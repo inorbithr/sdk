@@ -1,0 +1,13 @@
+name: gateway-plain-text-403
+area: errors
+summary: A plain-text 403 from the gateway becomes an API error with code forbidden.
+notes: The edge answers RBAC denials in plain text, not the envelope (spec/README.md).
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 403, headers: { content-type: text/plain }, text: "RBAC: access denied" }
+expect:
+  error: { kind: api, code: forbidden, status: 403, message_contains: "RBAC: access denied" }
+  attempts: 1

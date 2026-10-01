@@ -1,0 +1,14 @@
+name: rate-limited-honours-retry-after
+area: retries
+summary: A 429 with Retry-After is retried after the stated delay, then succeeds.
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 429, headers: { retry-after: "1" }, json: { code: rate_limited, error: Too many requests., details: [ { type: retry, after_seconds: 1 } ] } }
+  - request: { method: GET, path: /v1/me, min_delay_ms: 1000 }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+expect:
+  ok: { subject: ak_test }
+  attempts: 2

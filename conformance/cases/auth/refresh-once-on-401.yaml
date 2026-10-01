@@ -1,0 +1,16 @@
+name: refresh-once-on-401
+area: auth
+summary: A 401 from the API triggers one token refresh and one replay of the request.
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }
+    response: { status: 401, text: "Jwt is expired" }
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t2, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t2 } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+expect:
+  ok: { subject: ak_test }
+  token_exchanges: 2

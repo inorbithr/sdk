@@ -1,0 +1,14 @@
+name: concurrent-calls-share-one-exchange
+area: auth
+summary: Five concurrent first calls wait for a single token exchange (single flight).
+action: { op: me, concurrent: 5 }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, delay_ms: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - { request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }, response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } } }
+  - { request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }, response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } } }
+  - { request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }, response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } } }
+  - { request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }, response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } } }
+  - { request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }, response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } } }
+expect:
+  token_exchanges: 1

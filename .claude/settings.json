@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(mise run *)",
+      "Bash(mise tasks *)",
+      "Bash(mise install)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(go build *)",
+      "Bash(go doc *)",
+      "Bash(cargo check *)",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(cargo nextest *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo doc *)",
+      "Bash(pnpm run *)",
+      "Bash(pnpm exec *)",
+      "Bash(uv run *)",
+      "Bash(uv sync *)",
+      "WebFetch(domain:docs.inorbit.hr)",
+      "WebFetch(domain:api.inorbit.hr)",
+      "WebFetch(domain:pkg.go.dev)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:doc.rust-lang.org)",
+      "WebFetch(domain:developer.mozilla.org)",
+      "WebFetch(domain:docs.python.org)",
+      "WebFetch(domain:www.python-httpx.org)",
+      "WebFetch(domain:docs.pydantic.dev)",
+      "WebFetch(domain:azure.github.io)",
+      "WebFetch(domain:google.aip.dev)",
+      "WebFetch(domain:code.claude.com)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git tag *)",
+      "Bash(go get *)",
+      "Bash(cargo add *)",
+      "Bash(pnpm add *)",
+      "Bash(uv add *)",
+      "Bash(gh release *)",
+      "Bash(gh workflow run *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Edit(./spec/*.json)",
+      "Edit(./spec/SOURCE)",
+      "Edit(./**/generated/**)",
+      "Edit(./**/_generated/**)",
+      "Edit(./python/src/inorbithr/_sync/**)",
+      "Edit(./**/CHANGELOG.md)",
+      "Edit(./.release-please-manifest.json)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(npm publish *)",
+      "Bash(pnpm publish *)",
+      "Bash(cargo publish *)",
+      "Bash(uv publish *)",
+      "Bash(twine *)"
+    ]
+  },
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format-file.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-check.sh",
+            "timeout": 900
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'Reminder after compaction: spec/ and generated/ are never edited by hand; a public change lands in all four languages with a conformance case; mise run ci before reporting done.'"
+          }
+        ]
+      }
+    ]
+  }
+}

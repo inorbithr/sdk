@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": true,
+  "tag-separator": "/",
+  "include-v-in-tag": true,
+  "separate-pull-requests": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "build", "section": "Dependencies", "hidden": false },
+    { "type": "refactor", "hidden": true },
+    { "type": "test", "hidden": true },
+    { "type": "ci", "hidden": true },
+    { "type": "chore", "hidden": true }
+  ],
+  "packages": {
+    "go": { "release-type": "go", "component": "go", "package-name": "github.com/inorbithr/sdk/go" },
+    "rust": { "release-type": "rust", "component": "rust", "package-name": "inorbithr" },
+    "typescript": { "release-type": "node", "component": "typescript", "package-name": "@inorbithr/sdk" },
+    "python": { "release-type": "python", "component": "python", "package-name": "inorbithr" }
+  }
+}

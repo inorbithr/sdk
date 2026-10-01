@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/inorbithr/sdk/spec/problem.json",
+  "title": "Problem",
+  "description": "The error envelope every InOrbit API surface returns. Field names and code slugs are frozen within /v1.",
+  "type": "object",
+  "required": ["code", "error", "details"],
+  "properties": {
+    "code": { "$ref": "#/$defs/Code" },
+    "error": { "type": "string", "description": "One sentence for a person. For `internal` it is always \"internal error\"." },
+    "details": { "type": "array", "items": { "$ref": "#/$defs/Detail" } }
+  },
+  "$defs": {
+    "Code": {
+      "description": "Stable slug. The HTTP status for each is in x-http-status.",
+      "type": "string",
+      "enum": [
+        "bad_request", "failed_precondition", "unauthenticated", "forbidden", "not_found",
+        "method_not_allowed", "already_exists", "conflict", "payload_too_large",
+        "unsupported_media_type", "rate_limited", "cancelled", "internal", "unimplemented",
+        "unavailable", "timeout"
+      ],
+      "x-http-status": {
+        "bad_request": 400, "failed_precondition": 400, "unauthenticated": 401, "forbidden": 403,
+        "not_found": 404, "method_not_allowed": 405, "already_exists": 409, "conflict": 409,
+        "payload_too_large": 413, "unsupported_media_type": 415, "rate_limited": 429,
+        "cancelled": 499, "internal": 500, "unimplemented": 501, "unavailable": 503, "timeout": 504
+      }
+    },
+    "Detail": {
+      "oneOf": [
+        { "$ref": "#/$defs/FieldDetail" },
+        { "$ref": "#/$defs/InfoDetail" },
+        { "$ref": "#/$defs/RetryDetail" }
+      ],
+      "discriminator": { "propertyName": "type" }
+    },
+    "FieldDetail": {
+      "type": "object",
+      "required": ["type", "field", "description"],
+      "properties": {
+        "type": { "const": "field" },
+        "field": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "InfoDetail": {
+      "type": "object",
+      "required": ["type", "reason", "domain", "metadata"],
+      "properties": {
+        "type": { "const": "info" },
+        "reason": { "type": "string" },
+        "domain": { "type": "string" },
+        "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "RetryDetail": {
+      "type": "object",
+      "required": ["type", "after_seconds"],
+      "properties": {
+        "type": { "const": "retry" },
+        "after_seconds": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+name: get-usage-with-range
+area: operations
+summary: get_usage sends org_id in the path and from/to as YYYY-MM-DD query parameters.
+action: { op: accounts.get_usage, args: { org_id: org_1, from: "2026-09-01", to: "2026-09-30" } }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/accounts/orgs/org_1/usage, query: { from: "2026-09-01", to: "2026-09-30" } }
+    response: { status: 200, json: {} }
+expect:
+  attempts: 1
+notes: The response body is filled in at the first spec sync; the case checks the request shape until then.

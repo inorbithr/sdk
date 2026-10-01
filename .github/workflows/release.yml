@@ -1,0 +1,175 @@
+# release-please opens one release PR per package; merging it tags the commit and creates
+# the GitHub release. The publish jobs below then run for the packages released, each in
+# an environment that waits for a maintainer's approval (ADR 0003, docs/releasing.md).
+# This file name and the environment names are what the registries' trusted publishers
+# are bound to: renaming either breaks publishing.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      go: ${{ steps.rp.outputs['go--release_created'] }}
+      go_tag: ${{ steps.rp.outputs['go--tag_name'] }}
+      go_version: ${{ steps.rp.outputs['go--version'] }}
+      rust: ${{ steps.rp.outputs['rust--release_created'] }}
+      rust_tag: ${{ steps.rp.outputs['rust--tag_name'] }}
+      ts: ${{ steps.rp.outputs['typescript--release_created'] }}
+      ts_tag: ${{ steps.rp.outputs['typescript--tag_name'] }}
+      py: ${{ steps.rp.outputs['python--release_created'] }}
+      py_tag: ${{ steps.rp.outputs['python--tag_name'] }}
+    steps:
+      # A GitHub App token, so the release PR triggers CI (the default token cannot).
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: rp
+        with:
+          token: ${{ steps.app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  go:
+    name: publish go
+    needs: release-please
+    if: needs.release-please.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.go_tag }}
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "go"
+      - name: Warm the Go module proxy
+        env:
+          VERSION: ${{ needs.release-please.outputs.go_version }}
+        run: GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go list -m "github.com/inorbithr/sdk/go@v${VERSION}"
+      - name: Source archive
+        run: git archive --format=tar.gz --prefix=go/ -o go-source.tar.gz HEAD:go
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: go-source.tar.gz
+      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: go
+          artifact-name: go-sbom.spdx.json
+          upload-release-assets: false
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.go_tag }}
+        run: gh release upload "$TAG" go-source.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
+
+  rust:
+    name: publish rust
+    needs: release-please
+    if: needs.release-please.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    environment: release-crates
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.rust_tag }}
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "rust"
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: auth
+      - working-directory: rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked
+
+  ts:
+    name: publish typescript
+    needs: release-please
+    if: needs.release-please.outputs.ts == 'true'
+    runs-on: ubuntu-latest
+    environment: release-npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.ts_tag }}
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "node pnpm"
+      - working-directory: typescript
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          # Trusted publishing needs npm 11.5.1 or newer; Node 24 bundles it.
+          npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && $2 >= 5)) }' || { echo "npm too old for trusted publishing" >&2; exit 1; }
+          npm publish --access public
+          pnpm dlx jsr@0.14.3 publish
+
+  py-build:
+    name: build python
+    needs: release-please
+    if: needs.release-please.outputs.py == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.py_tag }}
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "python uv"
+      - working-directory: python
+        run: uv build --out-dir ../dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-dist
+          path: dist/
+
+  py:
+    name: publish python
+    needs: py-build
+    runs-on: ubuntu-latest
+    environment: release-pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

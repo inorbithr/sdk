@@ -1,0 +1,11 @@
+name: unknown-code-is-kept
+area: errors
+summary: A code slug the SDK does not know maps to unknown and keeps the raw string.
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 400, json: { code: brand_new_code, error: Something new., details: [ { type: future_detail, x: 1 } ] } }
+expect:
+  error: { kind: api, code: brand_new_code, status: 400 }
