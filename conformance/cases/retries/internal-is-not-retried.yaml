@@ -1,0 +1,12 @@
+name: internal-is-not-retried
+area: retries
+summary: A 500 internal error is returned at once, without a retry.
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 500, json: { code: internal, error: internal error, details: [] } }
+expect:
+  error: { kind: api, code: internal, status: 500 }
+  attempts: 1

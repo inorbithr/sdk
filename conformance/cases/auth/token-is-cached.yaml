@@ -1,0 +1,16 @@
+name: token-is-cached
+area: auth
+summary: Three calls on one client exchange the key for a token once.
+action: { op: me, repeat: 3 }
+exchanges:
+  - request: { method: POST, path: /oauth2/token, form: { grant_type: client_credentials, audience: tbd-api, scope: tbd.public }, headers: { authorization: "Basic YWtfdGVzdDpzM2NyM3Q=" } }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899, scope: tbd.public } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+expect:
+  ok: { subject: ak_test }
+  token_exchanges: 1

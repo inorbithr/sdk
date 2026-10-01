@@ -1,0 +1,14 @@
+name: reset-then-success
+area: retries
+summary: A connection reset on a GET is retried with backoff and the second attempt succeeds.
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { fault: reset }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+expect:
+  ok: { subject: ak_test }
+  attempts: 2
