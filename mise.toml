@@ -1,0 +1,241 @@
+# Toolchains and tasks. `mise install`, then `mise run ci` runs what CI runs.
+# CI matrix cells override one tool with MISE_<TOOL>_VERSION (ADR 0005).
+# A language task skips with exit 0 until that language's manifest exists.
+
+[settings]
+experimental = true
+cargo.binstall = true
+
+[tools]
+go = "1.27.1"
+rust = { version = "1.98.1", components = "rustfmt,clippy" }
+node = "24.21.0"
+pnpm = "12.8.2"
+python = "3.14"
+uv = "0.12.21"
+
+golangci-lint = "2.14.0"
+"go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen" = "2.8.0"
+"go:golang.org/x/exp/cmd/gorelease" = "latest"
+"go:github.com/oasdiff/oasdiff" = "1.32.1"
+# Cargo tools install as prebuilt binaries through cargo-binstall, not from source.
+cargo-binstall = "1.24.0"
+"cargo:cargo-nextest" = "0.9.146"
+"cargo:cargo-semver-checks" = "0.50.0"
+"cargo:cargo-hack" = "0.6.45"
+cargo-deny = "0.20.2"
+biome = "2.5.15"
+typos = "1.50.3"
+actionlint = "1.7.12"
+zizmor = "1.30.1"
+
+[env]
+# Keep agent and CI output plain.
+NO_COLOR = "1"
+CARGO_TERM_COLOR = "never"
+
+# ---------------------------------------------------------------- aggregate
+
+[tasks.ci]
+description = "Everything CI checks, in the same order"
+depends = ["repo:check", "spec:lint", "conformance:validate", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "conformance", "examples:check"]
+
+[tasks.check]
+description = "Format check, lint, types and unit tests for every language"
+depends = ["go:check", "rust:check", "ts:check", "py:check"]
+
+[tasks.fmt]
+description = "Format every language in place"
+depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt"]
+
+[tasks.gen]
+description = "Regenerate every generated/ directory from spec/"
+depends = ["go:gen", "rust:gen", "ts:gen", "py:gen"]
+
+[tasks."gen:check"]
+description = "Fail if regenerating from spec/ changes any committed file"
+run = """
+mise run gen
+git diff --exit-code -- go rust typescript python || {
+  echo "generated code is stale: run 'mise run gen' and commit the result" >&2; exit 1; }
+"""
+
+# ---------------------------------------------------------------- repository
+
+[tasks."repo:check"]
+description = "Spelling, workflow lint and workflow security audit"
+run = [
+  "typos",
+  "actionlint",
+  "zizmor --min-severity low .github/workflows",
+  "python3 tools/check-repo.py",
+]
+
+# ---------------------------------------------------------------- spec
+
+[tasks."spec:sync"]
+description = "Fetch the public API contract, filter, normalise and write spec/"
+run = """
+[ -f tools/spec-sync.py ] || { echo "spec:sync: tools/spec-sync.py not written yet (see spec/README.md)"; exit 0; }
+uv run --script tools/spec-sync.py
+"""
+
+[tasks."spec:lint"]
+description = "Validate spec/ and report breaking changes against main"
+run = """
+for f in spec/*.json; do python3 -m json.tool "$f" > /dev/null || exit 1; done
+[ -f spec/openapi.json ] || { echo "spec:lint: no openapi.json yet, JSON checks only"; exit 0; }
+base=$(git show origin/main:spec/openapi.json 2>/dev/null) || { echo "spec:lint: no openapi.json on main yet"; exit 0; }
+printf '%s' "$base" > "${TMPDIR:-/tmp}/openapi-main.json"
+oasdiff breaking "${TMPDIR:-/tmp}/openapi-main.json" spec/openapi.json --fail-on ERR
+"""
+
+# ---------------------------------------------------------------- Go
+
+[tasks."go:check"]
+description = "Go: gofmt, vet, golangci-lint, tests with the race detector"
+dir = "go"
+run = """
+[ -f go.mod ] || { echo "go: no module yet, skipping"; exit 0; }
+test -z "$(gofmt -l .)" || { gofmt -l .; echo "go: run 'mise run go:fmt'" >&2; exit 1; }
+go vet ./...
+golangci-lint run
+go test -race ./...
+"""
+
+[tasks."go:fmt"]
+dir = "go"
+run = "[ -f go.mod ] || exit 0; gofmt -w ."
+
+[tasks."go:gen"]
+dir = "go"
+run = "[ -f go.mod ] && [ -f ../spec/openapi.json ] || exit 0; go generate ./..."
+
+[tasks."go:api"]
+description = "Go: check the API change against the last go/v tag"
+dir = "go"
+run = """
+[ -f go.mod ] || exit 0
+base=$(git describe --tags --abbrev=0 --match 'go/v*' 2>/dev/null) || { echo "go:api: no release yet"; exit 0; }
+gorelease -base="${base#go/}"
+"""
+
+# ---------------------------------------------------------------- Rust
+
+[tasks."rust:check"]
+description = "Rust: fmt, clippy, nextest, doctests, cargo-deny"
+dir = "rust"
+run = """
+[ -f Cargo.toml ] || { echo "rust: no crate yet, skipping"; exit 0; }
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run --all-features
+cargo test --doc --all-features
+cargo deny check
+"""
+
+[tasks."rust:fmt"]
+dir = "rust"
+run = "[ -f Cargo.toml ] || exit 0; cargo fmt"
+
+[tasks."rust:gen"]
+dir = "rust"
+run = "[ -f Cargo.toml ] && [ -f ../spec/openapi.json ] || exit 0; cargo run -q -p xtask -- gen"
+
+[tasks."rust:features"]
+description = "Rust: build every feature on its own"
+dir = "rust"
+run = "[ -f Cargo.toml ] || exit 0; cargo hack check --each-feature --no-dev-deps"
+
+[tasks."rust:api"]
+description = "Rust: semver check against the last rust/v tag"
+dir = "rust"
+run = """
+[ -f Cargo.toml ] || exit 0
+base=$(git describe --tags --abbrev=0 --match 'rust/v*' 2>/dev/null) || { echo "rust:api: no release yet"; exit 0; }
+cargo semver-checks --baseline-rev "$base"
+"""
+
+# ---------------------------------------------------------------- TypeScript
+
+[tasks."ts:check"]
+description = "TypeScript: biome, tsc, vitest, publint, attw, api-extractor"
+dir = "typescript"
+run = """
+[ -f package.json ] || { echo "ts: no package yet, skipping"; exit 0; }
+pnpm install --frozen-lockfile
+pnpm run check
+"""
+
+[tasks."ts:fmt"]
+dir = "typescript"
+run = "[ -f package.json ] || exit 0; biome format --write ."
+
+[tasks."ts:gen"]
+dir = "typescript"
+run = "[ -f package.json ] && [ -f ../spec/openapi.json ] || exit 0; pnpm run gen"
+
+# ---------------------------------------------------------------- Python
+
+[tasks."py:check"]
+description = "Python: ruff, pyright, mypy, pytest"
+dir = "python"
+run = """
+[ -f pyproject.toml ] || { echo "py: no package yet, skipping"; exit 0; }
+uv sync --locked
+uv run ruff format --check
+uv run ruff check
+uv run pyright
+uv run mypy --strict src
+uv run pytest
+"""
+
+[tasks."py:fmt"]
+dir = "python"
+run = "[ -f pyproject.toml ] || exit 0; uv run ruff format && uv run ruff check --fix"
+
+[tasks."py:gen"]
+dir = "python"
+run = "[ -f pyproject.toml ] && [ -f ../spec/openapi.json ] || exit 0; uv run python tools/gen.py"
+
+[tasks."py:api"]
+description = "Python: griffe check against the last python/v tag"
+dir = "python"
+run = """
+[ -f pyproject.toml ] || exit 0
+base=$(git describe --tags --abbrev=0 --match 'python/v*' 2>/dev/null) || { echo "py:api: no release yet"; exit 0; }
+uv run griffe check inorbithr --search src --against "$base"
+"""
+
+# ---------------------------------------------------------------- conformance and examples
+
+[tasks.conformance]
+description = "Run the shared conformance cases in every language"
+depends = ["conformance:go", "conformance:rust", "conformance:ts", "conformance:py"]
+
+[tasks."conformance:validate"]
+description = "Validate every case file against conformance/case.schema.json"
+run = "uv run --with pyyaml --with jsonschema python tools/validate-cases.py"
+
+[tasks."conformance:go"]
+run = "[ -e conformance/server ] && [ -f go/go.mod ] || { echo 'conformance:go: skipping (no server or no module yet)'; exit 0; }; cd go && go test ./internal/conformance/..."
+
+[tasks."conformance:rust"]
+run = "[ -e conformance/server ] && [ -f rust/Cargo.toml ] || { echo 'conformance:rust: skipping (no server or no crate yet)'; exit 0; }; cd rust && cargo nextest run --test conformance"
+
+[tasks."conformance:ts"]
+run = "[ -e conformance/server ] && [ -f typescript/package.json ] || { echo 'conformance:ts: skipping (no server or no package yet)'; exit 0; }; cd typescript && pnpm run conformance"
+
+[tasks."conformance:py"]
+run = "[ -e conformance/server ] && [ -f python/pyproject.toml ] || { echo 'conformance:py: skipping (no server or no package yet)'; exit 0; }; cd python && uv run pytest tests/conformance"
+
+[tasks."examples:check"]
+description = "Compile every example"
+run = """
+found=0
+[ -d examples/go ] && { found=1; (cd examples/go && go vet ./...) || exit 1; }
+[ -d examples/rust ] && { found=1; (cd examples/rust && cargo check --all-targets) || exit 1; }
+[ -d examples/typescript ] && { found=1; (cd examples/typescript && pnpm install --frozen-lockfile && pnpm exec tsc --noEmit) || exit 1; }
+[ -d examples/python ] && { found=1; (cd examples/python && uv run pyright) || exit 1; }
+[ "$found" = 1 ] || echo "examples: none yet, skipping"
+"""
