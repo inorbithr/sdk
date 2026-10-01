@@ -1,11 +1,13 @@
 # Automatic review of pull requests from branches in this repository. Fork pull requests
 # get no secrets from GitHub, so they are skipped here; a maintainer can ask for a review
 # after pushing the branch into this repository (ADR 0005).
+# One review when a PR opens or leaves draft, not on every push: it runs on the
+# maintainer's Claude subscription. Ask for another with `@claude review`.
 name: claude-review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, ready_for_review]
 
 permissions: {}
 
@@ -32,7 +34,7 @@ jobs:
           persist-credentials: false
       - uses: anthropics/claude-code-action@12dd8d74c712f5f3669365b2369b558c495b1104 # v1.0.238
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"

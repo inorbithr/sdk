@@ -2,6 +2,8 @@
 # it (the action checks), never bots, and never on a pull request from a fork: a fork's
 # code and its .claude/ settings must not run next to the API key (ADR 0005).
 # Claude may read, edit and push; it does not run the repository's code here. CI does.
+# It runs on the maintainer's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN, made with
+# `claude setup-token`), so it shares that plan's usage limits.
 name: claude
 
 on:
@@ -55,7 +57,7 @@ jobs:
           persist-credentials: false
       - uses: anthropics/claude-code-action@12dd8d74c712f5f3669365b2369b558c495b1104 # v1.0.238
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: >-
             --max-turns 40
             --allowedTools "Read,Glob,Grep,Edit,Write,Bash(git status *),Bash(git diff *),Bash(git log *)"
