@@ -18,6 +18,8 @@ defaults:
 
 env:
   MISE_YES: "1"
+  # Each job installs only the tools in its install_args; tasks must not pull in the rest.
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
 
 jobs:
   changes:
@@ -73,7 +75,7 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
         with:
-          install_args: "python uv typos actionlint zizmor go:github.com/oasdiff/oasdiff"
+          install_args: "go python uv typos actionlint zizmor go:github.com/oasdiff/oasdiff"
       - run: mise run repo:check
       - run: mise run spec:lint
       - run: mise run conformance:validate

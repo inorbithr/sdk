@@ -1,6 +1,8 @@
 # Toolchains and tasks. `mise install`, then `mise run ci` runs what CI runs.
 # CI matrix cells override one tool with MISE_<TOOL>_VERSION (ADR 0005).
 # A language task skips with exit 0 until that language's manifest exists.
+# Every task runs in bash with errexit and pipefail on every OS (`shell` below); Windows
+# would otherwise use cmd, and project config may not change mise's default shell.
 
 [settings]
 experimental = true
@@ -53,6 +55,7 @@ description = "Regenerate every generated/ directory from spec/"
 depends = ["go:gen", "rust:gen", "ts:gen", "py:gen"]
 
 [tasks."gen:check"]
+shell = "bash -e -o pipefail -c"
 description = "Fail if regenerating from spec/ changes any committed file"
 run = """
 mise run gen
@@ -63,6 +66,7 @@ git diff --exit-code -- go rust typescript python || {
 # ---------------------------------------------------------------- repository
 
 [tasks."repo:check"]
+shell = "bash -e -o pipefail -c"
 description = "Spelling, workflow lint and workflow security audit"
 run = [
   "typos",
@@ -74,6 +78,7 @@ run = [
 # ---------------------------------------------------------------- spec
 
 [tasks."spec:sync"]
+shell = "bash -e -o pipefail -c"
 description = "Fetch the public API contract, filter, normalise and write spec/"
 run = """
 [ -f tools/spec-sync.py ] || { echo "spec:sync: tools/spec-sync.py not written yet (see spec/README.md)"; exit 0; }
@@ -81,6 +86,7 @@ uv run --script tools/spec-sync.py
 """
 
 [tasks."spec:lint"]
+shell = "bash -e -o pipefail -c"
 description = "Validate spec/ and report breaking changes against main"
 run = """
 for f in spec/*.json; do python3 -m json.tool "$f" > /dev/null || exit 1; done
@@ -93,6 +99,7 @@ oasdiff breaking "${TMPDIR:-/tmp}/openapi-main.json" spec/openapi.json --fail-on
 # ---------------------------------------------------------------- Go
 
 [tasks."go:check"]
+shell = "bash -e -o pipefail -c"
 description = "Go: gofmt, vet, golangci-lint, tests with the race detector"
 dir = "go"
 run = """
@@ -104,14 +111,17 @@ go test -race ./...
 """
 
 [tasks."go:fmt"]
+shell = "bash -e -o pipefail -c"
 dir = "go"
 run = "[ -f go.mod ] || exit 0; gofmt -w ."
 
 [tasks."go:gen"]
+shell = "bash -e -o pipefail -c"
 dir = "go"
 run = "[ -f go.mod ] && [ -f ../spec/openapi.json ] || exit 0; go generate ./..."
 
 [tasks."go:api"]
+shell = "bash -e -o pipefail -c"
 description = "Go: check the API change against the last go/v tag"
 dir = "go"
 run = """
@@ -123,6 +133,7 @@ gorelease -base="${base#go/}"
 # ---------------------------------------------------------------- Rust
 
 [tasks."rust:check"]
+shell = "bash -e -o pipefail -c"
 description = "Rust: fmt, clippy, nextest, doctests, cargo-deny"
 dir = "rust"
 run = """
@@ -135,19 +146,23 @@ cargo deny check
 """
 
 [tasks."rust:fmt"]
+shell = "bash -e -o pipefail -c"
 dir = "rust"
 run = "[ -f Cargo.toml ] || exit 0; cargo fmt"
 
 [tasks."rust:gen"]
+shell = "bash -e -o pipefail -c"
 dir = "rust"
 run = "[ -f Cargo.toml ] && [ -f ../spec/openapi.json ] || exit 0; cargo run -q -p xtask -- gen"
 
 [tasks."rust:features"]
+shell = "bash -e -o pipefail -c"
 description = "Rust: build every feature on its own"
 dir = "rust"
 run = "[ -f Cargo.toml ] || exit 0; cargo hack check --each-feature --no-dev-deps"
 
 [tasks."rust:api"]
+shell = "bash -e -o pipefail -c"
 description = "Rust: semver check against the last rust/v tag"
 dir = "rust"
 run = """
@@ -159,6 +174,7 @@ cargo semver-checks --baseline-rev "$base"
 # ---------------------------------------------------------------- TypeScript
 
 [tasks."ts:check"]
+shell = "bash -e -o pipefail -c"
 description = "TypeScript: biome, tsc, vitest, publint, attw, api-extractor"
 dir = "typescript"
 run = """
@@ -168,16 +184,19 @@ pnpm run check
 """
 
 [tasks."ts:fmt"]
+shell = "bash -e -o pipefail -c"
 dir = "typescript"
 run = "[ -f package.json ] || exit 0; biome format --write ."
 
 [tasks."ts:gen"]
+shell = "bash -e -o pipefail -c"
 dir = "typescript"
 run = "[ -f package.json ] && [ -f ../spec/openapi.json ] || exit 0; pnpm run gen"
 
 # ---------------------------------------------------------------- Python
 
 [tasks."py:check"]
+shell = "bash -e -o pipefail -c"
 description = "Python: ruff, pyright, mypy, pytest"
 dir = "python"
 run = """
@@ -191,14 +210,17 @@ uv run pytest
 """
 
 [tasks."py:fmt"]
+shell = "bash -e -o pipefail -c"
 dir = "python"
 run = "[ -f pyproject.toml ] || exit 0; uv run ruff format && uv run ruff check --fix"
 
 [tasks."py:gen"]
+shell = "bash -e -o pipefail -c"
 dir = "python"
 run = "[ -f pyproject.toml ] && [ -f ../spec/openapi.json ] || exit 0; uv run python tools/gen.py"
 
 [tasks."py:api"]
+shell = "bash -e -o pipefail -c"
 description = "Python: griffe check against the last python/v tag"
 dir = "python"
 run = """
@@ -214,22 +236,28 @@ description = "Run the shared conformance cases in every language"
 depends = ["conformance:go", "conformance:rust", "conformance:ts", "conformance:py"]
 
 [tasks."conformance:validate"]
+shell = "bash -e -o pipefail -c"
 description = "Validate every case file against conformance/case.schema.json"
 run = "uv run --with pyyaml --with jsonschema python tools/validate-cases.py"
 
 [tasks."conformance:go"]
+shell = "bash -e -o pipefail -c"
 run = "[ -e conformance/server ] && [ -f go/go.mod ] || { echo 'conformance:go: skipping (no server or no module yet)'; exit 0; }; cd go && go test ./internal/conformance/..."
 
 [tasks."conformance:rust"]
+shell = "bash -e -o pipefail -c"
 run = "[ -e conformance/server ] && [ -f rust/Cargo.toml ] || { echo 'conformance:rust: skipping (no server or no crate yet)'; exit 0; }; cd rust && cargo nextest run --test conformance"
 
 [tasks."conformance:ts"]
+shell = "bash -e -o pipefail -c"
 run = "[ -e conformance/server ] && [ -f typescript/package.json ] || { echo 'conformance:ts: skipping (no server or no package yet)'; exit 0; }; cd typescript && pnpm run conformance"
 
 [tasks."conformance:py"]
+shell = "bash -e -o pipefail -c"
 run = "[ -e conformance/server ] && [ -f python/pyproject.toml ] || { echo 'conformance:py: skipping (no server or no package yet)'; exit 0; }; cd python && uv run pytest tests/conformance"
 
 [tasks."examples:check"]
+shell = "bash -e -o pipefail -c"
 description = "Compile every example"
 run = """
 found=0
