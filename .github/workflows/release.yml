@@ -138,7 +138,10 @@ jobs:
           # Node 24 bundles it.
           npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && $2 >= 15)) }' || { echo "npm too old for staged publishing" >&2; exit 1; }
           npm stage publish
-          pnpm dlx jsr@0.14.3 publish
+      # JSR links only public repositories, so its OIDC publishing starts at launch.
+      - if: ${{ !github.event.repository.private }}
+        working-directory: typescript
+        run: pnpm dlx jsr@0.14.3 publish
 
   py-build:
     name: build python
