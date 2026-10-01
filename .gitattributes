@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+# Produced by tools; collapsed in diffs and excluded from language stats.
+spec/*.json                          linguist-generated
+**/generated/**                      linguist-generated
+python/src/inorbithr/_generated/**   linguist-generated
+python/src/inorbithr/_sync/**        linguist-generated
+typescript/etc/*.api.md              linguist-generated
+**/CHANGELOG.md                      linguist-generated
