@@ -10,7 +10,7 @@ exchanges:
   - request: { method: POST, path: /oauth2/token }
     response: { status: 200, json: { access_token: t2, token_type: bearer, expires_in: 899 } }
   - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t2 } }
-    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
 expect:
   ok: { subject: ak_test }
   token_exchanges: 2

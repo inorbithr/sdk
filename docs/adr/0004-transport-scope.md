@@ -1,6 +1,6 @@
 # 0004. REST first; SSE, socket and MCP when the platform opens them
 
-Status: accepted, 2026-10-01
+Status: accepted, 2026-10-01; amended by [0008](0008-key-scopes-and-iohr-identifiers.md) (scopes and identifiers)
 
 ## Context
 

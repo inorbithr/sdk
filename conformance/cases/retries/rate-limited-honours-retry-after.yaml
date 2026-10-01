@@ -8,7 +8,7 @@ exchanges:
   - request: { method: GET, path: /v1/me }
     response: { status: 429, headers: { retry-after: "1" }, json: { code: rate_limited, error: Too many requests., details: [ { type: retry, after_seconds: 1 } ] } }
   - request: { method: GET, path: /v1/me, min_delay_ms: 1000 }
-    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
 expect:
   ok: { subject: ak_test }
   attempts: 2

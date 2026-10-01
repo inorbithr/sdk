@@ -13,7 +13,7 @@ hand.** `mise run spec:sync` refreshes them; CI checks them; a mistake is fixed 
 ## How a sync works
 
 1. Fetch `https://api.inorbit.hr/openapi.json` (no credentials needed).
-2. Keep only operations marked `x-tbd-public: true`, plus the schemas they reach.
+2. Keep only operations marked `x-iohr-public: true`, plus the schemas they reach.
 3. Apply the normalisation rules below.
 4. Write the files and `SOURCE`; `mise run gen` regenerates the models; the PR shows both.
 
