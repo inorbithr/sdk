@@ -1,0 +1,28 @@
+name: Bug
+description: The SDK does something wrong or different from the docs.
+labels: [bug]
+body:
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options: [Go, Rust, TypeScript, Python, All or several]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: SDK version and runtime
+      placeholder: "inorbithr 0.2.1, Python 3.13 on Linux"
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: Include the error code and message. Remove key secrets and tokens.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Smallest code that shows it
+      render: text
+    validations: { required: true }

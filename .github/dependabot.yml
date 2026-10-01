@@ -1,0 +1,38 @@
+# Weekly, grouped, and never a version younger than the cooldown: a compromised release
+# usually surfaces within days (ADR 0005).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { actions: { patterns: ["*"] } }
+    commit-message: { prefix: "ci", include: scope }
+
+  - package-ecosystem: gomod
+    directory: /go
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { go: { patterns: ["*"] } }
+    commit-message: { prefix: "build(go)" }
+
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { rust: { patterns: ["*"] } }
+    commit-message: { prefix: "build(rust)" }
+
+  - package-ecosystem: npm
+    directory: /typescript
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { ts: { patterns: ["*"] } }
+    commit-message: { prefix: "build(ts)" }
+
+  - package-ecosystem: uv
+    directory: /python
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { py: { patterns: ["*"] } }
+    commit-message: { prefix: "build(py)" }

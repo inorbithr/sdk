@@ -1,0 +1,16 @@
+name: Feature
+description: Something the SDK should support.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you are trying to do
+      description: The task, not the solution. If it is an API operation the SDK lacks, name it.
+    validations: { required: true }
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language you use
+      options: [Go, Rust, TypeScript, Python]
+      multiple: true
