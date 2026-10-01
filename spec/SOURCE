@@ -1,0 +1,2 @@
+not synced yet: run `mise run spec:sync`
+problem.json is a seed written from the platform docs on 2026-10-01; the first sync replaces it.
