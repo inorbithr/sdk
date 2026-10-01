@@ -30,8 +30,9 @@ A maintainer's job is to merge the release PR and approve the publish.
 - [x] Publish `inorbithr 0.0.0` to crates.io by hand, then link the repository under the
       crate's trusted publishing settings (workflow `release.yml`, environment
       `release-crates`), trusted publishing only. Done 2026-10-01; owner `0x19`.
-- [ ] On PyPI, add a pending trusted publisher for `inorbithr` (workflow `release.yml`,
-      environment `release-pypi`); no manual upload needed.
+- [x] Publish `inorbithr 0.0.0` to PyPI by hand to hold the name (a pending publisher
+      does not reserve it), then add the trusted publisher for `inorbithr/sdk` (workflow
+      `release.yml`, environment `release-pypi`). Done 2026-10-01.
 - [x] On npm, add the trusted publisher for `@inorbithr/sdk` (workflow `release.yml`,
       environment `release-npm`), stage-only, and require 2FA with no bypass tokens.
       Done 2026-10-01.
