@@ -1,0 +1,87 @@
+# Verifying releases
+
+How to check that the package you installed is the one this repository built. Every
+release is built and published by the `release` workflow in `inorbithr/sdk` from a
+commit on `main`; the checks below confirm that.
+
+Status: the commands apply from the first release (0.1.0). Items marked **planned** are
+being added to the release workflow ([requirements.md](requirements.md) SR-23).
+
+## npm: `@inorbithr/sdk`
+
+```sh
+npm install @inorbithr/sdk
+npm audit signatures
+```
+
+`npm audit signatures` checks the registry signatures and the provenance attestation of
+every installed package. The package page on npmjs.com shows "Built and signed on GitHub
+Actions" with a link to the exact workflow run and commit.
+
+## PyPI: `inorbithr`
+
+PyPI stores a PEP 740 attestation for each file, shown on the file's page under
+"Provenance". To verify a downloaded file:
+
+```sh
+pip download inorbithr==X.Y.Z --no-deps -d dist/
+pipx run pypi-attestations verify pypi \
+  --repository https://github.com/inorbithr/sdk dist/inorbithr-X.Y.Z-py3-none-any.whl
+```
+
+## crates.io: `inorbithr`
+
+crates.io does not sign crates yet. The release workflow attests the exact `.crate` file
+with GitHub artifact attestations (**planned**):
+
+```sh
+curl -sSLo inorbithr-X.Y.Z.crate https://static.crates.io/crates/inorbithr/inorbithr-X.Y.Z.crate
+gh attestation verify inorbithr-X.Y.Z.crate --repo inorbithr/sdk
+```
+
+Cargo also checks every download against the checksum in the crates.io index.
+
+## Go: `github.com/inorbithr/sdk/go`
+
+The Go toolchain checks every module against the public checksum database
+(`sum.golang.org`) on download; a module that differs from what the database recorded
+fails to build. The release workflow also attests the source archive attached to the
+GitHub release:
+
+```sh
+gh release download go/vX.Y.Z --repo inorbithr/sdk --pattern go-source.tar.gz
+gh attestation verify go-source.tar.gz --repo inorbithr/sdk
+```
+
+## JSR: `@inorbithr/sdk`
+
+JSR records provenance for packages published from GitHub Actions and shows it on the
+package page with a link to the transparency log entry.
+
+## SBOMs
+
+Each GitHub release carries a CycloneDX SBOM per package (**planned**), attested so you
+can check it came from the same workflow:
+
+```sh
+gh release download typescript/vX.Y.Z --repo inorbithr/sdk --pattern '*.cdx.json'
+gh attestation verify <artifact> --repo inorbithr/sdk \
+  --predicate-type https://cyclonedx.org/bom
+```
+
+`<artifact>` is the package file the SBOM describes (for example the npm `.tgz`).
+
+## The GitHub release itself
+
+Releases are immutable once published (**planned**): their tag and assets cannot be
+changed, and GitHub signs a release attestation.
+
+```sh
+gh release verify typescript/vX.Y.Z --repo inorbithr/sdk
+gh release verify-asset typescript/vX.Y.Z ./inorbithr-sdk-X.Y.Z.tgz --repo inorbithr/sdk
+```
+
+## If a check fails
+
+Do not use the package. Report it privately as described in
+[SECURITY.md](../../SECURITY.md).

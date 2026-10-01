@@ -13,3 +13,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0004](0004-transport-scope.md) | REST first; SSE, socket and MCP when the platform opens them | accepted |
 | [0005](0005-ci-and-supply-chain.md) | CI shape and supply-chain rules | accepted |
 | [0006](0006-names-and-runtimes.md) | Package names and minimum runtimes | proposed |
+| [0007](0007-security-baseline.md) | Security baseline before 1.0 | accepted |
