@@ -3,6 +3,20 @@
 Releases are automated by release-please ([ADR 0003](adr/0003-versioning-and-releases.md)).
 A maintainer's job is to merge the release PR and approve the publish.
 
+## Launch checklist (when the repository goes public)
+
+These wait for a public repository; nothing else changes at launch.
+
+- [ ] JSR: link `inorbithr/sdk` on `@inorbithr/sdk` (Settings, GitHub repository). The
+      scope and package exist since 2026-10-01; the release job publishes to JSR only
+      once the repository is public.
+- [ ] Environments `release-npm`, `release-pypi`, `release-crates`: add a required
+      reviewer (needs a public repository on the Team plan).
+- [ ] Turn on private vulnerability reporting (Settings, Code security).
+- [ ] Check that `security.yml` (CodeQL, zizmor upload, dependency review) and
+      `scorecard.yml` run; they skip themselves while the repository is private.
+- [ ] README: drop "design phase" once a release exists.
+
 ## How a release happens
 
 1. Conventional Commits land on `main` (`feat(go): ...`, `fix(py): ...`).
