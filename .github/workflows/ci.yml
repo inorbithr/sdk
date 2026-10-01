@@ -92,9 +92,9 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         go: ["1.26", "1.27"]
-        include:
-          - { os: windows-latest, go: "1.27" }
-          - { os: macos-latest, go: "1.27" }
+        # Windows and macOS cost 2x and 10x minutes on a private repository: they run on
+        # main, the merge queue and release PRs, not on every pull request.
+        include: ${{ fromJSON((github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')) && '[]' || '[{"os":"windows-latest","go":"1.27"},{"os":"macos-latest","go":"1.27"}]') }}
     env:
       MISE_GO_VERSION: ${{ matrix.go }}
     steps:
@@ -123,9 +123,9 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         rust: ["1.94", "1.98.1"]
-        include:
-          - { os: windows-latest, rust: "1.98.1" }
-          - { os: macos-latest, rust: "1.98.1" }
+        # Windows and macOS cost 2x and 10x minutes on a private repository: they run on
+        # main, the merge queue and release PRs, not on every pull request.
+        include: ${{ fromJSON((github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')) && '[]' || '[{"os":"windows-latest","rust":"1.98.1"},{"os":"macos-latest","rust":"1.98.1"}]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
     steps:
@@ -158,8 +158,9 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         node: ["22", "24", "26"]
-        include:
-          - { os: windows-latest, node: "24" }
+        # Windows and macOS cost 2x and 10x minutes on a private repository: they run on
+        # main, the merge queue and release PRs, not on every pull request.
+        include: ${{ fromJSON((github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')) && '[]' || '[{"os":"windows-latest","node":"24"}]') }}
     env:
       MISE_NODE_VERSION: ${{ matrix.node }}
     steps:
@@ -185,8 +186,9 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python: ["3.11", "3.12", "3.13", "3.14"]
-        include:
-          - { os: windows-latest, python: "3.14" }
+        # Windows and macOS cost 2x and 10x minutes on a private repository: they run on
+        # main, the merge queue and release PRs, not on every pull request.
+        include: ${{ fromJSON((github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')) && '[]' || '[{"os":"windows-latest","python":"3.14"}]') }}
     env:
       MISE_PYTHON_VERSION: ${{ matrix.python }}
       UV_PYTHON: ${{ matrix.python }}
