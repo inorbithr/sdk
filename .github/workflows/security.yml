@@ -9,9 +9,13 @@ on:
 
 permissions: {}
 
+# Code scanning uploads and dependency review need GitHub Advanced Security on a private
+# repository. Until the repository is public these jobs skip; zizmor still runs on every
+# change through `mise run repo:check` in ci.yml.
 jobs:
   zizmor:
     name: zizmor
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,6 +28,7 @@ jobs:
 
   codeql:
     name: codeql ${{ matrix.language }}
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -59,7 +64,7 @@ jobs:
 
   dependency-review:
     name: dependency review
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
