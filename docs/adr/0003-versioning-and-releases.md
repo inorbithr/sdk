@@ -20,7 +20,9 @@ the Rust crate.
   (with PEP 740 attestations), crates.io (`rust-lang/crates-io-auth-action`). Go
   publishes by tag; the workflow warms `proxy.golang.org` afterwards.
 - Each publish job runs in a GitHub environment (`release-npm`, `release-pypi`,
-  `release-crates`) that requires a maintainer's approval.
+  `release-crates`) that only `main` can deploy to and, once the repository is public,
+  requires a maintainer's approval (required reviewers on a private repository need
+  GitHub Enterprise).
 - The first version on npm and crates.io is published by hand once to claim the name;
   trusted publishing is configured right after (`docs/releasing.md`).
 - Stay on v0 until the public surface covers more than the account endpoints; go to v1
