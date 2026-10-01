@@ -73,7 +73,8 @@
     "gopls-lsp@claude-plugins-official": true,
     "rust-analyzer-lsp@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
-    "pyright-lsp@claude-plugins-official": true
+    "pyright-lsp@claude-plugins-official": true,
+    "inorbit@inorbit": true
   },
   "hooks": {
     "PostToolUse": [
@@ -110,5 +111,13 @@
         ]
       }
     ]
+  },
+  "extraKnownMarketplaces": {
+    "inorbit": {
+      "source": {
+        "source": "github",
+        "repo": "inorbithr/ai-kit"
+      }
+    }
   }
 }
