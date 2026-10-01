@@ -39,6 +39,13 @@ See [docs/design.md](docs/design.md) for the full design.
 | [`examples/`](examples/) | Small programs that CI compiles |
 | [`docs/`](docs/) | Design, decisions (ADRs), releasing, style |
 
+## Security
+
+- Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
+- Supported versions and the 5-year security support period: [SUPPORT.md](SUPPORT.md).
+- Requirements, threat model, controls and how to verify releases:
+  [docs/security/](docs/security/).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).

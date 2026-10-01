@@ -39,9 +39,15 @@ Configuration, same names everywhere (case adjusted):
 | `token_provider` | client credentials (below) | Pluggable, for apps that already hold a token. |
 | `base_url` | `https://api.inorbit.hr` | env `INORBIT_BASE_URL`. |
 | `token_url` | `https://auth.inorbit.hr/oauth2/token` | env `INORBIT_TOKEN_URL`. |
-| `timeout` | 30 s per attempt | Unary calls; streams have none. |
+| `timeout` | 30 s per attempt | Unary calls; streams use a connect timeout and a 45 s idle timeout (section 11). |
 | `max_retries` | 2 | 0 disables. |
 | `http_client` | the language default | Bring your own transport, proxies, TLS. |
+| `region` | none (`base_url` decides) | `eu` or `us` when the API offers them; never a silent fallback (section 11). |
+| `ca_bundle` | system trust store | Extra CA certificates in PEM, for TLS-inspecting proxies. |
+| `client_cert` | none | Client certificate and key for mTLS; a signer hook where the language allows. |
+| `proxy` | `HTTPS_PROXY` / `NO_PROXY` | Explicit proxy, with credentials treated as secrets. |
+| `pinned_keys` | none (off) | SPKI SHA-256 pins, at least one backup; opt-in only. |
+| `logger`, `redact` | off | Logging is off by default; `redact` sees every record first. |
 | `user_agent_suffix` | none | Appended to the SDK's user agent. |
 
 A client built with no credentials fails at construction with a configuration error that
@@ -178,3 +184,34 @@ No public route is paginated today. When one is, the platform's `cursor` convent
   fields, Python keyword-only arguments.
 - Minimum runtimes are in each language's README and change only in a minor release with
   a changelog line.
+
+## 11. Transport security and data protection
+
+The public API shapes that follow from the security requirements
+([security/requirements.md](security/requirements.md)); the requirement ids are in
+brackets.
+
+- **TLS.** TLS 1.2 minimum [SR-01]; certificate verification cannot be turned off
+  through the public API [SR-02]. `ca_bundle` adds trusted CAs [SR-03], `client_cert`
+  enables mTLS [SR-04], `proxy` and the proxy environment variables route traffic
+  [SR-05], and `pinned_keys` pins the API's public key when a caller opts in [SR-06].
+  `base_url` and `token_url` must be `https://` except on loopback [SR-07].
+- **FIPS.** No cryptography in the SDK; each language documents how to run on its
+  runtime's FIPS-validated module, and calls itself FIPS-capable only [SR-08].
+- **Region.** `region` or `base_url` fixes where requests go; retries stay in that
+  region [SR-09].
+- **Secrets.** `key_secret`, tokens, proxy passwords and private keys are `Secret`
+  values that print as `<redacted>` [SR-10], are zeroed on drop in Rust [SR-11] and are
+  kept only in memory [SR-12].
+- **Logging.** Off by default; when on, metadata only, never bodies, query values or
+  the `Authorization` header [SR-13]; `redact` sees every record and message first
+  [SR-14]. Personal data never goes into URLs or SDK-built messages [SR-15]. No
+  telemetry [SR-16].
+- **Request ids.** Each request sends a client request id; every result and every error
+  exposes `request_id` (the client's) and `server_request_id` when the API returns one
+  [SR-17].
+- **Idempotency.** Calls that create or change data accept an `idempotency_key`; the SDK
+  generates one per logical call when retries are enabled and reuses it on every attempt,
+  and retries such calls only when a key is present and the API supports it [SR-18].
+- **Time.** Every call has a finite deadline; streams end on 45 s without data or
+  keep-alive [SR-19].

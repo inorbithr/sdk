@@ -65,6 +65,18 @@ A task for a language whose package does not exist yet prints a skip line and ex
 - **The SDK talks only to the public API and the token endpoint.** No other host, no
   telemetry sent anywhere.
 
+## Security and compliance
+
+- The security requirements in `docs/security/requirements.md` (SR-01 to SR-23) are as
+  binding as `docs/design.md`; code review rejects a change that breaks one.
+- Never put a key secret, token, health data (PHI), personal data or card number in a
+  log line, error message, URL, test fixture or example output.
+- A change that affects a requirement, the threat model or a control updates
+  `docs/security/` in the same pull request.
+- Vulnerabilities are handled privately as `SECURITY.md` describes; never in a public
+  issue, pull request or commit message.
+- InOrbit keeps a private compliance programme; agents with access to it follow it too.
+
 ## Commits and pull requests
 
 - [Conventional Commits](https://www.conventionalcommits.org) with the language as scope:
