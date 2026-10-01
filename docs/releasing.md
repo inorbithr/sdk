@@ -27,9 +27,9 @@ A maintainer's job is to merge the release PR and approve the publish.
 - [x] Create the npm organisation `inorbithr`; publish `@inorbithr/sdk@0.0.0` by hand to
       claim it (npm cannot trust-publish a package that does not exist yet). Done
       2026-10-01.
-- [ ] Publish `inorbithr 0.0.0` to crates.io by hand, then link the repository under the
+- [x] Publish `inorbithr 0.0.0` to crates.io by hand, then link the repository under the
       crate's trusted publishing settings (workflow `release.yml`, environment
-      `release-crates`).
+      `release-crates`), trusted publishing only. Done 2026-10-01; owner `0x19`.
 - [ ] On PyPI, add a pending trusted publisher for `inorbithr` (workflow `release.yml`,
       environment `release-pypi`); no manual upload needed.
 - [x] On npm, add the trusted publisher for `@inorbithr/sdk` (workflow `release.yml`,
