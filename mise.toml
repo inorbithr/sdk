@@ -26,6 +26,11 @@ cargo-binstall = "1.24.0"
 "cargo:cargo-semver-checks" = "0.50.0"
 "cargo:cargo-hack" = "0.6.45"
 cargo-deny = "0.20.2"
+"cargo:cargo-cyclonedx" = "0.5.9"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"
+"go:github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod" = "1.12.0"
+osv-scanner = "2.6.0"
+cyclonedx = "0.33.1"
 biome = "2.5.15"
 typos = "1.50.3"
 actionlint = "1.7.12"
@@ -40,7 +45,7 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "conformance", "examples:check"]
 
 [tasks.check]
 description = "Format check, lint, types and unit tests for every language"
@@ -74,6 +79,95 @@ run = [
   "zizmor --min-severity low .github/workflows",
   "python3 tools/check-repo.py",
 ]
+
+# ---------------------------------------------------------------- supply chain
+# Known-vulnerability scans and SBOMs (docs/security/, compliance evidence). Each language
+# task skips until its package exists; `audit` also scans every lockfile with OSV.
+
+[tasks.audit]
+description = "Known-vulnerability scans: OSV over every lockfile, plus each language's own scanner"
+depends = ["audit:osv", "go:audit", "rust:audit", "ts:audit", "py:audit"]
+
+[tasks."audit:osv"]
+description = "OSV-Scanner over every lockfile in the repository"
+shell = "bash -e -o pipefail -c"
+run = """
+locks=$(git ls-files '*go.sum' '*Cargo.lock' '*pnpm-lock.yaml' '*package-lock.json' '*uv.lock' | head -1)
+[ -n "$locks" ] || { echo "audit: no lockfiles yet, skipping OSV scan"; exit 0; }
+osv-scanner scan source --recursive .
+"""
+
+[tasks.sbom]
+description = "CycloneDX SBOM for every package into dist/sbom/, then validate them"
+depends = ["go:sbom", "rust:sbom", "ts:sbom", "py:sbom"]
+depends_post = ["sbom:validate"]
+
+[tasks."sbom:validate"]
+description = "Validate every SBOM in dist/sbom/ against the CycloneDX schema"
+shell = "bash -e -o pipefail -c"
+run = """
+found=0
+for f in dist/sbom/*.cdx.json; do
+  [ -e "$f" ] || continue
+  found=1
+  cyclonedx validate --input-file "$f" --input-format json --fail-on-errors
+done
+[ "$found" = 1 ] || echo "sbom: no packages yet, skipping"
+"""
+
+[tasks."go:audit"]
+dir = "go"
+shell = "bash -e -o pipefail -c"
+run = "[ -f go.mod ] || { echo 'go:audit: no module yet, skipping'; exit 0; }; govulncheck ./..."
+
+[tasks."go:sbom"]
+dir = "go"
+shell = "bash -e -o pipefail -c"
+run = "[ -f go.mod ] || exit 0; mkdir -p ../dist/sbom; cyclonedx-gomod mod -licenses -json -output ../dist/sbom/go.cdx.json"
+
+[tasks."rust:audit"]
+dir = "rust"
+shell = "bash -e -o pipefail -c"
+run = "[ -f Cargo.toml ] || { echo 'rust:audit: no crate yet, skipping'; exit 0; }; cargo deny check advisories"
+
+[tasks."rust:sbom"]
+dir = "rust"
+shell = "bash -e -o pipefail -c"
+run = "[ -f Cargo.toml ] || exit 0; mkdir -p ../dist/sbom; cargo cyclonedx --format json --override-filename rust.cdx && mv rust.cdx.json ../dist/sbom/"
+
+[tasks."ts:audit"]
+dir = "typescript"
+shell = "bash -e -o pipefail -c"
+run = """
+[ -f package.json ] || { echo 'ts:audit: no package yet, skipping'; exit 0; }
+pnpm install --frozen-lockfile
+pnpm audit --prod
+npm audit signatures
+"""
+
+[tasks."ts:sbom"]
+dir = "typescript"
+shell = "bash -e -o pipefail -c"
+run = "[ -f package.json ] || exit 0; mkdir -p ../dist/sbom; npm sbom --sbom-format cyclonedx --omit dev > ../dist/sbom/typescript.cdx.json"
+
+[tasks."py:audit"]
+dir = "python"
+shell = "bash -e -o pipefail -c"
+run = """
+[ -f pyproject.toml ] || { echo 'py:audit: no package yet, skipping'; exit 0; }
+uv export --no-dev --no-emit-project --format requirements-txt --no-hashes > "${TMPDIR:-/tmp}/py-reqs.txt"
+uvx pip-audit@2.10.1 --strict --requirement "${TMPDIR:-/tmp}/py-reqs.txt"
+"""
+
+[tasks."py:sbom"]
+dir = "python"
+shell = "bash -e -o pipefail -c"
+run = """
+[ -f pyproject.toml ] || exit 0
+mkdir -p ../dist/sbom
+uv export --no-dev --no-emit-project --format requirements-txt > "${TMPDIR:-/tmp}/py-reqs.txt"
+uvx --from cyclonedx-bom@7.5.0 cyclonedx-py requirements "${TMPDIR:-/tmp}/py-reqs.txt" --output-format JSON --output-file ../dist/sbom/python.cdx.json
+"""
 
 # ---------------------------------------------------------------- spec
 
