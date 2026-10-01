@@ -75,10 +75,11 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
         with:
-          install_args: "go python uv typos actionlint zizmor go:github.com/oasdiff/oasdiff"
+          install_args: "go python uv typos actionlint zizmor osv-scanner go:github.com/oasdiff/oasdiff"
       - run: mise run repo:check
       - run: mise run spec:lint
       - run: mise run conformance:validate
+      - run: mise run audit:osv
 
   go:
     name: go ${{ matrix.go }} (${{ matrix.os }})
@@ -104,9 +105,10 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
         with:
-          install_args: "go golangci-lint go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen go:golang.org/x/exp/cmd/gorelease"
+          install_args: "go golangci-lint go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck"
       - run: mise run go:gen && git diff --exit-code -- go
       - run: mise run go:check
+      - run: mise run go:audit
       - run: mise run conformance:go
       - run: mise run go:api
         if: github.event_name == 'pull_request'
@@ -141,6 +143,7 @@ jobs:
           workspaces: rust
       - run: mise run rust:gen && git diff --exit-code -- rust
       - run: mise run rust:check
+      - run: mise run rust:audit
       - run: mise run rust:features
       - run: mise run conformance:rust
       - run: mise run rust:api
@@ -172,6 +175,7 @@ jobs:
           install_args: "node pnpm biome"
       - run: mise run ts:gen && git diff --exit-code -- typescript
       - run: mise run ts:check
+      - run: mise run ts:audit
       - run: mise run conformance:ts
 
   py:
@@ -202,6 +206,7 @@ jobs:
           install_args: "python uv"
       - run: mise run py:gen && git diff --exit-code -- python
       - run: mise run py:check
+      - run: mise run py:audit
       - run: mise run conformance:py
       - run: mise run py:api
         if: github.event_name == 'pull_request'
