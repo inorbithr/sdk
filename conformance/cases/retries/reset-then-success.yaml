@@ -8,7 +8,7 @@ exchanges:
   - request: { method: GET, path: /v1/me }
     response: { fault: reset }
   - request: { method: GET, path: /v1/me }
-    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [tbd.public] } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
 expect:
   ok: { subject: ak_test }
   attempts: 2

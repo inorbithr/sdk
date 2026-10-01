@@ -29,14 +29,14 @@ exchanges:                         # in order; the server fails the case on any 
   - request:  { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }
     response: { status: 429, headers: { retry-after: "1" }, json: { code: rate_limited, error: Slow down., details: [] } }
   - request:  { method: GET, path: /v1/me, min_delay_ms: 1000 }
-    response: { status: 200, json: { subject: ak_1, kind: client, scopes: [tbd.public] } }
+    response: { status: 200, json: { subject: ak_1, kind: client, scopes: [identity:read] } }
 expect:
   ok: { subject: ak_1 }
   attempts: 2
 ```
 
 Unless a case says otherwise, the driver builds the client with `key_id: ak_test`,
-`key_secret: s3cr3t`, `max_retries: 2`, and `base_url` and `token_url` pointing at the
+`key_secret: s3cr3t`, `scopes: [identity:read]`, `max_retries: 2`, and `base_url` and `token_url` pointing at the
 replay server. Header names are lower case. `json` bodies match as subsets on requests and are sent
 verbatim on responses. `fault: reset` closes the connection instead of answering.
 

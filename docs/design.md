@@ -9,17 +9,23 @@ and this page is corrected in the same PR.
 
 ## 1. Scope
 
-The SDK covers what an API key may call. Today (spec `0.1.0`, see `spec/SOURCE`) that is:
+The SDK covers what an API key may call. An API key holds scopes chosen when it was made,
+and each operation needs one ([ADR 0008](adr/0008-key-scopes-and-iohr-identifiers.md)).
+As published on docs.inorbit.hr on 2026-10-01:
 
-| Operation | Method and path | SDK name |
-|---|---|---|
-| Who am I | `GET /v1/me` | `me` |
-| The key's account | `GET /v1/accounts/me` | `accounts.get_me` |
-| Usage per day | `GET /v1/accounts/orgs/{org_id}/usage` | `accounts.get_usage` |
+| Operation | Method and path | Scope | SDK name |
+|---|---|---|---|
+| Who am I | `GET /v1/me` | `identity:read` | `me` |
+| The key's account | `GET /v1/accounts/me` | `account:read` | `accounts.get_me` |
+| Units and usage | `GET /v1/accounts/orgs/{org_id}/units`, `/usage` | `usage:read` | `accounts.get_usage` and one more, named at the first spec sync |
+| Unit categories | `GET /v1/accounts/units/categories` | `usage:read` | named at the first spec sync |
+| Radar digests and items | `GET /v1/radar/digests`, `/v1/radar/digests/{id}`, `/v1/radar/items` | `radar:read` | named at the first spec sync |
+| The plan's OpenAPI document | `GET /v1/openapi.json` | any key | not wrapped |
 
-Server-sent events, the multiplexed socket (`/v1/ws`) and MCP are designed below but not
-shipped until the platform opens them to the `tbd.public` scope
-([ADR 0004](adr/0004-transport-scope.md)).
+The names marked "at the first spec sync" are chosen with `/add-endpoint` once `spec/`
+holds the operations. Server-sent events, the multiplexed socket (`/v1/ws`) and MCP are
+designed below but not shipped until the platform opens them to API keys
+([ADR 0004](adr/0004-transport-scope.md), as amended by ADR 0008).
 
 ## 2. The client
 
@@ -36,6 +42,7 @@ Configuration, same names everywhere (case adjusted):
 | Option | Default | Notes |
 |---|---|---|
 | `key_id`, `key_secret` | env `INORBIT_KEY_ID`, `INORBIT_KEY_SECRET` | Either both or a custom `token_provider`. |
+| `scopes` | env `INORBIT_SCOPES` (space-separated) | The scopes to ask for, a subset of the key's. No default: a token with no scope can call nothing. |
 | `token_provider` | client credentials (below) | Pluggable, for apps that already hold a token. |
 | `base_url` | `https://api.inorbit.hr` | env `INORBIT_BASE_URL`. |
 | `token_url` | `https://auth.inorbit.hr/oauth2/token` | env `INORBIT_TOKEN_URL`. |
@@ -50,8 +57,8 @@ Configuration, same names everywhere (case adjusted):
 | `logger`, `redact` | off | Logging is off by default; `redact` sees every record first. |
 | `user_agent_suffix` | none | Appended to the SDK's user agent. |
 
-A client built with no credentials fails at construction with a configuration error that
-names both environment variables.
+A client built with no credentials, or with credentials but no scopes, fails at
+construction with a configuration error that names the missing environment variables.
 
 ## 3. Authentication
 
@@ -63,8 +70,12 @@ POST {token_url}
 Authorization: Basic base64(key_id:key_secret)
 Content-Type: application/x-www-form-urlencoded
 
-grant_type=client_credentials&audience=tbd-api&scope=tbd.public
+grant_type=client_credentials&audience=iohr-api&scope=identity%3Aread%20account%3Aread
 ```
+
+- `audience` is always `iohr-api`; `scope` is the configured `scopes`, space-separated.
+  Asking for a scope the key does not hold fails with `invalid_scope`, surfaced as an
+  `AuthError` naming the scope.
 
 - Cache the token. Refresh when less than 20 % of its `expires_in` remains, or on a 401
   from the API (once per request, then surface the error).
