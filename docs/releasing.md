@@ -5,14 +5,16 @@ A maintainer's job is to merge the release PR and approve the publish.
 
 ## Launch checklist (when the repository goes public)
 
-These wait for a public repository; nothing else changes at launch.
+The repository went public on 2026-10-01. These items waited for that.
 
 - [ ] JSR: link `inorbithr/sdk` on `@inorbithr/sdk` (Settings, GitHub repository). The
       scope and package exist since 2026-10-01; the release job publishes to JSR only
       once the repository is public.
-- [ ] Environments `release-npm`, `release-pypi`, `release-crates`: add a required
-      reviewer (needs a public repository on the Team plan).
-- [ ] Turn on private vulnerability reporting (Settings, Code security).
+- [x] Environments `release-npm`, `release-pypi`, `release-crates`: add a required
+      reviewer (needs a public repository on the Team plan). Done 2026-10-01.
+- [x] Turn on private vulnerability reporting (Settings, Code security). Done 2026-10-01.
+- [x] Fork pull requests from any outside contributor wait for approval before their
+      workflows run. Done 2026-10-01.
 - [ ] Check that `security.yml` (CodeQL, zizmor upload, dependency review) and
       `scorecard.yml` run; they skip themselves while the repository is private.
 - [ ] README: drop "design phase" once a release exists.
