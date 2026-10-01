@@ -19,20 +19,22 @@ A maintainer's job is to merge the release PR and approve the publish.
 |---|---|---|---|
 | Go | `go/vX.Y.Z` | warms `proxy.golang.org`, attests the source archive | none |
 | Rust | `rust/vX.Y.Z` | `cargo publish` via `crates-io-auth-action` | `release-crates` |
-| TypeScript | `typescript/vX.Y.Z` | `npm publish` (provenance automatic) and `jsr publish` | `release-npm` |
+| TypeScript | `typescript/vX.Y.Z` | `npm stage publish` (provenance automatic), then a maintainer approves it; `jsr publish` | `release-npm` |
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
 
 ## One-time setup (before the first release)
 
-- [ ] Create the npm organisation `inorbithr`; publish `@inorbithr/sdk@0.0.0` by hand to
-      claim it (npm cannot trust-publish a package that does not exist yet).
+- [x] Create the npm organisation `inorbithr`; publish `@inorbithr/sdk@0.0.0` by hand to
+      claim it (npm cannot trust-publish a package that does not exist yet). Done
+      2026-10-01.
 - [ ] Publish `inorbithr 0.0.0` to crates.io by hand, then link the repository under the
       crate's trusted publishing settings (workflow `release.yml`, environment
       `release-crates`).
 - [ ] On PyPI, add a pending trusted publisher for `inorbithr` (workflow `release.yml`,
       environment `release-pypi`); no manual upload needed.
-- [ ] On npm, add the trusted publisher for `@inorbithr/sdk` (workflow `release.yml`,
-      environment `release-npm`).
+- [x] On npm, add the trusted publisher for `@inorbithr/sdk` (workflow `release.yml`,
+      environment `release-npm`), stage-only, and require 2FA with no bypass tokens.
+      Done 2026-10-01.
 - [x] Create the three environments, deployable from `main` only (2026-10-01).
 - [ ] Add a required reviewer to each environment. GitHub allows required reviewers on a
       private repository only on Enterprise; on the Team plan this waits until the
@@ -45,6 +47,16 @@ A maintainer's job is to merge the release PR and approve the publish.
       are 0 while there is one maintainer.
 - [x] Ruleset `release tags are immutable`: tags `*/v*` cannot be moved or deleted.
 - [ ] Restrict creating `*/v*` tags to the release app, once the app exists.
+
+## Approving an npm release
+
+The npm trusted publisher may only **stage** a version. After the publish job runs, the
+version waits on npmjs.com, invisible to installs, until a maintainer approves it:
+
+- web: npmjs.com, `@inorbithr/sdk`, **Staged Packages**, **Approve** (asks for 2FA);
+- CLI: `npm stage approve <stage-id>` (asks for 2FA).
+
+The CI token cannot approve, so a compromised workflow cannot ship a version on its own.
 
 ## Fixing a bad release
 

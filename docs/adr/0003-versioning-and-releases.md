@@ -16,7 +16,8 @@ the Rust crate.
 - **release-please in manifest mode** (`release-please-config.json`), one release PR per
   package, driven by Conventional Commits scoped to the language. Tags:
   `go/vX.Y.Z`, `rust/vX.Y.Z`, `typescript/vX.Y.Z`, `python/vX.Y.Z`.
-- **Trusted publishing (OIDC), no long-lived tokens**: npm (with provenance), PyPI
+- **Trusted publishing (OIDC), no long-lived tokens**: npm (with provenance, staged:
+  a maintainer approves each version with 2FA), PyPI
   (with PEP 740 attestations), crates.io (`rust-lang/crates-io-auth-action`). Go
   publishes by tag; the workflow warms `proxy.golang.org` afterwards.
 - Each publish job runs in a GitHub environment (`release-npm`, `release-pypi`,

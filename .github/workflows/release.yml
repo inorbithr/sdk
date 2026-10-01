@@ -133,9 +133,11 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
-          # Trusted publishing needs npm 11.5.1 or newer; Node 24 bundles it.
-          npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && $2 >= 5)) }' || { echo "npm too old for trusted publishing" >&2; exit 1; }
-          npm publish --access public
+          # The npm trusted publisher is stage-only: the version waits on npmjs.com until a
+          # maintainer approves it with 2FA (docs/releasing.md). Needs npm 11.15 or newer;
+          # Node 24 bundles it.
+          npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && $2 >= 15)) }' || { echo "npm too old for staged publishing" >&2; exit 1; }
+          npm stage publish
           pnpm dlx jsr@0.14.3 publish
 
   py-build:
