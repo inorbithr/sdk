@@ -33,12 +33,18 @@ A maintainer's job is to merge the release PR and approve the publish.
       environment `release-pypi`); no manual upload needed.
 - [ ] On npm, add the trusted publisher for `@inorbithr/sdk` (workflow `release.yml`,
       environment `release-npm`).
-- [ ] Create the three environments in GitHub with required reviewers.
+- [x] Create the three environments, deployable from `main` only (2026-10-01).
+- [ ] Add a required reviewer to each environment. GitHub allows required reviewers on a
+      private repository only on Enterprise; on the Team plan this waits until the
+      repository is public. Until then a publish starts as soon as release-please tags.
 - [ ] Create a GitHub App for release-please (contents and pull-requests write) and store
       `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`; the default token cannot trigger
       the CI run a release PR needs.
-- [ ] Rulesets: `main` requires `ci-ok` and one review, no force push; tags matching
-      `*/v*` can be created only by the release app.
+- [x] Ruleset `main`: pull request with squash merge only, `ci-ok` required, resolved
+      threads, linear history, no force push or deletion (2026-10-01). Required approvals
+      are 0 while there is one maintainer.
+- [x] Ruleset `release tags are immutable`: tags `*/v*` cannot be moved or deleted.
+- [ ] Restrict creating `*/v*` tags to the release app, once the app exists.
 
 ## Fixing a bad release
 
