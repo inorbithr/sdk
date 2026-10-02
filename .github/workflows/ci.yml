@@ -246,6 +246,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: cli
+      # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
+      - run: rustup component add rustfmt clippy
       - run: mise run cli:check
       - run: mise run cli:audit
       # A Secret Service for the Linux credential-store test; packages from the runner image's archive.
