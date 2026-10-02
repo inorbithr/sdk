@@ -12,7 +12,12 @@ pub(crate) async fn run(g: &Global, env: &Env, out: Out) -> Result<(), Error> {
     // Either may be outside a token's scopes; what the token says about itself fills in.
     let me = optional(s.api.get::<Value>("/v1/me", &[]).await)?;
     let account = optional(s.api.get::<Value>("/v1/accounts/me", &[]).await)?;
-    let expires = s.claims.expires_at().map(|t| t.date().to_string());
+    let expires = s.claims.expires_at().and_then(|t| {
+        t.format(time::macros::format_description!(
+            "[year]-[month]-[day] [hour]:[minute] UTC"
+        ))
+        .ok()
+    });
 
     if out.json {
         Out::print_json(&serde_json::json!({

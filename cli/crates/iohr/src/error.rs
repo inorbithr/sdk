@@ -35,7 +35,12 @@ impl Error {
             Self::Usage(_) => 2,
             Self::NotSignedIn(_)
             | Self::Api {
-                error: ApiError::Auth(AuthError::NotSignedIn { .. } | AuthError::Claims(_)),
+                error:
+                    ApiError::Auth(
+                        AuthError::NotSignedIn { .. }
+                        | AuthError::SessionEnded { .. }
+                        | AuthError::Claims(_),
+                    ),
                 ..
             } => 3,
             Self::Api { error, .. } if is_unauthenticated(error.status()) => 3,
@@ -76,9 +81,9 @@ impl From<ApiError> for Error {
 impl From<AuthError> for Error {
     fn from(e: AuthError) -> Self {
         match e {
-            AuthError::NotSignedIn { .. } | AuthError::Claims(_) => {
-                Self::NotSignedIn(e.to_string())
-            }
+            AuthError::NotSignedIn { .. }
+            | AuthError::SessionEnded { .. }
+            | AuthError::Claims(_) => Self::NotSignedIn(e.to_string()),
             other => Self::Failed(other.to_string()),
         }
     }

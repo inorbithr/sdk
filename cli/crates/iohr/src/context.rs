@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iohr_auth::{
-    Claims, Config, EntryKey, FileStore, KeyringStore, Kind, ProfileName, Redacted, StaticToken,
-    Storage, Store, StoreError,
+    AuthError, Bearer, Claims, Config, Credential, EntryKey, FileStore, KeyringStore, Kind,
+    ProfileName, Redacted, Session as PersonSession, StaticToken, Storage, Store, StoreError,
 };
 use time::OffsetDateTime;
 
@@ -68,6 +68,22 @@ where
         .map_err(Error::from)
 }
 
+/// The credential a run calls with: an API token, or a person's refreshing session.
+#[derive(Debug)]
+pub(crate) enum AnyCredential {
+    Token(StaticToken),
+    Person(Box<PersonSession>),
+}
+
+impl Credential for AnyCredential {
+    async fn bearer(&self) -> Result<Bearer, AuthError> {
+        match self {
+            Self::Token(t) => t.bearer().await,
+            Self::Person(p) => p.bearer().await,
+        }
+    }
+}
+
 /// Who calls, against which account, with which client.
 pub(crate) struct Session {
     /// The profile's name, or `IOHR_TOKEN`.
@@ -75,7 +91,7 @@ pub(crate) struct Session {
     pub(crate) kind: Kind,
     pub(crate) account: String,
     pub(crate) claims: Claims,
-    pub(crate) api: Api<StaticToken>,
+    pub(crate) api: Api<AnyCredential>,
 }
 
 /// The session for this run: `IOHR_TOKEN` when set, otherwise the chosen profile.
@@ -84,7 +100,11 @@ pub(crate) async fn session(global: &Global, env: &Env) -> Result<Session, Error
     if let Some(token) = &env.token {
         let claims = Claims::read(token.expose(), OffsetDateTime::now_utc())?;
         let account = claims.org.clone().unwrap_or_default();
-        let api = Api::new(base, StaticToken::new(token.clone()), global.verbose)?;
+        let api = Api::new(
+            base,
+            AnyCredential::Token(StaticToken::new(token.clone())),
+            global.verbose,
+        )?;
         return Ok(Session {
             label: "IOHR_TOKEN".into(),
             kind: Kind::Token,
@@ -100,23 +120,37 @@ pub(crate) async fn session(global: &Global, env: &Env) -> Result<Session, Error
             "there is no profile {name}: `iohr profile list` shows the ones there are"
         ))
     })?;
-    if profile.kind != Kind::Token {
-        return Err(Error::Failed(format!(
-            "profile {name} was made by a newer iohr; update iohr to use it"
-        )));
-    }
     let key = EntryKey::new(name.clone(), &profile.account)?;
     let store = ctx.store(profile.storage)?;
-    let secret: Option<Redacted<String>> = blocking(store, move |s| s.get(&key)).await?;
-    let token = secret.ok_or_else(|| iohr_auth::AuthError::NotSignedIn {
-        profile: name.to_string(),
-    })?;
-    let claims = Claims::read(token.expose(), OffsetDateTime::now_utc()).map_err(|e| {
-        Error::NotSignedIn(format!(
-            "profile {name}: {e}; then `iohr login --with-token --profile {name}`"
-        ))
-    })?;
-    let api = Api::new(base, StaticToken::new(token), global.verbose)?;
+    let (credential, claims) = match profile.kind {
+        Kind::Token => {
+            let secret: Option<Redacted<String>> = blocking(store, move |s| s.get(&key)).await?;
+            let token = secret.ok_or_else(|| AuthError::NotSignedIn {
+                profile: name.to_string(),
+            })?;
+            let claims = Claims::read(token.expose(), OffsetDateTime::now_utc()).map_err(|e| {
+                Error::NotSignedIn(format!(
+                    "profile {name}: {e}; then `iohr login --with-token --profile {name}`"
+                ))
+            })?;
+            (AnyCredential::Token(StaticToken::new(token)), claims)
+        }
+        Kind::Person => {
+            let issuer = profile.issuer.as_deref().unwrap_or(&global.issuer);
+            let client_id = profile.client_id.as_deref().unwrap_or(&global.client_id);
+            let person = PersonSession::load(store, key, issuer, client_id).await?;
+            // Refreshes now if needed, so the claims shown are the ones calls carry.
+            let bearer = person.bearer().await?;
+            let claims = Claims::read(bearer.expose(), OffsetDateTime::now_utc())?;
+            (AnyCredential::Person(Box::new(person)), claims)
+        }
+        _ => {
+            return Err(Error::Failed(format!(
+                "profile {name} was made by a newer iohr; update iohr to use it"
+            )));
+        }
+    };
+    let api = Api::new(base, credential, global.verbose)?;
     Ok(Session {
         label: name.to_string(),
         kind: profile.kind,

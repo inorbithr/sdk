@@ -105,7 +105,7 @@ fn scopes<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Erro
     })
 }
 
-fn audiences<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+pub(crate) fn audiences<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Aud {

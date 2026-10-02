@@ -9,16 +9,29 @@ cargo install --locked --path cli/crates/iohr
 
 ## Sign in
 
-This version signs in with an API token. Create one in the console (API tokens and
-keys), then pipe it in; a token is never accepted as an argument, where shell history
-and the process list would keep it.
-
 ```sh
-iohr login --with-token --profile work < token.txt
+iohr login
 iohr whoami
 ```
 
-Signing in with a browser or a device code arrives in the next version.
+`iohr login` signs you in on InOrbit's own sign-in pages. On a machine with a browser it
+opens one and waits up to 5 minutes for it to come back to `http://127.0.0.1:<port>`.
+Over SSH, in a container or without a display it prints a link and a code instead:
+open the link in any browser, on any device, and enter the code. `--web` and `--device`
+choose one. Only enter a code you started yourself.
+
+A signed-in session holds a 15-minute access token and a 30-day refresh token that is
+replaced on every use; `iohr` refreshes on its own. `iohr logout` revokes the session at
+the sign-in service before removing it from this machine. The console's sign-in devices
+list shows the session and can end it from anywhere.
+
+An API token works too. Create one in the console (API tokens and keys) or with `iohr
+token create`, then pipe it in; a token is never accepted as an argument, where shell
+history and the process list would keep it.
+
+```sh
+iohr login --with-token --profile ci < token.txt
+```
 
 For CI and one-off use, `IOHR_TOKEN` is used in memory and nothing is written:
 
@@ -30,6 +43,7 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 
 | Command | What it does |
 |---|---|
+| `iohr login [--web \| --device]` | Sign in and add a profile |
 | `iohr login --with-token` | Read an API token from stdin and add a profile |
 | `iohr logout` | Forget the profile and its credential on this machine |
 | `iohr profile list \| use \| show` | The profiles here; the default one |
@@ -55,8 +69,8 @@ was refused, 4 forbidden by scope, role or plan.
 - Secrets: the operating system's credential store (macOS Keychain, Windows Credential
   Manager, the Secret Service on Linux), one entry per profile and account. On a machine
   without one, `--insecure-storage` keeps the token in a file with mode 0600 instead.
-- `iohr` talks to `api.inorbit.hr` only (and, with browser sign-in, `auth.inorbit.hr`).
-  No telemetry, no update check.
+- `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` only. No telemetry, no update
+  check.
 
 The rules are SR-10 to SR-24 in [docs/security/requirements.md](../docs/security/requirements.md);
 the layout is [ADR 0009](../docs/adr/0009-the-command-line.md).
@@ -76,5 +90,5 @@ Each runtime dependency, and why (SR-20):
 | keyring-core and one store per OS | The OS credential store: apple-native-keyring-store, windows-native-keyring-store, zbus-secret-service-keyring-store (pure Rust D-Bus, no libdbus) |
 | zeroize | Secrets are wiped from memory when dropped |
 | etcetera | The platform's config directory |
-| base64 | Reading a token's claims to name its account |
+| base64, sha2 | Reading a token's claims to name its account; the PKCE S256 challenge |
 | getrandom | Request ids and retry jitter |

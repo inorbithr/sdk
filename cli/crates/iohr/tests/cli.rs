@@ -378,3 +378,156 @@ async fn verbose_output_never_shows_the_token() {
         );
     }
 }
+
+/// A provider at the mock server's own address, for a person's sign-in.
+async fn mock_provider(server: &MockServer) {
+    let uri = server.uri();
+    Mock::given(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "issuer": uri,
+            "authorization_endpoint": format!("{uri}/oauth2/auth"),
+            "token_endpoint": format!("{uri}/oauth2/token"),
+            "device_authorization_endpoint": format!("{uri}/oauth2/device/auth"),
+            "revocation_endpoint": format!("{uri}/oauth2/revoke"),
+        })))
+        .mount(server)
+        .await;
+}
+
+fn person_tokens(issuer: &str) -> serde_json::Value {
+    let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
+    let jwt = |c: serde_json::Value| {
+        format!(
+            "{}.{}.TOKENSIGNATUREMARKER",
+            enc(serde_json::json!({"alg": "RS256"})),
+            enc(c)
+        )
+    };
+    serde_json::json!({
+        "access_token": jwt(serde_json::json!({
+            "sub": "person-1", "aud": ["iohr-api"], "exp": 4_102_444_800_i64,
+            "scp": ["openid", "offline_access", "iohr.api"], "org": ACCOUNT, "plan": "free"
+        })),
+        "token_type": "bearer", "expires_in": 900, "refresh_token": "REFRESHMARKER",
+        "id_token": jwt(serde_json::json!({"iss": issuer, "aud": ["iohr-cli"], "sub": "person-1"})),
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_signs_in_with_a_device_code_and_logout_revokes() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mock_provider(&server).await;
+    let uri = server.uri();
+    Mock::given(method("POST"))
+        .and(path("/oauth2/device/auth"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "device_code": "dc", "user_code": "ABCD2345", "verification_uri": format!("{uri}/oauth2/device/verify"),
+            "expires_in": 600, "interval": 1
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(person_tokens(&uri)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/me"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"subject": "person-1", "kind": "person"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/accounts/me"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"account": {"id": ACCOUNT, "plan": "free"}})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/revoke"))
+        .and(wiremock::matchers::body_string_contains(
+            "token=REFRESHMARKER",
+        ))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let login = r
+        .cmd(&["login", "--device", "--insecure-storage", "--profile", "me"])
+        .env("IOHR_ISSUER", &uri)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&login), 0, "{}", text(&login));
+    let shown = text(&login);
+    assert!(
+        shown.contains("ABCD2345") && shown.contains("/oauth2/device/verify"),
+        "{shown}"
+    );
+    assert!(!shown.contains("TOKENSIGNATUREMARKER") && !shown.contains("REFRESHMARKER"));
+    let config = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(
+        config.contains("kind = \"person\"") && config.contains(&uri),
+        "{config}"
+    );
+    assert!(!config.contains("REFRESHMARKER"));
+
+    let who = r
+        .cmd(&["whoami", "--verbose"])
+        .env("IOHR_ISSUER", &uri)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&who), 0, "{}", text(&who));
+    assert!(text(&who).contains("person"));
+    assert!(!text(&who).contains("TOKENSIGNATUREMARKER") && !text(&who).contains("REFRESHMARKER"));
+
+    let out = r.run(&["logout"]);
+    assert_eq!(code(&out), 0, "{}", text(&out));
+    assert!(!dir.path().join("secrets/me.acc_test1").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logout_keeps_the_profile_when_revoking_fails() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mock_provider(&server).await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/revoke"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let uri = server.uri();
+    std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        format!(
+            "default = \"me\"\n[profiles.me]\nkind = \"person\"\naccount = \"{ACCOUNT}\"\nstorage = \"file\"\nissuer = \"{uri}\"\nclient_id = \"iohr-cli\"\n"
+        ),
+    )
+    .unwrap();
+    let session = serde_json::json!({"refresh_token": "rt", "access_token": "x", "expires_at": 4_102_444_800_i64});
+    std::fs::write(
+        dir.path().join(format!("secrets/me.{ACCOUNT}")),
+        session.to_string(),
+    )
+    .unwrap();
+    let out = r.run(&["logout"]);
+    assert_eq!(code(&out), 1, "{}", text(&out));
+    assert!(text(&out).contains("Nothing was removed"));
+    assert!(dir.path().join(format!("secrets/me.{ACCOUNT}")).exists());
+}

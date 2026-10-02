@@ -10,6 +10,7 @@ pub mod api;
 pub mod cli;
 
 mod args;
+mod browser;
 mod commands;
 mod context;
 mod error;

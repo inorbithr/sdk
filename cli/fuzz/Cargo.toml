@@ -33,3 +33,10 @@ path = "fuzz_targets/claims.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "loopback"
+path = "fuzz_targets/loopback.rs"
+test = false
+doc = false
+bench = false

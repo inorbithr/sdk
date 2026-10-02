@@ -11,7 +11,10 @@ Read the root `AGENTS.md`, `docs/design.md` sections 4 to 6 and
 - `mise run cli:fmt`, `mise run cli:audit`.
 - `mise run cli:keyring` (Linux): the credential-store test against a throwaway Secret
   Service in a private D-Bus session.
-- `mise run cli:fuzz` (nightly, `FUZZ_SECONDS` each): the config, error and token readers.
+- `mise run cli:hydra`: browser and device sign-in, refresh and revocation against the
+  Ory Hydra the platform runs (Docker, image pinned by digest).
+- `mise run cli:fuzz` (nightly, `FUZZ_SECONDS` each): the config, error, token and
+  loopback request readers.
 - Single test: `cargo nextest run -p iohr -E 'test(name)'` in `cli/`.
 
 ## Layout
@@ -19,7 +22,9 @@ Read the root `AGENTS.md`, `docs/design.md` sections 4 to 6 and
 ```
 cli/
   Cargo.toml          workspace, lints, dependency versions
-  crates/iohr-auth/   Redacted, Credential, Claims, Config and profiles, Store
+  crates/iohr-auth/   Redacted, Credential, Claims, Config and profiles, Store,
+                      Provider (discovery), Authorization<Browser|Device|Granted>,
+                      loopback listener, PKCE, Session (refreshing person)
   crates/iohr/        lib: api (private HTTP client), cli (clap), commands, context
                       main.rs: argv guard, parse, run, exit code
   fuzz/               cargo-fuzz targets; excluded from the workspace
@@ -37,6 +42,12 @@ cli/
   `--insecure-storage`. The config file never holds one. Entries are keyed by profile and
   account (`EntryKey`).
 - Credential-store calls block: run them through `context::blocking`.
+- Sign-in: PKCE S256 only, a fresh `state` compared in constant time, the issuer checked
+  in discovery and in the ID token, every endpoint and link on the issuer's origin, the
+  loopback listener on `127.0.0.1` (or `[::1]`) only, one `GET /callback`, 5 minutes.
+  Only `Authorization<Granted>` becomes a stored `Session`; keep it that way.
+- A refused refresh ends the session only after re-reading the store: another `iohr`
+  process may have rotated the token.
 - Only the API host: paths are checked to stay on it, base URLs are HTTPS (loopback
   excepted), redirects are not followed. No telemetry, no update check.
 - `--verbose` prints method, path, status, time and request id; never a header, a query

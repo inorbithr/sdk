@@ -67,6 +67,10 @@ build, (4) CI to registry, (5) contributor to `main`.
 | I | Another account's token used by mistake | SR-24: one store entry per profile and account |
 | I | Token printed by `--verbose` or an error | SR-10, SR-13; a test runs every command with `--verbose` and finds no token |
 | S | `IOHR_BASE_URL` pointed at an attacker's host | SR-07 HTTPS only (loopback excepted); residual: control of the environment is control of the process |
+| S | Someone sends a device code they started, to be approved by a victim | The approval page says to enter only a code you started; codes expire after 10 minutes; code entry is rate limited at the edge |
+| S | Another local process answers the loopback redirect, or a web page calls it | `state` (32 random bytes) compared in constant time; PKCE S256; one request ends the listener; 5-minute bound |
+| T | A sign-in answer from another issuer (mix-up) | Discovery checks the issuer; the ID token's `iss` and `aud` are checked; every endpoint and link must be on the issuer's origin |
+| I | Refresh token stolen from this machine | 30-day lifetime, rotated on every use, a replay after rotation ends the chain; `logout` and the console revoke it |
 | E | A malicious local process reads the credential store | Out of scope: the OS store's own access control applies; tokens expire and are revoked from the console |
 
 ### Network path

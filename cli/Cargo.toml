@@ -22,12 +22,13 @@ clap_complete = "4.6"
 etcetera = "0.11"
 getrandom = "0.4"
 keyring-core = "1"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "query", "system-proxy"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "query", "form", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"
 serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
-tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util", "fs"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util", "fs", "net", "sync"] }
 toml = "1"
 url = "2"
 zeroize = "1"
