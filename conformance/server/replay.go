@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -400,8 +402,11 @@ func mismatch(want Request, got Seen) string {
 	return ""
 }
 
+// subsetMap checks the keys in sorted order, so the reason names the same missing or
+// different key on every run (Go's map order is random).
 func subsetMap(what string, want, got map[string]string) string {
-	for k, v := range want {
+	for _, k := range slices.Sorted(maps.Keys(want)) {
+		v := want[k]
 		actual, ok := got[k]
 		if !ok {
 			return fmt.Sprintf("%s %s: missing", what, k)
@@ -422,7 +427,8 @@ func subset(want, got any, path string) (string, bool) {
 		if !ok {
 			return path, false
 		}
-		for k, v := range w {
+		for _, k := range slices.Sorted(maps.Keys(w)) {
+			v := w[k]
 			gv, present := g[k]
 			if !present {
 				return path + "." + k, false
