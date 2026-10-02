@@ -43,6 +43,12 @@ pub struct Global {
     /// The API's address.
     #[arg(long, global = true, env = "IOHR_BASE_URL", default_value = DEFAULT_BASE_URL, hide_default_value = true)]
     pub base_url: String,
+    /// The sign-in service.
+    #[arg(long, global = true, env = "IOHR_ISSUER", default_value = iohr_auth::DEFAULT_ISSUER, hide = true)]
+    pub issuer: String,
+    /// The OAuth client the command line signs in as.
+    #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
+    pub client_id: String,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
     pub config_dir: Option<PathBuf>,
@@ -50,7 +56,8 @@ pub struct Global {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Sign in and add a profile.
+    /// Sign in and add a profile: in a browser when this machine can open one, with
+    /// a device code otherwise.
     Login(Login),
     /// Forget a profile and its credential on this machine.
     Logout,
@@ -79,12 +86,27 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct Login {
-    /// Read an API token from standard input.
-    #[arg(long)]
-    pub with_token: bool,
+    #[command(flatten)]
+    pub how: How,
     /// Keep the credential in an owner-only file instead of the OS credential store.
     #[arg(long)]
     pub insecure_storage: bool,
+}
+
+/// How to sign in; at most one. Without any, a browser when this machine can open
+/// one, a device code otherwise.
+#[derive(Debug, Args)]
+#[group(multiple = false)]
+pub struct How {
+    /// Sign in in a browser on this machine.
+    #[arg(long)]
+    pub web: bool,
+    /// Sign in with a code approved in any browser, on any device.
+    #[arg(long)]
+    pub device: bool,
+    /// Read an API token from standard input instead of signing in.
+    #[arg(long)]
+    pub with_token: bool,
 }
 
 #[derive(Debug, Subcommand)]

@@ -33,6 +33,15 @@ impl<T: Zeroize> Redacted<T> {
     }
 }
 
+/// Secrets arrive in JSON (token answers, the stored session) and are wrapped as they
+/// are read. There is no `Serialize`: writing one out is always a deliberate
+/// [`expose`](Redacted::expose).
+impl<'de, T: Zeroize + serde::Deserialize<'de>> serde::Deserialize<'de> for Redacted<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        T::deserialize(d).map(Self::new)
+    }
+}
+
 impl<T: Zeroize> fmt::Debug for Redacted<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("<redacted>")

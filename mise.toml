@@ -306,15 +306,40 @@ dbus-run-session -- bash -e -o pipefail -c "
 "
 """
 
+[tasks."cli:hydra"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: browser and device sign-in, refresh and revocation against a real Ory Hydra (the version the platform runs), in Docker"
+dir = "cli"
+run = """
+# The version core pins in devops/k8s/auth/hydra.yaml, by digest.
+image="oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9"
+name="iohr-hydra-$$"
+free_port() { python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
+port=$(free_port); aport=$(free_port)
+public="http://127.0.0.1:$port"; admin="http://127.0.0.1:$aport"
+trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+# Login, consent and device pages point nowhere: the test accepts each step through
+# the admin API, as the platform's sign-in pages do.
+docker run -d --name "$name" -p "127.0.0.1:$port:4444" -p "127.0.0.1:$aport:4445" \\
+  -e DSN=memory -e SECRETS_SYSTEM="$(head -c 32 /dev/urandom | base64)" -e STRATEGIES_ACCESS_TOKEN=jwt \\
+  -e URLS_SELF_ISSUER="$public" -e URLS_SELF_PUBLIC="$public" \\
+  -e URLS_LOGIN=http://127.0.0.1:9/login -e URLS_CONSENT=http://127.0.0.1:9/consent \\
+  -e URLS_DEVICE_VERIFICATION=http://127.0.0.1:9/device -e URLS_DEVICE_SUCCESS=http://127.0.0.1:9/device/done \\
+  "$image" serve all --dev >/dev/null
+for _ in $(seq 1 60); do curl -fs "$public/health/ready" >/dev/null && break; sleep 1; done
+IOHR_TEST_REQUIRE_HYDRA=1 IOHR_TEST_HYDRA="$public" IOHR_TEST_HYDRA_ADMIN="$admin" \\
+  cargo nextest run --locked -p iohr-auth -E 'binary(hydra)'
+"""
+
 [tasks."cli:fuzz"]
 shell = "bash -e -o pipefail -c"
-description = "Command line: fuzz the config, error and token readers (nightly; FUZZ_SECONDS each, default 60)"
+description = "Command line: fuzz the config, error, token and loopback request readers (nightly; FUZZ_SECONDS each, default 60)"
 dir = "cli"
 run = """
 rustup toolchain list | grep -q '^nightly' || rustup toolchain install nightly --profile minimal --no-self-update
 # The prebuilt cargo-fuzz defaults to the target it was built for (musl); use the host's.
 host=$(rustc +nightly -vV | sed -n 's/^host: //p')
-for target in config problem claims; do
+for target in config problem claims loopback; do
   cargo +nightly fuzz run --target "$host" "$target" -- -max_total_time="${FUZZ_SECONDS:-60}"
 done
 """

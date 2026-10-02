@@ -12,12 +12,17 @@ publish.workspace = true
 [dependencies]
 base64.workspace = true
 etcetera.workspace = true
+getrandom.workspace = true
 keyring-core.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
+tokio.workspace = true
 toml.workspace = true
+url.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -30,7 +35,10 @@ windows-native-keyring-store.workspace = true
 zbus-secret-service-keyring-store.workspace = true
 
 [dev-dependencies]
+reqwest = { workspace = true, features = ["cookies"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

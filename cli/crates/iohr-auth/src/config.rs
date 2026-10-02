@@ -37,6 +37,12 @@ pub struct Profile {
     /// Where the profile's secret is kept.
     #[serde(default)]
     pub storage: Storage,
+    /// For a person: the sign-in service the session refreshes with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    /// For a person: the OAuth client the session belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
 }
 
 impl Profile {
@@ -47,6 +53,25 @@ impl Profile {
             kind,
             account: account.into(),
             storage,
+            issuer: None,
+            client_id: None,
+        }
+    }
+
+    /// A signed-in person's profile, which refreshes with `issuer` as `client_id`.
+    #[must_use]
+    pub fn person(
+        account: impl Into<String>,
+        storage: Storage,
+        issuer: impl Into<String>,
+        client_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: Kind::Person,
+            account: account.into(),
+            storage,
+            issuer: Some(issuer.into()),
+            client_id: Some(client_id.into()),
         }
     }
 }

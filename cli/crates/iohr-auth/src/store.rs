@@ -46,6 +46,12 @@ impl EntryKey {
         })
     }
 
+    /// The profile this entry belongs to.
+    #[must_use]
+    pub fn profile(&self) -> &ProfileName {
+        &self.profile
+    }
+
     fn user(&self) -> String {
         format!("{}@{}", self.profile, self.account)
     }

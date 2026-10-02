@@ -255,6 +255,9 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends gnome-keyring dbus
       - if: runner.os == 'Linux'
         run: mise run cli:keyring
+      # Browser and device sign-in against the identity provider the platform runs.
+      - if: runner.os == 'Linux' && matrix.rust != '1.94'
+        run: mise run cli:hydra
 
   examples:
     name: examples
