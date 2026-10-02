@@ -244,7 +244,9 @@ jobs:
     if: needs.release-please.outputs.iohr == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/cli-build.yml
+    # A job-level call resolves from the triggering commit, not the runner's filesystem.
+    # zizmor prefers `$/` (GitHub, July 2026); actionlint 1.7.12 does not parse it yet.
+    uses: ./.github/workflows/cli-build.yml # zizmor: ignore[self-repository]
     with:
       ref: ${{ needs.release-please.outputs.iohr_tag }}
 

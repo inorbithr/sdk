@@ -16,3 +16,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0007](0007-security-baseline.md) | Security baseline before 1.0 | accepted |
 | [0008](0008-key-scopes-and-iohr-identifiers.md) | Per-key scopes and the iohr identifiers | accepted |
 | [0009](0009-the-command-line.md) | The command line lives here, in its own workspace | accepted |
+| [0010](0010-releasing-the-command-line.md) | Releasing the command line: our own workflow, six targets, WiX 5 | accepted |
