@@ -13,7 +13,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/cli-build.yml"
-      - "tools/cli-dist.sh"
+      - "cli/release/**"
       - "cli/packaging/**"
       - "cli/Cargo.toml"
       - "cli/Cargo.lock"

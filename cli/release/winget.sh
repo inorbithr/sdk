@@ -4,7 +4,7 @@
 # against winget's published JSON schemas. Submitting them to microsoft/winget-pkgs is a
 # separate, credentialed step.
 #
-#   tools/cli-winget.sh <version>
+#   cli/release/winget.sh <version>
 set -euo pipefail
 shopt -s inherit_errexit
 

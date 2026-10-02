@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build `iohr` for one target and package it as a release archive (ADR 0010).
 #
-#   tools/cli-dist.sh <target>        e.g. x86_64-unknown-linux-musl
+#   cli/release/dist.sh <target>        e.g. x86_64-unknown-linux-musl
 #
 # Writes to dist/cli/:
 #   iohr-<version>-<target>.tar.gz     Linux and macOS (.zip on Windows): the binary,
@@ -17,7 +17,7 @@
 # and later add a maintenance-fee EULA (ADR 0010).
 set -euo pipefail
 
-target="${1:?usage: tools/cli-dist.sh <rust target triple>}"
+target="${1:?usage: cli/release/dist.sh <rust target triple>}"
 root=$(git rev-parse --show-toplevel)
 out="$root/dist/cli"
 mkdir -p "$out"

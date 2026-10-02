@@ -3,7 +3,7 @@
 # request (platform RFC 0021, ADR 0010). Uses the GitHub API only, so nothing is pushed
 # with a stored credential: GH_TOKEN is a short-lived GitHub App token limited to the tap.
 #
-#   GH_TOKEN=... tools/cli-tap.sh <version> <SHA256SUMS>
+#   GH_TOKEN=... cli/release/tap.sh <version> <SHA256SUMS>
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -15,7 +15,7 @@ tap="inorbithr/homebrew-tap"
 branch="iohr-$version"
 path="Formula/iohr.rb"
 
-formula=$(bash "$root/tools/cli-formula.sh" "$version" "$sums")
+formula=$(bash "$root/cli/release/formula.sh" "$version" "$sums")
 base=$(gh api "repos/$tap/git/ref/heads/main" --jq .object.sha)
 if ! gh api "repos/$tap/git/ref/heads/$branch" >/dev/null 2>&1; then
   gh api -X POST "repos/$tap/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null

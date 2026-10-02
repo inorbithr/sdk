@@ -41,7 +41,7 @@ wiremock.workspace = true
 [lints]
 workspace = true
 
-# The Debian package (RFC 0021, ADR 0010), built by tools/cli-dist.sh from the static
+# The Debian package (RFC 0021, ADR 0010), built by cli/release/dist.sh from the static
 # musl binary with `cargo deb --no-build`. Paths are relative to this crate.
 [package.metadata.deb]
 name = "iohr"
