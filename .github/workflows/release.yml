@@ -347,3 +347,39 @@ jobs:
           # Signs the GitHub CLI in, so the installers also check the attestation.
           GH_TOKEN: ${{ github.token }}
         run: mise run cli:install-test
+
+  # Homebrew: a pull request with the new formula to inorbithr/homebrew-tap, whose CI
+  # installs and tests it. The token comes from the release GitHub App, limited to the
+  # tap and to this job's lifetime.
+  iohr-tap:
+    name: homebrew tap
+    needs: [release-please, iohr]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.iohr_tag }}
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install: false
+      - name: Download SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.iohr_tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir dist/cli
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: inorbithr
+          repositories: homebrew-tap
+          permission-contents: write
+          permission-pull-requests: write
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ needs.release-please.outputs.iohr_version }}
+        run: mise run cli:tap "$VERSION" dist/cli/SHA256SUMS
