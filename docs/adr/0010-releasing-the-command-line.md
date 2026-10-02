@@ -36,7 +36,9 @@ with release-please and attests what it publishes (ADR 0003, ADR 0005).
    Cyber Resilience Act's reporting duty applies to them too).
 6. **One approval**: the publish job runs in the `release-cli` environment (main only, a
    required reviewer). The channel jobs (APT, Homebrew, winget) follow it without a second
-   gate, and each does nothing until its credentials exist.
+   gate. The Homebrew job proposes the formula to `inorbithr/homebrew-tap` as a pull
+   request through the GitHub API, with a token minted from the release GitHub App for
+   that one repository and that job only: no long-lived token for the tap exists.
 7. **crates.io later**: `cargo install iohr` needs `iohr` and `iohr-auth` published, and
    trusted publishing needs each name claimed by hand first; the crates stay
    `publish = false` until then.

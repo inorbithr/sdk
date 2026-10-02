@@ -402,6 +402,11 @@ case "$(uname -s)" in
 esac
 """
 
+[tasks."cli:tap"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: propose a release's Homebrew formula to inorbithr/homebrew-tap (needs GH_TOKEN for the tap)"
+run = "bash tools/cli-tap.sh"
+
 [tasks."cli:sbom"]
 dir = "cli"
 shell = "bash -e -o pipefail -c"
