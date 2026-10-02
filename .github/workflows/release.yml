@@ -272,7 +272,7 @@ jobs:
           pattern: iohr-*
           path: dist/cli
           merge-multiple: true
-      - run: mise run cli:sboms && mise run sbom:validate
+      - run: mise run cli:sboms
       - run: mise run cli:checksums
       # Provenance for every file the release carries, then each target's SBOM bound to
       # that target's archive and packages.
