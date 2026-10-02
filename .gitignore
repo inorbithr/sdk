@@ -33,3 +33,5 @@ __pycache__/
 .vscode/*
 !.vscode/extensions.json
 .DS_Store
+# SBOMs cargo-cyclonedx writes beside each manifest; released ones live in dist/.
+cli/**/*.cdx.json
