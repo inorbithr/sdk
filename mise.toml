@@ -353,13 +353,16 @@ run = "bash tools/cli-dist.sh"
 
 [tasks."cli:sboms"]
 shell = "bash -e -o pipefail -c"
-description = "Command line: one CycloneDX SBOM per release target, beside the archives in dist/cli/"
+description = "Command line: one CycloneDX SBOM per release target, beside the archives in dist/cli/, each validated"
 dir = "cli"
 run = """
 version=$(cargo pkgid -p iohr | sed 's/.*[#@]//')
 for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
-  cargo cyclonedx --format json --target "$target" --override-filename "iohr-$version-$target.cdx" -p iohr
+  cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --target "$target" --override-filename "iohr-$version-$target.cdx"
   mv "crates/iohr/iohr-$version-$target.cdx.json" ../dist/cli/
+  # cargo-cyclonedx writes one for every workspace member; only the binary's is released.
+  rm -f crates/iohr-auth/*.cdx.json
+  cyclonedx validate --input-file "../dist/cli/iohr-$version-$target.cdx.json" --input-format json --fail-on-errors
 done
 """
 
@@ -435,7 +438,7 @@ run = "bash tools/cli-winget.sh"
 [tasks."cli:sbom"]
 dir = "cli"
 shell = "bash -e -o pipefail -c"
-run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --override-filename cli.cdx -p iohr && mv crates/iohr/cli.cdx.json ../dist/sbom/"
+run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --override-filename cli.cdx && mv crates/iohr/cli.cdx.json ../dist/sbom/ && rm -f crates/iohr-auth/*.cdx.json"
 
 # ---------------------------------------------------------------- TypeScript
 
