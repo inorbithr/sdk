@@ -35,6 +35,7 @@ osv-scanner = "2.6.0"
 cyclonedx = "0.33.1"
 biome = "2.5.15"
 typos = "1.50.3"
+shellcheck = "0.11.0"
 actionlint = "1.7.12"
 zizmor = "1.30.1"
 
@@ -367,6 +368,39 @@ shell = "bash -e -o pipefail -c"
 description = "Command line: SHA256SUMS over every file in dist/cli/"
 dir = "dist/cli"
 run = "rm -f SHA256SUMS && sha256sum -- * >SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS && cat SHA256SUMS"
+
+[tasks."cli:installers"]
+shell = "bash -e -o pipefail -c"
+description = "Command line installers: shellcheck install.sh; parse install.ps1 when PowerShell is here"
+dir = "cli/install"
+run = """
+shellcheck --shell=sh install.sh
+if command -v pwsh >/dev/null; then
+  pwsh -NoProfile -Command '$e = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path install.ps1), [ref]$null, [ref]$e) | Out-Null; if ($e) { $e; exit 1 }'
+else
+  echo "cli:installers: no pwsh here, install.ps1 not parsed (CI's Linux runner has it)"
+fi
+"""
+
+[tasks."cli:install-test"]
+shell = "bash -e -o pipefail -c"
+description = "Command line installers against a published release (IOHR_VERSION, default the newest): install.sh in Debian on Linux, natively on macOS; install.ps1 on Windows"
+run = """
+case "$(uname -s)" in
+  Linux)
+    docker run --rm -e IOHR_VERSION -v "$PWD/cli/install:/install:ro" debian:stable-slim sh -euc '
+      apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates >/dev/null
+      sh /install/install.sh
+      "$HOME/.local/bin/iohr" --version'
+    ;;
+  Darwin)
+    IOHR_INSTALL_DIR=$(mktemp -d) sh cli/install/install.sh
+    ;;
+  MINGW* | MSYS*)
+    IOHR_INSTALL_DIR=$(mktemp -d) powershell -NoProfile -ExecutionPolicy Bypass -File cli/install/install.ps1
+    ;;
+esac
+"""
 
 [tasks."cli:sbom"]
 dir = "cli"
