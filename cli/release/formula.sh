@@ -37,7 +37,6 @@ cat <<RUBY
 class Iohr < Formula
   desc "InOrbit command-line tool: sign in, keep several accounts, call the API"
   homepage "https://docs.inorbit.hr"
-  version "$version"
   license "Apache-2.0"
 
   on_macos do
