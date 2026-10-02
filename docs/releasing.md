@@ -39,6 +39,16 @@ The repository went public on 2026-10-01. These items waited for that.
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
 | Command line | `iohr/vX.Y.Z` | builds six targets (`cli-build.yml`), attests every file, attaches archives, `.deb`, `.msi`, SBOMs and `SHA256SUMS` to the release; then runs the installers against it and opens the formula PR on `inorbithr/homebrew-tap` (release App token limited to the tap) ([ADR 0010](adr/0010-releasing-the-command-line.md)) | `release-cli` |
 
+## The command line's channels
+
+| Channel | How a release reaches it | Credential |
+|---|---|---|
+| GitHub release | `iohr` job: archives, `.deb`, `.msi`, SBOMs, `SHA256SUMS`, attestations | `GITHUB_TOKEN`, environment `release-cli` |
+| APT (`https://packages.inorbit.hr/apt`) | `iohr-apt`: reprepro, signed by the repository subkey, uploaded to R2, then installed in Debian | `APT_SIGNING_*`, `R2_*` (repository secrets) |
+| Installers (`https://packages.inorbit.hr/install.sh`, `.ps1`) | uploaded by `iohr-apt`; `iohr-install` runs them against the release | as above |
+| Homebrew (`inorbithr/homebrew-tap`) | `iohr-tap`: a formula PR the tap's CI installs and tests; a maintainer merges it | release GitHub App, token limited to the tap |
+| winget | `iohr-winget`: manifests generated and schema-checked, kept as an artifact; submitted to `microsoft/winget-pkgs` by hand from the first stable release | a maintainer's GitHub account with a fork of winget-pkgs |
+
 ## One-time setup (before the first release)
 
 - [x] Create the npm organisation `inorbithr`; publish `@inorbithr/sdk@0.0.0` by hand to
