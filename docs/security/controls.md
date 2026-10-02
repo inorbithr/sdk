@@ -3,7 +3,7 @@
 What this repository does against common secure-development frameworks, with an honest
 status. Status words: **met** (in place and enforced), **partial** (in place with a known
 gap), **planned** (decided, not yet in place). Updated in the same pull request as any
-change to a control. Last update: 2026-10-01.
+change to a control. Last update: 2026-10-02.
 
 This page covers the SDK repository. InOrbit's company-wide programme (policies, the
 hosted API, audits) is maintained separately and is not public.
@@ -12,7 +12,7 @@ hosted API, audits) is maintained separately and is not public.
 
 | Practice | What we do | Status |
 |---|---|---|
-| PO.1 Security requirements | [requirements.md](requirements.md), SR-01 to SR-23 | met |
+| PO.1 Security requirements | [requirements.md](requirements.md), SR-01 to SR-24 | met |
 | PO.2 Roles and responsibilities | [GOVERNANCE.md](../../GOVERNANCE.md) | partial: one maintainer |
 | PO.3 Toolchain | mise-pinned toolchains, CodeQL, zizmor, actionlint, dependency review, Scorecard | met |
 | PO.4 Security check criteria | SR-21 vulnerability gate; `ci-ok` required | partial: scanners land with code |

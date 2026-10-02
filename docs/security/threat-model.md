@@ -4,7 +4,7 @@ What could go wrong with the SDKs, who could make it go wrong, and what stops th
 Method: STRIDE (spoofing, tampering, repudiation, information disclosure, denial of
 service, elevation of privilege) over each part of the system. Reviewed on every change
 that adds a transport, an option, a dependency or a release step, and at least once a
-year. Last review: 2026-10-01, before any SDK code exists.
+year. Last review: 2026-10-02, before any SDK code exists; the command line added (ADR 0009).
 
 ## What we protect
 
@@ -57,6 +57,17 @@ build, (4) CI to registry, (5) contributor to `main`.
 | S | Attacker sets `INORBIT_BASE_URL` or `INORBIT_TOKEN_URL` to their host and harvests the key | SR-07 HTTPS only; residual risk: control of the environment is control of the process (see below) |
 | I | Key committed to source control by a user | Out of SDK scope; docs show environment variables; GitHub secret scanning recognises the key format once registered (planned) |
 | E | Overly broad key used where a narrow one would do | Keys carry scopes on the API side; docs recommend one key per workload |
+
+### The command line on a developer machine
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| I | Token read from shell history or the process list | SR-24: a token is never an argument; `login --with-token` reads stdin |
+| I | Token read from a dotfile, a backup or a synced folder | SR-24: OS credential store only; the config file holds no secret; the file store is opt-in, mode 0600 |
+| I | Another account's token used by mistake | SR-24: one store entry per profile and account |
+| I | Token printed by `--verbose` or an error | SR-10, SR-13; a test runs every command with `--verbose` and finds no token |
+| S | `IOHR_BASE_URL` pointed at an attacker's host | SR-07 HTTPS only (loopback excepted); residual: control of the environment is control of the process |
+| E | A malicious local process reads the credential store | Out of scope: the OS store's own access control applies; tokens expire and are revoked from the console |
 
 ### Network path
 

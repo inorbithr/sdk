@@ -33,6 +33,7 @@ jobs:
             rust
             ts
             py
+            cli
             spec
             conformance
             examples
