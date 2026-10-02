@@ -12,10 +12,17 @@ hand.** `mise run spec:sync` refreshes them; CI checks them; a mistake is fixed 
 
 ## How a sync works
 
-1. Fetch `https://api.inorbit.hr/openapi.json` (no credentials needed).
+1. Fetch `https://api.inorbit.hr/openapi.json` (no credentials needed). `uv run --script
+   tools/spec-sync.py FILE_OR_URL` syncs from another document, such as a local build.
 2. Keep only operations marked `x-iohr-public: true`, plus the schemas they reach.
 3. Apply the normalisation rules below.
 4. Write the files and `SOURCE`; `mise run gen` regenerates the models; the PR shows both.
+
+The output is deterministic: the same document gives the same files, and `SOURCE` keeps
+its `synced` date while the document's `sha256` is unchanged. `--check` writes nothing
+and exits 1 when `spec/` would change. `SOURCE` records the URL, the document's
+`sha256`, the API version and the number of operations; the platform commit is added
+once the document carries it (an upstream ask below).
 
 ## Normalisation rules
 
@@ -24,21 +31,20 @@ request; when the platform fixes the cause, the rule is deleted.
 
 | # | Quirk in the platform document | Rule here | Upstream ask |
 |---|---|---|---|
-| N1 | Schema names are proto full names (`tbd.accounts.v1.GetMeResponse`); dots break several generators | Rename to the last segment (`GetMeResponse`), refusing collisions | Emit short, unique names |
-| N2 | Transcoded schemas declare no `required` fields although the server always sends every field | Mark every property `required` (the server emits defaults) | Emit `required` |
-| N3 | `oneOf` unions (`Detail`, `EventBody`) have no `discriminator` though each variant has a `type` or `kind` enum | Add `discriminator.propertyName` | Emit the discriminator |
+| N1 | Schema names are proto full names (`iohr.accounts.v1.GetMeResponse`); dots break several generators | Rename to the last segment (`GetMeResponse`). When two names clash, a schema without a package keeps the short name and the proto one takes its package as a prefix (`iohr.accounts.v1.Key` becomes `AccountsKey`, beside the gateway's own `Key`); any clash left fails the sync | Emit short, unique names |
+| N2 | Transcoded schemas declare no `required` fields although the server always sends every field | Mark every property of a transcoded (proto) schema `required`; the gateway's own schemas (`Me`, `Key`, `Problem`) keep theirs | Emit `required` |
+| N3 | `oneOf` unions (`Detail`) have no `discriminator` though each variant fixes a required `type` or `kind` | Add `discriminator.propertyName`; a union with `null` (an optional field) is left alone | Emit the discriminator |
 | N4 | `servers` is `/` | Set `https://api.inorbit.hr` | Use the production server URL in the served document |
 | N5 | Unset timestamps are `""`, not absent or `null` | Keep `type: string`; the SDKs map `""` to "no value" | Document it, or emit `null` |
-| N6 | The code-to-status table lives only in prose (docs.inorbit.hr/docs/errors) | Add it to `problem.json` as `x-http-status` | Put the table in the document |
+| N6 | The code-to-status table lives only in code and prose (docs.inorbit.hr/docs/errors) | Add it to `problem.json` as `x-http-status`, from the table in `tools/spec-sync.py`; a code the table lacks, or a code the document dropped, fails the sync | Put the table in the document |
 
 ## Other upstream asks (not normalised)
 
-- `/openapi.json` on the API host serves all operations (179 on 2026-10-01), not only
-  the 3 a key may call. Serve the public slice there, or confirm the full surface is
-  meant to be public.
 - The document's `info.license` is "Proprietary" and its title is the internal name. The
   public slice should carry a public title and a licence that matches publishing it.
 - Gateway errors (401, 403, 429 from the edge) are plain text, not the envelope. Return
   the envelope from the edge too, with `Retry-After` on 429.
 - No `x-request-id` or trace id comes back on responses; return one so users can quote
   it in a support request.
+- The document carries no platform commit or build id; `SOURCE` can only record a hash.
+  Add one (an `info.x-iohr-commit`) so a synced spec names the code it came from.
