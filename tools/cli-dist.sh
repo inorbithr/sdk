@@ -7,7 +7,7 @@
 #   iohr-<version>-<target>.tar.gz     Linux and macOS (.zip on Windows): the binary,
 #                                      LICENSE, NOTICE, README.md, completions/
 #   iohr_<version>_<arch>.deb          Linux targets only (cargo-deb)
-#   iohr-<version>-<target>.msi        Windows targets only (WiX 5, cli/dist/iohr.wxs)
+#   iohr-<version>-<target>.msi        Windows targets only (WiX 5, cli/packaging/iohr.wxs)
 #
 # Linux targets link statically against musl and build in a pinned Alpine image, so one
 # binary runs on every distribution; the runner's architecture must match the target's.
@@ -79,7 +79,7 @@ case "$target" in
     case "$target" in x86_64-*) arch=x64 ;; aarch64-*) arch=arm64 ;; esac
     (cd "$stage" && "$wix/wix" build -arch "$arch" \
       -d "IOHR_VERSION=${version%%-*}" -d "IOHR_STAGE=$name" \
-      -o "$name.msi" "$root/cli/dist/iohr.wxs")
+      -o "$name.msi" "$root/cli/packaging/iohr.wxs")
     mv "$stage/$name.msi" "$out/"
     ;;
   *-apple-*)

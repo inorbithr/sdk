@@ -14,7 +14,7 @@ on:
     paths:
       - ".github/workflows/cli-build.yml"
       - "tools/cli-dist.sh"
-      - "cli/dist/**"
+      - "cli/packaging/**"
       - "cli/Cargo.toml"
       - "cli/Cargo.lock"
       - "cli/crates/iohr/Cargo.toml"
