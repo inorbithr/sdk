@@ -42,6 +42,9 @@ jobs:
       ts_tag: ${{ steps.rp.outputs['typescript--tag_name'] }}
       py: ${{ steps.rp.outputs['python--release_created'] }}
       py_tag: ${{ steps.rp.outputs['python--tag_name'] }}
+      iohr: ${{ steps.rp.outputs['cli--release_created'] }}
+      iohr_tag: ${{ steps.rp.outputs['cli--tag_name'] }}
+      iohr_version: ${{ steps.rp.outputs['cli--version'] }}
     steps:
       # A GitHub App token, so the release PR triggers CI (the default token cannot).
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -231,3 +234,90 @@ jobs:
           path: |
             dist/inorbithr-*
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  # The command line (ADR 0010): build every target, then attest and attach in one job
+  # that waits for a maintainer in the release-cli environment. Channels (APT, Homebrew,
+  # winget) follow from the release once it is published.
+  iohr-build:
+    name: build iohr
+    needs: release-please
+    if: needs.release-please.outputs.iohr == 'true'
+    permissions:
+      contents: read
+    # A job-level call resolves from the triggering commit, not the runner's filesystem.
+    # zizmor prefers `$/` (GitHub, July 2026); actionlint 1.7.12 does not parse it yet.
+    uses: ./.github/workflows/cli-build.yml # zizmor: ignore[self-repository]
+    with:
+      ref: ${{ needs.release-please.outputs.iohr_tag }}
+
+  iohr:
+    name: publish iohr
+    needs: [release-please, iohr-build]
+    runs-on: ubuntu-latest
+    environment: release-cli
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.iohr_tag }}
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "rust cargo-binstall cargo:cargo-cyclonedx cyclonedx"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: iohr-*
+          path: dist/cli
+          merge-multiple: true
+      - run: mise run cli:sboms && mise run sbom:validate
+      - run: mise run cli:checksums
+      # Provenance for every file the release carries, then each target's SBOM bound to
+      # that target's archive and packages.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/cli/*.tar.gz
+            dist/cli/*.zip
+            dist/cli/*.deb
+            dist/cli/*.msi
+            dist/cli/SHA256SUMS
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: |
+            dist/cli/iohr-*-x86_64-unknown-linux-musl.tar.gz
+            dist/cli/iohr_*_amd64.deb
+          sbom-path: dist/cli/iohr-${{ needs.release-please.outputs.iohr_version }}-x86_64-unknown-linux-musl.cdx.json
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: |
+            dist/cli/iohr-*-aarch64-unknown-linux-musl.tar.gz
+            dist/cli/iohr_*_arm64.deb
+          sbom-path: dist/cli/iohr-${{ needs.release-please.outputs.iohr_version }}-aarch64-unknown-linux-musl.cdx.json
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: dist/cli/iohr-*-x86_64-apple-darwin.tar.gz
+          sbom-path: dist/cli/iohr-${{ needs.release-please.outputs.iohr_version }}-x86_64-apple-darwin.cdx.json
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: dist/cli/iohr-*-aarch64-apple-darwin.tar.gz
+          sbom-path: dist/cli/iohr-${{ needs.release-please.outputs.iohr_version }}-aarch64-apple-darwin.cdx.json
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: |
+            dist/cli/iohr-*-x86_64-pc-windows-msvc.zip
+            dist/cli/iohr-*-x86_64-pc-windows-msvc.msi
+          sbom-path: dist/cli/iohr-${{ needs.release-please.outputs.iohr_version }}-x86_64-pc-windows-msvc.cdx.json
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: |
+            dist/cli/iohr-*-aarch64-pc-windows-msvc.zip
+            dist/cli/iohr-*-aarch64-pc-windows-msvc.msi
+          sbom-path: dist/cli/iohr-${{ needs.release-please.outputs.iohr_version }}-aarch64-pc-windows-msvc.cdx.json
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.iohr_tag }}
+        run: gh release upload "$TAG" dist/cli/* --repo "$GITHUB_REPOSITORY" --clobber

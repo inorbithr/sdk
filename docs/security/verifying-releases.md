@@ -58,6 +58,21 @@ gh attestation verify go-source.tar.gz --repo inorbithr/sdk
 JSR records provenance for packages published from GitHub Actions and shows it on the
 package page with a link to the transparency log entry.
 
+## Command line: `iohr`
+
+Every file on an `iohr/vX.Y.Z` release (archives, `.deb`, `.msi`, `SHA256SUMS`) has a
+build provenance attestation, and each target's CycloneDX SBOM is attested against that
+target's files:
+
+```sh
+gh release download iohr/vX.Y.Z --repo inorbithr/sdk --pattern 'iohr-*-x86_64-unknown-linux-musl.tar.gz' --pattern SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify iohr-X.Y.Z-x86_64-unknown-linux-musl.tar.gz --repo inorbithr/sdk
+```
+
+The installers run the checksum check themselves and the attestation check when `gh` is
+installed. Releases before 1.0 are marked pre-release.
+
 ## SBOMs
 
 Each GitHub release carries a CycloneDX SBOM per package (**planned**), attested so you

@@ -37,6 +37,7 @@ The repository went public on 2026-10-01. These items waited for that.
 | Rust | `rust/vX.Y.Z` | `cargo publish` via `crates-io-auth-action` | `release-crates` |
 | TypeScript | `typescript/vX.Y.Z` | `npm stage publish` (provenance automatic), then a maintainer approves it; `jsr publish` | `release-npm` |
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
+| Command line | `iohr/vX.Y.Z` | builds six targets (`cli-build.yml`), attests every file, attaches archives, `.deb`, `.msi`, SBOMs and `SHA256SUMS` to the release ([ADR 0010](adr/0010-releasing-the-command-line.md)) | `release-cli` |
 
 ## One-time setup (before the first release)
 

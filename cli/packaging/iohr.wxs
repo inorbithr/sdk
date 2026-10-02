@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows installer for iohr (RFC 0021, ADR 0010), x64 and arm64. Built by
+  tools/cli-dist.sh on the Windows runners with WiX 5 (`wix build -arch <arch>`).
+
+  Per machine, into Program Files\InOrbit\iohr, and on the system PATH. The
+  UpgradeCode never changes: it is how a newer installer finds and replaces an older
+  one. IOHR_VERSION is the numeric part of the version (MSI compares three fields), so
+  same-version upgrades are allowed: a later 0.1.0 pre-release replaces an earlier one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="iohr"
+           Manufacturer="InOrbit d.o.o."
+           Version="$(var.IOHR_VERSION)"
+           UpgradeCode="bb9f3fd7-887c-4e6d-ac1d-3c06877e03c3"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="iohr, the InOrbit command line" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of iohr is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="InOrbitFolder" Name="InOrbit">
+        <Directory Id="INSTALLFOLDER" Name="iohr" />
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="Files" Directory="INSTALLFOLDER">
+      <!-- A fixed GUID: iohr.exe carries no version resource, so WiX cannot derive one.
+           It never changes while the component installs the same files to the same place. -->
+      <Component Guid="5a3e0d2b-6f0c-4b8e-9c1d-2f7a8e4b6c10">
+        <File Source="$(var.IOHR_STAGE)\iohr.exe" KeyPath="yes" />
+        <File Source="$(var.IOHR_STAGE)\LICENSE" Name="LICENSE.txt" />
+        <File Source="$(var.IOHR_STAGE)\NOTICE" Name="NOTICE.txt" />
+        <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last"
+                     System="yes" Permanent="no" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="iohr">
+      <ComponentGroupRef Id="Files" />
+    </Feature>
+  </Package>
+</Wix>
