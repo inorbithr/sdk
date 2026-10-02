@@ -427,6 +427,11 @@ docker run --rm -e IOHR_VERSION debian:stable-slim sh -euc '
   if [ -n "${IOHR_VERSION:-}" ]; then iohr --version | grep -qx "iohr $IOHR_VERSION"; fi'
 """
 
+[tasks."cli:winget"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: winget manifests for a release from dist/cli/ (the .msi files, SHA256SUMS) into dist/winget/, checked against winget's schemas"
+run = "bash tools/cli-winget.sh"
+
 [tasks."cli:sbom"]
 dir = "cli"
 shell = "bash -e -o pipefail -c"

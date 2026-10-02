@@ -417,3 +417,36 @@ jobs:
       - env:
           IOHR_VERSION: ${{ needs.release-please.outputs.iohr_version }}
         run: mise run cli:apt-test
+
+  # winget: manifests for microsoft/winget-pkgs, generated and schema-checked on every
+  # release and kept as the run's artifact. Submitting them needs a GitHub account with a
+  # fork of winget-pkgs and waits for the first stable release (winget-pkgs lists
+  # pre-releases under a separate identifier); see docs/releasing.md.
+  iohr-winget:
+    name: winget manifests
+    needs: [release-please, iohr]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.iohr_tag }}
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "uv"
+      - name: Download the installers and SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.iohr_tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.msi' --pattern SHA256SUMS --dir dist/cli
+      - run: sudo apt-get install -y --no-install-recommends msitools
+      - env:
+          VERSION: ${{ needs.release-please.outputs.iohr_version }}
+        run: mise run cli:winget "$VERSION"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: winget-manifests
+          path: dist/winget/
+          if-no-files-found: error
