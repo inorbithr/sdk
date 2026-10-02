@@ -321,3 +321,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.iohr_tag }}
         run: gh release upload "$TAG" dist/cli/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  # The installers, run against the release just published, on each operating system.
+  iohr-install:
+    name: install iohr (${{ matrix.os }})
+    needs: [release-please, iohr]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.iohr_tag }}
+      # Only mise itself: the installers need nothing but the runner's shell.
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install: false
+      - env:
+          IOHR_VERSION: ${{ needs.release-please.outputs.iohr_version }}
+          # Signs the GitHub CLI in, so the installers also check the attestation.
+          GH_TOKEN: ${{ github.token }}
+        run: mise run cli:install-test

@@ -1,7 +1,21 @@
 # iohr, the InOrbit command line
 
-Not released yet: no package, installer or binary is published. Build it from this
-repository to try it. Packages for APT, Homebrew and winget come with platform RFC 0021.
+Pre-release (0.x): commands and output can still change between versions.
+
+```sh
+brew install inorbithr/tap/iohr                                   # macOS, Linux
+curl -fsSL https://packages.inorbit.hr/install.sh | sh            # Linux, macOS, no sudo
+powershell -c "irm https://packages.inorbit.hr/install.ps1 | iex" # Windows
+```
+
+Debian and Ubuntu (a signed APT repository), winget and every other way are on
+[docs.inorbit.hr/docs/command-line](https://docs.inorbit.hr/docs/command-line/). The
+installers ([install.sh](install/install.sh), [install.ps1](install/install.ps1)) are short
+enough to read first: each downloads the archive for your machine from the GitHub release,
+refuses it unless its SHA-256 matches the release's `SHA256SUMS` (and, with the GitHub CLI
+signed in, unless its build attestation checks), and copies one binary into your user
+directory. Every release also has archives, `.deb` and `.msi` files with provenance and
+SBOMs ([verifying releases](../docs/security/verifying-releases.md)). From source:
 
 ```sh
 cargo install --locked --path cli/crates/iohr
