@@ -11,6 +11,7 @@ CLAUDE.local.md
 
 # Go
 go/coverage.out
+conformance/server/bin/
 
 # Rust
 target/
