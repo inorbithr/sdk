@@ -33,6 +33,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       ts: ${{ steps.filter.outputs.ts }}
       py: ${{ steps.filter.outputs.py }}
+      cli: ${{ steps.filter.outputs.cli }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,6 +63,10 @@ jobs:
               - *shared
               - 'python/**'
               - 'examples/python/**'
+            cli:
+              - 'cli/**'
+              - 'mise.toml'
+              - '.github/workflows/ci.yml'
 
   repo:
     name: repo
@@ -211,6 +216,44 @@ jobs:
       - run: mise run py:api
         if: github.event_name == 'pull_request'
 
+  cli:
+    name: cli ${{ matrix.rust }} (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        rust: ["1.94", "1.98.1"]
+        # Windows and macOS cost 2x and 10x minutes on a private repository: they run on
+        # main, the merge queue and release PRs, not on every pull request.
+        include: ${{ fromJSON((github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')) && '[]' || '[{"os":"windows-latest","rust":"1.98.1"},{"os":"macos-latest","rust":"1.98.1"}]') }}
+    env:
+      MISE_RUST_VERSION: ${{ matrix.rust }}
+      # macOS and Windows runners have a credential store: its test must run, not skip
+      # (SR-24). Linux gets one in the cli:keyring step.
+      IOHR_TEST_REQUIRE_STORE: ${{ matrix.os != 'ubuntu-latest' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "rust cargo-binstall cargo:cargo-nextest cargo-deny"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: cli
+      - run: mise run cli:check
+      - run: mise run cli:audit
+      # A Secret Service for the Linux credential-store test; packages from the runner image's archive.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends gnome-keyring dbus
+      - if: runner.os == 'Linux'
+        run: mise run cli:keyring
+
   examples:
     name: examples
     needs: changes
@@ -234,7 +277,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [repo, go, rust, ts, py, examples]
+    needs: [repo, go, rust, ts, py, cli, examples]
     runs-on: ubuntu-latest
     permissions: {}
     steps:

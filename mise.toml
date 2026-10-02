@@ -25,6 +25,7 @@ cargo-binstall = "1.24.0"
 "cargo:cargo-nextest" = "0.9.146"
 "cargo:cargo-semver-checks" = "0.50.0"
 "cargo:cargo-hack" = "0.6.45"
+"cargo:cargo-fuzz" = "0.13.2"
 cargo-deny = "0.20.2"
 "cargo:cargo-cyclonedx" = "0.5.9"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"
@@ -45,15 +46,15 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "cli:check", "conformance", "examples:check"]
 
 [tasks.check]
-description = "Format check, lint, types and unit tests for every language"
-depends = ["go:check", "rust:check", "ts:check", "py:check"]
+description = "Format check, lint, types and unit tests for every language and the command line"
+depends = ["go:check", "rust:check", "ts:check", "py:check", "cli:check"]
 
 [tasks.fmt]
-description = "Format every language in place"
-depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt"]
+description = "Format every language and the command line in place"
+depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt", "cli:fmt"]
 
 [tasks.gen]
 description = "Regenerate every generated/ directory from spec/"
@@ -86,7 +87,7 @@ run = [
 
 [tasks.audit]
 description = "Known-vulnerability scans: OSV over every lockfile, plus each language's own scanner"
-depends = ["audit:osv", "go:audit", "rust:audit", "ts:audit", "py:audit"]
+depends = ["audit:osv", "go:audit", "rust:audit", "ts:audit", "py:audit", "cli:audit"]
 
 [tasks."audit:osv"]
 description = "OSV-Scanner over every lockfile in the repository"
@@ -99,7 +100,7 @@ osv-scanner scan source --recursive .
 
 [tasks.sbom]
 description = "CycloneDX SBOM for every package into dist/sbom/, then validate them"
-depends = ["go:sbom", "rust:sbom", "ts:sbom", "py:sbom"]
+depends = ["go:sbom", "rust:sbom", "ts:sbom", "py:sbom", "cli:sbom"]
 depends_post = ["sbom:validate"]
 
 [tasks."sbom:validate"]
@@ -264,6 +265,64 @@ run = """
 base=$(git describe --tags --abbrev=0 --match 'rust/v*' 2>/dev/null) || { echo "rust:api: no release yet"; exit 0; }
 cargo semver-checks --baseline-rev "$base"
 """
+
+# ---------------------------------------------------------------- command line (ADR 0009)
+
+[tasks."cli:check"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: fmt, clippy, nextest, doctests, cargo-deny"
+dir = "cli"
+run = """
+cargo fmt --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo nextest run --locked --all-features
+cargo test --locked --doc --all-features
+cargo deny check
+"""
+
+[tasks."cli:fmt"]
+shell = "bash -e -o pipefail -c"
+dir = "cli"
+run = "cargo fmt"
+
+[tasks."cli:audit"]
+shell = "bash -e -o pipefail -c"
+dir = "cli"
+run = "cargo deny check advisories"
+
+[tasks."cli:keyring"]
+shell = "bash -e -o pipefail -c"
+description = "Command line, Linux: the credential-store test against a real Secret Service in a private D-Bus session"
+dir = "cli"
+run = """
+command -v dbus-run-session >/dev/null && command -v gnome-keyring-daemon >/dev/null || {
+  echo "cli:keyring: needs dbus-run-session and gnome-keyring-daemon" >&2; exit 1; }
+# A throwaway keyring in a temporary directory, never the user's own.
+keyrings=$(mktemp -d)
+trap 'rm -rf "$keyrings"' EXIT
+dbus-run-session -- bash -e -o pipefail -c "
+  printf iohr-test | XDG_DATA_HOME='$keyrings' gnome-keyring-daemon --unlock --components=secrets >/dev/null
+  IOHR_TEST_REQUIRE_STORE=1 cargo nextest run --locked -p iohr-auth -E 'test(os_credential_store)'
+"
+"""
+
+[tasks."cli:fuzz"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: fuzz the config, error and token readers (nightly; FUZZ_SECONDS each, default 60)"
+dir = "cli"
+run = """
+rustup toolchain list | grep -q '^nightly' || rustup toolchain install nightly --profile minimal --no-self-update
+# The prebuilt cargo-fuzz defaults to the target it was built for (musl); use the host's.
+host=$(rustc +nightly -vV | sed -n 's/^host: //p')
+for target in config problem claims; do
+  cargo +nightly fuzz run --target "$host" "$target" -- -max_total_time="${FUZZ_SECONDS:-60}"
+done
+"""
+
+[tasks."cli:sbom"]
+dir = "cli"
+shell = "bash -e -o pipefail -c"
+run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --override-filename cli.cdx -p iohr && mv crates/iohr/cli.cdx.json ../dist/sbom/"
 
 # ---------------------------------------------------------------- TypeScript
 

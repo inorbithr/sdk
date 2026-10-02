@@ -4,7 +4,7 @@
 - Every workflow sets top-level `permissions`.
 - No workflow uses `pull_request_target` or `workflow_run`.
 - Agent instruction files stay under the size that keeps them effective (200 lines).
-- Each language directory has AGENTS.md, CLAUDE.md (importing it) and README.md.
+- Each language directory and cli/ has AGENTS.md, CLAUDE.md (importing it) and README.md.
 """
 
 import re
@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 USES = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)(\s*#\s*(\S+))?", re.MULTILINE)
 SHA = re.compile(r"@[0-9a-f]{40}$")
-LANGS = ("go", "rust", "typescript", "python")
+LANGS = ("go", "rust", "typescript", "python", "cli")
 MAX_LINES = 200
 
 
