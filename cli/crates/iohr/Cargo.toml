@@ -40,3 +40,25 @@ wiremock.workspace = true
 
 [lints]
 workspace = true
+
+# The Debian package (RFC 0021, ADR 0010), built by tools/cli-dist.sh from the static
+# musl binary with `cargo deb --no-build`. Paths are relative to this crate.
+[package.metadata.deb]
+name = "iohr"
+maintainer = "InOrbit d.o.o. <nevio@inorbit.hr>"
+copyright = "2026, InOrbit d.o.o."
+license-file = ["../../../LICENSE", "0"]
+extended-description = """\
+Sign in to InOrbit (in a browser or with a device code), keep several accounts as \
+profiles, manage API tokens and call the API. Credentials live in the system's \
+credential store, never in a file."""
+section = "utils"
+priority = "optional"
+assets = [
+  ["target/release/iohr", "usr/bin/", "755"],
+  ["../../target/completions/iohr.bash", "usr/share/bash-completion/completions/iohr", "644"],
+  ["../../target/completions/_iohr", "usr/share/zsh/vendor-completions/_iohr", "644"],
+  ["../../target/completions/iohr.fish", "usr/share/fish/vendor_completions.d/iohr.fish", "644"],
+  ["../../README.md", "usr/share/doc/iohr/README.md", "644"],
+  ["../../../NOTICE", "usr/share/doc/iohr/NOTICE", "644"],
+]

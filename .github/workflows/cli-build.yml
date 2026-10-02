@@ -1,0 +1,71 @@
+# Build iohr for every release target (ADR 0010, platform RFC 0021). The release workflow
+# calls this for a tag; a pull request that changes the build runs it too, so the whole
+# matrix is proven before a release depends on it. Nothing here publishes anything.
+name: cli-build
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The tag or commit to build
+        type: string
+        required: true
+  pull_request:
+    paths:
+      - ".github/workflows/cli-build.yml"
+      - "tools/cli-dist.sh"
+      - "cli/dist/**"
+      - "cli/Cargo.toml"
+      - "cli/Cargo.lock"
+      - "cli/crates/iohr/Cargo.toml"
+
+permissions: {}
+
+concurrency:
+  group: cli-build-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  MISE_YES: "1"
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
+          # The archives carry the commit's time (SOURCE_DATE_EPOCH from git log).
+          fetch-depth: 1
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: >-
+            rust ${{ runner.os == 'Linux' && 'cargo-binstall cargo:cargo-deb' || '' }}
+      - env:
+          TARGET: ${{ matrix.target }}
+        run: mise run cli:dist "$TARGET"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iohr-${{ matrix.target }}
+          path: dist/cli/*
+          if-no-files-found: error
+          retention-days: 7

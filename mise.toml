@@ -28,6 +28,7 @@ cargo-binstall = "1.24.0"
 "cargo:cargo-fuzz" = "0.13.2"
 cargo-deny = "0.20.2"
 "cargo:cargo-cyclonedx" = "0.5.9"
+"cargo:cargo-deb" = "3.8.0"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.8.0"
 "go:github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod" = "1.12.0"
 osv-scanner = "2.6.0"
@@ -343,6 +344,29 @@ for target in config problem claims loopback; do
   cargo +nightly fuzz run --target "$host" "$target" -- -max_total_time="${FUZZ_SECONDS:-60}"
 done
 """
+
+[tasks."cli:dist"]
+shell = "bash -e -o pipefail -c"
+description = "Command line release build for one target into dist/cli/: the archive, plus the .deb on Linux and the .msi on Windows (ADR 0010)"
+run = "bash tools/cli-dist.sh"
+
+[tasks."cli:sboms"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: one CycloneDX SBOM per release target, beside the archives in dist/cli/"
+dir = "cli"
+run = """
+version=$(cargo pkgid -p iohr | sed 's/.*[#@]//')
+for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+  cargo cyclonedx --format json --target "$target" --override-filename "iohr-$version-$target.cdx" -p iohr
+  mv "crates/iohr/iohr-$version-$target.cdx.json" ../dist/cli/
+done
+"""
+
+[tasks."cli:checksums"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: SHA256SUMS over every file in dist/cli/"
+dir = "dist/cli"
+run = "rm -f SHA256SUMS && sha256sum -- * >SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS && cat SHA256SUMS"
 
 [tasks."cli:sbom"]
 dir = "cli"
