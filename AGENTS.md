@@ -12,6 +12,7 @@ agent and for people. Language-specific rules live in each language directory's 
 | `spec/` | The contract, vendored from the platform: the public OpenAPI slice, the error envelope, the socket frames. Never hand-edited. |
 | `conformance/` | Language-neutral test cases (YAML) and the replay server every SDK is tested against. |
 | `go/`, `rust/`, `typescript/`, `python/` | One package each. `generated/` inside is codegen output; everything else is written by hand. |
+| `cli/` | The `iohr` command line: a Cargo workspace of its own (ADR 0009), with `cli/AGENTS.md`. |
 | `examples/<lang>/` | Small programs that compile in CI and are quoted by the READMEs. |
 | `docs/` | `design.md` (cross-language API rules), `adr/` (decisions), `releasing.md`, `style.md`. |
 | `tools/` | Repository scripts used by `mise` tasks and hooks. |
@@ -67,7 +68,7 @@ A task for a language whose package does not exist yet prints a skip line and ex
 
 ## Security and compliance
 
-- The security requirements in `docs/security/requirements.md` (SR-01 to SR-23) are as
+- The security requirements in `docs/security/requirements.md` (SR-01 to SR-24) are as
   binding as `docs/design.md`; code review rejects a change that breaks one.
 - Never put a key secret, token, health data (PHI), personal data or card number in a
   log line, error message, URL, test fixture or example output.
@@ -81,7 +82,8 @@ A task for a language whose package does not exist yet prints a skip line and ex
 
 - [Conventional Commits](https://www.conventionalcommits.org) with the language as scope:
   `feat(go): ...`, `fix(py): ...`, `docs: ...`, `ci: ...`, `spec: ...`. Scopes:
-  `go`, `rust`, `ts`, `py`, `spec`, `conformance`, `examples`, `ci`, `docs`, `repo`.
+  `go`, `rust`, `ts`, `py`, `cli`, `spec`, `conformance`, `examples`, `ci`, `docs`,
+  `repo`.
   Release notes and version bumps are generated from these.
 - One logical change per commit. A breaking change says `!` and has a `BREAKING CHANGE:`
   footer.

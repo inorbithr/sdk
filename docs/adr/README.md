@@ -15,3 +15,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0006](0006-names-and-runtimes.md) | Package names and minimum runtimes | proposed |
 | [0007](0007-security-baseline.md) | Security baseline before 1.0 | accepted |
 | [0008](0008-key-scopes-and-iohr-identifiers.md) | Per-key scopes and the iohr identifiers | accepted |
+| [0009](0009-the-command-line.md) | The command line lives here, in its own workspace | accepted |

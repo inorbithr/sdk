@@ -105,7 +105,8 @@ say so and keep secrets in as few copies as possible.
 - Refs: CRA I.2(e).
 
 **SR-12. Tokens live in memory only.** The token cache is in process memory. The SDK
-never writes a token or a secret to disk, environment variables or shared storage.
+never writes a token or a secret to disk, environment variables or shared storage. This
+binds the libraries; the command line keeps credentials under SR-24 (ADR 0009).
 - Verify: review.
 - Refs: CRA I.2(e).
 
@@ -135,6 +136,19 @@ makes to the API and the token endpoint: no usage pings, no crash reports, no up
 checks.
 - Verify: review; conformance runs with only the replay server reachable.
 - Refs: CRA I.2(g).
+
+**SR-24. Command-line credentials.** The `iohr` command line keeps secrets only in the
+operating system's credential store (macOS Keychain, Windows Credential Manager, the
+Secret Service on Linux), one entry per profile and account, so two accounts never
+share an entry. The config file never holds a secret. A plain file store exists only
+behind `--insecure-storage`, mode 0600 in a 0700 directory. A token from `IOHR_TOKEN`
+stays in memory. A token is never accepted as a command-line argument.
+- Why: a developer machine holds credentials for several accounts; shell history, the
+  process list and dotfile backups are where tokens leak.
+- Verify: unit tests for entry keys and file modes; a test that refuses a token in
+  `argv`; a test that runs every command with `--verbose` and finds no token in the
+  output; the credential store tested on each operating system in CI.
+- Refs: CRA I.2(e); clig.dev "Arguments and flags".
 
 ## Reliability and traceability
 
