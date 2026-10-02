@@ -35,7 +35,7 @@ cat <<RUBY
 # Written by inorbithr/sdk cli/release/formula.sh for iohr $version; regenerated on every
 # release, not edited by hand.
 class Iohr < Formula
-  desc "InOrbit command line: sign in, keep several accounts, call the API"
+  desc "InOrbit command-line tool: sign in, keep several accounts, call the API"
   homepage "https://docs.inorbit.hr"
   version "$version"
   license "Apache-2.0"
