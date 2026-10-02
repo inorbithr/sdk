@@ -1170,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -1191,7 +1191,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-auth"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.23.1",

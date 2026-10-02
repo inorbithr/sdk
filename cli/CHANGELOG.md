@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.2](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.1...iohr/v0.1.0-alpha.2) (2026-10-02)
+
+
+### Bug fixes
+
+* **cli:** the release scripts live in cli/release ([#27](https://github.com/inorbithr/sdk/issues/27)) ([eef71a8](https://github.com/inorbithr/sdk/commit/eef71a87b8f8bf395e50279339c9f9190507b244))
+
 ## 0.1.0-alpha.1 (2026-10-02)
 
 
