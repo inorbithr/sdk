@@ -27,7 +27,9 @@
     </StandardDirectory>
 
     <ComponentGroup Id="Files" Directory="INSTALLFOLDER">
-      <Component>
+      <!-- A fixed GUID: iohr.exe carries no version resource, so WiX cannot derive one.
+           It never changes while the component installs the same files to the same place. -->
+      <Component Guid="5a3e0d2b-6f0c-4b8e-9c1d-2f7a8e4b6c10">
         <File Source="$(var.IOHR_STAGE)\iohr.exe" KeyPath="yes" />
         <File Source="$(var.IOHR_STAGE)\LICENSE" Name="LICENSE.txt" />
         <File Source="$(var.IOHR_STAGE)\NOTICE" Name="NOTICE.txt" />
