@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The Homebrew formula for an iohr release (platform RFC 0021, ADR 0010).
 #
-#   tools/cli-formula.sh <version> <SHA256SUMS> > Formula/iohr.rb
+#   cli/release/formula.sh <version> <SHA256SUMS> > Formula/iohr.rb
 #
 # Prebuilt archives only, one per platform and architecture, each pinned by its SHA-256
 # from the release's SHA256SUMS: nothing is compiled and nothing runs at install time
@@ -32,7 +32,7 @@ linux_arm=$(block arm aarch64-unknown-linux-musl)
 linux_intel=$(block intel x86_64-unknown-linux-musl)
 
 cat <<RUBY
-# Written by inorbithr/sdk tools/cli-formula.sh for iohr $version; regenerated on every
+# Written by inorbithr/sdk cli/release/formula.sh for iohr $version; regenerated on every
 # release, not edited by hand.
 class Iohr < Formula
   desc "InOrbit command line: sign in, keep several accounts, call the API"

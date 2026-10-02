@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The Windows installer for iohr (RFC 0021, ADR 0010), x64 and arm64. Built by
-  tools/cli-dist.sh on the Windows runners with WiX 5 (`wix build -arch <arch>`).
+  cli/release/dist.sh on the Windows runners with WiX 5 (`wix build -arch <arch>`).
 
   Per machine, into Program Files\InOrbit\iohr, and on the system PATH. The
   UpgradeCode never changes: it is how a newer installer finds and replaces an older

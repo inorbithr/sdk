@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# reprepro's SignWith hook for the iohr APT repository (ADR 0010, tools/cli-apt.sh).
+# reprepro's SignWith hook for the iohr APT repository (ADR 0010, cli/release/apt.sh).
 # reprepro calls it with: $1 the unsigned Release, $2 the InRelease to write, $3 the
 # Release.gpg to write (either may be empty). The passphrase goes to gpg on stdin with
 # loopback pinentry; it is never an argument, a file or a log line.

@@ -349,7 +349,7 @@ done
 [tasks."cli:dist"]
 shell = "bash -e -o pipefail -c"
 description = "Command line release build for one target into dist/cli/: the archive, plus the .deb on Linux and the .msi on Windows (ADR 0010)"
-run = "bash tools/cli-dist.sh"
+run = "bash cli/release/dist.sh"
 
 [tasks."cli:sboms"]
 shell = "bash -e -o pipefail -c"
@@ -374,10 +374,11 @@ run = "rm -f SHA256SUMS && sha256sum -- * >SHA256SUMS.tmp && mv SHA256SUMS.tmp S
 
 [tasks."cli:installers"]
 shell = "bash -e -o pipefail -c"
-description = "Command line installers: shellcheck install.sh; parse install.ps1 when PowerShell is here"
+description = "Command line installers and release scripts: shellcheck them; parse install.ps1 when PowerShell is here"
 dir = "cli/install"
 run = """
 shellcheck --shell=sh install.sh
+shellcheck ../release/*.sh
 if command -v pwsh >/dev/null; then
   pwsh -NoProfile -Command '$e = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path install.ps1), [ref]$null, [ref]$e) | Out-Null; if ($e) { $e; exit 1 }'
 else
@@ -408,12 +409,12 @@ esac
 [tasks."cli:tap"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: propose a release's Homebrew formula to inorbithr/homebrew-tap (needs GH_TOKEN for the tap)"
-run = "bash tools/cli-tap.sh"
+run = "bash cli/release/tap.sh"
 
 [tasks."cli:apt"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: the signed APT repository from dist/cli/*.deb into dist/apt/ (APT_SIGNING_KEY, APT_SIGNING_KEY_ID, APT_SIGNING_PASSPHRASE); --publish uploads it to the packages bucket"
-run = "bash tools/cli-apt.sh"
+run = "bash cli/release/apt.sh"
 
 [tasks."cli:apt-test"]
 shell = "bash -e -o pipefail -c"
@@ -433,7 +434,7 @@ docker run --rm -e IOHR_VERSION debian:stable-slim sh -euc '
 [tasks."cli:winget"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: winget manifests for a release from dist/cli/ (the .msi files, SHA256SUMS) into dist/winget/, checked against winget's schemas"
-run = "bash tools/cli-winget.sh"
+run = "bash cli/release/winget.sh"
 
 [tasks."cli:sbom"]
 dir = "cli"

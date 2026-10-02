@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The iohr APT repository (platform RFC 0021, ADR 0010).
 #
-#   tools/cli-apt.sh             build dist/apt/ from the .debs in dist/cli/, signed
-#   tools/cli-apt.sh --publish   build, then upload it to the packages bucket with the
+#   cli/release/apt.sh             build dist/apt/ from the .debs in dist/cli/, signed
+#   cli/release/apt.sh --publish   build, then upload it to the packages bucket with the
 #                                public key (iohr.gpg) and the installers
 #
 # The repository is static: dists/stable/main for amd64 and arm64, built from scratch by
@@ -45,7 +45,7 @@ Codename: stable
 Architectures: amd64 arm64
 Components: main
 Description: InOrbit command line (iohr)
-SignWith: ! $root/tools/cli-apt-sign.sh
+SignWith: ! $root/cli/release/apt-sign.sh
 CONF
 
 shopt -s nullglob
