@@ -39,7 +39,13 @@ with release-please and attests what it publishes (ADR 0003, ADR 0005).
    gate. The Homebrew job proposes the formula to `inorbithr/homebrew-tap` as a pull
    request through the GitHub API, with a token minted from the release GitHub App for
    that one repository and that job only: no long-lived token for the tap exists.
-7. **crates.io later**: `cargo install iohr` needs `iohr` and `iohr-auth` published, and
+7. **APT** is a static repository built from scratch each release by reprepro (newest
+   version per architecture; older package files stay in the bucket's pool), signed by
+   the repository's signing subkey through a hook that gives gpg the passphrase on stdin
+   with loopback pinentry, checked against `cli/install/iohr.gpg`, then uploaded to
+   Cloudflare R2 (bucket `inorbit-packages`, `https://packages.inorbit.hr`) package files
+   first and `InRelease` last, with the public key and the installers beside it.
+8. **crates.io later**: `cargo install iohr` needs `iohr` and `iohr-auth` published, and
    trusted publishing needs each name claimed by hand first; the crates stay
    `publish = false` until then.
 

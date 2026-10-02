@@ -73,6 +73,19 @@ gh attestation verify iohr-X.Y.Z-x86_64-unknown-linux-musl.tar.gz --repo inorbit
 The installers run the checksum check themselves and the attestation check when `gh` is
 installed. Releases before 1.0 are marked pre-release.
 
+The APT repository at `https://packages.inorbit.hr/apt` is signed with a key used for
+nothing else ([`cli/install/iohr.gpg`](../../cli/install/iohr.gpg), also served at
+`https://packages.inorbit.hr/iohr.gpg`). Check what you fetched with
+`gpg --show-keys /etc/apt/keyrings/iohr.gpg`:
+
+| Key | Fingerprint |
+|---|---|
+| Primary, `InOrbit packages <packages@inorbit.hr>` (certifies only, kept offline) | `5FF6 7AF3 D50A 6B06 FFE6  EA8A FFA5 11CF 585B F28D` |
+| Signing subkey (signs the repository; expires 2028-10-01) | `1725 799F E6C8 0810 9671  0D42 E7B1 639B 4435 8981` |
+
+A new signing subkey is announced in the release notes a release before it takes over,
+with both in the keyring during the overlap.
+
 ## SBOMs
 
 Each GitHub release carries a CycloneDX SBOM per package (**planned**), attested so you

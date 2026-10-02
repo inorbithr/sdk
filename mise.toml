@@ -407,6 +407,26 @@ shell = "bash -e -o pipefail -c"
 description = "Command line: propose a release's Homebrew formula to inorbithr/homebrew-tap (needs GH_TOKEN for the tap)"
 run = "bash tools/cli-tap.sh"
 
+[tasks."cli:apt"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: the signed APT repository from dist/cli/*.deb into dist/apt/ (APT_SIGNING_KEY, APT_SIGNING_KEY_ID, APT_SIGNING_PASSPHRASE); --publish uploads it to the packages bucket"
+run = "bash tools/cli-apt.sh"
+
+[tasks."cli:apt-test"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: install iohr in a clean Debian from https://packages.inorbit.hr exactly as the docs say (IOHR_VERSION, when set, must be what installs)"
+run = """
+docker run --rm -e IOHR_VERSION debian:stable-slim sh -euc '
+  apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates >/dev/null
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://packages.inorbit.hr/iohr.gpg | tee /etc/apt/keyrings/iohr.gpg >/dev/null
+  printf "Types: deb\nURIs: https://packages.inorbit.hr/apt\nSuites: stable\nComponents: main\nSigned-By: /etc/apt/keyrings/iohr.gpg\n" >/etc/apt/sources.list.d/iohr.sources
+  apt-get update -qq
+  apt-get install -y -qq iohr >/dev/null
+  iohr --version
+  if [ -n "${IOHR_VERSION:-}" ]; then iohr --version | grep -qx "iohr $IOHR_VERSION"; fi'
+"""
+
 [tasks."cli:sbom"]
 dir = "cli"
 shell = "bash -e -o pipefail -c"
