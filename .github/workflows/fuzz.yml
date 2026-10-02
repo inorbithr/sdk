@@ -1,0 +1,29 @@
+name: fuzz
+
+# The command line's readers of untrusted input (config file, error answers, tokens),
+# fuzzed weekly and on demand. Nightly Rust; not a pull-request check.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cli:
+    name: fuzz cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      MISE_YES: "1"
+      FUZZ_SECONDS: "300"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          install_args: "rust cargo-binstall cargo:cargo-fuzz"
+      - run: mise run cli:fuzz

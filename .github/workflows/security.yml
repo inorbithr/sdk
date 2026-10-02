@@ -39,7 +39,7 @@ jobs:
         include:
           - { language: actions, build-mode: none, glob: ".github/workflows/*.yml" }
           - { language: go, build-mode: autobuild, glob: "go/go.mod" }
-          - { language: rust, build-mode: none, glob: "rust/Cargo.toml" }
+          - { language: rust, build-mode: none, glob: "*/Cargo.toml" }
           - { language: javascript-typescript, build-mode: none, glob: "typescript/package.json" }
           - { language: python, build-mode: none, glob: "python/pyproject.toml" }
     steps:
