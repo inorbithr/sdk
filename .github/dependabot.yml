@@ -16,6 +16,13 @@ updates:
     groups: { go: { patterns: ["*"] } }
     commit-message: { prefix: "build(go)" }
 
+  - package-ecosystem: gomod
+    directory: /conformance/server
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { conformance: { patterns: ["*"] } }
+    commit-message: { prefix: "build(conformance)" }
+
   - package-ecosystem: cargo
     directory: /rust
     schedule: { interval: weekly, day: monday }

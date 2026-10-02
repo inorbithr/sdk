@@ -65,7 +65,17 @@
               "json": {},
               "text": { "type": "string" },
               "delay_ms": { "type": "integer", "minimum": 0 },
-              "fault": { "enum": ["reset"] }
+              "fault": { "enum": ["reset"] },
+              "chunked": {
+                "type": "object",
+                "description": "Send the body with chunked transfer encoding, `bytes` at a time, waiting `delay_ms` between chunks (a slow body).",
+                "required": ["bytes"],
+                "additionalProperties": false,
+                "properties": {
+                  "bytes": { "type": "integer", "minimum": 1 },
+                  "delay_ms": { "type": "integer", "minimum": 0 }
+                }
+              }
             }
           }
         }

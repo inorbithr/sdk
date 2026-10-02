@@ -48,7 +48,7 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "cli:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "cli:check", "conformance", "examples:check"]
 
 [tasks.check]
 description = "Format check, lint, types and unit tests for every language and the command line"
@@ -503,6 +503,29 @@ uv run griffe check inorbithr --search src --against "$base"
 [tasks.conformance]
 description = "Run the shared conformance cases in every language"
 depends = ["conformance:go", "conformance:rust", "conformance:ts", "conformance:py"]
+
+[tasks."conformance:server"]
+shell = "bash -e -o pipefail -c"
+description = "Run the replay server; it prints its address (--addr to choose one)"
+dir = "conformance/server"
+run = "go run . --cases ../cases"
+
+[tasks."conformance:server:build"]
+shell = "bash -e -o pipefail -c"
+description = "Build the replay server to conformance/server/bin/replay for the language drivers"
+dir = "conformance/server"
+run = "go build -trimpath -o bin/replay ."
+
+[tasks."conformance:server:check"]
+shell = "bash -e -o pipefail -c"
+description = "Replay server: gofmt, vet, golangci-lint, and the self-test that replays every case"
+dir = "conformance/server"
+run = """
+test -z "$(gofmt -l .)" || { gofmt -l .; echo "conformance:server: run gofmt -w ." >&2; exit 1; }
+go vet ./...
+golangci-lint run
+go test -race -count=1 ./...
+"""
 
 [tasks."conformance:validate"]
 shell = "bash -e -o pipefail -c"
