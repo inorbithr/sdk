@@ -28,7 +28,8 @@ alpine="rust:1.98.1-alpine@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a683270
 
 version=$(cargo pkgid -p iohr | sed 's/.*[#@]//')
 name="iohr-$version-$target"
-# Archives carry the commit's time, not the build's, so a rebuild gives the same bytes.
+# Archives carry the commit's time, not the build's, so the same binary always packs to
+# the same archive.
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
 
 echo "cli-dist: building iohr $version for $target"
