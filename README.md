@@ -18,7 +18,7 @@ Status on 2026-10-03:
 | Go | `github.com/inorbithr/sdk/go`, Go 1.26 | built, not released |
 | Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | built, not released |
 | C# | `InOrbit.Sdk`, .NET 8 | built, not released |
-| Java | `hr.inorbit:inorbit-sdk`, Java 17 | in progress |
+| Java | `hr.inorbit:inorbit-sdk`, Java 17 | built, not released |
 
 The contract the libraries are built against is synced from the platform into
 [`spec/`](spec/), and the replay server in
