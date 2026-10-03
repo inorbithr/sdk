@@ -8,7 +8,7 @@ and six client libraries. Each library is a hand-written runtime plus an API sur
 `iohr sdk generate` writes, cut to what your credentials may call
 ([ADR 0011](docs/adr/0011-runtime-and-surface.md)). The libraries pass the shared conformance
 suite. Rust, TypeScript, Python and Go are released; the C# and Java registry releases
-(NuGet, Maven Central) come later. Status on 2026-10-03 (iohr 0.1.0-alpha.4 generates all six):
+(NuGet, Maven Central) come later. Status on 2026-10-04 (iohr 0.1.0-alpha.4 generates all six):
 
 | Part | Package | Status |
 |---|---|---|
