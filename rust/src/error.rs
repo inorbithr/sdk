@@ -115,6 +115,20 @@ impl fmt::Debug for RawResponse {
 }
 
 impl RawResponse {
+    /// An answer built by hand, for tests and fuzz targets of the readers.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn for_tests(status: u16, headers: Headers, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            headers,
+            body,
+            request_id: String::new(),
+            server_request_id: None,
+            attempts: 1,
+        }
+    }
+
     /// The body as `T`.
     ///
     /// # Errors

@@ -1,7 +1,6 @@
 use serde_json::Value;
 
 use crate::Env;
-use crate::api::ApiError;
 use crate::cli::Global;
 use crate::context::session;
 use crate::error::Error;
@@ -60,7 +59,7 @@ pub(crate) async fn run(g: &Global, env: &Env, out: Out) -> Result<(), Error> {
 }
 
 /// A 403 means "not in this token's scopes": the field is left out, not an error.
-fn optional(r: Result<Value, ApiError>) -> Result<Option<Value>, Error> {
+fn optional(r: Result<Value, inorbithr::Error>) -> Result<Option<Value>, Error> {
     match r {
         Ok(v) => Ok(Some(v)),
         Err(e) if e.status() == Some(403) => Ok(None),

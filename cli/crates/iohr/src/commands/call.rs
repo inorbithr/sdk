@@ -1,22 +1,22 @@
 use std::io::Read as _;
 
-use reqwest::Method;
+use inorbithr::Method;
 use serde_json::{Map, Value};
 
 use crate::Env;
-use crate::api::MAX_BODY;
 use crate::cli::{ApiCall, Global, HttpMethod};
-use crate::context::session;
+use crate::context::{response, session};
 use crate::error::Error;
 use crate::output::Out;
+use inorbithr::error::MAX_BODY;
 
 pub(crate) async fn run(g: &Global, env: &Env, call: ApiCall, out: Out) -> Result<(), Error> {
     let method = match call.method {
-        HttpMethod::Get => Method::GET,
-        HttpMethod::Post => Method::POST,
-        HttpMethod::Put => Method::PUT,
-        HttpMethod::Patch => Method::PATCH,
-        HttpMethod::Delete => Method::DELETE,
+        HttpMethod::Get => Method::Get,
+        HttpMethod::Post => Method::Post,
+        HttpMethod::Put => Method::Put,
+        HttpMethod::Patch => Method::Patch,
+        HttpMethod::Delete => Method::Delete,
     };
     let mut fields: Vec<(String, Value)> = Vec::new();
     for f in &call.fields {
@@ -28,7 +28,7 @@ pub(crate) async fn run(g: &Global, env: &Env, call: ApiCall, out: Out) -> Resul
         let parsed = serde_json::from_str(v).unwrap_or_else(|_| Value::String(v.to_owned()));
         fields.push((k.to_owned(), parsed));
     }
-    let in_query = matches!(method, Method::GET | Method::DELETE);
+    let in_query = matches!(method, Method::Get | Method::Delete);
     let body = match &call.input {
         Some(path) => Some(read_body(path)?),
         None if !in_query && !fields.is_empty() => {
@@ -59,6 +59,7 @@ pub(crate) async fn run(g: &Global, env: &Env, call: ApiCall, out: Out) -> Resul
         .api
         .send(method, &call.path, &query, body.as_ref())
         .await?;
+    let resp = response(resp);
     if call.include {
         Out::raw(
             format!(

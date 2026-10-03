@@ -17,6 +17,7 @@ publish = false
 iohr-auth = { path = "crates/iohr-auth" }
 iohr-codegen = { path = "crates/iohr-codegen" }
 iohr-openapi = { path = "crates/iohr-openapi" }
+inorbithr = { path = "../rust" }
 
 base64 = "0.23"
 clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }

@@ -2,9 +2,12 @@
 //! the bounded message.
 #![no_main]
 
+use inorbithr::{ApiError, Headers, RawResponse};
+
 libfuzzer_sys::fuzz_target!(|input: (u16, &[u8])| {
     let (status, body) = input;
-    let p = iohr::api::Problem::parse(status, body, None);
-    assert!(p.message.chars().count() <= 301);
-    let _ = p.to_string();
+    let raw = RawResponse::for_tests(status, Headers::default(), body.to_vec());
+    let e = ApiError::parse(raw);
+    assert!(e.message.chars().count() <= 301);
+    let _ = e.to_string();
 });

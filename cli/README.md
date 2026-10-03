@@ -116,7 +116,8 @@ Each runtime dependency, and why (SR-20):
 |---|---|
 | clap, clap_complete | Arguments, help and shell completions |
 | tokio | The runtime for HTTP; current-thread only |
-| reqwest (rustls) | HTTPS with the platform's trust store; no OpenSSL |
+| inorbithr | The Rust SDK's runtime: the client every command calls through, with its retries, errors and user agent (ADR 0009, ADR 0011) |
+| reqwest (rustls) | HTTPS with the platform's trust store; no OpenSSL (the sign-in flows in iohr-auth) |
 | serde, serde_json, toml | The config file and the API's JSON |
 | thiserror | Typed errors in the libraries |
 | time, url | RFC 3339 timestamps; URL checks (HTTPS only, the path stays on the API host) |

@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use iohr_auth::{AuthError, ClaimsError, ConfigError, StoreError};
 
-use crate::api::{ApiError, is_unauthenticated};
+use inorbithr::Code;
 
 /// Why a command failed, and the exit code it maps to.
 ///
@@ -19,7 +19,7 @@ pub enum Error {
     /// A call failed; `hint` says what to do about it.
     Api {
         /// The failure.
-        error: ApiError,
+        error: inorbithr::Error,
         /// What to do, when the command knows better than the API's message.
         hint: Option<&'static str>,
     },
@@ -35,23 +35,26 @@ impl Error {
     pub fn exit_code(&self) -> ExitCode {
         ExitCode::from(match self {
             Self::Usage(_) => 2,
+            // The runtime wraps the session's own refusal in Provider(text); a 401 is
+            // the API refusing the token: both mean "sign in".
             Self::NotSignedIn(_)
             | Self::Api {
-                error:
-                    ApiError::Auth(
-                        AuthError::NotSignedIn { .. }
-                        | AuthError::SessionEnded { .. }
-                        | AuthError::Claims(_),
-                    ),
+                error: inorbithr::Error::Auth(_),
                 ..
             } => 3,
-            Self::Api { error, .. } if is_unauthenticated(error.status()) => 3,
-            Self::Api { error, .. } if error.status() == Some(403) => 4,
+            Self::Api {
+                error: inorbithr::Error::Api(e),
+                ..
+            } if e.code == Code::Unauthenticated || e.status == 401 => 3,
+            Self::Api {
+                error: inorbithr::Error::Api(e),
+                ..
+            } if e.code == Code::Forbidden || e.status == 403 => 4,
             Self::Api { .. } | Self::Failed(_) | Self::Drift(_) => 1,
         })
     }
 
-    pub(crate) fn with_hint(error: ApiError, hint: &'static str) -> Self {
+    pub(crate) fn with_hint(error: inorbithr::Error, hint: &'static str) -> Self {
         Self::Api {
             error,
             hint: Some(hint),
@@ -76,8 +79,8 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<ApiError> for Error {
-    fn from(error: ApiError) -> Self {
+impl From<inorbithr::Error> for Error {
+    fn from(error: inorbithr::Error) -> Self {
         Self::Api { error, hint: None }
     }
 }
