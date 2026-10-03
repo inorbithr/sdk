@@ -59,6 +59,7 @@ HTTP_STATUS = {
     "conflict": 409,
     "payload_too_large": 413,
     "unsupported_media_type": 415,
+    "unprocessable": 422,
     "rate_limited": 429,
     "quota_exceeded": 429,
     "cancelled": 499,

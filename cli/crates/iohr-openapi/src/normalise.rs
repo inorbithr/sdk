@@ -23,7 +23,7 @@ pub const METHODS: [&str; 8] = [
 const DISCRIMINATORS: [&str; 2] = ["type", "kind"];
 
 /// N6: the HTTP status of every error code, the platform's `Code::http` table.
-pub const HTTP_STATUS: [(&str, u16); 17] = [
+pub const HTTP_STATUS: [(&str, u16); 18] = [
     ("bad_request", 400),
     ("failed_precondition", 400),
     ("unauthenticated", 401),
@@ -34,6 +34,7 @@ pub const HTTP_STATUS: [(&str, u16); 17] = [
     ("conflict", 409),
     ("payload_too_large", 413),
     ("unsupported_media_type", 415),
+    ("unprocessable", 422),
     ("rate_limited", 429),
     ("quota_exceeded", 429),
     ("cancelled", 499),
@@ -331,31 +332,9 @@ fn problem_schema(schemas: &Map<String, Value>) -> Result<Value, NormaliseError>
         })
         .unwrap_or_default();
     let table = status_table();
-    let missing: Vec<&str> = codes
-        .iter()
-        .map(String::as_str)
-        .filter(|c| !table.contains_key(c))
-        .collect();
-    let gone: Vec<&str> = table
-        .keys()
-        .copied()
-        .filter(|c| !codes.iter().any(|k| k == c))
-        .collect();
-    if !missing.is_empty() || !gone.is_empty() {
-        let show = |v: &[&str]| {
-            if v.is_empty() {
-                "none".to_owned()
-            } else {
-                format!("{v:?}")
-            }
-        };
-        return Err(NormaliseError::Problem(format!(
-            "the status table no longer matches the codes (new codes without a status: {}; table codes the document dropped: {}); update HTTP_STATUS from the platform's Code::http",
-            show(&missing),
-            show(&gone)
-        )));
-    }
-
+    // A code the table does not know yet gets no status here, and every runtime reads it
+    // as its unknown code: a new platform code must never break `iohr sdk generate`.
+    // `tools/spec-sync.py` stays strict, so the repository's own spec catches it.
     let names: BTreeMap<String, String> = [("Code", "Code"), ("Detail", "Detail")]
         .into_iter()
         .map(|(a, b)| (a.to_owned(), b.to_owned()))
@@ -364,7 +343,7 @@ fn problem_schema(schemas: &Map<String, Value>) -> Result<Value, NormaliseError>
     let mut code = schemas["Code"].clone();
     let statuses: Map<String, Value> = codes
         .iter()
-        .map(|c| (c.clone(), json!(table[c.as_str()])))
+        .filter_map(|c| table.get(c.as_str()).map(|s| (c.clone(), json!(s))))
         .collect();
     code["x-http-status"] = Value::Object(statuses);
     defs.insert("Code".into(), code);
@@ -577,14 +556,24 @@ mod tests {
     }
 
     #[test]
-    fn n6_refuses_a_code_the_table_does_not_know() {
+    fn n6_keeps_a_code_the_table_does_not_know_without_a_status() {
+        // A new platform code must not break `iohr sdk generate`: it stays in the enum,
+        // with no status, and the runtimes read it as their unknown code.
         let mut doc = minimal();
         doc["components"]["schemas"]["Code"]["enum"]
             .as_array_mut()
             .unwrap()
             .push(json!("brand_new"));
-        let err = normalise(&doc).unwrap_err();
-        assert!(err.to_string().contains("brand_new"), "{err}");
+        let out = normalise(&doc).unwrap();
+        let code = &out.problem["$defs"]["Code"];
+        assert!(
+            code["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("brand_new"))
+        );
+        assert!(code["x-http-status"].get("brand_new").is_none());
+        assert_eq!(code["x-http-status"]["not_found"], json!(404));
         let mut doc = minimal();
         doc["openapi"] = json!("3.0.3");
         assert!(matches!(
