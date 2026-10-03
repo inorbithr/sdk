@@ -1,6 +1,8 @@
 # 0009. The command line lives here, in its own workspace
 
-Status: accepted, 2026-10-02. Scopes SR-12 to the libraries and adds SR-24.
+Status: accepted, 2026-10-02. Scopes SR-12 to the libraries and adds SR-24. Point 5 is
+superseded by [ADR 0012](0012-extensions.md) (2026-10-03): the extension registry is the
+one exception.
 
 ## Context
 
@@ -42,7 +44,8 @@ Three facts shape where it goes:
    directory. A token given in `IOHR_TOKEN` is used in memory and nothing is written.
    A token is never accepted as a command-line argument, where it would reach shell
    history and the process list.
-5. **No update check.** SR-16 holds for the command line: it talks to the API host and
+5. **No update check.** (Superseded by ADR 0012, which adds the extension registry
+   for `iohr ext install`, `upgrade` and `sync` only.) SR-16 holds for the command line: it talks to the API host and
    the sign-in host and nothing else.
 6. Commit and pull-request scope `cli`.
 

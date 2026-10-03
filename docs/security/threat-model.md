@@ -4,7 +4,8 @@ What could go wrong with the SDKs, who could make it go wrong, and what stops th
 Method: STRIDE (spoofing, tampering, repudiation, information disclosure, denial of
 service, elevation of privilege) over each part of the system. Reviewed on every change
 that adds a transport, an option, a dependency or a release step, and at least once a
-year. Last review: 2026-10-02, before any SDK code exists; the command line added (ADR 0009).
+year. Last review: 2026-10-03: command-line extensions added (ADR 0012). Before that,
+2026-10-02: the command line added (ADR 0009).
 
 ## What we protect
 
@@ -73,6 +74,26 @@ build, (4) CI to registry, (5) contributor to `main`.
 | I | Refresh token stolen from this machine | 30-day lifetime, rotated on every use, a replay after rotation ends the chain; `logout` and the console revoke it |
 | E | A malicious local process reads the credential store | Out of scope: the OS store's own access control applies; tokens expire and are revoked from the console |
 
+### Command-line extensions
+
+Boundary: the extension registry (or a company's mirror) to `iohr`, and `iohr` to the
+extension process it runs (ADR 0012).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| T | Registry or mirror serves a modified program, manifest or index | SR-26: every manifest and blob checked against its digest and size; signature and provenance from InOrbit's release workflow, verified offline against the embedded Sigstore root |
+| S | Someone publishes an artifact under InOrbit's name, or signs with their own GitHub workflow | SR-26: the certificate identity must be `inorbithr/<repo>/.github/workflows/release.yml` at a tag, issuer GitHub Actions, logged in Rekor; provenance must name the same repository |
+| T | An older, vulnerable version is served in place of the one asked for (rollback) | The tag must hold the version it names (manifest check); `sync` installs only the pinned digest (SR-28); `upgrade` only moves forward |
+| T | A layer writes outside the install directory (path traversal, links) | Only the entrypoint is read, only as a regular file; the entrypoint is a relative path without `..`; nothing else in the layer is written |
+| D | A decompression bomb or an endless answer from the registry | Manifests 4 MiB, bundles 1 MiB, layers 256 MiB compressed and 512 MiB of program, all checked while reading; connect and read timeouts |
+| T | The installed program is replaced on disk after install | Directory 0700; the program is re-hashed before every run; `iohr ext verify` re-checks hash, bundles and signer offline |
+| I | An extension reads the person's refresh token or keychain entry | SR-27: separate process; `IOHR_TOKEN*` removed from its environment; it only gets access tokens through the channel |
+| E | An extension asks for more than it declared | SR-27: scopes outside the manifest are refused; the person saw the scopes at install and upgrade |
+| S | Another local user connects to the token channel | Unix socket 0600 in a 0700 directory, peer uid checked; Windows named pipe with a random name, remote clients refused, write access only for the creator |
+| I | The registry credential leaks through output | It is a `Redacted` value, sent as a sensitive header to the registry and its token service only, never printed by `--verbose` (test) |
+| I | `iohr` reports installs or checks for updates | SR-25: the registry is contacted only by `ext install`, `upgrade`, `sync`; no telemetry |
+| R | A team cannot show which extension code ran | SR-28: `iohr-ext.lock` with digest and signer, committed; `ext list` and `verify` |
+
 ### Network path
 
 | STRIDE | Threat | Mitigation |
@@ -118,5 +139,12 @@ build, (4) CI to registry, (5) contributor to `main`.
   configuration by environment; pinning (SR-06) narrows it.
 - **Memory in garbage-collected languages.** Go, TypeScript and Python cannot reliably
   wipe secrets (SR-11).
+- **Extension tokens are not narrowed yet.** The channel hands an extension the
+  profile's own 15-minute access token when it holds every scope asked for; the
+  platform cannot mint a narrower token from a person's session until token exchange
+  exists. The scope check limits what an extension may ask for, not what the token can
+  do (ADR 0012, point 6).
+- **The embedded Sigstore root ages.** A Sigstore key rotation makes installs fail
+  closed until an `iohr` release carries the new root.
 - **crates.io provenance.** crates.io has no native signatures yet; we attest crates
   through GitHub instead, which users must check themselves.
