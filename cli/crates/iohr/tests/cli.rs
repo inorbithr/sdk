@@ -970,7 +970,7 @@ async fn sdk_generate_from_files_needs_no_credential() {
 }
 
 #[test]
-fn a_language_not_built_yet_is_refused_not_rendered() {
+fn a_language_iohr_does_not_know_is_a_usage_error_and_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let doc = dir.path().join("public.json");
     std::fs::write(
@@ -982,21 +982,17 @@ fn a_language_not_built_yet_is_refused_not_rendered() {
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_iohr"))
         .env_clear()
         .env("IOHR_CONFIG_DIR", dir.path())
-        .args(["sdk", "generate", "--lang", "csharp", "--from"])
+        .args(["sdk", "generate", "--lang", "cobol", "--from"])
         .arg(format!("public={}", doc.display()))
         .arg("--out")
         .arg(&out_dir)
         .output()
         .unwrap();
-    assert_eq!(code(&o), 1, "{}", text(&o));
-    assert!(
-        text(&o).contains("does not generate csharp yet"),
-        "{}",
-        text(&o)
-    );
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("cobol"), "{}", text(&o));
     assert!(
         !out_dir.exists(),
-        "nothing is written for a language that is not built"
+        "nothing is written for a language iohr does not know"
     );
 }
 
