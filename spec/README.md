@@ -6,7 +6,7 @@ hand.** `mise run spec:sync` refreshes them; CI checks them; a mistake is fixed 
 | File | What it is | Produced by |
 |---|---|---|
 | `SOURCE` | Where and when the files were synced from, and the API version | `spec:sync` |
-| `openapi.json` | The public slice of the platform's OpenAPI 3.1 document, normalised for code generators | `spec:sync` (fetch, filter, normalise) |
+| `openapi.json` | The public slice of the platform's OpenAPI 3.1 document, normalised for code generators | `spec:sync` (fetch, filter, normalise); the same rules live in `cli/crates/iohr-openapi` for `iohr sdk generate`, kept byte-equal by a golden pair (`mise run cli:normalise-golden`) |
 | `problem.json` | JSON Schema of the error envelope (`code`, `error`, `details`) | `spec:sync`, extracted from the `Problem`, `Code` and `Detail` components (rule N6) |
 | `frames.json` | JSON Schema of `/v1/ws` client and server frames | added when the socket opens to API keys (ADR 0004) |
 

@@ -65,6 +65,21 @@ That is [`examples/rust/src/bin/whoami.rs`](../examples/rust/src/bin/whoami.rs);
 `docs/design.md` is the design every language follows; the shared conformance cases
 run against this crate with `mise run conformance:rust`.
 
+## The surface
+
+Every public operation is on the client through `inorbithr::public`, generated into the
+crate from the synced contract:
+
+```rust
+use inorbithr::public::Surface as _;
+let digests = client.radar().list_digests(&Default::default()).await?;
+let me = client.accounts().get_me().await?;
+```
+
+A surface for your own credentials, with exactly the operations they may call and a
+compile-time refusal of the rest, comes from `iohr sdk generate` ([docs/design.md
+section 12](../docs/design.md#12-runtime-and-surface)).
+
 ## Not here yet
 
 - Server-sent events and the socket (`docs/design.md` section 7) come with the streaming

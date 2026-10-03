@@ -22,8 +22,11 @@ As published on docs.inorbit.hr on 2026-10-01:
 | Radar digests and items | `GET /v1/radar/digests`, `/v1/radar/digests/{id}`, `/v1/radar/items` | `radar:read` | named at the first spec sync |
 | The plan's OpenAPI document | `GET /v1/openapi.json` | any key | not wrapped |
 
-The names marked "at the first spec sync" are chosen with `/add-endpoint` once `spec/`
-holds the operations. Server-sent events, the multiplexed socket (`/v1/ws`) and MCP are
+This table is the **public surface**: what the published package offers, generated
+from `spec/openapi.json`. It is one surface of many. A developer generates their own
+with `iohr sdk generate`, cut to what their credentials may call (section 12). Names are
+the operation id in the language's case (`accounts.get_me`, `radar.list_digests`), the
+bare ids flat (`me`). Server-sent events, the multiplexed socket (`/v1/ws`) and MCP are
 designed below but not shipped until the platform opens them to API keys
 ([ADR 0004](adr/0004-transport-scope.md), as amended by ADR 0008).
 
@@ -226,3 +229,54 @@ brackets.
   and retries such calls only when a key is present and the API supports it [SR-18].
 - **Time.** Every call has a finite deadline; streams end on 45 s without data or
   keep-alive [SR-19].
+
+## 12. Runtime and surface
+
+Each language is one **runtime** and many **surfaces** ([ADR 0011](adr/0011-runtime-and-surface.md),
+platform RFC 0020).
+
+- **The runtime** is the published package: client, configuration, token handling,
+  retries, errors, hooks, later streaming. It is hand-written, holds no operation, and
+  is what the conformance cases test. In Rust it is the `inorbithr` crate.
+- **A surface** is generated: the models and the thin operation methods for a set of
+  operations, calling the runtime's one request path (`Operation` in Rust). The
+  published package carries the public surface, generated into it from
+  `spec/openapi.json` by the same generator (`mise run rust:gen`); a developer's
+  repository carries one `iohr sdk generate` wrote for their credentials.
+
+**Profiles.** A surface is generated for one or more profiles (`iohr profile`), each
+the credential of one account. In Rust `Client<P: Profile>` is generic over a
+zero-sized profile type the surface defines (`Personal`, `AcmeCi`); each operation has
+a marker trait implemented for the profiles whose cut holds it, and the operation's
+method is bounded by it, so a call the profile may not make does not compile:
+
+```rust
+use iohr::prelude::*;                       // the generated surface
+let ci: Client<AcmeCi> = Client::from_env()?;   // INORBIT_ACME_CI_TOKEN, or _KEY_ID + _KEY_SECRET + _SCOPES
+let digests = ci.radar().list_digests(&Default::default()).await?;
+// personal.accounts().get_usage(..) does not compile when Personal lacks usage:read
+```
+
+A named profile reads `INORBIT_<PROFILE>_*` and nothing else; the public profile reads
+the bare `INORBIT_*`. Operations with a service in their id are grouped under a handle
+per tag (`accounts()`, `radar()`); bare ids are flat (`me()`). The same holds in every
+language as far as its types reach (RFC 0020's table).
+
+**The cut and the lock.** The document a credential fetches from `GET /v1/openapi.json`
+is cut to its plan narrowed by its scopes and stamped `info.x-iohr-cut` with the plan,
+the account, the scopes and a hash of the cut's shape (`paths` and `components` without
+prose or `x-iohr-*` keys, keys sorted). `iohr sdk generate` writes `iohr.lock` beside
+the surface: the generator, the language, and per profile the hash, plan, scopes and
+the `METHOD /path` lines the cut held, never a secret. Both are committed. `iohr sdk
+check` fetches each profile's document again and fails with the lines added and removed
+when a hash moved; `--files` also diffs the regenerated surface. In CI, where a person
+cannot sign in, `IOHR_TOKEN_<PROFILE>` stands in for a profile.
+
+**Wire optionality.** N2 (`spec/README.md`) marks every field of a transcoded message
+required, and the gateway does send every scalar; a field that is itself a message is
+left out when it was never set. A generated surface reads such a field as optional
+(`Option<T>` in Rust) and every other required field as present.
+
+**Streaming operations** (`text/event-stream`) are left out of a generated surface with
+a note until the runtime's streaming milestone (section 7).
+
