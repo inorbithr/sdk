@@ -891,6 +891,37 @@ async fn sdk_generate_from_files_needs_no_credential() {
     assert!(text(&o).contains("INORBIT_ACME_CI"), "{}", text(&o));
 }
 
+#[test]
+fn a_language_not_built_yet_is_refused_not_rendered() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = dir.path().join("public.json");
+    std::fs::write(
+        &doc,
+        cut_document("acc_p", &["identity:read"], false).to_string(),
+    )
+    .unwrap();
+    let out_dir = dir.path().join("gen");
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .env_clear()
+        .env("IOHR_CONFIG_DIR", dir.path())
+        .args(["sdk", "generate", "--lang", "java", "--from"])
+        .arg(format!("public={}", doc.display()))
+        .arg("--out")
+        .arg(&out_dir)
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains("does not generate java yet"),
+        "{}",
+        text(&o)
+    );
+    assert!(
+        !out_dir.exists(),
+        "nothing is written for a language that is not built"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_person_profile_sends_its_account_and_refuses_a_document_for_another() {
     let server = MockServer::start().await;

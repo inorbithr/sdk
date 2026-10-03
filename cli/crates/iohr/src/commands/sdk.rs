@@ -5,12 +5,12 @@
 use std::path::{Path, PathBuf};
 
 use iohr_auth::{Kind, ProfileName};
-use iohr_codegen::{Files, RustTarget, Target as _};
+use iohr_codegen::{Files, Language};
 use iohr_openapi::Api;
 use serde_json::Value;
 
 use crate::Env;
-use crate::cli::{Global, Lang, SdkCheck, SdkGenerate};
+use crate::cli::{Global, SdkCheck, SdkGenerate};
 use crate::context::{Ctx, Session, session_for};
 use crate::error::Error;
 use crate::lock::Lock;
@@ -61,7 +61,11 @@ pub(crate) async fn check(g: &Global, env: &Env, args: &SdkCheck, out: Out) -> R
             .lock
             .parent()
             .map_or_else(|| PathBuf::from(&lock.out), |p| p.join(&lock.out));
-        let files = render(&api, &lock.lang, &lock_options(&lock))?;
+        let lang: Language = lock
+            .lang
+            .parse()
+            .map_err(|e: iohr_codegen::RenderError| Error::Failed(e.to_string()))?;
+        let files = render(&api, lang, &lock.options)?;
         files_changed = files
             .diff(&out_dir)
             .map_err(|e| Error::Failed(format!("cannot read {}: {e}", out_dir.display())))?;
@@ -164,27 +168,14 @@ fn from_files(specs: &[String]) -> Result<Vec<(String, Value)>, Error> {
     Ok(docs)
 }
 
-fn render(api: &Api, lang: &str, rust: &iohr_codegen::RustOptions) -> Result<Files, Error> {
-    match lang {
-        "rust" => RustTarget
-            .render(api, rust)
-            .map_err(|e| Error::Failed(e.to_string())),
-        other => Err(Error::Failed(format!(
-            "the lock names a language this iohr cannot render: {other}"
-        ))),
-    }
-}
-
-fn lock_options(lock: &Lock) -> iohr_codegen::RustOptions {
-    iohr_codegen::RustOptions {
-        runtime: lock.runtime.clone().unwrap_or_else(|| "inorbithr".into()),
-        in_crate: false,
-    }
+fn render(api: &Api, lang: Language, options: &iohr_codegen::Options) -> Result<Files, Error> {
+    iohr_codegen::render(lang, api, options).map_err(|e| Error::Failed(e.to_string()))
 }
 
 /// Renders `api` into `--out`, with the lock beside it.
 pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(), Error> {
-    let files = render(api, lang_name(args.lang), &args.rust)?;
+    let lang = args.lang.language();
+    let files = render(api, lang, &args.options)?;
     let target = &args.out;
     let occupied = std::fs::read_dir(target).is_ok_and(|mut d| d.next().is_some());
     if !args.force && occupied {
@@ -200,16 +191,13 @@ pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(
     let out_name = target
         .file_name()
         .map_or_else(|| ".".into(), |n| n.to_string_lossy().into_owned());
-    let mut lock = Lock::from_api(
-        api,
-        lang_name(args.lang),
-        &out_name,
-        env!("CARGO_PKG_VERSION"),
-    );
-    if args.rust.runtime != "inorbithr" {
-        lock.runtime = Some(args.rust.runtime.clone());
-    }
-    if !args.rust.in_crate {
+    let mut lock = Lock::from_api(api, lang.as_str(), &out_name, env!("CARGO_PKG_VERSION"));
+    lock.options = iohr_codegen::Options {
+        in_package: false,
+        ..args.options.clone()
+    };
+    let in_package = args.options.in_package;
+    if !in_package {
         std::fs::write(&lock_path, lock.render())
             .map_err(|e| Error::Failed(format!("cannot write {}: {e}", lock_path.display())))?;
     }
@@ -219,7 +207,7 @@ pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(
     if out.json {
         Out::print_json(&serde_json::json!({
             "out": target,
-            "lock": if args.rust.in_crate { None } else { Some(&lock_path) },
+            "lock": if in_package { None } else { Some(&lock_path) },
             "files": files.len(),
             "profiles": lock.profiles,
             "notes": files.notes(),
@@ -233,7 +221,7 @@ pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(
             target.display(),
             profiles.join(", "),
             if ops == 1 { "" } else { "s" },
-            if args.rust.in_crate {
+            if in_package {
                 String::new()
             } else {
                 format!("; the lock is {}", lock_path.display())
@@ -248,12 +236,6 @@ pub(crate) fn lock_path(out: &Path) -> PathBuf {
     out.parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("iohr.lock"), |p| p.join("iohr.lock"))
-}
-
-pub(crate) fn lang_name(lang: Lang) -> &'static str {
-    match lang {
-        Lang::Rust => "rust",
-    }
 }
 
 fn short(hash: &str) -> &str {

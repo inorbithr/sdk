@@ -414,7 +414,7 @@ pub struct SdkGenerate {
     #[arg(long)]
     pub force: bool,
     #[command(flatten)]
-    pub rust: iohr_codegen::RustOptions,
+    pub options: iohr_codegen::Options,
 }
 
 #[derive(Debug, Args)]
@@ -427,7 +427,35 @@ pub struct SdkCheck {
     pub files: bool,
 }
 
+/// The languages `--lang` accepts. One that this `iohr` does not generate yet is
+/// hidden from the help and refused with a message, never rendered as a placeholder.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Lang {
+    #[value(hide = true)]
+    Typescript,
+    #[value(hide = true)]
+    Python,
+    #[value(hide = true)]
+    Go,
+    #[value(hide = true)]
+    Java,
+    #[value(hide = true)]
+    Csharp,
     Rust,
+}
+
+impl Lang {
+    /// The generator's language.
+    #[must_use]
+    pub fn language(self) -> iohr_codegen::Language {
+        use iohr_codegen::Language;
+        match self {
+            Self::Typescript => Language::TypeScript,
+            Self::Python => Language::Python,
+            Self::Go => Language::Go,
+            Self::Java => Language::Java,
+            Self::Csharp => Language::CSharp,
+            Self::Rust => Language::Rust,
+        }
+    }
 }

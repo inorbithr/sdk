@@ -2,21 +2,29 @@
 //! the thin operation methods for the operations a set of profiles may call, on top of
 //! the language's hand-written runtime (platform RFC 0020, ADR 0011).
 //!
-//! One [`Target`] per language. The Rust target is here; the others follow it. Output
-//! is deterministic: the same model and options give byte-identical files, so a
-//! regenerated surface diffs cleanly and `iohr sdk check` can compare files.
+//! One [`Target`] per language, picked by [`render`]. The language-neutral parts every
+//! target shares are the type model ([`ir`]) and the operation context ([`context`],
+//! with each language's [`Naming`]); the Rust target hands the schemas to typify
+//! instead of the IR. Output is deterministic: the same model and options give
+//! byte-identical files, so a regenerated surface diffs cleanly and `iohr sdk check`
+//! can compare files.
 //!
 //! This crate is part of the `iohr` command line and is not published on its own; its
 //! API may change in any release.
 
 #![forbid(unsafe_code)]
 
+pub mod context;
 mod files;
+pub mod ir;
+mod language;
 pub mod rust;
 mod target;
 
+pub use context::Naming;
 pub use files::Files;
-pub use rust::{RustOptions, RustTarget};
+pub use language::{Language, Options, render};
+pub use rust::RustTarget;
 pub use target::{RenderError, Target};
 
 /// The line every generated file starts with, naming the cuts it was made from.
