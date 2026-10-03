@@ -20,8 +20,9 @@ export function retryAfterMs(headers: Headers): number | undefined {
 /** Full jitter: a random wait up to 0.5 s doubled per retry, at most 8 s. */
 export function backoffMs(retry: number): number {
   const ceiling = Math.min(BACKOFF_BASE_MS * 2 ** Math.min(retry, 5), BACKOFF_CAP_MS);
+  // A uniform fraction in [0, 1) from 32 random bits: scaling, not modulo, so no bias.
   const [r = 0] = crypto.getRandomValues(new Uint32Array(1));
-  return r % (ceiling + 1);
+  return Math.floor((r / 2 ** 32) * (ceiling + 1));
 }
 
 /** `iohr-<16 hex>`, the id each call is sent with. */
