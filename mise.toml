@@ -476,7 +476,7 @@ run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path cr
 
 [tasks."ts:check"]
 shell = "bash -e -o pipefail -c"
-description = "TypeScript: biome, tsc, vitest, publint, attw, api-extractor"
+description = "TypeScript: biome, tsc (strict, isolatedDeclarations), unit tests with node --test, the build"
 dir = "typescript"
 run = """
 [ -f package.json ] || { echo "ts: no package yet, skipping"; exit 0; }
@@ -491,10 +491,12 @@ run = "[ -f package.json ] || exit 0; biome format --write ."
 
 [tasks."ts:gen"]
 shell = "bash -e -o pipefail -c"
+description = "TypeScript: regenerate the public surface in typescript/src/generated/ from spec/openapi.json with `iohr sdk generate` (ADR 0011)"
 dir = "typescript"
-run = "[ -f package.json ] && [ -f ../spec/openapi.json ] || exit 0; pnpm run gen"
-
-# ---------------------------------------------------------------- Python
+run = """
+[ -f package.json ] && [ -f ../spec/openapi.json ] || { echo "ts:gen: no package yet, skipping"; exit 0; }
+cargo run -q --manifest-path ../cli/Cargo.toml -p iohr -- sdk generate --lang typescript --from public=../spec/openapi.json --in-package --out src/generated --force
+"""
 
 [tasks."py:check"]
 shell = "bash -e -o pipefail -c"
@@ -640,7 +642,7 @@ run = "[ -f rust/Cargo.toml ] || { echo 'conformance:rust: skipping (no crate ye
 [tasks."conformance:ts"]
 shell = "bash -e -o pipefail -c"
 depends = ["conformance:server:build"]
-run = "[ -e conformance/server ] && [ -f typescript/package.json ] || { echo 'conformance:ts: skipping (no server or no package yet)'; exit 0; }; cd typescript && pnpm run conformance"
+run = "[ -e conformance/server ] && [ -f typescript/package.json ] || { echo 'conformance:ts: skipping (no server or no package yet)'; exit 0; }; cd typescript && pnpm install --frozen-lockfile && IOHR_TEST_REQUIRE_REPLAY=1 pnpm run conformance"
 
 [tasks."conformance:py"]
 shell = "bash -e -o pipefail -c"

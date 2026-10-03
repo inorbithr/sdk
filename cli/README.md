@@ -66,7 +66,7 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 | `iohr token create \| list \| revoke` | API tokens for an account (a signed-in person only) |
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file` |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
-| `iohr sdk generate --lang rust --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
+| `iohr sdk generate --lang rust\|typescript --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
@@ -92,7 +92,9 @@ git add src/iohr src/iohr.lock
 ```
 
 The surface holds exactly the operations each profile's credential may call, on the
-`inorbithr` runtime; a call a profile may not make does not compile. In CI, with a token
+language's runtime (`inorbithr` in Rust, `@inorbithr/sdk` in TypeScript); a call a
+profile may not make does not compile. `--lang` takes `rust` and `typescript` today;
+Python, Go, Java and C# follow (ADR 0013). In CI, with a token
 per profile in `IOHR_TOKEN_<PROFILE>` (`IOHR_TOKEN_CI`, `IOHR_TOKEN_DEFAULT`), `iohr sdk
 check` fails with a diff when the API's cut has moved, so a plan change or a revoked
 scope is a failing check, not a surprise in production. A person profile cannot sign in

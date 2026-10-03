@@ -1,0 +1,39 @@
+{
+  "name": "@inorbithr/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The InOrbit API client for TypeScript and JavaScript: one runtime, and the operations your credential may call.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inorbithr/sdk.git",
+    "directory": "typescript"
+  },
+  "homepage": "https://docs.inorbit.hr",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "packageManager": "pnpm@12.8.2",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && node --test --test-reporter=spec \"build-test/test/*.test.js\"",
+    "conformance": "tsc -p tsconfig.test.json && node --test --test-reporter=spec build-test/test/conformance/driver.test.js",
+    "check": "biome ci . && pnpm run typecheck && pnpm run test && pnpm run build"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
+  }
+}

@@ -20,12 +20,14 @@ pub mod ir;
 mod language;
 pub mod rust;
 mod target;
+pub mod typescript;
 
 pub use context::Naming;
 pub use files::Files;
 pub use language::{Language, Options, render};
 pub use rust::RustTarget;
 pub use target::{RenderError, Target};
+pub use typescript::TypeScriptTarget;
 
 /// The line every generated file starts with, naming the cuts it was made from.
 #[must_use]
