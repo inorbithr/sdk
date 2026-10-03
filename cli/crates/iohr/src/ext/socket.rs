@@ -276,7 +276,11 @@ mod tests {
     struct Fixed;
 
     impl Minter for Fixed {
-        #[allow(clippy::unused_async_trait_impl, reason = "a fixed answer")]
+        #[allow(
+            unknown_lints,
+            clippy::unused_async_trait_impl,
+            reason = "a fixed answer; the lint is newer than the MSRV toolchain's clippy"
+        )]
         async fn mint(&self, scopes: Vec<String>) -> Result<Minted, MintError> {
             if scopes.iter().any(|s| s == "domains:read") {
                 return Err(MintError::Forbidden(
