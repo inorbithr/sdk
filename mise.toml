@@ -362,13 +362,13 @@ echo "cli:normalise-golden: fixtures regenerated from $fixtures/raw-public.json"
 
 [tasks."cli:fuzz"]
 shell = "bash -e -o pipefail -c"
-description = "Command line: fuzz the config, error, token and loopback request readers (nightly; FUZZ_SECONDS each, default 60)"
+description = "Command line: fuzz the config, error, token, loopback request and extension (manifest, layer, token channel) readers (nightly; FUZZ_SECONDS each, default 60)"
 dir = "cli"
 run = """
 rustup toolchain list | grep -q '^nightly' || rustup toolchain install nightly --profile minimal --no-self-update
 # The prebuilt cargo-fuzz defaults to the target it was built for (musl); use the host's.
 host=$(rustc +nightly -vV | sed -n 's/^host: //p')
-for target in config problem claims loopback; do
+for target in config problem claims loopback ext_manifest ext_layer ext_token_request; do
   cargo +nightly fuzz run --target "$host" "$target" -- -max_total_time="${FUZZ_SECONDS:-60}"
 done
 """

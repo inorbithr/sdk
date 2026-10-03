@@ -276,6 +276,11 @@ impl<C: Credential> Api<C> {
         })
     }
 
+    /// The credential calls are made with.
+    pub(crate) fn credential(&self) -> &C {
+        &self.credential
+    }
+
     /// `GET path` and read the JSON answer.
     ///
     /// # Errors

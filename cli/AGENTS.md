@@ -25,7 +25,9 @@ cli/
   crates/iohr-auth/   Redacted, Credential, Claims, Config and profiles, Store,
                       Provider (discovery), Authorization<Browser|Device|Granted>,
                       loopback listener, PKCE, Session (refreshing person)
-  crates/iohr/        lib: api (private HTTP client), cli (clap), commands, context, lock
+  crates/iohr/        lib: api (private HTTP client), cli (clap), commands, context, lock,
+                      ext (OCI client, Sigstore trust, layer, lock, install store, token
+                      channel, run)
                       main.rs: argv guard, parse, run, exit code
   crates/iohr-openapi/ a document normalised (N1 to N6, equal to tools/spec-sync.py),
                       hashed (the cut hash) and modelled as operations per profile
@@ -68,4 +70,11 @@ cli/
   generated surface against `rust/` and proves the wrong profile does not compile.
   `rust/src/generated/` is this generator's output; never edit it, run `mise run rust:gen`.
 - `unwrap`/`expect` only in tests; `unsafe` is forbidden; clippy pedantic stays on.
+- Extensions (ADR 0012, SR-25 to SR-28): the registry is reached only from `ext install`,
+  `upgrade` and `sync` (`ext::oci`, `GET` only, bounded sizes, digests checked). Nothing
+  from a registry is used before `ext::trust::verify` passes, and no option skips it.
+  `ext::layer` takes the entrypoint only, as a regular file. An extension gets tokens
+  only through `ext::socket` for its manifest's scopes; never pass it `IOHR_TOKEN*`, the
+  store or a refresh token. `tests/ext.rs` runs a registry on loopback: add a case for
+  every new refusal.
 - Commit scope `cli`.

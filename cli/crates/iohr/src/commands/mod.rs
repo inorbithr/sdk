@@ -2,6 +2,9 @@
 
 mod accounts;
 mod call;
+mod config;
+mod domains;
+mod ext;
 mod login;
 mod openapi;
 mod profile;
@@ -39,6 +42,10 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         }
         Command::Sdk(SdkCommand::Generate(args)) => sdk::generate(g, &env, &args, out).await,
         Command::Sdk(SdkCommand::Check(args)) => sdk::check(g, &env, &args, out).await,
+        Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
+        Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
+        Command::Config(cmd) => config::run(g, cmd, out),
+        Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();
             clap_complete::generate(shell, &mut Cli::command(), "iohr", &mut buf);
