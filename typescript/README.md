@@ -27,5 +27,8 @@ without the check.
 - 64-bit integers are `bigint`; errors are classes under `InOrbitError` with a stable
   `kind` and, for API errors, `code` and `status`.
 - Every call takes `{ signal, timeout }` (milliseconds) last.
+- A paged list has an `all<Operation>` beside its page method, an async generator that
+  follows the next-page token: `for await (const d of api.radar.allListDigests()) {}`;
+  breaking out fetches nothing more, and `signal` stops it between pages.
 - How the SDKs behave, in every language: [docs/design.md](../docs/design.md)
 - Contributing: [CONTRIBUTING.md](../CONTRIBUTING.md)

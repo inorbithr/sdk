@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use crate::context::{self, Naming, Segment};
 use crate::files::Files;
-use crate::ir::Type;
+use crate::ir::{self, Type};
 use crate::language::{Language, Options};
 use crate::target::{RenderError, Target};
 
@@ -36,6 +36,8 @@ struct Context {
     handles: Vec<HandleCtx>,
     flat: Vec<OpCtx>,
     params_structs: Vec<ParamsCtx>,
+    /// Whether any operation pages, which imports the runtime's pager.
+    paged: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,6 +80,18 @@ struct OpCtx {
     response_type: String,
     scopes: Vec<String>,
     idempotent: bool,
+    /// How the operation pages, when it does and takes no body (design.md §9).
+    paging: Option<PagingCtx>,
+}
+
+/// What `all_<operation>` needs: the item type, the params field the token goes in,
+/// and how to read the list and the next token off the answer.
+#[derive(Debug, Clone, Serialize)]
+struct PagingCtx {
+    item: String,
+    token_field: String,
+    list: String,
+    next: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -206,9 +220,10 @@ fn context(api: &Api, runtime: &str, in_crate: bool, files: &mut Files) -> Conte
         files.note(note.clone());
     }
     let mut params_structs = Vec::new();
-    let mut op = |o: &context::Op| op_context(o, &mut params_structs);
+    let models = context::models(api);
+    let mut op = |o: &context::Op| op_context(o, &models, &mut params_structs);
     let flat: Vec<OpCtx> = surface.flat.iter().map(&mut op).collect();
-    let handles = surface
+    let handles: Vec<HandleCtx> = surface
         .handles
         .iter()
         .map(|h| HandleCtx {
@@ -245,13 +260,18 @@ fn context(api: &Api, runtime: &str, in_crate: bool, files: &mut Files) -> Conte
                 profiles: m.profiles.iter().map(|p| type_name(p)).collect(),
             })
             .collect(),
+        paged: handles.iter().any(|h: &HandleCtx| h.ops.iter().any(|o| o.paging.is_some())),
         handles,
         flat,
         params_structs,
     }
 }
 
-fn op_context(op: &context::Op, params_structs: &mut Vec<ParamsCtx>) -> OpCtx {
+fn op_context(
+    op: &context::Op,
+    models: &[ir::Model],
+    params_structs: &mut Vec<ParamsCtx>,
+) -> OpCtx {
     let naming = RustNaming;
     let (path_literal, path_format, path_args) = if op.path_params.is_empty() {
         (Some(op.path.clone()), None, Vec::new())
@@ -324,7 +344,42 @@ fn op_context(op: &context::Op, params_structs: &mut Vec<ParamsCtx>) -> OpCtx {
             .unwrap_or_else(|| "::serde_json::Value".to_owned()),
         scopes: op.scopes.clone(),
         idempotent: op.idempotent_override,
+        paging: paging_context(op, models),
     }
+}
+
+/// The paging of `op` for the template, when it pages and takes no body.
+fn paging_context(op: &context::Op, models: &[ir::Model]) -> Option<PagingCtx> {
+    let naming = RustNaming;
+    if op.body.is_some() {
+        return None;
+    }
+    let paging = context::paging(op, models)?;
+    let response = op.response.as_deref()?;
+    let ir::Shape::Object { fields } = &models.iter().find(|m| m.name == response)?.shape else {
+        return None;
+    };
+    // A field typify reads as plain when the schema requires it and it is not nullable;
+    // otherwise it is an `Option`, and an absent list or token reads as empty.
+    let read = |wire: &str| -> Option<String> {
+        let f = fields.iter().find(|f| f.name == wire)?;
+        let name = naming.field_name(wire);
+        Some(if f.required && !f.nullable {
+            name
+        } else {
+            format!("{name}.unwrap_or_default()")
+        })
+    };
+    let item = match &paging.item {
+        Type::Ref { name } => name.clone(),
+        other => rust_type(other),
+    };
+    Some(PagingCtx {
+        item,
+        token_field: naming.field_name(&paging.token_param),
+        list: read(&paging.list_field)?,
+        next: read(&paging.next_field)?,
+    })
 }
 
 /// The Rust type of a query parameter.

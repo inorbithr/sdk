@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace InOrbit.Sdk;
 
@@ -17,6 +20,44 @@ public static class Codegen
 {
     /// <summary>The surface contract this runtime implements.</summary>
     public const int Version = 1;
+
+    /// <summary>
+    /// Every item of a paged list, page after page, for <c>await foreach</c>: <paramref name="fetch"/>
+    /// takes the token for the next page (<c>null</c> for the first) and answers that page's items
+    /// and the next token. The walk stops after the page whose token is empty or repeats, when the
+    /// loop stops (no further page is fetched), and when <paramref name="cancellationToken"/> is
+    /// cancelled between pages; a failed call is thrown.
+    /// </summary>
+    /// <typeparam name="T">The item type.</typeparam>
+    /// <param name="fetch">Fetches one page.</param>
+    /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+    /// <returns>The items, in order.</returns>
+    public static async IAsyncEnumerable<T> Pages<T>(
+        Func<string?, CancellationToken, Task<(IReadOnlyList<T>? Items, string? Next)>> fetch,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fetch);
+        string? token = null;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (items, next) = await fetch(token, cancellationToken).ConfigureAwait(false);
+            if (items is not null)
+            {
+                foreach (var item in items)
+                {
+                    yield return item;
+                }
+            }
+
+            if (string.IsNullOrEmpty(next) || next == token)
+            {
+                yield break;
+            }
+
+            token = next;
+        }
+    }
 
     /// <summary>
     /// Percent-encodes <paramref name="value"/> as one path segment: every byte but the

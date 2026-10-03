@@ -45,6 +45,10 @@ not make does not compile. `Ci.fromEnv()` reads `INORBIT_CI_TOKEN` (or `INORBIT_
 `_KEY_SECRET`, `_SCOPES`) and nothing else. Regenerate it, never edit it; `iohr sdk check`
 in CI says when the API's cut has moved.
 
+A paged list has an `all<Operation>` beside its page method: a lazy `Pages<T>`, an
+`Iterable` with `stream()`, that follows the next-page token and fetches nothing more once
+the loop stops (`for (Digest d : api.radar().allListDigests()) { ... }`).
+
 ## Errors
 
 Every failure is an unchecked `InOrbitException`: `ApiException` (with `code()`,

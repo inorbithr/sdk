@@ -38,6 +38,10 @@ await ci.Accounts().GetUsageAsync("acc_1");   // compiles only if ci's cut holds
 - Errors: `InOrbitException` and its kinds; `ApiException` carries the `Code` (unknown
   codes kept as the API wrote them), the HTTP status, typed details and the raw answer.
 - 64-bit integers are `long`, sent and read as decimal strings.
+- A paged list has an `All<Operation>Async` beside its page method, an
+  `IAsyncEnumerable<T>` that follows the next-page token:
+  `await foreach (var d in client.Radar().AllListDigestsAsync(cancellationToken: ct))`;
+  breaking out fetches nothing more, and the token stops it between pages.
 - No dependency beyond the framework (`HttpClient`, `System.Text.Json`); `https` only,
   plain `http` only to this machine.
 

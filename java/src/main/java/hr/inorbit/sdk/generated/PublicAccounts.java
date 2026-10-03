@@ -2,7 +2,9 @@
 package hr.inorbit.sdk.generated;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
+import hr.inorbit.sdk.codegen.Codegen;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -100,6 +102,30 @@ public final class PublicAccounts {
     }
 
     /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/audit</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<TeamEvent> allListTeamEvents(String orgId, AccountsListTeamEventsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listTeamEvents(client, orgId, new AccountsListTeamEventsParams(params.action(), params.actor(), params.from(), params.to(), params.query(), token != null ? token : params.pageToken(), params.limit(), params.after(), params.pageSize())).value();
+            return new Pages.Page<>(page.events(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/audit</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @return the walk
+     */
+    public Pages<TeamEvent> allListTeamEvents(String orgId) {
+        return allListTeamEvents(orgId, AccountsListTeamEventsParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/accounts/orgs/{org_id}/domains</code>; needs scope <code>domains:read</code>. Transcoded from <code>/iohr.accounts.v1.AccountsService/ListDomains</code> on the <code>accounts</code> backend.
      *
      * @param orgId the <code>org_id</code> path parameter
@@ -139,6 +165,30 @@ public final class PublicAccounts {
      */
     public CompletableFuture<Response<ListDomainsResponse>> listDomainsAsync(String orgId) {
         return Operations.listDomainsAsync(client, orgId, AccountsListDomainsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/domains</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Domain> allListDomains(String orgId, AccountsListDomainsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listDomains(client, orgId, new AccountsListDomainsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.domains(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/domains</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Domain> allListDomains(String orgId) {
+        return allListDomains(orgId, AccountsListDomainsParams.builder().build());
     }
 
     /**
@@ -303,6 +353,28 @@ public final class PublicAccounts {
      */
     public CompletableFuture<Response<ListUnitCategoriesResponse>> listUnitCategoriesAsync() {
         return Operations.listUnitCategoriesAsync(client, AccountsListUnitCategoriesParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/units/categories</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<UnitCategory> allListUnitCategories(AccountsListUnitCategoriesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listUnitCategories(client, new AccountsListUnitCategoriesParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.categories(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/units/categories</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<UnitCategory> allListUnitCategories() {
+        return allListUnitCategories(AccountsListUnitCategoriesParams.builder().build());
     }
 
     /**

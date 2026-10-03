@@ -176,6 +176,57 @@ pub struct Op {
     pub profiles: Vec<String>,
 }
 
+/// How a list operation pages, by wire names: the query parameter that carries the
+/// token, the answer's list and next-token fields, and the type of one item.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Paging {
+    /// The query parameter's wire name (`page_token`).
+    pub token_param: String,
+    /// The index of that parameter in [`Op::query`].
+    pub token_index: usize,
+    /// The answer's list field, by wire name.
+    pub list_field: String,
+    /// The answer's next-token field, by wire name (`next_page_token`).
+    pub next_field: String,
+    /// The type of one item of the list.
+    pub item: Type,
+}
+
+/// The paging of `op`, when it pages: a string `page_token` query parameter, and an answer
+/// with a string `next_page_token` and exactly one list. The rule every target's
+/// `All<Op>` iterator follows (design.md §9).
+#[must_use]
+pub fn paging(op: &Op, models: &[ir::Model]) -> Option<Paging> {
+    const TOKEN: [&str; 2] = ["page_token", "pageToken"];
+    const NEXT: [&str; 2] = ["next_page_token", "nextPageToken"];
+    let token_index = op
+        .query
+        .iter()
+        .position(|q| TOKEN.contains(&q.name.as_str()) && q.ty == Type::String)?;
+    let response = op.response.as_deref()?;
+    let ir::Shape::Object { fields } = &models.iter().find(|m| m.name == response)?.shape else {
+        return None;
+    };
+    let next = fields
+        .iter()
+        .find(|f| NEXT.contains(&f.name.as_str()) && f.ty == Type::String)?;
+    let mut lists = fields.iter().filter(|f| matches!(f.ty, Type::Array { .. }));
+    let list = lists.next()?;
+    if lists.next().is_some() {
+        return None;
+    }
+    let Type::Array { item } = &list.ty else {
+        return None;
+    };
+    Some(Paging {
+        token_param: op.query[token_index].name.clone(),
+        token_index,
+        list_field: list.name.clone(),
+        next_field: next.name.clone(),
+        item: (**item).clone(),
+    })
+}
+
 /// The surface of `api`: every operation whose answer is JSON; a stream or another
 /// media type is left out with a note.
 #[must_use]

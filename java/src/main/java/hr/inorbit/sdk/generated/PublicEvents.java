@@ -2,7 +2,9 @@
 package hr.inorbit.sdk.generated;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
+import hr.inorbit.sdk.codegen.Codegen;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -134,6 +136,28 @@ public final class PublicEvents {
     }
 
     /**
+     * Every item <code>GET /v1/events/types</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<EventType> allListEventTypes(EventsListEventTypesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listEventTypes(client, new EventsListEventTypesParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.types(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/events/types</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<EventType> allListEventTypes() {
+        return allListEventTypes(EventsListEventTypesParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/webhooks/endpoints</code>; needs scope <code>webhooks:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListEndpoints</code> on the <code>events</code> backend.
      *
      * @param params the query parameters
@@ -169,6 +193,28 @@ public final class PublicEvents {
      */
     public CompletableFuture<Response<ListEndpointsResponse>> listEndpointsAsync() {
         return Operations.listEndpointsAsync(client, EventsListEndpointsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/endpoints</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Endpoint> allListEndpoints(EventsListEndpointsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listEndpoints(client, new EventsListEndpointsParams(params.accountId(), params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.endpoints(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/endpoints</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<Endpoint> allListEndpoints() {
+        return allListEndpoints(EventsListEndpointsParams.builder().build());
     }
 
     /**
@@ -234,6 +280,30 @@ public final class PublicEvents {
     }
 
     /**
+     * Every item <code>GET /v1/webhooks/endpoints/{endpoint_id}/deliveries</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param endpointId the <code>endpointId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Delivery> allListDeliveries(String endpointId, EventsListDeliveriesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listDeliveries(client, endpointId, new EventsListDeliveriesParams(params.status(), token != null ? token : params.pageToken(), params.pageSize())).value();
+            return new Pages.Page<>(page.deliveries(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/endpoints/{endpoint_id}/deliveries</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param endpointId the <code>endpointId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Delivery> allListDeliveries(String endpointId) {
+        return allListDeliveries(endpointId, EventsListDeliveriesParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/webhooks/inboxes</code>; needs scope <code>webhooks:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListInboxes</code> on the <code>events</code> backend.
      *
      * @param params the query parameters
@@ -269,6 +339,28 @@ public final class PublicEvents {
      */
     public CompletableFuture<Response<ListInboxesResponse>> listInboxesAsync() {
         return Operations.listInboxesAsync(client, EventsListInboxesParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/inboxes</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Inbox> allListInboxes(EventsListInboxesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listInboxes(client, new EventsListInboxesParams(params.accountId(), params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.inboxes(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/inboxes</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<Inbox> allListInboxes() {
+        return allListInboxes(EventsListInboxesParams.builder().build());
     }
 
     /**
@@ -311,6 +403,30 @@ public final class PublicEvents {
      */
     public CompletableFuture<Response<ListInboxRequestsResponse>> listInboxRequestsAsync(String inboxId) {
         return Operations.listInboxRequestsAsync(client, inboxId, EventsListInboxRequestsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/inboxes/{inbox_id}/requests</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param inboxId the <code>inboxId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<InboxRequest> allListInboxRequests(String inboxId, EventsListInboxRequestsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listInboxRequests(client, inboxId, new EventsListInboxRequestsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.requests(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/inboxes/{inbox_id}/requests</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param inboxId the <code>inboxId</code> path parameter
+     * @return the walk
+     */
+    public Pages<InboxRequest> allListInboxRequests(String inboxId) {
+        return allListInboxRequests(inboxId, EventsListInboxRequestsParams.builder().build());
     }
 
     /**

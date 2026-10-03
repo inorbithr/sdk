@@ -3,17 +3,23 @@
 
 from __future__ import annotations
 
+from collections.abc import (
+    AsyncIterator,
+    Iterator,
+)
 from typing import ClassVar
 
 from ..runtime import (
     AsyncClient,
     Client,
     Response,
+    codegen,
 )
 from . import operations as _ops
 from .models import (
     AddDomainRequest,
     AddDomainResponse,
+    Agent,
     CallActionRequest,
     CallActionResponse,
     CallToolRequest,
@@ -22,6 +28,7 @@ from .models import (
     CheckDomainResponse,
     ConfirmDomainRequest,
     ConfirmDomainResponse,
+    Connection,
     CreateConnectionRequest,
     CreateConnectionResponse,
     CreateEndpointRequest,
@@ -37,7 +44,11 @@ from .models import (
     DeleteEndpointResponse,
     DeleteInboxResponse,
     DeleteMonitorResponse,
+    Delivery,
+    Digest,
+    Domain,
     Endpoint,
+    EventType,
     GetAgentResponse,
     GetConnectionResponse,
     GetDeliveryStatsResponse,
@@ -50,6 +61,11 @@ from .models import (
     GetUnitSeriesResponse,
     GetUnitsResponse,
     GetUsageResponse,
+    Grant,
+    Inbox,
+    InboxRequest,
+    Item,
+    Kind,
     ListAgentsResponse,
     ListConnectionsResponse,
     ListDeliveriesResponse,
@@ -69,6 +85,8 @@ from .models import (
     ListToolsResponse,
     ListUnitCategoriesResponse,
     Me,
+    Monitor,
+    MonitorRun,
     RecoverEndpointRequest,
     RecoverEndpointResponse,
     RemoveDomainResponse,
@@ -80,12 +98,16 @@ from .models import (
     RunCheckRequest,
     RunCheckResponse,
     SendTestResponse,
+    TeamEvent,
     TestConnectionResponse,
+    ToolInfo,
+    UnitCategory,
     UpdateConnectionRequest,
     UpdateConnectionResponse,
     UpdateEndpointRequest,
     UpdateMonitorRequest,
     UpdateMonitorResponse,
+    Use,
 )
 
 
@@ -159,6 +181,15 @@ class PublicAccounts:
             timeout=timeout,
         )
 
+    def all_list_team_events(self, org_id: str, *, action: str | None = None, actor: str | None = None, from_: str | None = None, to: str | None = None, query: str | None = None, page_token: str | None = None, limit: int | None = None, after: str | None = None, page_size: int | None = None, timeout: float | None = None) -> Iterator[TeamEvent]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/audit` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[TeamEvent], str]:
+            value = (self.list_team_events(org_id, action=action, actor=actor, from_=from_, to=to, query=query, page_token=page if page is not None else page_token, limit=limit, after=after, page_size=page_size, timeout=timeout)).value
+            return value.events or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def list_domains(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListDomainsResponse]:
         """`GET /v1/accounts/orgs/{org_id}/domains`; needs scope `domains:read`. Transcoded from `/iohr.accounts.v1.AccountsService/ListDomains` on the `accounts` backend."""
         return self._client.request(
@@ -166,6 +197,15 @@ class PublicAccounts:
             ListDomainsResponse,
             timeout=timeout,
         )
+
+    def all_list_domains(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Domain]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/domains` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Domain], str]:
+            value = (self.list_domains(org_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.domains or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def get_domain(self, org_id: str, domain: str, *, timeout: float | None = None) -> Response[GetDomainResponse]:
         """`GET /v1/accounts/orgs/{org_id}/domains/{domain}`; needs scope `domains:read`. Transcoded from `/iohr.accounts.v1.AccountsService/GetDomain` on the `accounts` backend."""
@@ -206,6 +246,15 @@ class PublicAccounts:
             ListUnitCategoriesResponse,
             timeout=timeout,
         )
+
+    def all_list_unit_categories(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[UnitCategory]:
+        """Every item `GET /v1/accounts/units/categories` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[UnitCategory], str]:
+            value = (self.list_unit_categories(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.categories or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def add_domain(self, org_id: str, body: AddDomainRequest, *, timeout: float | None = None) -> Response[AddDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/AddDomain` on the `accounts` backend."""
@@ -254,6 +303,15 @@ class PublicAgents:
             ListAgentsResponse,
             timeout=timeout,
         )
+
+    def all_list_agents(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Agent]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/agents` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Agent], str]:
+            value = (self.list_agents(org_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.agents or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def get_agent(self, org_id: str, agent_id: str, *, timeout: float | None = None) -> Response[GetAgentResponse]:
         """`GET /v1/accounts/orgs/{org_id}/agents/{agent_id}`; needs scope `agents:read`. Transcoded from `/iohr.agents.v1.AgentsService/GetAgent` on the `agents` backend."""
@@ -327,6 +385,15 @@ class PublicConnections:
             timeout=timeout,
         )
 
+    def all_list_connections(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Connection]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/connections` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Connection], str]:
+            value = (self.list_connections(org_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.connections or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def get_connection(self, org_id: str, connection_id: str, *, timeout: float | None = None) -> Response[GetConnectionResponse]:
         """`GET /v1/accounts/orgs/{org_id}/connections/{connection_id}`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/GetConnection` on the `connections` backend."""
         return self._client.request(
@@ -343,6 +410,15 @@ class PublicConnections:
             timeout=timeout,
         )
 
+    def all_list_grants(self, org_id: str, connection_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Grant]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Grant], str]:
+            value = (self.list_grants(org_id, connection_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.grants or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def list_history(self, org_id: str, connection_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListHistoryResponse]:
         """`GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/ListHistory` on the `connections` backend."""
         return self._client.request(
@@ -351,6 +427,15 @@ class PublicConnections:
             timeout=timeout,
         )
 
+    def all_list_history(self, org_id: str, connection_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Use]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Use], str]:
+            value = (self.list_history(org_id, connection_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.uses or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def list_monitors(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, connection_id: str | None = None, timeout: float | None = None) -> Response[ListMonitorsResponse]:
         """`GET /v1/accounts/orgs/{org_id}/monitors`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitors` on the `connections` backend."""
         return self._client.request(
@@ -358,6 +443,15 @@ class PublicConnections:
             ListMonitorsResponse,
             timeout=timeout,
         )
+
+    def all_list_monitors(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, connection_id: str | None = None, timeout: float | None = None) -> Iterator[Monitor]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/monitors` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Monitor], str]:
+            value = (self.list_monitors(org_id, page_size=page_size, page_token=page if page is not None else page_token, connection_id=connection_id, timeout=timeout)).value
+            return value.monitors or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def get_monitor(self, org_id: str, monitor_id: str, *, timeout: float | None = None) -> Response[GetMonitorResponse]:
         """`GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitor` on the `connections` backend."""
@@ -375,6 +469,15 @@ class PublicConnections:
             timeout=timeout,
         )
 
+    def all_list_monitor_runs(self, org_id: str, monitor_id: str, *, page_size: int | None = None, page_token: str | None = None, from_: str | None = None, timeout: float | None = None) -> Iterator[MonitorRun]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[MonitorRun], str]:
+            value = (self.list_monitor_runs(org_id, monitor_id, page_size=page_size, page_token=page if page is not None else page_token, from_=from_, timeout=timeout)).value
+            return value.runs or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def get_monitor_summary(self, org_id: str, monitor_id: str, *, timeout: float | None = None) -> Response[GetMonitorSummaryResponse]:
         """`GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitorSummary` on the `connections` backend."""
         return self._client.request(
@@ -391,6 +494,15 @@ class PublicConnections:
             timeout=timeout,
         )
 
+    def all_list_kinds(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Kind]:
+        """Every item `GET /v1/connections/kinds` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Kind], str]:
+            value = (self.list_kinds(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.kinds or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def list_tools(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListToolsResponse]:
         """`GET /v1/connections/tools`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/ListTools` on the `connections` backend."""
         return self._client.request(
@@ -398,6 +510,15 @@ class PublicConnections:
             ListToolsResponse,
             timeout=timeout,
         )
+
+    def all_list_tools(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[ToolInfo]:
+        """Every item `GET /v1/connections/tools` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[ToolInfo], str]:
+            value = (self.list_tools(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.tools or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def update_connection(self, org_id: str, connection_id: str, body: UpdateConnectionRequest, *, timeout: float | None = None) -> Response[UpdateConnectionResponse]:
         """`PATCH /v1/accounts/orgs/{org_id}/connections/{connection_id}`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateConnection` on the `connections` backend."""
@@ -495,6 +616,15 @@ class PublicEvents:
             timeout=timeout,
         )
 
+    def all_list_event_types(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[EventType]:
+        """Every item `GET /v1/events/types` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[EventType], str]:
+            value = (self.list_event_types(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.types or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def list_endpoints(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListEndpointsResponse]:
         """`GET /v1/webhooks/endpoints`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListEndpoints` on the `events` backend."""
         return self._client.request(
@@ -502,6 +632,15 @@ class PublicEvents:
             ListEndpointsResponse,
             timeout=timeout,
         )
+
+    def all_list_endpoints(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Endpoint]:
+        """Every item `GET /v1/webhooks/endpoints` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Endpoint], str]:
+            value = (self.list_endpoints(account_id=account_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.endpoints or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def get_endpoint(self, endpoint_id: str, *, timeout: float | None = None) -> Response[Endpoint]:
         """`GET /v1/webhooks/endpoints/{endpoint_id}`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/GetEndpoint` on the `events` backend."""
@@ -519,6 +658,15 @@ class PublicEvents:
             timeout=timeout,
         )
 
+    def all_list_deliveries(self, endpoint_id: str, *, status: str | None = None, page_token: str | None = None, page_size: int | None = None, timeout: float | None = None) -> Iterator[Delivery]:
+        """Every item `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Delivery], str]:
+            value = (self.list_deliveries(endpoint_id, status=status, page_token=page if page is not None else page_token, page_size=page_size, timeout=timeout)).value
+            return value.deliveries or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def list_inboxes(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListInboxesResponse]:
         """`GET /v1/webhooks/inboxes`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend."""
         return self._client.request(
@@ -527,6 +675,15 @@ class PublicEvents:
             timeout=timeout,
         )
 
+    def all_list_inboxes(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Inbox]:
+        """Every item `GET /v1/webhooks/inboxes` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Inbox], str]:
+            value = (self.list_inboxes(account_id=account_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.inboxes or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def list_inbox_requests(self, inbox_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListInboxRequestsResponse]:
         """`GET /v1/webhooks/inboxes/{inbox_id}/requests`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxRequests` on the `events` backend."""
         return self._client.request(
@@ -534,6 +691,15 @@ class PublicEvents:
             ListInboxRequestsResponse,
             timeout=timeout,
         )
+
+    def all_list_inbox_requests(self, inbox_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[InboxRequest]:
+        """Every item `GET /v1/webhooks/inboxes/{inbox_id}/requests` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[InboxRequest], str]:
+            value = (self.list_inbox_requests(inbox_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.requests or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def get_delivery_stats(self, *, account_id: str | None = None, endpoint_id: str | None = None, range: str | None = None, timeout: float | None = None) -> Response[GetDeliveryStatsResponse]:
         """`GET /v1/webhooks/stats`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/GetDeliveryStats` on the `events` backend."""
@@ -615,6 +781,15 @@ class PublicRadar:
             timeout=timeout,
         )
 
+    def all_list_digests(self, *, language: str | None = None, lang: str | None = None, limit: int | None = None, include_drafts: bool | None = None, before_week: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Digest]:
+        """Every item `GET /v1/radar/digests` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Digest], str]:
+            value = (self.list_digests(language=language, lang=lang, limit=limit, include_drafts=include_drafts, before_week=before_week, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.digests or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
+
     def get_digest(self, id: str, *, timeout: float | None = None) -> Response[GetDigestResponse]:
         """`GET /v1/radar/digests/{id}`; needs scope `radar:read`. Transcoded from `/iohr.radar.v1.RadarService/GetDigest` on the `radar` backend."""
         return self._client.request(
@@ -630,6 +805,15 @@ class PublicRadar:
             ListItemsResponse,
             timeout=timeout,
         )
+
+    def all_list_items(self, *, language: str | None = None, limit: int | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Iterator[Item]:
+        """Every item `GET /v1/radar/items` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Item], str]:
+            value = (self.list_items(language=language, limit=limit, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.items or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
 
 class AsyncPublic:
@@ -702,6 +886,15 @@ class AsyncPublicAccounts:
             timeout=timeout,
         )
 
+    def all_list_team_events(self, org_id: str, *, action: str | None = None, actor: str | None = None, from_: str | None = None, to: str | None = None, query: str | None = None, page_token: str | None = None, limit: int | None = None, after: str | None = None, page_size: int | None = None, timeout: float | None = None) -> AsyncIterator[TeamEvent]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/audit` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[TeamEvent], str]:
+            value = (await self.list_team_events(org_id, action=action, actor=actor, from_=from_, to=to, query=query, page_token=page if page is not None else page_token, limit=limit, after=after, page_size=page_size, timeout=timeout)).value
+            return value.events or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def list_domains(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListDomainsResponse]:
         """`GET /v1/accounts/orgs/{org_id}/domains`; needs scope `domains:read`. Transcoded from `/iohr.accounts.v1.AccountsService/ListDomains` on the `accounts` backend."""
         return await self._client.request(
@@ -709,6 +902,15 @@ class AsyncPublicAccounts:
             ListDomainsResponse,
             timeout=timeout,
         )
+
+    def all_list_domains(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Domain]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/domains` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Domain], str]:
+            value = (await self.list_domains(org_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.domains or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def get_domain(self, org_id: str, domain: str, *, timeout: float | None = None) -> Response[GetDomainResponse]:
         """`GET /v1/accounts/orgs/{org_id}/domains/{domain}`; needs scope `domains:read`. Transcoded from `/iohr.accounts.v1.AccountsService/GetDomain` on the `accounts` backend."""
@@ -749,6 +951,15 @@ class AsyncPublicAccounts:
             ListUnitCategoriesResponse,
             timeout=timeout,
         )
+
+    def all_list_unit_categories(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[UnitCategory]:
+        """Every item `GET /v1/accounts/units/categories` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[UnitCategory], str]:
+            value = (await self.list_unit_categories(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.categories or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def add_domain(self, org_id: str, body: AddDomainRequest, *, timeout: float | None = None) -> Response[AddDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/AddDomain` on the `accounts` backend."""
@@ -797,6 +1008,15 @@ class AsyncPublicAgents:
             ListAgentsResponse,
             timeout=timeout,
         )
+
+    def all_list_agents(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Agent]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/agents` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Agent], str]:
+            value = (await self.list_agents(org_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.agents or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def get_agent(self, org_id: str, agent_id: str, *, timeout: float | None = None) -> Response[GetAgentResponse]:
         """`GET /v1/accounts/orgs/{org_id}/agents/{agent_id}`; needs scope `agents:read`. Transcoded from `/iohr.agents.v1.AgentsService/GetAgent` on the `agents` backend."""
@@ -870,6 +1090,15 @@ class AsyncPublicConnections:
             timeout=timeout,
         )
 
+    def all_list_connections(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Connection]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/connections` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Connection], str]:
+            value = (await self.list_connections(org_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.connections or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def get_connection(self, org_id: str, connection_id: str, *, timeout: float | None = None) -> Response[GetConnectionResponse]:
         """`GET /v1/accounts/orgs/{org_id}/connections/{connection_id}`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/GetConnection` on the `connections` backend."""
         return await self._client.request(
@@ -886,6 +1115,15 @@ class AsyncPublicConnections:
             timeout=timeout,
         )
 
+    def all_list_grants(self, org_id: str, connection_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Grant]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Grant], str]:
+            value = (await self.list_grants(org_id, connection_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.grants or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def list_history(self, org_id: str, connection_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListHistoryResponse]:
         """`GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/ListHistory` on the `connections` backend."""
         return await self._client.request(
@@ -894,6 +1132,15 @@ class AsyncPublicConnections:
             timeout=timeout,
         )
 
+    def all_list_history(self, org_id: str, connection_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Use]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Use], str]:
+            value = (await self.list_history(org_id, connection_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.uses or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def list_monitors(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, connection_id: str | None = None, timeout: float | None = None) -> Response[ListMonitorsResponse]:
         """`GET /v1/accounts/orgs/{org_id}/monitors`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitors` on the `connections` backend."""
         return await self._client.request(
@@ -901,6 +1148,15 @@ class AsyncPublicConnections:
             ListMonitorsResponse,
             timeout=timeout,
         )
+
+    def all_list_monitors(self, org_id: str, *, page_size: int | None = None, page_token: str | None = None, connection_id: str | None = None, timeout: float | None = None) -> AsyncIterator[Monitor]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/monitors` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Monitor], str]:
+            value = (await self.list_monitors(org_id, page_size=page_size, page_token=page if page is not None else page_token, connection_id=connection_id, timeout=timeout)).value
+            return value.monitors or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def get_monitor(self, org_id: str, monitor_id: str, *, timeout: float | None = None) -> Response[GetMonitorResponse]:
         """`GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitor` on the `connections` backend."""
@@ -918,6 +1174,15 @@ class AsyncPublicConnections:
             timeout=timeout,
         )
 
+    def all_list_monitor_runs(self, org_id: str, monitor_id: str, *, page_size: int | None = None, page_token: str | None = None, from_: str | None = None, timeout: float | None = None) -> AsyncIterator[MonitorRun]:
+        """Every item `GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[MonitorRun], str]:
+            value = (await self.list_monitor_runs(org_id, monitor_id, page_size=page_size, page_token=page if page is not None else page_token, from_=from_, timeout=timeout)).value
+            return value.runs or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def get_monitor_summary(self, org_id: str, monitor_id: str, *, timeout: float | None = None) -> Response[GetMonitorSummaryResponse]:
         """`GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitorSummary` on the `connections` backend."""
         return await self._client.request(
@@ -934,6 +1199,15 @@ class AsyncPublicConnections:
             timeout=timeout,
         )
 
+    def all_list_kinds(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Kind]:
+        """Every item `GET /v1/connections/kinds` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Kind], str]:
+            value = (await self.list_kinds(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.kinds or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def list_tools(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListToolsResponse]:
         """`GET /v1/connections/tools`; needs scope `connections:read`. Transcoded from `/iohr.connections.v1.ConnectionsService/ListTools` on the `connections` backend."""
         return await self._client.request(
@@ -941,6 +1215,15 @@ class AsyncPublicConnections:
             ListToolsResponse,
             timeout=timeout,
         )
+
+    def all_list_tools(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[ToolInfo]:
+        """Every item `GET /v1/connections/tools` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[ToolInfo], str]:
+            value = (await self.list_tools(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.tools or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def update_connection(self, org_id: str, connection_id: str, body: UpdateConnectionRequest, *, timeout: float | None = None) -> Response[UpdateConnectionResponse]:
         """`PATCH /v1/accounts/orgs/{org_id}/connections/{connection_id}`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateConnection` on the `connections` backend."""
@@ -1038,6 +1321,15 @@ class AsyncPublicEvents:
             timeout=timeout,
         )
 
+    def all_list_event_types(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[EventType]:
+        """Every item `GET /v1/events/types` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[EventType], str]:
+            value = (await self.list_event_types(page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.types or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def list_endpoints(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListEndpointsResponse]:
         """`GET /v1/webhooks/endpoints`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListEndpoints` on the `events` backend."""
         return await self._client.request(
@@ -1045,6 +1337,15 @@ class AsyncPublicEvents:
             ListEndpointsResponse,
             timeout=timeout,
         )
+
+    def all_list_endpoints(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Endpoint]:
+        """Every item `GET /v1/webhooks/endpoints` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Endpoint], str]:
+            value = (await self.list_endpoints(account_id=account_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.endpoints or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def get_endpoint(self, endpoint_id: str, *, timeout: float | None = None) -> Response[Endpoint]:
         """`GET /v1/webhooks/endpoints/{endpoint_id}`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/GetEndpoint` on the `events` backend."""
@@ -1062,6 +1363,15 @@ class AsyncPublicEvents:
             timeout=timeout,
         )
 
+    def all_list_deliveries(self, endpoint_id: str, *, status: str | None = None, page_token: str | None = None, page_size: int | None = None, timeout: float | None = None) -> AsyncIterator[Delivery]:
+        """Every item `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Delivery], str]:
+            value = (await self.list_deliveries(endpoint_id, status=status, page_token=page if page is not None else page_token, page_size=page_size, timeout=timeout)).value
+            return value.deliveries or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def list_inboxes(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListInboxesResponse]:
         """`GET /v1/webhooks/inboxes`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend."""
         return await self._client.request(
@@ -1070,6 +1380,15 @@ class AsyncPublicEvents:
             timeout=timeout,
         )
 
+    def all_list_inboxes(self, *, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Inbox]:
+        """Every item `GET /v1/webhooks/inboxes` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Inbox], str]:
+            value = (await self.list_inboxes(account_id=account_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.inboxes or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def list_inbox_requests(self, inbox_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListInboxRequestsResponse]:
         """`GET /v1/webhooks/inboxes/{inbox_id}/requests`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxRequests` on the `events` backend."""
         return await self._client.request(
@@ -1077,6 +1396,15 @@ class AsyncPublicEvents:
             ListInboxRequestsResponse,
             timeout=timeout,
         )
+
+    def all_list_inbox_requests(self, inbox_id: str, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[InboxRequest]:
+        """Every item `GET /v1/webhooks/inboxes/{inbox_id}/requests` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[InboxRequest], str]:
+            value = (await self.list_inbox_requests(inbox_id, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.requests or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def get_delivery_stats(self, *, account_id: str | None = None, endpoint_id: str | None = None, range: str | None = None, timeout: float | None = None) -> Response[GetDeliveryStatsResponse]:
         """`GET /v1/webhooks/stats`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/GetDeliveryStats` on the `events` backend."""
@@ -1158,6 +1486,15 @@ class AsyncPublicRadar:
             timeout=timeout,
         )
 
+    def all_list_digests(self, *, language: str | None = None, lang: str | None = None, limit: int | None = None, include_drafts: bool | None = None, before_week: str | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Digest]:
+        """Every item `GET /v1/radar/digests` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Digest], str]:
+            value = (await self.list_digests(language=language, lang=lang, limit=limit, include_drafts=include_drafts, before_week=before_week, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.digests or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
+
     async def get_digest(self, id: str, *, timeout: float | None = None) -> Response[GetDigestResponse]:
         """`GET /v1/radar/digests/{id}`; needs scope `radar:read`. Transcoded from `/iohr.radar.v1.RadarService/GetDigest` on the `radar` backend."""
         return await self._client.request(
@@ -1173,3 +1510,12 @@ class AsyncPublicRadar:
             ListItemsResponse,
             timeout=timeout,
         )
+
+    def all_list_items(self, *, language: str | None = None, limit: int | None = None, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> AsyncIterator[Item]:
+        """Every item `GET /v1/radar/items` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Item], str]:
+            value = (await self.list_items(language=language, limit=limit, page_size=page_size, page_token=page if page is not None else page_token, timeout=timeout)).value
+            return value.items or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)

@@ -37,6 +37,7 @@ pub mod error;
 mod generated;
 mod hooks;
 mod int64;
+mod pages;
 mod profile;
 mod retry;
 mod secret;
@@ -56,6 +57,7 @@ pub use client::{Client, ClientBuilder, DEFAULT_BASE_URL, Method, Operation, Res
 pub use error::{ApiError, AuthError, Code, ConfigError, Detail, Error, Headers, RawResponse};
 pub use hooks::{Attempt, Hook};
 pub use int64::Int64;
+pub use pages::Pages;
 pub use profile::{Profile, Public};
 pub use secret::Secret;
 
@@ -74,6 +76,28 @@ pub mod prelude {
 /// confusing one.
 #[doc(hidden)]
 pub mod __codegen {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use crate::{Error, Pages};
+
+    /// One page's call: the token for the page (`None` for the first) to its items and
+    /// the next token.
+    pub type Fetch<'a, T> = Box<
+        dyn FnMut(
+                Option<String>,
+            )
+                -> Pin<Box<dyn Future<Output = Result<(Vec<T>, String), Error>> + Send + 'a>>
+            + Send
+            + 'a,
+    >;
+
+    /// A paged list's walk, over `fetch`.
+    #[must_use]
+    pub fn pages<T>(fetch: Fetch<'_, T>) -> Pages<'_, T> {
+        Pages::new(fetch)
+    }
+
     /// Bumped when a generated surface written for an older runtime would not compile
     /// or would behave differently.
     pub const VERSION: u32 = 1;

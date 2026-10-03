@@ -4,9 +4,13 @@
 
 use std::future::Future;
 
+{% if paged %}
+use {{ runtime }}::__codegen::{pages, path_segment};
+use {{ runtime }}::{Client, Error, Method, Operation, Pages, Profile, Response};
+{% else %}
 use {{ runtime }}::__codegen::path_segment;
 use {{ runtime }}::{Client, Error, Method, Operation, Profile, Response};
-
+{% endif %}
 use super::models::*;
 use super::ops;
 
@@ -78,7 +82,27 @@ impl<P: ops::{{ op.marker }}> {{ h.type_name }}<'_, P> {
         let op = {{ build(op) }};
         self.0.request(op).await
     }
-}
+{% if op.paging %}
+
+    /// Every item `{{ op.line }}` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_{{ op.name }}(&self{% for a in op.path_args %}, {{ a }}: &str{% endfor %}, params: &{{ op.params_type }}) -> Pages<'_, {{ op.paging.item }}> {
+        let client = self.0;
+        {% for a in op.path_args %}let {{ a }} = {{ a }}.to_owned();
+        {% endfor %}let params = params.clone();
+        pages(Box::new(move |token| {
+            let mut params = params.clone();
+            if token.is_some() {
+                params.{{ op.paging.token_field }} = token;
+            }
+            {% for a in op.path_args %}let {{ a }} = {{ a }}.clone();
+            {% endfor %}Box::pin(async move {
+                let page = Self(client).{{ op.name }}({% for a in op.path_args %}&{{ a }}, {% endfor %}&params).await?.value;
+                Ok((page.{{ op.paging.list }}, page.{{ op.paging.next }}))
+            })
+        }))
+    }
+{% endif %}}
 {% endfor %}
 {% endfor %}
 

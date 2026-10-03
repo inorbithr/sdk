@@ -88,7 +88,7 @@ impl Target for PythonTarget {
         );
         files.insert(
             "profiles.py",
-            format!("{header}{}", render_profiles(&surface, &runtime)),
+            format!("{header}{}", render_profiles(&surface, &models, &runtime)),
         );
         files.insert(
             "__init__.py",
@@ -214,6 +214,7 @@ fn doc_text(text: &str) -> String {
 #[derive(Default)]
 struct Uses {
     typing: BTreeSet<&'static str>,
+    abc: BTreeSet<&'static str>,
     runtime: BTreeSet<String>,
     models: BTreeSet<String>,
 }
@@ -597,12 +598,12 @@ impl Form {
     }
 }
 
-fn render_profiles(surface: &context::Surface, runtime: &str) -> String {
+fn render_profiles(surface: &context::Surface, models: &[Model], runtime: &str) -> String {
     let mut uses = Uses::default();
     let mut body = String::new();
     for p in &surface.profiles {
         for form in [Form::Sync, Form::Async] {
-            body.push_str(&profile_class(surface, p, form, &mut uses));
+            body.push_str(&profile_class(surface, p, models, form, &mut uses));
         }
     }
     let mut out = String::from(
@@ -615,7 +616,10 @@ fn render_profiles(surface: &context::Surface, runtime: &str) -> String {
         runtime_names.insert(n.into());
     }
     out.push_str(&imports(
-        vec![Import::new("typing", typing)],
+        vec![
+            Import::new("collections.abc", uses.abc.iter().map(|t| (*t).to_owned())),
+            Import::new("typing", typing),
+        ],
         vec![
             Import::new(runtime, runtime_names),
             Import::new(".", ["operations as _ops".to_owned()]),
@@ -630,6 +634,7 @@ fn render_profiles(surface: &context::Surface, runtime: &str) -> String {
 fn profile_class(
     surface: &context::Surface,
     p: &context::Profile,
+    models: &[Model],
     form: Form,
     uses: &mut Uses,
 ) -> String {
@@ -693,7 +698,7 @@ fn profile_class(
         "\n    @classmethod\n    def from_env(cls) -> {class}:\n        \"\"\"The profile with its credential from the environment.\"\"\"\n        return cls({client}.from_env({env_arg}))\n"
     );
     for op in surface.flat.iter().filter(|o| o.profiles.contains(&p.name)) {
-        out.push_str(&profile_method(op, "self.client", form, uses));
+        out.push_str(&profile_method(op, models, "self.client", form, uses));
     }
     for (h, ops) in &handles {
         let _ = write!(
@@ -704,13 +709,13 @@ fn profile_class(
             p.name
         );
         for op in ops {
-            out.push_str(&profile_method(op, "self._client", form, uses));
+            out.push_str(&profile_method(op, models, "self._client", form, uses));
         }
     }
     out
 }
 
-fn profile_method(op: &Op, client: &str, form: Form, uses: &mut Uses) -> String {
+fn profile_method(op: &Op, models: &[Model], client: &str, form: Form, uses: &mut Uses) -> String {
     let naming = PyNaming;
     let mut params = parameters(op, uses);
     if !params.contains(&"*".to_owned()) {
@@ -725,13 +730,69 @@ fn profile_method(op: &Op, client: &str, form: Form, uses: &mut Uses) -> String 
         Form::Sync => ("def", ""),
         Form::Async => ("async def", "await "),
     };
-    format!(
+    let mut out = format!(
         "\n    {def} {}(self, {}) -> Response[{response}]:\n        \"\"\"{}\"\"\"\n        return {call}{client}.request(\n            _ops.{}({}),\n            {response},\n            timeout=timeout,\n        )\n",
         naming.method_name(&op.name),
         params.join(", "),
         op_doc(op),
         builder_name(op),
         call_arguments(op).join(", ")
+    );
+    if let Some(paging) = context::paging(op, models) {
+        out.push_str(&iterator_method(op, &paging, &params, form, uses));
+    }
+    out
+}
+
+/// `all_<op>`: every item of a paged list, page after page: a generator in the blocking
+/// class, an async generator (`async for`) in the asyncio one (design.md §9).
+fn iterator_method(
+    op: &Op,
+    paging: &context::Paging,
+    params: &[String],
+    form: Form,
+    uses: &mut Uses,
+) -> String {
+    let naming = PyNaming;
+    uses.ty(&paging.item);
+    uses.runtime.insert("codegen".into());
+    let item = py_type(&paging.item);
+    let method = naming.method_name(&op.name);
+    let token = naming.field_name(&paging.token_param);
+    // The page call: the operation's own method, every argument passed through, the
+    // token replaced once there is one (the caller's own token starts the walk).
+    let mut args: Vec<String> = op
+        .path_params
+        .iter()
+        .map(|p| naming.field_name(&p.name))
+        .collect();
+    if op.body.is_some() {
+        args.push("body".into());
+    }
+    for q in &op.query {
+        let name = naming.field_name(&q.name);
+        if q.name == paging.token_param {
+            args.push(format!("{name}=page if page is not None else {token}"));
+        } else {
+            args.push(format!("{name}={name}"));
+        }
+    }
+    args.push("timeout=timeout".into());
+    let (list, _) = field_name(&paging.list_field);
+    let (next, _) = field_name(&paging.next_field);
+    let doc = format!(
+        "Every item `{}` answers, page after page, following `{}` until the last page.",
+        op.line, paging.next_field
+    );
+    let (def, iter, fetch_def, wait, helper) = match form {
+        Form::Sync => ("def", "Iterator", "def", "", "pages"),
+        Form::Async => ("def", "AsyncIterator", "async def", "await ", "apages"),
+    };
+    uses.abc.insert(iter);
+    format!(
+        "\n    {def} all_{method}(self, {}) -> {iter}[{item}]:\n        \"\"\"{doc}\"\"\"\n\n        {fetch_def} fetch(page: str | None) -> tuple[list[{item}], str]:\n            value = ({wait}self.{method}({})).value\n            return value.{list} or [], value.{next} or \"\"\n\n        return codegen.{helper}(fetch)\n",
+        params.join(", "),
+        args.join(", "),
     )
 }
 

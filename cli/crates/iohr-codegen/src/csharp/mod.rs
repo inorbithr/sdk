@@ -179,7 +179,7 @@ impl Target for CSharpTarget {
         );
         files.insert(
             "Operations.cs",
-            format!("{header}{}", render_operations(&surface, &ctx)),
+            format!("{header}{}", render_operations(&surface, &models, &ctx)),
         );
         Ok(files)
     }
@@ -527,7 +527,7 @@ fn scopes_note(op: &Op) -> String {
     )
 }
 
-fn render_operations(surface: &Surface, ctx: &Ctx) -> String {
+fn render_operations(surface: &Surface, models: &[Model], ctx: &Ctx) -> String {
     let rt = &ctx.runtime;
     let mut out = format!(
         "\nnamespace {ns}\n{{\n    /// <summary>A surface generated for another runtime version fails to compile here: run <c>iohr sdk generate</c> again.</summary>\n    internal static class SurfaceVersion\n    {{\n        /// <summary>The runtime contract this surface was generated for; dividing by zero stops the build when it differs.</summary>\n        internal const int Value = 1 / ({rt}.Codegen.Version == 1 ? 1 : 0);\n    }}\n",
@@ -570,6 +570,13 @@ fn render_operations(surface: &Surface, ctx: &Ctx) -> String {
             "client",
             ctx,
         ));
+        out.push_str(&iterator(
+            op,
+            "client",
+            &format!("{rt}.Client<TProfile>"),
+            models,
+            ctx,
+        ));
     }
     out.push_str("    }\n");
     for h in &surface.handles {
@@ -592,11 +599,65 @@ fn render_operations(surface: &Surface, ctx: &Ctx) -> String {
                 &format!("{receiver}.Client"),
                 ctx,
             ));
+            out.push_str(&iterator(
+                op,
+                &receiver,
+                &format!("{handle}<TProfile>"),
+                models,
+                ctx,
+            ));
         }
         out.push_str("    }\n");
     }
     out.push_str("}\n");
     out
+}
+
+/// `All<Op>Async`: every item of a paged list as an `IAsyncEnumerable` (design.md §9),
+/// next to the operation it walks; empty when the operation does not page.
+fn iterator(op: &Op, receiver: &str, receiver_type: &str, models: &[Model], ctx: &Ctx) -> String {
+    let rt = &ctx.runtime;
+    let naming = CsNaming;
+    if op.body.is_some() {
+        return String::new();
+    }
+    let (Some(paging), Some(params_type), Some(response)) = (
+        context::paging(op, models),
+        op.params_type.as_deref(),
+        op.response.as_deref(),
+    ) else {
+        return String::new();
+    };
+    let item = cs_type(&paging.item, ctx, models).0;
+    let (params, docs) = parameters(op, receiver, receiver_type);
+    let mut args = vec![receiver.to_owned()];
+    args.extend(op.path_params.iter().map(|p| naming.field_name(&p.name)));
+    let token = property(&paging.token_param, params_type);
+    // The caller's own query with the token replaced once there is one.
+    let query = if op.query.iter().any(|q| q.required) {
+        format!("token is null ? query : query with {{ {token} = token }}")
+    } else {
+        format!("token is null ? query : (query ?? new {params_type}()) with {{ {token} = token }}")
+    };
+    args.push(query);
+    args.push("ct".into());
+    let list = property(&paging.list_field, response);
+    let next = property(&paging.next_field, response);
+    let walk_docs: Vec<String> = docs
+        .iter()
+        .map(|d| d.replace("Cancels the call, retries included.", "Cancels the walk and the page in flight."))
+        .collect();
+    format!(
+        "\n        /// <summary>Every item <c>{}</c> answers, page after page, following <c>{}</c> until the last page; for <c>await foreach</c>.</summary>\n        /// <typeparam name=\"TProfile\">The client's profile, whose cut holds the operation.</typeparam>\n{}\n        /// <returns>The items, fetched a page at a time.</returns>\n        public static global::System.Collections.Generic.IAsyncEnumerable<{item}> All{}Async<TProfile>({})\n            where TProfile : {}\n        {{\n            return {rt}.Codegen.Pages<{item}>(async (token, ct) =>\n            {{\n                var page = (await {}Async({}).ConfigureAwait(false)).Value;\n                return (page.{list}, page.{next});\n            }}, cancellationToken);\n        }}\n",
+        op.line,
+        paging.next_field,
+        walk_docs.join("\n"),
+        naming.type_name(&op.name),
+        params.join(", "),
+        marker(&op.marker),
+        naming.method_name(&op.name),
+        args.join(", "),
+    )
 }
 
 fn all_ops(surface: &Surface) -> Vec<&Op> {

@@ -2,7 +2,9 @@
 package hr.inorbit.sdk.generated;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
+import hr.inorbit.sdk.codegen.Codegen;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -79,6 +81,30 @@ public final class PublicAgents {
      */
     public CompletableFuture<Response<ListAgentsResponse>> listAgentsAsync(String orgId) {
         return Operations.listAgentsAsync(client, orgId, AgentsListAgentsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/agents</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Agent> allListAgents(String orgId, AgentsListAgentsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listAgents(client, orgId, new AgentsListAgentsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.agents(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/agents</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Agent> allListAgents(String orgId) {
+        return allListAgents(orgId, AgentsListAgentsParams.builder().build());
     }
 
     /**

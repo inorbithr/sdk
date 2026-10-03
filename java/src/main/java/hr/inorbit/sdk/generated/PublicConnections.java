@@ -2,7 +2,9 @@
 package hr.inorbit.sdk.generated;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
+import hr.inorbit.sdk.codegen.Codegen;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -128,6 +130,30 @@ public final class PublicConnections {
     }
 
     /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/connections</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Connection> allListConnections(String orgId, ConnectionsListConnectionsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listConnections(client, orgId, new ConnectionsListConnectionsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.connections(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/connections</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Connection> allListConnections(String orgId) {
+        return allListConnections(orgId, ConnectionsListConnectionsParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}</code>; needs scope <code>connections:read</code>. Transcoded from <code>/iohr.connections.v1.ConnectionsService/GetConnection</code> on the <code>connections</code> backend.
      *
      * @param orgId the <code>org_id</code> path parameter
@@ -196,6 +222,32 @@ public final class PublicConnections {
     }
 
     /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param connectionId the <code>connectionId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Grant> allListGrants(String orgId, String connectionId, ConnectionsListGrantsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listGrants(client, orgId, connectionId, new ConnectionsListGrantsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.grants(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param connectionId the <code>connectionId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Grant> allListGrants(String orgId, String connectionId) {
+        return allListGrants(orgId, connectionId, ConnectionsListGrantsParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history</code>; needs scope <code>connections:read</code>. Transcoded from <code>/iohr.connections.v1.ConnectionsService/ListHistory</code> on the <code>connections</code> backend.
      *
      * @param orgId the <code>org_id</code> path parameter
@@ -242,6 +294,32 @@ public final class PublicConnections {
     }
 
     /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param connectionId the <code>connectionId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Use> allListHistory(String orgId, String connectionId, ConnectionsListHistoryParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listHistory(client, orgId, connectionId, new ConnectionsListHistoryParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.uses(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param connectionId the <code>connectionId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Use> allListHistory(String orgId, String connectionId) {
+        return allListHistory(orgId, connectionId, ConnectionsListHistoryParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/accounts/orgs/{org_id}/monitors</code>; needs scope <code>connections:read</code>. Transcoded from <code>/iohr.connections.v1.ConnectionsService/ListMonitors</code> on the <code>connections</code> backend.
      *
      * @param orgId the <code>org_id</code> path parameter
@@ -281,6 +359,30 @@ public final class PublicConnections {
      */
     public CompletableFuture<Response<ListMonitorsResponse>> listMonitorsAsync(String orgId) {
         return Operations.listMonitorsAsync(client, orgId, ConnectionsListMonitorsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/monitors</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Monitor> allListMonitors(String orgId, ConnectionsListMonitorsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listMonitors(client, orgId, new ConnectionsListMonitorsParams(params.pageSize(), token != null ? token : params.pageToken(), params.connectionId())).value();
+            return new Pages.Page<>(page.monitors(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/monitors</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Monitor> allListMonitors(String orgId) {
+        return allListMonitors(orgId, ConnectionsListMonitorsParams.builder().build());
     }
 
     /**
@@ -352,6 +454,32 @@ public final class PublicConnections {
     }
 
     /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param monitorId the <code>monitorId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<MonitorRun> allListMonitorRuns(String orgId, String monitorId, ConnectionsListMonitorRunsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listMonitorRuns(client, orgId, monitorId, new ConnectionsListMonitorRunsParams(params.pageSize(), token != null ? token : params.pageToken(), params.from())).value();
+            return new Pages.Page<>(page.runs(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param orgId the <code>orgId</code> path parameter
+     * @param monitorId the <code>monitorId</code> path parameter
+     * @return the walk
+     */
+    public Pages<MonitorRun> allListMonitorRuns(String orgId, String monitorId) {
+        return allListMonitorRuns(orgId, monitorId, ConnectionsListMonitorRunsParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary</code>; needs scope <code>connections:read</code>. Transcoded from <code>/iohr.connections.v1.ConnectionsService/GetMonitorSummary</code> on the <code>connections</code> backend.
      *
      * @param orgId the <code>org_id</code> path parameter
@@ -412,6 +540,28 @@ public final class PublicConnections {
     }
 
     /**
+     * Every item <code>GET /v1/connections/kinds</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Kind> allListKinds(ConnectionsListKindsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listKinds(client, new ConnectionsListKindsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.kinds(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/connections/kinds</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<Kind> allListKinds() {
+        return allListKinds(ConnectionsListKindsParams.builder().build());
+    }
+
+    /**
      * <code>GET /v1/connections/tools</code>; needs scope <code>connections:read</code>. Transcoded from <code>/iohr.connections.v1.ConnectionsService/ListTools</code> on the <code>connections</code> backend.
      *
      * @param params the query parameters
@@ -447,6 +597,28 @@ public final class PublicConnections {
      */
     public CompletableFuture<Response<ListToolsResponse>> listToolsAsync() {
         return Operations.listToolsAsync(client, ConnectionsListToolsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/connections/tools</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<ToolInfo> allListTools(ConnectionsListToolsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listTools(client, new ConnectionsListToolsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.tools(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/connections/tools</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<ToolInfo> allListTools() {
+        return allListTools(ConnectionsListToolsParams.builder().build());
     }
 
     /**
