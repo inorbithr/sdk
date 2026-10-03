@@ -28,6 +28,7 @@ from inorbithr import (
     UnknownDetail,
     codegen,
 )
+from inorbithr._errors import CODES, code_for_status
 from inorbithr._retry import backoff
 
 TOKEN_ANSWER = {"access_token": "tok-123", "token_type": "bearer", "expires_in": 900}
@@ -218,3 +219,9 @@ def test_a_path_parameter_is_one_segment() -> None:
 
 def test_backoff_stays_under_its_ceiling() -> None:
     assert all(0 <= backoff(n) <= 8.0 for n in range(12) for _ in range(20))
+
+
+def test_unprocessable_is_known_and_an_unknown_code_is_kept() -> None:
+    assert CODES["unprocessable"] == 422
+    assert code_for_status(422) == "unprocessable"
+    assert "brand_new_code" not in CODES

@@ -36,6 +36,8 @@ public final class Code implements Serializable {
     public static final Code PAYLOAD_TOO_LARGE = new Code("payload_too_large");
     /** {@code unsupported_media_type}, HTTP 415. */
     public static final Code UNSUPPORTED_MEDIA_TYPE = new Code("unsupported_media_type");
+    /** {@code unprocessable}, HTTP 422. */
+    public static final Code UNPROCESSABLE = new Code("unprocessable");
     /** {@code rate_limited}, HTTP 429. */
     public static final Code RATE_LIMITED = new Code("rate_limited");
     /** {@code quota_exceeded}, HTTP 429. */
@@ -62,6 +64,7 @@ public final class Code implements Serializable {
             Map.entry("conflict", 409),
             Map.entry("payload_too_large", 413),
             Map.entry("unsupported_media_type", 415),
+            Map.entry("unprocessable", 422),
             Map.entry("rate_limited", 429),
             Map.entry("quota_exceeded", 429),
             Map.entry("cancelled", 499),
@@ -79,6 +82,7 @@ public final class Code implements Serializable {
             Map.entry(409, "conflict"),
             Map.entry(413, "payload_too_large"),
             Map.entry(415, "unsupported_media_type"),
+            Map.entry(422, "unprocessable"),
             Map.entry(429, "rate_limited"),
             Map.entry(499, "cancelled"),
             Map.entry(501, "unimplemented"),

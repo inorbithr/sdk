@@ -55,3 +55,11 @@ document to say `required` only for what is always sent.
   it in a support request.
 - The document carries no platform commit or build id; `SOURCE` can only record a hash.
   Add one (an `info.x-iohr-commit`) so a synced spec names the code it came from.
+
+## Accepted breaking changes
+
+`mise run spec:lint` runs `oasdiff breaking` against `main` and fails on a breaking change.
+A change the platform made on purpose, and that the runtimes already handle, is recorded in
+[`breaking-ignore.txt`](breaking-ignore.txt): one line per change (`METHOD /path` and oasdiff's
+description) under a dated comment saying why it is safe. 2026-10-03: the error code
+`unprocessable` (422); every runtime keeps a code it does not know.

@@ -268,12 +268,12 @@ fn render_field(f: &Field, uses: &mut Uses) -> String {
     let mut out = String::new();
     match (alias, f.required) {
         (Some(wire), true) => {
-            let _ = writeln!(out, "    {name}: {ty} = Field(alias={})", py_string(&wire));
+            let _ = writeln!(out, "    {name}: {ty} = _Field(alias={})", py_string(&wire));
         }
         (Some(wire), false) => {
             let _ = writeln!(
                 out,
-                "    {name}: {ty} = Field(default=None, alias={})",
+                "    {name}: {ty} = _Field(default=None, alias={})",
                 py_string(&wire)
             );
         }
@@ -357,10 +357,10 @@ fn render_models(models: &[Model], runtime: &str) -> String {
     let mut out = String::from(
         "\"\"\"The models of the InOrbit API this surface was generated from.\"\"\"\n\n",
     );
-    let mut pydantic = vec!["BaseModel".to_owned(), "ConfigDict".to_owned()];
-    if classes.contains("Field(") {
-        pydantic.push("Field".into());
-    }
+    let pydantic = vec!["BaseModel".to_owned(), "ConfigDict".to_owned()];
+    // pydantic's Field is imported under a private name: the API may have a model called
+    // Field (it does since 2026-10-03), and a model must never shadow the helper.
+    let field_helper = classes.contains("_Field(");
     out.push_str(&imports(
         vec![Import::new(
             "typing",
@@ -368,6 +368,11 @@ fn render_models(models: &[Model], runtime: &str) -> String {
         )],
         vec![
             Import::new("pydantic", pydantic),
+            // An aliased name is its own statement, as isort (ruff) orders them.
+            Import::new(
+                "pydantic",
+                field_helper.then(|| "Field as _Field".to_owned()),
+            ),
             Import::new(runtime, uses.runtime.iter().cloned()),
         ],
     ));

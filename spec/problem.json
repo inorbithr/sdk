@@ -19,7 +19,8 @@
         "internal",
         "unsupported_media_type",
         "payload_too_large",
-        "method_not_allowed"
+        "method_not_allowed",
+        "unprocessable"
       ],
       "type": "string",
       "x-http-status": {
@@ -39,6 +40,7 @@
         "unauthenticated": 401,
         "unavailable": 503,
         "unimplemented": 501,
+        "unprocessable": 422,
         "unsupported_media_type": 415
       }
     },
@@ -145,7 +147,7 @@
   },
   "$id": "https://github.com/inorbithr/sdk/spec/problem.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "`{\"code\",\"error\",\"details\"}`: the REST body and the SSE `error` payload.",
+  "description": "`{\"code\",\"error\",\"details\",\"request_id\"}`: the REST body and the SSE `error` payload.",
   "properties": {
     "code": {
       "$ref": "#/$defs/Code",
@@ -161,12 +163,17 @@
     "error": {
       "description": "The sentence.",
       "type": "string"
+    },
+    "request_id": {
+      "description": "The request's id, the `x-request-id` the answer carries: name it when\nasking about a call. Empty on a socket or MQTT frame, whose own id\nnames the call.",
+      "type": "string"
     }
   },
   "required": [
     "code",
     "error",
-    "details"
+    "details",
+    "request_id"
   ],
   "title": "Problem",
   "type": "object"

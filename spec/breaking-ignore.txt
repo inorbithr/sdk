@@ -1,0 +1,27 @@
+# Breaking changes reviewed and accepted, for `oasdiff breaking --err-ignore` in spec:lint.
+# One line per change: METHOD /path and the description oasdiff prints.
+# 2026-10-03: the platform added the error code `unprocessable` (422). Every runtime keeps a
+# code it does not know, so a client written before it reads the value as an unknown code.
+DELETE /v1/webhooks/endpoints/{endpoint_id} added the new `unprocessable` enum value to the `code` response property for the response status `default`
+DELETE /v1/webhooks/inboxes/{inbox_id} added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/me added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/units added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/usage added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/units/categories added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/events/events added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/events/types added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/me added the new `unprocessable` enum value to the `code` response property for the response status `401`
+GET /v1/radar/digests added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/radar/digests/{id} added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/radar/items added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/endpoints added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/endpoints/{endpoint_id} added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/endpoints/{endpoint_id}/deliveries added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/inboxes added the new `unprocessable` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/inboxes/{inbox_id}/requests added the new `unprocessable` enum value to the `code` response property for the response status `default`
+PATCH /v1/webhooks/endpoints/{endpoint_id} added the new `unprocessable` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/deliveries/{delivery_id}/retry added the new `unprocessable` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/endpoints added the new `unprocessable` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/endpoints/{endpoint_id}/rotate added the new `unprocessable` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/endpoints/{endpoint_id}/test added the new `unprocessable` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/inboxes added the new `unprocessable` enum value to the `code` response property for the response status `default`

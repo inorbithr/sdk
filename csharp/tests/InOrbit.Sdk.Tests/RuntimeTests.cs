@@ -25,14 +25,17 @@ public class RuntimeTests
     [Fact]
     public void Every_known_code_has_its_status_and_an_unknown_one_is_kept()
     {
-        Assert.Equal(17, new[]
+        Assert.Equal(18, new[]
         {
             Code.BadRequest, Code.FailedPrecondition, Code.Unauthenticated, Code.Forbidden, Code.NotFound,
             Code.MethodNotAllowed, Code.AlreadyExists, Code.Conflict, Code.PayloadTooLarge, Code.UnsupportedMediaType,
+            Code.Unprocessable,
             Code.RateLimited, Code.QuotaExceeded, Code.Cancelled, Code.Internal, Code.Unimplemented, Code.Unavailable,
             Code.Timeout,
         }.Length);
         Assert.Equal(429, Code.QuotaExceeded.HttpStatus);
+        Assert.Equal(422, Code.Unprocessable.HttpStatus);
+        Assert.Equal(Code.Unprocessable, Code.ForStatus(422));
         var newer = new Code("teapot_refused");
         Assert.False(newer.IsKnown);
         Assert.Equal("teapot_refused", newer.ToString());

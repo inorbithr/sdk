@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { inspect } from "node:util";
-
+import { CODES, codeForStatus } from "../src/errors.js";
 import {
   ApiError,
   Client,
@@ -157,5 +157,13 @@ describe("retry", () => {
     for (let i = 0; i < 10; i++) {
       assert.ok(backoffMs(i) <= 8000);
     }
+  });
+});
+
+describe("codes", () => {
+  it("knows unprocessable and keeps an unknown code", () => {
+    assert.equal(CODES.unprocessable, 422);
+    assert.equal(codeForStatus(422), "unprocessable");
+    assert.equal(codeForStatus(418), "http_418");
   });
 });
