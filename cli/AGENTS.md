@@ -25,8 +25,12 @@ cli/
   crates/iohr-auth/   Redacted, Credential, Claims, Config and profiles, Store,
                       Provider (discovery), Authorization<Browser|Device|Granted>,
                       loopback listener, PKCE, Session (refreshing person)
-  crates/iohr/        lib: api (private HTTP client), cli (clap), commands, context
+  crates/iohr/        lib: api (private HTTP client), cli (clap), commands, context, lock
                       main.rs: argv guard, parse, run, exit code
+  crates/iohr-openapi/ a document normalised (N1 to N6, equal to tools/spec-sync.py),
+                      hashed (the cut hash) and modelled as operations per profile
+  crates/iohr-codegen/ one Target per language; rust/ renders models (typify) and the
+                      surface (minijinja templates in src/rust/templates/)
   fuzz/               cargo-fuzz targets; excluded from the workspace
 ```
 
@@ -56,5 +60,9 @@ cli/
 - Output: results on stdout (tables, or JSON with `--json`), notes on stderr, so pipes
   get only data. `token create` prints the new token alone on stdout.
 - Dependencies: the table in `README.md`. A new one needs a reason there and in the PR.
+- The generator's output is deterministic and golden-tested (`iohr-codegen/tests/golden/`,
+  `IOHR_UPDATE_GOLDEN=1` rewrites, review the diff); `IOHR_TEST_COMPILE=1` builds a
+  generated surface against `rust/` and proves the wrong profile does not compile.
+  `rust/src/generated/` is this generator's output; never edit it, run `mise run rust:gen`.
 - `unwrap`/`expect` only in tests; `unsafe` is forbidden; clippy pedantic stays on.
 - Commit scope `cli`.

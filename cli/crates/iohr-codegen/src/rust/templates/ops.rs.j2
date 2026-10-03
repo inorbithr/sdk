@@ -1,0 +1,11 @@
+//! One marker trait per operation, implemented for the profiles whose cut holds it.
+//! An operation's method is bounded by its marker, so calling it on a profile that
+//! may not is a compile error, not a 403.
+
+{% for m in markers %}
+/// `{{ m.line }}`
+pub trait {{ m.name }}: {{ runtime }}::Profile {}
+{% for p in m.profiles %}
+impl {{ m.name }} for super::profiles::{{ p }} {}
+{% endfor %}
+{% endfor %}

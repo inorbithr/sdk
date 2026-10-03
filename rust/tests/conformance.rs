@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use inorbithr::{Client, Code, Error, Method, Operation, Public, RawResponse};
+use inorbithr::{Client, Code, Error, Public, RawResponse};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -37,7 +37,7 @@ struct Case {
     expect: Expect,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Action {
     op: String,
     #[serde(default)]
@@ -213,9 +213,10 @@ fn build_client(url: &str, options: &ClientOptions) -> Client<Public> {
     b.build().expect("the client builds")
 }
 
-/// The operations the cases name, called through the raw path until the generated
-/// public surface replaces this table.
-fn operation(action: &Action) -> Operation<'static> {
+/// The operations the cases name, called through the generated public surface
+/// (`inorbithr::public`), so a passing case proves the generated code.
+async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, Error> {
+    use inorbithr::public::{AccountsGetUsageParams, Surface as _};
     let arg = |k: &str| {
         action
             .args
@@ -223,16 +224,19 @@ fn operation(action: &Action) -> Operation<'static> {
             .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
     };
     match action.op.as_str() {
-        "me" => Operation::new(Method::Get, "/v1/me").named("me"),
-        "accounts.get_me" => {
-            Operation::new(Method::Get, "/v1/accounts/me").named("accounts.get_me")
-        }
+        "me" => client.me().await.map(|r| r.raw),
+        "accounts.get_me" => client.accounts().get_me().await.map(|r| r.raw),
         "accounts.get_usage" => {
             let org = arg("org_id").unwrap_or_default();
-            Operation::new(Method::Get, format!("/v1/accounts/orgs/{org}/usage"))
-                .named("accounts.get_usage")
-                .query_opt("from", arg("from"))
-                .query_opt("to", arg("to"))
+            let params = AccountsGetUsageParams {
+                from: arg("from"),
+                to: arg("to"),
+            };
+            client
+                .accounts()
+                .get_usage(&org, &params)
+                .await
+                .map(|r| r.raw)
         }
         other => panic!("the conformance schema names an op this driver does not know: {other}"),
     }
@@ -378,16 +382,17 @@ async fn every_case_passes() {
         }
         let client = build_client(&replay.url, &case.client);
         let results: Vec<Result<RawResponse, Error>> = if let Some(n) = case.action.concurrent {
+            let action = std::sync::Arc::new(case.action.clone());
             let calls = (0..n).map(|_| {
                 let client = client.clone();
-                let op = operation(&case.action);
-                async move { client.send(op).await }
+                let action = std::sync::Arc::clone(&action);
+                async move { call(&client, &action).await }
             });
             futures_join_all(calls).await
         } else {
             let mut out = Vec::new();
             for _ in 0..case.action.repeat.unwrap_or(1) {
-                out.push(client.send(operation(&case.action)).await);
+                out.push(call(&client, &case.action).await);
             }
             out
         };

@@ -77,6 +77,9 @@ pub enum Command {
     /// The OpenAPI document for this credential.
     #[command(subcommand)]
     Openapi(OpenapiCommand),
+    /// Generate an SDK cut to what your credentials may call, and check it later.
+    #[command(subcommand)]
+    Sdk(SdkCommand),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -230,4 +233,34 @@ pub enum OpenapiCommand {
         #[arg(short, long, default_value = "openapi.json")]
         output: PathBuf,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SdkCommand {
+    /// Write a surface for one or more documents into a directory, with its `iohr.lock`.
+    Generate(SdkGenerate),
+}
+
+#[derive(Debug, Args)]
+pub struct SdkGenerate {
+    /// The language.
+    #[arg(long, value_enum)]
+    pub lang: Lang,
+    /// A document to generate from, as NAME=FILE: the profile's name and the document it
+    /// saw (`iohr openapi pull`). Repeat it for several profiles.
+    #[arg(long = "from", value_name = "NAME=FILE", required = true)]
+    pub from: Vec<String>,
+    /// The directory to write the surface into; `iohr.lock` goes beside it.
+    #[arg(long, value_name = "DIR")]
+    pub out: PathBuf,
+    /// Replace a non-empty output directory.
+    #[arg(long)]
+    pub force: bool,
+    #[command(flatten)]
+    pub rust: iohr_codegen::RustOptions,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum Lang {
+    Rust,
 }

@@ -19,6 +19,8 @@ path = "src/main.rs"
 
 [dependencies]
 iohr-auth.workspace = true
+iohr-codegen.workspace = true
+iohr-openapi.workspace = true
 
 clap.workspace = true
 clap_complete.workspace = true
@@ -29,6 +31,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+toml.workspace = true
 url.workspace = true
 zeroize.workspace = true
 

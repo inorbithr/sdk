@@ -130,6 +130,20 @@ impl<'a> Operation<'a> {
         self
     }
 
+    /// Adds one query parameter per item, under the same key.
+    #[must_use]
+    pub fn query_each(
+        mut self,
+        key: impl Into<Cow<'static, str>>,
+        values: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let key = key.into();
+        for v in values {
+            self.query.push((key.clone(), v.into()));
+        }
+        self
+    }
+
     /// Adds a query parameter when `value` is `Some`.
     #[must_use]
     pub fn query_opt(

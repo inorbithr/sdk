@@ -5,13 +5,14 @@ mod call;
 mod login;
 mod openapi;
 mod profile;
+mod sdk;
 mod token;
 mod whoami;
 
 use clap::CommandFactory as _;
 
 use crate::Env;
-use crate::cli::{AccountsCommand, Cli, Command, OpenapiCommand};
+use crate::cli::{AccountsCommand, Cli, Command, OpenapiCommand, SdkCommand};
 use crate::error::Error;
 use crate::output::Out;
 
@@ -36,6 +37,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Openapi(OpenapiCommand::Pull { output }) => {
             openapi::pull(g, &env, &output, out).await
         }
+        Command::Sdk(SdkCommand::Generate(args)) => sdk::generate(&args, out),
         Command::Completion { shell } => {
             let mut buf = Vec::new();
             clap_complete::generate(shell, &mut Cli::command(), "iohr", &mut buf);

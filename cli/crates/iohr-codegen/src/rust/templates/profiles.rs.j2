@@ -1,0 +1,18 @@
+//! The profiles this surface was generated for: one zero-sized type each, the type
+//! parameter of `Client`. A profile's client reads `INORBIT_<NAME>_*` and calls only
+//! the operations its cut holds.
+
+{% for p in profiles %}
+{% if p.is_public %}
+pub use {{ runtime }}::Public;
+{% else %}
+/// Profile `{{ p.name }}`: `Client::<{{ p.type_name }}>::from_env()` reads `INORBIT_{{ p.env }}_TOKEN`, or
+/// `INORBIT_{{ p.env }}_KEY_ID`, `INORBIT_{{ p.env }}_KEY_SECRET` and `INORBIT_{{ p.env }}_SCOPES`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct {{ p.type_name }};
+
+impl {{ runtime }}::Profile for {{ p.type_name }} {
+    const NAME: &'static str = "{{ p.name }}";
+}
+{% endif %}
+{% endfor %}

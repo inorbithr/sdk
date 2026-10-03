@@ -1,0 +1,20 @@
+[package]
+name = "iohr-openapi"
+description = "The OpenAPI document as the generator sees it: normalised, hashed, and modelled as operations per profile."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[dependencies]
+heck.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

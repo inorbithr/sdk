@@ -1,0 +1,173 @@
+{
+  "$defs": {
+    "Code": {
+      "description": "The stable error vocabulary. The slug (`snake_case`) is what clients see in\n`code`; the HTTP status follows the standard gRPC mapping, plus the two\nHTTP-only codes for request bodies.",
+      "enum": [
+        "bad_request",
+        "not_found",
+        "already_exists",
+        "conflict",
+        "forbidden",
+        "unauthenticated",
+        "rate_limited",
+        "quota_exceeded",
+        "failed_precondition",
+        "unimplemented",
+        "unavailable",
+        "timeout",
+        "cancelled",
+        "internal",
+        "unsupported_media_type",
+        "payload_too_large",
+        "method_not_allowed"
+      ],
+      "type": "string",
+      "x-http-status": {
+        "already_exists": 409,
+        "bad_request": 400,
+        "cancelled": 499,
+        "conflict": 409,
+        "failed_precondition": 400,
+        "forbidden": 403,
+        "internal": 500,
+        "method_not_allowed": 405,
+        "not_found": 404,
+        "payload_too_large": 413,
+        "quota_exceeded": 429,
+        "rate_limited": 429,
+        "timeout": 504,
+        "unauthenticated": 401,
+        "unavailable": 503,
+        "unimplemented": 501,
+        "unsupported_media_type": 415
+      }
+    },
+    "Detail": {
+      "description": "A typed detail, translated from `google.rpc` error details.",
+      "discriminator": {
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FieldDetail"
+        },
+        {
+          "$ref": "#/$defs/InfoDetail"
+        },
+        {
+          "$ref": "#/$defs/RetryDetail"
+        }
+      ]
+    },
+    "FieldDetail": {
+      "description": "`google.rpc.BadRequest.FieldViolation`: which field, and why.",
+      "properties": {
+        "description": {
+          "description": "What is wrong with it.",
+          "type": "string"
+        },
+        "field": {
+          "description": "Field path in the request.",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "field"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "description",
+        "type"
+      ],
+      "type": "object"
+    },
+    "InfoDetail": {
+      "description": "`google.rpc.ErrorInfo`: a machine-readable reason.",
+      "properties": {
+        "domain": {
+          "description": "Who owns the reason.",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra key/values.",
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "reason": {
+          "description": "Reason, `UPPER_SNAKE_CASE` by convention.",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "info"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "domain",
+        "metadata",
+        "type"
+      ],
+      "type": "object"
+    },
+    "RetryDetail": {
+      "description": "`google.rpc.RetryInfo`: when to try again; also the `Retry-After` header.",
+      "properties": {
+        "after_seconds": {
+          "description": "Seconds to wait, rounded up.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "retry"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "after_seconds",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/inorbithr/sdk/spec/problem.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`{\"code\",\"error\",\"details\"}`: the REST body and the SSE `error` payload.",
+  "properties": {
+    "code": {
+      "$ref": "#/$defs/Code",
+      "description": "The slug."
+    },
+    "details": {
+      "description": "Typed details.",
+      "items": {
+        "$ref": "#/$defs/Detail"
+      },
+      "type": "array"
+    },
+    "error": {
+      "description": "The sentence.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "error",
+    "details"
+  ],
+  "title": "Problem",
+  "type": "object"
+}

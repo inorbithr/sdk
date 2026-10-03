@@ -1,0 +1,127 @@
+{
+  "components": {
+    "schemas": {
+      "Digest": {
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ListDigestsResponse": {
+        "properties": {
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/Digest"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Me": {
+        "description": "ignored",
+        "properties": {
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "subject": {
+            "example": "ak_1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "scopes"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "ignored by the hash",
+    "title": "InOrbit API",
+    "version": "0.1.0",
+    "x-iohr-cut": {
+      "hash": "sha256:not-part-of-the-hash",
+      "plan": "free",
+      "scopes": [
+        "identity:read"
+      ]
+    }
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/me": {
+      "get": {
+        "description": "ignored",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            },
+            "description": "ignored"
+          }
+        },
+        "summary": "ignored",
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "identity:read"
+        ]
+      }
+    },
+    "/v1/radar/digests": {
+      "get": {
+        "operationId": "RadarService.ListDigests",
+        "parameters": [
+          {
+            "example": 5,
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDigestsResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "radar"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "radar:read"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.inorbit.hr"
+    }
+  ]
+}
