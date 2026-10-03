@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>InOrbit.Sdk</RootNamespace>
+    <PackageId>InOrbit.Sdk</PackageId>
+    <Version>0.0.0</Version>
+    <Authors>InOrbit d.o.o.</Authors>
+    <Description>The InOrbit API client: the runtime and the public surface.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/inorbithr/sdk</RepositoryUrl>
+    <PackageProjectUrl>https://docs.inorbit.hr</PackageProjectUrl>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="InOrbit.Sdk.Tests" />
+  </ItemGroup>
+</Project>

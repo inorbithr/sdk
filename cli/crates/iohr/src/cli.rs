@@ -458,7 +458,6 @@ pub enum Lang {
     Go,
     #[value(hide = true)]
     Java,
-    #[value(hide = true)]
     Csharp,
     Rust,
 }

@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 pub mod context;
+pub mod csharp;
 mod files;
 pub mod go;
 pub mod ir;
@@ -25,6 +26,7 @@ mod target;
 pub mod typescript;
 
 pub use context::Naming;
+pub use csharp::CSharpTarget;
 pub use files::Files;
 pub use go::GoTarget;
 pub use language::{Language, Options, render};
