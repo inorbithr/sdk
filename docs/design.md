@@ -34,11 +34,11 @@ designed below but not shipped until the platform opens them to API keys
 
 One entry type per language, constructed once and shared across threads or tasks.
 
-| | Go | Rust | TypeScript | Python |
-|---|---|---|---|---|
-| Type | `inorbit.Client` | `inorbithr::Client` | `InOrbit` | `InOrbit`, `AsyncInOrbit` |
-| Build | `inorbit.NewClient(opts...)` | `Client::builder()...build()?` | `new InOrbit({...})` | `InOrbit(...)` |
-| Per call | `ctx context.Context` first | `.await` on a builder | `{ signal, timeout }` options | keyword `timeout=` |
+| | TypeScript | Python | Go | Java | C# | Rust |
+|---|---|---|---|---|---|---|
+| Type | `Client` | `Client`, `AsyncClient` | `inorbit.Client` | `hr.inorbit.sdk.Client` | `InOrbit.Sdk.Client<P>` | `inorbithr::Client<P>` |
+| Build | `new Client({...})` | `Client(...)` | `inorbit.NewClient(opts...)` | `Client.builder()...build()` | `Client<P>.Builder()...Build()` | `Client::builder()...build()?` |
+| Per call | `{ signal, timeout }` options | keyword `timeout=` | `ctx context.Context` first | a sync call, a `CompletableFuture` beside it | `async`, `CancellationToken` last | `.await` |
 
 Configuration, same names everywhere (case adjusted):
 
@@ -185,9 +185,10 @@ reimplement the protocol.
 ## 9. Pagination
 
 No public route is paginated today. When one is, the platform's `cursor` convention
-(empty when last) is exposed as the language's iterator over items (Go
-`iter.Seq2[T, error]`, Rust `Stream`, TS `AsyncIterable`, Python `__iter__` /
-`__aiter__`), with page-level access kept.
+(empty when last) is exposed as the language's iterator over items (TS
+`AsyncIterable`, Python `__iter__` / `__aiter__`, Go `iter.Seq2[T, error]`, Java
+`Iterable` and `Stream`, C# `IAsyncEnumerable`, Rust `Stream`), with page-level access
+kept.
 
 ## 10. Compatibility
 
@@ -260,7 +261,20 @@ let digests = ci.radar().list_digests(&Default::default()).await?;
 A named profile reads `INORBIT_<PROFILE>_*` and nothing else; the public profile reads
 the bare `INORBIT_*`. Operations with a service in their id are grouped under a handle
 per tag (`accounts()`, `radar()`); bare ids are flat (`me()`). The same holds in every
-language as far as its types reach (RFC 0020's table).
+language as far as its types reach (RFC 0020's table, ADR 0013):
+
+| Language | A profile's client holds only its operations through |
+|---|---|
+| TypeScript | one class per profile with a handle per tag; plain JavaScript gets the methods unchecked |
+| Python | one class per profile, sync and async, checked by pyright and mypy |
+| Go | one package per profile wrapping the runtime's client |
+| Java | one class per profile with a handle per tag; records for the models |
+| C# | a marker interface per operation and extension methods constrained to it |
+| Rust | a marker trait per operation bounding the method |
+
+Every target renders from the generator's shared model (`iohr-codegen` `ir` for the
+models, `context` for the operations); only the Rust target reads models through
+typify.
 
 **The cut and the lock.** The document a credential fetches from `GET /v1/openapi.json`
 is cut to its plan narrowed by its scopes and stamped `info.x-iohr-cut` with the plan,

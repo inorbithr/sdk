@@ -19,3 +19,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0010](0010-releasing-the-command-line.md) | Releasing the command line: our own workflow, six targets, WiX 5 | accepted |
 | [0011](0011-runtime-and-surface.md) | Runtime and surface: generated operations on a hand-written runtime | accepted |
 | [0012](0012-extensions.md) | Extensions: signed OCI artifacts, run as separate processes | accepted |
+| [0013](0013-java-and-csharp.md) | Java and C#: names, runtimes, the surface shape | accepted |

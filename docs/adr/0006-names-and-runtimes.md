@@ -16,6 +16,8 @@ split the brand. The GitHub organisation is `inorbithr`.
 | Rust | crate `inorbithr` | `use inorbithr::Client;` |
 | TypeScript | `@inorbithr/sdk` (npm), `@inorbithr/sdk` (JSR) | `import { InOrbit } from "@inorbithr/sdk"` |
 | Python | `inorbithr` (PyPI) | `import inorbithr` |
+| Java | `hr.inorbit:inorbit-sdk` (Maven Central) | `import hr.inorbit.sdk.Client;` (ADR 0013) |
+| C# | `InOrbit.Sdk` (NuGet) | `using InOrbit.Sdk;` (ADR 0013) |
 
 Minimum runtimes, checked against https://endoflife.date on 2026-10-01:
 
@@ -25,6 +27,8 @@ Minimum runtimes, checked against https://endoflife.date on 2026-10-01:
 | Rust | MSRV 1.94 (about six months) | MSRV, stable | Recent enough for edition 2024 and the MSRV-aware resolver. |
 | TypeScript | Node 22.12, ESM only | Node 22, 24, 26; Bun and Deno smoke tests | `require(esm)` is stable from 22.12, so CommonJS users can still load it. |
 | Python | 3.11 | 3.11 to 3.14 | 3.10 reaches end of life on 2026-10-31, before the first release. |
+| Java | 17 | Temurin 17, 21 | The oldest long-term release with updates (ADR 0013). |
+| C# | `net8.0` | .NET 10 SDK | Every supported .NET runtime loads it (ADR 0013). |
 
 ## Open
 
