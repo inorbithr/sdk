@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.0-alpha.4](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.3...iohr/v0.1.0-alpha.4) (2026-10-03)
+
+
+### Features
+
+* **cli:** iterators over paged lists in TypeScript, Python, Rust, Java and C# ([#66](https://github.com/inorbithr/sdk/issues/66)) ([3a42fd6](https://github.com/inorbithr/sdk/commit/3a42fd63fbfc855a916e8694f0ff5c0fe4c7bab5))
+* **csharp:** the C# runtime and target ([#58](https://github.com/inorbithr/sdk/issues/58)) ([bc1e7bb](https://github.com/inorbithr/sdk/commit/bc1e7bbcb0927247e31d754a92020a153489995b))
+* **go:** iterators over paged lists, slog logging, Example functions, virtual-clock tests ([#60](https://github.com/inorbithr/sdk/issues/60)) ([069a9cb](https://github.com/inorbithr/sdk/commit/069a9cb0bc516be82d2f290457c1455b752f669b))
+* **go:** the Go runtime and target ([#56](https://github.com/inorbithr/sdk/issues/56)) ([8bbebcb](https://github.com/inorbithr/sdk/commit/8bbebcb4870fa86fbd45e55b0fee6bd1ddf871e4))
+* **java:** the Java runtime and the Java target ([#59](https://github.com/inorbithr/sdk/issues/59)) ([325f2f9](https://github.com/inorbithr/sdk/commit/325f2f953bfa0e985bf45ff0203ae7dd7452ca78))
+* **py:** the Python runtime and target ([#57](https://github.com/inorbithr/sdk/issues/57)) ([e823d2e](https://github.com/inorbithr/sdk/commit/e823d2e9f4e91c29ae14d7ff0efa71be416f9a15))
+* **spec:** the contract synced with the platform; unprocessable in every runtime ([#65](https://github.com/inorbithr/sdk/issues/65)) ([69aad11](https://github.com/inorbithr/sdk/commit/69aad110b1e77c4c49241846581959537dfcf15f))
+* **ts:** the TypeScript runtime and target ([#46](https://github.com/inorbithr/sdk/issues/46)) ([3a2b2b0](https://github.com/inorbithr/sdk/commit/3a2b2b03f3325bac7a048cd642d6ac5c93f495b3))
+
+
+### Bug fixes
+
+* **cli:** a new platform error code no longer stops sdk generate ([#61](https://github.com/inorbithr/sdk/issues/61)) ([b6689ef](https://github.com/inorbithr/sdk/commit/b6689ef6611663164e03d113b7684b9ead0ec7e2))
+
 ## [0.1.0-alpha.3](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.2...iohr/v0.1.0-alpha.3) (2026-10-03)
 
 
