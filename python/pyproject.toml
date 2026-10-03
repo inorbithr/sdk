@@ -1,0 +1,74 @@
+[project]
+name = "inorbithr"
+version = "0.0.0"
+description = "The InOrbit API for Python: the runtime and the public surface, sync and async."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "InOrbit d.o.o." }]
+requires-python = ">=3.11"
+# The runtime's only dependencies (python/AGENTS.md): an HTTP client and the models.
+dependencies = ["httpx>=0.28,<1", "pydantic>=2.10,<3"]
+classifiers = [
+  # PyPI refuses any upload carrying this classifier: nothing is published before M4
+  # (docs/roadmap.md). The release that publishes removes it.
+  "Private :: Do Not Upload",
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://docs.inorbit.hr"
+Source = "https://github.com/inorbithr/sdk/tree/main/python"
+
+[dependency-groups]
+dev = ["mypy>=1.15", "pyright>=1.1.400", "pytest>=8.3", "ruff>=0.11", "griffe>=1.5"]
+
+[build-system]
+requires = ["uv_build>=0.7,<0.13"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "D", "ANN", "S", "PT", "PL", "TRY", "N"]
+ignore = [
+  "D203", "D213",    # docstring layout: one blank line style, summary on the first line
+  "PLR0913",         # keyword-only options are the design (python/AGENTS.md)
+  "PLR2004",         # HTTP statuses read best as numbers
+  "TRY003",          # messages say what failed, in the reader's words (docs/style.md)
+  "S101",            # assert is how pytest checks
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "ANN", "PLR0912", "PLR0915", "S", "PLC0415"]
+"src/inorbithr/_generated/**" = ["D", "E501", "N", "RUF", "PLR"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+exclude = ["src/inorbithr/_generated/**"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

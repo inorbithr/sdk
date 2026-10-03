@@ -1,0 +1,19 @@
+[project]
+name = "inorbithr-examples"
+version = "0.0.0"
+description = "Small programs the README quotes; CI type-checks them."
+requires-python = ">=3.11"
+dependencies = ["inorbithr"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+inorbithr = { path = "../../python", editable = true }
+
+[dependency-groups]
+dev = ["pyright>=1.1.400"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
