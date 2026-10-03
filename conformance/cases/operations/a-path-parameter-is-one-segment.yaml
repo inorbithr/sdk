@@ -1,0 +1,13 @@
+name: a-path-parameter-is-one-segment
+area: operations
+summary: A path parameter is percent-encoded as one segment, so a slash or a space in it never changes the route.
+action: { op: radar.get_digest, args: { id: "a/b c" } }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/radar/digests/a%2Fb%20c }
+    response: { status: 404, json: { code: not_found, error: no such digest } }
+expect:
+  error: { kind: api, code: not_found, status: 404 }
+  attempts: 1
+notes: The replay server compares the path as sent (percent-encoded), so `/v1/radar/digests/a/b c` does not match.

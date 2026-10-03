@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 USES = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)(\s*#\s*(\S+))?", re.MULTILINE)
 SHA = re.compile(r"@[0-9a-f]{40}$")
-LANGS = ("go", "rust", "typescript", "python", "cli")
+LANGS = ("go", "rust", "typescript", "python", "java", "csharp", "cli")
 MAX_LINES = 200
 
 

@@ -347,7 +347,7 @@ func read(r *http.Request) (Seen, error) {
 	if len(body) > maxBody {
 		return Seen{}, fmt.Errorf("the body is larger than %d bytes", maxBody)
 	}
-	seen := Seen{Method: r.Method, Path: r.URL.Path, Query: first(r.URL.Query()), Headers: map[string]string{}}
+	seen := Seen{Method: r.Method, Path: r.URL.EscapedPath(), Query: first(r.URL.Query()), Headers: map[string]string{}}
 	for k := range r.Header {
 		seen.Headers[strings.ToLower(k)] = r.Header.Get(k)
 	}

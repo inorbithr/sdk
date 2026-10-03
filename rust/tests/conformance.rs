@@ -216,7 +216,7 @@ fn build_client(url: &str, options: &ClientOptions) -> Client<Public> {
 /// The operations the cases name, called through the generated public surface
 /// (`inorbithr::public`), so a passing case proves the generated code.
 async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, Error> {
-    use inorbithr::public::{AccountsGetUsageParams, Surface as _};
+    use inorbithr::public::{AccountsGetUsageParams, CreateEndpointRequest, Surface as _};
     let arg = |k: &str| {
         action
             .args
@@ -237,6 +237,20 @@ async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, E
                 .get_usage(&org, &params)
                 .await
                 .map(|r| r.raw)
+        }
+        "radar.get_digest" => {
+            let id = arg("id").unwrap_or_default();
+            client.radar().get_digest(&id).await.map(|r| r.raw)
+        }
+        "events.create_endpoint" => {
+            let body: CreateEndpointRequest =
+                serde_json::from_value(Value::Object(action.args.clone().into_iter().collect()))
+                    .expect("the case's args are a CreateEndpointRequest");
+            client.events().create_endpoint(&body).await.map(|r| r.raw)
+        }
+        "events.delete_endpoint" => {
+            let id = arg("endpoint_id").unwrap_or_default();
+            client.events().delete_endpoint(&id).await.map(|r| r.raw)
         }
         other => panic!("the conformance schema names an op this driver does not know: {other}"),
     }

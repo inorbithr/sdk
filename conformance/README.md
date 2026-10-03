@@ -1,10 +1,10 @@
 # Conformance
 
-One behaviour, one case, four languages. Each case describes the exchange between an SDK
+One behaviour, one case, six languages. Each case describes the exchange between an SDK
 and the API as data: what the SDK must send, what the server answers, and what the SDK
 must return. A replay server plays the server side; each SDK runs a small driver that
-performs the case's action and reports the result. A case that passes in three
-languages and fails in the fourth is a parity bug.
+performs the case's action and reports the result. A case that passes in five
+languages and fails in the sixth is a parity bug.
 
 ## Layout
 
@@ -90,4 +90,4 @@ plays every case's exchanges against the server and expects a pass.
 
 1. Copy the closest case. Name it for the behaviour, not the bug.
 2. Run `mise run conformance` and watch it fail in every language.
-3. Implement in all four, or mark the case `pending: [<lang>]` with an issue link.
+3. Implement in every language, or mark the case `pending: [<lang>]` with an issue link.

@@ -1,0 +1,15 @@
+name: a-delete-is-retried
+area: retries
+summary: A DELETE is idempotent, so a 503 is retried and the second answer is the result.
+client: { max_retries: 2 }
+action: { op: events.delete_endpoint, args: { endpoint_id: ep_1 } }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: DELETE, path: /v1/webhooks/endpoints/ep_1 }
+    response: { status: 503, json: { code: unavailable, error: try again } }
+  - request: { method: DELETE, path: /v1/webhooks/endpoints/ep_1 }
+    response: { status: 200, json: {} }
+expect:
+  ok: {}
+  attempts: 2

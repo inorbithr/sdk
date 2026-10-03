@@ -9,7 +9,7 @@
     "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
     "area": { "enum": ["auth", "errors", "retries", "operations", "sse", "socket"] },
     "summary": { "type": "string" },
-    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py"] }, "description": "Languages that do not pass yet; each needs an issue link in `notes`." },
+    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp"] }, "description": "Languages that do not pass yet; each needs an issue link in `notes`." },
     "notes": { "type": "string" },
     "client": {
       "type": "object",
@@ -27,7 +27,7 @@
       "required": ["op"],
       "additionalProperties": false,
       "properties": {
-        "op": { "enum": ["me", "accounts.get_me", "accounts.get_usage"] },
+        "op": { "enum": ["me", "accounts.get_me", "accounts.get_usage", "radar.get_digest", "events.create_endpoint", "events.delete_endpoint"] },
         "args": { "type": "object" },
         "repeat": { "type": "integer", "minimum": 1, "description": "Run the action this many times on one client." },
         "concurrent": { "type": "integer", "minimum": 1, "description": "Run the action this many times at once on one client." }

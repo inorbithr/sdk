@@ -18,6 +18,8 @@ grep -q '^go/'          <<<"$changed" && tasks+=("go:check")
 grep -q '^rust/'        <<<"$changed" && tasks+=("rust:check")
 grep -q '^typescript/'  <<<"$changed" && tasks+=("ts:check")
 grep -q '^python/'      <<<"$changed" && tasks+=("py:check")
+grep -q '^java/'        <<<"$changed" && tasks+=("java:check")
+grep -q '^csharp/'      <<<"$changed" && tasks+=("csharp:check")
 grep -q '^conformance/' <<<"$changed" && tasks+=("conformance:validate")
 grep -q '^\.github/'    <<<"$changed" && tasks+=("repo:check")
 [ ${#tasks[@]} -gt 0 ] || exit 0

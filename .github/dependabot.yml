@@ -43,3 +43,17 @@ updates:
     cooldown: { default-days: 7 }
     groups: { py: { patterns: ["*"] } }
     commit-message: { prefix: "build(py)" }
+
+  - package-ecosystem: maven
+    directory: /java
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { java: { patterns: ["*"] } }
+    commit-message: { prefix: "build(java)" }
+
+  - package-ecosystem: nuget
+    directory: /csharp
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups: { csharp: { patterns: ["*"] } }
+    commit-message: { prefix: "build(csharp)" }

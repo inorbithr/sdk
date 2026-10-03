@@ -371,3 +371,20 @@ func TestTheCaseListAndTheLoadedCaseServeTheDrivers(t *testing.T) {
 		t.Fatalf("client options are not handed back: %v", c["client"])
 	}
 }
+
+func TestThePathIsComparedAsSent(t *testing.T) {
+	ts := start(t)
+	load(t, ts, `{"name": "a-path-parameter-is-one-segment"}`)
+	_, _, _ = send(t, ts, Request{Method: "POST", Path: tokenPath})
+	// The decoded form names another route; only the encoded one matches.
+	_, _, _ = send(t, ts, Request{Method: "GET", Path: "/v1/radar/digests/a/b%20c"})
+	if res := result(t, ts); res.Status != "fail" {
+		t.Fatalf("a slash sent unencoded matched: %+v", res)
+	}
+	load(t, ts, `{"name": "a-path-parameter-is-one-segment"}`)
+	_, _, _ = send(t, ts, Request{Method: "POST", Path: tokenPath})
+	_, _, _ = send(t, ts, Request{Method: "GET", Path: "/v1/radar/digests/a%2Fb%20c"})
+	if res := result(t, ts); res.Status != "pass" {
+		t.Fatalf("%+v", res)
+	}
+}
