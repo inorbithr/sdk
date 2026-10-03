@@ -7,7 +7,7 @@
     reason = "test helpers fail the test by panicking"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 use base64::Engine as _;
@@ -33,6 +33,8 @@ fn platform() -> serde_json::Value {
     serde_json::json!({"os": os, "architecture": arch})
 }
 
+// Only the Unix-only `run` tests sign a request; on Windows this would be dead code.
+#[cfg(unix)]
 fn token(scopes: &[&str]) -> String {
     let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
     format!(
@@ -480,6 +482,7 @@ async fn a_private_registry_challenge_is_answered_with_the_configured_credential
 #[cfg(unix)]
 mod run {
     use std::os::unix::fs::PermissionsExt as _;
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
