@@ -15,6 +15,10 @@ node = "24.21.0"
 pnpm = "12.8.2"
 python = "3.14"
 uv = "0.12.21"
+java = "temurin-17.0.20+8"
+maven = "3.9.16"
+# The .NET 10 LTS SDK builds the net8.0 library (ADR 0013); .NET 8 itself ends in 2026-11.
+dotnet = "10.0.401"
 
 golangci-lint = "2.14.0"
 "go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen" = "2.8.0"
@@ -48,26 +52,26 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "cli:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "cli:check", "conformance", "examples:check"]
 
 [tasks.check]
 description = "Format check, lint, types and unit tests for every language and the command line"
-depends = ["go:check", "rust:check", "ts:check", "py:check", "cli:check"]
+depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "cli:check"]
 
 [tasks.fmt]
 description = "Format every language and the command line in place"
-depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt", "cli:fmt"]
+depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt", "java:fmt", "csharp:fmt", "cli:fmt"]
 
 [tasks.gen]
 description = "Regenerate every generated/ directory from spec/"
-depends = ["go:gen", "rust:gen", "ts:gen", "py:gen"]
+depends = ["go:gen", "rust:gen", "ts:gen", "py:gen", "java:gen", "csharp:gen"]
 
 [tasks."gen:check"]
 shell = "bash -e -o pipefail -c"
 description = "Fail if regenerating from spec/ changes any committed file"
 run = """
 mise run gen
-git diff --exit-code -- go rust typescript python || {
+git diff --exit-code -- go rust typescript python java csharp || {
   echo "generated code is stale: run 'mise run gen' and commit the result" >&2; exit 1; }
 """
 
@@ -528,9 +532,71 @@ uv run griffe check inorbithr --search src --against "$base"
 
 # ---------------------------------------------------------------- conformance and examples
 
+# -------------------------------------------------------------- java, csharp
+# Both runtimes arrive with RFC 0020's second plan (ADR 0013); until a manifest exists
+# each task says so and passes.
+
+[tasks."java:check"]
+shell = "bash -e -o pipefail -c"
+description = "Java: compile with warnings as errors, unit tests, the generated surface type-checked (mvn verify)"
+dir = "java"
+run = """
+[ -f pom.xml ] || { echo "java: no project yet, skipping"; exit 0; }
+mvn -B -q verify
+"""
+
+[tasks."java:fmt"]
+shell = "bash -e -o pipefail -c"
+dir = "java"
+run = "[ -f pom.xml ] || exit 0; mvn -B -q spotless:apply"
+
+[tasks."java:gen"]
+shell = "bash -e -o pipefail -c"
+description = "Java: regenerate the public surface from spec/openapi.json with `iohr sdk generate` (ADR 0011)"
+dir = "java"
+run = """
+[ -f pom.xml ] && [ -f ../spec/openapi.json ] || { echo "java:gen: no project yet, skipping"; exit 0; }
+cargo run -q --manifest-path ../cli/Cargo.toml -p iohr -- sdk generate --lang java --from public=../spec/openapi.json --in-package --out src/main/java/hr/inorbit/sdk/generated --force
+"""
+
+[tasks."csharp:check"]
+shell = "bash -e -o pipefail -c"
+description = "C#: format check, build with warnings as errors, unit tests"
+dir = "csharp"
+run = """
+ls *.sln* >/dev/null 2>&1 || { echo "csharp: no solution yet, skipping"; exit 0; }
+dotnet format --verify-no-changes
+dotnet build -warnaserror
+dotnet test --no-build
+"""
+
+[tasks."csharp:fmt"]
+shell = "bash -e -o pipefail -c"
+dir = "csharp"
+run = "ls *.sln* >/dev/null 2>&1 || exit 0; dotnet format"
+
+[tasks."csharp:gen"]
+shell = "bash -e -o pipefail -c"
+description = "C#: regenerate the public surface from spec/openapi.json with `iohr sdk generate` (ADR 0011)"
+dir = "csharp"
+run = """
+ls *.sln* >/dev/null 2>&1 && [ -f ../spec/openapi.json ] || { echo "csharp:gen: no solution yet, skipping"; exit 0; }
+cargo run -q --manifest-path ../cli/Cargo.toml -p iohr -- sdk generate --lang csharp --from public=../spec/openapi.json --in-package --out src/InOrbit.Sdk/Generated --force
+"""
+
+[tasks."conformance:java"]
+shell = "bash -e -o pipefail -c"
+depends = ["conformance:server:build"]
+run = "[ -f java/pom.xml ] || { echo 'conformance:java: skipping (no project yet)'; exit 0; }; cd java && IOHR_TEST_REQUIRE_REPLAY=1 mvn -B -q -Pconformance verify"
+
+[tasks."conformance:csharp"]
+shell = "bash -e -o pipefail -c"
+depends = ["conformance:server:build"]
+run = "ls csharp/*.sln* >/dev/null 2>&1 || { echo 'conformance:csharp: skipping (no solution yet)'; exit 0; }; cd csharp && IOHR_TEST_REQUIRE_REPLAY=1 dotnet test --filter Category=Conformance"
+
 [tasks.conformance]
 description = "Run the shared conformance cases in every language"
-depends = ["conformance:go", "conformance:rust", "conformance:ts", "conformance:py"]
+depends = ["conformance:go", "conformance:rust", "conformance:ts", "conformance:py", "conformance:java", "conformance:csharp"]
 
 [tasks."conformance:server"]
 shell = "bash -e -o pipefail -c"
@@ -562,6 +628,7 @@ run = "uv run --with pyyaml --with jsonschema python tools/validate-cases.py"
 
 [tasks."conformance:go"]
 shell = "bash -e -o pipefail -c"
+depends = ["conformance:server:build"]
 run = "[ -e conformance/server ] && [ -f go/go.mod ] || { echo 'conformance:go: skipping (no server or no module yet)'; exit 0; }; cd go && go test ./internal/conformance/..."
 
 [tasks."conformance:rust"]
@@ -572,10 +639,12 @@ run = "[ -f rust/Cargo.toml ] || { echo 'conformance:rust: skipping (no crate ye
 
 [tasks."conformance:ts"]
 shell = "bash -e -o pipefail -c"
+depends = ["conformance:server:build"]
 run = "[ -e conformance/server ] && [ -f typescript/package.json ] || { echo 'conformance:ts: skipping (no server or no package yet)'; exit 0; }; cd typescript && pnpm run conformance"
 
 [tasks."conformance:py"]
 shell = "bash -e -o pipefail -c"
+depends = ["conformance:server:build"]
 run = "[ -e conformance/server ] && [ -f python/pyproject.toml ] || { echo 'conformance:py: skipping (no server or no package yet)'; exit 0; }; cd python && uv run pytest tests/conformance"
 
 [tasks."examples:check"]

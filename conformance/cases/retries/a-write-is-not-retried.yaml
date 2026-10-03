@@ -1,0 +1,12 @@
+name: a-write-is-not-retried
+area: retries
+summary: A POST that answers 503 is not retried, because the API does not take an idempotency key; the body is sent as JSON.
+action: { op: events.create_endpoint, args: { account_id: acc_1, url: "https://example.com/hook", description: build hooks, event_types: [radar.digest.published] } }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: POST, path: /v1/webhooks/endpoints, json: { account_id: acc_1, url: "https://example.com/hook", event_types: [radar.digest.published] } }
+    response: { status: 503, json: { code: unavailable, error: try again } }
+expect:
+  error: { kind: api, code: unavailable, status: 503 }
+  attempts: 1

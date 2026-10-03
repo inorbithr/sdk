@@ -1,11 +1,11 @@
 ---
 name: parity
-description: Check that Go, Rust, TypeScript and Python expose the same operations, options, error codes and behaviour, and report every gap. Use before a release, after a multi-language change, or when asked whether the SDKs match.
+description: Check that TypeScript, Python, Go, Java, C# and Rust expose the same operations, options, error codes and behaviour, and report every gap. Use before a release, after a multi-language change, or when asked whether the SDKs match.
 context: fork
 agent: parity-checker
 ---
 
-Compare the four SDKs against `docs/design.md` and against each other.
+Compare the six SDKs against `docs/design.md` and against each other.
 
 Scope: $ARGUMENTS (if empty, the whole public surface).
 

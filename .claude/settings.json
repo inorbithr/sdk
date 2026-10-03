@@ -66,7 +66,10 @@
       "Bash(pnpm publish *)",
       "Bash(cargo publish *)",
       "Bash(uv publish *)",
-      "Bash(twine *)"
+      "Bash(twine *)",
+      "Bash(mvn deploy*)",
+      "Bash(mvn *:deploy*)",
+      "Bash(dotnet nuget push *)"
     ]
   },
   "enabledPlugins": {

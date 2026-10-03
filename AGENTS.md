@@ -11,7 +11,7 @@ agent and for people. Language-specific rules live in each language directory's 
 |---|---|
 | `spec/` | The contract, vendored from the platform: the public OpenAPI slice, the error envelope, the socket frames. Never hand-edited. |
 | `conformance/` | Language-neutral test cases (YAML) and the replay server every SDK is tested against. |
-| `go/`, `rust/`, `typescript/`, `python/` | One package each. `generated/` inside is codegen output; everything else is written by hand. |
+| `typescript/`, `python/`, `go/`, `java/`, `csharp/`, `rust/` | One package each: a hand-written runtime and the public surface `iohr sdk generate` writes into it (ADR 0011). |
 | `cli/` | The `iohr` command line: a Cargo workspace of its own (ADR 0009), with `cli/AGENTS.md`. |
 | `examples/<lang>/` | Small programs that compile in CI and are quoted by the READMEs. |
 | `docs/` | `design.md` (cross-language API rules), `adr/` (decisions), `releasing.md`, `style.md`. |
@@ -22,13 +22,13 @@ agent and for people. Language-specific rules live in each language directory's 
 1. **The platform defines the API; this repo follows it.** `spec/` is synced from the
    platform with `mise run spec:sync` and records the commit it came from in
    `spec/SOURCE`. A wrong spec is fixed upstream, then synced. Never patch `spec/` by hand.
-2. **`docs/design.md` defines how the SDKs look.** All four languages expose the same
+2. **`docs/design.md` defines how the SDKs look.** All six languages expose the same
    concepts with the same names, adjusted only for each language's idiom
    (`get_me` / `GetMe` / `getMe`). A difference between languages is a bug unless
    `design.md` lists it.
 3. **`conformance/cases/` defines behaviour.** Retries, token refresh, error mapping and
    streaming are specified as cases, and every SDK runs every case. A behaviour change is
-   a new or edited case first, then code in all four languages.
+   a new or edited case first, then code in every language.
 
 ## Commands
 
@@ -51,7 +51,7 @@ A task for a language whose package does not exist yet prints a skip line and ex
 
 - **No hand edits in `generated/` or `spec/`.** Change the generator config or the
   upstream contract, then regenerate.
-- **Every public change lands in all four languages in the same pull request**, with a
+- **Every public change lands in every language that has a runtime, in the same pull request**, with a
   conformance case and an example when behaviour or surface changes. If one language
   cannot follow yet, the PR says so and opens an issue labelled `parity`. The runtimes
   themselves arrive one language at a time (ADR 0011): a runtime ships when it passes
@@ -84,7 +84,8 @@ A task for a language whose package does not exist yet prints a skip line and ex
 
 - [Conventional Commits](https://www.conventionalcommits.org) with the language as scope:
   `feat(go): ...`, `fix(py): ...`, `docs: ...`, `ci: ...`, `spec: ...`. Scopes:
-  `go`, `rust`, `ts`, `py`, `cli`, `spec`, `conformance`, `examples`, `ci`, `docs`,
+  `go`, `rust`, `ts`, `py`, `java`, `csharp`, `cli`, `spec`, `conformance`, `examples`,
+  `ci`, `docs`,
   `repo`.
   Release notes and version bumps are generated from these.
 - One logical change per commit. A breaking change says `!` and has a `BREAKING CHANGE:`

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. This page covers setup, the rules that keep four SDKs in step, and
+Thanks for helping. This page covers setup, the rules that keep six SDKs in step, and
 how a change gets merged.
 
 ## Setup
@@ -14,8 +14,8 @@ A dev container (`.devcontainer/`) does the same for VS Code and Codespaces.
 
 ## The rules that matter
 
-- **One behaviour, four languages.** A public change lands in Go, Rust, TypeScript and
-  Python in the same pull request, with a [conformance case](conformance/). If you only
+- **One behaviour, six languages.** A public change lands in TypeScript, Python, Go,
+  Java, C# and Rust in the same pull request, with a [conformance case](conformance/). If you only
   know one of the languages, open the PR anyway and say so; a maintainer will finish
   the rest.
 - **The contract comes from the API.** `spec/` and every `generated/` directory are

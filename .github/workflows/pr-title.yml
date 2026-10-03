@@ -33,6 +33,8 @@ jobs:
             rust
             ts
             py
+            java
+            csharp
             cli
             spec
             conformance
