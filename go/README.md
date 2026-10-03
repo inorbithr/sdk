@@ -1,7 +1,10 @@
 # InOrbit SDK for Go
 
-Not released yet: nothing is published, and the module has no version tag. It is built
-and tested in the open; the first release is 0.1.0.
+Released since 0.1.0 (standard library only, Go 1.26 or later):
+
+```sh
+go get github.com/inorbithr/sdk/go@latest
+```
 
 ```go
 import (

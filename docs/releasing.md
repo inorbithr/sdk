@@ -7,7 +7,7 @@ A maintainer's job is to merge the release PR and approve the publish.
 
 The repository went public on 2026-10-01. These items waited for that.
 
-- [ ] JSR: link `inorbithr/sdk` on `@inorbithr/sdk` (Settings, GitHub repository). The
+- [x] JSR: link `inorbithr/sdk` on `@inorbithr/sdk` (Settings, GitHub repository). Done (checked 2026-10-03). The
       scope and package exist since 2026-10-01; the release job publishes to JSR only
       once the repository is public.
 - [x] Environments `release-npm`, `release-pypi`, `release-crates`, `release-go` (2026-10-03): add a required
@@ -17,7 +17,7 @@ The repository went public on 2026-10-01. These items waited for that.
       workflows run. Done 2026-10-01.
 - [ ] Check that `security.yml` (CodeQL, zizmor upload, dependency review) and
       `scorecard.yml` run; they skip themselves while the repository is private.
-- [ ] README: drop "design phase" once a release exists.
+- [x] README: drop "design phase" once a release exists. Done 2026-10-03.
 
 ## How a release happens
 
@@ -64,12 +64,25 @@ The repository went public on 2026-10-01. These items waited for that.
       environment `release-npm`), stage-only, and require 2FA with no bypass tokens.
       Done 2026-10-01.
 - [x] Create the three environments, deployable from `main` only (2026-10-01).
-- [ ] Add a required reviewer to each environment. GitHub allows required reviewers on a
-      private repository only on Enterprise; on the Team plan this waits until the
-      repository is public. Until then a publish starts as soon as release-please tags.
-- [ ] Create a GitHub App for release-please (contents and pull-requests write) and store
+- [x] Add a required reviewer to each environment (`release-crates`, `release-npm`,
+      `release-pypi`, `release-go`, `release-cli`, `release-nuget`): the maintainer, `main`
+      only. Done 2026-10-03.
+- [x] Create a GitHub App for release-please (contents and pull-requests write) and store
       `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`; the default token cannot trigger
-      the CI run a release PR needs.
+      the CI run a release PR needs. Done (`inorbithr-release`; the key is also an
+      organisation secret shared with inorbithr/dataplane).
+- [ ] C# on NuGet: the trusted-publishing policy (owner organisation InOrbit, repository
+      `inorbithr/sdk`, workflow `release.yml`, environment `release-nuget`), the `InOrbit.`
+      ID prefix (mail to account@nuget.org), then lift `IsPackable` and add the publish job.
+- [ ] Java on Maven Central: a Central user token and a dedicated signing key as secrets,
+      then the publish job. The namespace `hr.inorbit` is verified (2026-10-03).
+
+## A Rust release and the command line
+
+The command line depends on the `inorbithr` crate by path, and its `cli/Cargo.lock` pins
+the crate's version. A Rust release PR that changes the version leaves that lock behind,
+and `cli:check` (which builds with `--locked`) fails on it: add a `chore(cli)` commit to the
+release PR with `cargo update -p inorbithr --manifest-path cli/Cargo.toml`.
 - [x] Ruleset `main`: pull request with squash merge only, `ci-ok` required, resolved
       threads, linear history, no force push or deletion (2026-10-01). Required approvals
       are 0 while there is one maintainer.

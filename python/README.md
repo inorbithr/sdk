@@ -1,7 +1,11 @@
 # InOrbit SDK for Python
 
 The runtime for the InOrbit API, and its public surface, in a blocking and an `asyncio`
-form. Not released yet: nothing is on PyPI before the first release.
+form. On [PyPI](https://pypi.org/project/inorbithr/) since 0.1.0, for Python 3.11 or later:
+
+```sh
+pip install inorbithr     # or: uv add inorbithr
+```
 
 ```python
 from inorbithr import Public

@@ -7,18 +7,18 @@ The repository holds two things: the `iohr` command line, released as a pre-rele
 and six client libraries. Each library is a hand-written runtime plus an API surface that
 `iohr sdk generate` writes, cut to what your credentials may call
 ([ADR 0011](docs/adr/0011-runtime-and-surface.md)). The libraries pass the shared conformance
-suite and are not on their registries yet; they are published together at milestone M4.
-Status on 2026-10-03 (iohr 0.1.0-alpha.4 generates all six):
+suite. Rust, TypeScript, Python and Go are released; the C# and Java registry releases
+(NuGet, Maven Central) come later. Status on 2026-10-03 (iohr 0.1.0-alpha.4 generates all six):
 
 | Part | Package | Status |
 |---|---|---|
 | Command line | `iohr` (APT, Homebrew, installers) | **0.1.0-alpha.4, pre-release** |
-| Rust | [`inorbithr`](https://crates.io/crates/inorbithr), Rust 1.94 | built, not released |
-| TypeScript | [`@inorbithr/sdk`](https://www.npmjs.com/package/@inorbithr/sdk), Node 22.12, Bun, Deno, browsers | built, not released |
-| Go | `github.com/inorbithr/sdk/go`, Go 1.26 | built, not released |
-| Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | built, not released |
-| C# | `InOrbit.Sdk`, .NET 8 | built, not released |
-| Java | `hr.inorbit:inorbit-sdk`, Java 17 | built, not released |
+| Rust | [`inorbithr`](https://crates.io/crates/inorbithr), Rust 1.94 | **0.1.0** on crates.io |
+| TypeScript | [`@inorbithr/sdk`](https://www.npmjs.com/package/@inorbithr/sdk), Node 22.12, Bun, Deno, browsers | **0.1.0** on npm and JSR |
+| Go | [`github.com/inorbithr/sdk/go`](https://pkg.go.dev/github.com/inorbithr/sdk/go), Go 1.26 | **0.1.0** |
+| Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | **0.1.0** on PyPI |
+| C# | `InOrbit.Sdk`, .NET 8 | built; NuGet release planned |
+| Java | `hr.inorbit:inorbit-sdk`, Java 17 | built; Maven Central release planned |
 
 The contract the libraries are built against is synced from the platform into
 [`spec/`](spec/), and the replay server in

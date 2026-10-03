@@ -6,12 +6,10 @@ the public one this crate ships with, or one `iohr sdk generate` writes into you
 repository with exactly the operations your credentials may call (platform RFC 0020,
 [ADR 0011](../docs/adr/0011-runtime-and-surface.md)).
 
-Not on crates.io yet (`publish = false` until the generated public surface lands and the
-first release is declared). Until then, use it by path:
+On [crates.io](https://crates.io/crates/inorbithr) since 0.1.0:
 
-```toml
-[dependencies]
-inorbithr = { git = "https://github.com/inorbithr/sdk", subdir = "rust" }
+```sh
+cargo add inorbithr
 ```
 
 Edition 2024, Rust 1.94 or later.

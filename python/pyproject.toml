@@ -4,15 +4,14 @@ version = "0.0.0"
 description = "The InOrbit API for Python: the runtime and the public surface, sync and async."
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "InOrbit d.o.o." }]
 requires-python = ">=3.11"
 # The runtime's only dependencies (python/AGENTS.md): an HTTP client and the models.
 dependencies = ["httpx>=0.28,<1", "pydantic>=2.10,<3"]
+keywords = ["inorbit", "api", "sdk", "client"]
 classifiers = [
-  # PyPI refuses any upload carrying this classifier: nothing is published before M4
-  # (docs/roadmap.md). The release that publishes removes it.
-  "Private :: Do Not Upload",
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
@@ -22,7 +21,10 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://docs.inorbit.hr"
+Documentation = "https://docs.inorbit.hr/docs/sdk/"
 Source = "https://github.com/inorbithr/sdk/tree/main/python"
+Issues = "https://github.com/inorbithr/sdk/issues"
+Changelog = "https://github.com/inorbithr/sdk/blob/main/python/CHANGELOG.md"
 
 [dependency-groups]
 dev = ["mypy>=1.15", "pyright>=1.1.400", "pytest>=8.3", "ruff>=0.11", "griffe>=1.5"]

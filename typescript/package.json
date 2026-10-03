@@ -1,8 +1,14 @@
 {
   "name": "@inorbithr/sdk",
   "version": "0.0.0",
-  "private": true,
   "description": "The InOrbit API client for TypeScript and JavaScript: one runtime, and the operations your credential may call.",
+  "keywords": [
+    "inorbit",
+    "api",
+    "sdk",
+    "client",
+    "typescript"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -10,6 +16,9 @@
     "directory": "typescript"
   },
   "homepage": "https://docs.inorbit.hr",
+  "bugs": {
+    "url": "https://github.com/inorbithr/sdk/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -19,7 +28,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.12"

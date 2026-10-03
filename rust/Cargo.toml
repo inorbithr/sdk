@@ -11,9 +11,6 @@ documentation = "https://docs.rs/inorbithr"
 readme = "README.md"
 keywords = ["inorbit", "api", "sdk", "client"]
 categories = ["api-bindings", "web-programming::http-client"]
-# Not published until the generated public surface lands and M4 declares the crate
-# ready (ADR 0011). The crates.io publish job also waits for a maintainer's approval.
-publish = false
 
 [features]
 default = ["rustls"]
