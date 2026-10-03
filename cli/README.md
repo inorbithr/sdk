@@ -106,3 +106,6 @@ Each runtime dependency, and why (SR-20):
 | etcetera | The platform's config directory |
 | base64, sha2 | Reading a token's claims to name its account; the PKCE S256 challenge |
 | getrandom | Request ids and retry jitter |
+| typify, schemars, syn, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and prettyplease print them) |
+| minijinja | The templates the generated surface's operations, profiles and markers are rendered from, embedded in the binary |
+| heck | Case changes for generated names (`AcmeCi`, `get_me`) |

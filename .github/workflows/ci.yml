@@ -257,6 +257,9 @@ jobs:
       - run: rustup component add rustfmt clippy
       - run: mise run cli:check
       - run: mise run cli:audit
+      # A generated surface builds against rust/ and the wrong profile is refused.
+      - if: runner.os == 'Linux' && matrix.rust != '1.94'
+        run: mise run cli:compile-test
       - if: runner.os == 'Linux' && matrix.rust != '1.94'
         run: mise run cli:installers
       # A Secret Service for the Linux credential-store test; packages from the runner image's archive.

@@ -6,7 +6,8 @@ exchanges:
   - request: { method: POST, path: /oauth2/token }
     response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
   - request: { method: GET, path: /v1/accounts/orgs/org_1/usage, query: { from: "2026-09-01", to: "2026-09-30" } }
-    response: { status: 200, json: {} }
+    response: { status: 200, json: { plan: free, rows: [ { day: "2026-09-01", service: radar, metric: calls, amount: "12" } ] } }
 expect:
+  ok: { plan: free }
   attempts: 1
-notes: The response body is filled in at the first spec sync; the case checks the request shape until then.
+notes: The body is a GetUsageResponse as the synced contract (spec/openapi.json) shapes it; a typed SDK must read it.

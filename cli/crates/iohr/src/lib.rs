@@ -14,6 +14,7 @@ mod browser;
 mod commands;
 mod context;
 mod error;
+mod lock;
 mod output;
 
 pub use args::refuse_secrets_in_args;

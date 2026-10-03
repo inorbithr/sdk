@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/iohr", "crates/iohr-auth"]
+members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/iohr-codegen"]
 # Built with nightly by `mise run cli:fuzz`.
 exclude = ["fuzz"]
 
@@ -15,13 +15,21 @@ publish = false
 
 [workspace.dependencies]
 iohr-auth = { path = "crates/iohr-auth" }
+iohr-codegen = { path = "crates/iohr-codegen" }
+iohr-openapi = { path = "crates/iohr-openapi" }
 
 base64 = "0.23"
 clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4.6"
 etcetera = "0.11"
 getrandom = "0.4"
+heck = "0.5"
 keyring-core = "1"
+minijinja = "2"
+prettyplease = "0.3"
+schemars = "0.8"
+syn = { version = "3", features = ["full"] }
+typify = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "query", "form", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"

@@ -1,0 +1,94 @@
+//! The operations, grouped by area. [`Surface`] is implemented for `Client<P>` for the
+//! profiles of this surface; each operation is callable only where its marker in
+//! [`ops`](super::ops) is implemented.
+
+use std::future::Future;
+
+use {{ runtime }}::__codegen::path_segment;
+use {{ runtime }}::{Client, Error, Method, Operation, Profile, Response};
+
+use super::models::*;
+use super::ops;
+
+{%- macro signature(op) -%}
+(&self{% for a in op.path_args %}, {{ a }}: &str{% endfor %}{% if op.params_type %}, params: &{{ op.params_type }}{% endif %}{% if op.body_type %}, body: &{{ op.body_type }}{% endif %})
+{%- endmacro -%}
+
+{%- macro build(op) -%}
+Operation::new(Method::{{ op.method }}, {% if op.path_literal %}"{{ op.path_literal }}"{% else %}format!("{{ op.path_format }}"{% for a in op.path_args %}, path_segment({{ a }}){% endfor %}){% endif %})
+    .named("{{ op.hook_name }}")
+    .scopes(&[{% for s in op.scopes %}"{{ s }}", {% endfor %}])
+    {%- if op.idempotent %}
+    .idempotent(true)
+    {%- endif %}
+    {%- for q in op.query %}
+    {%- if q.is_vec %}
+    .query_each("{{ q.name }}", params.{{ q.field }}.iter().flatten().map(ToString::to_string))
+    {%- else %}
+    .query_opt("{{ q.name }}", params.{{ q.field }}.as_ref().map(ToString::to_string))
+    {%- endif %}
+    {%- endfor %}
+    {%- if op.body_type %}
+    .json(body)?
+    {%- endif %}
+{%- endmacro -%}
+
+/// The operations, as methods on [`Client`].
+pub trait Surface<P: Profile> {
+{% for h in handles %}
+    /// The `{{ h.tag }}` operations.
+    fn {{ h.method_name }}(&self) -> {{ h.type_name }}<'_, P>;
+{% endfor %}
+{% for op in flat %}
+    /// `{{ op.line }}`{% if op.scopes %}; needs scope{% if op.scopes|length > 1 %}s{% endif %} {% for s in op.scopes %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.
+    fn {{ op.name }}{{ signature(op) }} -> impl Future<Output = Result<Response<{{ op.response_type }}>, Error>> + Send
+    where
+        P: ops::{{ op.marker }};
+{% endfor %}
+}
+
+impl<P: Profile> Surface<P> for Client<P> {
+{% for h in handles %}
+    fn {{ h.method_name }}(&self) -> {{ h.type_name }}<'_, P> {
+        {{ h.type_name }}(self)
+    }
+{% endfor %}
+{% for op in flat %}
+    fn {{ op.name }}{{ signature(op) }} -> impl Future<Output = Result<Response<{{ op.response_type }}>, Error>> + Send
+    where
+        P: ops::{{ op.marker }},
+    {
+        async move {
+            let op = {{ build(op) }};
+            self.request(op).await
+        }
+    }
+{% endfor %}
+}
+
+{% for h in handles %}
+/// The `{{ h.tag }}` operations of a client.
+#[derive(Debug, Clone, Copy)]
+pub struct {{ h.type_name }}<'a, P: Profile>(&'a Client<P>);
+
+{% for op in h.ops %}
+impl<P: ops::{{ op.marker }}> {{ h.type_name }}<'_, P> {
+    /// `{{ op.line }}`{% if op.scopes %}; needs scope{% if op.scopes|length > 1 %}s{% endif %} {% for s in op.scopes %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.
+    pub async fn {{ op.name }}{{ signature(op) }} -> Result<Response<{{ op.response_type }}>, Error> {
+        let op = {{ build(op) }};
+        self.0.request(op).await
+    }
+}
+{% endfor %}
+{% endfor %}
+
+{% for s in params_structs %}
+/// The query parameters of `{{ s.op_line }}`; every field is optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct {{ s.type_name }} {
+{% for f in s.fields %}
+    {% if f.doc %}/// {{ f.doc }}{% else %}/// `{{ f.name }}`{% endif %}
+    pub {{ f.field }}: ::std::option::Option<{{ f.ty }}>,
+{% endfor %}
+}
+{% endfor %}

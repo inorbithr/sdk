@@ -236,9 +236,9 @@ dir = "rust"
 run = """
 [ -f Cargo.toml ] || { echo "rust: no crate yet, skipping"; exit 0; }
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo nextest run --all-features
-cargo test --doc --all-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo nextest run --locked --all-features
+cargo test --locked --doc --all-features
 cargo deny check
 """
 
@@ -340,6 +340,26 @@ IOHR_TEST_REQUIRE_HYDRA=1 IOHR_TEST_HYDRA="$public" IOHR_TEST_HYDRA_ADMIN="$admi
   cargo nextest run --locked -p iohr-auth -E 'binary(hydra)'
 """
 
+[tasks."cli:compile-test"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: generate a two-profile surface, build it against rust/, and prove the wrong profile does not compile (slow; CI runs it on Linux)"
+dir = "cli"
+run = "IOHR_TEST_COMPILE=1 cargo nextest run --locked -p iohr-codegen --test compile"
+
+[tasks."cli:normalise-golden"]
+shell = "bash -e -o pipefail -c"
+description = "Regenerate the normaliser's golden fixture pair from the fixture's raw document with tools/spec-sync.py, so the Rust port stays byte-equal to the sync tool"
+run = """
+fixtures=cli/crates/iohr-openapi/tests/fixtures/normalise
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/tools" "$tmp/spec"
+cp tools/spec-sync.py "$tmp/tools/"
+uv run --script "$tmp/tools/spec-sync.py" "$fixtures/raw-public.json" >/dev/null
+cp "$tmp/spec/openapi.json" "$fixtures/expected-openapi.json"
+cp "$tmp/spec/problem.json" "$fixtures/expected-problem.json"
+echo "cli:normalise-golden: fixtures regenerated from $fixtures/raw-public.json"
+"""
+
 [tasks."cli:fuzz"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: fuzz the config, error, token and loopback request readers (nightly; FUZZ_SECONDS each, default 60)"
@@ -368,7 +388,7 @@ for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-
   cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --target "$target" --override-filename "iohr-$version-$target.cdx"
   mv "crates/iohr/iohr-$version-$target.cdx.json" ../dist/cli/
   # cargo-cyclonedx writes one for every workspace member; only the binary's is released.
-  rm -f crates/iohr-auth/*.cdx.json
+  rm -f crates/iohr-auth/*.cdx.json crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json
   cyclonedx validate --input-file "../dist/cli/iohr-$version-$target.cdx.json" --input-format json --fail-on-errors
 done
 """
@@ -446,7 +466,7 @@ run = "bash cli/release/winget.sh"
 [tasks."cli:sbom"]
 dir = "cli"
 shell = "bash -e -o pipefail -c"
-run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --override-filename cli.cdx && mv crates/iohr/cli.cdx.json ../dist/sbom/ && rm -f crates/iohr-auth/*.cdx.json"
+run = "mkdir -p ../dist/sbom && cargo cyclonedx --format json --manifest-path crates/iohr/Cargo.toml --override-filename cli.cdx && mv crates/iohr/cli.cdx.json ../dist/sbom/ && rm -f crates/iohr-auth/*.cdx.json crates/iohr-openapi/*.cdx.json crates/iohr-codegen/*.cdx.json"
 
 # ---------------------------------------------------------------- TypeScript
 
