@@ -30,13 +30,15 @@ async fn main() -> Result<(), Error> {
     let result: Result<inorbithr::Response<serde_json::Value>, Error> = client
         .request(Operation::new(Method::Get, "/v1/accounts/me"))
         .await;
+    // Nothing read from the token file reaches the output: what is printed is what the
+    // outcome means, not what came back.
     match result {
-        Ok(account) => println!("account {}", account.value["account"]["id"]),
+        Ok(_) => println!("the token works: account:read is granted"),
         Err(Error::Api(e)) if e.code == Code::Forbidden => {
-            println!("the token holds no account:read scope: {}", e.message);
+            println!("the token holds no account:read scope");
         }
         Err(Error::Api(e)) if e.code == Code::RateLimited => {
-            println!("slow down for {} s", e.retry_after_seconds().unwrap_or(1));
+            println!("rate limited; try again shortly");
         }
         Err(e) => return Err(e),
     }
