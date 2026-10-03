@@ -337,7 +337,7 @@ impl Target for GoTarget {
         );
         files.insert(
             "internal/ops/ops.go",
-            format!("{header}{}", render_ops(&ops, &nilable, &layout)),
+            format!("{header}{}", render_ops(&ops, &layout)),
         );
         for p in &surface.profiles {
             let (dir, name) = if layout.in_package {
@@ -432,7 +432,6 @@ fn go_type(ty: &Type, q: &str, uses: &mut Uses) -> String {
 /// Whether a value of `ty` can already be nil.
 fn is_nilable(ty: &Type, nilable: &BTreeSet<String>) -> bool {
     match ty {
-        Type::Array { .. } | Type::Map { .. } => true,
         Type::Ref { name } => nilable.contains(name),
         Type::Int64
         | Type::Integer { .. }
@@ -470,81 +469,8 @@ fn render_models(
     let mut uses = Uses::default();
     let mut body = String::new();
     for m in models.iter().filter(|m| !m.runtime) {
-        let name = GoNaming.type_name(&m.name);
         body.push('\n');
-        match &m.shape {
-            Shape::Object { fields } => {
-                let doc = if m.doc.is_empty() {
-                    format!("// {name} is the API's {} model.\n", m.name)
-                } else {
-                    doc_for(&name, &m.doc, "")
-                };
-                body.push_str(&doc);
-                if fields.is_empty() {
-                    let _ = writeln!(body, "type {name} struct{{}}");
-                    continue;
-                }
-                let _ = writeln!(body, "type {name} struct {{");
-                let names = field_names(fields.iter().map(|f| f.name.as_str()));
-                for (i, (f, go_name)) in fields.iter().zip(&names).enumerate() {
-                    if i > 0 {
-                        body.push('\n');
-                    }
-                    let mut ty = go_type(&f.ty, "", &mut uses);
-                    if (!f.required || f.nullable) && !is_nilable(&f.ty, nilable) {
-                        ty.insert(0, '*');
-                    }
-                    let omit = if f.required { "" } else { ",omitempty" };
-                    let doc = comment_text(&f.doc);
-                    if !doc.is_empty() {
-                        let _ = writeln!(body, "\t// {doc}");
-                    }
-                    let _ = writeln!(body, "\t{go_name} {ty} `json:\"{}{omit}\"`", f.name);
-                }
-                body.push_str("}\n");
-            }
-            Shape::Enum { values } => {
-                body.push_str(&if m.doc.is_empty() {
-                    format!("// {name} is one of a fixed set of values.\n")
-                } else {
-                    doc_for(&name, &m.doc, "")
-                });
-                let _ = writeln!(body, "type {name} string");
-                let mut used = BTreeSet::new();
-                for v in values {
-                    let mut c = format!("{name}{}", exported(v));
-                    if !used.insert(c.clone()) {
-                        c = format!("{c}{}", used.len());
-                        used.insert(c.clone());
-                    }
-                    let _ = write!(
-                        body,
-                        "\n// {c} is {name} {v:?}.\nconst {c} {name} = {v:?}\n"
-                    );
-                }
-            }
-            Shape::Union { variants, .. } => {
-                let names: Vec<String> = variants
-                    .iter()
-                    .map(|v| go_type(v, "", &mut Uses::default()))
-                    .collect();
-                let _ = writeln!(
-                    body,
-                    "// {name} is one of {}, as the API sent it; unmarshal it into the one its fields name.",
-                    names.join(", ")
-                );
-                uses.json = true;
-                let _ = writeln!(body, "type {name} = json.RawMessage");
-            }
-            Shape::Alias { ty } => {
-                body.push_str(&if m.doc.is_empty() {
-                    format!("// {name} is another name for its type.\n")
-                } else {
-                    doc_for(&name, &m.doc, "")
-                });
-                let _ = writeln!(body, "type {name} = {}", go_type(ty, "", &mut uses));
-            }
-        }
+        body.push_str(&model_decl(m, nilable, &mut uses));
     }
     for op in ops {
         if let Some(t) = &op.params_type {
@@ -564,6 +490,83 @@ fn render_models(
         imports.render(),
         body.trim_start_matches('\n')
     )
+}
+
+/// A model's doc comment: its description, or `fallback` when it has none.
+fn model_doc(name: &str, m: &Model, fallback: &str) -> String {
+    if m.doc.is_empty() {
+        format!("// {name} {fallback}\n")
+    } else {
+        doc_for(name, &m.doc, "")
+    }
+}
+
+/// One model's declaration.
+fn model_decl(m: &Model, nilable: &BTreeSet<String>, uses: &mut Uses) -> String {
+    let name = GoNaming.type_name(&m.name);
+    let mut out = String::new();
+    match &m.shape {
+        Shape::Object { fields } => {
+            out.push_str(&model_doc(
+                &name,
+                m,
+                &format!("is the API's {} model.", m.name),
+            ));
+            if fields.is_empty() {
+                let _ = writeln!(out, "type {name} struct{{}}");
+                return out;
+            }
+            let _ = writeln!(out, "type {name} struct {{");
+            let names = field_names(fields.iter().map(|f| f.name.as_str()));
+            for (i, (f, go_name)) in fields.iter().zip(&names).enumerate() {
+                if i > 0 {
+                    out.push('\n');
+                }
+                let mut ty = go_type(&f.ty, "", uses);
+                if (!f.required || f.nullable) && !is_nilable(&f.ty, nilable) {
+                    ty.insert(0, '*');
+                }
+                let omit = if f.required { "" } else { ",omitempty" };
+                let doc = comment_text(&f.doc);
+                if !doc.is_empty() {
+                    let _ = writeln!(out, "\t// {doc}");
+                }
+                let _ = writeln!(out, "\t{go_name} {ty} `json:\"{}{omit}\"`", f.name);
+            }
+            out.push_str("}\n");
+        }
+        Shape::Enum { values } => {
+            out.push_str(&model_doc(&name, m, "is one of a fixed set of values."));
+            let _ = writeln!(out, "type {name} string");
+            let mut consts = BTreeSet::new();
+            for v in values {
+                let mut c = format!("{name}{}", exported(v));
+                if !consts.insert(c.clone()) {
+                    c = format!("{c}{}", consts.len());
+                    consts.insert(c.clone());
+                }
+                let _ = write!(out, "\n// {c} is {name} {v:?}.\nconst {c} {name} = {v:?}\n");
+            }
+        }
+        Shape::Union { variants, .. } => {
+            let names: Vec<String> = variants
+                .iter()
+                .map(|v| go_type(v, "", &mut Uses::default()))
+                .collect();
+            let _ = writeln!(
+                out,
+                "// {name} is one of {}, as the API sent it; unmarshal it into the one its fields name.",
+                names.join(", ")
+            );
+            uses.json = true;
+            let _ = writeln!(out, "type {name} = json.RawMessage");
+        }
+        Shape::Alias { ty } => {
+            out.push_str(&model_doc(&name, m, "is another name for its type."));
+            let _ = writeln!(out, "type {name} = {}", go_type(ty, "", uses));
+        }
+    }
+    out
 }
 
 /// The query parameters of one operation, as a struct: a required one is a value, an
@@ -644,15 +647,12 @@ fn arguments(op: &Op, uses: &mut Uses) -> (Vec<String>, Vec<String>) {
 }
 
 fn response_type(op: &Op, uses: &mut Uses) -> String {
-    match &op.response {
-        Some(r) => {
-            uses.models = true;
-            format!("models.{}", GoNaming.type_name(r))
-        }
-        None => {
-            uses.json = true;
-            "json.RawMessage".into()
-        }
+    if let Some(r) = &op.response {
+        uses.models = true;
+        format!("models.{}", GoNaming.type_name(r))
+    } else {
+        uses.json = true;
+        "json.RawMessage".into()
     }
 }
 
@@ -660,7 +660,6 @@ fn response_type(op: &Op, uses: &mut Uses) -> String {
 fn query_value(ty: &Type, expr: &str, strconv: &mut bool) -> String {
     match ty {
         Type::String | Type::Enum { .. } => expr.to_owned(),
-        Type::Ref { .. } => format!("string({expr})"),
         Type::Int64 => format!("{expr}.String()"),
         Type::Integer { .. } => {
             *strconv = true;
@@ -678,111 +677,34 @@ fn query_value(ty: &Type, expr: &str, strconv: &mut bool) -> String {
     }
 }
 
-fn render_ops(ops: &[Op], nilable: &BTreeSet<String>, layout: &Layout) -> String {
-    let _ = nilable;
-    let mut uses = Uses::default();
-    let mut strconv = false;
-    let mut segment = false;
-    let mut query = false;
+/// What the operations file needs imported, beyond `context` and the runtime.
+#[derive(Default)]
+struct OpsUses {
+    types: Uses,
+    strconv: bool,
+    codegen: bool,
+}
+
+fn render_ops(ops: &[Op], layout: &Layout) -> String {
+    let mut uses = OpsUses::default();
     let mut body = String::new();
     for op in ops {
-        let name = function_name(op);
-        let (decl, _) = arguments(op, &mut uses);
-        let response = response_type(op, &mut uses);
-        let mut sig = vec![
-            "ctx context.Context".to_owned(),
-            "c *inorbit.Client".to_owned(),
-        ];
-        sig.extend(decl);
         body.push('\n');
-        body.push_str(&op_doc(&name, op, ""));
-        let _ = writeln!(
-            body,
-            "func {name}({}) (*inorbit.Response[{response}], error) {{",
-            sig.join(", ")
-        );
-        let path: Vec<String> = op
-            .segments
-            .iter()
-            .map(|s| match s {
-                Segment::Literal { text } => format!("{text:?}"),
-                Segment::Param { name } => {
-                    segment = true;
-                    format!("codegen.PathSegment({})", unexported(name))
-                }
-            })
-            .collect();
-        let scopes: Vec<String> = op.scopes.iter().map(|s| format!("{s:?}")).collect();
-        let mut fields = vec![
-            format!("Name: {:?}", op.hook_name),
-            format!("Method: {:?}", op.method.as_str()),
-            format!("Path: {}", path.join(" + ")),
-        ];
-        if !scopes.is_empty() {
-            fields.push(format!("Scopes: []string{{{}}}", scopes.join(", ")));
-        }
-        // One line: gofmt aligns the keys of a literal spread over several lines.
-        let _ = writeln!(body, "\top := inorbit.Operation{{{}}}", fields.join(", "));
-        if op.idempotent_override {
-            body.push_str("\top.Idempotent = true\n");
-        }
-        if op.body.is_some() {
-            body.push_str("\top.Body = body\n");
-        }
-        if op.params_type.is_some() {
-            query = true;
-            let pointer = !op.query.iter().any(|q| q.required);
-            let indent = if pointer { "\t\t" } else { "\t" };
-            if pointer {
-                body.push_str("\tif params != nil {\n");
-            }
-            let _ = writeln!(body, "{indent}q := codegen.Query()");
-            let names = field_names(op.query.iter().map(|q| q.name.as_str()));
-            for (q, field) in op.query.iter().zip(&names) {
-                let access = format!("params.{field}");
-                match &q.ty {
-                    Type::Array { item } => {
-                        let v = query_value(item, "v", &mut strconv);
-                        let _ = writeln!(
-                            body,
-                            "{indent}for _, v := range {access} {{\n{indent}\tq.Add({:?}, {v})\n{indent}}}",
-                            q.name
-                        );
-                    }
-                    ty if !q.required => {
-                        let v = query_value(ty, &format!("*{access}"), &mut strconv);
-                        let _ = writeln!(
-                            body,
-                            "{indent}if {access} != nil {{\n{indent}\tq.Set({:?}, {v})\n{indent}}}",
-                            q.name
-                        );
-                    }
-                    ty => {
-                        let v = query_value(ty, &access, &mut strconv);
-                        let _ = writeln!(body, "{indent}q.Set({:?}, {v})", q.name);
-                    }
-                }
-            }
-            let _ = writeln!(body, "{indent}op.Query = q");
-            if pointer {
-                body.push_str("\t}\n");
-            }
-        }
-        let _ = writeln!(body, "\treturn inorbit.Call[{response}](ctx, c, op)\n}}");
+        body.push_str(&operation_function(op, &mut uses));
     }
     let mut imports = Imports::default();
     imports.std("context");
-    if uses.json {
+    if uses.types.json {
         imports.std("encoding/json");
     }
-    if strconv {
+    if uses.strconv {
         imports.std("strconv");
     }
     imports.other(&layout.runtime, Some("inorbit"));
-    if segment || query {
+    if uses.codegen {
         imports.other(&layout.codegen(), None);
     }
-    if uses.models {
+    if uses.types.models {
         imports.other(&layout.models(), None);
     }
     format!(
@@ -790,6 +712,134 @@ fn render_ops(ops: &[Op], nilable: &BTreeSet<String>, layout: &Layout) -> String
         imports.render(),
         body.trim_start_matches('\n')
     )
+}
+
+/// One operation as a function over the runtime's request path.
+fn operation_function(op: &Op, uses: &mut OpsUses) -> String {
+    let name = function_name(op);
+    let (decl, _) = arguments(op, &mut uses.types);
+    let response = response_type(op, &mut uses.types);
+    let mut sig = vec![
+        "ctx context.Context".to_owned(),
+        "c *inorbit.Client".to_owned(),
+    ];
+    sig.extend(decl);
+    let mut out = op_doc(&name, op, "");
+    let _ = writeln!(
+        out,
+        "func {name}({}) (*inorbit.Response[{response}], error) {{",
+        sig.join(", ")
+    );
+    let path: Vec<String> = op
+        .segments
+        .iter()
+        .map(|s| match s {
+            Segment::Literal { text } => format!("{text:?}"),
+            Segment::Param { name } => {
+                uses.codegen = true;
+                format!("codegen.PathSegment({})", unexported(name))
+            }
+        })
+        .collect();
+    let scopes: Vec<String> = op.scopes.iter().map(|s| format!("{s:?}")).collect();
+    let mut fields = vec![
+        format!("Name: {:?}", op.hook_name),
+        format!("Method: {:?}", op.method.as_str()),
+        format!("Path: {}", path.join(" + ")),
+    ];
+    if !scopes.is_empty() {
+        fields.push(format!("Scopes: []string{{{}}}", scopes.join(", ")));
+    }
+    // One line: gofmt aligns the keys of a literal spread over several lines.
+    let _ = writeln!(out, "\top := inorbit.Operation{{{}}}", fields.join(", "));
+    if op.idempotent_override {
+        out.push_str("\top.Idempotent = true\n");
+    }
+    if op.body.is_some() {
+        out.push_str("\top.Body = body\n");
+    }
+    if op.params_type.is_some() {
+        uses.codegen = true;
+        out.push_str(&query_block(op, &mut uses.strconv));
+    }
+    let _ = writeln!(out, "\treturn inorbit.Call[{response}](ctx, c, op)\n}}");
+    out
+}
+
+/// The statements that copy an operation's query parameters onto `op.Query`.
+fn query_block(op: &Op, strconv: &mut bool) -> String {
+    let mut out = String::new();
+    let pointer = !op.query.iter().any(|q| q.required);
+    let indent = if pointer { "\t\t" } else { "\t" };
+    if pointer {
+        out.push_str("\tif params != nil {\n");
+    }
+    let _ = writeln!(out, "{indent}q := codegen.Query()");
+    let names = field_names(op.query.iter().map(|q| q.name.as_str()));
+    for (q, field) in op.query.iter().zip(&names) {
+        let access = format!("params.{field}");
+        match &q.ty {
+            Type::Array { item } => {
+                let v = query_value(item, "v", strconv);
+                let _ = writeln!(
+                    out,
+                    "{indent}for _, v := range {access} {{\n{indent}\tq.Add({:?}, {v})\n{indent}}}",
+                    q.name
+                );
+            }
+            ty if !q.required => {
+                let v = query_value(ty, &format!("*{access}"), strconv);
+                let _ = writeln!(
+                    out,
+                    "{indent}if {access} != nil {{\n{indent}\tq.Set({:?}, {v})\n{indent}}}",
+                    q.name
+                );
+            }
+            ty => {
+                let v = query_value(ty, &access, strconv);
+                let _ = writeln!(out, "{indent}q.Set({:?}, {v})", q.name);
+            }
+        }
+    }
+    let _ = writeln!(out, "{indent}op.Query = q");
+    if pointer {
+        out.push_str("\t}\n");
+    }
+    out
+}
+
+/// The accessor method and the type of each tag's handle, by tag, checked against the
+/// flat methods: one profile's client cannot have two members of one name.
+fn member_names(
+    handles: &[(&context::Handle, Vec<&Op>)],
+    flat: &[&Op],
+) -> Result<BTreeMap<String, (String, String)>, RenderError> {
+    let mut taken: BTreeSet<String> = ["Runtime".to_owned()].into();
+    let mut handle_types = BTreeMap::new();
+    for (h, _) in handles {
+        let accessor = GoNaming.type_name(&h.tag);
+        let mut ty = accessor.clone();
+        if ty == "Client" || ty == "Profile" {
+            ty.push_str("Ops");
+        }
+        if !taken.insert(accessor.clone()) {
+            return Err(RenderError::Models(format!(
+                "the tag {} would be the method {accessor} twice",
+                h.tag
+            )));
+        }
+        handle_types.insert(h.tag.clone(), (accessor, ty));
+    }
+    for op in flat {
+        let m = GoNaming.method_name(&op.name);
+        if !taken.insert(m.clone()) {
+            return Err(RenderError::Models(format!(
+                "the operation {} would be the method {m}, which another name already is",
+                op.line
+            )));
+        }
+    }
+    Ok(handle_types)
 }
 
 /// One profile's package: its client, the handles, and the methods its cut holds.
@@ -817,31 +867,7 @@ fn render_profile(
         .iter()
         .filter(|o| o.profiles.contains(&p.name))
         .collect();
-    let mut taken: BTreeSet<String> = ["Runtime".to_owned()].into();
-    let mut handle_types = BTreeMap::new();
-    for (h, _) in &handles {
-        let accessor = GoNaming.type_name(&h.tag);
-        let mut ty = accessor.clone();
-        if ty == "Client" || ty == "Profile" {
-            ty.push_str("Ops");
-        }
-        if !taken.insert(accessor.clone()) {
-            return Err(RenderError::Models(format!(
-                "the tag {} would be the method {accessor} twice",
-                h.tag
-            )));
-        }
-        handle_types.insert(h.tag.clone(), (accessor, ty));
-    }
-    for op in &flat {
-        let m = GoNaming.method_name(&op.name);
-        if !taken.insert(m.clone()) {
-            return Err(RenderError::Models(format!(
-                "the operation {} would be the method {m}, which another name already is",
-                op.line
-            )));
-        }
-    }
+    let handle_types = member_names(&handles, &flat)?;
     let mut uses = Uses::default();
     let mut body = String::new();
     let env_doc = if p.is_public {
