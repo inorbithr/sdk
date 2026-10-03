@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -18,15 +19,21 @@ import (
 type Case struct {
 	Name      string     `yaml:"name" json:"name"`
 	Area      string     `yaml:"area" json:"area"`
+	Summary   string     `yaml:"summary" json:"summary,omitempty"`
+	Pending   []string   `yaml:"pending" json:"pending,omitempty"`
 	Action    Action     `yaml:"action" json:"action"`
+	Client    any        `yaml:"client" json:"client,omitempty"`
 	Exchanges []Exchange `yaml:"exchanges" json:"exchanges"`
+	Expect    any        `yaml:"expect" json:"expect,omitempty"`
 }
 
 // Action is what the driver calls; the server reads only how many calls run at once.
+// The rest (`args`) is handed back to the driver with the loaded case.
 type Action struct {
 	Op         string `yaml:"op" json:"op"`
-	Repeat     int    `yaml:"repeat" json:"repeat"`
-	Concurrent int    `yaml:"concurrent" json:"concurrent"`
+	Args       any    `yaml:"args" json:"args,omitempty"`
+	Repeat     int    `yaml:"repeat" json:"repeat,omitempty"`
+	Concurrent int    `yaml:"concurrent" json:"concurrent,omitempty"`
 }
 
 // Exchange is one request the SDK must make and the answer it gets.
@@ -109,6 +116,17 @@ func parseCase(data []byte) (*Case, error) {
 	if len(c.Exchanges) == 0 {
 		return nil, fmt.Errorf("case %q has no exchanges", c.Name)
 	}
+	// The parts only the drivers read are handed back as JSON shapes too.
+	var err error
+	if c.Client, err = asJSON(c.Client); err != nil {
+		return nil, fmt.Errorf("case %q client: %w", c.Name, err)
+	}
+	if c.Expect, err = asJSON(c.Expect); err != nil {
+		return nil, fmt.Errorf("case %q expect: %w", c.Name, err)
+	}
+	if c.Action.Args, err = asJSON(c.Action.Args); err != nil {
+		return nil, fmt.Errorf("case %q action.args: %w", c.Name, err)
+	}
 	for i := range c.Exchanges {
 		ex := &c.Exchanges[i]
 		if ex.Request.Method == "" || !strings.HasPrefix(ex.Request.Path, "/") {
@@ -121,7 +139,6 @@ func parseCase(data []byte) (*Case, error) {
 			return nil, fmt.Errorf("case %q exchange %d: chunked.bytes must be at least 1", c.Name, i)
 		}
 		// YAML maps and numbers become their JSON forms, so bodies compare like JSON.
-		var err error
 		if ex.Request.JSON, err = asJSON(ex.Request.JSON); err != nil {
 			return nil, fmt.Errorf("case %q exchange %d request: %w", c.Name, i, err)
 		}
@@ -145,4 +162,23 @@ func asJSON(v any) (any, error) {
 	var out any
 	err = json.Unmarshal(data, &out)
 	return out, err
+}
+
+// listCases names every case under dir as "area/name", sorted, so a driver needs no
+// YAML reader of its own: it lists, loads each by name and reads the case back as JSON.
+func listCases(dir string) ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "*", "*.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		rel, err := filepath.Rel(dir, m)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, strings.TrimSuffix(filepath.ToSlash(rel), ".yaml"))
+	}
+	sort.Strings(names)
+	return names, nil
 }

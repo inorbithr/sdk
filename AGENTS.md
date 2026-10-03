@@ -53,7 +53,9 @@ A task for a language whose package does not exist yet prints a skip line and ex
   upstream contract, then regenerate.
 - **Every public change lands in all four languages in the same pull request**, with a
   conformance case and an example when behaviour or surface changes. If one language
-  cannot follow yet, the PR says so and opens an issue labelled `parity`.
+  cannot follow yet, the PR says so and opens an issue labelled `parity`. The runtimes
+  themselves arrive one language at a time (ADR 0011): a runtime ships when it passes
+  every case, and a case a runtime does not pass yet is `pending` for it, never weakened.
 - **Wire names are the API's names.** JSON is snake_case on the wire in every language;
   64-bit integers travel as strings; timestamps are RFC 3339 strings. Each SDK converts at
   its boundary and nowhere else.

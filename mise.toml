@@ -249,8 +249,15 @@ run = "[ -f Cargo.toml ] || exit 0; cargo fmt"
 
 [tasks."rust:gen"]
 shell = "bash -e -o pipefail -c"
+description = "Rust: regenerate the public surface in rust/src/generated/ from spec/openapi.json with the command line's generator (ADR 0011)"
 dir = "rust"
-run = "[ -f Cargo.toml ] && [ -f ../spec/openapi.json ] || exit 0; cargo run -q -p xtask -- gen"
+run = """
+[ -f Cargo.toml ] && [ -f ../spec/openapi.json ] || exit 0
+# The generator is `iohr sdk generate`, in cli/ (iohr-codegen); until it lands there is
+# nothing to regenerate and the task says so.
+grep -q 'name = "iohr-codegen"' ../cli/crates/iohr-codegen/Cargo.toml 2>/dev/null || { echo "rust:gen: the generator (cli/crates/iohr-codegen) is not here yet; nothing to regenerate"; exit 0; }
+cargo run -q --manifest-path ../cli/Cargo.toml -p iohr -- sdk generate --lang rust --from public=../spec/openapi.json --in-crate --out src/generated --force
+"""
 
 [tasks."rust:features"]
 shell = "bash -e -o pipefail -c"
@@ -539,7 +546,9 @@ run = "[ -e conformance/server ] && [ -f go/go.mod ] || { echo 'conformance:go: 
 
 [tasks."conformance:rust"]
 shell = "bash -e -o pipefail -c"
-run = "[ -e conformance/server ] && [ -f rust/Cargo.toml ] || { echo 'conformance:rust: skipping (no server or no crate yet)'; exit 0; }; cd rust && cargo nextest run --test conformance"
+description = "Rust: run every conformance case against the replay server (built first)"
+depends = ["conformance:server:build"]
+run = "[ -f rust/Cargo.toml ] || { echo 'conformance:rust: skipping (no crate yet)'; exit 0; }; cd rust && IOHR_TEST_REQUIRE_REPLAY=1 cargo nextest run --all-features --test conformance"
 
 [tasks."conformance:ts"]
 shell = "bash -e -o pipefail -c"

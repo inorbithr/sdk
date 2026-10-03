@@ -1,0 +1,64 @@
+[package]
+name = "inorbithr"
+version = "0.1.0"
+description = "The InOrbit API client for Rust: the runtime every generated SDK surface runs on."
+edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+repository = "https://github.com/inorbithr/sdk"
+homepage = "https://docs.inorbit.hr"
+documentation = "https://docs.rs/inorbithr"
+readme = "README.md"
+keywords = ["inorbit", "api", "sdk", "client"]
+categories = ["api-bindings", "web-programming::http-client"]
+# Not published until the generated public surface lands and M4 declares the crate
+# ready (ADR 0011). The crates.io publish job also waits for a maintainer's approval.
+publish = false
+
+[features]
+default = ["rustls"]
+# TLS through rustls with the platform's trust roots. Without it the crate builds, but
+# a client can only call plain-HTTP loopback addresses (tests, local stacks).
+rustls = ["reqwest/rustls"]
+
+[dependencies]
+# HTTP; TLS is chosen by the features above, so no TLS backend is a hard dependency.
+reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "query", "form", "system-proxy"] }
+# Wire format.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Typed errors.
+thiserror = "2"
+# The runtime: timers for backoff and the single-flight token exchange.
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+# URL checks and joins (SR-07).
+url = "2"
+# RFC 3339 timestamps in models.
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+# Random request ids and retry jitter.
+getrandom = "0.4"
+# Secrets are zeroed on drop (SR-11).
+zeroize = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
+wiremock = "0.6"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+todo = "warn"
+unimplemented = "warn"
+
+[package.metadata.docs.rs]
+all-features = false

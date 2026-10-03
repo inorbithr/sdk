@@ -85,6 +85,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.loadHandler(w, r)
 	case "/_result":
 		s.resultHandler(w, r)
+	case "/_cases":
+		s.listHandler(w, r)
 	default:
 		if strings.HasPrefix(r.URL.Path, "/_") {
 			writeJSON(w, http.StatusNotFound, problem("not_found", "no such control route: "+r.URL.Path))
@@ -136,7 +138,23 @@ func (s *Server) loadHandler(w http.ResponseWriter, r *http.Request) {
 	s.last = s.now()
 	s.fail = nil
 	s.tokens, s.calls = 0, 0
-	writeJSON(w, http.StatusOK, map[string]any{"loaded": c.Name, "exchanges": len(c.Exchanges)})
+	// The loaded case goes back as JSON, so a driver reads client, action and expect
+	// from here instead of parsing YAML itself.
+	writeJSON(w, http.StatusOK, map[string]any{"loaded": c.Name, "exchanges": len(c.Exchanges), "case": c})
+}
+
+// listHandler answers GET /_cases with every case name under the cases directory.
+func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, problem("method_not_allowed", "GET the case list"))
+		return
+	}
+	names, err := listCases(s.casesDir)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, problem("internal", err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cases": names})
 }
 
 func (s *Server) resultHandler(w http.ResponseWriter, r *http.Request) {

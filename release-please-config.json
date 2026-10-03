@@ -21,7 +21,14 @@
   ],
   "packages": {
     "go": { "release-type": "go", "component": "go", "package-name": "github.com/inorbithr/sdk/go" },
-    "rust": { "release-type": "rust", "component": "rust", "package-name": "inorbithr" },
+    "rust": {
+      "release-type": "rust",
+      "component": "rust",
+      "package-name": "inorbithr",
+      "extra-files": [
+        { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" }
+      ]
+    },
     "typescript": { "release-type": "node", "component": "typescript", "package-name": "@inorbithr/sdk" },
     "python": { "release-type": "python", "component": "python", "package-name": "inorbithr" },
     "cli": {

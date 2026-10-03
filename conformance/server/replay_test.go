@@ -337,3 +337,37 @@ func TestBadLoads(t *testing.T) {
 		t.Fatalf("request with no case: %d", resp.StatusCode)
 	}
 }
+
+func TestTheCaseListAndTheLoadedCaseServeTheDrivers(t *testing.T) {
+	ts := start(t)
+	resp, err := client.Get(ts.URL + "/_cases")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var listed struct {
+		Cases []string `json:"cases"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Cases) < 10 || listed.Cases[0] != "auth/concurrent-calls-share-one-exchange" {
+		t.Fatalf("cases: %v", listed.Cases)
+	}
+	// Every listed case loads, and the answer carries what a driver reads.
+	for _, name := range listed.Cases {
+		status, out := load(t, ts, `{"name": "`+name+`"}`)
+		if status != http.StatusOK {
+			t.Fatalf("%s: %d %v", name, status, out)
+		}
+		c, ok := out["case"].(map[string]any)
+		if !ok || c["expect"] == nil || c["action"] == nil {
+			t.Fatalf("%s: the loaded case is not handed back: %v", name, out)
+		}
+	}
+	_, out := load(t, ts, `{"name": "secret-never-in-message"}`)
+	c := out["case"].(map[string]any)
+	if c["client"].(map[string]any)["key_secret"] != "s3cr3t-do-not-print" {
+		t.Fatalf("client options are not handed back: %v", c["client"])
+	}
+}
