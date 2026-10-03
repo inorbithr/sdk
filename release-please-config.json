@@ -20,7 +20,7 @@
     { "type": "chore", "hidden": true }
   ],
   "packages": {
-    "go": { "release-type": "go", "component": "go", "package-name": "github.com/inorbithr/sdk/go" },
+    "go": { "release-type": "go", "component": "go", "package-name": "github.com/inorbithr/sdk/go", "initial-version": "0.1.0" },
     "rust": {
       "release-type": "rust",
       "component": "rust",
@@ -29,8 +29,8 @@
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" }
       ]
     },
-    "typescript": { "release-type": "node", "component": "typescript", "package-name": "@inorbithr/sdk" },
-    "python": { "release-type": "python", "component": "python", "package-name": "inorbithr" },
+    "typescript": { "release-type": "node", "component": "typescript", "package-name": "@inorbithr/sdk", "initial-version": "0.1.0" },
+    "python": { "release-type": "python", "component": "python", "package-name": "inorbithr", "initial-version": "0.1.0" },
     "cli": {
       "release-type": "simple",
       "component": "iohr",

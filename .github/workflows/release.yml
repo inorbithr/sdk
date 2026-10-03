@@ -67,6 +67,9 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.go == 'true'
     runs-on: ubuntu-latest
+    # A tag on the Go module proxy cannot be taken back: wait for a maintainer, as the
+    # other registries do.
+    environment: release-go
     permissions:
       contents: write
       id-token: write

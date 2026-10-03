@@ -10,7 +10,7 @@ The repository went public on 2026-10-01. These items waited for that.
 - [ ] JSR: link `inorbithr/sdk` on `@inorbithr/sdk` (Settings, GitHub repository). The
       scope and package exist since 2026-10-01; the release job publishes to JSR only
       once the repository is public.
-- [x] Environments `release-npm`, `release-pypi`, `release-crates`: add a required
+- [x] Environments `release-npm`, `release-pypi`, `release-crates`, `release-go` (2026-10-03): add a required
       reviewer (needs a public repository on the Team plan). Done 2026-10-01.
 - [x] Turn on private vulnerability reporting (Settings, Code security). Done 2026-10-01.
 - [x] Fork pull requests from any outside contributor wait for approval before their
@@ -33,7 +33,7 @@ The repository went public on 2026-10-01. These items waited for that.
 
 | Package | Tag | Publish job | Environment |
 |---|---|---|---|
-| Go | `go/vX.Y.Z` | warms `proxy.golang.org`, attests the source archive | none |
+| Go | `go/vX.Y.Z` | warms `proxy.golang.org`, attests the source archive | `release-go` |
 | Rust | `rust/vX.Y.Z` | `cargo publish` via `crates-io-auth-action` | `release-crates` |
 | TypeScript | `typescript/vX.Y.Z` | `npm stage publish` (provenance automatic), then a maintainer approves it; `jsr publish` | `release-npm` |
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
