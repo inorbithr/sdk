@@ -55,10 +55,12 @@ replay --addr 127.0.0.1:0 --cases conformance/cases
 
 A driver then:
 
-1. `POST /_case` with `{"name": "auth/token-is-cached"}` (or the bare name, or
-   `{"case": {...}}` for a case written inline). This starts a new session.
-2. Points `base_url` and `token_url` at the server and runs the case's action.
-3. `GET /_result`:
+1. `GET /_cases` lists every case as `area/name`, so a driver needs no YAML reader.
+2. `POST /_case` with `{"name": "auth/token-is-cached"}` (or the bare name, or
+   `{"case": {...}}` for a case written inline). This starts a new session, and the
+   answer carries the loaded case as JSON (`client`, `action`, `expect`, `pending`).
+3. Points `base_url` and `token_url` at the server and runs the case's action.
+4. `GET /_result`:
 
 ```json
 { "status": "pass", "case": "token-is-cached", "used": 4, "total": 4,

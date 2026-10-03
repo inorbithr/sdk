@@ -55,6 +55,8 @@ jobs:
               - *shared
               - 'rust/**'
               - 'examples/rust/**'
+              - 'cli/crates/iohr-openapi/**'
+              - 'cli/crates/iohr-codegen/**'
             ts:
               - *shared
               - 'typescript/**'
@@ -65,6 +67,7 @@ jobs:
               - 'examples/python/**'
             cli:
               - 'cli/**'
+              - 'spec/**'
               - 'mise.toml'
               - '.github/workflows/ci.yml'
 
@@ -143,10 +146,13 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
         with:
-          install_args: "rust cargo-binstall cargo:cargo-nextest cargo:cargo-semver-checks cargo:cargo-hack cargo-deny"
+          # go builds the conformance replay server the driver starts.
+          install_args: "rust cargo-binstall cargo:cargo-nextest cargo:cargo-semver-checks cargo:cargo-hack cargo-deny go"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
+      # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
+      - run: rustup component add rustfmt clippy
       - run: mise run rust:gen && git diff --exit-code -- rust
       - run: mise run rust:check
       - run: mise run rust:audit
