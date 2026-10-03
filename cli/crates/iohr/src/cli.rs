@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use iohr_auth::ProfileName;
 
-use crate::api::DEFAULT_BASE_URL;
+use inorbithr::DEFAULT_BASE_URL;
 
 /// The InOrbit command line.
 ///

@@ -33,8 +33,7 @@ impl Minter for ProfileMinter {
             .await
             .map_err(|e| MintError::Unavailable(e.to_string()))?;
         let bearer = s
-            .api
-            .credential()
+            .credential
             .bearer()
             .await
             .map_err(|e| MintError::Unavailable(e.to_string()))?;
@@ -78,7 +77,7 @@ pub(crate) async fn run(
         )));
     };
     let program = check_program(&record, &dir).map_err(|e| Error::Failed(e.to_string()))?;
-    let base = crate::api::base_url(&global.base_url)?;
+    let base = api_origin(&global.base_url)?;
     let ctx = Arc::new(Ctx {
         minter: ProfileMinter {
             global: global.clone(),
@@ -89,6 +88,31 @@ pub(crate) async fn run(
         verbose: global.verbose,
     });
     serve(&program, base.as_str().trim_end_matches('/'), args, ctx).await
+}
+
+/// The API's origin for `IOHR_EXT_API`: HTTPS, or plain HTTP to this machine only
+/// (SR-07), as the runtime's client accepts it.
+fn api_origin(raw: &str) -> Result<url::Url, Error> {
+    let url = url::Url::parse(raw)
+        .map_err(|e| Error::Failed(format!("IOHR_BASE_URL is not a URL: {e}")))?;
+    let loopback = match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(d)) => d == "localhost",
+        None => false,
+    };
+    let ok = (url.scheme() == "https" || (url.scheme() == "http" && loopback))
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.username().is_empty()
+        && url.password().is_none();
+    if ok {
+        Ok(url)
+    } else {
+        Err(Error::Failed(
+            "IOHR_BASE_URL must be an https origin (plain http only to this machine)".into(),
+        ))
+    }
 }
 
 fn command(program: &Path, args: &[OsString], api: &str, channel: &str) -> tokio::process::Command {

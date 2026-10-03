@@ -1,14 +1,19 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use inorbithr::{
+    Attempt, Client, ConfigError, Hook, Method, Operation, RawResponse, Secret, Token,
+    TokenProvider,
+};
 use iohr_auth::{
     AuthError, Bearer, Claims, Config, Credential, EntryKey, FileStore, KeyringStore, Kind,
     ProfileName, Redacted, Session as PersonSession, StaticToken, Storage, Store, StoreError,
 };
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use time::OffsetDateTime;
 
 use crate::Env;
-use crate::api::{Api, base_url};
 use crate::cli::Global;
 use crate::env_name;
 use crate::error::Error;
@@ -85,6 +90,163 @@ impl Credential for AnyCredential {
     }
 }
 
+/// The command line's credential is the runtime's token provider (ADR 0009): a
+/// person's session refreshes on its own, so the runtime is handed a token that is
+/// valid now and never caches it.
+impl TokenProvider for AnyCredential {
+    async fn token(&self) -> Result<Token, inorbithr::AuthError> {
+        let bearer = self
+            .bearer()
+            .await
+            .map_err(|e| inorbithr::AuthError::Provider(e.to_string()))?;
+        Ok(Token::new(Secret::from(bearer.expose()), None))
+    }
+}
+
+/// The credential shared between the runtime's client and the extension token channel
+/// (ADR 0012), which hands the same access token to an extension.
+#[derive(Debug, Clone)]
+pub(crate) struct Shared(pub(crate) Arc<AnyCredential>);
+
+impl TokenProvider for Shared {
+    async fn token(&self) -> Result<Token, inorbithr::AuthError> {
+        self.0.token().await
+    }
+}
+
+/// `--verbose`: one line per attempt on stderr with method, path, status, time and
+/// request id; never a header, a query value or a body (SR-13).
+struct Verbose {
+    started: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+}
+
+impl Verbose {
+    fn new() -> Self {
+        Self {
+            started: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn line(&self, attempt: &Attempt, status: &str) {
+        let elapsed = self
+            .started
+            .lock()
+            .ok()
+            .and_then(|mut m| m.remove(&attempt.request_id))
+            .map_or(0, |t| t.elapsed().as_millis());
+        note(&format!(
+            "{} {} -> {status} in {elapsed} ms (request id {}, attempt {})",
+            attempt.method, attempt.path, attempt.request_id, attempt.number
+        ));
+    }
+}
+
+impl Hook for Verbose {
+    fn on_request(&self, attempt: &Attempt) {
+        if let Ok(mut m) = self.started.lock() {
+            m.insert(attempt.request_id.clone(), std::time::Instant::now());
+        }
+    }
+
+    fn on_response(&self, attempt: &Attempt, response: &RawResponse) {
+        self.line(attempt, &response.status.to_string());
+    }
+
+    fn on_error(&self, attempt: &Attempt, error: &inorbithr::Error) {
+        if error.status().is_none() {
+            self.line(attempt, "no answer");
+        }
+    }
+}
+
+/// One line on stderr, for `--verbose`.
+pub(crate) fn note(line: &str) {
+    use std::io::Write as _;
+    let _ = writeln!(std::io::stderr().lock(), "iohr: {line}");
+}
+
+/// A successful answer, as the commands read it.
+#[derive(Debug)]
+pub(crate) struct Response {
+    pub(crate) status: u16,
+    pub(crate) content_type: Option<String>,
+    pub(crate) request_id: Option<String>,
+    pub(crate) body: Vec<u8>,
+}
+
+/// The calls every command makes, on the runtime's client.
+pub(crate) struct Api {
+    client: Client,
+}
+
+impl std::fmt::Debug for Api {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Api")
+            .field("base", &self.client.base_url())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Api {
+    fn new(base: &str, credential: Arc<AnyCredential>, verbose: bool) -> Result<Self, Error> {
+        let mut b = Client::builder()
+            .base_url(base)
+            .token_provider(Shared(credential))
+            .user_agent_suffix(concat!("iohr/", env!("CARGO_PKG_VERSION")));
+        if verbose {
+            b = b.hook(Verbose::new());
+        }
+        // A base URL that cannot be used is a failed call (exit 1), as it always was,
+        // named by the variable that set it.
+        let client = b.build().map_err(|e| match e {
+            inorbithr::Error::Config(ConfigError::InvalidUrl { .. }) => {
+                Error::Failed(format!("IOHR_BASE_URL: {e}"))
+            }
+            other => Error::Failed(other.to_string()),
+        })?;
+        Ok(Self { client })
+    }
+
+    /// `GET path` and read the JSON answer.
+    pub(crate) async fn get<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<T, inorbithr::Error> {
+        let raw = self.send(Method::Get, path, query, None).await?;
+        raw.json()
+    }
+
+    /// One call, as the runtime makes it: idempotent methods retried, a 401 answered by
+    /// one fresh token (SR-18).
+    pub(crate) async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<RawResponse, inorbithr::Error> {
+        let mut op = Operation::new(method, path.to_owned());
+        for (k, v) in query {
+            op = op.query((*k).to_owned(), (*v).to_owned());
+        }
+        if let Some(b) = body {
+            op = op.json(b)?;
+        }
+        self.client.send(op).await
+    }
+}
+
+/// The answer of [`Api::send`] in the shape the `api` command prints.
+pub(crate) fn response(raw: RawResponse) -> Response {
+    Response {
+        status: raw.status,
+        content_type: raw.headers.get("content-type").map(str::to_owned),
+        request_id: raw.server_request_id.clone(),
+        body: raw.body,
+    }
+}
+
 /// Who calls, against which account, with which client.
 pub(crate) struct Session {
     /// The profile's name, or `IOHR_TOKEN`.
@@ -92,7 +254,9 @@ pub(crate) struct Session {
     pub(crate) kind: Kind,
     pub(crate) account: String,
     pub(crate) claims: Claims,
-    pub(crate) api: Api<AnyCredential>,
+    pub(crate) api: Api,
+    /// The credential `api` calls with, for the extension token channel.
+    pub(crate) credential: Arc<AnyCredential>,
 }
 
 /// The session for this run: `IOHR_TOKEN` when set, otherwise the chosen profile.
@@ -111,7 +275,7 @@ pub(crate) async fn session_for(
     ctx: &Ctx,
     name: Option<&ProfileName>,
 ) -> Result<Session, Error> {
-    let base = base_url(&global.base_url)?;
+    let base = global.base_url.as_str();
     // A named profile takes `IOHR_TOKEN_<PROFILE>` and nothing else from the environment;
     // the chosen profile falls back to `IOHR_TOKEN` as every command always did.
     let per_profile: Option<&Redacted<String>> = name.and_then(|n| env.profile_token(n.as_str()));
@@ -123,11 +287,8 @@ pub(crate) async fn session_for(
     if let Some(token) = standing_in {
         let claims = Claims::read(token.expose(), OffsetDateTime::now_utc())?;
         let account = claims.org.clone().unwrap_or_default();
-        let api = Api::new(
-            base,
-            AnyCredential::Token(StaticToken::new(token.clone())),
-            global.verbose,
-        )?;
+        let credential = Arc::new(AnyCredential::Token(StaticToken::new(token.clone())));
+        let api = Api::new(base, Arc::clone(&credential), global.verbose)?;
         return Ok(Session {
             label: name.map_or_else(
                 || "IOHR_TOKEN".into(),
@@ -137,6 +298,7 @@ pub(crate) async fn session_for(
             account,
             claims,
             api,
+            credential,
         });
     }
     let Some(name) = name else {
@@ -182,13 +344,15 @@ pub(crate) async fn session_for(
             )));
         }
     };
-    let api = Api::new(base, credential, global.verbose)?;
+    let credential = Arc::new(credential);
+    let api = Api::new(base, Arc::clone(&credential), global.verbose)?;
     Ok(Session {
         label: name.to_string(),
         kind: profile.kind,
         account: profile.account,
         claims,
         api,
+        credential,
     })
 }
 

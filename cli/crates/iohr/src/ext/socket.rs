@@ -176,7 +176,7 @@ async fn answer<M: Minter>(head: &Head, body: &[u8], ctx: &Ctx<M>) -> Vec<u8> {
     };
     let outcome = ctx.minter.mint(scopes.clone()).await;
     if ctx.verbose {
-        crate::api::note(&format!(
+        crate::context::note(&format!(
             "the extension asked for a token with {}: {}",
             scopes.join(" "),
             if outcome.is_ok() {

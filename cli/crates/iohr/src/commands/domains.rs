@@ -3,11 +3,10 @@
 
 use std::time::{Duration, Instant};
 
-use reqwest::Method;
+use inorbithr::Method;
 use serde_json::Value;
 
 use crate::Env;
-use crate::api::ApiError;
 use crate::cli::{DomainsCommand, Global};
 use crate::context::{Session, account, session};
 use crate::error::Error;
@@ -91,7 +90,7 @@ fn path(acc: &str, rest: &str) -> String {
     format!("/v1/accounts/orgs/{acc}/domains{rest}")
 }
 
-fn scoped(e: ApiError) -> Error {
+fn scoped(e: inorbithr::Error) -> Error {
     if e.status() == Some(403) {
         Error::with_hint(
             e,
@@ -114,7 +113,7 @@ async fn add(s: &Session, acc: &str, domain: &str, subdomain: bool, out: Out) ->
     });
     let made: Value = s
         .api
-        .send(Method::POST, &path(acc, ""), &[], Some(&body))
+        .send(Method::Post, &path(acc, ""), &[], Some(&body))
         .await
         .and_then(|r| r.json())
         .map_err(scoped)?;
@@ -144,7 +143,7 @@ async fn add(s: &Session, acc: &str, domain: &str, subdomain: bool, out: Out) ->
 async fn check(s: &Session, acc: &str, domain: &str) -> Result<Value, Error> {
     s.api
         .send(
-            Method::POST,
+            Method::Post,
             &path(acc, &format!("/{domain}/check")),
             &[],
             None,
@@ -236,7 +235,7 @@ async fn confirm(s: &Session, acc: &str, domain: &str, out: Out) -> Result<(), E
     let v: Value = s
         .api
         .send(
-            Method::POST,
+            Method::Post,
             &path(acc, &format!("/{domain}/confirm")),
             &[],
             None,
@@ -288,7 +287,7 @@ async fn list(s: &Session, acc: &str, out: Out) -> Result<(), Error> {
 
 async fn rm(s: &Session, acc: &str, domain: &str, out: Out) -> Result<(), Error> {
     s.api
-        .send(Method::DELETE, &path(acc, &format!("/{domain}")), &[], None)
+        .send(Method::Delete, &path(acc, &format!("/{domain}")), &[], None)
         .await
         .map_err(scoped)?;
     if out.json {

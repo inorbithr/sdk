@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 iohr = { path = "../crates/iohr" }
 iohr-auth = { path = "../crates/iohr-auth" }
+inorbithr = { path = "../../rust" }
 libfuzzer-sys = "0.4"
 time = "0.3"
 

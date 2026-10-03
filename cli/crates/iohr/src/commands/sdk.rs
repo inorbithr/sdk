@@ -123,7 +123,7 @@ async fn fetch_cut(g: &Global, env: &Env, ctx: &Ctx, name: &ProfileName) -> Resu
     let query: Vec<(&str, &str)> = asked.iter().map(|a| ("account", a.as_str())).collect();
     let resp = s
         .api
-        .send(reqwest::Method::GET, "/v1/openapi.json", &query, None)
+        .send(inorbithr::Method::Get, "/v1/openapi.json", &query, None)
         .await
         .map_err(|e| match e.status() {
             Some(403) => Error::with_hint(

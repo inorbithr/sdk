@@ -599,7 +599,7 @@ impl Registry {
             let reply = req.send().await.map_err(|e| self.unreachable(&e))?;
             let status = reply.status();
             if self.verbose {
-                crate::api::note(&format!(
+                crate::context::note(&format!(
                     "GET {} /v2/{repo}/{} -> {} in {} ms",
                     self.source.host(),
                     rest.split('?').next().unwrap_or_default(),

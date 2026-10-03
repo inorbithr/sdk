@@ -7,8 +7,8 @@ Milestones, in order. Each ends with `mise run ci` green and nothing half-wired.
 | M0 | Repository foundation | Layout, agent setup, CI, release config, design and ADRs in place (2026-10-01) |
 | M1 | Contract and harness | `tools/spec-sync.py` writes `spec/`; the replay server runs every case in `conformance/cases/` (2026-10-02) |
 | M2 | Core in Go and Python | Client, token provider, errors, retries, hooks and the 3 operations pass every case |
-| M3 | Core in Rust and TypeScript | Same cases pass; `/parity` reports no gaps |
-| M4 | First release, 0.1.0 | Names reserved, trusted publishing configured, release PRs merged for all four |
+| M3 | Core in Rust and TypeScript | Rust: the runtime, the generator's Rust target and `iohr sdk generate\|check` on it, every case through the generated public surface (2026-10-03); TypeScript follows on the same model; `/parity` reports no gaps |
+| M4 | First release, 0.1.0 | Names reserved, trusted publishing configured, `publish = false` lifted on `rust/`, release PRs merged for all four |
 | M5 | Streaming | When the API admits API keys on SSE and `/v1/ws`: cases enabled, four implementations, 0.2.0 |
 
 Upstream requests that unblock or simplify later milestones are listed in
