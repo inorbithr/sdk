@@ -66,7 +66,7 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 | `iohr token create \| list \| revoke` | API tokens for an account (a signed-in person only) |
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file` |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
-| `iohr sdk generate --lang rust\|typescript\|python\|go\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
+| `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
@@ -93,12 +93,12 @@ git add src/iohr src/iohr.lock
 
 The surface holds exactly the operations each profile's credential may call, on the
 language's runtime (`inorbithr` in Rust and Python, `@inorbithr/sdk` in TypeScript,
-`github.com/inorbithr/sdk/go` in Go, `InOrbit.Sdk` in C#); a call a profile may not make
-does not compile (in Python, pyright and mypy refuse it). In Go each profile is a package,
-and the surface's import path is read from the enclosing `go.mod` (or given with
-`--package`); in C#, `--package` names the surface's namespace (default
-`InOrbit.Generated`). `--lang` takes `rust`, `typescript`, `python`, `go` and `csharp`
-today; Java follows (ADR 0013). In CI, with a token
+`github.com/inorbithr/sdk/go` in Go, `hr.inorbit:inorbit-sdk` in Java, `InOrbit.Sdk` in C#); a
+call a profile may not make does not compile (in Python, pyright and mypy refuse it). In Go
+each profile is a package, and the surface's import path is read from the enclosing `go.mod`
+(or given with `--package`); in Java `--package` names the surface's package, and in C# its
+namespace (default `InOrbit.Generated`). `--lang` takes all six: `rust`, `typescript`,
+`python`, `go`, `java` and `csharp` (ADR 0013). In CI, with a token
 per profile in `IOHR_TOKEN_<PROFILE>` (`IOHR_TOKEN_CI`, `IOHR_TOKEN_DEFAULT`), `iohr sdk
 check` fails with a diff when the API's cut has moved, so a plan change or a revoked
 scope is a failing check, not a surprise in production. A person profile cannot sign in
