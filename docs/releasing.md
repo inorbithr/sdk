@@ -111,3 +111,12 @@ The CI token cannot approve, so a compromised workflow cannot ship a version on 
   version; never unpublish.
 - Go: add a `retract` directive for the bad version in `go/go.mod` and release a patch.
   Never delete or move a Go tag; the checksum database has already recorded it.
+
+## When a tagged release did not reach its registry
+
+The release workflow can publish an existing tag again by hand, through the same trusted
+publisher and approval environment: Actions, `release`, "Run workflow", with
+`python_tag` (for example `python/v0.1.0`) or `typescript_tag` (for example
+`typescript/v0.1.0`), one per run. Python publishes the release's attached, attested
+files; TypeScript rebuilds from the tag and stages on npm, where a maintainer approves it
+with 2FA. release-please does not run on a manual run, so nothing new is tagged.

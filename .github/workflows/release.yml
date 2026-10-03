@@ -12,14 +12,19 @@ name: release
 on:
   push:
     branches: [main]
-  # Publish a Python release that is already tagged and attached but did not reach PyPI
-  # (2026-10-03: the artifact hand-off was broken). Same file and environment as the
-  # trusted publisher, so it stays keyless and waits for a maintainer.
+  # Publish a release that is already tagged but did not reach its registry (2026-10-03:
+  # the Python artifact hand-off and the TypeScript pack destination were broken). Same
+  # file and environments as the trusted publishers, so it stays keyless and waits for a
+  # maintainer. Name one tag per run.
   workflow_dispatch:
     inputs:
       python_tag:
         description: "An existing Python release tag to publish to PyPI, e.g. python/v0.1.0"
-        required: true
+        required: false
+        type: string
+      typescript_tag:
+        description: "An existing TypeScript release tag to publish to npm and JSR, e.g. typescript/v0.1.0"
+        required: false
         type: string
 
 permissions: {}
@@ -156,7 +161,10 @@ jobs:
   ts:
     name: publish typescript
     needs: release-please
-    if: needs.release-please.outputs.ts == 'true'
+    # On a manual run release-please is skipped, so the job asks not to be skipped with it.
+    if: >-
+      ${{ !cancelled() && (needs.release-please.outputs.ts == 'true'
+      || (github.event_name == 'workflow_dispatch' && inputs.typescript_tag != '')) }}
     runs-on: ubuntu-latest
     environment: release-npm
     permissions:
@@ -167,7 +175,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.release-please.outputs.ts_tag }}
+          ref: ${{ needs.release-please.outputs.ts_tag || inputs.typescript_tag }}
+      - name: Check the tag
+        env:
+          TAG: ${{ needs.release-please.outputs.ts_tag || inputs.typescript_tag }}
+        run: '[[ "$TAG" =~ ^typescript/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a typescript release tag: $TAG" >&2; exit 1; }'
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
         with:
           install_args: "node pnpm cyclonedx"
@@ -175,6 +187,8 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
+          # npm pack does not create its destination, and a fresh checkout has no dist/.
+          mkdir -p ../dist
           npm pack --pack-destination ../dist
           # The npm trusted publisher is stage-only: the version waits on npmjs.com until a
           # maintainer approves it with 2FA (docs/releasing.md). Needs npm 11.15 or newer;
@@ -189,7 +203,7 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-please.outputs.ts_tag }}
+          TAG: ${{ needs.release-please.outputs.ts_tag || inputs.typescript_tag }}
         run: gh release upload "$TAG" dist/*.tgz dist/sbom/typescript.cdx.json --repo "$GITHUB_REPOSITORY" --clobber
       # JSR links only public repositories, so its OIDC publishing starts at launch.
       - if: ${{ !github.event.repository.private }}
@@ -251,7 +265,7 @@ jobs:
 
   py-existing:
     name: publish an existing python release
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.python_tag != ''
     runs-on: ubuntu-latest
     environment: release-pypi
     permissions:
