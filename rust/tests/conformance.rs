@@ -104,7 +104,10 @@ fn repo_root() -> PathBuf {
 
 async fn start_replay() -> Option<Replay> {
     let root = repo_root();
-    let bin = root.join("conformance/server/bin/replay");
+    let bin = root.join(format!(
+        "conformance/server/bin/replay{}",
+        std::env::consts::EXE_SUFFIX
+    ));
     if !bin.is_file() {
         let note = "conformance: no replay server at conformance/server/bin/replay; run `mise run conformance:server:build`";
         assert!(

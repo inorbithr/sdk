@@ -49,7 +49,7 @@ interface Verdict {
 }
 
 const root = resolve(process.cwd(), "..");
-const bin = resolve(root, "conformance/server/bin/replay");
+const bin = resolve(root, `conformance/server/bin/replay${process.platform === "win32" ? ".exe" : ""}`);
 
 async function startReplay(): Promise<{ url: string; stop(): void } | undefined> {
   if (!existsSync(bin)) {
