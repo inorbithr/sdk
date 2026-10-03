@@ -16,6 +16,7 @@
 
 pub mod context;
 mod files;
+pub mod go;
 pub mod ir;
 mod language;
 pub mod rust;
@@ -24,6 +25,7 @@ pub mod typescript;
 
 pub use context::Naming;
 pub use files::Files;
+pub use go::GoTarget;
 pub use language::{Language, Options, render};
 pub use rust::RustTarget;
 pub use target::{RenderError, Target};

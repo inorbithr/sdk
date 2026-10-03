@@ -175,7 +175,12 @@ fn render(api: &Api, lang: Language, options: &iohr_codegen::Options) -> Result<
 /// Renders `api` into `--out`, with the lock beside it.
 pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(), Error> {
     let lang = args.lang.language();
-    let files = render(api, lang, &args.options)?;
+    let mut options = args.options.clone();
+    if lang == Language::Go && options.package.is_none() && !options.in_package {
+        // Go needs the import path of the output; the enclosing go.mod says it.
+        options.package = iohr_codegen::go::package_for(&args.out);
+    }
+    let files = render(api, lang, &options)?;
     let target = &args.out;
     let occupied = std::fs::read_dir(target).is_ok_and(|mut d| d.next().is_some());
     if !args.force && occupied {
@@ -194,7 +199,7 @@ pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(
     let mut lock = Lock::from_api(api, lang.as_str(), &out_name, env!("CARGO_PKG_VERSION"));
     lock.options = iohr_codegen::Options {
         in_package: false,
-        ..args.options.clone()
+        ..options
     };
     let in_package = args.options.in_package;
     if !in_package {

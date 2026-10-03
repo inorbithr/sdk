@@ -127,11 +127,14 @@ jobs:
       - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
         with:
           # rust runs `iohr sdk generate` for the generated surface (ADR 0011).
-          install_args: "go golangci-lint go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck rust"
+          install_args: "go golangci-lint go:golang.org/x/exp/cmd/gorelease go:golang.org/x/vuln/cmd/govulncheck rust cargo-binstall cargo:cargo-nextest"
       - run: mise run go:gen && git diff --exit-code -- go
       - run: mise run go:check
       - run: mise run go:audit
       - run: mise run conformance:go
+      # A generated two-profile surface builds and the wrong profile does not.
+      - if: runner.os == 'Linux'
+        run: IOHR_TEST_COMPILE=go mise run cli:compile-test
       - run: mise run go:api
         if: github.event_name == 'pull_request'
 

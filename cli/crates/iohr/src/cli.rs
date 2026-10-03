@@ -456,7 +456,6 @@ pub enum Lang {
     Typescript,
     #[value(hide = true)]
     Python,
-    #[value(hide = true)]
     Go,
     #[value(hide = true)]
     Java,
