@@ -982,7 +982,7 @@ fn a_language_not_built_yet_is_refused_not_rendered() {
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_iohr"))
         .env_clear()
         .env("IOHR_CONFIG_DIR", dir.path())
-        .args(["sdk", "generate", "--lang", "java", "--from"])
+        .args(["sdk", "generate", "--lang", "csharp", "--from"])
         .arg(format!("public={}", doc.display()))
         .arg("--out")
         .arg(&out_dir)
@@ -990,7 +990,7 @@ fn a_language_not_built_yet_is_refused_not_rendered() {
         .unwrap();
     assert_eq!(code(&o), 1, "{}", text(&o));
     assert!(
-        text(&o).contains("does not generate java yet"),
+        text(&o).contains("does not generate csharp yet"),
         "{}",
         text(&o)
     );
