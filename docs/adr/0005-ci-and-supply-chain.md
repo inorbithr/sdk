@@ -1,6 +1,6 @@
 # 0005. CI shape and supply-chain rules
 
-Status: accepted, 2026-10-01
+Status: accepted, 2026-10-01; where each check runs is amended by [0014](0014-what-ci-runs-where.md)
 
 ## Context
 

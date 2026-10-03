@@ -12,6 +12,8 @@ CLAUDE.local.md
 # Go
 go/coverage.out
 conformance/server/bin/
+# CI's tools job hands its binaries over here.
+ci-tools/
 
 # Rust
 target/
