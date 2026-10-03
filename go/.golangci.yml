@@ -1,0 +1,26 @@
+version: "2"
+
+linters:
+  # The defaults (errcheck, govet, ineffassign, staticcheck, unused) plus the ones that
+  # matter for a library others depend on.
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - revive
+    - unconvert
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: package-comments
+  exclusions:
+    # public/ is written by iohr sdk generate and carries Go's generated-code marker.
+    generated: strict
+
+formatters:
+  enable:
+    - gofmt

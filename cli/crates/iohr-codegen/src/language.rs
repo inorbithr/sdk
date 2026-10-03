@@ -55,7 +55,7 @@ impl Language {
     /// refused with [`RenderError::NotBuilt`], never rendered as a placeholder.
     #[must_use]
     pub fn is_built(self) -> bool {
-        matches!(self, Self::Rust | Self::TypeScript)
+        matches!(self, Self::Rust | Self::TypeScript | Self::Go)
     }
 
     /// The runtime a surface refers to unless `--runtime` says otherwise: the crate, the
@@ -126,6 +126,7 @@ pub fn render(lang: Language, api: &Api, options: &Options) -> Result<Files, Ren
     match lang {
         Language::Rust => crate::rust::RustTarget.render(api, options),
         Language::TypeScript => crate::typescript::TypeScriptTarget.render(api, options),
+        Language::Go => crate::go::GoTarget.render(api, options),
         other => Err(RenderError::NotBuilt(other)),
     }
 }
