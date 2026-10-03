@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { inspect } from "node:util";
-
+import { CODES, codeForStatus } from "../src/errors.js";
 import {
   ApiError,
   Client,
@@ -11,7 +11,6 @@ import {
   RawResponse,
   StaticToken,
 } from "../src/index.js";
-import { CODES, codeForStatus } from "../src/errors.js";
 import { backoffMs, retryAfterMs } from "../src/retry.js";
 
 function raw(status: number, body: string, headers: Record<string, string> = {}): RawResponse {
