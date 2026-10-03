@@ -36,9 +36,10 @@ python/
   src/inorbithr/
     __init__.py           public exports, __version__
     py.typed
-    _client.py            Client and AsyncClient, the builder, the one request path
-    _auth.py, _errors.py, _retry.py, _hooks.py, _int64.py
-    _codegen.py           what generated surfaces import (VERSION, path_segment)
+    runtime.py            the runtime alone: what a generated surface imports
+    codegen.py            the contract with iohr (VERSION, path_segment, check)
+    _client.py            Client and AsyncClient, Operation, Response, the one request path
+    _auth.py, _errors.py, _retry.py, _hooks.py, _int64.py, _version.py
     _generated/           written by iohr; never edit
   tests/
     conformance/          the driver, run against both clients
@@ -49,9 +50,14 @@ python/
 - Runtime dependencies: `httpx` and `pydantic` 2 only.
 - Public functions take keyword-only arguments after the path parameters, so fields can
   be added without breaking callers.
-- Errors: `InOrbitError` base, `ApiError` with `.code`, `.status`, `.details`,
-  `.headers`; connection, timeout, auth and config errors as subclasses.
+- Errors: `InOrbitError` base with `.kind`; `ApiError` with `.code`, `.status`,
+  `.details`, `.raw`; `ApiConnectionError`, `ApiTimeoutError` (named so they do not shadow
+  the built-ins), `AuthError`, `ConfigError`, `TooLargeError`, `DecodeError`.
+- Sync and async token providers are separate classes (`ClientCredentials`,
+  `AsyncClientCredentials`): a protocol cannot hold both forms of one method.
 - `int64` values are `int`; a message field the gateway left out is `None`.
 - `__repr__` of credentials redacts the secret; a test asserts it.
 - Google-style docstrings on every public name.
-- Publishing stays off until the first release (M4).
+- Publishing stays off until the first release (M4): `pyproject.toml` carries the
+  `Private :: Do Not Upload` classifier, which PyPI refuses; the release that publishes
+  removes it.

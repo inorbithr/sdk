@@ -523,8 +523,12 @@ run = "[ -f pyproject.toml ] || exit 0; uv run ruff format && uv run ruff check 
 
 [tasks."py:gen"]
 shell = "bash -e -o pipefail -c"
+description = "Python: regenerate the public surface in python/src/inorbithr/_generated/ from spec/openapi.json with `iohr sdk generate` (ADR 0011)"
 dir = "python"
-run = "[ -f pyproject.toml ] && [ -f ../spec/openapi.json ] || exit 0; uv run python tools/gen.py"
+run = """
+[ -f pyproject.toml ] && [ -f ../spec/openapi.json ] || { echo "py:gen: no package yet, skipping"; exit 0; }
+cargo run -q --manifest-path ../cli/Cargo.toml -p iohr -- sdk generate --lang python --from public=../spec/openapi.json --in-package --out src/inorbithr/_generated --force
+"""
 
 [tasks."py:api"]
 shell = "bash -e -o pipefail -c"

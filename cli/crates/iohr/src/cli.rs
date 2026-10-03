@@ -454,7 +454,6 @@ pub struct SdkCheck {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Lang {
     Typescript,
-    #[value(hide = true)]
     Python,
     Go,
     #[value(hide = true)]
