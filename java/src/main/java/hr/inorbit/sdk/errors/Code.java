@@ -2,6 +2,7 @@ package hr.inorbit.sdk.errors;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
+import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -11,7 +12,9 @@ import java.util.OptionalInt;
  * with the constants ({@code e.code().equals(Code.FORBIDDEN)}); {@link #slug()} is the wire
  * form.
  */
-public final class Code {
+public final class Code implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     /** {@code bad_request}, HTTP 400. */
     public static final Code BAD_REQUEST = new Code("bad_request");
