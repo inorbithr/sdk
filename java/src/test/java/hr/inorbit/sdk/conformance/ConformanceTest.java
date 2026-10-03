@@ -50,7 +50,9 @@ class ConformanceTest {
     @Test
     void everyCasePasses() throws Exception {
         Path root = Path.of("..").toAbsolutePath().normalize();
-        Path bin = root.resolve("conformance/server/bin/replay");
+        // `mise run conformance:server:build` writes bin/replay, bin/replay.exe on Windows.
+        String exe = System.getProperty("os.name", "").startsWith("Windows") ? ".exe" : "";
+        Path bin = root.resolve("conformance/server/bin/replay" + exe);
         if (!Files.isExecutable(bin)) {
             String note =
                     "conformance: no replay server at conformance/server/bin/replay; run `mise run conformance:server:build`";
