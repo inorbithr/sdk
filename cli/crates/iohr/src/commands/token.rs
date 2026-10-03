@@ -1,11 +1,10 @@
+use inorbithr::Method;
 use iohr_auth::Kind;
-use reqwest::Method;
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::Env;
-use crate::api::ApiError;
 use crate::cli::{Global, TokenCommand, TokenStatus};
 use crate::commands::day;
 use crate::context::{Session, account, session};
@@ -46,7 +45,7 @@ async fn create(
     let made: Value = s
         .api
         .send(
-            Method::POST,
+            Method::Post,
             &format!("/v1/accounts/orgs/{acc}/tokens"),
             &[],
             Some(&body),
@@ -135,7 +134,7 @@ async fn revoke(s: &Session, acc: &str, id: &str, out: Out) -> Result<(), Error>
     }
     s.api
         .send(
-            Method::DELETE,
+            Method::Delete,
             &format!("/v1/accounts/orgs/{acc}/keys/{id}"),
             &[],
             None,
@@ -178,7 +177,7 @@ fn row(t: &Value, now: OffsetDateTime) -> Vec<String> {
 }
 
 /// Tokens are made, listed and revoked by a signed-in person, never by another token.
-fn person_only(s: &Session, e: ApiError) -> Error {
+fn person_only(s: &Session, e: inorbithr::Error) -> Error {
     if e.status() == Some(403) && s.kind == Kind::Token {
         Error::with_hint(
             e,

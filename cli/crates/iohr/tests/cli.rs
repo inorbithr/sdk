@@ -193,7 +193,7 @@ async fn exit_codes_say_what_went_wrong() {
     let t = token(&["radar:read"]);
     Mock::given(path("/v1/accounts/me"))
         .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
-            "code": "permission_denied", "error": "this token may not read the account"
+            "code": "forbidden", "error": "this token may not read the account"
         })))
         .mount(&server)
         .await;

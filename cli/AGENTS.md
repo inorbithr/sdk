@@ -25,7 +25,8 @@ cli/
   crates/iohr-auth/   Redacted, Credential, Claims, Config and profiles, Store,
                       Provider (discovery), Authorization<Browser|Device|Granted>,
                       loopback listener, PKCE, Session (refreshing person)
-  crates/iohr/        lib: api (private HTTP client), cli (clap), commands, context, lock
+  crates/iohr/        lib: cli (clap), commands, context (the runtime's Client with the
+                      profile's credential as its TokenProvider, the --verbose hook), lock
                       main.rs: argv guard, parse, run, exit code
   crates/iohr-openapi/ a document normalised (N1 to N6, equal to tools/spec-sync.py),
                       hashed (the cut hash) and modelled as operations per profile
@@ -54,6 +55,9 @@ cli/
   process may have rotated the token.
 - Only the API host: paths are checked to stay on it, base URLs are HTTPS (loopback
   excepted), redirects are not followed. No telemetry, no update check.
+- The HTTP client is the Rust SDK (`inorbithr`, by path): retries, the error envelope,
+  the user agent and the body cap are its; the command line adds the credential, the
+  `--verbose` hook and the exit codes. Do not grow a transport layer here again.
 - `--verbose` prints method, path, status, time and request id; never a header, a query
   value or a body. The `verbose_output_never_shows_the_token` test covers every command:
   add each new command to it.

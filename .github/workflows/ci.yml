@@ -67,6 +67,7 @@ jobs:
               - 'examples/python/**'
             cli:
               - 'cli/**'
+              - 'rust/**'
               - 'spec/**'
               - 'mise.toml'
               - '.github/workflows/ci.yml'

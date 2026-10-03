@@ -593,6 +593,9 @@ name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "digest"
@@ -1165,6 +1168,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "inorbithr"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "inout"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1182,6 +1200,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "getrandom 0.4.3",
+ "inorbithr",
  "iohr-auth",
  "iohr-codegen",
  "iohr-openapi",

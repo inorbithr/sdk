@@ -12,7 +12,7 @@ pub(crate) async fn pull(g: &Global, env: &Env, output: &Path, out: Out) -> Resu
     let s = session(g, env).await?;
     let resp = s
         .api
-        .send(reqwest::Method::GET, "/v1/openapi.json", &[], None)
+        .send(inorbithr::Method::Get, "/v1/openapi.json", &[], None)
         .await?;
     let doc: Value = resp.json()?;
     let operations = doc.get("paths").and_then(Value::as_object).map_or(0, |p| {

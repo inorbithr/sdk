@@ -21,6 +21,7 @@ path = "src/main.rs"
 iohr-auth.workspace = true
 iohr-codegen.workspace = true
 iohr-openapi.workspace = true
+inorbithr.workspace = true
 
 clap.workspace = true
 clap_complete.workspace = true
