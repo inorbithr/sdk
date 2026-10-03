@@ -29,6 +29,9 @@ its cut holds; pyright and mypy refuse a call a profile may not make.
   at most twice, honouring `Retry-After`; writes are not.
 - 64-bit integers are `int`, sent as decimal strings; a message field the API left out is
   `None`; fields this version does not know are kept.
+- A paged list has an `all_<operation>` beside its page method that follows the next-page
+  token: `for d in api.radar.all_list_digests(): ...`, or `async for` on the `asyncio`
+  class; stopping the loop fetches nothing more.
 - Python 3.11 or newer; the only dependencies are `httpx` and `pydantic` 2.
 
 How the SDKs behave in every language: [docs/design.md](../docs/design.md).

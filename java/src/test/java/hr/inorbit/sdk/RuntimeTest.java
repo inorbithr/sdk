@@ -186,4 +186,43 @@ class RuntimeTest {
             server.stop(0);
         }
     }
+
+    private static Pages.Page<Integer> book(String token, List<String> fetched) {
+        fetched.add(token);
+        if (token == null) {
+            return new Pages.Page<>(List.of(1, 2), "b");
+        }
+        return token.equals("b") ? new Pages.Page<>(List.of(3), "c") : new Pages.Page<>(List.of(4), "");
+    }
+
+    @Test
+    void pagesWalkEveryPageAndStopEarly() {
+        List<String> fetched = new ArrayList<>();
+        Pages<Integer> pages = Pages.of(t -> book(t, fetched));
+        assertEquals(List.of(1, 2, 3, 4), pages.stream().toList());
+        assertEquals(java.util.Arrays.asList(null, "b", "c"), fetched);
+        fetched.clear();
+        for (int n : pages) {
+            if (n == 2) {
+                break;
+            }
+        }
+        assertEquals(java.util.Collections.singletonList(null), fetched);
+    }
+
+    @Test
+    void pagesThrowALaterErrorAfterTheEarlierItemsAndStopOnARepeat() {
+        Pages<Integer> failing = Pages.of(t -> {
+            if (t != null) {
+                throw new IllegalStateException("boom");
+            }
+            return new Pages.Page<>(List.of(1), "b");
+        });
+        var it = failing.iterator();
+        assertEquals(1, it.next());
+        assertThrows(IllegalStateException.class, it::hasNext);
+        int[] calls = {0};
+        Pages<Integer> looping = Pages.of(t -> new Pages.Page<>(List.of(++calls[0]), "same"));
+        assertEquals(List.of(1, 2), looping.stream().toList());
+    }
 }

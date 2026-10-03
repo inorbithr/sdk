@@ -2,7 +2,9 @@
 package iohr;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
+import hr.inorbit.sdk.codegen.Codegen;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -173,6 +175,30 @@ public final class PublicEvents {
      */
     public CompletableFuture<Response<ListDeliveriesResponse>> listDeliveriesAsync(String endpointId) {
         return Operations.listDeliveriesAsync(client, endpointId, EventsListDeliveriesParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/endpoints/{endpoint_id}/deliveries</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param endpointId the <code>endpointId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Delivery> allListDeliveries(String endpointId, EventsListDeliveriesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listDeliveries(client, endpointId, new EventsListDeliveriesParams(params.status(), token != null ? token : params.pageToken(), params.pageSize())).value();
+            return new Pages.Page<>(page.deliveries(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/endpoints/{endpoint_id}/deliveries</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param endpointId the <code>endpointId</code> path parameter
+     * @return the walk
+     */
+    public Pages<Delivery> allListDeliveries(String endpointId) {
+        return allListDeliveries(endpointId, EventsListDeliveriesParams.builder().build());
     }
 
     /**

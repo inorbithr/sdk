@@ -133,6 +133,7 @@ const RUNTIME: &[&str] = &[
     "Method",
     "Code",
     "Detail",
+    "Pages",
 ];
 
 impl Target for JavaTarget {
@@ -153,6 +154,7 @@ impl Target for JavaTarget {
             package,
             runtime,
             types: models.iter().map(|m| (m.name.clone(), m.clone())).collect(),
+            models: models.clone(),
         };
         let mut files = Files::new();
         for note in &surface.notes {
@@ -290,6 +292,7 @@ struct Gen {
     package: String,
     runtime: String,
     types: BTreeMap<String, Model>,
+    models: Vec<Model>,
 }
 
 impl Gen {
@@ -822,6 +825,96 @@ impl Gen {
             let _ = write!(
                 out,
                 "    public CompletableFuture<{response}<{answer}>> {name}Async({args}) {{\n        return Operations.{fname}Async({pass});\n    }}\n"
+            );
+        }
+        if op.body.is_none()
+            && let Some(paging) = context::paging(op, &self.models)
+        {
+            out.push_str(&self.iterator(op, &paging, imports));
+        }
+        out
+    }
+
+    /// `all<Op>`: every item of a paged list as a lazy [`Iterable`] (design.md §9); an
+    /// overload without the query parameters when none is required.
+    fn iterator(&self, op: &Op, paging: &context::Paging, imports: &mut Imports) -> String {
+        let naming = JavaNaming;
+        let pages = self.rt("Pages", imports);
+        imports.add(format!("{}.codegen.Codegen", self.runtime));
+        let item = self.ty(&paging.item, true, imports);
+        let Some(params_type) = &op.params_type else {
+            return String::new();
+        };
+        let name = format!("all{}", naming.type_name(&op.name));
+        let fname = function_name(op);
+        let path: Vec<String> = op
+            .path_params
+            .iter()
+            .map(|p| naming.field_name(&p.name))
+            .collect();
+        // The record again with the token replaced once there is one: the caller's own
+        // token starts the walk.
+        let components: Vec<String> = op
+            .query
+            .iter()
+            .map(|q| {
+                let f = naming.field_name(&q.name);
+                if q.name == paging.token_param {
+                    format!("token != null ? token : params.{f}()")
+                } else {
+                    format!("params.{f}()")
+                }
+            })
+            .collect();
+        let pass: Vec<String> = std::iter::once("client".to_owned())
+            .chain(path.iter().cloned())
+            .chain(std::iter::once(format!(
+                "new {params_type}({})",
+                components.join(", ")
+            )))
+            .collect();
+        let list = naming.field_name(&paging.list_field);
+        let next = naming.field_name(&paging.next_field);
+        let main = format!(
+            "Every item <code>{}</code> answers, page after page, following <code>{}</code> until the last page; see {{@link {pages}}}.",
+            jdoc(&op.line),
+            jdoc(&paging.next_field)
+        );
+        let mut decl: Vec<String> = path.iter().map(|p| format!("String {p}")).collect();
+        let mut tags: Vec<String> = path
+            .iter()
+            .map(|p| format!("@param {p} the <code>{p}</code> path parameter"))
+            .collect();
+        decl.push(format!("{params_type} params"));
+        tags.push("@param params the query parameters; the page token is set for each page".into());
+        tags.push("@return the walk".into());
+        let mut out = String::from("\n");
+        out.push_str(&javadoc("    ", &main, &tags));
+        let _ = write!(
+            out,
+            "    public {pages}<{item}> {name}({}) {{\n        return Codegen.pages(token -> {{\n            var page = Operations.{fname}({}).value();\n            return new {pages}.Page<>(page.{list}(), page.{next}());\n        }});\n    }}\n",
+            decl.join(", "),
+            pass.join(", ")
+        );
+        if !op.query.iter().any(|q| q.required) {
+            let short: Vec<String> = path.iter().map(|p| format!("String {p}")).collect();
+            let args: Vec<String> = path
+                .iter()
+                .cloned()
+                .chain(std::iter::once(format!("{params_type}.builder().build()")))
+                .collect();
+            let mut short_tags: Vec<String> = path
+                .iter()
+                .map(|p| format!("@param {p} the <code>{p}</code> path parameter"))
+                .collect();
+            short_tags.push("@return the walk".into());
+            out.push('\n');
+            out.push_str(&javadoc("    ", &main, &short_tags));
+            let _ = write!(
+                out,
+                "    public {pages}<{item}> {name}({}) {{\n        return {name}({});\n    }}\n",
+                short.join(", "),
+                args.join(", ")
             );
         }
         out

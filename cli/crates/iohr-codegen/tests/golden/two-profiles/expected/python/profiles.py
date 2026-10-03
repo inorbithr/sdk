@@ -3,12 +3,17 @@
 
 from __future__ import annotations
 
+from collections.abc import (
+    AsyncIterator,
+    Iterator,
+)
 from typing import ClassVar
 
 from inorbithr.runtime import (
     AsyncClient,
     Client,
     Response,
+    codegen,
 )
 
 from . import operations as _ops
@@ -19,6 +24,7 @@ from .models import (
     CreateInboxResponse,
     DeleteEndpointResponse,
     DeleteInboxResponse,
+    Delivery,
     Endpoint,
     GetDigestResponse,
     GetMeResponse,
@@ -167,6 +173,15 @@ class AcmeCiEvents:
             ListDeliveriesResponse,
             timeout=timeout,
         )
+
+    def all_list_deliveries(self, endpoint_id: str, *, status: str | None = None, page_token: str | None = None, page_size: int | None = None, timeout: float | None = None) -> Iterator[Delivery]:
+        """Every item `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries` answers, page after page, following `next_page_token` until the last page."""
+
+        def fetch(page: str | None) -> tuple[list[Delivery], str]:
+            value = (self.list_deliveries(endpoint_id, status=status, page_token=page if page is not None else page_token, page_size=page_size, timeout=timeout)).value
+            return value.deliveries or [], value.next_page_token or ""
+
+        return codegen.pages(fetch)
 
     def list_inboxes(self, *, account_id: str | None = None, timeout: float | None = None) -> Response[ListInboxesResponse]:
         """`GET /v1/webhooks/inboxes`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend."""
@@ -392,6 +407,15 @@ class AsyncAcmeCiEvents:
             ListDeliveriesResponse,
             timeout=timeout,
         )
+
+    def all_list_deliveries(self, endpoint_id: str, *, status: str | None = None, page_token: str | None = None, page_size: int | None = None, timeout: float | None = None) -> AsyncIterator[Delivery]:
+        """Every item `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries` answers, page after page, following `next_page_token` until the last page."""
+
+        async def fetch(page: str | None) -> tuple[list[Delivery], str]:
+            value = (await self.list_deliveries(endpoint_id, status=status, page_token=page if page is not None else page_token, page_size=page_size, timeout=timeout)).value
+            return value.deliveries or [], value.next_page_token or ""
+
+        return codegen.apages(fetch)
 
     async def list_inboxes(self, *, account_id: str | None = None, timeout: float | None = None) -> Response[ListInboxesResponse]:
         """`GET /v1/webhooks/inboxes`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend."""

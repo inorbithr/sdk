@@ -167,3 +167,64 @@ describe("codes", () => {
     assert.equal(codeForStatus(418), "http_418");
   });
 });
+
+describe("codegen.pages", () => {
+  const book: Record<string, readonly [readonly number[], string]> = {
+    "": [[1, 2], "b"],
+    b: [[3], "c"],
+    c: [[4], ""],
+  };
+  const fetched: (string | undefined)[] = [];
+  const page = async (token: string | undefined) => {
+    fetched.push(token);
+    const p = book[token ?? ""];
+    if (p === undefined) throw new Error(`no page ${token}`);
+    return p;
+  };
+
+  it("walks every page", async () => {
+    fetched.length = 0;
+    const got: number[] = [];
+    for await (const n of codegen.pages(page)) got.push(n);
+    assert.deepEqual(got, [1, 2, 3, 4]);
+    assert.deepEqual(fetched, [undefined, "b", "c"]);
+  });
+
+  it("fetches nothing more after a break", async () => {
+    fetched.length = 0;
+    for await (const n of codegen.pages(page)) {
+      if (n === 2) break;
+    }
+    assert.deepEqual(fetched, [undefined]);
+  });
+
+  it("throws an error from a later page after the earlier items", async () => {
+    const got: number[] = [];
+    const failing = async (token: string | undefined) => {
+      if (token === "b") throw new Error("boom");
+      return [[1], "b"] as const;
+    };
+    await assert.rejects(async () => {
+      for await (const n of codegen.pages(failing)) got.push(n);
+    }, /boom/);
+    assert.deepEqual(got, [1]);
+  });
+
+  it("stops on an aborted signal and on a token that repeats", async () => {
+    const ctl = new AbortController();
+    ctl.abort();
+    await assert.rejects(async () => {
+      for await (const _ of codegen.pages(page, ctl.signal)) {
+        // unreachable
+      }
+    });
+    let calls = 0;
+    const looping = async () => {
+      calls += 1;
+      return [[calls], "same"] as const;
+    };
+    const got: number[] = [];
+    for await (const n of codegen.pages(looping)) got.push(n);
+    assert.deepEqual(got, [1, 2]);
+  });
+});

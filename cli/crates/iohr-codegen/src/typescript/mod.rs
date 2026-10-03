@@ -114,7 +114,7 @@ impl Target for TypeScriptTarget {
         );
         files.insert(
             "profiles.ts",
-            format!("{header}{}", render_profiles(&surface, &runtime)),
+            format!("{header}{}", render_profiles(&surface, &models, &runtime)),
         );
         files.insert(
             "index.ts",
@@ -531,15 +531,27 @@ fn operation_function(op: &Op, needs: &BTreeSet<String>, uses_shapes: &mut bool)
     out
 }
 
-fn render_profiles(surface: &context::Surface, runtime: &str) -> String {
+fn render_profiles(surface: &context::Surface, all_models: &[Model], runtime: &str) -> String {
     let mut models = BTreeSet::new();
     let mut params = BTreeSet::new();
     let mut body = String::new();
     for p in &surface.profiles {
-        body.push_str(&profile_class(surface, p, &mut models, &mut params));
+        body.push_str(&profile_class(
+            surface,
+            p,
+            all_models,
+            &mut models,
+            &mut params,
+        ));
     }
-    let mut out =
-        format!("import {{ type CallOptions, Client, type Response }} from \"{runtime}\";\n");
+    let codegen = if body.contains("codegen.pages(") {
+        "codegen, "
+    } else {
+        ""
+    };
+    let mut out = format!(
+        "import {{ type CallOptions, Client, {codegen}type Response }} from \"{runtime}\";\n"
+    );
     if !models.is_empty() {
         let list: Vec<String> = models.iter().map(|m| format!("type {m}")).collect();
         let _ = writeln!(
@@ -565,6 +577,7 @@ fn render_profiles(surface: &context::Surface, runtime: &str) -> String {
 fn profile_class(
     surface: &context::Surface,
     p: &context::Profile,
+    all_models: &[Model],
     models: &mut BTreeSet<String>,
     params: &mut BTreeSet<String>,
 ) -> String {
@@ -629,7 +642,7 @@ fn profile_class(
         "\n  /** The profile with its credential from the environment. */\n  static fromEnv(): {class} {{\n    return new {class}(Client.fromEnv({env_arg}));\n  }}\n"
     );
     for op in surface.flat.iter().filter(|o| o.profiles.contains(&p.name)) {
-        out.push_str(&profile_method(op, models, params));
+        out.push_str(&profile_method(op, all_models, models, params));
     }
     out.push_str("}\n");
     for (h, ops) in &handles {
@@ -641,14 +654,19 @@ fn profile_class(
             naming.type_name(&h.tag)
         );
         for op in ops {
-            out.push_str(&profile_method(op, models, params));
+            out.push_str(&profile_method(op, all_models, models, params));
         }
         out.push_str("}\n");
     }
     out
 }
 
-fn profile_method(op: &Op, models: &mut BTreeSet<String>, params: &mut BTreeSet<String>) -> String {
+fn profile_method(
+    op: &Op,
+    all_models: &[Model],
+    models: &mut BTreeSet<String>,
+    params: &mut BTreeSet<String>,
+) -> String {
     let naming = TsNaming;
     let (decl, call) = arguments(op);
     let decl = decl.trim_start_matches("client: Client, ").to_owned();
@@ -662,11 +680,52 @@ fn profile_method(op: &Op, models: &mut BTreeSet<String>, params: &mut BTreeSet<
     if let Some(t) = &op.params_type {
         params.insert(t.clone());
     }
-    format!(
+    let mut out = format!(
         "\n{}  {}({decl}): Promise<Response<{response}>> {{\n    return ops.{}({call});\n  }}\n",
         op_doc(op, "  "),
         naming.method_name(&op.name),
         function_name(op)
+    );
+    if let Some(paging) = context::paging(op, all_models) {
+        out.push_str(&iterator_method(op, &paging, &decl, models));
+    }
+    out
+}
+
+/// `all<Op>`: every item of a paged list as an async generator (`for await`), following
+/// the next-page token (design.md §9).
+fn iterator_method(
+    op: &Op,
+    paging: &context::Paging,
+    decl: &str,
+    models: &mut BTreeSet<String>,
+) -> String {
+    let naming = TsNaming;
+    refs(&paging.item, models);
+    let item = ts_type(&paging.item);
+    let mut call = vec!["this.client".to_owned()];
+    for p in &op.path_params {
+        call.push(naming.field_name(&p.name));
+    }
+    // The token is set only once there is one, so the caller's own `page_token` (if any)
+    // starts the walk, and an optional field is never set to `undefined`.
+    call.push(format!(
+        "token === undefined ? params : {{ ...params, {}: token }}",
+        key(&paging.token_param)
+    ));
+    if op.body.is_some() {
+        call.push("body".into());
+    }
+    call.push("options".into());
+    format!(
+        "\n  /**\n   * Every item `{}` answers, page after page, following `{}` until the last page.\n   * Throws the first error; stops when the loop breaks or `options.signal` aborts.\n   */\n  async *all{}({decl}): AsyncGenerator<{item}, void, undefined> {{\n    yield* codegen.pages(async (token) => {{\n      const {{ value }} = await ops.{}({});\n      return [value.{} ?? [], value.{} ?? \"\"] as const;\n    }}, options?.signal);\n  }}\n",
+        op.line,
+        paging.next_field,
+        naming.type_name(&op.name),
+        function_name(op),
+        call.join(", "),
+        key(&paging.list_field),
+        key(&paging.next_field),
     )
 }
 

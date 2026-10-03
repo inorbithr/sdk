@@ -22,6 +22,28 @@ export function pathSegment(value: string): string {
   );
 }
 
+/**
+ * Every item of a paged list, page after page: `page` fetches one page for a token
+ * (`undefined` for the first) and answers its items and the next token. Stops after the
+ * page whose next token is empty or repeats; stops when the loop breaks; throws the first
+ * error, and an abort of `signal` between pages.
+ */
+export async function* pages<T>(
+  page: (token: string | undefined) => Promise<readonly [readonly T[], string]>,
+  signal?: AbortSignal,
+): AsyncGenerator<T, void, undefined> {
+  let token: string | undefined;
+  for (;;) {
+    signal?.throwIfAborted();
+    const [items, next] = await page(token);
+    yield* items;
+    if (next === "" || next === token) {
+      return;
+    }
+    token = next;
+  }
+}
+
 /** Where a value holds a 64-bit integer: the integer itself, a model, a list or a map. */
 export type Shape =
   | "i64"

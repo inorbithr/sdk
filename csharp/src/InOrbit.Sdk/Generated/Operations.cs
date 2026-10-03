@@ -404,6 +404,23 @@ namespace InOrbit.Sdk.Api
             return accounts.Client.RequestAsync<ListTeamEventsResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/audit</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="accounts">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<TeamEvent> AllListTeamEventsAsync<TProfile>(this AccountsHandle<TProfile> accounts, string orgId, AccountsListTeamEventsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListTeamEvents
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<TeamEvent>(async (token, ct) =>
+            {
+                var page = (await ListTeamEventsAsync(accounts, orgId, token is null ? query : (query ?? new AccountsListTeamEventsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Events, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/domains</c>; needs scope <c>domains:read</c>. Transcoded from <c>/iohr.accounts.v1.AccountsService/ListDomains</c> on the <c>accounts</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="accounts">The client, or its handle.</param>
@@ -417,6 +434,23 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("accounts.list_domains", global::InOrbit.Sdk.Method.Get, $"/v1/accounts/orgs/{(global::InOrbit.Sdk.Codegen.PathSegment(orgId))}/domains", ["domains:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return accounts.Client.RequestAsync<ListDomainsResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/domains</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="accounts">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Domain> AllListDomainsAsync<TProfile>(this AccountsHandle<TProfile> accounts, string orgId, AccountsListDomainsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListDomains
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Domain>(async (token, ct) =>
+            {
+                var page = (await ListDomainsAsync(accounts, orgId, token is null ? query : (query ?? new AccountsListDomainsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Domains, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/domains/{domain}</c>; needs scope <c>domains:read</c>. Transcoded from <c>/iohr.accounts.v1.AccountsService/GetDomain</c> on the <c>accounts</c> backend.</summary>
@@ -488,6 +522,22 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("accounts.list_unit_categories", global::InOrbit.Sdk.Method.Get, "/v1/accounts/units/categories", ["usage:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return accounts.Client.RequestAsync<ListUnitCategoriesResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/accounts/units/categories</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="accounts">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<UnitCategory> AllListUnitCategoriesAsync<TProfile>(this AccountsHandle<TProfile> accounts, AccountsListUnitCategoriesParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListUnitCategories
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<UnitCategory>(async (token, ct) =>
+            {
+                var page = (await ListUnitCategoriesAsync(accounts, token is null ? query : (query ?? new AccountsListUnitCategoriesParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Categories, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>POST /v1/accounts/orgs/{org_id}/domains</c>; needs scope <c>domains:write</c>. Transcoded from <c>/iohr.accounts.v1.AccountsService/AddDomain</c> on the <c>accounts</c> backend.</summary>
@@ -581,6 +631,23 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("agents.list_agents", global::InOrbit.Sdk.Method.Get, $"/v1/accounts/orgs/{(global::InOrbit.Sdk.Codegen.PathSegment(orgId))}/agents", ["agents:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return agents.Client.RequestAsync<ListAgentsResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/agents</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="agents">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Agent> AllListAgentsAsync<TProfile>(this AgentsHandle<TProfile> agents, string orgId, AgentsListAgentsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListAgents
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Agent>(async (token, ct) =>
+            {
+                var page = (await ListAgentsAsync(agents, orgId, token is null ? query : (query ?? new AgentsListAgentsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Agents, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/agents/{agent_id}</c>; needs scope <c>agents:read</c>. Transcoded from <c>/iohr.agents.v1.AgentsService/GetAgent</c> on the <c>agents</c> backend.</summary>
@@ -719,6 +786,23 @@ namespace InOrbit.Sdk.Api
             return connections.Client.RequestAsync<ListConnectionsResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/connections</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="connections">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Connection> AllListConnectionsAsync<TProfile>(this ConnectionsHandle<TProfile> connections, string orgId, ConnectionsListConnectionsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListConnections
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Connection>(async (token, ct) =>
+            {
+                var page = (await ListConnectionsAsync(connections, orgId, token is null ? query : (query ?? new ConnectionsListConnectionsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Connections, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}</c>; needs scope <c>connections:read</c>. Transcoded from <c>/iohr.connections.v1.ConnectionsService/GetConnection</c> on the <c>connections</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="connections">The client, or its handle.</param>
@@ -749,6 +833,24 @@ namespace InOrbit.Sdk.Api
             return connections.Client.RequestAsync<ListGrantsResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="connections">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="connectionId"><c>connection_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Grant> AllListGrantsAsync<TProfile>(this ConnectionsHandle<TProfile> connections, string orgId, string connectionId, ConnectionsListGrantsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListGrants
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Grant>(async (token, ct) =>
+            {
+                var page = (await ListGrantsAsync(connections, orgId, connectionId, token is null ? query : (query ?? new ConnectionsListGrantsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Grants, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history</c>; needs scope <c>connections:read</c>. Transcoded from <c>/iohr.connections.v1.ConnectionsService/ListHistory</c> on the <c>connections</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="connections">The client, or its handle.</param>
@@ -765,6 +867,24 @@ namespace InOrbit.Sdk.Api
             return connections.Client.RequestAsync<ListHistoryResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="connections">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="connectionId"><c>connection_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Use> AllListHistoryAsync<TProfile>(this ConnectionsHandle<TProfile> connections, string orgId, string connectionId, ConnectionsListHistoryParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListHistory
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Use>(async (token, ct) =>
+            {
+                var page = (await ListHistoryAsync(connections, orgId, connectionId, token is null ? query : (query ?? new ConnectionsListHistoryParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Uses, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/monitors</c>; needs scope <c>connections:read</c>. Transcoded from <c>/iohr.connections.v1.ConnectionsService/ListMonitors</c> on the <c>connections</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="connections">The client, or its handle.</param>
@@ -778,6 +898,23 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("connections.list_monitors", global::InOrbit.Sdk.Method.Get, $"/v1/accounts/orgs/{(global::InOrbit.Sdk.Codegen.PathSegment(orgId))}/monitors", ["connections:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken), ("connection_id", query?.ConnectionId));
             return connections.Client.RequestAsync<ListMonitorsResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/monitors</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="connections">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Monitor> AllListMonitorsAsync<TProfile>(this ConnectionsHandle<TProfile> connections, string orgId, ConnectionsListMonitorsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListMonitors
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Monitor>(async (token, ct) =>
+            {
+                var page = (await ListMonitorsAsync(connections, orgId, token is null ? query : (query ?? new ConnectionsListMonitorsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Monitors, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}</c>; needs scope <c>connections:read</c>. Transcoded from <c>/iohr.connections.v1.ConnectionsService/GetMonitor</c> on the <c>connections</c> backend.</summary>
@@ -810,6 +947,24 @@ namespace InOrbit.Sdk.Api
             return connections.Client.RequestAsync<ListMonitorRunsResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="connections">The client, or its handle.</param>
+        /// <param name="orgId"><c>org_id</c>.</param>
+        /// <param name="monitorId"><c>monitor_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<MonitorRun> AllListMonitorRunsAsync<TProfile>(this ConnectionsHandle<TProfile> connections, string orgId, string monitorId, ConnectionsListMonitorRunsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListMonitorRuns
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<MonitorRun>(async (token, ct) =>
+            {
+                var page = (await ListMonitorRunsAsync(connections, orgId, monitorId, token is null ? query : (query ?? new ConnectionsListMonitorRunsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Runs, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary</c>; needs scope <c>connections:read</c>. Transcoded from <c>/iohr.connections.v1.ConnectionsService/GetMonitorSummary</c> on the <c>connections</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="connections">The client, or its handle.</param>
@@ -838,6 +993,22 @@ namespace InOrbit.Sdk.Api
             return connections.Client.RequestAsync<ListKindsResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/connections/kinds</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="connections">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Kind> AllListKindsAsync<TProfile>(this ConnectionsHandle<TProfile> connections, ConnectionsListKindsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListKinds
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Kind>(async (token, ct) =>
+            {
+                var page = (await ListKindsAsync(connections, token is null ? query : (query ?? new ConnectionsListKindsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Kinds, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/connections/tools</c>; needs scope <c>connections:read</c>. Transcoded from <c>/iohr.connections.v1.ConnectionsService/ListTools</c> on the <c>connections</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="connections">The client, or its handle.</param>
@@ -850,6 +1021,22 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("connections.list_tools", global::InOrbit.Sdk.Method.Get, "/v1/connections/tools", ["connections:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return connections.Client.RequestAsync<ListToolsResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/connections/tools</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="connections">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<ToolInfo> AllListToolsAsync<TProfile>(this ConnectionsHandle<TProfile> connections, ConnectionsListToolsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListTools
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<ToolInfo>(async (token, ct) =>
+            {
+                var page = (await ListToolsAsync(connections, token is null ? query : (query ?? new ConnectionsListToolsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Tools, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>PATCH /v1/accounts/orgs/{org_id}/connections/{connection_id}</c>; needs scope <c>connections:write</c>. Transcoded from <c>/iohr.connections.v1.ConnectionsService/UpdateConnection</c> on the <c>connections</c> backend.</summary>
@@ -1032,6 +1219,22 @@ namespace InOrbit.Sdk.Api
             return events.Client.RequestAsync<ListEventTypesResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/events/types</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="events">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<EventType> AllListEventTypesAsync<TProfile>(this EventsHandle<TProfile> events, EventsListEventTypesParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListEventTypes
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<EventType>(async (token, ct) =>
+            {
+                var page = (await ListEventTypesAsync(events, token is null ? query : (query ?? new EventsListEventTypesParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Types, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/webhooks/endpoints</c>; needs scope <c>webhooks:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/ListEndpoints</c> on the <c>events</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="events">The client, or its handle.</param>
@@ -1044,6 +1247,22 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_endpoints", global::InOrbit.Sdk.Method.Get, "/v1/webhooks/endpoints", ["webhooks:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("account_id", query?.AccountId), ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return events.Client.RequestAsync<ListEndpointsResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/webhooks/endpoints</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="events">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Endpoint> AllListEndpointsAsync<TProfile>(this EventsHandle<TProfile> events, EventsListEndpointsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListEndpoints
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Endpoint>(async (token, ct) =>
+            {
+                var page = (await ListEndpointsAsync(events, token is null ? query : (query ?? new EventsListEndpointsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Endpoints, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>GET /v1/webhooks/endpoints/{endpoint_id}</c>; needs scope <c>webhooks:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/GetEndpoint</c> on the <c>events</c> backend.</summary>
@@ -1074,6 +1293,23 @@ namespace InOrbit.Sdk.Api
             return events.Client.RequestAsync<ListDeliveriesResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/webhooks/endpoints/{endpoint_id}/deliveries</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="events">The client, or its handle.</param>
+        /// <param name="endpointId"><c>endpoint_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Delivery> AllListDeliveriesAsync<TProfile>(this EventsHandle<TProfile> events, string endpointId, EventsListDeliveriesParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListDeliveries
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Delivery>(async (token, ct) =>
+            {
+                var page = (await ListDeliveriesAsync(events, endpointId, token is null ? query : (query ?? new EventsListDeliveriesParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Deliveries, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/webhooks/inboxes</c>; needs scope <c>webhooks:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/ListInboxes</c> on the <c>events</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="events">The client, or its handle.</param>
@@ -1086,6 +1322,22 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_inboxes", global::InOrbit.Sdk.Method.Get, "/v1/webhooks/inboxes", ["webhooks:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("account_id", query?.AccountId), ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return events.Client.RequestAsync<ListInboxesResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/webhooks/inboxes</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="events">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Inbox> AllListInboxesAsync<TProfile>(this EventsHandle<TProfile> events, EventsListInboxesParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListInboxes
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Inbox>(async (token, ct) =>
+            {
+                var page = (await ListInboxesAsync(events, token is null ? query : (query ?? new EventsListInboxesParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Inboxes, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>GET /v1/webhooks/inboxes/{inbox_id}/requests</c>; needs scope <c>webhooks:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/ListInboxRequests</c> on the <c>events</c> backend.</summary>
@@ -1101,6 +1353,23 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_inbox_requests", global::InOrbit.Sdk.Method.Get, $"/v1/webhooks/inboxes/{(global::InOrbit.Sdk.Codegen.PathSegment(inboxId))}/requests", ["webhooks:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return events.Client.RequestAsync<ListInboxRequestsResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/webhooks/inboxes/{inbox_id}/requests</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="events">The client, or its handle.</param>
+        /// <param name="inboxId"><c>inbox_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<InboxRequest> AllListInboxRequestsAsync<TProfile>(this EventsHandle<TProfile> events, string inboxId, EventsListInboxRequestsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListInboxRequests
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<InboxRequest>(async (token, ct) =>
+            {
+                var page = (await ListInboxRequestsAsync(events, inboxId, token is null ? query : (query ?? new EventsListInboxRequestsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Requests, page.NextPageToken);
+            }, cancellationToken);
         }
 
         /// <summary><c>GET /v1/webhooks/stats</c>; needs scope <c>webhooks:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/GetDeliveryStats</c> on the <c>events</c> backend.</summary>
@@ -1245,6 +1514,22 @@ namespace InOrbit.Sdk.Api
             return radar.Client.RequestAsync<ListDigestsResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/radar/digests</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="radar">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Digest> AllListDigestsAsync<TProfile>(this RadarHandle<TProfile> radar, RadarListDigestsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListDigests
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Digest>(async (token, ct) =>
+            {
+                var page = (await ListDigestsAsync(radar, token is null ? query : (query ?? new RadarListDigestsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Digests, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/radar/digests/{id}</c>; needs scope <c>radar:read</c>. Transcoded from <c>/iohr.radar.v1.RadarService/GetDigest</c> on the <c>radar</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="radar">The client, or its handle.</param>
@@ -1270,6 +1555,22 @@ namespace InOrbit.Sdk.Api
             var operation = global::InOrbit.Sdk.Codegen.Operation("radar.list_items", global::InOrbit.Sdk.Method.Get, "/v1/radar/items", ["radar:read"]);
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("language", query?.Language), ("limit", query?.Limit), ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return radar.Client.RequestAsync<ListItemsResponse>(operation, cancellationToken);
+        }
+
+        /// <summary>Every item <c>GET /v1/radar/items</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="radar">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Item> AllListItemsAsync<TProfile>(this RadarHandle<TProfile> radar, RadarListItemsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListItems
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Item>(async (token, ct) =>
+            {
+                var page = (await ListItemsAsync(radar, token is null ? query : (query ?? new RadarListItemsParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Items, page.NextPageToken);
+            }, cancellationToken);
         }
     }
 }

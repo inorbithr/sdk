@@ -1,6 +1,8 @@
 package hr.inorbit.sdk.codegen;
 
+import hr.inorbit.sdk.Pages;
 import java.nio.charset.StandardCharsets;
+import java.util.function.Function;
 
 /**
  * What a generated surface uses from the runtime, and nothing else does. This class is a contract
@@ -47,5 +49,17 @@ public final class Codegen {
             }
         }
         return out.toString();
+    }
+
+    /**
+     * A paged list's walk: {@code fetch} takes the token for the next page ({@code null} for the
+     * first) and answers that page.
+     *
+     * @param fetch fetches one page
+     * @param <T> the item type
+     * @return the walk
+     */
+    public static <T> Pages<T> pages(Function<String, Pages.Page<T>> fetch) {
+        return Pages.of(fetch);
     }
 }

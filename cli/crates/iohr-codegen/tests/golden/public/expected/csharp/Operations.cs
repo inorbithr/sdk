@@ -281,6 +281,23 @@ namespace InOrbit.Generated
             return events.Client.RequestAsync<ListDeliveriesResponse>(operation, cancellationToken);
         }
 
+        /// <summary>Every item <c>GET /v1/webhooks/endpoints/{endpoint_id}/deliveries</c> answers, page after page, following <c>next_page_token</c> until the last page; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="events">The client, or its handle.</param>
+        /// <param name="endpointId"><c>endpoint_id</c>.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Cancels the walk and the page in flight.</param>
+        /// <returns>The items, fetched a page at a time.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<Delivery> AllListDeliveriesAsync<TProfile>(this EventsHandle<TProfile> events, string endpointId, EventsListDeliveriesParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IListDeliveries
+        {
+            return global::InOrbit.Sdk.Codegen.Pages<Delivery>(async (token, ct) =>
+            {
+                var page = (await ListDeliveriesAsync(events, endpointId, token is null ? query : (query ?? new EventsListDeliveriesParams()) with { PageToken = token }, ct).ConfigureAwait(false)).Value;
+                return (page.Deliveries, page.NextPageToken);
+            }, cancellationToken);
+        }
+
         /// <summary><c>GET /v1/webhooks/inboxes</c>; needs scope <c>webhooks:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/ListInboxes</c> on the <c>events</c> backend.</summary>
         /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
         /// <param name="events">The client, or its handle.</param>

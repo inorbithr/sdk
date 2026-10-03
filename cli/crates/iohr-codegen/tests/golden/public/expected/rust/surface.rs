@@ -3,8 +3,8 @@
 //! profiles of this surface; each operation is callable only where its marker in
 //! [`ops`](super::ops) is implemented.
 use std::future::Future;
-use inorbithr::__codegen::path_segment;
-use inorbithr::{Client, Error, Method, Operation, Profile, Response};
+use inorbithr::__codegen::{pages, path_segment};
+use inorbithr::{Client, Error, Method, Operation, Pages, Profile, Response};
 use super::models::*;
 use super::ops;
 /// The operations, as methods on [`Client`].
@@ -192,6 +192,33 @@ impl<P: ops::ListDeliveries> Events<'_, P> {
             .query_opt("page_token", params.page_token.as_ref().map(ToString::to_string))
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string));
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_deliveries(
+        &self,
+        endpoint_id: &str,
+        params: &EventsListDeliveriesParams,
+    ) -> Pages<'_, Delivery> {
+        let client = self.0;
+        let endpoint_id = endpoint_id.to_owned();
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                let endpoint_id = endpoint_id.clone();
+                Box::pin(async move {
+                    let page = Self(client)
+                        .list_deliveries(&endpoint_id, &params)
+                        .await?
+                        .value;
+                    Ok((page.deliveries, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 impl<P: ops::ListInboxes> Events<'_, P> {

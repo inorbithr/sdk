@@ -76,6 +76,18 @@ let digests = client.radar().list_digests(&Default::default()).await?;
 let me = client.accounts().get_me().await?;
 ```
 
+A paged list has an `all_<operation>` beside its page method that follows the next-page
+token; the pager is the runtime's own `Pages`, so no `futures` dependency:
+
+```rust
+let mut digests = client.radar().all_list_digests(&Default::default());
+while let Some(digest) = digests.next().await {
+    let digest = digest?;
+}
+```
+
+Stopping early fetches nothing more; `.collect().await` gathers every item.
+
 A surface for your own credentials, with exactly the operations they may call and a
 compile-time refusal of the rest, comes from `iohr sdk generate` ([docs/design.md
 section 12](../docs/design.md#12-runtime-and-surface)).

@@ -225,3 +225,52 @@ def test_unprocessable_is_known_and_an_unknown_code_is_kept() -> None:
     assert CODES["unprocessable"] == 422
     assert code_for_status(422) == "unprocessable"
     assert "brand_new_code" not in CODES
+
+
+_BOOK: dict[str, tuple[list[int], str]] = {"": ([1, 2], "b"), "b": ([3], "c"), "c": ([4], "")}
+
+
+def test_pages_walks_every_page_and_stops_after_a_break() -> None:
+    fetched: list[str | None] = []
+
+    def fetch(token: str | None) -> tuple[list[int], str]:
+        fetched.append(token)
+        return _BOOK[token or ""]
+
+    assert list(codegen.pages(fetch)) == [1, 2, 3, 4]
+    assert fetched == [None, "b", "c"]
+    fetched.clear()
+    for n in codegen.pages(fetch):
+        if n == 2:
+            break
+    assert fetched == [None]
+
+
+def test_pages_raises_a_later_error_after_the_earlier_items_and_stops_on_a_repeat() -> None:
+    got: list[int] = []
+
+    def failing(token: str | None) -> tuple[list[int], str]:
+        if token == "b":
+            raise RuntimeError("boom")
+        return [1], "b"
+
+    with pytest.raises(RuntimeError, match="boom"):
+        got.extend(codegen.pages(failing))
+    assert got == [1]
+    calls = [0]
+
+    def looping(token: str | None) -> tuple[list[int], str]:
+        calls[0] += 1
+        return [calls[0]], "same"
+
+    assert list(codegen.pages(looping)) == [1, 2]
+
+
+def test_apages_walks_every_page() -> None:
+    async def fetch(token: str | None) -> tuple[list[int], str]:
+        return _BOOK[token or ""]
+
+    async def collect() -> list[int]:
+        return [n async for n in codegen.apages(fetch)]
+
+    assert asyncio.run(collect()) == [1, 2, 3, 4]

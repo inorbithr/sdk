@@ -185,13 +185,26 @@ reimplement the protocol.
 ## 9. Pagination
 
 A paged operation takes `page_token` and answers one list with `next_page_token`, empty
-after the last page (one public route today: `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries`).
-The page method stays, and the generated surface adds an iterator over the items beside
-it, in the language's own idiom: Go `All<Operation>` returning `iter.Seq2[T, error]`
-(built); TS `AsyncIterable`, Python `__iter__` / `__aiter__`, Java `Iterable` and
-`Stream`, C# `IAsyncEnumerable`, Rust `Stream` (planned). An iterator follows the token
-until it is empty, fetches nothing more once the caller stops, stops at the first error,
-and stops when a page names itself as the next.
+after the last page (18 public routes on 2026-10-03, among them radar digests, webhook
+deliveries, connections, monitors and the team audit log). The page method stays, and
+the generated surface adds an iterator over the items beside it, in the language's own
+idiom:
+
+| Language | Iterator | Use |
+|---|---|---|
+| Go | `All<Op>(ctx, params) iter.Seq2[T, error]` | `for d, err := range api.Radar().AllListDigests(ctx, p)` |
+| TypeScript | `all<Op>(params, options)` → `AsyncGenerator<T>` | `for await (const d of api.radar.allListDigests())` |
+| Python | `all_<op>(...)` → `Iterator[T]`; `AsyncIterator[T]` on the asyncio class | `for d in api.radar.all_list_digests():` / `async for` |
+| Rust | `all_<op>(&params)` → `inorbithr::Pages<'_, T>` | `while let Some(d) = pages.next().await` (or `.collect().await`) |
+| Java | `all<Op>(params)` → `Pages<T>`, an `Iterable<T>` with `stream()` | `for (Digest d : api.radar().allListDigests())` |
+| C# | `All<Op>Async(query, cancellationToken)` → `IAsyncEnumerable<T>` | `await foreach (var d in client.Radar().AllListDigestsAsync())` |
+
+An iterator follows the token until it is empty, fetches nothing more once the caller
+stops, stops at the first error (raising, throwing or yielding it as the language does),
+stops when a page names itself as the next, and checks cancellation between pages where
+the language has it (a `context.Context`, an `AbortSignal`, a `CancellationToken`, a
+cancelled task). A token the caller passes starts the walk. Rust's iterator is a pager the
+runtime owns rather than a `futures::Stream`, so the runtime takes no extra dependency.
 
 ## 10. Compatibility
 
