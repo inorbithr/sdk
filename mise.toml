@@ -542,10 +542,13 @@ run = """
 shell = "bash -e -o pipefail -c"
 description = "Python: griffe check against the last python/v tag"
 dir = "python"
+# griffe reads the old tag from a temporary worktree and resolves --search from that
+# worktree's root (load_git), but the current code from the working directory (load):
+# the same relative path means the same files on both sides only from the repository root.
 run = """
 [ -f pyproject.toml ] || exit 0
 base=$(git describe --tags --abbrev=0 --match 'python/v*' 2>/dev/null) || { echo "py:api: no release yet"; exit 0; }
-uv run griffe check inorbithr --search src --against "$base"
+cd .. && uv run --project python griffe check inorbithr --search python/src --against "$base"
 """
 
 # ---------------------------------------------------------------- conformance and examples
