@@ -35,7 +35,9 @@ agent and for people. Language-specific rules live in each language directory's 
 [mise](https://mise.jdx.dev) pins every toolchain and runs every task. `mise install`
 once, then:
 
-- `mise run ci`: exactly what CI runs. Run it before saying a change is done.
+- `mise run ci:changed`: what CI runs for your changes since `origin/main` (same path
+  rules). Run it before a push and before saying a change is done.
+- `mise run ci`: every check in every language; before a release, or when in doubt.
 - `mise run <lang>:check`: format check, lint, type check and unit tests for one
   language (`go`, `rust`, `ts`, `py`).
 - `mise run <lang>:fmt`: format one language in place.
