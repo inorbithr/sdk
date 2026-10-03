@@ -125,7 +125,9 @@ done
 [tasks."go:audit"]
 dir = "go"
 shell = "bash -e -o pipefail -c"
-run = "[ -f go.mod ] || { echo 'go:audit: no module yet, skipping'; exit 0; }; govulncheck ./..."
+# Built by the Go that runs it: a govulncheck built by another toolchain (a cache shared
+# across CI matrix cells) refuses to load packages for a newer one. Same pinned version.
+run = "[ -f go.mod ] || { echo 'go:audit: no module yet, skipping'; exit 0; }; go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./..."
 
 [tasks."go:sbom"]
 dir = "go"
