@@ -18,7 +18,9 @@ without the check.
 
 ## Commands
 
-- `mise run ts:check`: `biome ci`, `tsc --noEmit`, `vitest run`, `publint`
+- `mise run ts:check`: `biome ci`, `tsc --noEmit` (strict, `isolatedDeclarations`), the
+  unit tests with `node --test`, and the build. The only dev dependencies are
+  `typescript` and `@types/node`; tests use the built-in runner.
 - `mise run ts:fmt`, `mise run ts:gen` (`iohr sdk generate` into `src/generated/`)
 - `mise run conformance:ts`: the driver in `test/conformance/` against the replay server
 - The generator's TypeScript target lives in `cli/crates/iohr-codegen/src/typescript/`;
@@ -37,10 +39,11 @@ typescript/
     index.ts          public exports only
     client.ts         Client, the builder options, the one request path
     auth.ts           TokenProvider, client credentials (single flight), static token
-    errors.ts         InOrbitError tree, Code, Detail
-    retry.ts, hooks.ts, int64.ts
-    codegen.ts        what generated surfaces import (VERSION, pathSegment); semver-tracked
-    generated/        written by iohr; never edit
+    errors.ts         InOrbitError tree, Code, Detail, RawResponse
+    retry.ts, hooks.ts, int64.ts, version.ts
+    codegen.ts        what generated surfaces import (VERSION, pathSegment, the Int64 shapes); semver-tracked
+    runtime.ts        the runtime alone, which a generated surface imports
+    generated/        written by iohr; never edit (biome skips it; tsc checks it)
   test/
     conformance/      the driver for conformance/cases
 ```
@@ -56,4 +59,4 @@ typescript/
 - Errors are classes with a stable `name` and `code`; `instanceof` and `err.code` work.
 - Every call takes an options bag with `signal` and `timeout`.
 - `toJSON` and `util.inspect` output of credentials redacts the secret; a test asserts it.
-- Publishing stays off until the first release (M4).
+- `"private": true` in `package.json` keeps it off npm until the first release (M4).

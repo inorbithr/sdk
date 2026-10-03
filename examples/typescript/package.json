@@ -1,0 +1,10 @@
+{
+  "name": "inorbithr-examples-typescript",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.2",
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
+  }
+}

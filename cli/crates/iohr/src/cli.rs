@@ -431,7 +431,6 @@ pub struct SdkCheck {
 /// hidden from the help and refused with a message, never rendered as a placeholder.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Lang {
-    #[value(hide = true)]
     Typescript,
     #[value(hide = true)]
     Python,
