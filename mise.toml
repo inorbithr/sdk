@@ -256,7 +256,7 @@ run = """
 # The generator is `iohr sdk generate`, in cli/ (iohr-codegen); until it lands there is
 # nothing to regenerate and the task says so.
 grep -q 'name = "iohr-codegen"' ../cli/crates/iohr-codegen/Cargo.toml 2>/dev/null || { echo "rust:gen: the generator (cli/crates/iohr-codegen) is not here yet; nothing to regenerate"; exit 0; }
-cargo run -q --manifest-path ../cli/Cargo.toml -p iohr -- sdk generate --lang rust --from public=../spec/openapi.json --in-crate --out src/generated --force
+cargo run -q --manifest-path ../cli/Cargo.toml -p iohr -- sdk generate --lang rust --from public=../spec/openapi.json --in-package --out src/generated --force
 """
 
 [tasks."rust:features"]
@@ -342,9 +342,9 @@ IOHR_TEST_REQUIRE_HYDRA=1 IOHR_TEST_HYDRA="$public" IOHR_TEST_HYDRA_ADMIN="$admi
 
 [tasks."cli:compile-test"]
 shell = "bash -e -o pipefail -c"
-description = "Command line: generate a two-profile surface, build it against rust/, and prove the wrong profile does not compile (slow; CI runs it on Linux)"
+description = "Command line: generate a two-profile surface per language, build it against that language's runtime, and prove the wrong profile does not compile; IOHR_TEST_COMPILE names the languages (default rust; slow, each needs its toolchain)"
 dir = "cli"
-run = "IOHR_TEST_COMPILE=1 cargo nextest run --locked -p iohr-codegen --test compile"
+run = "IOHR_TEST_COMPILE=${IOHR_TEST_COMPILE:-rust} cargo nextest run --locked -p iohr-codegen -E 'binary(/^compile_/)'"
 
 [tasks."cli:normalise-golden"]
 shell = "bash -e -o pipefail -c"

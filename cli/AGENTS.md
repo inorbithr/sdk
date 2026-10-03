@@ -69,10 +69,16 @@ cli/
 - Output: results on stdout (tables, or JSON with `--json`), notes on stderr, so pipes
   get only data. `token create` prints the new token alone on stdout.
 - Dependencies: the table in `README.md`. A new one needs a reason there and in the PR.
-- The generator's output is deterministic and golden-tested (`iohr-codegen/tests/golden/`,
-  `IOHR_UPDATE_GOLDEN=1` rewrites, review the diff); `IOHR_TEST_COMPILE=1` builds a
-  generated surface against `rust/` and proves the wrong profile does not compile.
+- The generator's output is deterministic and golden-tested per language
+  (`iohr-codegen/tests/golden/<case>/expected/<lang>/`, `IOHR_UPDATE_GOLDEN=1` rewrites,
+  review the diff). `IOHR_TEST_COMPILE=<lang,...>` (or `all`) builds a generated surface
+  against each language's runtime and proves the wrong profile does not compile.
   `rust/src/generated/` is this generator's output; never edit it, run `mise run rust:gen`.
+- A language target lives in `iohr-codegen/src/<lang>/`: it renders from `ir` (the
+  models) and `context` (the operations, with its own `Naming`), takes `Options`, and
+  registers in `language::render` and `Language::is_built`; the CLI's `Lang` stops
+  hiding it. Its tests are `tests/golden_<lang>.rs` and `tests/compile_<lang>.rs`, both
+  through `tests/support`. The Rust target alone reads models through typify.
 - `unwrap`/`expect` only in tests; `unsafe` is forbidden; clippy pedantic stays on.
 - Extensions (ADR 0012, SR-25 to SR-28): the registry is reached only from `ext install`,
   `upgrade` and `sync` (`ext::oci`, `GET` only, bounded sizes, digests checked). Nothing

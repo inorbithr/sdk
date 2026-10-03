@@ -22,9 +22,10 @@ pub(crate) struct Lock {
     /// `info.version` of the documents.
     #[serde(default)]
     pub(crate) api_version: String,
-    /// The runtime crate the surface was rendered for, when not the default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) runtime: Option<String>,
+    /// The generator options the surface was rendered with, so `iohr sdk check --files`
+    /// renders it the same way: `runtime` and `package` when not the language's default.
+    #[serde(default, with = "options", skip_serializing_if = "options::is_default")]
+    pub(crate) options: iohr_codegen::Options,
     /// One entry per profile.
     pub(crate) profiles: BTreeMap<String, Locked>,
 }
@@ -69,7 +70,7 @@ impl Lock {
             lang: lang.to_owned(),
             out: out.to_owned(),
             api_version: api.api_version.clone(),
-            runtime: None,
+            options: iohr_codegen::Options::default(),
             profiles,
         }
     }
@@ -88,8 +89,22 @@ impl Lock {
                 path.display()
             ))
         })?;
-        toml::from_str(&text)
+        Self::parse(&text)
             .map_err(|e| Error::Failed(format!("{} is not an iohr.lock: {e}", path.display())))
+    }
+
+    /// A lock's text, also one written before the options table existed, which kept
+    /// `runtime` at the top level.
+    fn parse(text: &str) -> Result<Self, toml::de::Error> {
+        let mut table: toml::Table = toml::from_str(text)?;
+        if let Some(runtime) = table.remove("runtime")
+            && !table.contains_key("options")
+        {
+            let mut options = toml::Table::new();
+            options.insert("runtime".into(), runtime);
+            table.insert("options".into(), toml::Value::Table(options));
+        }
+        Self::deserialize(table)
     }
 
     /// What changed between this lock and a fresh `api`, per profile: an empty list
@@ -153,6 +168,13 @@ impl Locked {
 mod tests {
     use std::collections::BTreeMap;
 
+    #[test]
+    fn a_lock_from_before_the_options_table_still_reads() {
+        let text = "generator = \"0.1.0\"\nlang = \"rust\"\nout = \"iohr\"\nruntime = \"my_inorbithr\"\n\n[profiles.ci]\ncut = \"sha256:ab\"\n";
+        let lock = super::Lock::parse(text).unwrap();
+        assert_eq!(lock.options.runtime.as_deref(), Some("my_inorbithr"));
+    }
+
     use super::{Lock, Locked};
 
     #[test]
@@ -162,7 +184,10 @@ mod tests {
             lang: "rust".into(),
             out: "src/iohr".into(),
             api_version: "0.1.0".into(),
-            runtime: None,
+            options: iohr_codegen::Options {
+                runtime: Some("my_inorbithr".into()),
+                ..Default::default()
+            },
             profiles: BTreeMap::from([(
                 "acme-ci".to_owned(),
                 Locked {
@@ -177,7 +202,51 @@ mod tests {
         let text = lock.render();
         assert!(text.starts_with("# iohr.lock"));
         assert!(text.contains("[profiles.acme-ci]"));
-        assert_eq!(toml::from_str::<Lock>(&text).unwrap(), lock);
+        assert!(
+            text.contains("[options]\nruntime = \"my_inorbithr\""),
+            "{text}"
+        );
+        assert_eq!(Lock::parse(&text).unwrap(), lock);
         assert!(!text.contains("secret") && !text.contains("eyJ"));
+    }
+}
+
+/// The options as a TOML table, `runtime` and `package` only. A lock written before the
+/// table existed kept `runtime` at the top level; `Lock::read` moves it in.
+mod options {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Default, Serialize, Deserialize)]
+    struct Table {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runtime: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        package: Option<String>,
+    }
+
+    pub(super) fn is_default(o: &iohr_codegen::Options) -> bool {
+        o.runtime.is_none() && o.package.is_none()
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        o: &iohr_codegen::Options,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        Table {
+            runtime: o.runtime.clone(),
+            package: o.package.clone(),
+        }
+        .serialize(s)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<iohr_codegen::Options, D::Error> {
+        let t = Table::deserialize(d)?;
+        Ok(iohr_codegen::Options {
+            runtime: t.runtime,
+            package: t.package,
+            in_package: false,
+        })
     }
 }

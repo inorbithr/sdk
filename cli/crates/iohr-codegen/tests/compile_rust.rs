@@ -1,5 +1,5 @@
 //! The generated surface builds against the runtime, and a call a profile may not
-//! make does not compile. Runs with `IOHR_TEST_COMPILE=1` (the Linux CI job sets it):
+//! make does not compile. Runs with `IOHR_TEST_COMPILE=rust` (or `1`) (the Linux CI job sets it):
 //! it writes a throwaway crate and runs `cargo check` twice, which takes a while.
 
 #![allow(clippy::unwrap_used, clippy::print_stderr, reason = "test helpers")]
@@ -7,12 +7,11 @@
 use std::path::Path;
 use std::process::Command;
 
-use iohr_codegen::{RustOptions, RustTarget, Target as _};
-use iohr_openapi::Api;
+mod support;
 
-fn repo() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
+use iohr_codegen::{Language, Options};
+
+use support::{compile_enabled, repo};
 
 fn cargo_check(dir: &Path) -> (bool, String) {
     let output = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
@@ -32,21 +31,11 @@ fn cargo_check(dir: &Path) -> (bool, String) {
 
 #[test]
 fn the_two_profile_surface_compiles_and_the_wrong_profile_does_not() {
-    if std::env::var_os("IOHR_TEST_COMPILE").is_none() {
-        eprintln!("compile test: set IOHR_TEST_COMPILE=1 to run it (CI does); skipping");
+    if !compile_enabled(Language::Rust) {
+        eprintln!("compile test: set IOHR_TEST_COMPILE=rust to run it (CI does); skipping");
         return;
     }
-    let input = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/two-profiles/input");
-    let mut docs = Vec::new();
-    for profile in ["personal", "acme-ci"] {
-        let doc = serde_json::from_str(
-            &std::fs::read_to_string(input.join(format!("{profile}.json"))).unwrap(),
-        )
-        .unwrap();
-        docs.push((profile.to_owned(), doc));
-    }
-    let api = Api::from_documents(docs).unwrap();
-    let files = RustTarget.render(&api, &RustOptions::default()).unwrap();
+    let (_, files) = support::render("two-profiles", Language::Rust, &Options::default());
 
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

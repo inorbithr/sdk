@@ -1,8 +1,7 @@
-use std::fmt;
-
 use iohr_openapi::Api;
 
 use crate::files::Files;
+use crate::language::{Language, Options};
 
 /// Why a surface could not be rendered.
 #[derive(Debug, thiserror::Error)]
@@ -27,16 +26,21 @@ pub enum RenderError {
         /// The parser's message.
         reason: String,
     },
+    /// The language is known but this `iohr` does not render it yet.
+    #[error(
+        "this iohr does not generate {0} yet; the languages it generates are listed by `iohr sdk generate --help`"
+    )]
+    NotBuilt(Language),
+    /// The language is not one `iohr` knows (a lock written by a newer `iohr`).
+    #[error("{0:?} is not a language this iohr knows; a newer iohr may")]
+    UnknownLanguage(String),
 }
 
-/// One language. Adding a language is one implementation, with its own options, and
-/// nothing else changes.
+/// One language. Adding a language is one implementation, one arm in
+/// [`render`](crate::render), and its golden and compile tests.
 pub trait Target {
-    /// The target's own flags (`--runtime`), flattened into `iohr sdk generate`.
-    type Options: clap::Args + Default + fmt::Debug;
-
-    /// The language, as `--lang` names it.
-    const LANG: &'static str;
+    /// The language this target renders.
+    const LANG: Language;
 
     /// Renders `api` into files relative to the output directory.
     ///
@@ -44,5 +48,5 @@ pub trait Target {
     ///
     /// [`RenderError`] when a model or a template cannot be rendered; never because of
     /// the file system, which [`Files::write`] handles.
-    fn render(&self, api: &Api, options: &Self::Options) -> Result<Files, RenderError>;
+    fn render(&self, api: &Api, options: &Options) -> Result<Files, RenderError>;
 }

@@ -6,36 +6,19 @@
 
 mod models;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use heck::{ToSnakeCase as _, ToUpperCamelCase as _};
-use iohr_openapi::model::{env_name, type_name};
-use iohr_openapi::{Api, Media, Method, Operation, ParamIn};
+use iohr_openapi::model::type_name;
+use iohr_openapi::{Api, Method};
 use minijinja::Environment;
 use serde::Serialize;
 
+use crate::context::{self, Naming, Segment};
 use crate::files::Files;
+use crate::ir::Type;
+use crate::language::{Language, Options};
 use crate::target::{RenderError, Target};
-
-/// Flags of the Rust target.
-#[derive(Debug, Clone, clap::Args)]
-pub struct RustOptions {
-    /// The crate the surface runs on, as it is named in your `Cargo.toml`.
-    #[arg(long, default_value = "inorbithr")]
-    pub runtime: String,
-    /// Generate the runtime's own public surface, which refers to it as `crate`.
-    #[arg(long, hide = true)]
-    pub in_crate: bool,
-}
-
-impl Default for RustOptions {
-    fn default() -> Self {
-        Self {
-            runtime: "inorbithr".into(),
-            in_crate: false,
-        }
-    }
-}
 
 /// The Rust target.
 #[derive(Debug, Clone, Copy, Default)]
@@ -125,18 +108,17 @@ const OPS_TEMPLATE: &str = include_str!("templates/ops.rs.j2");
 const SURFACE_TEMPLATE: &str = include_str!("templates/surface.rs.j2");
 
 impl Target for RustTarget {
-    type Options = RustOptions;
+    const LANG: Language = Language::Rust;
 
-    const LANG: &'static str = "rust";
-
-    fn render(&self, api: &Api, options: &Self::Options) -> Result<Files, RenderError> {
-        let runtime = if options.in_crate {
+    fn render(&self, api: &Api, options: &Options) -> Result<Files, RenderError> {
+        let named = options.runtime_for(Self::LANG);
+        let runtime = if options.in_package {
             "crate"
         } else {
-            options.runtime.as_str()
+            named.as_str()
         };
         let mut files = Files::new();
-        let ctx = context(api, runtime, options.in_crate, &mut files);
+        let ctx = context(api, runtime, options.in_package, &mut files);
 
         let models = models::render(
             &api.schemas
@@ -203,160 +185,116 @@ fn format_rust(file: &str, text: &str) -> Result<String, RenderError> {
     Ok(prettyplease::unparse(&parsed))
 }
 
-fn context(api: &Api, runtime: &str, in_crate: bool, files: &mut Files) -> Context {
-    let profiles: Vec<ProfileCtx> = api
-        .profiles
-        .keys()
-        .map(|name| ProfileCtx {
-            name: name.clone(),
-            type_name: type_name(name),
-            env: env_name(name),
-            is_public: name == "public",
-        })
-        .collect();
-    let markers = marker_names(api);
-    let mut params_structs = Vec::new();
-    let mut by_tag: BTreeMap<&str, Vec<OpCtx>> = BTreeMap::new();
-    let mut flat = Vec::new();
-    for op in api.operations.values() {
-        match &op.response.media {
-            Media::Json => {}
-            Media::EventStream => {
-                files.note(format!(
-                    "{}: a stream (text/event-stream); streaming comes with the runtime's streaming milestone, so the operation is left out",
-                    op.line()
-                ));
-                continue;
-            }
-            Media::Other(m) => {
-                files.note(format!(
-                    "{}: answers {m}, which the Rust target does not render; left out",
-                    op.line()
-                ));
-                continue;
-            }
-        }
-        let ctx = op_context(op, &markers, &mut params_structs);
-        if op.service.is_some() {
-            by_tag.entry(op.tag.as_str()).or_default().push(ctx);
+/// How Rust spells names: the model's own `snake_case`, and `r#` before a keyword.
+struct RustNaming;
+
+impl Naming for RustNaming {
+    const RESERVED: &'static [&'static str] = &["type", "ref", "self", "match", "loop", "mod"];
+
+    fn escape(&self, ident: String) -> String {
+        if Self::RESERVED.contains(&ident.as_str()) {
+            format!("r#{ident}")
         } else {
-            flat.push(ctx);
+            ident
         }
     }
-    let handles = by_tag
-        .into_iter()
-        .map(|(tag, ops)| HandleCtx {
-            tag: tag.to_owned(),
-            type_name: tag.to_upper_camel_case(),
-            method_name: tag.to_snake_case(),
-            ops,
+}
+
+fn context(api: &Api, runtime: &str, in_crate: bool, files: &mut Files) -> Context {
+    let surface = context::surface(api);
+    for note in &surface.notes {
+        files.note(note.clone());
+    }
+    let mut params_structs = Vec::new();
+    let mut op = |o: &context::Op| op_context(o, &mut params_structs);
+    let flat: Vec<OpCtx> = surface.flat.iter().map(&mut op).collect();
+    let handles = surface
+        .handles
+        .iter()
+        .map(|h| HandleCtx {
+            tag: h.tag.clone(),
+            type_name: h.tag.to_upper_camel_case(),
+            method_name: h.tag.to_snake_case(),
+            ops: h.ops.iter().map(&mut op).collect(),
         })
         .collect();
-    let marker_ctx = api
-        .operations
-        .values()
-        .filter(|op| op.response.media == Media::Json)
-        .map(|op| MarkerCtx {
-            name: markers[&op.line()].clone(),
-            line: op.line(),
-            profiles: op.profiles.iter().map(|p| type_name(p)).collect(),
-        })
-        .collect();
+    // The structs were pushed in handle order then flat order; the templates list
+    // them in `METHOD /path` order, as before.
+    params_structs.sort_by(|a: &ParamsCtx, b: &ParamsCtx| a.op_line.cmp(&b.op_line));
     Context {
-        header: crate::header(api),
+        header: surface.header,
         runtime: runtime.to_owned(),
         in_crate,
-        api_version: api.api_version.clone(),
-        profiles,
-        markers: marker_ctx,
+        api_version: surface.api_version,
+        profiles: surface
+            .profiles
+            .iter()
+            .map(|p| ProfileCtx {
+                name: p.name.clone(),
+                type_name: type_name(&p.name),
+                env: p.env.clone(),
+                is_public: p.is_public,
+            })
+            .collect(),
+        markers: surface
+            .markers
+            .iter()
+            .map(|m| MarkerCtx {
+                name: m.name.clone(),
+                line: m.line.clone(),
+                profiles: m.profiles.iter().map(|p| type_name(p)).collect(),
+            })
+            .collect(),
         handles,
         flat,
         params_structs,
     }
 }
 
-/// One marker trait per operation, named after the operation; when two tags share a
-/// name, both take their tag as a prefix.
-fn marker_names(api: &Api) -> BTreeMap<String, String> {
-    let mut count: BTreeMap<String, usize> = BTreeMap::new();
-    for op in api.operations.values() {
-        *count.entry(op.name.to_upper_camel_case()).or_default() += 1;
-    }
-    api.operations
-        .values()
-        .map(|op| {
-            let short = op.name.to_upper_camel_case();
-            let name = if count[&short] > 1 {
-                format!("{}{short}", op.tag.to_upper_camel_case())
-            } else {
-                short
-            };
-            (op.line(), name)
-        })
-        .collect()
-}
-
-fn op_context(
-    op: &Operation,
-    markers: &BTreeMap<String, String>,
-    params_structs: &mut Vec<ParamsCtx>,
-) -> OpCtx {
-    let path_params: Vec<&str> = op
-        .params
-        .iter()
-        .filter(|p| p.location == ParamIn::Path)
-        .map(|p| p.name.as_str())
-        .collect();
-    let (path_literal, path_format, path_args) = if path_params.is_empty() {
+fn op_context(op: &context::Op, params_structs: &mut Vec<ParamsCtx>) -> OpCtx {
+    let naming = RustNaming;
+    let (path_literal, path_format, path_args) = if op.path_params.is_empty() {
         (Some(op.path.clone()), None, Vec::new())
     } else {
-        let mut format = op.path.clone();
-        for name in &path_params {
-            format = format.replace(&format!("{{{name}}}"), "{}");
-        }
+        let format: String = op
+            .segments
+            .iter()
+            .map(|s| match s {
+                Segment::Literal { text } => text.as_str(),
+                Segment::Param { .. } => "{}",
+            })
+            .collect();
         (
             None,
             Some(format),
-            path_params.iter().map(|n| n.to_snake_case()).collect(),
+            op.path_params
+                .iter()
+                .map(|p| p.name.to_snake_case())
+                .collect(),
         )
     };
-    let query: Vec<&iohr_openapi::Param> = op
-        .params
-        .iter()
-        .filter(|p| p.location == ParamIn::Query)
-        .collect();
-    let params_type = if query.is_empty() {
-        None
-    } else {
-        let type_name = format!("{}Params", op.name.to_upper_camel_case());
-        let type_name = match &op.service {
-            Some(_) => format!("{}{type_name}", op.tag.to_upper_camel_case()),
-            None => type_name,
-        };
+    if let Some(type_name) = &op.params_type {
         params_structs.push(ParamsCtx {
             type_name: type_name.clone(),
-            op_line: op.line(),
-            fields: query
+            op_line: op.line.clone(),
+            fields: op
+                .query
                 .iter()
                 .map(|p| FieldCtx {
                     name: p.name.clone(),
-                    field: field_name(&p.name),
-                    ty: rust_type(&p.schema),
+                    field: naming.field_name(&p.name),
+                    ty: rust_type(&p.ty),
                     doc: p.doc.clone(),
                 })
                 .collect(),
         });
-        Some(type_name)
-    };
+    }
     OpCtx {
         name: op.name.clone(),
-        hook_name: match &op.service {
-            Some(_) => format!("{}.{}", op.tag, op.name),
-            None => op.name.clone(),
-        },
-        marker: markers[&op.line()].clone(),
+        hook_name: op.hook_name.clone(),
+        marker: op.marker.clone(),
         doc: op.doc.clone(),
-        line: op.line(),
+        line: op.line.clone(),
         method: match op.method {
             Method::Get => "Get",
             Method::Post => "Post",
@@ -369,55 +307,34 @@ fn op_context(
         path_literal,
         path_format,
         path_args,
-        params_type,
-        query: query
+        params_type: op.params_type.clone(),
+        query: op
+            .query
             .iter()
             .map(|p| QueryCtx {
                 name: p.name.clone(),
-                field: field_name(&p.name),
-                is_vec: p.schema.get("type") == Some(&serde_json::json!("array")),
+                field: naming.field_name(&p.name),
+                is_vec: matches!(p.ty, Type::Array { .. }),
             })
             .collect(),
-        body_type: op.request_body.clone(),
+        body_type: op.body.clone(),
         response_type: op
             .response
-            .schema
             .clone()
             .unwrap_or_else(|| "::serde_json::Value".to_owned()),
         scopes: op.scopes.clone(),
-        idempotent: op.idempotent && !op.method.is_idempotent(),
+        idempotent: op.idempotent_override,
     }
 }
 
-/// Rust keywords a wire name may collide with.
-const KEYWORDS: [&str; 6] = ["type", "ref", "self", "match", "loop", "mod"];
-
-/// A query parameter's field: `snake_case`, with a Rust keyword escaped.
-fn field_name(wire: &str) -> String {
-    let name = wire.to_snake_case();
-    if KEYWORDS.contains(&name.as_str()) {
-        format!("r#{name}")
-    } else {
-        name
-    }
-}
-
-/// The Rust type of a query parameter's schema.
-fn rust_type(schema: &serde_json::Value) -> String {
-    let ty = schema
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("string");
-    let format = schema
-        .get("format")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    match (ty, format) {
-        ("integer", "int32") => "i32".into(),
-        ("integer", _) => "i64".into(),
-        ("number", _) => "f64".into(),
-        ("boolean", _) => "bool".into(),
-        ("array", _) => "::std::vec::Vec<::std::string::String>".into(),
+/// The Rust type of a query parameter.
+fn rust_type(ty: &Type) -> String {
+    match ty {
+        Type::Integer { bits: 32 } => "i32".into(),
+        Type::Integer { .. } => "i64".into(),
+        Type::Number => "f64".into(),
+        Type::Bool => "bool".into(),
+        Type::Array { .. } => "::std::vec::Vec<::std::string::String>".into(),
         _ => "::std::string::String".into(),
     }
 }
