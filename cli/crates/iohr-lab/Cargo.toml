@@ -1,0 +1,19 @@
+[package]
+name = "iohr-lab"
+description = "The checks every lab document passes (RFC 0035): file name, front matter, status log and redaction, the same as the InOrbit site's build."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -5,6 +5,7 @@ mod call;
 mod config;
 mod domains;
 mod ext;
+mod lab;
 mod login;
 mod openapi;
 mod profile;
@@ -15,7 +16,7 @@ mod whoami;
 use clap::CommandFactory as _;
 
 use crate::Env;
-use crate::cli::{AccountsCommand, Cli, Command, OpenapiCommand, SdkCommand};
+use crate::cli::{AccountsCommand, Cli, Command, LabCommand, OpenapiCommand, SdkCommand};
 use crate::error::Error;
 use crate::output::Out;
 
@@ -45,6 +46,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
+        Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();

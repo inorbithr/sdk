@@ -32,6 +32,9 @@ cli/
                       main.rs: argv guard, parse, run, exit code
   crates/iohr-openapi/ a document normalised (N1 to N6, equal to tools/spec-sync.py),
                       hashed (the cut hash) and modelled as operations per profile
+  crates/iohr-lab/    `iohr lab check`: the lab document checks and redaction rules, the
+                      generic rules embedded from spec/lab/rules.json, held to the site's
+                      findings by spec/lab/conformance.json (never edit either by hand)
   crates/iohr-codegen/ one Target per language; rust/ renders models (typify) and the
                       surface (minijinja templates in src/rust/templates/)
   fuzz/               cargo-fuzz targets; excluded from the workspace

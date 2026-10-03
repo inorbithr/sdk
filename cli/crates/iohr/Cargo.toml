@@ -20,6 +20,7 @@ path = "src/main.rs"
 [dependencies]
 iohr-auth.workspace = true
 iohr-codegen.workspace = true
+iohr-lab.workspace = true
 iohr-openapi.workspace = true
 inorbithr.workspace = true
 

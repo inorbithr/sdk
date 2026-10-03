@@ -8,6 +8,7 @@ hand.** `mise run spec:sync` refreshes them; CI checks them; a mistake is fixed 
 | `SOURCE` | Where and when the files were synced from, and the API version | `spec:sync` |
 | `openapi.json` | The public slice of the platform's OpenAPI 3.1 document, normalised for code generators | `spec:sync` (fetch, filter, normalise); the same rules live in `cli/crates/iohr-openapi` for `iohr sdk generate`, kept byte-equal by a golden pair (`mise run cli:normalise-golden`) |
 | `problem.json` | JSON Schema of the error envelope (`code`, `error`, `details`) | `spec:sync`, extracted from the `Problem`, `Code` and `Detail` components (rule N6) |
+| `lab/rules.json`, `lab/conformance.json` | The lab's generic redaction rules and the fixture documents with the findings expected of each (RFC 0035), which `iohr lab check` embeds and is tested against | `spec:sync`, from `https://docs.inorbit.hr/lab/`, checked for shape (no lookaround in a rule); `--only lab` syncs them without touching the contract |
 | `frames.json` | JSON Schema of `/v1/ws` client and server frames | added when the socket opens to API keys (ADR 0004) |
 
 ## How a sync works

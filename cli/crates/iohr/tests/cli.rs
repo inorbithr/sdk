@@ -497,6 +497,84 @@ async fn verbose_output_never_shows_the_token() {
             "{args:?} printed no verbose line"
         );
     }
+    // An offline command makes no call, so it prints no request line; it must not
+    // print the token either.
+    let lab = dir.path().join("lab/rfcs");
+    std::fs::create_dir_all(&lab).unwrap();
+    std::fs::write(lab.join("0001-a.md"), LAB_DOC).unwrap();
+    let lab = lab.to_str().unwrap();
+    let args = ["lab", "check", lab, "--verbose"];
+    let o = r.with_token(&t, &args);
+    assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+    let all = text(&o);
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER"),
+        "{args:?} leaked the token"
+    );
+    assert!(!all.contains("request id"), "{args:?} made a call");
+}
+
+const LAB_DOC: &str = "---\ntitle: A decision\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe site is www.example.com.\n\n## Status log\n\n- 2026-10-03: opened.\n";
+
+/// `iohr lab check` with no network: 0 for clean documents, 1 with every finding
+/// printed, 2 for a path that is not there; a lab's config adds its own words.
+#[test]
+fn lab_check_says_what_to_fix() {
+    let dir = tempfile::tempdir().unwrap();
+    let rfcs = dir.path().join("docs/rfcs");
+    std::fs::create_dir_all(&rfcs).unwrap();
+    std::fs::write(rfcs.join("0001-a.md"), LAB_DOC).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_iohr"))
+            .args(args)
+            .current_dir(dir.path())
+            .env_clear()
+            .envs(kept_env())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    let o = run(&["lab", "check"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("1 document checked, 0 findings"),
+        "{}",
+        text(&o)
+    );
+
+    std::fs::write(
+        rfcs.join("0002-b.md"),
+        LAB_DOC.replace("www.example.com", "db.example.com on :5432"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("docs/lab")).unwrap();
+    std::fs::write(
+        dir.path().join("docs/lab/redaction.json"),
+        r#"{"domains": ["example.com"], "words": ["staging-eu"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        rfcs.join("0003-c.md"),
+        LAB_DOC.replace("A decision", "On staging-eu"),
+    )
+    .unwrap();
+    let o = run(&["lab", "check"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    let all = text(&o);
+    assert!(all.contains("0002-b.md:12 [domain]"), "{all}");
+    assert!(all.contains("0002-b.md:12 [port]"), "{all}");
+    assert!(all.contains("0003-c.md:2 [denylist]"), "{all}");
+    assert!(all.contains("3 documents checked, 3 findings"), "{all}");
+
+    let o = run(&["--json", "lab", "check", "docs/rfcs/0002-b.md"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    let findings: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(findings.as_array().map(Vec::len), Some(2), "{findings}");
+    assert_eq!(findings[0]["rule"], "domain");
+
+    let o = run(&["lab", "check", "no/such/folder"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
 }
 
 /// A provider at the mock server's own address, for a person's sign-in.
