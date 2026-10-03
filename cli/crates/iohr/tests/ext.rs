@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 use base64::Engine as _;
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::STANDARD;
 use iohr::ext::layer::tar_gz;
 use iohr::ext::oci::Digest;
 use sigstore_verify::crypto::KeyPair;
@@ -36,6 +36,8 @@ fn platform() -> serde_json::Value {
 // Only the Unix-only `run` tests sign a request; on Windows this would be dead code.
 #[cfg(unix)]
 fn token(scopes: &[&str]) -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
     let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
     format!(
         "{}.{}.TOKENSIGNATUREMARKER",
