@@ -57,7 +57,7 @@ impl Language {
     pub fn is_built(self) -> bool {
         matches!(
             self,
-            Self::Rust | Self::TypeScript | Self::Python | Self::Go
+            Self::Rust | Self::TypeScript | Self::Python | Self::Go | Self::CSharp
         )
     }
 
@@ -131,6 +131,7 @@ pub fn render(lang: Language, api: &Api, options: &Options) -> Result<Files, Ren
         Language::TypeScript => crate::typescript::TypeScriptTarget.render(api, options),
         Language::Python => crate::python::PythonTarget.render(api, options),
         Language::Go => crate::go::GoTarget.render(api, options),
+        Language::CSharp => crate::csharp::CSharpTarget.render(api, options),
         other => Err(RenderError::NotBuilt(other)),
     }
 }
