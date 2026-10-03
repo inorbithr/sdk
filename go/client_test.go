@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/inorbithr/sdk/go/codegen"
@@ -83,42 +81,6 @@ func TestURLsMustBeHTTPSOrLoopback(t *testing.T) {
 func TestAPathParameterIsOneSegment(t *testing.T) {
 	if got := codegen.PathSegment("a/b c?~é"); got != "a%2Fb%20c%3F~%C3%A9" {
 		t.Fatalf("got %s", got)
-	}
-}
-
-func TestConcurrentCallsShareOneExchange(t *testing.T) {
-	var exchanges, calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/oauth2/token" {
-			exchanges.Add(1)
-			_, _ = fmt.Fprint(w, `{"access_token":"tok","expires_in":900}`)
-			return
-		}
-		calls.Add(1)
-		if r.Header.Get("Authorization") != "Bearer tok" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		_, _ = fmt.Fprint(w, `{"subject":"ak_test"}`)
-	}))
-	defer srv.Close()
-	c, err := NewClient(WithBaseURL(srv.URL), WithTokenURL(srv.URL+"/oauth2/token"),
-		WithKey("ak_test", "s3cr3t"), WithScopes("identity:read"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	for range 10 {
-		wg.Go(func() {
-			r, err := Call[map[string]any](context.Background(), c, Operation{Method: "GET", Path: "/v1/me"})
-			if err != nil || r.Value["subject"] != "ak_test" {
-				t.Errorf("call: %v", err)
-			}
-		})
-	}
-	wg.Wait()
-	if exchanges.Load() != 1 || calls.Load() != 10 {
-		t.Fatalf("exchanges %d calls %d", exchanges.Load(), calls.Load())
 	}
 }
 

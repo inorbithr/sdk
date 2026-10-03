@@ -36,7 +36,8 @@ go/
   auth.go                TokenProvider, client credentials (single flight), static token
   errors.go              APIError, Code, Detail; errors.As targets
   retry.go, hooks.go, int64.go
-  codegen/               what generated surfaces import (Version, PathSegment)
+  codegen/               what generated surfaces import (Version, PathSegment, Pages)
+  slog.go                SlogHook: log/slog records per attempt, nothing a call carries
   public/                written by iohr; never edit
   internal/              transport details, the conformance driver
 ```
@@ -52,6 +53,14 @@ go/
 - Errors: return `*APIError` (wrapping is fine) so callers use `errors.As`. Never
   `panic` outside programmer errors at construction.
 - `String()` and `GoString()` on credentials redact the secret; a test asserts it.
-- Doc comments start with the identifier and are full sentences.
+- Doc comments start with the identifier and are full sentences. Usage lives in
+  `Example` functions (`example_test.go`), compile-only when they need the network.
+- Tests of anything timed (retries, `Retry-After`, backoff, timeouts, token lifetime,
+  single flight) run in a `testing/synctest` bubble with an in-memory transport, so a
+  minute's wait is exact and instant; a real socket would stop the bubble's clock.
+- `codegen` is a contract with `iohr`: adding what new surfaces need adds a version
+  constant (`V2` added `Pages`) and keeps the old ones, so an old surface still builds.
+- A hook never sees or logs a header, body, query value or token; `SlogHook` logs the
+  operation's name, not the bound path.
 - Never move or delete a released tag; retract instead (`docs/releasing.md`).
 - Publishing stays off until the first release (M4).
