@@ -357,7 +357,7 @@ fn render_models(models: &[Model], runtime: &str) -> String {
     let mut out = String::from(
         "\"\"\"The models of the InOrbit API this surface was generated from.\"\"\"\n\n",
     );
-    let mut pydantic = vec!["BaseModel".to_owned(), "ConfigDict".to_owned()];
+    let pydantic = vec!["BaseModel".to_owned(), "ConfigDict".to_owned()];
     // pydantic's Field is imported under a private name: the API may have a model called
     // Field (it does since 2026-10-03), and a model must never shadow the helper.
     let field_helper = classes.contains("_Field(");
