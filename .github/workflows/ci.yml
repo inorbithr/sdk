@@ -152,12 +152,12 @@ jobs:
       - run: cargo build --locked --manifest-path cli/Cargo.toml -p iohr
       - run: mise run conformance:server:build
       - run: |
-          mkdir -p .tools
-          cp cli/target/debug/iohr conformance/server/bin/replay .tools/
+          mkdir -p ci-tools
+          cp cli/target/debug/iohr conformance/server/bin/replay ci-tools/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tools-linux
-          path: .tools/
+          path: ci-tools/
           if-no-files-found: error
           retention-days: 1
 
@@ -177,7 +177,7 @@ jobs:
     env:
       MISE_GO_VERSION: ${{ matrix.go }}
       # Linux cells use the tools job's binaries; Windows and macOS build their own.
-      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/.tools/iohr', github.workspace) || '' }}
+      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       # One cell builds the generator's compile test (it needs Rust).
       COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.go == '1.27' }}
@@ -195,11 +195,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tools-linux
-          path: .tools
+          path: ci-tools
       - if: matrix.os == 'ubuntu-latest'
         run: |
-          chmod +x .tools/iohr .tools/replay
-          mkdir -p conformance/server/bin && cp .tools/replay conformance/server/bin/replay
+          chmod +x ci-tools/iohr ci-tools/replay
+          mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
       - run: mise run go:gen && git diff --exit-code -- go
       - run: mise run go:check
       - run: mise run go:audit
@@ -229,7 +229,7 @@ jobs:
         include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","rust":"1.98.1"},{"os":"macos-latest","rust":"1.98.1"}]' || '[]') }}
     env:
       MISE_RUST_VERSION: ${{ matrix.rust }}
-      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/.tools/iohr', github.workspace) || '' }}
+      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -245,11 +245,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tools-linux
-          path: .tools
+          path: ci-tools
       - if: matrix.os == 'ubuntu-latest'
         run: |
-          chmod +x .tools/iohr .tools/replay
-          mkdir -p conformance/server/bin && cp .tools/replay conformance/server/bin/replay
+          chmod +x ci-tools/iohr ci-tools/replay
+          mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: rust
@@ -279,7 +279,7 @@ jobs:
         include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","node":"26"}]' || '[]') }}
     env:
       MISE_NODE_VERSION: ${{ matrix.node }}
-      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/.tools/iohr', github.workspace) || '' }}
+      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.node == '26' }}
     steps:
@@ -295,11 +295,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tools-linux
-          path: .tools
+          path: ci-tools
       - if: matrix.os == 'ubuntu-latest'
         run: |
-          chmod +x .tools/iohr .tools/replay
-          mkdir -p conformance/server/bin && cp .tools/replay conformance/server/bin/replay
+          chmod +x ci-tools/iohr ci-tools/replay
+          mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
       - run: mise run ts:gen && git diff --exit-code -- typescript
       - run: mise run ts:check
       - run: mise run ts:audit
@@ -329,7 +329,7 @@ jobs:
     env:
       MISE_PYTHON_VERSION: ${{ matrix.python }}
       UV_PYTHON: ${{ matrix.python }}
-      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/.tools/iohr', github.workspace) || '' }}
+      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.python == '3.14' }}
     steps:
@@ -346,11 +346,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tools-linux
-          path: .tools
+          path: ci-tools
       - if: matrix.os == 'ubuntu-latest'
         run: |
-          chmod +x .tools/iohr .tools/replay
-          mkdir -p conformance/server/bin && cp .tools/replay conformance/server/bin/replay
+          chmod +x ci-tools/iohr ci-tools/replay
+          mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
       - run: mise run py:gen && git diff --exit-code -- python
       - run: mise run py:check
       - run: mise run py:audit
@@ -381,7 +381,7 @@ jobs:
         include: ${{ fromJSON(needs.changes.outputs.full == 'true' && '[{"os":"windows-latest","java":"temurin-17.0.20+8"}]' || '[]') }}
     env:
       MISE_JAVA_VERSION: ${{ matrix.java }}
-      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/.tools/iohr', github.workspace) || '' }}
+      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' && matrix.java == 'temurin-21.0.12+8.0.LTS' }}
     steps:
@@ -397,11 +397,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tools-linux
-          path: .tools
+          path: ci-tools
       - if: matrix.os == 'ubuntu-latest'
         run: |
-          chmod +x .tools/iohr .tools/replay
-          mkdir -p conformance/server/bin && cp .tools/replay conformance/server/bin/replay
+          chmod +x ci-tools/iohr ci-tools/replay
+          mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
       - run: mise run java:gen && git diff --exit-code -- java
       - run: mise run java:check
       - run: mise run conformance:java
@@ -428,7 +428,7 @@ jobs:
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
-      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/.tools/iohr', github.workspace) || '' }}
+      IOHR_BIN: ${{ matrix.os == 'ubuntu-latest' && format('{0}/ci-tools/iohr', github.workspace) || '' }}
       REPLAY_PREBUILT: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       COMPILE_CELL: ${{ matrix.os == 'ubuntu-latest' }}
     steps:
@@ -445,11 +445,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tools-linux
-          path: .tools
+          path: ci-tools
       - if: matrix.os == 'ubuntu-latest'
         run: |
-          chmod +x .tools/iohr .tools/replay
-          mkdir -p conformance/server/bin && cp .tools/replay conformance/server/bin/replay
+          chmod +x ci-tools/iohr ci-tools/replay
+          mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
       - run: mise run csharp:gen && git diff --exit-code -- csharp
       - run: mise run csharp:check
       - run: mise run conformance:csharp
