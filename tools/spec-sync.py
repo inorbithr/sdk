@@ -13,6 +13,11 @@ spec/problem.json and spec/SOURCE. The output is deterministic: the same documen
 always produces the same files, and SOURCE keeps its date while the document's hash is
 unchanged.
 
+It also fetches the lab's generic redaction rules and conformance cases (RFC 0035),
+which `iohr lab check` embeds, from the developer docs into spec/lab/ (`--lab` for
+another folder or URL). `--only lab` syncs those alone and leaves the API contract as
+it is, since a newer contract means regenerating every SDK.
+
 `--check` writes nothing and exits 1 when spec/ would change.
 """
 
@@ -31,6 +36,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "spec"
 DEFAULT_SOURCE = "https://api.inorbit.hr/openapi.json"
+DEFAULT_LAB = "https://docs.inorbit.hr/lab"
 SERVER = {"url": "https://api.inorbit.hr", "description": "The InOrbit API"}
 SCHEMAS = "#/components/schemas/"
 METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
@@ -285,15 +291,35 @@ def render(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
-def source_file(source: str, digest: str, doc: dict[str, Any], operations: int) -> str:
-    """SOURCE, keeping the previous date when the document has not changed."""
+def lab_files(source: str) -> tuple[dict[str, str], str]:
+    """spec/lab/: the rules and the cases, checked for shape, and their joint sha256."""
+    raw = {name: fetch(f"{source.rstrip('/')}/{name}") for name in ("rules.json", "conformance.json")}
+    rules = json.loads(raw["rules.json"])
+    cases = json.loads(raw["conformance.json"])
+    if not isinstance(rules.get("rules"), list) or not rules["rules"]:
+        raise SyncError("lab/rules.json has no rules")
+    for rule in rules["rules"]:
+        if not all(isinstance(rule.get(k), str) for k in ("id", "re", "why")):
+            raise SyncError(f"lab/rules.json: a rule without id, re or why: {rule!r}")
+        if "(?=" in rule["re"] or "(?!" in rule["re"] or "(?<" in rule["re"]:
+            raise SyncError(f"lab/rules.json: rule {rule['id']} uses lookaround")
+    if not isinstance(cases.get("files"), dict) or not isinstance(cases.get("config"), dict):
+        raise SyncError("lab/conformance.json has no files or config")
+    digest = hashlib.sha256(raw["rules.json"] + b"\n" + raw["conformance.json"]).hexdigest()
+    return {"rules.json": render(rules), "conformance.json": render(cases)}, digest
+
+
+def source_file(
+    source: str, digest: str, doc: dict[str, Any], operations: int, lab: str, lab_digest: str
+) -> str:
+    """SOURCE, keeping the previous date when neither the document nor the lab changed."""
     synced = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     previous = SPEC / "SOURCE"
     if previous.exists():
         old = dict(
             line.split(": ", 1) for line in previous.read_text().splitlines() if ": " in line
         )
-        if old.get("sha256") == digest and "synced" in old:
+        if old.get("sha256") == digest and old.get("lab_sha256") == lab_digest and "synced" in old:
             synced = old["synced"]
     return (
         f"source: {source}\n"
@@ -303,14 +329,54 @@ def source_file(source: str, digest: str, doc: dict[str, Any], operations: int) 
         f"operations: {operations}\n"
         f"synced: {synced}\n"
         "commit: the platform does not publish it in the document yet (spec/README.md)\n"
+        f"lab_source: {lab}\n"
+        f"lab_sha256: {lab_digest}\n"
     )
+
+
+def sync_lab(args: argparse.Namespace) -> int:
+    """spec/lab/ alone, and the two lab lines of SOURCE; the contract stays as it is."""
+    try:
+        lab, lab_digest = lab_files(args.lab)
+    except (SyncError, OSError, json.JSONDecodeError) as err:
+        print(f"spec:sync: {err}", file=sys.stderr)
+        return 1
+    previous = SPEC / "SOURCE"
+    lines = [
+        line
+        for line in (previous.read_text().splitlines() if previous.exists() else [])
+        if not line.startswith(("lab_source: ", "lab_sha256: "))
+    ]
+    lines += [f"lab_source: {args.lab}", f"lab_sha256: {lab_digest}"]
+    files = {
+        previous: "\n".join(lines) + "\n",
+        **{SPEC / "lab" / name: text for name, text in lab.items()},
+    }
+    changed = [p for p, text in files.items() if not p.exists() or p.read_text() != text]
+    if args.check:
+        for path in changed:
+            print(f"spec:sync: {path.relative_to(ROOT)} is out of date", file=sys.stderr)
+        return 1 if changed else 0
+    for path, text in files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    print(
+        "spec:sync: lab only; changed: "
+        + (", ".join(str(p.relative_to(ROOT)) for p in changed) or "nothing")
+    )
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("source", nargs="?", default=DEFAULT_SOURCE, help="URL or file")
+    parser.add_argument("--lab", default=DEFAULT_LAB, help="URL or folder of the lab files")
     parser.add_argument("--check", action="store_true", help="exit 1 if spec/ would change")
+    parser.add_argument("--only", choices=["lab"], help="sync only this part of spec/")
     args = parser.parse_args()
+
+    if args.only == "lab":
+        return sync_lab(args)
 
     try:
         raw = fetch(args.source)
@@ -318,6 +384,7 @@ def main() -> int:
         if not str(doc.get("openapi", "")).startswith("3.1"):
             raise SyncError(f"expected OpenAPI 3.1, got {doc.get('openapi')!r}")
         openapi, problem = normalise(doc)
+        lab, lab_digest = lab_files(args.lab)
     except (SyncError, OSError, json.JSONDecodeError) as err:
         print(f"spec:sync: {err}", file=sys.stderr)
         return 1
@@ -328,7 +395,10 @@ def main() -> int:
     files = {
         SPEC / "openapi.json": render(openapi),
         SPEC / "problem.json": render(problem),
-        SPEC / "SOURCE": source_file(args.source, hashlib.sha256(raw).hexdigest(), doc, operations),
+        SPEC / "SOURCE": source_file(
+            args.source, hashlib.sha256(raw).hexdigest(), doc, operations, args.lab, lab_digest
+        ),
+        **{SPEC / "lab" / name: text for name, text in lab.items()},
     }
     changed = [p for p, text in files.items() if not p.exists() or p.read_text() != text]
     if args.check:
@@ -336,6 +406,7 @@ def main() -> int:
             print(f"spec:sync: {path.relative_to(ROOT)} is out of date", file=sys.stderr)
         return 1 if changed else 0
     for path, text in files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     print(
         f"spec:sync: {operations} operations, {len(openapi['components']['schemas'])} schemas, "

@@ -94,6 +94,9 @@ pub enum Command {
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
+    /// Lab documents: RFCs and studies kept in your repository (RFC 0035).
+    #[command(subcommand)]
+    Lab(LabCommand),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -102,6 +105,25 @@ pub enum Command {
     /// An installed extension, such as `iohr agent ...`.
     #[command(external_subcommand)]
     External(Vec<OsString>),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LabCommand {
+    /// Check RFCs and studies the way the InOrbit site checks its own: file names,
+    /// front matter, status logs, and the redaction rules on public documents. Reads
+    /// only the files named, makes no network call, needs no sign-in.
+    Check(LabCheck),
+}
+
+#[derive(Debug, Args)]
+pub struct LabCheck {
+    /// Folders of documents (`studies` holds studies, any other folder RFCs), or single
+    /// files. Default: `docs/rfcs` and `docs/studies`, those that exist.
+    pub paths: Vec<PathBuf>,
+    /// The lab's own redaction config: its domains, words and patterns. Default:
+    /// `docs/lab/redaction.json` when it exists, otherwise the generic rules alone.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]

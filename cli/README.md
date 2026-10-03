@@ -72,6 +72,7 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
 | `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install, verify and pin them; `iohr <name> ...` runs one |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
+| `iohr lab check [PATH...] [--config FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter, status logs, redaction on public documents; offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json` and `--verbose`.
@@ -181,6 +182,7 @@ Each runtime dependency, and why (SR-20):
 | flate2 (pure Rust backend) | Extensions: the gzip of an extension's layer; the tar inside is read by `iohr` itself, one regular file only |
 | semver | Extensions: the newest release among a registry's tags |
 | sha2 | Also the digests of OCI manifests and blobs |
+| regex (no Unicode tables but the Perl classes) | `iohr lab check`: the redaction rules are regular expressions published as data (`spec/lab/rules.json`); already in the lock through two other crates |
 
 The OCI registry client is written here over reqwest (ADR 0012): the published crates
 added a licence outside `deny.toml` and about 30 crates for four read-only calls.

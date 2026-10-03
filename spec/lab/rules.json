@@ -1,0 +1,31 @@
+{
+  "note": "The lab's generic redaction rules: what no public RFC or study may carry, for any lab. Each rule is a regular expression over one line, with [REDACTED: reason] markers reduced to their reasons. Patterns stay in the subset JavaScript and Rust's regex crate read the same way: no lookaround, no backreferences. A lab adds its own domains, words and patterns in its redaction.json. Served at docs.inorbit.hr/lab/rules.json for iohr lab check; the cases in conformance/ pin the behaviour.",
+  "rules": [
+    {
+      "id": "ipv4",
+      "re": "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b",
+      "why": "an address"
+    },
+    {
+      "id": "port",
+      "re": ":(?:102[4-9]|10[3-9]\\d|1[1-9]\\d{2}|[2-9]\\d{3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])\\b",
+      "why": "a port"
+    },
+    {
+      "id": "path",
+      "re": "(?:^|[\\s\"'`(=])(?:/mnt/|/opt/|/home/|\\.env\\b)",
+      "why": "a path into the machine or the deployment"
+    },
+    {
+      "id": "k8s",
+      "re": "\\b[a-z0-9-]+\\.[a-z0-9-]+\\.svc(?:\\.cluster\\.local)?\\b|^\\s*(?:kind|namespace):\\s*\\S+|\\s-n\\s+[a-z0-9-]+\\b",
+      "why": "a cluster name"
+    },
+    {
+      "id": "embed",
+      "ignore_case": true,
+      "re": "<(?:script|iframe|link|img)\\b|!\\[[^\\]]*\\]\\(https?:",
+      "why": "content loaded from elsewhere"
+    }
+  ]
+}

@@ -1382,6 +1382,7 @@ dependencies = [
  "inorbithr",
  "iohr-auth",
  "iohr-codegen",
+ "iohr-lab",
  "iohr-openapi",
  "reqwest",
  "semver",
@@ -1440,6 +1441,16 @@ dependencies = [
  "tempfile",
  "thiserror",
  "typify",
+]
+
+[[package]]
+name = "iohr-lab"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

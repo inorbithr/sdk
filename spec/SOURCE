@@ -5,3 +5,5 @@ openapi: 3.1.0
 operations: 23
 synced: 2026-10-02T15:02:36Z
 commit: the platform does not publish it in the document yet (spec/README.md)
+lab_source: https://docs.inorbit.hr/lab
+lab_sha256: 394cd19d17699325b17666cb4f10cd178eefd6b610d11fdf5e38455d5c2d97c9

@@ -43,7 +43,8 @@
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr-auth')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr-openapi')].version" },
-        { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr-codegen')].version" }
+        { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr-codegen')].version" },
+        { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr-lab')].version" }
       ]
     }
   }

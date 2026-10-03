@@ -1,0 +1,184 @@
+{
+  "config": {
+    "domains": [
+      "example.com"
+    ],
+    "labs": [
+      "core",
+      "data"
+    ],
+    "patterns": [
+      {
+        "id": "secret",
+        "re": "\\bVaultPath\\b",
+        "why": "the shape of the gate"
+      },
+      {
+        "id": "path",
+        "re": "(?:^|\\s)deploy/",
+        "why": "a path into the machine or the deployment"
+      }
+    ],
+    "words": [
+      "db-primary"
+    ]
+  },
+  "files": {
+    "rfcs/0001-a-duplicate.md": {
+      "expected": [],
+      "text": "---\ntitle: A second document numbered 0001\nstatus: open\ndate: 2026-10-03\npublic: false\nlab: core\nsummary: Two files share a number.\n---\n"
+    },
+    "rfcs/0001-clean.md": {
+      "expected": [
+        {
+          "line": null,
+          "rule": "duplicate-number"
+        }
+      ],
+      "text": "---\ntitle: A clean document\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: Passes every check, close to every rule without breaking one.\n---\n\n## Problem\n\nThe site is www.example.com and the company is example.com. Plain HTTP is :80, the\nmeeting is at 12:30, the version is 1.2.3 and a range is 1-2.\n\nThe balancer answers on [REDACTED: the internal port] behind the edge.\n\n```redacted\nthe routing table, six lines\n```\n\n## Status log\n\n- 2026-10-03: opened.\n- 2026-10-04: a line that runs on\n  over an indented second line.\n"
+    },
+    "rfcs/0002-leaks.md": {
+      "expected": [
+        {
+          "line": 7,
+          "rule": "domain"
+        },
+        {
+          "line": 12,
+          "rule": "domain"
+        },
+        {
+          "line": 13,
+          "rule": "ipv4"
+        },
+        {
+          "line": 14,
+          "rule": "port"
+        },
+        {
+          "line": 15,
+          "rule": "path"
+        },
+        {
+          "line": 16,
+          "rule": "k8s"
+        },
+        {
+          "line": 17,
+          "rule": "k8s"
+        },
+        {
+          "line": 18,
+          "rule": "embed"
+        },
+        {
+          "line": 19,
+          "rule": "denylist"
+        },
+        {
+          "line": 20,
+          "rule": "secret"
+        },
+        {
+          "line": 21,
+          "rule": "path"
+        },
+        {
+          "line": 22,
+          "rule": "port"
+        },
+        {
+          "line": 25,
+          "rule": "denylist"
+        }
+      ],
+      "text": "---\ntitle: A public document that leaks\nstatus: decided\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: Every redaction rule, once, and the domain in the front matter too, api.example.com.\n---\n\n## Problem\n\nThe service is at api.example.com, and also at Admin.Example.Com.\nIt listens on 192.0.2.10.\nThe port is :8443.\nIts data is under /home/svc/data.\nIn the cluster it is billing.prod.svc.cluster.local.\n  namespace: prod\nThe page loads <script src=\"x.js\">.\nIt reads from db-primary.\nThe token lives at VaultPath.\nThe manifests are under deploy/k8s.\nThe edge [REDACTED: listens on :9443].\n\n```redacted\nthe database is DB-PRIMARY\n```\n\n## Status log\n\n- 2026-10-03: opened.\n"
+    },
+    "rfcs/0003-a-draft.md": {
+      "expected": [],
+      "text": "---\ntitle: A draft may name anything\nstatus: open\ndate: 2026-10-03\npublic: false\nlab: core\nsummary: Not public, so the redaction rules do not apply.\n---\n\n## Problem\n\napi.example.com, 192.0.2.10, :8443, db-primary.\n\n## Status log\n\n- 2026-10-03: opened.\n"
+    },
+    "rfcs/0004-bad-front.md": {
+      "expected": [
+        {
+          "line": 7,
+          "rule": "unknown-key"
+        },
+        {
+          "line": 8,
+          "rule": "front-matter"
+        },
+        {
+          "line": null,
+          "rule": "missing-key"
+        },
+        {
+          "line": null,
+          "rule": "public"
+        },
+        {
+          "line": null,
+          "rule": "status"
+        },
+        {
+          "line": null,
+          "rule": "date"
+        },
+        {
+          "line": null,
+          "rule": "lab"
+        }
+      ],
+      "text": "---\ntitle: Front matter with every mistake\nstatus: done\ndate: 3 October 2026\npublic: yes\nlab: other\nowner: someone\nthis line is not a key and a value\n---\n\n## Problem\n\nNothing else is wrong.\n"
+    },
+    "rfcs/0005-bad-log.md": {
+      "expected": [
+        {
+          "line": 13,
+          "rule": "status-log"
+        }
+      ],
+      "text": "---\ntitle: A status log with a bad bullet\nstatus: open\ndate: 2026-10-03\npublic: false\nlab: data\nsummary: The second bullet has no date.\n---\n\n## Status log\n\n- 2026-10-03: opened.\n- yesterday: built.\n\n## After the log\n\n- a bullet outside the log is fine.\n"
+    },
+    "rfcs/0006-no-front-matter.md": {
+      "expected": [
+        {
+          "line": 1,
+          "rule": "front-matter"
+        }
+      ],
+      "text": "# A document without front matter\n\nNothing to read.\n"
+    },
+    "rfcs/0007-unclosed.md": {
+      "expected": [
+        {
+          "line": 4,
+          "rule": "front-matter"
+        },
+        {
+          "line": null,
+          "rule": "front-matter"
+        }
+      ],
+      "text": "---\ntitle: The front matter never closes\nstatus: open\n"
+    },
+    "rfcs/a-bad-name.md": {
+      "expected": [
+        {
+          "line": null,
+          "rule": "file-name"
+        }
+      ],
+      "text": "The name has no number.\n"
+    },
+    "studies/0001-a-study.md": {
+      "expected": [
+        {
+          "line": null,
+          "rule": "status"
+        }
+      ],
+      "text": "---\ntitle: A study with an RFC's status\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: data\nsummary: A study is running, measured or published, never open.\nrfc: 0001-clean\nheadline: 72 tok/s\nheadline_note: a number with its context\n---\n\n## The question\n\nWhat did we measure?\n"
+    }
+  }
+}
