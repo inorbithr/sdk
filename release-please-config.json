@@ -45,7 +45,15 @@
         "src/version.ts"
       ]
     },
-    "python": { "release-type": "python", "component": "python", "package-name": "inorbithr", "initial-version": "0.1.0" },
+    "python": {
+      "release-type": "python",
+      "component": "python",
+      "package-name": "inorbithr",
+      "initial-version": "0.1.0",
+      "extra-files": [
+        { "type": "toml", "path": "uv.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" }
+      ]
+    },
     "cli": {
       "release-type": "simple",
       "component": "iohr",

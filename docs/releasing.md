@@ -77,6 +77,12 @@ The repository went public on 2026-10-01. These items waited for that.
 - [ ] Java on Maven Central: a Central user token and a dedicated signing key as secrets,
       then the publish job. The namespace `hr.inorbit` is verified (2026-10-03).
 
+## Lock files in a release
+
+release-please updates every lock file that records a package's own version, so the
+release PR builds with `--locked`: `rust/Cargo.lock`, `cli/Cargo.lock` (the `iohr*` crates)
+and `python/uv.lock` (`extra-files` in `release-please-config.json`).
+
 ## A Rust release and the command line
 
 The command line depends on the `inorbithr` crate by path, and its `cli/Cargo.lock` pins
