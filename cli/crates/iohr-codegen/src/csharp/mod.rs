@@ -645,7 +645,12 @@ fn iterator(op: &Op, receiver: &str, receiver_type: &str, models: &[Model], ctx:
     let next = property(&paging.next_field, response);
     let walk_docs: Vec<String> = docs
         .iter()
-        .map(|d| d.replace("Cancels the call, retries included.", "Cancels the walk and the page in flight."))
+        .map(|d| {
+            d.replace(
+                "Cancels the call, retries included.",
+                "Cancels the walk and the page in flight.",
+            )
+        })
         .collect();
     format!(
         "\n        /// <summary>Every item <c>{}</c> answers, page after page, following <c>{}</c> until the last page; for <c>await foreach</c>.</summary>\n        /// <typeparam name=\"TProfile\">The client's profile, whose cut holds the operation.</typeparam>\n{}\n        /// <returns>The items, fetched a page at a time.</returns>\n        public static global::System.Collections.Generic.IAsyncEnumerable<{item}> All{}Async<TProfile>({})\n            where TProfile : {}\n        {{\n            return {rt}.Codegen.Pages<{item}>(async (token, ct) =>\n            {{\n                var page = (await {}Async({}).ConfigureAwait(false)).Value;\n                return (page.{list}, page.{next});\n            }}, cancellationToken);\n        }}\n",

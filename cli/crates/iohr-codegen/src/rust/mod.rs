@@ -260,7 +260,9 @@ fn context(api: &Api, runtime: &str, in_crate: bool, files: &mut Files) -> Conte
                 profiles: m.profiles.iter().map(|p| type_name(p)).collect(),
             })
             .collect(),
-        paged: handles.iter().any(|h: &HandleCtx| h.ops.iter().any(|o| o.paging.is_some())),
+        paged: handles
+            .iter()
+            .any(|h: &HandleCtx| h.ops.iter().any(|o| o.paging.is_some())),
         handles,
         flat,
         params_structs,

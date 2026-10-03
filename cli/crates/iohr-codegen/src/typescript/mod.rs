@@ -536,9 +536,19 @@ fn render_profiles(surface: &context::Surface, all_models: &[Model], runtime: &s
     let mut params = BTreeSet::new();
     let mut body = String::new();
     for p in &surface.profiles {
-        body.push_str(&profile_class(surface, p, all_models, &mut models, &mut params));
+        body.push_str(&profile_class(
+            surface,
+            p,
+            all_models,
+            &mut models,
+            &mut params,
+        ));
     }
-    let codegen = if body.contains("codegen.pages(") { "codegen, " } else { "" };
+    let codegen = if body.contains("codegen.pages(") {
+        "codegen, "
+    } else {
+        ""
+    };
     let mut out = format!(
         "import {{ type CallOptions, Client, {codegen}type Response }} from \"{runtime}\";\n"
     );
