@@ -8,8 +8,8 @@ from typing import Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
-    Field,
 )
+from pydantic import Field as _Field
 
 from ..runtime import (
     Code,
@@ -450,7 +450,7 @@ class EventType(_Model):
     """`iohr.events.v1.EventType`"""
 
     description: str
-    schema_: str = Field(alias="schema")
+    schema_: str = _Field(alias="schema")
     type: str
 
 
@@ -573,7 +573,7 @@ class GetUnitSeriesResponse(_Model):
     """`iohr.accounts.v1.GetUnitSeriesResponse`"""
 
     by: str
-    from_: str = Field(alias="from")
+    from_: str = _Field(alias="from")
     groups: list[UnitSeriesGroup]
     rows: list[UnitSeriesRow]
     to: str
@@ -686,14 +686,14 @@ class Kind(_Model):
 class KindAction(_Model):
     """`iohr.connections.v1.KindAction`"""
 
-    class_: str = Field(alias="class")
+    class_: str = _Field(alias="class")
     description: str
     executors: list[str]
     name: str
     params: list[Field]
     reads_private: bool
     reads_untrusted: bool
-    schema_: str = Field(alias="schema")
+    schema_: str = _Field(alias="schema")
     sends_out: bool
 
 
@@ -1065,7 +1065,7 @@ class ToolInfo(_Model):
     connection_id: str
     description: str
     name: str
-    schema_json_: str = Field(alias="schema_json")
+    schema_json_: str = _Field(alias="schema_json")
 
 
 class UnitCategory(_Model):

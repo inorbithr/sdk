@@ -13,8 +13,8 @@ from inorbithr.runtime import (
 from pydantic import (
     BaseModel,
     ConfigDict,
-    Field,
 )
+from pydantic import Field as _Field
 
 
 class _Model(BaseModel):
@@ -181,7 +181,7 @@ class EventType(_Model):
     """`iohr.events.v1.EventType`"""
 
     description: str
-    schema_: str = Field(alias="schema")
+    schema_: str = _Field(alias="schema")
     type: str
 
 
