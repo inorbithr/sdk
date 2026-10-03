@@ -73,7 +73,15 @@ fn the_committed_spec_matches_when_it_came_from_the_fixture() {
 fn the_hash_vector_is_stable() {
     // The same document and hash are committed to the platform repository, so the
     // gateway's stamp and this crate's local hash agree.
-    let doc = read("cut-hash.json");
-    let expected = std::fs::read_to_string(fixtures().join("cut-hash.sha256")).unwrap();
-    assert_eq!(cut_hash(&doc), expected.trim());
+    // The file is the platform's own vector (core: crates/protocol/tests/fixtures/
+    // cut-hash.json): `{about, hash, document}`.
+    let vector = read("cut-hash.json");
+    let expected = vector["hash"].as_str().unwrap();
+    assert_eq!(cut_hash(&vector["document"]), expected);
+    assert_eq!(
+        std::fs::read_to_string(fixtures().join("cut-hash.sha256"))
+            .unwrap()
+            .trim(),
+        expected
+    );
 }

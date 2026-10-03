@@ -1,127 +1,34 @@
 {
-  "components": {
-    "schemas": {
-      "Digest": {
-        "properties": {
-          "id": {
-            "format": "int64",
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          }
-        },
-        "type": "object"
+  "about": "The test vector for the cut hash (RFC 0020): sha256 over paths and components with description, summary, example, examples and x-iohr-* removed, keys sorted at every level, no whitespace. The gateway and the SDK repository both check this document against this hash.",
+  "hash": "sha256:769dbcada4336686ff25294b80cf9ad1628a6090055137628732d61400bfbe9e",
+  "document": {
+    "openapi": "3.1.0",
+    "info": {"title": "Vector", "version": "9.9.9", "description": "never hashed", "x-iohr-cut": {"hash": "never hashed"}},
+    "paths": {
+      "/v1/me": {
+        "get": {
+          "operationId": "me",
+          "summary": "not hashed",
+          "description": "not hashed",
+          "x-iohr-public": true,
+          "x-iohr-scopes": ["identity:read"],
+          "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Me"}, "example": {"subject": "x"}}}}}
+        }
       },
-      "ListDigestsResponse": {
-        "properties": {
-          "digests": {
-            "items": {
-              "$ref": "#/components/schemas/Digest"
-            },
-            "type": "array"
-          }
-        },
-        "type": "object"
-      },
-      "Me": {
-        "description": "ignored",
-        "properties": {
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "subject": {
-            "example": "ak_1",
-            "type": "string"
-          }
-        },
-        "required": [
-          "subject",
-          "scopes"
-        ],
-        "type": "object"
-      }
-    }
-  },
-  "info": {
-    "description": "ignored by the hash",
-    "title": "InOrbit API",
-    "version": "0.1.0",
-    "x-iohr-cut": {
-      "hash": "sha256:not-part-of-the-hash",
-      "plan": "free",
-      "scopes": [
-        "identity:read"
-      ]
-    }
-  },
-  "openapi": "3.1.0",
-  "paths": {
-    "/v1/me": {
-      "get": {
-        "description": "ignored",
-        "operationId": "me",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Me"
-                }
-              }
-            },
-            "description": "ignored"
-          }
-        },
-        "summary": "ignored",
-        "x-iohr-public": true,
-        "x-iohr-scopes": [
-          "identity:read"
-        ]
+      "/v1/things/{id}": {
+        "post": {
+          "operationId": "ThingService.Make",
+          "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+          "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}},
+          "responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}}}
+        }
       }
     },
-    "/v1/radar/digests": {
-      "get": {
-        "operationId": "RadarService.ListDigests",
-        "parameters": [
-          {
-            "example": 5,
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListDigestsResponse"
-                }
-              }
-            }
-          }
-        },
-        "tags": [
-          "radar"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-scopes": [
-          "radar:read"
-        ]
+    "components": {
+      "schemas": {
+        "Thing": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "not hashed"}, "size": {"type": "string", "format": "int64"}}, "examples": [{"name": "a"}]},
+        "Me": {"type": "object", "properties": {"subject": {"type": "string"}, "scopes": {"type": "array", "items": {"type": "string"}}}}
       }
     }
-  },
-  "servers": [
-    {
-      "url": "https://api.inorbit.hr"
-    }
-  ]
+  }
 }
