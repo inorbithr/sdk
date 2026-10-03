@@ -83,7 +83,7 @@ impl Error {
 
 /// The answer as it came: status, headers, body, and the request ids both ways
 /// (SR-17).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct RawResponse {
     /// The HTTP status.
@@ -98,6 +98,20 @@ pub struct RawResponse {
     pub server_request_id: Option<String>,
     /// How many attempts the call took.
     pub attempts: u32,
+}
+
+/// `Debug` shows the body's size, not the body: an answer may hold data a log must not
+/// (SR-13).
+impl fmt::Debug for RawResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RawResponse")
+            .field("status", &self.status)
+            .field("body_bytes", &self.body.len())
+            .field("request_id", &self.request_id)
+            .field("server_request_id", &self.server_request_id)
+            .field("attempts", &self.attempts)
+            .finish_non_exhaustive()
+    }
 }
 
 impl RawResponse {
@@ -596,6 +610,15 @@ mod tests {
         let e = ApiError::parse(raw(502, ""));
         assert_eq!(e.code, Code::Internal);
         assert_eq!(e.message, "the API failed to answer");
+    }
+
+    #[test]
+    fn debug_shows_the_body_size_not_the_body() {
+        let shown = format!("{:?}", raw(200, "{\"email\":\"someone@example.com\"}"));
+        assert!(
+            shown.contains("body_bytes: 31") && !shown.contains("example.com"),
+            "{shown}"
+        );
     }
 
     #[test]

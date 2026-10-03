@@ -11,7 +11,8 @@ pub struct CreateEndpointRequest {
 ///`iohr.events.v1.CreateEndpointResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct CreateEndpointResponse {
-    pub endpoint: Endpoint,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub endpoint: ::std::option::Option<Endpoint>,
     pub secret: ::std::string::String,
 }
 ///`iohr.events.v1.CreateInboxRequest`
@@ -20,9 +21,10 @@ pub struct CreateInboxRequest {
     pub account_id: ::std::string::String,
 }
 ///`iohr.events.v1.CreateInboxResponse`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct CreateInboxResponse {
-    pub inbox: Inbox,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub inbox: ::std::option::Option<Inbox>,
 }
 ///`iohr.events.v1.DeleteEndpointResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -127,9 +129,10 @@ pub struct Problem {
     pub error: ::std::string::String,
 }
 ///`iohr.events.v1.RetryDeliveryResponse`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct RetryDeliveryResponse {
-    pub delivery: Delivery,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub delivery: ::std::option::Option<Delivery>,
 }
 ///`iohr.events.v1.RotateSecretResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -138,9 +141,10 @@ pub struct RotateSecretResponse {
     pub secret: ::std::string::String,
 }
 ///`iohr.events.v1.SendTestResponse`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct SendTestResponse {
-    pub delivery: Delivery,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub delivery: ::std::option::Option<Delivery>,
 }
 ///`iohr.events.v1.UpdateEndpointRequest`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]

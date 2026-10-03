@@ -23,6 +23,8 @@ pub enum Error {
         /// What to do, when the command knows better than the API's message.
         hint: Option<&'static str>,
     },
+    /// `iohr sdk check` found the API's cut moved since the surface was generated.
+    Drift(String),
     /// Anything else that failed.
     Failed(String),
 }
@@ -45,7 +47,7 @@ impl Error {
             } => 3,
             Self::Api { error, .. } if is_unauthenticated(error.status()) => 3,
             Self::Api { error, .. } if error.status() == Some(403) => 4,
-            Self::Api { .. } | Self::Failed(_) => 1,
+            Self::Api { .. } | Self::Failed(_) | Self::Drift(_) => 1,
         })
     }
 
@@ -60,7 +62,9 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Usage(m) | Self::NotSignedIn(m) | Self::Failed(m) => f.write_str(m),
+            Self::Usage(m) | Self::NotSignedIn(m) | Self::Failed(m) | Self::Drift(m) => {
+                f.write_str(m)
+            }
             Self::Api { error, hint: None } => write!(f, "{error}"),
             Self::Api {
                 error,

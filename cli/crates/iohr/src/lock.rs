@@ -6,21 +6,27 @@
 use iohr_openapi::{Api, Cut, Operation};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::Path;
+
+use crate::error::Error;
 
 /// The lock file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Lock {
     /// The command line that wrote it.
-    pub generator: String,
+    pub(crate) generator: String,
     /// The target language.
-    pub lang: String,
+    pub(crate) lang: String,
     /// The directory the surface was written to, relative to the lock.
-    pub out: String,
+    pub(crate) out: String,
     /// `info.version` of the documents.
     #[serde(default)]
-    pub api_version: String,
+    pub(crate) api_version: String,
+    /// The runtime crate the surface was rendered for, when not the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) runtime: Option<String>,
     /// One entry per profile.
-    pub profiles: BTreeMap<String, Locked>,
+    pub(crate) profiles: BTreeMap<String, Locked>,
 }
 
 /// One profile's cut, as it was when the surface was generated.
@@ -63,6 +69,7 @@ impl Lock {
             lang: lang.to_owned(),
             out: out.to_owned(),
             api_version: api.api_version.clone(),
+            runtime: None,
             profiles,
         }
     }
@@ -72,6 +79,62 @@ impl Lock {
     pub(crate) fn render(&self) -> String {
         format!("{HEADER}{}", toml::to_string(self).unwrap_or_default())
     }
+
+    /// Reads a lock file.
+    pub(crate) fn read(path: &Path) -> Result<Self, Error> {
+        let text = std::fs::read_to_string(path).map_err(|e| {
+            Error::Usage(format!(
+                "cannot read {}: {e}; run `iohr sdk generate` first, or pass --lock",
+                path.display()
+            ))
+        })?;
+        toml::from_str(&text)
+            .map_err(|e| Error::Failed(format!("{} is not an iohr.lock: {e}", path.display())))
+    }
+
+    /// What changed between this lock and a fresh `api`, per profile: an empty list
+    /// means nothing moved.
+    pub(crate) fn drift(&self, api: &Api) -> Vec<Drift> {
+        let mut out = Vec::new();
+        for (name, locked) in &self.profiles {
+            let Some(cut) = api.profiles.get(name) else {
+                continue;
+            };
+            if cut.hash == locked.cut {
+                continue;
+            }
+            let now: Vec<String> = api.operations_of(name).map(Operation::line).collect();
+            let added = now
+                .iter()
+                .filter(|l| !locked.operations.contains(l))
+                .cloned()
+                .collect();
+            let removed = locked
+                .operations
+                .iter()
+                .filter(|l| !now.contains(l))
+                .cloned()
+                .collect();
+            out.push(Drift {
+                profile: name.clone(),
+                was: locked.cut.clone(),
+                now: cut.hash.clone(),
+                added,
+                removed,
+            });
+        }
+        out
+    }
+}
+
+/// One profile whose cut moved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct Drift {
+    pub(crate) profile: String,
+    pub(crate) was: String,
+    pub(crate) now: String,
+    pub(crate) added: Vec<String>,
+    pub(crate) removed: Vec<String>,
 }
 
 impl Locked {
@@ -99,6 +162,7 @@ mod tests {
             lang: "rust".into(),
             out: "src/iohr".into(),
             api_version: "0.1.0".into(),
+            runtime: None,
             profiles: BTreeMap::from([(
                 "acme-ci".to_owned(),
                 Locked {

@@ -57,6 +57,9 @@ cli/
 - `--verbose` prints method, path, status, time and request id; never a header, a query
   value or a body. The `verbose_output_never_shows_the_token` test covers every command:
   add each new command to it.
+- `sdk generate` and `sdk check` resolve each profile through `context::session_for`:
+  `IOHR_TOKEN_<PROFILE>` stands in for a named profile (CI), never the bare `IOHR_TOKEN`.
+  A person profile sends `?account=` and the answer's stamp must name that account.
 - Output: results on stdout (tables, or JSON with `--json`), notes on stderr, so pipes
   get only data. `token create` prints the new token alone on stdout.
 - Dependencies: the table in `README.md`. A new one needs a reason there and in the PR.

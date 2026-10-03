@@ -344,6 +344,16 @@ async fn verbose_output_never_shows_the_token() {
         config: dir.path(),
     };
     let t = token(&["identity:read", "account:read"]);
+    // Mounted first: wiremock answers with the first mock that matches.
+    Mock::given(method("GET"))
+        .and(path("/v1/openapi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cut_document(
+            ACCOUNT,
+            &["identity:read", "account:read"],
+            false,
+        )))
+        .mount(&server)
+        .await;
     Mock::given(wiremock::matchers::any())
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "subject": "ak_tok1", "account": {"id": ACCOUNT}, "teams": [], "keys": [], "paths": {},
@@ -353,6 +363,23 @@ async fn verbose_output_never_shows_the_token() {
         .await;
     let out_file = dir.path().join("doc.json");
     let out_file = out_file.to_str().unwrap();
+    // The sdk commands need a profile and a stamped document; `sdk check` reads the
+    // lock `sdk generate` leaves beside its output.
+    let o = r.with_stdin(
+        &format!("{t}\n"),
+        &[
+            "login",
+            "--with-token",
+            "--insecure-storage",
+            "--profile",
+            "ci",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let gen_dir = dir.path().join("proj/src/iohr");
+    let gen_dir = gen_dir.to_str().unwrap();
+    let lock_file = dir.path().join("proj/src/iohr.lock");
+    let lock_file = lock_file.to_str().unwrap();
     let commands: Vec<Vec<&str>> = vec![
         vec!["whoami"],
         vec!["accounts", "list"],
@@ -361,6 +388,10 @@ async fn verbose_output_never_shows_the_token() {
         vec!["token", "create", "--name", "n", "--scope", "radar:read"],
         vec!["api", "GET", "/v1/me", "-f", "a=b"],
         vec!["openapi", "pull", "-o", out_file],
+        vec![
+            "sdk", "generate", "--lang", "rust", "--for", "ci", "--out", gen_dir,
+        ],
+        vec!["sdk", "check", "--lock", lock_file],
     ];
     for args in commands {
         let mut args = args.clone();
@@ -530,4 +561,381 @@ async fn logout_keeps_the_profile_when_revoking_fails() {
     assert_eq!(code(&out), 1, "{}", text(&out));
     assert!(text(&out).contains("Nothing was removed"));
     assert!(dir.path().join(format!("secrets/me.{ACCOUNT}")).exists());
+}
+
+/// A document with a stamp, as the gateway answers `/v1/openapi.json`.
+fn cut_document(account: &str, scopes: &[&str], with_radar: bool) -> serde_json::Value {
+    let mut paths = serde_json::json!({
+        "/v1/me": { "get": { "operationId": "me", "tags": ["identity"], "x-iohr-public": true, "x-iohr-scopes": ["identity:read"],
+            "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } } },
+                           "default": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } } } } }
+    });
+    if with_radar {
+        paths["/v1/radar/digests"] = serde_json::json!({ "get": { "operationId": "RadarService.ListDigests", "tags": ["radar"], "x-iohr-public": true, "x-iohr-scopes": ["radar:read"],
+            "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } } },
+                           "default": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } } } } });
+    }
+    let mut doc = serde_json::json!({
+        "openapi": "3.1.0",
+        "info": { "title": "InOrbit API", "version": "0.1.0" },
+        "paths": paths,
+        "components": { "schemas": {
+            "Me": { "type": "object", "required": ["subject"], "properties": { "subject": { "type": "string" } } },
+            "Problem": { "type": "object", "properties": { "code": { "$ref": "#/components/schemas/Code" }, "details": { "type": "array", "items": { "$ref": "#/components/schemas/Detail" } } } },
+            "Code": { "type": "string", "enum": ["bad_request","failed_precondition","unauthenticated","forbidden","not_found","method_not_allowed","already_exists","conflict","payload_too_large","unsupported_media_type","rate_limited","quota_exceeded","cancelled","internal","unimplemented","unavailable","timeout"] },
+            "Detail": { "oneOf": [ { "type": "object", "required": ["type"], "properties": { "type": { "const": "retry" } } } ] }
+        } }
+    });
+    let hash = format!(
+        "sha256:{}",
+        if with_radar {
+            "aa".repeat(32)
+        } else {
+            "bb".repeat(32)
+        }
+    );
+    doc["info"]["x-iohr-cut"] =
+        serde_json::json!({ "plan": "free", "account": account, "scopes": scopes, "hash": hash });
+    doc
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario, generate then check then drift"
+)]
+async fn sdk_generate_writes_a_surface_and_a_lock_and_check_sees_drift() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["identity:read", "radar:read"]);
+    me(&server, &t).await;
+    // The token profile: no ?account= is sent for a token.
+    Mock::given(method("GET"))
+        .and(path("/v1/openapi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cut_document(
+            ACCOUNT,
+            &["identity:read", "radar:read"],
+            true,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let o = r.with_stdin(
+        &format!("{t}\n"),
+        &[
+            "login",
+            "--with-token",
+            "--insecure-storage",
+            "--profile",
+            "ci",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
+    let out_dir = dir.path().join("proj/src/iohr");
+    let o = r.run(&[
+        "sdk",
+        "generate",
+        "--lang",
+        "rust",
+        "--for",
+        "ci",
+        "--out",
+        out_dir.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!text(&o).contains("TOKENSIGNATUREMARKER"));
+    for f in ["mod.rs", "models.rs", "ops.rs", "profiles.rs", "surface.rs"] {
+        assert!(out_dir.join(f).is_file(), "{f} missing");
+    }
+    let lock_path = dir.path().join("proj/src/iohr.lock");
+    let lock = std::fs::read_to_string(&lock_path).unwrap();
+    assert!(lock.contains("[profiles.ci]"), "{lock}");
+    assert!(
+        lock.contains(&format!("sha256:{}", "aa".repeat(32))),
+        "{lock}"
+    );
+    assert!(lock.contains("\"GET /v1/radar/digests\""), "{lock}");
+    assert!(!lock.contains("TOKENSIGNATUREMARKER"));
+    let requests = server.received_requests().await.unwrap();
+    let openapi: Vec<_> = requests
+        .iter()
+        .filter(|q| q.url.path() == "/v1/openapi.json")
+        .collect();
+    assert_eq!(openapi.len(), 1);
+    assert!(
+        openapi[0].url.query().is_none(),
+        "a token profile sends no ?account="
+    );
+
+    // The same cut: check passes, with --files too.
+    let o = r.run(&[
+        "sdk",
+        "check",
+        "--lock",
+        lock_path.to_str().unwrap(),
+        "--files",
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
+    // The API no longer grants radar:read: check fails and names the operation.
+    server.reset().await;
+    me(&server, &t).await;
+    Mock::given(method("GET"))
+        .and(path("/v1/openapi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cut_document(
+            ACCOUNT,
+            &["identity:read"],
+            false,
+        )))
+        .mount(&server)
+        .await;
+    let o = r.run(&["sdk", "check", "--lock", lock_path.to_str().unwrap()]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("- GET /v1/radar/digests"), "{}", text(&o));
+    assert!(text(&o).contains("the cut moved"), "{}", text(&o));
+
+    // Regenerating with --force takes the new cut; a non-empty --out without --force is refused.
+    let o = r.run(&[
+        "sdk",
+        "generate",
+        "--lang",
+        "rust",
+        "--for",
+        "ci",
+        "--out",
+        out_dir.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    let o = r.run(&[
+        "sdk",
+        "generate",
+        "--lang",
+        "rust",
+        "--for",
+        "ci",
+        "--out",
+        out_dir.to_str().unwrap(),
+        "--force",
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.run(&[
+        "sdk",
+        "check",
+        "--lock",
+        lock_path.to_str().unwrap(),
+        "--files",
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
+    // No lock: a usage error.
+    assert_eq!(
+        code(&r.run(&[
+            "sdk",
+            "check",
+            "--lock",
+            dir.path().join("nope.lock").to_str().unwrap()
+        ])),
+        2
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sdk_generate_from_files_needs_no_credential() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let a = dir.path().join("personal.json");
+    let b = dir.path().join("ci.json");
+    std::fs::write(
+        &a,
+        cut_document("acc_p", &["identity:read"], false).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        &b,
+        cut_document("acc_t", &["identity:read", "radar:read"], true).to_string(),
+    )
+    .unwrap();
+    let out_dir = dir.path().join("gen/src/iohr");
+    let o = r.run(&[
+        "sdk",
+        "generate",
+        "--lang",
+        "rust",
+        "--from",
+        &format!("personal={}", a.display()),
+        "--from",
+        &format!("acme-ci={}", b.display()),
+        "--out",
+        out_dir.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let ops = std::fs::read_to_string(out_dir.join("ops.rs")).unwrap();
+    assert!(ops.contains("impl ListDigests for super::profiles::AcmeCi {}"));
+    assert!(!ops.contains("impl ListDigests for super::profiles::Personal {}"));
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "offline"
+    );
+    // Two names that would read the same variables are refused.
+    let o = r.run(&[
+        "sdk",
+        "generate",
+        "--lang",
+        "rust",
+        "--from",
+        &format!("acme-ci={}", b.display()),
+        "--from",
+        &format!("acme_ci={}", b.display()),
+        "--out",
+        dir.path().join("x").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("INORBIT_ACME_CI"), "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_profile_sends_its_account_and_refuses_a_document_for_another() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mock_provider(&server).await;
+    let uri = server.uri();
+    // A person profile written as `iohr login` leaves it, with a refresh token on file.
+    std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        format!("default = \"me\"\n[profiles.me]\nkind = \"person\"\naccount = \"acc_team1\"\nstorage = \"file\"\nissuer = \"{uri}\"\nclient_id = \"iohr-cli\"\n"),
+    )
+    .unwrap();
+    let tokens = person_tokens(&uri);
+    std::fs::write(
+        dir.path().join("secrets/me.acc_team1"),
+        serde_json::json!({ "access_token": tokens["access_token"], "refresh_token": "REFRESHMARKER", "expires_at": 4_102_444_800_i64 }).to_string(),
+    )
+    .unwrap();
+    // The gateway answers the personal plan whatever is asked: the stamp names acc_test1.
+    Mock::given(method("GET"))
+        .and(path("/v1/openapi.json"))
+        .and(query_param("account", "acc_team1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cut_document(ACCOUNT, &[], true)))
+        .mount(&server)
+        .await;
+    let o = r.run(&[
+        "sdk",
+        "generate",
+        "--lang",
+        "rust",
+        "--for",
+        "me",
+        "--out",
+        dir.path().join("o").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains("acc_team1") && text(&o).contains("does not cut by account yet"),
+        "{}",
+        text(&o)
+    );
+    assert!(!text(&o).contains("TOKENSIGNATUREMARKER"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_profile_token_from_the_environment_stands_in_for_a_profile_in_ci() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["identity:read"]);
+    me(&server, &t).await;
+    Mock::given(method("GET"))
+        .and(path("/v1/openapi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cut_document(
+            ACCOUNT,
+            &["identity:read"],
+            false,
+        )))
+        .mount(&server)
+        .await;
+    // A lock written elsewhere names profile acme-ci; this machine has no such profile.
+    std::fs::write(
+        dir.path().join("iohr.lock"),
+        format!("generator = \"0\"\nlang = \"rust\"\nout = \"src/iohr\"\n[profiles.acme-ci]\ncut = \"sha256:{}\"\nplan = \"free\"\nscopes = [\"identity:read\"]\noperations = [\"GET /v1/me\"]\n", "bb".repeat(32)),
+    )
+    .unwrap();
+    let lock = dir.path().join("iohr.lock");
+    let o = r.run(&["sdk", "check", "--lock", lock.to_str().unwrap()]);
+    assert_eq!(code(&o), 3, "no profile and no token: {}", text(&o));
+    let o = r
+        .cmd(&["sdk", "check", "--lock", lock.to_str().unwrap()])
+        .env("IOHR_TOKEN_ACME_CI", &t)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!text(&o).contains("TOKENSIGNATUREMARKER"));
+    assert!(!dir.path().join("secrets").exists(), "nothing written");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn profile_account_points_a_person_at_one_of_their_teams() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mock_provider(&server).await;
+    let uri = server.uri();
+    std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        format!("default = \"me\"\n[profiles.me]\nkind = \"person\"\naccount = \"{ACCOUNT}\"\nstorage = \"file\"\nissuer = \"{uri}\"\nclient_id = \"iohr-cli\"\n"),
+    )
+    .unwrap();
+    let tokens = person_tokens(&uri);
+    std::fs::write(
+        dir.path().join(format!("secrets/me.{ACCOUNT}")),
+        serde_json::json!({ "access_token": tokens["access_token"], "refresh_token": "REFRESHMARKER", "expires_at": 4_102_444_800_i64 }).to_string(),
+    )
+    .unwrap();
+    Mock::given(method("GET"))
+        .and(path("/v1/accounts/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "account": { "id": ACCOUNT, "kind": "personal", "name": "Me", "plan": "free", "slug": "" },
+            "teams": [ { "id": "acc_team1", "kind": "team", "name": "Acme", "plan": "pro", "slug": "acme" } ]
+        })))
+        .mount(&server)
+        .await;
+    let o = r.run(&["profile", "account", "me", "acme"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("acc_team1") && text(&o).contains("pro"),
+        "{}",
+        text(&o)
+    );
+    let config = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(config.contains("account = \"acc_team1\""), "{config}");
+    assert!(
+        dir.path().join("secrets/me.acc_team1").is_file(),
+        "the credential moved with the account"
+    );
+    assert!(!dir.path().join(format!("secrets/me.{ACCOUNT}")).exists());
+    let o = r.run(&["profile", "account", "me", "acc_nobody"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("acme"), "{}", text(&o));
+    assert!(!text(&o).contains("TOKENSIGNATUREMARKER"));
 }

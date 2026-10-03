@@ -29,7 +29,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     match cli.command {
         Command::Login(args) => login::login(g, &env, &args, out).await,
         Command::Logout => login::logout(g, out).await,
-        Command::Profile(cmd) => profile::run(g, cmd, out).await,
+        Command::Profile(cmd) => profile::run(g, &env, cmd, out).await,
         Command::Whoami => whoami::run(g, &env, out).await,
         Command::Accounts(AccountsCommand::List) => accounts::list(g, &env, out).await,
         Command::Token(cmd) => token::run(g, &env, cmd, out).await,
@@ -37,7 +37,8 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Openapi(OpenapiCommand::Pull { output }) => {
             openapi::pull(g, &env, &output, out).await
         }
-        Command::Sdk(SdkCommand::Generate(args)) => sdk::generate(&args, out),
+        Command::Sdk(SdkCommand::Generate(args)) => sdk::generate(g, &env, &args, out).await,
+        Command::Sdk(SdkCommand::Check(args)) => sdk::check(g, &env, &args, out).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();
             clap_complete::generate(shell, &mut Cli::command(), "iohr", &mut buf);
