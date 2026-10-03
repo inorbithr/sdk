@@ -295,6 +295,8 @@ pub enum Code {
     PayloadTooLarge,
     /// 415: the media type is not accepted.
     UnsupportedMediaType,
+    /// 422: the request is well formed but its content cannot be processed.
+    Unprocessable,
     /// 429: too many requests.
     RateLimited,
     /// 429: the account's allowance is used up.
@@ -314,7 +316,7 @@ pub enum Code {
 }
 
 impl Code {
-    const KNOWN: [(Code, &'static str, u16); 17] = [
+    const KNOWN: [(Code, &'static str, u16); 18] = [
         (Code::BadRequest, "bad_request", 400),
         (Code::FailedPrecondition, "failed_precondition", 400),
         (Code::Unauthenticated, "unauthenticated", 401),
@@ -325,6 +327,7 @@ impl Code {
         (Code::Conflict, "conflict", 409),
         (Code::PayloadTooLarge, "payload_too_large", 413),
         (Code::UnsupportedMediaType, "unsupported_media_type", 415),
+        (Code::Unprocessable, "unprocessable", 422),
         (Code::RateLimited, "rate_limited", 429),
         (Code::QuotaExceeded, "quota_exceeded", 429),
         (Code::Cancelled, "cancelled", 499),
@@ -367,6 +370,7 @@ impl Code {
             409 => Self::Conflict,
             413 => Self::PayloadTooLarge,
             415 => Self::UnsupportedMediaType,
+            422 => Self::Unprocessable,
             429 => Self::RateLimited,
             499 => Self::Cancelled,
             501 => Self::Unimplemented,
@@ -597,6 +601,9 @@ mod tests {
         assert_eq!(new, Code::Unknown("brand_new_code".into()));
         assert_eq!(new.as_str(), "brand_new_code");
         assert_eq!(new.http_status(), None);
+        assert_eq!(Code::from("unprocessable"), Code::Unprocessable);
+        assert_eq!(Code::Unprocessable.http_status(), Some(422));
+        assert_eq!(Code::for_status(422), Code::Unprocessable);
     }
 
     #[test]

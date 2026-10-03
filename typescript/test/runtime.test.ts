@@ -11,6 +11,7 @@ import {
   RawResponse,
   StaticToken,
 } from "../src/index.js";
+import { CODES, codeForStatus } from "../src/errors.js";
 import { backoffMs, retryAfterMs } from "../src/retry.js";
 
 function raw(status: number, body: string, headers: Record<string, string> = {}): RawResponse {
@@ -157,5 +158,13 @@ describe("retry", () => {
     for (let i = 0; i < 10; i++) {
       assert.ok(backoffMs(i) <= 8000);
     }
+  });
+});
+
+describe("codes", () => {
+  it("knows unprocessable and keeps an unknown code", () => {
+    assert.equal(CODES.unprocessable, 422);
+    assert.equal(codeForStatus(422), "unprocessable");
+    assert.equal(codeForStatus(418), "http_418");
   });
 });

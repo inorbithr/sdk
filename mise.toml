@@ -200,7 +200,9 @@ for f in spec/*.json; do python3 -m json.tool "$f" > /dev/null || exit 1; done
 [ -f spec/openapi.json ] || { echo "spec:lint: no openapi.json yet, JSON checks only"; exit 0; }
 base=$(git show origin/main:spec/openapi.json 2>/dev/null) || { echo "spec:lint: no openapi.json on main yet"; exit 0; }
 printf '%s' "$base" > "${TMPDIR:-/tmp}/openapi-main.json"
-oasdiff breaking "${TMPDIR:-/tmp}/openapi-main.json" spec/openapi.json --fail-on ERR
+# A reviewed, intentional break goes in spec/breaking-ignore.txt with a dated reason.
+ignore=(); [ -f spec/breaking-ignore.txt ] && ignore=(--err-ignore spec/breaking-ignore.txt)
+oasdiff breaking "${TMPDIR:-/tmp}/openapi-main.json" spec/openapi.json --fail-on ERR "${ignore[@]}"
 """
 
 # ---------------------------------------------------------------- Go

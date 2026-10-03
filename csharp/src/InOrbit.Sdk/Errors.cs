@@ -44,6 +44,9 @@ public readonly record struct Code(string Value)
     /// <summary>The request body has a media type the route does not take.</summary>
     public static Code UnsupportedMediaType { get; } = new("unsupported_media_type");
 
+    /// <summary>The request is well formed but its content cannot be processed.</summary>
+    public static Code Unprocessable { get; } = new("unprocessable");
+
     /// <summary>Too many requests; try again shortly.</summary>
     public static Code RateLimited { get; } = new("rate_limited");
 
@@ -77,6 +80,7 @@ public readonly record struct Code(string Value)
         ["conflict"] = 409,
         ["payload_too_large"] = 413,
         ["unsupported_media_type"] = 415,
+        ["unprocessable"] = 422,
         ["rate_limited"] = 429,
         ["quota_exceeded"] = 429,
         ["cancelled"] = 499,
@@ -105,6 +109,7 @@ public readonly record struct Code(string Value)
         409 => Conflict,
         413 => PayloadTooLarge,
         415 => UnsupportedMediaType,
+        422 => Unprocessable,
         429 => RateLimited,
         499 => Cancelled,
         501 => Unimplemented,

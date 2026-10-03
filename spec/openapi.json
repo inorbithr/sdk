@@ -100,6 +100,224 @@
         ],
         "type": "object"
       },
+      "ActionResult": {
+        "description": "`iohr.connections.v1.ActionResult`",
+        "properties": {
+          "error_class": {
+            "type": "string"
+          },
+          "executor": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "output": {
+            "$ref": "#/components/schemas/Struct"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "status_code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "use_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error_class",
+          "executor",
+          "latency_ms",
+          "message",
+          "ok",
+          "output",
+          "started_at",
+          "status",
+          "status_code",
+          "use_id"
+        ],
+        "type": "object"
+      },
+      "AddDomainRequest": {
+        "description": "`iohr.accounts.v1.AddDomainRequest`",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "org_id",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "AddDomainResponse": {
+        "description": "`iohr.accounts.v1.AddDomainResponse`",
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/Domain"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "type": "object"
+      },
+      "Agent": {
+        "description": "`iohr.agents.v1.Agent`",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "enrolled_at": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string"
+          },
+          "policy_hash": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "arch",
+          "domains",
+          "enrolled_at",
+          "environment",
+          "last_seen_at",
+          "name",
+          "os",
+          "policy_hash",
+          "revoked_at",
+          "status",
+          "version"
+        ],
+        "type": "object"
+      },
+      "CallActionRequest": {
+        "description": "`iohr.connections.v1.CallActionRequest`",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/Struct"
+          }
+        },
+        "required": [
+          "action",
+          "connection_id",
+          "org_id",
+          "params"
+        ],
+        "type": "object"
+      },
+      "CallActionResponse": {
+        "description": "`iohr.connections.v1.CallActionResponse`",
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/ActionResult"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "CallToolRequest": {
+        "description": "`iohr.connections.v1.CallToolRequest`",
+        "properties": {
+          "args_json": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "args_json",
+          "name"
+        ],
+        "type": "object"
+      },
+      "CallToolResponse": {
+        "description": "`iohr.connections.v1.CallToolResponse`",
+        "properties": {
+          "ms": {
+            "format": "int64",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "result_json": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ms",
+          "ok",
+          "result_json",
+          "tool"
+        ],
+        "type": "object"
+      },
       "Change": {
         "description": "`iohr.radar.v1.Change`",
         "properties": {
@@ -163,6 +381,75 @@
         ],
         "type": "object"
       },
+      "CheckDetail": {
+        "description": "`iohr.agents.v1.CheckDetail`",
+        "properties": {
+          "error_class": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "status_code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tls_expires_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error_class",
+          "latency_ms",
+          "ok",
+          "status_code",
+          "tls_expires_at"
+        ],
+        "type": "object"
+      },
+      "CheckDomainRequest": {
+        "description": "`iohr.accounts.v1.CheckDomainRequest`",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "org_id"
+        ],
+        "type": "object"
+      },
+      "CheckDomainResponse": {
+        "description": "`iohr.accounts.v1.CheckDomainResponse`",
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/Domain"
+          },
+          "resolvers": {
+            "items": {
+              "$ref": "#/components/schemas/ResolverAnswer"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "resolvers",
+          "status"
+        ],
+        "type": "object"
+      },
       "Code": {
         "description": "The stable error vocabulary. The slug (`snake_case`) is what clients see in\n`code`; the HTTP status follows the standard gRPC mapping, plus the two\nHTTP-only codes for request bodies.",
         "enum": [
@@ -182,9 +469,189 @@
           "internal",
           "unsupported_media_type",
           "payload_too_large",
-          "method_not_allowed"
+          "method_not_allowed",
+          "unprocessable"
         ],
         "type": "string"
+      },
+      "ConfirmDomainRequest": {
+        "description": "`iohr.accounts.v1.ConfirmDomainRequest`",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "org_id"
+        ],
+        "type": "object"
+      },
+      "ConfirmDomainResponse": {
+        "description": "`iohr.accounts.v1.ConfirmDomainResponse`",
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/Domain"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "type": "object"
+      },
+      "Connection": {
+        "description": "`iohr.connections.v1.Connection`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/Credential"
+          },
+          "description": {
+            "type": "string"
+          },
+          "executor": {
+            "$ref": "#/components/schemas/Executor"
+          },
+          "grants": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_test_at": {
+            "type": "string"
+          },
+          "last_test_error": {
+            "type": "string"
+          },
+          "last_test_ok": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "receive_url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "config",
+          "created_at",
+          "credential",
+          "description",
+          "executor",
+          "grants",
+          "id",
+          "kind",
+          "last_test_at",
+          "last_test_error",
+          "last_test_ok",
+          "name",
+          "receive_url",
+          "status",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "Consumer": {
+        "description": "`iohr.connections.v1.Consumer`",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "CreateConnectionRequest": {
+        "description": "`iohr.connections.v1.CreateConnectionRequest`",
+        "properties": {
+          "config": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "description": {
+            "type": "string"
+          },
+          "executor": {
+            "$ref": "#/components/schemas/Executor"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "secret_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "description",
+          "executor",
+          "kind",
+          "name",
+          "org_id",
+          "secret",
+          "secret_ref"
+        ],
+        "type": "object"
+      },
+      "CreateConnectionResponse": {
+        "description": "`iohr.connections.v1.CreateConnectionResponse`",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          },
+          "webhook_secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "webhook_secret"
+        ],
+        "type": "object"
       },
       "CreateEndpointRequest": {
         "description": "`iohr.events.v1.CreateEndpointRequest`",
@@ -229,6 +696,53 @@
         ],
         "type": "object"
       },
+      "CreateEnrollmentRequest": {
+        "description": "`iohr.agents.v1.CreateEnrollmentRequest`",
+        "properties": {
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domains",
+          "environment",
+          "name",
+          "org_id"
+        ],
+        "type": "object"
+      },
+      "CreateEnrollmentResponse": {
+        "description": "`iohr.agents.v1.CreateEnrollmentResponse`",
+        "properties": {
+          "enrollment_id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "expires_at",
+          "token"
+        ],
+        "type": "object"
+      },
       "CreateInboxRequest": {
         "description": "`iohr.events.v1.CreateInboxRequest`",
         "properties": {
@@ -253,12 +767,90 @@
         ],
         "type": "object"
       },
+      "CreateMonitorRequest": {
+        "description": "`iohr.connections.v1.CreateMonitorRequest`",
+        "properties": {
+          "connection_id": {
+            "type": "string"
+          },
+          "fail_after": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "interval_secs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MonitorParams"
+          }
+        },
+        "required": [
+          "connection_id",
+          "fail_after",
+          "interval_secs",
+          "name",
+          "org_id",
+          "params"
+        ],
+        "type": "object"
+      },
+      "CreateMonitorResponse": {
+        "description": "`iohr.connections.v1.CreateMonitorResponse`",
+        "properties": {
+          "monitor": {
+            "$ref": "#/components/schemas/Monitor"
+          }
+        },
+        "required": [
+          "monitor"
+        ],
+        "type": "object"
+      },
+      "Credential": {
+        "description": "`iohr.connections.v1.Credential`",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "set_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "reference",
+          "set_at"
+        ],
+        "type": "object"
+      },
+      "DeleteAgentResponse": {
+        "description": "`iohr.agents.v1.DeleteAgentResponse`",
+        "type": "object"
+      },
+      "DeleteConnectionResponse": {
+        "description": "`iohr.connections.v1.DeleteConnectionResponse`",
+        "type": "object"
+      },
       "DeleteEndpointResponse": {
         "description": "`iohr.events.v1.DeleteEndpointResponse`",
         "type": "object"
       },
       "DeleteInboxResponse": {
         "description": "`iohr.events.v1.DeleteInboxResponse`",
+        "type": "object"
+      },
+      "DeleteMonitorResponse": {
+        "description": "`iohr.connections.v1.DeleteMonitorResponse`",
         "type": "object"
       },
       "Delivery": {
@@ -317,6 +909,86 @@
           "next_attempt_at",
           "status",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "DeliveryErrorCount": {
+        "description": "`iohr.events.v1.DeliveryErrorCount`",
+        "properties": {
+          "count": {
+            "format": "int64",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "last_at": {
+            "type": "string"
+          },
+          "status_code": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "error",
+          "last_at",
+          "status_code"
+        ],
+        "type": "object"
+      },
+      "DeliveryStatsBucket": {
+        "description": "`iohr.events.v1.DeliveryStatsBucket`",
+        "properties": {
+          "failed": {
+            "format": "int64",
+            "type": "string"
+          },
+          "p50_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "start": {
+            "type": "string"
+          },
+          "succeeded": {
+            "format": "int64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "failed",
+          "p50_ms",
+          "p95_ms",
+          "start",
+          "succeeded"
+        ],
+        "type": "object"
+      },
+      "DeliveryTypeCount": {
+        "description": "`iohr.events.v1.DeliveryTypeCount`",
+        "properties": {
+          "failed": {
+            "format": "int64",
+            "type": "string"
+          },
+          "succeeded": {
+            "format": "int64",
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "failed",
+          "succeeded",
+          "type"
         ],
         "type": "object"
       },
@@ -504,6 +1176,58 @@
         ],
         "type": "object"
       },
+      "Domain": {
+        "description": "`iohr.accounts.v1.Domain`",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "dns_provider": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "last_checked_at": {
+            "type": "string"
+          },
+          "record_name": {
+            "type": "string"
+          },
+          "record_value": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "unverified_reason": {
+            "type": "string"
+          },
+          "verified_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "dns_provider",
+          "domain",
+          "expires_at",
+          "last_checked_at",
+          "record_name",
+          "record_value",
+          "scope",
+          "status",
+          "unverified_reason",
+          "verified_at"
+        ],
+        "type": "object"
+      },
       "DrillCode": {
         "description": "`iohr.radar.v1.DrillCode`",
         "properties": {
@@ -597,6 +1321,27 @@
         ],
         "type": "object"
       },
+      "EventStatsRow": {
+        "description": "`iohr.events.v1.EventStatsRow`",
+        "properties": {
+          "count": {
+            "format": "int64",
+            "type": "string"
+          },
+          "day": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "day",
+          "type"
+        ],
+        "type": "object"
+      },
       "EventType": {
         "description": "`iohr.events.v1.EventType`",
         "properties": {
@@ -649,6 +1394,171 @@
         ],
         "type": "object"
       },
+      "Executor": {
+        "description": "`iohr.connections.v1.Executor`",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "Expect": {
+        "description": "`iohr.agents.v1.Expect`",
+        "properties": {
+          "max_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_ms",
+          "status"
+        ],
+        "type": "object"
+      },
+      "Field": {
+        "description": "`iohr.connections.v1.Field`",
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default_value": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "max": {
+            "format": "int64",
+            "type": "string"
+          },
+          "min": {
+            "format": "int64",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "choices",
+          "default_value",
+          "description",
+          "max",
+          "min",
+          "name",
+          "required",
+          "type"
+        ],
+        "type": "object"
+      },
+      "GetAgentResponse": {
+        "description": "`iohr.agents.v1.GetAgentResponse`",
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "type": "object"
+      },
+      "GetConnectionResponse": {
+        "description": "`iohr.connections.v1.GetConnectionResponse`",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          }
+        },
+        "required": [
+          "connection"
+        ],
+        "type": "object"
+      },
+      "GetDeliveryStatsResponse": {
+        "description": "`iohr.events.v1.GetDeliveryStatsResponse`",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryStatsBucket"
+            },
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryErrorCount"
+            },
+            "type": "array"
+          },
+          "failed": {
+            "format": "int64",
+            "type": "string"
+          },
+          "in_flight": {
+            "format": "int64",
+            "type": "string"
+          },
+          "p50_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "range": {
+            "type": "string"
+          },
+          "succeeded": {
+            "format": "int64",
+            "type": "string"
+          },
+          "types": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryTypeCount"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "bucket",
+          "buckets",
+          "errors",
+          "failed",
+          "in_flight",
+          "p50_ms",
+          "p95_ms",
+          "range",
+          "succeeded",
+          "types"
+        ],
+        "type": "object"
+      },
       "GetDigestResponse": {
         "description": "`iohr.radar.v1.GetDigestResponse`",
         "properties": {
@@ -658,6 +1568,37 @@
         },
         "required": [
           "digest"
+        ],
+        "type": "object"
+      },
+      "GetDomainResponse": {
+        "description": "`iohr.accounts.v1.GetDomainResponse`",
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/Domain"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "type": "object"
+      },
+      "GetEventStatsResponse": {
+        "description": "`iohr.events.v1.GetEventStatsResponse`",
+        "properties": {
+          "range": {
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/EventStatsRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "range",
+          "rows"
         ],
         "type": "object"
       },
@@ -705,6 +1646,84 @@
           "subject",
           "teams",
           "user_id"
+        ],
+        "type": "object"
+      },
+      "GetMonitorResponse": {
+        "description": "`iohr.connections.v1.GetMonitorResponse`",
+        "properties": {
+          "monitor": {
+            "$ref": "#/components/schemas/Monitor"
+          }
+        },
+        "required": [
+          "monitor"
+        ],
+        "type": "object"
+      },
+      "GetMonitorSummaryResponse": {
+        "description": "`iohr.connections.v1.GetMonitorSummaryResponse`",
+        "properties": {
+          "health": {
+            "type": "string"
+          },
+          "last_failure": {
+            "$ref": "#/components/schemas/MonitorRun"
+          },
+          "latency_ms": {
+            "$ref": "#/components/schemas/Latency"
+          },
+          "since": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "uptime": {
+            "$ref": "#/components/schemas/Uptime"
+          }
+        },
+        "required": [
+          "health",
+          "last_failure",
+          "latency_ms",
+          "since",
+          "state",
+          "uptime"
+        ],
+        "type": "object"
+      },
+      "GetUnitSeriesResponse": {
+        "description": "`iohr.accounts.v1.GetUnitSeriesResponse`",
+        "properties": {
+          "by": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/UnitSeriesGroup"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/UnitSeriesRow"
+            },
+            "type": "array"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "from",
+          "groups",
+          "rows",
+          "to"
         ],
         "type": "object"
       },
@@ -782,6 +1801,53 @@
         "required": [
           "plan",
           "rows"
+        ],
+        "type": "object"
+      },
+      "Grant": {
+        "description": "`iohr.connections.v1.Grant`",
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "consumer": {
+            "$ref": "#/components/schemas/Consumer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actions",
+          "connection_id",
+          "consumer",
+          "created_at",
+          "created_by",
+          "expires_at",
+          "id",
+          "revoked_at",
+          "status"
         ],
         "type": "object"
       },
@@ -894,6 +1960,38 @@
         ],
         "type": "object"
       },
+      "JobResult": {
+        "description": "`iohr.agents.v1.JobResult`",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/CheckDetail"
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "refusal": {
+            "$ref": "#/components/schemas/Refusal"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail",
+          "finished_at",
+          "job_id",
+          "refusal",
+          "started_at",
+          "status"
+        ],
+        "type": "object"
+      },
       "Key": {
         "description": "The key claims, as `OpenAPI` sees them.",
         "properties": {
@@ -911,6 +2009,161 @@
         },
         "required": [
           "id"
+        ],
+        "type": "object"
+      },
+      "Kind": {
+        "description": "`iohr.connections.v1.Kind`",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/KindAction"
+            },
+            "type": "array"
+          },
+          "auth": {
+            "type": "string"
+          },
+          "config": {
+            "items": {
+              "$ref": "#/components/schemas/Field"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "executors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "test_action": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actions",
+          "auth",
+          "config",
+          "description",
+          "executors",
+          "name",
+          "test_action",
+          "title"
+        ],
+        "type": "object"
+      },
+      "KindAction": {
+        "description": "`iohr.connections.v1.KindAction`",
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "executors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/Field"
+            },
+            "type": "array"
+          },
+          "reads_private": {
+            "type": "boolean"
+          },
+          "reads_untrusted": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "sends_out": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "class",
+          "description",
+          "executors",
+          "name",
+          "params",
+          "reads_private",
+          "reads_untrusted",
+          "schema",
+          "sends_out"
+        ],
+        "type": "object"
+      },
+      "Latency": {
+        "description": "`iohr.connections.v1.Latency`",
+        "properties": {
+          "p50": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "p50",
+          "p95"
+        ],
+        "type": "object"
+      },
+      "ListAgentsResponse": {
+        "description": "`iohr.agents.v1.ListAgentsResponse`",
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/Agent"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agents",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListConnectionsResponse": {
+        "description": "`iohr.connections.v1.ListConnectionsResponse`",
+        "properties": {
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/Connection"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connections",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -941,10 +2194,38 @@
               "$ref": "#/components/schemas/Digest"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "digests"
+          "digests",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListDomainsResponse": {
+        "description": "`iohr.accounts.v1.ListDomainsResponse`",
+        "properties": {
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/Domain"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          },
+          "total_size": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "domains",
+          "next_page_token",
+          "total_size"
         ],
         "type": "object"
       },
@@ -956,16 +2237,23 @@
               "$ref": "#/components/schemas/Endpoint"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "endpoints"
+          "endpoints",
+          "next_page_token"
         ],
         "type": "object"
       },
       "ListEventTypesResponse": {
         "description": "`iohr.events.v1.ListEventTypesResponse`",
         "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
           "types": {
             "items": {
               "$ref": "#/components/schemas/EventType"
@@ -974,7 +2262,46 @@
           }
         },
         "required": [
+          "next_page_token",
           "types"
+        ],
+        "type": "object"
+      },
+      "ListGrantsResponse": {
+        "description": "`iohr.connections.v1.ListGrantsResponse`",
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/Grant"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grants",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListHistoryResponse": {
+        "description": "`iohr.connections.v1.ListHistoryResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "uses": {
+            "items": {
+              "$ref": "#/components/schemas/Use"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "next_page_token",
+          "uses"
         ],
         "type": "object"
       },
@@ -983,6 +2310,9 @@
         "properties": {
           "inbox": {
             "$ref": "#/components/schemas/Inbox"
+          },
+          "next_page_token": {
+            "type": "string"
           },
           "requests": {
             "items": {
@@ -993,6 +2323,7 @@
         },
         "required": [
           "inbox",
+          "next_page_token",
           "requests"
         ],
         "type": "object"
@@ -1005,10 +2336,14 @@
               "$ref": "#/components/schemas/Inbox"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "inboxes"
+          "inboxes",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -1020,10 +2355,109 @@
               "$ref": "#/components/schemas/Item"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "items"
+          "items",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListKindsResponse": {
+        "description": "`iohr.connections.v1.ListKindsResponse`",
+        "properties": {
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/Kind"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kinds",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListMonitorRunsResponse": {
+        "description": "`iohr.connections.v1.ListMonitorRunsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "next_page_token",
+          "runs"
+        ],
+        "type": "object"
+      },
+      "ListMonitorsResponse": {
+        "description": "`iohr.connections.v1.ListMonitorsResponse`",
+        "properties": {
+          "monitors": {
+            "items": {
+              "$ref": "#/components/schemas/Monitor"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "monitors",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListTeamEventsResponse": {
+        "description": "`iohr.accounts.v1.ListTeamEventsResponse`",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TeamEvent"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListToolsResponse": {
+        "description": "`iohr.connections.v1.ListToolsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "next_page_token",
+          "tools"
         ],
         "type": "object"
       },
@@ -1035,10 +2469,29 @@
               "$ref": "#/components/schemas/UnitCategory"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "categories"
+          "categories",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListValue": {
+        "description": "`google.protobuf.ListValue`",
+        "properties": {
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/Value"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "values"
         ],
         "type": "object"
       },
@@ -1114,6 +2567,128 @@
         ],
         "type": "object"
       },
+      "Monitor": {
+        "description": "`iohr.connections.v1.Monitor`",
+        "properties": {
+          "connection_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "executor": {
+            "$ref": "#/components/schemas/Executor"
+          },
+          "fail_after": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "health": {
+            "type": "string"
+          },
+          "interval_secs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "last_run_at": {
+            "type": "string"
+          },
+          "monitor_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_run_at": {
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MonitorParams"
+          },
+          "paused_reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection_id",
+          "created_at",
+          "executor",
+          "fail_after",
+          "health",
+          "interval_secs",
+          "last_run_at",
+          "monitor_id",
+          "name",
+          "next_run_at",
+          "params",
+          "paused_reason",
+          "state"
+        ],
+        "type": "object"
+      },
+      "MonitorParams": {
+        "description": "`iohr.connections.v1.MonitorParams`",
+        "properties": {
+          "expect_status": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "max_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expect_status",
+          "max_ms",
+          "path"
+        ],
+        "type": "object"
+      },
+      "MonitorRun": {
+        "description": "`iohr.connections.v1.MonitorRun`",
+        "properties": {
+          "at": {
+            "type": "string"
+          },
+          "error_class": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "status_code": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "error_class",
+          "latency_ms",
+          "ok",
+          "run_id",
+          "status",
+          "status_code"
+        ],
+        "type": "object"
+      },
       "Plan": {
         "description": "`iohr.accounts.v1.Plan`",
         "properties": {
@@ -1149,7 +2724,7 @@
         "type": "object"
       },
       "Problem": {
-        "description": "`{\"code\",\"error\",\"details\"}`: the REST body and the SSE `error` payload.",
+        "description": "`{\"code\",\"error\",\"details\",\"request_id\"}`: the REST body and the SSE `error` payload.",
         "properties": {
           "code": {
             "$ref": "#/components/schemas/Code",
@@ -1165,12 +2740,99 @@
           "error": {
             "description": "The sentence.",
             "type": "string"
+          },
+          "request_id": {
+            "description": "The request's id, the `x-request-id` the answer carries: name it when\nasking about a call. Empty on a socket or MQTT frame, whose own id\nnames the call.",
+            "type": "string"
           }
         },
         "required": [
           "code",
           "error",
-          "details"
+          "details",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "RecoverEndpointRequest": {
+        "description": "`iohr.events.v1.RecoverEndpointRequest`",
+        "properties": {
+          "endpoint_id": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint_id",
+          "since"
+        ],
+        "type": "object"
+      },
+      "RecoverEndpointResponse": {
+        "description": "`iohr.events.v1.RecoverEndpointResponse`",
+        "properties": {
+          "created": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "retried": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "created",
+          "retried",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "Refusal": {
+        "description": "`iohr.agents.v1.Refusal`",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "RemoveDomainResponse": {
+        "description": "`iohr.accounts.v1.RemoveDomainResponse`",
+        "type": "object"
+      },
+      "ResolverAnswer": {
+        "description": "`iohr.accounts.v1.ResolverAnswer`",
+        "properties": {
+          "answered": {
+            "type": "boolean"
+          },
+          "dnssec": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "seen": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "answered",
+          "dnssec",
+          "name",
+          "seen",
+          "value"
         ],
         "type": "object"
       },
@@ -1183,6 +2845,46 @@
         },
         "required": [
           "delivery"
+        ],
+        "type": "object"
+      },
+      "RevokeAgentRequest": {
+        "description": "`iohr.agents.v1.RevokeAgentRequest`",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "org_id"
+        ],
+        "type": "object"
+      },
+      "RevokeAgentResponse": {
+        "description": "`iohr.agents.v1.RevokeAgentResponse`",
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "type": "object"
+      },
+      "RevokeGrantResponse": {
+        "description": "`iohr.connections.v1.RevokeGrantResponse`",
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/Grant"
+          }
+        },
+        "required": [
+          "grant"
         ],
         "type": "object"
       },
@@ -1199,6 +2901,54 @@
         "required": [
           "previous_expires_at",
           "secret"
+        ],
+        "type": "object"
+      },
+      "RunCheckRequest": {
+        "description": "`iohr.agents.v1.RunCheckRequest`",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "auth": {
+            "type": "string"
+          },
+          "expect": {
+            "$ref": "#/components/schemas/Expect"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          }
+        },
+        "required": [
+          "agent_id",
+          "auth",
+          "expect",
+          "org_id",
+          "service",
+          "surface",
+          "target"
+        ],
+        "type": "object"
+      },
+      "RunCheckResponse": {
+        "description": "`iohr.agents.v1.RunCheckResponse`",
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/JobResult"
+          }
+        },
+        "required": [
+          "result"
         ],
         "type": "object"
       },
@@ -1242,6 +2992,130 @@
           "id",
           "occurred_at",
           "type"
+        ],
+        "type": "object"
+      },
+      "Struct": {
+        "description": "`google.protobuf.Struct`",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Value"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "Target": {
+        "description": "`iohr.agents.v1.Target`",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "port",
+          "tls",
+          "url"
+        ],
+        "type": "object"
+      },
+      "TeamEvent": {
+        "description": "`iohr.accounts.v1.TeamEvent`",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_name": {
+            "type": "string"
+          },
+          "actor_sub": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "actor_name",
+          "actor_sub",
+          "after",
+          "at",
+          "before",
+          "id",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "TestConnectionResponse": {
+        "description": "`iohr.connections.v1.TestConnectionResponse`",
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/ActionResult"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "ToolInfo": {
+        "description": "`iohr.connections.v1.ToolInfo`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "schema_json": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "action",
+          "connection_id",
+          "description",
+          "name",
+          "schema_json"
         ],
         "type": "object"
       },
@@ -1292,6 +3166,78 @@
         ],
         "type": "object"
       },
+      "UnitSeriesGroup": {
+        "description": "`iohr.accounts.v1.UnitSeriesGroup`",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "units": {
+            "format": "int64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "units"
+        ],
+        "type": "object"
+      },
+      "UnitSeriesRow": {
+        "description": "`iohr.accounts.v1.UnitSeriesRow`",
+        "properties": {
+          "calls": {
+            "format": "int64",
+            "type": "string"
+          },
+          "client_errors": {
+            "format": "int64",
+            "type": "string"
+          },
+          "day": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "p50_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "platform_errors": {
+            "format": "int64",
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "string"
+          },
+          "units": {
+            "format": "int64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calls",
+          "client_errors",
+          "day",
+          "group",
+          "p50_ms",
+          "p95_ms",
+          "platform_errors",
+          "tokens",
+          "units"
+        ],
+        "type": "object"
+      },
       "UnitUsage": {
         "description": "`iohr.accounts.v1.UnitUsage`",
         "properties": {
@@ -1302,10 +3248,26 @@
           "category": {
             "type": "string"
           },
+          "client_errors": {
+            "format": "int64",
+            "type": "string"
+          },
           "key_id": {
             "type": "string"
           },
           "key_name": {
+            "type": "string"
+          },
+          "p50_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "platform_errors": {
+            "format": "int64",
             "type": "string"
           },
           "rpc": {
@@ -1329,13 +3291,80 @@
         "required": [
           "calls",
           "category",
+          "client_errors",
           "key_id",
           "key_name",
+          "p50_ms",
+          "p95_ms",
+          "platform_errors",
           "rpc",
           "tokens",
           "units",
           "user_id",
           "user_name"
+        ],
+        "type": "object"
+      },
+      "UpdateConnectionRequest": {
+        "description": "`iohr.connections.v1.UpdateConnectionRequest`",
+        "properties": {
+          "config": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "rotate_webhook_secret": {
+            "type": "boolean"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "secret_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "config",
+          "connection_id",
+          "description",
+          "name",
+          "org_id",
+          "paused",
+          "rotate_webhook_secret",
+          "secret",
+          "secret_ref"
+        ],
+        "type": "object"
+      },
+      "UpdateConnectionResponse": {
+        "description": "`iohr.connections.v1.UpdateConnectionResponse`",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          },
+          "webhook_secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "webhook_secret"
         ],
         "type": "object"
       },
@@ -1370,6 +3399,79 @@
         ],
         "type": "object"
       },
+      "UpdateMonitorRequest": {
+        "description": "`iohr.connections.v1.UpdateMonitorRequest`",
+        "properties": {
+          "fail_after": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "interval_secs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "monitor_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MonitorParams"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fail_after",
+          "interval_secs",
+          "monitor_id",
+          "name",
+          "org_id",
+          "params",
+          "state"
+        ],
+        "type": "object"
+      },
+      "UpdateMonitorResponse": {
+        "description": "`iohr.connections.v1.UpdateMonitorResponse`",
+        "properties": {
+          "monitor": {
+            "$ref": "#/components/schemas/Monitor"
+          }
+        },
+        "required": [
+          "monitor"
+        ],
+        "type": "object"
+      },
+      "Uptime": {
+        "description": "`iohr.connections.v1.Uptime`",
+        "properties": {
+          "d30": {
+            "format": "double",
+            "type": "number"
+          },
+          "d7": {
+            "format": "double",
+            "type": "number"
+          },
+          "h24": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "d30",
+          "d7",
+          "h24"
+        ],
+        "type": "object"
+      },
       "UsageRow": {
         "description": "`iohr.accounts.v1.UsageRow`",
         "properties": {
@@ -1394,6 +3496,97 @@
           "service"
         ],
         "type": "object"
+      },
+      "Use": {
+        "description": "`iohr.connections.v1.Use`",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "caller": {
+            "type": "string"
+          },
+          "caller_kind": {
+            "type": "string"
+          },
+          "error_class": {
+            "type": "string"
+          },
+          "executor": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "status_code": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action",
+          "at",
+          "caller",
+          "caller_kind",
+          "error_class",
+          "executor",
+          "grant_id",
+          "id",
+          "latency_ms",
+          "status",
+          "status_code"
+        ],
+        "type": "object"
+      },
+      "Value": {
+        "description": "`google.protobuf.Value`",
+        "properties": {
+          "bool_value": {
+            "type": "boolean"
+          },
+          "list_value": {
+            "$ref": "#/components/schemas/ListValue"
+          },
+          "null_value": {
+            "description": "`google.protobuf.NullValue`",
+            "enum": [
+              "NULL_VALUE"
+            ],
+            "type": "string"
+          },
+          "number_value": {
+            "format": "double",
+            "type": "number"
+          },
+          "string_value": {
+            "type": "string"
+          },
+          "struct_value": {
+            "$ref": "#/components/schemas/Struct"
+          }
+        },
+        "required": [
+          "bool_value",
+          "list_value",
+          "null_value",
+          "number_value",
+          "string_value",
+          "struct_value"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -1411,7 +3604,12 @@
       "name": "Proprietary"
     },
     "title": "InOrbit API",
-    "version": "0.1.0"
+    "version": "0.1.0",
+    "x-iohr-cut": {
+      "hash": "sha256:43c8985d109bc2ca597c47125896c58fd6bbd949727f605821a53f857ddc46ce",
+      "plan": "public",
+      "scopes": []
+    }
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1448,6 +3646,2051 @@
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "account:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/agents": {
+      "get": {
+        "description": "Transcoded from `/iohr.agents.v1.AgentsService/ListAgents` on the `agents` backend.\n\nA key needs scope `agents:read`.",
+        "operationId": "AgentsService.ListAgents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAgentsResponse"
+                }
+              }
+            },
+            "description": "`iohr.agents.v1.ListAgentsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.agents.v1.AgentsService/ListAgents",
+        "tags": [
+          "agents"
+        ],
+        "x-iohr-list": {
+          "items": "agents",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "agents:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/agents/enrollments": {
+      "post": {
+        "description": "Transcoded from `/iohr.agents.v1.AgentsService/CreateEnrollment` on the `agents` backend.\n\nA key needs scope `agents:write`.",
+        "operationId": "AgentsService.CreateEnrollment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEnrollmentRequest"
+              }
+            }
+          },
+          "description": "`iohr.agents.v1.CreateEnrollmentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateEnrollmentResponse"
+                }
+              }
+            },
+            "description": "`iohr.agents.v1.CreateEnrollmentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.agents.v1.AgentsService/CreateEnrollment",
+        "tags": [
+          "agents"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "agents:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/agents/{agent_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.agents.v1.AgentsService/DeleteAgent` on the `agents` backend.\n\nA key needs scope `agents:write`.",
+        "operationId": "AgentsService.DeleteAgent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteAgentResponse"
+                }
+              }
+            },
+            "description": "`iohr.agents.v1.DeleteAgentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.agents.v1.AgentsService/DeleteAgent",
+        "tags": [
+          "agents"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "agents:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.agents.v1.AgentsService/GetAgent` on the `agents` backend.\n\nA key needs scope `agents:read`.",
+        "operationId": "AgentsService.GetAgent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAgentResponse"
+                }
+              }
+            },
+            "description": "`iohr.agents.v1.GetAgentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.agents.v1.AgentsService/GetAgent",
+        "tags": [
+          "agents"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "agents:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/agents/{agent_id}/checks": {
+      "post": {
+        "description": "Transcoded from `/iohr.agents.v1.AgentsService/RunCheck` on the `agents` backend.\n\nA key needs scope `agents:write`.",
+        "operationId": "AgentsService.RunCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCheckRequest"
+              }
+            }
+          },
+          "description": "`iohr.agents.v1.RunCheckRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCheckResponse"
+                }
+              }
+            },
+            "description": "`iohr.agents.v1.RunCheckResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.agents.v1.AgentsService/RunCheck",
+        "tags": [
+          "agents"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "agents:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke": {
+      "post": {
+        "description": "Transcoded from `/iohr.agents.v1.AgentsService/RevokeAgent` on the `agents` backend.\n\nA key needs scope `agents:write`.",
+        "operationId": "AgentsService.RevokeAgent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeAgentRequest"
+              }
+            }
+          },
+          "description": "`iohr.agents.v1.RevokeAgentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeAgentResponse"
+                }
+              }
+            },
+            "description": "`iohr.agents.v1.RevokeAgentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.agents.v1.AgentsService/RevokeAgent",
+        "tags": [
+          "agents"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "agents:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/audit": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/ListTeamEvents` on the `accounts` backend.\n\nA key needs scope `account:audit`.",
+        "operationId": "AccountsService.ListTeamEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTeamEventsResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.ListTeamEventsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/ListTeamEvents",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-list": {
+          "items": "events",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "account:audit"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListConnections` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListConnections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListConnectionsResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListConnectionsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListConnections",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "connections",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/CreateConnection` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.CreateConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConnectionRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.CreateConnectionRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateConnectionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.CreateConnectionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/CreateConnection",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/{connection_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/DeleteConnection` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.DeleteConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteConnectionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.DeleteConnectionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/DeleteConnection",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/GetConnection` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.GetConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetConnectionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.GetConnectionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/GetConnection",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      },
+      "patch": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateConnection` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.UpdateConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConnectionRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.UpdateConnectionRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateConnectionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.UpdateConnectionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/UpdateConnection",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}": {
+      "post": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/CallAction` on the `connections` backend.\n\nA key needs scope `connections:use`.",
+        "operationId": "ConnectionsService.CallAction",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallActionRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.CallActionRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallActionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.CallActionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/CallAction",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:use"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListGrants` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListGrants",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListGrantsResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListGrantsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListGrants",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "grants",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/RevokeGrant` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.RevokeGrant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeGrantResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.RevokeGrantResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/RevokeGrant",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/{connection_id}/history": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListHistory` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListHistory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListHistoryResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListHistoryResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListHistory",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "uses",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors": {
+      "post": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/CreateMonitor` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.CreateMonitor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMonitorRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.CreateMonitorRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateMonitorResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.CreateMonitorResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/CreateMonitor",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/{connection_id}/test": {
+      "post": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/TestConnection` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.TestConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.TestConnectionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/TestConnection",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/domains": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/ListDomains` on the `accounts` backend.\n\nA key needs scope `domains:read`.",
+        "operationId": "AccountsService.ListDomains",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDomainsResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.ListDomainsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/ListDomains",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-list": {
+          "items": "domains",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token",
+          "total_size": "total_size"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "domains:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/AddDomain` on the `accounts` backend.\n\nA key needs scope `domains:write`.",
+        "operationId": "AccountsService.AddDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDomainRequest"
+              }
+            }
+          },
+          "description": "`iohr.accounts.v1.AddDomainRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddDomainResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.AddDomainResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/AddDomain",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "domains:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/domains/{domain}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/RemoveDomain` on the `accounts` backend.\n\nA key needs scope `domains:write`.",
+        "operationId": "AccountsService.RemoveDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveDomainResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.RemoveDomainResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/RemoveDomain",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "domains:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/GetDomain` on the `accounts` backend.\n\nA key needs scope `domains:read`.",
+        "operationId": "AccountsService.GetDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDomainResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.GetDomainResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/GetDomain",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "domains:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/domains/{domain}/check": {
+      "post": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/CheckDomain` on the `accounts` backend.\n\nA key needs scope `domains:write`.",
+        "operationId": "AccountsService.CheckDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckDomainRequest"
+              }
+            }
+          },
+          "description": "`iohr.accounts.v1.CheckDomainRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckDomainResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.CheckDomainResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/CheckDomain",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "domains:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/domains/{domain}/confirm": {
+      "post": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/ConfirmDomain` on the `accounts` backend.\n\nA key needs scope `domains:write`.",
+        "operationId": "AccountsService.ConfirmDomain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmDomainRequest"
+              }
+            }
+          },
+          "description": "`iohr.accounts.v1.ConfirmDomainRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmDomainResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.ConfirmDomainResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/ConfirmDomain",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "domains:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/monitors": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitors` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListMonitors",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "connection_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMonitorsResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListMonitorsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListMonitors",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "monitors",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/DeleteMonitor` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.DeleteMonitor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "monitor_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMonitorResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.DeleteMonitorResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/DeleteMonitor",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitor` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.GetMonitor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "monitor_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMonitorResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.GetMonitorResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/GetMonitor",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      },
+      "patch": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateMonitor` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.UpdateMonitor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "monitor_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMonitorRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.UpdateMonitorRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMonitorResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.UpdateMonitorResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/UpdateMonitor",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitorRuns` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListMonitorRuns",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "monitor_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMonitorRunsResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListMonitorRunsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListMonitorRuns",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "runs",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitorSummary` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.GetMonitorSummary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "monitor_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMonitorSummaryResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.GetMonitorSummaryResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/GetMonitorSummary",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
         ]
       }
     },
@@ -1488,6 +5731,76 @@
           }
         },
         "summary": "iohr.accounts.v1.AccountsService/GetUnits",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "usage:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/units/series": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/GetUnitSeries` on the `accounts` backend.\n\nA key needs scope `usage:read`.",
+        "operationId": "AccountsService.GetUnitSeries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "by",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetUnitSeriesResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.GetUnitSeriesResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/GetUnitSeries",
         "tags": [
           "accounts"
         ],
@@ -1563,6 +5876,25 @@
       "get": {
         "description": "Transcoded from `/iohr.accounts.v1.AccountsService/ListUnitCategories` on the `accounts` backend.\n\nA key needs scope `usage:read`.",
         "operationId": "AccountsService.ListUnitCategories",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1589,9 +5921,205 @@
         "tags": [
           "accounts"
         ],
+        "x-iohr-list": {
+          "items": "categories",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "usage:read"
+        ]
+      }
+    },
+    "/v1/connections/kinds": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListKinds` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListKinds",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListKindsResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListKindsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListKinds",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "kinds",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/connections/tools": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListTools` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListTools",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListToolsResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListToolsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListTools",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "tools",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/connections/tools/{name}": {
+      "post": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/CallTool` on the `connections` backend.\n\nA key needs scope `connections:use`.",
+        "operationId": "ConnectionsService.CallTool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallToolRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.CallToolRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallToolResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.CallToolResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/CallTool",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "connections:use"
         ]
       }
     },
@@ -1649,10 +6177,83 @@
         ]
       }
     },
+    "/v1/events/stats": {
+      "get": {
+        "description": "Transcoded from `/iohr.events.v1.EventsService/GetEventStats` on the `events` backend.\n\nA key needs scope `events:read`.",
+        "operationId": "EventsService.GetEventStats",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetEventStatsResponse"
+                }
+              }
+            },
+            "description": "`iohr.events.v1.GetEventStatsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.events.v1.EventsService/GetEventStats",
+        "tags": [
+          "events"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "events:read"
+        ]
+      }
+    },
     "/v1/events/types": {
       "get": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend.\n\nA key needs scope `events:read`.",
         "operationId": "EventsService.ListEventTypes",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1679,6 +6280,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "types",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "events:read"
@@ -1766,6 +6373,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1794,6 +6418,12 @@
         "tags": [
           "radar"
         ],
+        "x-iohr-list": {
+          "items": "digests",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "radar:read"
@@ -1868,6 +6498,23 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1896,6 +6543,12 @@
         "tags": [
           "radar"
         ],
+        "x-iohr-list": {
+          "items": "items",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "radar:read"
@@ -1912,6 +6565,17 @@
             "name": "delivery_id",
             "required": true,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -1960,6 +6624,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1988,6 +6669,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "endpoints",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "webhooks:read"
@@ -1996,6 +6683,19 @@
       "post": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend.\n\nA key needs scope `webhooks:write`.",
         "operationId": "EventsService.CreateEndpoint",
+        "parameters": [
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2249,9 +6949,83 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "deliveries",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "webhooks:read"
+        ]
+      }
+    },
+    "/v1/webhooks/endpoints/{endpoint_id}/recover": {
+      "post": {
+        "description": "Transcoded from `/iohr.events.v1.EventsService/RecoverEndpoint` on the `events` backend.\n\nA key needs scope `webhooks:write`.",
+        "operationId": "EventsService.RecoverEndpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoverEndpointRequest"
+              }
+            }
+          },
+          "description": "`iohr.events.v1.RecoverEndpointRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoverEndpointResponse"
+                }
+              }
+            },
+            "description": "`iohr.events.v1.RecoverEndpointResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.events.v1.EventsService/RecoverEndpoint",
+        "tags": [
+          "events"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "webhooks:write"
         ]
       }
     },
@@ -2265,6 +7039,17 @@
             "name": "endpoint_id",
             "required": true,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -2313,6 +7098,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2359,6 +7155,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2387,6 +7200,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "inboxes",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "webhooks:read"
@@ -2395,6 +7214,19 @@
       "post": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend.\n\nA key needs scope `webhooks:write`.",
         "operationId": "EventsService.CreateInbox",
+        "parameters": [
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2496,6 +7328,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2521,6 +7370,74 @@
           }
         },
         "summary": "iohr.events.v1.EventsService/ListInboxRequests",
+        "tags": [
+          "events"
+        ],
+        "x-iohr-list": {
+          "items": "requests",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "webhooks:read"
+        ]
+      }
+    },
+    "/v1/webhooks/stats": {
+      "get": {
+        "description": "Transcoded from `/iohr.events.v1.EventsService/GetDeliveryStats` on the `events` backend.\n\nA key needs scope `webhooks:read`.",
+        "operationId": "EventsService.GetDeliveryStats",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endpoint_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryStatsResponse"
+                }
+              }
+            },
+            "description": "`iohr.events.v1.GetDeliveryStatsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.events.v1.EventsService/GetDeliveryStats",
         "tags": [
           "events"
         ],

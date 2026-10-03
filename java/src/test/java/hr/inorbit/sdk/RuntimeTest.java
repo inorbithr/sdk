@@ -66,6 +66,9 @@ class RuntimeTest {
         assertEquals("brand_new_code", fresh.slug());
         assertEquals(Code.INTERNAL, Code.forStatus(502));
         assertEquals("http_418", Code.forStatus(418).slug());
+        assertEquals(Code.UNPROCESSABLE, Code.of("unprocessable"));
+        assertEquals(422, Code.UNPROCESSABLE.httpStatus().orElseThrow());
+        assertEquals(Code.UNPROCESSABLE, Code.forStatus(422));
     }
 
     @Test

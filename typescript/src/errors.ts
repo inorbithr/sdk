@@ -17,6 +17,7 @@ export const CODES: Readonly<Record<KnownCode, number>> = {
   conflict: 409,
   payload_too_large: 413,
   unsupported_media_type: 415,
+  unprocessable: 422,
   rate_limited: 429,
   quota_exceeded: 429,
   cancelled: 499,
@@ -38,6 +39,7 @@ export type KnownCode =
   | "conflict"
   | "payload_too_large"
   | "unsupported_media_type"
+  | "unprocessable"
   | "rate_limited"
   | "quota_exceeded"
   | "cancelled"
@@ -145,6 +147,7 @@ export function codeForStatus(status: number): Code {
     409: "conflict",
     413: "payload_too_large",
     415: "unsupported_media_type",
+    422: "unprocessable",
     429: "rate_limited",
     499: "cancelled",
     501: "unimplemented",
