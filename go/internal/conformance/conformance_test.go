@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -70,6 +71,9 @@ func startReplay(t *testing.T) string {
 	t.Helper()
 	root, _ := filepath.Abs("../../..")
 	bin := filepath.Join(root, "conformance/server/bin/replay")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	if _, err := os.Stat(bin); err != nil {
 		note := "conformance: no replay server at conformance/server/bin/replay; run `mise run conformance:server:build`"
 		if os.Getenv("IOHR_TEST_REQUIRE_REPLAY") != "" {

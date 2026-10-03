@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -31,7 +32,7 @@ from inorbithr import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
-BIN = ROOT / "conformance/server/bin/replay"
+BIN = ROOT / ("conformance/server/bin/replay" + (".exe" if sys.platform == "win32" else ""))
 FORMS = ("sync", "async")
 
 Result = RawResponse | InOrbitError
