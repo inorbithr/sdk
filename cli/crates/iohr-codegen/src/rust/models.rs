@@ -37,6 +37,44 @@ fn rewrite_int64(node: &mut Value) {
     }
 }
 
+/// N2 marks every field of a transcoded message required, and the gateway does send
+/// every scalar. A field that is itself a message (a `$ref` to an object) is left out
+/// of the answer when it was never set, so on the wire it is optional: the Rust type
+/// makes it an `Option` and reads a missing one as `None`.
+fn relax_message_fields(schemas: &mut Value) {
+    let Value::Object(all) = schemas else {
+        return;
+    };
+    let is_object = |name: &str, all: &serde_json::Map<String, Value>| {
+        all.get(name).is_some_and(|s| {
+            s.get("type") == Some(&json!("object")) || s.get("properties").is_some()
+        })
+    };
+    let names: Vec<String> = all.keys().cloned().collect();
+    for name in names {
+        let refs: Vec<String> = all[&name]
+            .get("properties")
+            .and_then(Value::as_object)
+            .map(|props| {
+                props
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        let target = v.get("$ref")?.as_str()?.rsplit('/').next()?.to_owned();
+                        is_object(&target, all).then_some(k.clone())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if refs.is_empty() {
+            continue;
+        }
+        if let Some(Value::Array(required)) = all.get_mut(&name).and_then(|s| s.get_mut("required"))
+        {
+            required.retain(|r| r.as_str().is_none_or(|r| !refs.iter().any(|k| k == r)));
+        }
+    }
+}
+
 /// Renders the schemas as a Rust module body (no header). `runtime` is the path of the
 /// runtime crate (`inorbithr`, or `crate` inside it).
 ///
@@ -48,6 +86,7 @@ pub(crate) fn render(
     runtime: &str,
 ) -> Result<String, RenderError> {
     let mut definitions = Value::Object(schemas.clone());
+    relax_message_fields(&mut definitions);
     rewrite_int64(&mut definitions);
     definitions[INT64] =
         json!({ "type": "string", "description": "A 64-bit integer as a decimal string." });
@@ -121,5 +160,22 @@ mod tests {
             !a.contains("pub enum Code"),
             "the runtime's Code replaces the generated one"
         );
+    }
+
+    #[test]
+    fn a_required_message_field_reads_as_optional() {
+        let schemas = json!({
+            "Change": { "type": "object", "required": ["title", "example"], "properties": {
+                "title": { "type": "string" },
+                "example": { "$ref": "#/components/schemas/Example" }
+            } },
+            "Example": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string" } } }
+        });
+        let out = render(schemas.as_object().unwrap(), "inorbithr").unwrap();
+        assert!(
+            out.contains("pub example: ::std::option::Option<Example>"),
+            "{out}"
+        );
+        assert!(out.contains("pub title: ::std::string::String"), "{out}");
     }
 }

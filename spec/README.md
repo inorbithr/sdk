@@ -38,6 +38,12 @@ request; when the platform fixes the cause, the rule is deleted.
 | N5 | Unset timestamps are `""`, not absent or `null` | Keep `type: string`; the SDKs map `""` to "no value" | Document it, or emit `null` |
 | N6 | The code-to-status table lives only in code and prose (docs.inorbit.hr/docs/errors) | Add it to `problem.json` as `x-http-status`, from the table in `tools/spec-sync.py`; a code the table lacks, or a code the document dropped, fails the sync | Put the table in the document |
 
+A finding from the first live run (2026-10-03): the gateway does send every scalar
+field, but a field that is itself a message (`Change.example`) is left out when it was
+never set. N2 stays, because the generated SDKs read such a field as optional
+(`Option<T>` in Rust, see `cli/crates/iohr-codegen`); the upstream ask is for the
+document to say `required` only for what is always sent.
+
 ## Other upstream asks (not normalised)
 
 - The document's `info.license` is "Proprietary" and its title is the internal name. The

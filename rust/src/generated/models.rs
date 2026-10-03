@@ -34,7 +34,8 @@ pub struct Change {
     pub advanced: ::std::string::String,
     pub after: ::std::string::String,
     pub area: ::std::string::String,
-    pub example: Example,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub example: ::std::option::Option<Example>,
     ///`iohr.radar.v1.Impact`
     pub impact: ChangeImpact,
     pub novice: ::std::string::String,
@@ -119,7 +120,8 @@ pub struct CreateEndpointRequest {
 ///`iohr.events.v1.CreateEndpointResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct CreateEndpointResponse {
-    pub endpoint: Endpoint,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub endpoint: ::std::option::Option<Endpoint>,
     pub secret: ::std::string::String,
 }
 ///`iohr.events.v1.CreateInboxRequest`
@@ -128,9 +130,10 @@ pub struct CreateInboxRequest {
     pub account_id: ::std::string::String,
 }
 ///`iohr.events.v1.CreateInboxResponse`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct CreateInboxResponse {
-    pub inbox: Inbox,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub inbox: ::std::option::Option<Inbox>,
 }
 ///`iohr.events.v1.DeleteEndpointResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -209,7 +212,8 @@ pub struct Digest {
     pub checked: bool,
     pub created_at: ::std::string::String,
     pub drill: ::std::string::String,
-    pub drill_code: DrillCode,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub drill_code: ::std::option::Option<DrillCode>,
     pub id: crate::Int64,
     pub item_count: i32,
     pub lang: ::std::string::String,
@@ -269,17 +273,20 @@ pub struct Example {
     pub toolchain: ::std::string::String,
 }
 ///`iohr.radar.v1.GetDigestResponse`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct GetDigestResponse {
-    pub digest: Digest,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub digest: ::std::option::Option<Digest>,
 }
 ///`iohr.accounts.v1.GetMeResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct GetMeResponse {
-    pub account: Account,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub account: ::std::option::Option<Account>,
     pub email: ::std::string::String,
     pub email_verified: bool,
-    pub key: AccountsKey,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub key: ::std::option::Option<AccountsKey>,
     pub name: ::std::string::String,
     pub stub: bool,
     pub subject: ::std::string::String,
@@ -294,7 +301,8 @@ pub struct GetUnitsResponse {
     pub days: ::std::vec::Vec<UnitDay>,
     pub granted: crate::Int64,
     pub month: ::std::string::String,
-    pub plan: Plan,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub plan: ::std::option::Option<Plan>,
     pub remaining: crate::Int64,
     pub resets_at: ::std::string::String,
     pub usage: ::std::vec::Vec<UnitUsage>,
@@ -374,7 +382,8 @@ pub struct ListEventTypesResponse {
 ///`iohr.events.v1.ListInboxRequestsResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ListInboxRequestsResponse {
-    pub inbox: Inbox,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub inbox: ::std::option::Option<Inbox>,
     pub requests: ::std::vec::Vec<InboxRequest>,
 }
 ///`iohr.events.v1.ListInboxesResponse`
@@ -440,9 +449,10 @@ pub struct Problem {
     pub error: ::std::string::String,
 }
 ///`iohr.events.v1.RetryDeliveryResponse`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct RetryDeliveryResponse {
-    pub delivery: Delivery,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub delivery: ::std::option::Option<Delivery>,
 }
 ///`iohr.events.v1.RotateSecretResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -451,9 +461,10 @@ pub struct RotateSecretResponse {
     pub secret: ::std::string::String,
 }
 ///`iohr.events.v1.SendTestResponse`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct SendTestResponse {
-    pub delivery: Delivery,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub delivery: ::std::option::Option<Delivery>,
 }
 ///`iohr.events.v1.StreamEventsResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]

@@ -126,6 +126,14 @@ pub enum ProfileCommand {
         /// The profile.
         name: Option<ProfileName>,
     },
+    /// Point a signed-in profile at one of its accounts (a team's id or slug), the one
+    /// `iohr sdk generate` cuts the document to.
+    Account {
+        /// The profile.
+        name: ProfileName,
+        /// The account's id or slug, among the ones the profile's person belongs to.
+        account: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -237,8 +245,12 @@ pub enum OpenapiCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum SdkCommand {
-    /// Write a surface for one or more documents into a directory, with its `iohr.lock`.
+    /// Write a surface cut to what your profiles may call into a directory, with its
+    /// `iohr.lock` beside it.
     Generate(SdkGenerate),
+    /// Fetch every profile's document again and fail when the cut has moved since the
+    /// surface was generated (run it in CI with `IOHR_TOKEN_<PROFILE>` per profile).
+    Check(SdkCheck),
 }
 
 #[derive(Debug, Args)]
@@ -246,9 +258,12 @@ pub struct SdkGenerate {
     /// The language.
     #[arg(long, value_enum)]
     pub lang: Lang,
-    /// A document to generate from, as NAME=FILE: the profile's name and the document it
-    /// saw (`iohr openapi pull`). Repeat it for several profiles.
-    #[arg(long = "from", value_name = "NAME=FILE", required = true)]
+    /// A profile whose credential's document to generate from; repeat it to put several
+    /// accounts in one surface (`--profile` on its own is the global flag).
+    #[arg(long = "for", value_name = "PROFILE")]
+    pub profiles: Vec<ProfileName>,
+    /// A document saved with `iohr openapi pull`, as NAME=FILE, for an offline run.
+    #[arg(long = "from", value_name = "NAME=FILE")]
     pub from: Vec<String>,
     /// The directory to write the surface into; `iohr.lock` goes beside it.
     #[arg(long, value_name = "DIR")]
@@ -258,6 +273,16 @@ pub struct SdkGenerate {
     pub force: bool,
     #[command(flatten)]
     pub rust: iohr_codegen::RustOptions,
+}
+
+#[derive(Debug, Args)]
+pub struct SdkCheck {
+    /// The lock file the surface was generated with.
+    #[arg(long, default_value = "iohr.lock")]
+    pub lock: PathBuf,
+    /// Also render the surface again and list the files that differ from what is on disk.
+    #[arg(long)]
+    pub files: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

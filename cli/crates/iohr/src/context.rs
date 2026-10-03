@@ -10,6 +10,7 @@ use time::OffsetDateTime;
 use crate::Env;
 use crate::api::{Api, base_url};
 use crate::cli::Global;
+use crate::env_name;
 use crate::error::Error;
 
 /// The config directory and the config read from it.
@@ -96,8 +97,30 @@ pub(crate) struct Session {
 
 /// The session for this run: `IOHR_TOKEN` when set, otherwise the chosen profile.
 pub(crate) async fn session(global: &Global, env: &Env) -> Result<Session, Error> {
+    let ctx = Ctx::load(global)?;
+    let chosen = ctx.chosen(global).ok();
+    session_for(global, env, &ctx, chosen.as_ref()).await
+}
+
+/// The session of one named profile: `IOHR_TOKEN_<PROFILE>` when set (CI, where a
+/// person cannot sign in), otherwise the profile's own credential. With `name` absent,
+/// `IOHR_TOKEN` alone.
+pub(crate) async fn session_for(
+    global: &Global,
+    env: &Env,
+    ctx: &Ctx,
+    name: Option<&ProfileName>,
+) -> Result<Session, Error> {
     let base = base_url(&global.base_url)?;
-    if let Some(token) = &env.token {
+    // A named profile takes `IOHR_TOKEN_<PROFILE>` and nothing else from the environment;
+    // the chosen profile falls back to `IOHR_TOKEN` as every command always did.
+    let per_profile: Option<&Redacted<String>> = name.and_then(|n| env.profile_token(n.as_str()));
+    let standing_in = per_profile.or(if name.is_some() {
+        None
+    } else {
+        env.token.as_ref()
+    });
+    if let Some(token) = standing_in {
         let claims = Claims::read(token.expose(), OffsetDateTime::now_utc())?;
         let account = claims.org.clone().unwrap_or_default();
         let api = Api::new(
@@ -106,15 +129,24 @@ pub(crate) async fn session(global: &Global, env: &Env) -> Result<Session, Error
             global.verbose,
         )?;
         return Ok(Session {
-            label: "IOHR_TOKEN".into(),
+            label: name.map_or_else(
+                || "IOHR_TOKEN".into(),
+                |n| format!("{n} (IOHR_TOKEN_{})", env_name(n.as_str())),
+            ),
             kind: Kind::Token,
             account,
             claims,
             api,
         });
     }
-    let ctx = Ctx::load(global)?;
-    let name = ctx.chosen(global)?;
+    let Some(name) = name else {
+        return Err(Error::NotSignedIn(
+            "no profile on this machine: create an API token in the console, then run \
+             `iohr login --with-token < token.txt`, or set IOHR_TOKEN"
+                .into(),
+        ));
+    };
+    let name = name.clone();
     let profile = ctx.config.profile(&name).cloned().ok_or_else(|| {
         Error::NotSignedIn(format!(
             "there is no profile {name}: `iohr profile list` shows the ones there are"

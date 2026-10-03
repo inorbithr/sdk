@@ -1,21 +1,155 @@
-//! `iohr sdk generate`: a surface cut to what the given documents hold, written into a
-//! directory of the developer's repository with its `iohr.lock` beside it (RFC 0020).
+//! `iohr sdk generate` and `iohr sdk check` (RFC 0020): a surface cut to what each
+//! profile's credential may call, written into the developer's repository with its
+//! `iohr.lock` beside it; and the check that says when the API's cut has moved.
 
 use std::path::{Path, PathBuf};
 
-use iohr_codegen::{RustTarget, Target as _};
+use iohr_auth::{Kind, ProfileName};
+use iohr_codegen::{Files, RustTarget, Target as _};
 use iohr_openapi::Api;
 use serde_json::Value;
 
-use crate::cli::{Lang, SdkGenerate};
+use crate::Env;
+use crate::cli::{Global, Lang, SdkCheck, SdkGenerate};
+use crate::context::{Ctx, Session, session_for};
 use crate::error::Error;
 use crate::lock::Lock;
 use crate::output::Out;
 
-/// `iohr sdk generate --from NAME=FILE ... --out DIR`.
-pub(crate) fn generate(args: &SdkGenerate, out: Out) -> Result<(), Error> {
-    let mut docs: Vec<(String, Value)> = Vec::new();
-    for spec in &args.from {
+/// `iohr sdk generate`: from profiles (`--profile`), from files (`--from`), or both.
+pub(crate) async fn generate(
+    g: &Global,
+    env: &Env,
+    args: &SdkGenerate,
+    out: Out,
+) -> Result<(), Error> {
+    let mut docs = from_files(&args.from)?;
+    if !args.profiles.is_empty() {
+        let ctx = Ctx::load(g)?;
+        for name in &args.profiles {
+            docs.push((name.to_string(), fetch_cut(g, env, &ctx, name).await?));
+        }
+    }
+    if docs.is_empty() {
+        return Err(Error::Usage(
+            "give at least one profile (--for NAME) or document (--from NAME=FILE)".into(),
+        ));
+    }
+    let api = Api::from_documents(docs).map_err(|e| Error::Failed(e.to_string()))?;
+    write_surface(&api, args, out)
+}
+
+/// `iohr sdk check`: every profile in the lock is fetched again and compared.
+pub(crate) async fn check(g: &Global, env: &Env, args: &SdkCheck, out: Out) -> Result<(), Error> {
+    let lock = Lock::read(&args.lock)?;
+    let ctx = Ctx::load(g)?;
+    let mut docs = Vec::new();
+    for name in lock.profiles.keys() {
+        let profile: ProfileName = name.parse().map_err(|_| {
+            Error::Failed(format!(
+                "{}: {name:?} is not a profile name",
+                args.lock.display()
+            ))
+        })?;
+        docs.push((name.clone(), fetch_cut(g, env, &ctx, &profile).await?));
+    }
+    let api = Api::from_documents(docs).map_err(|e| Error::Failed(e.to_string()))?;
+    let drift = lock.drift(&api);
+    let mut files_changed = Vec::new();
+    if args.files {
+        let out_dir = args
+            .lock
+            .parent()
+            .map_or_else(|| PathBuf::from(&lock.out), |p| p.join(&lock.out));
+        let files = render(&api, &lock.lang, &lock_options(&lock))?;
+        files_changed = files
+            .diff(&out_dir)
+            .map_err(|e| Error::Failed(format!("cannot read {}: {e}", out_dir.display())))?;
+    }
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "lock": args.lock,
+            "drift": drift,
+            "files_changed": files_changed,
+            "ok": drift.is_empty() && files_changed.is_empty(),
+        }));
+    } else {
+        for d in &drift {
+            let mut lines = vec![format!(
+                "profile {}: the cut moved ({} -> {})",
+                d.profile,
+                short(&d.was),
+                short(&d.now)
+            )];
+            lines.extend(d.added.iter().map(|l| format!("  + {l}")));
+            lines.extend(d.removed.iter().map(|l| format!("  - {l}")));
+            Out::raw(format!("{}\n", lines.join("\n")).as_bytes());
+        }
+        for f in &files_changed {
+            Out::raw(format!("{f}\n").as_bytes());
+        }
+    }
+    if !drift.is_empty() || !files_changed.is_empty() {
+        let files = if files_changed.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", {} file{} differ",
+                files_changed.len(),
+                if files_changed.len() == 1 { "" } else { "s" }
+            )
+        };
+        return Err(Error::Drift(format!(
+            "{} profile{} moved{files}; run `iohr sdk generate` again and commit the result",
+            drift.len(),
+            if drift.len() == 1 { "" } else { "s" },
+        )));
+    }
+    if !out.json {
+        Out::note(&format!(
+            "{}: every profile's cut is the one the surface was generated from.",
+            args.lock.display()
+        ));
+    }
+    Ok(())
+}
+
+/// The document a profile sees now: `GET /v1/openapi.json`, with `?account=` for a
+/// person, and the stamp checked to name that account, so a gateway that ignored the
+/// parameter can never hand back the personal plan as a team's.
+async fn fetch_cut(g: &Global, env: &Env, ctx: &Ctx, name: &ProfileName) -> Result<Value, Error> {
+    let s: Session = session_for(g, env, ctx, Some(name)).await?;
+    let asked = (s.kind == Kind::Person && !s.account.is_empty()).then(|| s.account.clone());
+    let query: Vec<(&str, &str)> = asked.iter().map(|a| ("account", a.as_str())).collect();
+    let resp = s
+        .api
+        .send(reqwest::Method::GET, "/v1/openapi.json", &query, None)
+        .await
+        .map_err(|e| match e.status() {
+            Some(403) => Error::with_hint(
+                e,
+                "The profile's account is not one its credential may act for.",
+            ),
+            _ => e.into(),
+        })?;
+    let doc: Value = resp.json()?;
+    if let Some(account) = &asked {
+        let stamped = doc
+            .pointer("/info/x-iohr-cut/account")
+            .and_then(Value::as_str);
+        if stamped != Some(account.as_str()) {
+            return Err(Error::Failed(format!(
+                "profile {name}: the API answered a document for {} where {account} was asked for; the API does not cut by account yet, or the profile's account is wrong (`iohr profile account {name} <id>`)",
+                stamped.unwrap_or("no account")
+            )));
+        }
+    }
+    Ok(doc)
+}
+
+fn from_files(specs: &[String]) -> Result<Vec<(String, Value)>, Error> {
+    let mut docs = Vec::new();
+    for spec in specs {
         let (profile, file) = spec.split_once('=').ok_or_else(|| {
             Error::Usage(format!(
                 "--from takes NAME=FILE, the profile's name and the document it saw; got {spec:?}"
@@ -27,22 +161,30 @@ pub(crate) fn generate(args: &SdkGenerate, out: Out) -> Result<(), Error> {
             .map_err(|e| Error::Failed(format!("{file} is not a JSON document: {e}")))?;
         docs.push((profile.to_owned(), doc));
     }
-    if docs.is_empty() {
-        return Err(Error::Usage(
-            "give at least one document: --from NAME=FILE (a document saved with `iohr openapi pull`)".into(),
-        ));
-    }
-    let api = Api::from_documents(docs).map_err(|e| Error::Failed(e.to_string()))?;
-    write_surface(&api, args, out)
+    Ok(docs)
 }
 
-/// Renders `api` for the chosen language into `--out`, with the lock beside it.
+fn render(api: &Api, lang: &str, rust: &iohr_codegen::RustOptions) -> Result<Files, Error> {
+    match lang {
+        "rust" => RustTarget
+            .render(api, rust)
+            .map_err(|e| Error::Failed(e.to_string())),
+        other => Err(Error::Failed(format!(
+            "the lock names a language this iohr cannot render: {other}"
+        ))),
+    }
+}
+
+fn lock_options(lock: &Lock) -> iohr_codegen::RustOptions {
+    iohr_codegen::RustOptions {
+        runtime: lock.runtime.clone().unwrap_or_else(|| "inorbithr".into()),
+        in_crate: false,
+    }
+}
+
+/// Renders `api` into `--out`, with the lock beside it.
 pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(), Error> {
-    let files = match args.lang {
-        Lang::Rust => RustTarget
-            .render(api, &args.rust)
-            .map_err(|e| Error::Failed(e.to_string()))?,
-    };
+    let files = render(api, lang_name(args.lang), &args.rust)?;
     let target = &args.out;
     let occupied = std::fs::read_dir(target).is_ok_and(|mut d| d.next().is_some());
     if !args.force && occupied {
@@ -58,12 +200,15 @@ pub(crate) fn write_surface(api: &Api, args: &SdkGenerate, out: Out) -> Result<(
     let out_name = target
         .file_name()
         .map_or_else(|| ".".into(), |n| n.to_string_lossy().into_owned());
-    let lock = Lock::from_api(
+    let mut lock = Lock::from_api(
         api,
         lang_name(args.lang),
         &out_name,
         env!("CARGO_PKG_VERSION"),
     );
+    if args.rust.runtime != "inorbithr" {
+        lock.runtime = Some(args.rust.runtime.clone());
+    }
     if !args.rust.in_crate {
         std::fs::write(&lock_path, lock.render())
             .map_err(|e| Error::Failed(format!("cannot write {}: {e}", lock_path.display())))?;
@@ -109,4 +254,8 @@ pub(crate) fn lang_name(lang: Lang) -> &'static str {
     match lang {
         Lang::Rust => "rust",
     }
+}
+
+fn short(hash: &str) -> &str {
+    hash.get(..19).unwrap_or(hash)
 }

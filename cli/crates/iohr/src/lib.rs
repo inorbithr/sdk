@@ -28,17 +28,47 @@ use iohr_auth::Redacted;
 pub struct Env {
     /// `IOHR_TOKEN`: an API token used in memory, nothing written (SR-24).
     pub token: Option<Redacted<String>>,
+    /// `IOHR_TOKEN_<PROFILE>`: a token standing in for a named profile, for CI, where
+    /// `iohr sdk check` runs and a person cannot sign in. Read on demand.
+    profile_tokens: std::collections::BTreeMap<String, Redacted<String>>,
 }
 
 impl Env {
     /// Reads the process environment.
     #[must_use]
     pub fn from_process() -> Self {
+        let read = |v: String| Redacted::new(v.trim().to_owned());
         let token = std::env::var("IOHR_TOKEN")
             .ok()
-            .filter(|t| !t.trim().is_empty());
+            .filter(|t| !t.trim().is_empty())
+            .map(read);
+        let profile_tokens = std::env::vars()
+            .filter_map(|(k, v)| {
+                let name = k.strip_prefix("IOHR_TOKEN_")?;
+                (!name.is_empty() && !v.trim().is_empty()).then(|| (name.to_owned(), read(v)))
+            })
+            .collect();
         Self {
-            token: token.map(|t| Redacted::new(t.trim().to_owned())),
+            token,
+            profile_tokens,
         }
     }
+
+    /// The token `IOHR_TOKEN_<PROFILE>` holds for `profile`, if any.
+    #[must_use]
+    pub fn profile_token(&self, profile: &str) -> Option<&Redacted<String>> {
+        self.profile_tokens.get(&env_name(profile))
+    }
+}
+
+/// `acme-ci` reads `IOHR_TOKEN_ACME_CI`: the name in upper case, `-` as `_`.
+#[must_use]
+pub fn env_name(profile: &str) -> String {
+    profile
+        .chars()
+        .map(|c| match c {
+            '-' => '_',
+            c => c.to_ascii_uppercase(),
+        })
+        .collect()
 }

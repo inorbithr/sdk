@@ -66,6 +66,9 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 | `iohr token create \| list \| revoke` | API tokens for an account (a signed-in person only) |
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file` |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
+| `iohr sdk generate --lang rust --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
+| `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
+| `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json` and `--verbose`.
@@ -74,6 +77,22 @@ a query value or a body.
 
 Exit codes: 0 success, 1 a failed call, 2 a usage error, 3 not signed in or the token
 was refused, 4 forbidden by scope, role or plan.
+
+## An SDK for your account
+
+```sh
+iohr login                                   # a person, or `iohr login --with-token --profile ci`
+iohr profile account default acme            # a team's slug or id (a person's profile)
+iohr sdk generate --lang rust --for default --for ci --out src/iohr
+git add src/iohr src/iohr.lock
+```
+
+The surface holds exactly the operations each profile's credential may call, on the
+`inorbithr` runtime; a call a profile may not make does not compile. In CI, with a token
+per profile in `IOHR_TOKEN_<PROFILE>` (`IOHR_TOKEN_CI`, `IOHR_TOKEN_DEFAULT`), `iohr sdk
+check` fails with a diff when the API's cut has moved, so a plan change or a revoked
+scope is a failing check, not a surprise in production. A person profile cannot sign in
+on CI: give it a token there, or leave it out of the lock.
 
 ## Where things are kept
 
