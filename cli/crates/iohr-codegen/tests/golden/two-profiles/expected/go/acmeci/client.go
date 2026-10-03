@@ -5,6 +5,7 @@ package acmeci
 
 import (
 	"context"
+	"iter"
 
 	"example.com/app/iohr/internal/ops"
 	"example.com/app/iohr/models"
@@ -12,8 +13,8 @@ import (
 	"github.com/inorbithr/sdk/go/codegen"
 )
 
-// The surface was generated for the runtime's contract 1: a runtime with another contract fails to build here, so run iohr sdk generate again.
-const _ = codegen.V1
+// The surface was generated for the runtime's contract 2: a runtime with another contract fails to build here, so run iohr sdk generate again.
+const _ = codegen.V2
 
 // Profile is the profile's name.
 const Profile = "acme-ci"
@@ -115,6 +116,24 @@ func (h Events) GetEndpoint(ctx context.Context, endpointID string) (*inorbit.Re
 // ListDeliveries calls GET /v1/webhooks/endpoints/{endpoint_id}/deliveries; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListDeliveries` on the `events` backend.
 func (h Events) ListDeliveries(ctx context.Context, endpointID string, params *models.EventsListDeliveriesParams) (*inorbit.Response[models.ListDeliveriesResponse], error) {
 	return ops.ListDeliveries(ctx, h.c, endpointID, params)
+}
+
+// AllListDeliveries iterates over every item ListDeliveries returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Events) AllListDeliveries(ctx context.Context, endpointID string, params *models.EventsListDeliveriesParams) iter.Seq2[models.Delivery, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.Delivery, string, error) {
+		p := models.EventsListDeliveriesParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListDeliveries(ctx, h.c, endpointID, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Deliveries, r.Value.NextPageToken, nil
+	})
 }
 
 // ListInboxes calls GET /v1/webhooks/inboxes; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend.

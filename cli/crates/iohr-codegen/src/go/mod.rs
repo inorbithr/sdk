@@ -348,7 +348,7 @@ impl Target for GoTarget {
             } else {
                 (format!("{}/", package_name(&p.name)), package_name(&p.name))
             };
-            let text = render_profile(&surface, p, &name, &layout)?;
+            let text = render_profile(&surface, p, &name, &layout, &models)?;
             files.insert(format!("{dir}client.go"), format!("{header}{text}"));
         }
         Ok(files)
@@ -848,6 +848,7 @@ fn render_profile(
     p: &context::Profile,
     pkg: &str,
     layout: &Layout,
+    models: &[Model],
 ) -> Result<String, RenderError> {
     let handles: Vec<(&context::Handle, Vec<&Op>)> = surface
         .handles
@@ -869,6 +870,8 @@ fn render_profile(
         .collect();
     let handle_types = member_names(&handles, &flat)?;
     let mut uses = Uses::default();
+    // Whether an iterator over a paged list is rendered, which imports iter.
+    let mut paged = false;
     let mut body = String::new();
     let env_doc = if p.is_public {
         "FromEnv reads INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES"
@@ -886,12 +889,17 @@ fn render_profile(
     };
     let _ = write!(
         body,
-        "// The surface was generated for the runtime's contract 1: a runtime with another contract fails to build here, so run iohr sdk generate again.\nconst _ = codegen.V1\n\n// Profile is the profile's name.\nconst Profile = {name:?}\n\n// Client calls the operations profile {name} may call.\ntype Client struct {{\n\tc *inorbit.Client\n}}\n\n// New returns the profile's surface on c, a client built for its credential.\nfunc New(c *inorbit.Client) *Client {{\n\treturn &Client{{c: c}}\n}}\n\n// FromEnv returns the profile's surface with its credential from the environment; opts apply after it.\nfunc FromEnv(opts ...inorbit.Option) (*Client, error) {{\n\tc, err := inorbit.FromEnv({env_arg:?}, opts...)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\treturn New(c), nil\n}}\n\n// Runtime returns the client underneath, for a raw call with Send.\nfunc (p *Client) Runtime() *inorbit.Client {{\n\treturn p.c\n}}\n",
+        "// The surface was generated for the runtime's contract 2: a runtime with another contract fails to build here, so run iohr sdk generate again.\nconst _ = codegen.V2\n\n// Profile is the profile's name.\nconst Profile = {name:?}\n\n// Client calls the operations profile {name} may call.\ntype Client struct {{\n\tc *inorbit.Client\n}}\n\n// New returns the profile's surface on c, a client built for its credential.\nfunc New(c *inorbit.Client) *Client {{\n\treturn &Client{{c: c}}\n}}\n\n// FromEnv returns the profile's surface with its credential from the environment; opts apply after it.\nfunc FromEnv(opts ...inorbit.Option) (*Client, error) {{\n\tc, err := inorbit.FromEnv({env_arg:?}, opts...)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\treturn New(c), nil\n}}\n\n// Runtime returns the client underneath, for a raw call with Send.\nfunc (p *Client) Runtime() *inorbit.Client {{\n\treturn p.c\n}}\n",
         name = p.name
     );
     for op in &flat {
         body.push('\n');
         body.push_str(&method(op, "p *Client", "p.c", &mut uses));
+        if let Some(paging) = paging(op, models) {
+            paged = true;
+            body.push('\n');
+            body.push_str(&iterator(op, &paging, "p *Client", "p.c", &mut uses));
+        }
     }
     for (h, ops) in &handles {
         let (accessor, ty) = &handle_types[&h.tag];
@@ -904,6 +912,11 @@ fn render_profile(
         for op in ops {
             body.push('\n');
             body.push_str(&method(op, &format!("h {ty}"), "h.c", &mut uses));
+            if let Some(paging) = paging(op, models) {
+                paged = true;
+                body.push('\n');
+                body.push_str(&iterator(op, &paging, &format!("h {ty}"), "h.c", &mut uses));
+            }
         }
     }
     let mut imports = Imports::default();
@@ -912,6 +925,9 @@ fn render_profile(
     }
     if uses.json {
         imports.std("encoding/json");
+    }
+    if paged {
+        imports.std("iter");
     }
     imports.other(&layout.runtime, Some("inorbit"));
     imports.other(&layout.codegen(), None);
@@ -944,6 +960,120 @@ fn method(op: &Op, receiver: &str, client: &str, uses: &mut Uses) -> String {
         sig.join(", "),
         function_name(op),
         args.join(", ")
+    )
+}
+
+/// How a paged list operation pages: the query field that carries the token, and the
+/// answer's list and next-token fields.
+struct Paging {
+    /// The Go type of one item.
+    item: String,
+    /// The answer's list field.
+    list: String,
+    /// The answer's next-token field, and whether it is a pointer.
+    next: String,
+    next_pointer: bool,
+    /// The parameters' token field, and whether it is a pointer.
+    token: String,
+    token_pointer: bool,
+}
+
+/// The paging of `op`, when it pages: a `page_token` query parameter, and an answer with
+/// a `next_page_token` string and exactly one list.
+fn paging(op: &Op, models: &[Model]) -> Option<Paging> {
+    const TOKEN: [&str; 2] = ["page_token", "pageToken"];
+    const NEXT: [&str; 2] = ["next_page_token", "nextPageToken"];
+    let token = op
+        .query
+        .iter()
+        .position(|q| TOKEN.contains(&q.name.as_str()) && q.ty == Type::String)?;
+    let response = op.response.as_deref()?;
+    let Some(Model {
+        shape: Shape::Object { fields },
+        ..
+    }) = models.iter().find(|m| m.name == response)
+    else {
+        return None;
+    };
+    let next = fields
+        .iter()
+        .position(|f| NEXT.contains(&f.name.as_str()) && f.ty == Type::String)?;
+    let mut lists = fields
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| matches!(f.ty, Type::Array { .. }));
+    let (list, list_field) = lists.next()?;
+    if lists.next().is_some() {
+        return None;
+    }
+    let Type::Array { item } = &list_field.ty else {
+        return None;
+    };
+    let names = field_names(fields.iter().map(|f| f.name.as_str()));
+    let query_names = field_names(op.query.iter().map(|q| q.name.as_str()));
+    let next_field = &fields[next];
+    Some(Paging {
+        item: go_type(item, "models.", &mut Uses::default()),
+        list: names[list].clone(),
+        next: names[next].clone(),
+        next_pointer: !next_field.required || next_field.nullable,
+        token: query_names[token].clone(),
+        token_pointer: !op.query[token].required,
+    })
+}
+
+/// `All<Op>`: every item of a paged list, page after page, as a range-over-func iterator.
+fn iterator(op: &Op, paging: &Paging, receiver: &str, client: &str, uses: &mut Uses) -> String {
+    uses.models = true;
+    let method = GoNaming.method_name(&op.name);
+    let name = format!("All{method}");
+    let (decl, call) = arguments(op, uses);
+    let mut sig = vec!["ctx context.Context".to_owned()];
+    sig.extend(decl);
+    let params_type = op.params_type.as_deref().unwrap_or_default();
+    let by_value = op.query.iter().any(|q| q.required);
+    let copy = if by_value {
+        "\t\tp := params\n".to_owned()
+    } else {
+        format!(
+            "\t\tp := models.{params_type}{{}}\n\t\tif params != nil {{\n\t\t\tp = *params\n\t\t}}\n"
+        )
+    };
+    let set_token = if paging.token_pointer {
+        format!(
+            "\t\tif token != \"\" {{\n\t\t\tp.{} = &token\n\t\t}}\n",
+            paging.token
+        )
+    } else {
+        format!("\t\tp.{} = token\n", paging.token)
+    };
+    let args: Vec<String> = ["ctx".to_owned(), client.to_owned()]
+        .into_iter()
+        .chain(call.into_iter().map(|a| match a.as_str() {
+            "params" if by_value => "p".to_owned(),
+            "params" => "&p".to_owned(),
+            other => other.to_owned(),
+        }))
+        .collect();
+    let next = if paging.next_pointer {
+        format!(
+            "\t\tnext := \"\"\n\t\tif r.Value.{n} != nil {{\n\t\t\tnext = *r.Value.{n}\n\t\t}}\n\t\treturn r.Value.{l}, next, nil\n",
+            n = paging.next,
+            l = paging.list
+        )
+    } else {
+        format!(
+            "\t\treturn r.Value.{}, r.Value.{}, nil\n",
+            paging.list, paging.next
+        )
+    };
+    format!(
+        "// {name} iterates over every item {method} returns, page after page, following {next_field} until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.\nfunc ({receiver}) {name}({}) iter.Seq2[{item}, error] {{\n\treturn codegen.Pages(ctx, func(ctx context.Context, token string) ([]{item}, string, error) {{\n{copy}{set_token}\t\tr, err := ops.{}({})\n\t\tif err != nil {{\n\t\t\treturn nil, \"\", err\n\t\t}}\n{next}\t}})\n}}\n",
+        sig.join(", "),
+        function_name(op),
+        args.join(", "),
+        next_field = paging.next,
+        item = paging.item,
     )
 }
 

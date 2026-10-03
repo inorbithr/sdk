@@ -184,11 +184,14 @@ reimplement the protocol.
 
 ## 9. Pagination
 
-No public route is paginated today. When one is, the platform's `cursor` convention
-(empty when last) is exposed as the language's iterator over items (TS
-`AsyncIterable`, Python `__iter__` / `__aiter__`, Go `iter.Seq2[T, error]`, Java
-`Iterable` and `Stream`, C# `IAsyncEnumerable`, Rust `Stream`), with page-level access
-kept.
+A paged operation takes `page_token` and answers one list with `next_page_token`, empty
+after the last page (one public route today: `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries`).
+The page method stays, and the generated surface adds an iterator over the items beside
+it, in the language's own idiom: Go `All<Operation>` returning `iter.Seq2[T, error]`
+(built); TS `AsyncIterable`, Python `__iter__` / `__aiter__`, Java `Iterable` and
+`Stream`, C# `IAsyncEnumerable`, Rust `Stream` (planned). An iterator follows the token
+until it is empty, fetches nothing more once the caller stops, stops at the first error,
+and stops when a page names itself as the next.
 
 ## 10. Compatibility
 

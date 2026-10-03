@@ -30,5 +30,21 @@ if errors.As(err, &apiErr) && apiErr.Code == inorbit.CodeForbidden {
 - Every call takes a context first. Errors are `*inorbit.APIError`, `*ConnectionError`,
   `*TimeoutError`, `*AuthError`, `*ConfigError`, `*TooLargeError` and `*DecodeError`,
   told apart with `errors.As`. Credentials never print their secret.
-- Example: [examples/go](../examples/go). How the SDKs behave in every language:
+- A paged list also has an iterator, `All<Operation>`, returning `iter.Seq2[T, error]`;
+  it follows the page tokens and fetches nothing more once the loop breaks:
+
+  ```go
+  for d, err := range api.Events().AllListDeliveries(ctx, endpointID, nil) {
+  	if err != nil {
+  		return err
+  	}
+  	fmt.Println(d.ID)
+  }
+  ```
+
+- Logging is off by default. `inorbit.WithHook(inorbit.SlogHook(logger))` logs each
+  answer at Debug and a failed call at Warn through `log/slog`: operation, method,
+  status, attempt, duration and request ids, never a bound path, query value, header,
+  body or token.
+- Example: [examples/go](../examples/go), and the `Example` functions on pkg.go.dev. How the SDKs behave in every language:
   [docs/design.md](../docs/design.md).
