@@ -1,5 +1,6 @@
 //! The command-line surface: every command, flag and environment variable.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -29,7 +30,7 @@ pub struct Cli {
 }
 
 /// Flags every command takes.
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct Global {
     /// The profile to use (default: the one `iohr profile use` chose).
     #[arg(long, global = true, env = "IOHR_PROFILE")]
@@ -52,6 +53,9 @@ pub struct Global {
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
     pub config_dir: Option<PathBuf>,
+    /// Where extensions are kept (default: the platform's data directory).
+    #[arg(long, global = true, env = "IOHR_DATA_DIR", hide = true)]
+    pub data_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -80,11 +84,149 @@ pub enum Command {
     /// Generate an SDK cut to what your credentials may call, and check it later.
     #[command(subcommand)]
     Sdk(SdkCommand),
+    /// Domains an account controls, proved with one DNS record.
+    #[command(subcommand)]
+    Domains(DomainsCommand),
+    /// Extensions: separate programs iohr installs from a registry, verifies, pins and
+    /// runs as `iohr <name> ...`.
+    #[command(subcommand)]
+    Ext(ExtCommand),
+    /// Settings besides profiles: where extensions come from, which keys may sign them.
+    #[command(subcommand)]
+    Config(ConfigCommand),
     /// Print a shell completion script.
     Completion {
         /// The shell.
         shell: Shell,
     },
+    /// An installed extension, such as `iohr agent ...`.
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DomainsCommand {
+    /// Start proving a domain: prints the TXT record to add.
+    Add {
+        /// The domain, such as acme.hr.
+        domain: String,
+        /// Prove only this subdomain's subtree, not its parent.
+        #[arg(long)]
+        subdomain: bool,
+        /// The account (default: the profile's).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Look the record up now, from several public resolvers.
+    Verify {
+        /// The domain.
+        domain: String,
+        /// Keep checking every 10 seconds until the record is seen.
+        #[arg(long)]
+        wait: bool,
+        /// With --wait, give up after this many seconds.
+        #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u64).range(10..=3600))]
+        timeout: u64,
+        /// The account (default: the profile's).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Mark a domain verified once its record has been seen.
+    Confirm {
+        /// The domain.
+        domain: String,
+        /// The account (default: the profile's).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// List the account's domains.
+    List {
+        /// The account (default: the profile's).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Remove a domain; its record may then be deleted.
+    Rm {
+        /// The domain.
+        domain: String,
+        /// The account (default: the profile's).
+        #[arg(long)]
+        account: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ExtCommand {
+    /// Fetch an extension, verify its signature, provenance and digest, and install it.
+    Install {
+        /// NAME, NAME@VERSION or NAME@sha256:DIGEST (default: the newest release).
+        extension: String,
+        /// Also pin it in this lock file, for `iohr ext sync` elsewhere.
+        #[arg(long, value_name = "FILE")]
+        lock: Option<PathBuf>,
+    },
+    /// The installed extensions.
+    List,
+    /// Install the newest release of one extension, or of every installed one.
+    Upgrade {
+        /// The extension (default: all).
+        name: Option<String>,
+        /// Also pin the result in this lock file.
+        #[arg(long, value_name = "FILE")]
+        lock: Option<PathBuf>,
+    },
+    /// Remove an extension from this machine.
+    Remove {
+        /// The extension.
+        name: String,
+        /// Also remove it from this lock file.
+        #[arg(long, value_name = "FILE")]
+        lock: Option<PathBuf>,
+    },
+    /// Check installed extensions again, offline: the program's hash, the signature
+    /// and provenance kept at install, and the signer the lock pins.
+    Verify {
+        /// The extension (default: all).
+        name: Option<String>,
+    },
+    /// Install exactly what a lock file pins, by digest and signer.
+    Sync {
+        /// The lock file.
+        #[arg(long, default_value = "iohr-ext.lock", value_name = "FILE")]
+        lock: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Set a value: `ext.registry HOST/PATH`, or `ext.trusted_keys FILE.pem...`.
+    Set {
+        /// The key.
+        key: ConfigKey,
+        /// The value; for `ext.trusted_keys`, one or more PEM public-key files.
+        #[arg(required = true, num_args = 1..)]
+        values: Vec<String>,
+    },
+    /// Print a value.
+    Get {
+        /// The key.
+        key: ConfigKey,
+    },
+    /// Return a value to its default.
+    Unset {
+        /// The key.
+        key: ConfigKey,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConfigKey {
+    /// The registry and path prefix extensions come from.
+    #[value(name = "ext.registry")]
+    ExtRegistry,
+    /// Public keys trusted to sign extensions besides InOrbit's release workflow.
+    #[value(name = "ext.trusted_keys")]
+    ExtTrustedKeys,
 }
 
 #[derive(Debug, Args)]

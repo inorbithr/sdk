@@ -24,6 +24,32 @@ pub struct Config {
     /// Every profile, by name.
     #[serde(default)]
     pub profiles: BTreeMap<ProfileName, Profile>,
+    /// Where extensions come from and which extra keys may sign them.
+    #[serde(default, skip_serializing_if = "ExtConfig::is_empty")]
+    pub ext: ExtConfig,
+}
+
+/// The `[ext]` table: extension settings (`iohr config set ext.<key>`). Public keys
+/// and a registry address; never a secret.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ExtConfig {
+    /// The registry and path prefix extensions are pulled from, such as a company's
+    /// mirror (`registry.acme.hr/inorbit/iohr-ext`). Unset: InOrbit's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+    /// PEM public keys trusted to sign extensions besides InOrbit's release workflow:
+    /// a mirror that re-signs, or an internal channel.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_keys: Vec<String>,
+}
+
+impl ExtConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.registry.is_none() && self.trusted_keys.is_empty()
+    }
 }
 
 /// One way of calling the API.

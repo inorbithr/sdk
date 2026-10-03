@@ -28,7 +28,9 @@ mod session;
 mod store;
 
 pub use claims::{Claims, ClaimsError};
-pub use config::{Config, ConfigError, Kind, Profile, ProfileName, ProfileNameError, Storage};
+pub use config::{
+    Config, ConfigError, ExtConfig, Kind, Profile, ProfileName, ProfileNameError, Storage,
+};
 pub use credential::{Bearer, Credential, StaticToken};
 pub use error::AuthError;
 pub use flow::{Authorization, Browser, Device, Granted};

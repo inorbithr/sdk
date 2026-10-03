@@ -41,3 +41,24 @@ path = "fuzz_targets/loopback.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ext_manifest"
+path = "fuzz_targets/ext_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ext_layer"
+path = "fuzz_targets/ext_layer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ext_token_request"
+path = "fuzz_targets/ext_token_request.rs"
+test = false
+doc = false
+bench = false

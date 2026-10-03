@@ -318,6 +318,90 @@ async fn token_create_prints_the_new_token_alone_on_stdout() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn domains_add_verify_confirm_list_and_remove() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["domains:read", "domains:write"]);
+    let base = format!("/v1/accounts/orgs/{ACCOUNT}/domains");
+    let domain = serde_json::json!({
+        "domain": "staging.acme.hr", "scope": "subdomain", "status": "pending",
+        "record_name": "_inorbit-verify.staging.acme.hr",
+        "record_value": "inorbit-verify=ABCDEF234567", "created_at": "2026-10-03T10:00:00Z",
+        "expires_at": "2026-10-10T10:00:00Z"
+    });
+    Mock::given(method("POST"))
+        .and(path(&base))
+        .and(body_json(
+            serde_json::json!({"domain": "staging.acme.hr", "scope": "subdomain"}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"domain": domain})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{base}/staging.acme.hr/check")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "seen",
+            "resolvers": [{"name": "cloudflare", "seen": true, "value": "inorbit-verify=ABCDEF234567"},
+                          {"name": "google", "seen": true}]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{base}/staging.acme.hr/confirm")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "domain": {"domain": "staging.acme.hr", "status": "verified"}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&base))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"domains": [domain]})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{base}/staging.acme.hr")))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(&t, &["domains", "add", "Staging.Acme.HR.", "--subdomain"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        stdout.contains("_inorbit-verify.staging.acme.hr")
+            && stdout.contains("inorbit-verify=ABCDEF234567"),
+        "{stdout}"
+    );
+    let o = r.with_token(&t, &["domains", "verify", "staging.acme.hr", "--wait"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("iohr domains confirm staging.acme.hr"),
+        "{}",
+        text(&o)
+    );
+    let o = r.with_token(&t, &["domains", "confirm", "staging.acme.hr"]);
+    assert!(text(&o).contains("verified"), "{}", text(&o));
+    let o = r.with_token(&t, &["domains", "list"]);
+    assert!(
+        String::from_utf8_lossy(&o.stdout).contains("staging.acme.hr"),
+        "{}",
+        text(&o)
+    );
+    let o = r.with_token(&t, &["domains", "rm", "staging.acme.hr"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(&t, &["domains", "add", "not a domain"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn plain_http_to_another_host_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let o = Command::new(env!("CARGO_BIN_EXE_iohr"))
@@ -392,6 +476,11 @@ async fn verbose_output_never_shows_the_token() {
             "sdk", "generate", "--lang", "rust", "--for", "ci", "--out", gen_dir,
         ],
         vec!["sdk", "check", "--lock", lock_file],
+        vec!["domains", "list"],
+        vec!["domains", "add", "acme.hr"],
+        vec!["domains", "verify", "acme.hr"],
+        vec!["domains", "confirm", "acme.hr"],
+        vec!["domains", "rm", "acme.hr"],
     ];
     for args in commands {
         let mut args = args.clone();

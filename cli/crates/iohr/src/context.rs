@@ -103,6 +103,17 @@ impl TokenProvider for AnyCredential {
     }
 }
 
+/// The credential shared between the runtime's client and the extension token channel
+/// (ADR 0012), which hands the same access token to an extension.
+#[derive(Debug, Clone)]
+pub(crate) struct Shared(pub(crate) Arc<AnyCredential>);
+
+impl TokenProvider for Shared {
+    async fn token(&self) -> Result<Token, inorbithr::AuthError> {
+        self.0.token().await
+    }
+}
+
 /// `--verbose`: one line per attempt on stderr with method, path, status, time and
 /// request id; never a header, a query value or a body (SR-13).
 struct Verbose {
@@ -177,10 +188,10 @@ impl std::fmt::Debug for Api {
 }
 
 impl Api {
-    fn new(base: &str, credential: AnyCredential, verbose: bool) -> Result<Self, Error> {
+    fn new(base: &str, credential: Arc<AnyCredential>, verbose: bool) -> Result<Self, Error> {
         let mut b = Client::builder()
             .base_url(base)
-            .token_provider(credential)
+            .token_provider(Shared(credential))
             .user_agent_suffix(concat!("iohr/", env!("CARGO_PKG_VERSION")));
         if verbose {
             b = b.hook(Verbose::new());
@@ -244,6 +255,8 @@ pub(crate) struct Session {
     pub(crate) account: String,
     pub(crate) claims: Claims,
     pub(crate) api: Api,
+    /// The credential `api` calls with, for the extension token channel.
+    pub(crate) credential: Arc<AnyCredential>,
 }
 
 /// The session for this run: `IOHR_TOKEN` when set, otherwise the chosen profile.
@@ -274,11 +287,8 @@ pub(crate) async fn session_for(
     if let Some(token) = standing_in {
         let claims = Claims::read(token.expose(), OffsetDateTime::now_utc())?;
         let account = claims.org.clone().unwrap_or_default();
-        let api = Api::new(
-            base,
-            AnyCredential::Token(StaticToken::new(token.clone())),
-            global.verbose,
-        )?;
+        let credential = Arc::new(AnyCredential::Token(StaticToken::new(token.clone())));
+        let api = Api::new(base, Arc::clone(&credential), global.verbose)?;
         return Ok(Session {
             label: name.map_or_else(
                 || "IOHR_TOKEN".into(),
@@ -288,6 +298,7 @@ pub(crate) async fn session_for(
             account,
             claims,
             api,
+            credential,
         });
     }
     let Some(name) = name else {
@@ -333,13 +344,15 @@ pub(crate) async fn session_for(
             )));
         }
     };
-    let api = Api::new(base, credential, global.verbose)?;
+    let credential = Arc::new(credential);
+    let api = Api::new(base, Arc::clone(&credential), global.verbose)?;
     Ok(Session {
         label: name.to_string(),
         kind: profile.kind,
         account: profile.account,
         claims,
         api,
+        credential,
     })
 }
 

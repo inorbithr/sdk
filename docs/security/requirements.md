@@ -133,7 +133,7 @@ the code, status and request id, and never echo request values.
 
 **SR-16. No telemetry.** The SDK sends nothing anywhere except the requests the caller
 makes to the API and the token endpoint: no usage pings, no crash reports, no update
-checks.
+checks. The command line has one exception, the extension registry, under SR-25.
 - Verify: review; conformance runs with only the replay server reachable.
 - Refs: CRA I.2(g).
 
@@ -149,6 +149,59 @@ stays in memory. A token is never accepted as a command-line argument.
   `argv`; a test that runs every command with `--verbose` and finds no token in the
   output; the credential store tested on each operating system in CI.
 - Refs: CRA I.2(e); clig.dev "Arguments and flags".
+
+## Command-line extensions
+
+Added by [ADR 0012](../adr/0012-extensions.md). They bind the `iohr` command line only.
+
+**SR-25. The extension registry, and only for extension commands.** `iohr` contacts
+the extension registry (`ghcr.io/inorbithr/iohr-ext`, or the mirror `ext.registry`
+names) only in `iohr ext install`, `upgrade` and `sync`: that registry, the token
+service its challenge names and the storage host a blob download redirects to, with
+`GET`, over HTTPS (plain HTTP to this machine only). Never on another command, never to
+look for updates, no telemetry. A mirror's credential comes from
+`IOHR_EXT_REGISTRY_AUTH` and goes to that registry and its token service only.
+- Why: banks and regulated companies do not allow software that changes or reports on
+  its own; a security team needs to know every host the tool reaches.
+- Verify: review; integration tests run against a registry on loopback with nothing
+  else reachable; a test that `--verbose` never shows the registry credential.
+- Refs: CRA I.2(g); SSDF PW.4.
+
+**SR-26. Extensions are verified before they are used.** Every manifest and blob is
+checked against its SHA-256 digest and declared size. An artifact is installed only
+with a signature and SLSA provenance from InOrbit's release workflow (Sigstore keyless:
+Fulcio certificate chain, SCT, Rekor entry, identity
+`https://github.com/inorbithr/<repo>/.github/workflows/release.yml@refs/tags/*`, issuer
+`https://token.actions.githubusercontent.com`, provenance naming the same repository),
+or with a signature by a public key in `ext.trusted_keys`. Every installed program is
+re-hashed before it runs. No option skips a check.
+- Why: the registry and any mirror in between are not trusted; the release workflow is.
+- Verify: unit tests against a real Sigstore bundle (accepted for its own signer,
+  refused for another identity, a tampered signature or another digest); integration
+  tests for a tampered blob, an unsigned artifact, a stranger's key and a program
+  changed on disk.
+- Refs: SSDF PS.2, PW.4; CRA I.2(a), I.2(f); SLSA Build L3 (consumer side).
+
+**SR-27. Extensions never hold the person's credentials.** An extension runs as its
+own process. It gets an access token only through a channel private to the user (a
+Unix socket of mode 0600 in a directory of mode 0700, or a named pipe that refuses
+remote clients), only for scopes its manifest declares, and only while it runs. The
+refresh token, the credential store and `IOHR_TOKEN*` never reach it.
+- Why: an extension is a different program with its own vulnerabilities; it must not
+  be able to keep or widen access.
+- Verify: unit tests for the channel (undeclared scope refused, scope the credential
+  lacks refused); an integration test that runs an extension and checks its
+  environment, the socket's modes, the scoping and that the socket is gone afterwards.
+- Refs: CRA I.2(d), I.2(e); least privilege.
+
+**SR-28. Extensions are pinned and change only on request.** What is installed is
+recorded in `iohr-ext.lock` (name, version, digest, signer). `iohr ext sync` installs
+exactly a lock's entries and refuses another digest, version or signer. Only
+`iohr ext upgrade` moves to a newer version.
+- Why: a team and its pipelines must run the same reviewed code; a security team must
+  be able to read what that is.
+- Verify: integration tests for install with `--lock`, sync and a signer mismatch.
+- Refs: SSDF PS.3; CRA I.2(c).
 
 ## Reliability and traceability
 

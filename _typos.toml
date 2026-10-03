@@ -1,6 +1,8 @@
 [default.extend-words]
 # Croatian and product words that appear in docs.
 hr = "hr"
+# The gzip crate (flate2).
+flate = "flate"
 
 [files]
 extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**"]

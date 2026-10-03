@@ -27,6 +27,8 @@ pub enum Error {
     Drift(String),
     /// Anything else that failed.
     Failed(String),
+    /// An extension ran and exited with this code; `iohr` exits with it too.
+    Child(u8),
 }
 
 impl Error {
@@ -51,6 +53,7 @@ impl Error {
                 ..
             } if e.code == Code::Forbidden || e.status == 403 => 4,
             Self::Api { .. } | Self::Failed(_) | Self::Drift(_) => 1,
+            Self::Child(code) => *code,
         })
     }
 
@@ -68,6 +71,7 @@ impl fmt::Display for Error {
             Self::Usage(m) | Self::NotSignedIn(m) | Self::Failed(m) | Self::Drift(m) => {
                 f.write_str(m)
             }
+            Self::Child(_) => Ok(()),
             Self::Api { error, hint: None } => write!(f, "{error}"),
             Self::Api {
                 error,
@@ -105,6 +109,18 @@ impl From<ClaimsError> for Error {
 impl From<StoreError> for Error {
     fn from(e: StoreError) -> Self {
         Self::Failed(e.to_string())
+    }
+}
+
+impl From<crate::ext::manifest::ManifestError> for Error {
+    fn from(e: crate::ext::manifest::ManifestError) -> Self {
+        Self::Usage(e.0)
+    }
+}
+
+impl From<crate::ext::lock::LockError> for Error {
+    fn from(e: crate::ext::lock::LockError) -> Self {
+        Self::Failed(e.0)
     }
 }
 

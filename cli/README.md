@@ -69,6 +69,9 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 | `iohr sdk generate --lang rust --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
+| `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
+| `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install, verify and pin them; `iohr <name> ...` runs one |
+| `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json` and `--verbose`.
@@ -94,6 +97,47 @@ check` fails with a diff when the API's cut has moved, so a plan change or a rev
 scope is a failing check, not a surprise in production. A person profile cannot sign in
 on CI: give it a token there, or leave it out of the lock.
 
+## Domains
+
+```sh
+iohr domains add acme.hr                 # prints the TXT record to add
+iohr domains verify acme.hr --wait       # looks it up from several resolvers until seen
+iohr domains confirm acme.hr             # marks it verified for the account
+```
+
+`--subdomain` proves only a subdomain's subtree (`staging.acme.hr`). The token expires
+after 7 days unless the domain is verified, and a verified domain is checked again every
+day. The calls need the `domains:read` and `domains:write` scopes.
+
+## Extensions
+
+An extension is a separate program that `iohr` installs from an OCI registry, verifies,
+pins and runs. The first is the InOrbit agent:
+
+```sh
+iohr ext install agent                   # or agent@0.1.0
+iohr agent status                        # runs the installed program
+```
+
+Before anything is used, `iohr` checks every digest, a signature and SLSA provenance
+from InOrbit's release workflow (Sigstore, offline against the root built into `iohr`)
+and the manifest's rules; there is no flag that skips this. Install prints who signed it
+and the API scopes it may ask for. What is installed is pinned in `iohr-ext.lock`; with
+`--lock iohr-ext.lock` the same file goes into your repository, and `iohr ext sync`
+installs exactly that elsewhere. Nothing updates by itself: `iohr ext upgrade` does,
+when you run it.
+
+A running extension never sees your refresh token or the credential store. It asks
+`iohr` for an access token over a private socket (`IOHR_EXT_TOKEN_SOCKET`, mode 0600),
+only for scopes its manifest declares; `IOHR_EXT_API` is the API's address. Until the
+platform can mint narrower tokens, the token handed out is the profile's own 15-minute
+access token, and only when it holds every scope asked for.
+
+From a company's mirror: `iohr config set ext.registry registry.acme.hr/inorbit/iohr-ext`,
+plus `iohr config set ext.trusted_keys mirror.pub` if the mirror re-signs. A mirror that
+needs a login reads `IOHR_EXT_REGISTRY_AUTH=user:password` from the environment. How to
+check an extension by hand: [verifying extensions](../docs/security/verifying-extensions.md).
+
 ## Where things are kept
 
 - Profiles: `config.toml` in the platform's config directory (`~/.config/iohr` on
@@ -102,10 +146,14 @@ on CI: give it a token there, or leave it out of the lock.
 - Secrets: the operating system's credential store (macOS Keychain, Windows Credential
   Manager, the Secret Service on Linux), one entry per profile and account. On a machine
   without one, `--insecure-storage` keeps the token in a file with mode 0600 instead.
-- `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` only. No telemetry, no update
+- Extensions: the platform's data directory (`~/.local/share/iohr/extensions` on
+  Linux), owner-only, with the machine's `iohr-ext.lock` and, per version, the program,
+  the Sigstore bundles checked at install and a record of the checks.
+- `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr`, and to the extension registry
+  only in `iohr ext install`, `upgrade` and `sync` (ADR 0012). No telemetry, no update
   check.
 
-The rules are SR-10 to SR-24 in [docs/security/requirements.md](../docs/security/requirements.md);
+The rules are SR-10 to SR-28 in [docs/security/requirements.md](../docs/security/requirements.md);
 the layout is [ADR 0009](../docs/adr/0009-the-command-line.md).
 
 ## Dependencies
@@ -129,3 +177,10 @@ Each runtime dependency, and why (SR-20):
 | typify, schemars, syn, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and prettyplease print them) |
 | minijinja | The templates the generated surface's operations, profiles and markers are rendered from, embedded in the binary |
 | heck | Case changes for generated names (`AcmeCi`, `get_me`) |
+| sigstore-verify | Extensions: verifies Sigstore bundles (Fulcio chain, SCT, Rekor inclusion, DSSE) offline against the trusted root it embeds; from the sigstore project |
+| flate2 (pure Rust backend) | Extensions: the gzip of an extension's layer; the tar inside is read by `iohr` itself, one regular file only |
+| semver | Extensions: the newest release among a registry's tags |
+| sha2 | Also the digests of OCI manifests and blobs |
+
+The OCI registry client is written here over reqwest (ADR 0012): the published crates
+added a licence outside `deny.toml` and about 30 crates for four read-only calls.

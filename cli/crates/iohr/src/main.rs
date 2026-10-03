@@ -27,6 +27,9 @@ fn main() -> ExitCode {
 }
 
 fn fail(e: &iohr::Error) -> ExitCode {
-    let _ = writeln!(std::io::stderr().lock(), "iohr: {e}");
+    let message = e.to_string();
+    if !message.is_empty() {
+        let _ = writeln!(std::io::stderr().lock(), "iohr: {message}");
+    }
     e.exit_code()
 }

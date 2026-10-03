@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cli;
+pub mod ext;
 
 mod args;
 mod browser;
@@ -23,13 +24,17 @@ pub use error::Error;
 use iohr_auth::Redacted;
 
 /// What the command line reads from its environment besides flags.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Env {
     /// `IOHR_TOKEN`: an API token used in memory, nothing written (SR-24).
     pub token: Option<Redacted<String>>,
     /// `IOHR_TOKEN_<PROFILE>`: a token standing in for a named profile, for CI, where
     /// `iohr sdk check` runs and a person cannot sign in. Read on demand.
     profile_tokens: std::collections::BTreeMap<String, Redacted<String>>,
+    /// `IOHR_EXT_REGISTRY`: the registry for extensions, over `ext.registry`.
+    pub ext_registry: Option<String>,
+    /// `IOHR_EXT_REGISTRY_AUTH`: `user:password` for a private registry mirror.
+    pub ext_registry_auth: Option<Redacted<String>>,
 }
 
 impl Env {
@@ -47,9 +52,18 @@ impl Env {
                 (!name.is_empty() && !v.trim().is_empty()).then(|| (name.to_owned(), read(v)))
             })
             .collect();
+        let ext_registry = std::env::var("IOHR_EXT_REGISTRY")
+            .ok()
+            .filter(|v| !v.trim().is_empty());
+        let ext_registry_auth = std::env::var("IOHR_EXT_REGISTRY_AUTH")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(read);
         Self {
             token,
             profile_tokens,
+            ext_registry,
+            ext_registry_auth,
         }
     }
 
