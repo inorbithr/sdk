@@ -8,11 +8,11 @@ and six client libraries. Each library is a hand-written runtime plus an API sur
 `iohr sdk generate` writes, cut to what your credentials may call
 ([ADR 0011](docs/adr/0011-runtime-and-surface.md)). The libraries pass the shared conformance
 suite and are not on their registries yet; they are published together at milestone M4.
-Status on 2026-10-03:
+Status on 2026-10-03 (iohr 0.1.0-alpha.4 generates all six):
 
 | Part | Package | Status |
 |---|---|---|
-| Command line | `iohr` (APT, Homebrew, installers) | **0.1.0-alpha.3, pre-release** |
+| Command line | `iohr` (APT, Homebrew, installers) | **0.1.0-alpha.4, pre-release** |
 | Rust | [`inorbithr`](https://crates.io/crates/inorbithr), Rust 1.94 | built, not released |
 | TypeScript | [`@inorbithr/sdk`](https://www.npmjs.com/package/@inorbithr/sdk), Node 22.12, Bun, Deno, browsers | built, not released |
 | Go | `github.com/inorbithr/sdk/go`, Go 1.26 | built, not released |
@@ -60,11 +60,11 @@ check with `gh attestation verify`. [cli/README.md](cli/README.md) has every com
 
 ```sh
 iohr login
-iohr sdk generate --lang rust --for default --out src/iohr   # or typescript, go, python, csharp
+iohr sdk generate --lang rust --for default --out src/iohr   # or typescript, go, python, csharp, java
 ```
 
 The generated code holds only the operations your profile's credential may call, so a call
-it may not make fails to compile (in TypeScript, Rust, Go, C#; in Python, the type checker).
+it may not make fails to compile (in TypeScript, Rust, Go, C#, Java; in Python, the type checker).
 Commit it with the `iohr.lock` beside it and run `iohr sdk check` in CI: it fails, with a
 diff, when what the credential may call changes. The guide is at
 [docs.inorbit.hr/docs/sdk](https://docs.inorbit.hr/docs/sdk/).
