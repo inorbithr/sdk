@@ -1,10 +1,10 @@
 # InOrbit SDK for Java
 
 The InOrbit API client for Java 17 and newer: one runtime (`hr.inorbit:inorbit-sdk`), and
-the operations your credential may call. Not released yet: nothing is published to Maven
-Central before the first release, and the package is built in the open.
-
-When it ships:
+the operations your credential may call. Built and tested in the open; the release to
+Maven Central (`hr.inorbit`, namespace verified) is planned and has not happened yet.
+Until then, build it from this repository (`mise run java:check`, or `mvn -f java install`
+to put it in your local Maven repository) and depend on it as it will be published:
 
 ```xml
 <dependency>

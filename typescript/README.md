@@ -1,7 +1,11 @@
 # InOrbit SDK for TypeScript and JavaScript
 
-Not released yet: nothing is on npm. The package builds and passes the shared
-conformance cases; it is published with the other SDKs at the first release.
+On [npm](https://www.npmjs.com/package/@inorbithr/sdk) and [JSR](https://jsr.io/@inorbithr/sdk)
+since 0.1.0. Node 22.12 or later, Bun, Deno and browsers; no runtime dependencies.
+
+```sh
+npm install @inorbithr/sdk     # or: pnpm add @inorbithr/sdk, deno add jsr:@inorbithr/sdk
+```
 
 ```ts
 import { Public } from "@inorbithr/sdk";

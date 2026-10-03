@@ -51,6 +51,15 @@ def main() -> int:
         if claude.is_file() and "@AGENTS.md" not in claude.read_text():
             problems.append(f"{lang}/CLAUDE.md must import @AGENTS.md")
 
+    # A published package carries the licence (Apache-2.0 section 4) and pkg.go.dev shows a
+    # Go module's docs only with a licence in the module's own directory, so each published
+    # package keeps an exact copy of the root LICENSE and NOTICE.
+    for pkg in ("go", "rust", "typescript", "python"):
+        for name in ("LICENSE", "NOTICE"):
+            copy = ROOT / pkg / name
+            if not copy.is_file() or copy.read_bytes() != (ROOT / name).read_bytes():
+                problems.append(f"{pkg}/{name} must be an exact copy of the root {name}")
+
     for p in problems:
         print(p, file=sys.stderr)
     print(f"repo:check: {len(problems)} problem(s)")

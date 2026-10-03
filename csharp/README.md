@@ -1,8 +1,9 @@
 # InOrbit SDK for .NET
 
-The runtime `InOrbit.Sdk` (`net8.0`) and the public surface generated into it. Not on
-NuGet yet: until the first release (milestone M4), reference the project from this
-repository.
+The runtime `InOrbit.Sdk` (`net8.0`) and the public surface generated into it. Built and
+tested in the open; the release to NuGet is planned and has not happened yet. Until then,
+reference the project from this repository (`dotnet add reference
+path/to/sdk/csharp/src/InOrbit.Sdk`).
 
 ```csharp
 using InOrbit.Sdk;
