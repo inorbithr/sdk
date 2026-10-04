@@ -96,6 +96,7 @@ fn substitute(v: &Value, dir: &str, file: &str) -> Value {
     }
 }
 
+#[allow(clippy::too_many_lines, reason = "one vector, every expectation")]
 fn run_config_vector(path: &Path, v: &Value) -> Result<(), String> {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().to_str().unwrap().to_owned();

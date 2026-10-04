@@ -91,7 +91,10 @@ impl Os {
             Some(i) => path[..i].to_owned(),
             None => ".".to_owned(),
         }
-        .replace(if self == Self::Windows { '/' } else { '\\' }, &self.sep().to_string())
+        .replace(
+            if self == Self::Windows { '/' } else { '\\' },
+            &self.sep().to_string(),
+        )
     }
 }
 
@@ -275,16 +278,18 @@ const CATALOGUE: &[Setting] = &[
         default: None,
     },
     net("pinned_keys", Ty::Pins),
-    d(s("log", Ty::Enum(&["off", "error", "warn", "info", "debug"])), || {
-        json!("off")
-    }),
+    d(
+        s("log", Ty::Enum(&["off", "error", "warn", "info", "debug"])),
+        || json!("off"),
+    ),
     d(s("log_headers", Ty::Bool), || json!(false)),
     s("log_allow_headers", Ty::List),
     s("tracing", Ty::Bool),
     s("metrics", Ty::Bool),
-    d(s("rate_limit", Ty::Enum(&["observe", "wait", "off"])), || {
-        json!("observe")
-    }),
+    d(
+        s("rate_limit", Ty::Enum(&["observe", "wait", "off"])),
+        || json!("observe"),
+    ),
     s("user_agent_suffix", Ty::Str),
 ];
 
@@ -340,7 +345,7 @@ pub(crate) fn parse_duration(v: &str) -> Option<u64> {
 }
 
 fn show_duration(ms: u64) -> String {
-    if ms % 1000 == 0 {
+    if ms.is_multiple_of(1000) {
         format!("{}s", ms / 1000)
     } else {
         format!("{ms}ms")
@@ -387,7 +392,11 @@ pub(crate) fn config_path(
         return (v != "off").then(|| (v.to_owned(), true, "env INORBIT_CONFIG_FILE".to_owned()));
     }
     if let Some(dir) = var("IOHR_CONFIG_DIR") {
-        return Some((os.join(dir, "config.toml"), false, "env IOHR_CONFIG_DIR".into()));
+        return Some((
+            os.join(dir, "config.toml"),
+            false,
+            "env IOHR_CONFIG_DIR".into(),
+        ));
     }
     let default = |p: String| Some((p, false, "default".to_owned()));
     match os {
@@ -418,14 +427,13 @@ fn valid_profile(name: &str) -> bool {
 }
 
 /// Resolves the configuration. `Ok` is the `describe()` document.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the file, the profile, then the layers in order"
+)]
 pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Value, Invalid> {
     let mut problems = Vec::new();
-    let var = |k: &str| {
-        inp.env
-            .get(k)
-            .map(String::as_str)
-            .filter(|v| !v.is_empty())
-    };
+    let var = |k: &str| inp.env.get(k).map(String::as_str).filter(|v| !v.is_empty());
 
     // The file.
     let code_file = inp.code.get("config_file").and_then(Value::as_str);
@@ -513,9 +521,10 @@ pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Value, Invalid> {
                     ),
                 });
             } else if !has {
-                let where_ = file_path
-                    .as_deref()
-                    .map_or_else(|| "no config file was read".to_owned(), |p| format!("{p} has no [profiles.{name}]"));
+                let where_ = file_path.as_deref().map_or_else(
+                    || "no config file was read".to_owned(),
+                    |p| format!("{p} has no [profiles.{name}]"),
+                );
                 problems.push(Problem {
                     setting: "profile".into(),
                     source,
@@ -555,7 +564,9 @@ pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Value, Invalid> {
         .map_or_else(|| inp.cwd.clone(), |p| inp.os.parent(p));
     let mut r = Resolver {
         inp,
-        prefix: typed.as_deref().map(|t| format!("INORBIT_{}_", env_name(t))),
+        prefix: typed
+            .as_deref()
+            .map(|t| format!("INORBIT_{}_", env_name(t))),
         file_path: file_path.clone(),
         file_dir,
         layers,
@@ -748,7 +759,14 @@ impl Resolver<'_> {
         if os.is_absolute(p) {
             return Ok(p.to_owned());
         }
-        Ok(os.join(if from_file { &self.file_dir } else { &self.inp.cwd }, p))
+        Ok(os.join(
+            if from_file {
+                &self.file_dir
+            } else {
+                &self.inp.cwd
+            },
+            p,
+        ))
     }
 
     #[allow(clippy::too_many_lines, reason = "one match over the value types")]
@@ -756,8 +774,9 @@ impl Resolver<'_> {
         let from_file = matches!(raw, Raw::File(_));
         let text = |what: &str| -> Result<String, String> {
             match raw {
-                Raw::Env(v) => Ok(v.clone()),
-                Raw::File(toml::Value::String(v)) | Raw::Code(Value::String(v)) => Ok(v.clone()),
+                Raw::Env(v) | Raw::File(toml::Value::String(v)) | Raw::Code(Value::String(v)) => {
+                    Ok(v.clone())
+                }
                 Raw::File(other) => Err(format!("must be {what}, not {}", other.type_str())),
                 Raw::Code(_) => Err(format!("must be {what}")),
             }
@@ -789,7 +808,10 @@ impl Resolver<'_> {
                             .ok_or_else(|| "must be a list of strings".to_owned())
                     })
                     .collect(),
-                Raw::File(other) => Err(format!("must be an array of strings, not {}", other.type_str())),
+                Raw::File(other) => Err(format!(
+                    "must be an array of strings, not {}",
+                    other.type_str()
+                )),
                 Raw::Code(_) => Err("must be a list of strings".into()),
             }
         };
@@ -829,25 +851,26 @@ impl Resolver<'_> {
                     "false" | "0" => Ok(json!(false)),
                     _ => Err(format!("{v:?} is not true, false, 1 or 0")),
                 },
-                Raw::File(toml::Value::Boolean(b)) => Ok(json!(b)),
-                Raw::Code(Value::Bool(b)) => Ok(json!(b)),
+                Raw::File(toml::Value::Boolean(b)) | Raw::Code(Value::Bool(b)) => Ok(json!(b)),
                 Raw::File(other) => Err(format!("must be a boolean, not {}", other.type_str())),
                 Raw::Code(_) => Err("must be a boolean".into()),
             },
             Ty::Scopes => list(false).map(|l| json!(l)),
             Ty::List => {
                 let l = list(true)?;
-                if s.name == "credential_sources" {
-                    if let Some(bad) = l.iter().find(|x| !SOURCES.contains(&x.as_str())) {
-                        return Err(format!(
-                            "{bad:?} is not a credential source; use env, workload, file or cli"
-                        ));
-                    }
+                if s.name == "credential_sources"
+                    && let Some(bad) = l.iter().find(|x| !SOURCES.contains(&x.as_str()))
+                {
+                    return Err(format!(
+                        "{bad:?} is not a credential source; use env, workload, file or cli"
+                    ));
                 }
                 if s.name == "no_proxy" {
                     for e in &l {
                         if !no_proxy_entry(e) {
-                            return Err(format!("{e:?} is not a no_proxy entry: a host, .domain, host:port, an IP address or a CIDR range"));
+                            return Err(format!(
+                                "{e:?} is not a no_proxy entry: a host, .domain, host:port, an IP address or a CIDR range"
+                            ));
                         }
                     }
                 }
@@ -877,7 +900,8 @@ impl Resolver<'_> {
             Ty::Str => {
                 let v = text("a string")?;
                 if s.name == "user_agent_suffix"
-                    && (v.chars().count() > 128 || v.chars().any(|c| !c.is_ascii_graphic() && c != ' '))
+                    && (v.chars().count() > 128
+                        || v.chars().any(|c| !c.is_ascii_graphic() && c != ' '))
                 {
                     return Err("must be product tokens (such as myapp/1.2), at most 128 printable ASCII characters".into());
                 }
@@ -897,9 +921,12 @@ impl Resolver<'_> {
                     return Ok(json!("off"));
                 }
                 let shown = redact_userinfo(&v);
-                let u = url::Url::parse(&v).map_err(|_| format!("{shown:?} is not an absolute URL"))?;
+                let u =
+                    url::Url::parse(&v).map_err(|_| format!("{shown:?} is not an absolute URL"))?;
                 if u.scheme() != "http" && u.scheme() != "https" {
-                    return Err(format!("{shown:?} must be an http:// or https:// proxy URL, or off"));
+                    return Err(format!(
+                        "{shown:?} must be an http:// or https:// proxy URL, or off"
+                    ));
                 }
                 Ok(json!(shown))
             }
@@ -918,7 +945,9 @@ impl Resolver<'_> {
                 }
                 Ok(json!(l))
             }
-            Ty::Reserved => Err("region is reserved until the API offers regions; remove it".into()),
+            Ty::Reserved => {
+                Err("region is reserved until the API offers regions; remove it".into())
+            }
         }
     }
 
@@ -939,8 +968,10 @@ impl Resolver<'_> {
     }
 
     fn show(&mut self, name: &str, value: Value, source: &str) {
-        self.settings
-            .insert(name.into(), json!({ "value": value, "source": source }));
+        let mut entry = Map::new();
+        entry.insert("value".into(), value);
+        entry.insert("source".into(), Value::String(source.to_owned()));
+        self.settings.insert(name.into(), Value::Object(entry));
     }
 
     /// The credential chain (section 5.1). `None` when a problem stopped it.
@@ -1015,7 +1046,11 @@ impl Resolver<'_> {
                 } else if let Some(f) = token_file {
                     let path = self.path(&f, false).unwrap_or(f);
                     if !self.exists(&path) {
-                        self.problem("token_file", &src("TOKEN_FILE"), format!("cannot read {path}"));
+                        self.problem(
+                            "token_file",
+                            &src("TOKEN_FILE"),
+                            format!("cannot read {path}"),
+                        );
                         return None;
                     }
                     self.show("token_file", json!(path), &src("TOKEN_FILE"));
@@ -1025,7 +1060,11 @@ impl Resolver<'_> {
                         self.problem(
                             "key_secret",
                             &src("KEY_SECRET"),
-                            format!("{} and {} are both set; set one", n("KEY_SECRET"), n("KEY_SECRET_FILE")),
+                            format!(
+                                "{} and {} are both set; set one",
+                                n("KEY_SECRET"),
+                                n("KEY_SECRET_FILE")
+                            ),
                         );
                         return None;
                     }
@@ -1046,7 +1085,14 @@ impl Resolver<'_> {
                         self.problem(
                             "scopes",
                             &src("KEY_ID"),
-                            format!("a key needs scopes: set {}SCOPES", if self.prefix.is_some() { &p } else { "INORBIT_" }),
+                            format!(
+                                "a key needs scopes: set {}SCOPES",
+                                if self.prefix.is_some() {
+                                    &p
+                                } else {
+                                    "INORBIT_"
+                                }
+                            ),
                         );
                         return None;
                     }
@@ -1056,7 +1102,11 @@ impl Resolver<'_> {
                     } else if let Some(f) = secret_file {
                         let path = self.path(&f, false).unwrap_or(f);
                         if !self.exists(&path) {
-                            self.problem("key_secret_file", &src("KEY_SECRET_FILE"), format!("cannot read {path}"));
+                            self.problem(
+                                "key_secret_file",
+                                &src("KEY_SECRET_FILE"),
+                                format!("cannot read {path}"),
+                            );
                             return None;
                         }
                         self.show("key_secret_file", json!(path), &src("KEY_SECRET_FILE"));
@@ -1081,18 +1131,28 @@ impl Resolver<'_> {
 
         // 4. The config file's profile table.
         if used.is_none() {
-            let label = self.layers.first().map(|l| l.label.clone()).unwrap_or_default();
+            let label = self
+                .layers
+                .first()
+                .map(|l| l.label.clone())
+                .unwrap_or_default();
             if !self.allowed("file") {
                 skip(&mut tried, "file", "not in credential_sources");
             } else if self.file_path.is_none() {
                 skip(&mut tried, "file", "no config file was read");
             } else if profile.is_none() {
                 skip(&mut tried, "file", "no profile chosen");
-            } else if let Some(t) = table.filter(|t| t.contains_key("token_file") || t.contains_key("key_id")) {
+            } else if let Some(t) =
+                table.filter(|t| t.contains_key("token_file") || t.contains_key("key_id"))
+            {
                 let has_secret = t.contains_key("key_secret");
                 let as_str = |k: &str| t.get(k).and_then(toml::Value::as_str).map(str::to_owned);
                 if t.contains_key("token_file") && t.contains_key("key_id") {
-                    self.problem("token_file", &label, "token_file and key_id are both set; set one credential");
+                    self.problem(
+                        "token_file",
+                        &label,
+                        "token_file and key_id are both set; set one credential",
+                    );
                     return None;
                 }
                 if let Some(f) = as_str("token_file") {
@@ -1109,11 +1169,19 @@ impl Resolver<'_> {
                         return None;
                     }
                     let Some(f) = as_str("key_secret_file") else {
-                        self.problem("key_secret", &label, "key_id is set without key_secret_file");
+                        self.problem(
+                            "key_secret",
+                            &label,
+                            "key_id is set without key_secret_file",
+                        );
                         return None;
                     };
                     if !self.scopes_set() {
-                        self.problem("scopes", &label, "a key needs scopes: set scopes in the profile's table");
+                        self.problem(
+                            "scopes",
+                            &label,
+                            "a key needs scopes: set scopes in the profile's table",
+                        );
                         return None;
                     }
                     let path = self.path(&f, true).unwrap_or(f);
@@ -1130,7 +1198,10 @@ impl Resolver<'_> {
                 }
                 tried.push(json!({ "source": "file", "result": "used" }));
             } else {
-                let reason = format!("profile {} sets no token_file or key_id", profile.unwrap_or_default());
+                let reason = format!(
+                    "profile {} sets no token_file or key_id",
+                    profile.unwrap_or_default()
+                );
                 skip(&mut tried, "file", &reason);
             }
         }
@@ -1149,7 +1220,10 @@ impl Resolver<'_> {
             } else if profile.is_none() {
                 skip(&mut tried, "cli", "skipped, no profile chosen");
             } else if !table.is_some_and(|t| t.contains_key("kind")) {
-                let reason = format!("profile {} was not made by iohr login", profile.unwrap_or_default());
+                let reason = format!(
+                    "profile {} was not made by iohr login",
+                    profile.unwrap_or_default()
+                );
                 skip(&mut tried, "cli", &reason);
             } else if !(self.inp.cli_found)(&program) {
                 let reason = if program == "iohr" {
@@ -1181,12 +1255,13 @@ impl Resolver<'_> {
             self.problem("credential", "", m);
             return None;
         };
-        if kind != "client_credentials" && kind != "custom" {
-            if let Some(s) = self.settings.remove("scopes") {
-                self.ignored.push(json!({
-                    "key": "scopes", "source": s["source"], "reason": "not used by this credential",
-                }));
-            }
+        if kind != "client_credentials"
+            && kind != "custom"
+            && let Some(s) = self.settings.remove("scopes")
+        {
+            self.ignored.push(json!({
+                "key": "scopes", "source": s["source"], "reason": "not used by this credential",
+            }));
         }
         Some(json!({ "source": source, "kind": kind, "tried": tried }))
     }
@@ -1194,9 +1269,17 @@ impl Resolver<'_> {
     fn cross_checks(&mut self) {
         let settings = self.settings.clone();
         let get = |k: &str| settings.get(k).cloned();
-        if get("system_trust").is_some_and(|v| v["value"] == json!(false)) && get("ca_bundle").is_none() {
-            let src = get("system_trust").map(|v| v["source"].as_str().unwrap_or_default().to_owned()).unwrap_or_default();
-            self.problem("system_trust", &src, "system_trust = false needs a ca_bundle to trust instead");
+        if get("system_trust").is_some_and(|v| v["value"] == json!(false))
+            && get("ca_bundle").is_none()
+        {
+            let src = get("system_trust")
+                .map(|v| v["source"].as_str().unwrap_or_default().to_owned())
+                .unwrap_or_default();
+            self.problem(
+                "system_trust",
+                &src,
+                "system_trust = false needs a ca_bundle to trust instead",
+            );
         }
         match (get("client_cert"), get("client_key")) {
             (Some(c), None) => {
@@ -1258,9 +1341,11 @@ fn no_proxy_entry(e: &str) -> bool {
     let host = host.trim_start_matches('[').trim_end_matches(']');
     !host.is_empty()
         && (host.parse::<std::net::IpAddr>().is_ok()
-            || host
-                .split('.')
-                .all(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')))
+            || host.split('.').all(|l| {
+                !l.is_empty()
+                    && l.bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            }))
 }
 
 /// Whether `program` can be run: a path to a file, or a name found on `PATH`.
@@ -1272,7 +1357,11 @@ pub(crate) fn program_found(program: &str, env: &BTreeMap<String, String>) -> bo
     let Some(path) = env.get("PATH") else {
         return false;
     };
-    let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
+    let exts: &[&str] = if cfg!(windows) {
+        &["", ".exe", ".cmd", ".bat"]
+    } else {
+        &[""]
+    };
     std::env::split_paths(path).any(|dir| {
         exts.iter()
             .any(|ext| dir.join(format!("{program}{ext}")).is_file())

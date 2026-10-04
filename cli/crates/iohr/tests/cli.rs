@@ -2142,18 +2142,30 @@ fn sdk_config_describes_what_a_client_would_see() {
             ("INORBIT_TOKEN", "TOKENSIGNATUREMARKER"),
             ("INORBIT_TIMEOUT", "5s"),
             ("IOHR_PROFILE", "ci"),
-            ("HTTPS_PROXY", "http://ana:pw-do-not-print@proxy.example:3128"),
+            (
+                "HTTPS_PROXY",
+                "http://ana:pw-do-not-print@proxy.example:3128",
+            ),
         ],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(!text(&o).contains("TOKENSIGNATUREMARKER") && !text(&o).contains("pw-do-not-print"));
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(v["profile"]["name"], "work", "IOHR_PROFILE is not read: {v}");
+    assert_eq!(
+        v["profile"]["name"], "work",
+        "IOHR_PROFILE is not read: {v}"
+    );
     assert_eq!(v["settings"]["timeout"]["value"], "5s");
     assert_eq!(v["settings"]["timeout"]["source"], "env INORBIT_TIMEOUT");
-    assert_eq!(v["settings"]["log"]["source"], format!("file {} [sdk]", file.display()));
+    assert_eq!(
+        v["settings"]["log"]["source"],
+        format!("file {} [sdk]", file.display())
+    );
     assert_eq!(v["settings"]["token"]["value"], "<redacted>");
-    assert_eq!(v["settings"]["proxy"]["value"], "http://<redacted>@proxy.example:3128");
+    assert_eq!(
+        v["settings"]["proxy"]["value"],
+        "http://<redacted>@proxy.example:3128"
+    );
     assert_eq!(v["credential"]["source"], "env");
     assert_eq!(v["pipeline"].as_array().unwrap().len(), 12);
     assert_eq!(v["ignored"][0]["key"], "colour");
@@ -2175,6 +2187,12 @@ fn sdk_config_describes_what_a_client_would_see() {
     assert_eq!(code(&o), 1, "{}", text(&o));
     assert!(o.stdout.is_empty());
     let err = String::from_utf8_lossy(&o.stderr);
-    assert!(err.contains("configuration is invalid (2 problems)"), "{err}");
-    assert!(err.contains("region") && err.contains("max_retries"), "{err}");
+    assert!(
+        err.contains("configuration is invalid (2 problems)"),
+        "{err}"
+    );
+    assert!(
+        err.contains("region") && err.contains("max_retries"),
+        "{err}"
+    );
 }

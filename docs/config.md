@@ -204,9 +204,16 @@ Every client and every `load` result can describe itself, the SDK's equivalent o
 - `ignored` lists what was read and not used: unknown file keys, settings a caller-supplied
   HTTP client makes meaningless (section 6.6), scopes a `cli` or token credential does not
   use.
-- The command line prints the same document with `iohr sdk config [--profile NAME]`
-  (a follow-up in `cli/`, through the Rust runtime), so "what will my service see" has a
-  one-line answer.
+- The command line prints the same document with `iohr sdk config [--profile NAME]
+  [--for TYPE]` (iohr 0.1.0-alpha.8 and later), so "what will my service see" has a
+  one-line answer. `--profile` stands for `profile` in code (source `code`), `--for`
+  resolves for a typed profile, and `IOHR_PROFILE` is not read. A configuration `load`
+  would refuse exits 1 with the `ConfigError`'s text on stderr. Until the Rust runtime
+  has `load`, the command line resolves with its own implementation, held to the
+  `config`, `config-path` and `durations` vectors; it then calls the runtime.
+- When no source has credentials, the `ConfigError` holds one problem with the setting
+  `credential` and an empty source, whose message is the chain's (section 5.1). When it
+  is the only problem, the error's text is that message alone.
 
 For tests, `load` accepts its environment and file system as inputs (section 9.2), so a
 test can resolve a configuration without touching the process environment.
