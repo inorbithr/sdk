@@ -44,6 +44,14 @@ type Operation struct {
 
 	// Idempotent retries the call like an idempotent method although its method is not.
 	Idempotent bool
+
+	// RPC is the RPC's full name (iohr.events.v1.EventsService/StreamEvents), which a
+	// stream over the socket calls; empty for the gateway's own routes.
+	RPC string
+
+	// Fields are the path and query parameters as the request message's fields, typed and
+	// in wire names, unset ones left out: the body of a socket call frame.
+	Fields map[string]any
 }
 
 func (op Operation) retrySafe() bool {
@@ -68,6 +76,8 @@ type config struct {
 	uaSuffix   string
 	hooks      []Hook
 	http       *http.Client
+	streams    Streams
+	streamIdle time.Duration
 }
 
 // Option configures a Client.
@@ -114,6 +124,16 @@ func WithHook(h Hook) Option { return func(c *config) { c.hooks = append(c.hooks
 // does not follow redirects whatever the client's policy.
 func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.http = h } }
 
+// WithStreams sets how streams open: StreamsSSE (the default), a server-sent events
+// request each, or StreamsSocket, every stream of the client over one /v1/ws socket.
+func WithStreams(s Streams) Option { return func(c *config) { c.streams = s } }
+
+// WithStreamIdleTimeout sets how long a stream may be silent, not even a keep-alive,
+// before it fails with a TimeoutError or, on the socket, reconnects (default 45 s).
+func WithStreamIdleTimeout(d time.Duration) Option {
+	return func(c *config) { c.streamIdle = d }
+}
+
 // Client is a client for one credential. It is safe for concurrent use and holds no
 // per-call state.
 type Client struct {
@@ -124,12 +144,18 @@ type Client struct {
 	userAgent  string
 	hooks      []Hook
 	http       *http.Client
+	streams    Streams
+	streamIdle time.Duration
+	socket     *socketMgr
 }
 
 // NewClient returns a client configured by opts. It needs a credential: WithToken,
 // WithKey with WithScopes, or WithTokenProvider.
 func NewClient(opts ...Option) (*Client, error) {
-	cfg := config{baseURL: DefaultBaseURL, tokenURL: DefaultTokenURL, timeout: 30 * time.Second, maxRetries: 2}
+	cfg := config{
+		baseURL: DefaultBaseURL, tokenURL: DefaultTokenURL, timeout: 30 * time.Second, maxRetries: 2,
+		streams: StreamsSSE, streamIdle: defaultStreamIdle,
+	}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -147,10 +173,18 @@ func NewClient(opts ...Option) (*Client, error) {
 		copied.CheckRedirect = noRedirects
 		hc = &copied
 	}
+	if cfg.streams != StreamsSSE && cfg.streams != StreamsSocket {
+		return nil, &ConfigError{Message: fmt.Sprintf("streams %q is not usable: sse or socket", cfg.streams)}
+	}
+	if cfg.streamIdle <= 0 {
+		return nil, &ConfigError{Message: "the stream idle timeout must be above zero"}
+	}
 	c := &Client{
 		base: base, timeout: cfg.timeout, maxRetries: max(cfg.maxRetries, 0),
 		userAgent: userAgent(cfg.uaSuffix), hooks: cfg.hooks, http: hc,
+		streams: cfg.streams, streamIdle: cfg.streamIdle,
 	}
+	c.socket = &socketMgr{c: c, calls: map[string]*sockCall{}}
 	switch {
 	case cfg.provider != nil:
 		c.provider = cfg.provider
