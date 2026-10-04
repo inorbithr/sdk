@@ -39,6 +39,7 @@ python/
     runtime.py            the runtime alone: what a generated surface imports
     codegen.py            the contract with iohr (VERSION, path_segment, check)
     _client.py            Client and AsyncClient, Operation, Response, the one request path
+    _stream.py            Stream/AsyncStream, the event-stream parser, the /v1/ws socket
     _auth.py, _errors.py, _retry.py, _hooks.py, _int64.py, _version.py
     _generated/           written by iohr; never edit
   tests/
@@ -47,7 +48,12 @@ python/
 
 ## Rules
 
-- Runtime dependencies: `httpx` and `pydantic` 2 only.
+- Runtime dependencies: `httpx`, `pydantic` 2 and `websockets` (the socket's client,
+  sync and asyncio; httpx has no WebSocket) only.
+- Streams (design.md section 7): `Client.stream(op, into)` hands back `Stream[T]`,
+  `AsyncClient.stream` an `AsyncStream[T]`; both open lazily. A socket has one reader
+  (a thread, or a task) feeding a bounded queue per stream; the connection closes after
+  the last stream. `codegen.VERSION` is 2 (stream methods); a surface for 1 still imports.
 - Public functions take keyword-only arguments after the path parameters, so fields can
   be added without breaking callers.
 - Errors: `InOrbitError` base with `.kind`; `ApiError` with `.code`, `.status`,

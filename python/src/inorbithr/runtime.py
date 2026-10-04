@@ -45,6 +45,7 @@ from inorbithr._errors import (
 )
 from inorbithr._hooks import Attempt, Hook
 from inorbithr._int64 import Int64
+from inorbithr._stream import AsyncStream, Stream, StreamTransport
 from inorbithr._timestamp import parse_timestamp
 from inorbithr._version import SDK_VERSION
 
@@ -61,6 +62,7 @@ __all__ = [
     "AsyncClient",
     "AsyncClientCredentials",
     "AsyncStaticToken",
+    "AsyncStream",
     "AsyncTokenProvider",
     "Attempt",
     "AuthError",
@@ -82,6 +84,8 @@ __all__ = [
     "Response",
     "RetryDetail",
     "StaticToken",
+    "Stream",
+    "StreamTransport",
     "Token",
     "TokenProvider",
     "TooLargeError",
