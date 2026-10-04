@@ -70,6 +70,9 @@ pub enum Command {
     Profile(ProfileCommand),
     /// Who the active profile is: subject, account, scopes, expiry.
     Whoami,
+    /// Credentials for other programs: a profile's current access token.
+    #[command(subcommand)]
+    Auth(AuthCommand),
     /// The accounts the credential can see.
     #[command(subcommand)]
     Accounts(AccountsCommand),
@@ -113,6 +116,34 @@ pub enum Command {
     /// An installed extension, such as `iohr agent ...`.
     #[command(external_subcommand)]
     External(Vec<OsString>),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuthCommand {
+    /// Print the profile's access token, refreshing a signed-in session first when less
+    /// than a minute of it is left.
+    ///
+    /// For programs that call the API with your login, such as the SDKs' `cli`
+    /// credential source (`docs/config.md` section 5.4). The refresh token never leaves
+    /// the credential store. Exit codes: 0 printed, 2 usage, 3 not signed in (no such
+    /// profile, no credential, an expired token or an ended session), 1 anything else,
+    /// such as the sign-in service being unreachable.
+    Token(AuthToken),
+}
+
+#[derive(Debug, Args)]
+pub struct AuthToken {
+    /// `text`: the token alone on one line. `json`: one line with `access_token`,
+    /// `expires_at` (RFC 3339, or null when the token does not expire), `profile` (null
+    /// for `IOHR_TOKEN`) and `account`. `--json` is the same as `--format json`.
+    #[arg(long, value_enum, default_value_t = TokenFormat::Text)]
+    pub format: TokenFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TokenFormat {
+    Text,
+    Json,
 }
 
 #[derive(Debug, Subcommand)]
