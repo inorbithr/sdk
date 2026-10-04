@@ -52,7 +52,8 @@ pub struct Examples {
     pub cuts: BTreeMap<String, String>,
     /// The languages, in the order the docs list them.
     pub languages: Vec<String>,
-    /// One entry per operation, by the document's `operationId`.
+    /// One entry per operation, by the document's `operationId`; an id two routes share
+    /// is followed by the route's line on each.
     pub operations: BTreeMap<String, OpExamples>,
     /// Why an operation has no example (an answer the surface does not render).
     pub notes: Vec<String>,
@@ -139,6 +140,12 @@ pub fn render(api: &Api, langs: &[Language], generator: &str) -> Result<Examples
     let models = context::models(api);
     let ids: BTreeMap<String, &iohr_openapi::Operation> =
         api.operations.values().map(|o| (o.line(), o)).collect();
+    // An id the document gives two routes (an RPC with another binding) is keyed with
+    // its line, `LabsService.ListTimeline GET /v1/...`, on each of them.
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+    for op in api.operations.values() {
+        *seen.entry(op.operation_id.as_str()).or_default() += 1;
+    }
     let mut operations = BTreeMap::new();
     let handled = surface
         .handles
@@ -154,8 +161,13 @@ pub fn render(api: &Api, langs: &[Language], generator: &str) -> Result<Examples
             .iter()
             .map(|lang| (lang.as_str().to_owned(), snippet(*lang, &call)))
             .collect();
+        let key = if seen.get(source.operation_id.as_str()).copied().unwrap_or(0) > 1 {
+            format!("{} {}", source.operation_id, op.line)
+        } else {
+            source.operation_id.clone()
+        };
         operations.insert(
-            source.operation_id.clone(),
+            key,
             OpExamples {
                 line: op.line.clone(),
                 code,

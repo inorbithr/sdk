@@ -20,13 +20,13 @@ pub struct Construction {
 
 /// What the comment on each construction says.
 #[cfg(test)]
-const FROM_ENV: &str = "INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES";
+const FROM_ENV: &str = "INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET";
 
 /// TypeScript and JavaScript, on `@inorbithr/sdk`.
 pub const TYPESCRIPT: Construction = Construction {
     imports: &["Public"],
     lines: &[
-        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES.",
+        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "const api = Public.fromEnv();",
     ],
 };
@@ -35,7 +35,7 @@ pub const TYPESCRIPT: Construction = Construction {
 pub const PYTHON: Construction = Construction {
     imports: &["Public"],
     lines: &[
-        "# Reads INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES.",
+        "# Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "api = Public.from_env()",
     ],
 };
@@ -44,7 +44,7 @@ pub const PYTHON: Construction = Construction {
 pub const GO: Construction = Construction {
     imports: &["github.com/inorbithr/sdk/go/public"],
     lines: &[
-        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES.",
+        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "api, err := public.FromEnv()",
         "if err != nil {",
         "\treturn err",
@@ -56,7 +56,7 @@ pub const GO: Construction = Construction {
 pub const JAVA: Construction = Construction {
     imports: &["hr.inorbit.sdk.generated.Public"],
     lines: &[
-        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES.",
+        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "Public api = Public.fromEnv();",
     ],
 };
@@ -65,7 +65,7 @@ pub const JAVA: Construction = Construction {
 pub const CSHARP: Construction = Construction {
     imports: &["InOrbit.Sdk"],
     lines: &[
-        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES.",
+        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "using var api = Client.FromEnv();",
     ],
 };
@@ -74,7 +74,7 @@ pub const CSHARP: Construction = Construction {
 pub const RUST: Construction = Construction {
     imports: &["inorbithr::Client"],
     lines: &[
-        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES.",
+        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "let api: Client = Client::from_env()?;",
     ],
 };
