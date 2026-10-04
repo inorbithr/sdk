@@ -214,15 +214,21 @@ stream ends. A stream is one call:
   provider and issues again every call that had not ended: streams are reads, so a
   call is safe to repeat. Reconnects follow the retry budget and backoff of section 6;
   the caller sees one stream;
-- frames wait in a bounded queue per stream (64 items): a caller that reads slowly holds
-  back its own stream only; a frame from the client is at most 256 KiB.
+- frames wait in a bounded queue per stream (64 items). The socket has one reader, so a
+  stream whose queue is full pauses that reader: a caller that reads slowly holds back
+  every stream on its client's socket, never the server's other connections or memory
+  (open a second client for a stream read slowly). A frame from the client is at most
+  256 KiB.
 
 The frames are `spec/frames.json`, synced from the platform's `/frames.json`
 (ADR 0004), which also carries the socket's limits. The token is checked once, at the
 upgrade, and the platform does not cut a socket when that token expires, so the SDK does
 not reconnect for token expiry.
 
-**Where a language's WebSocket stops short.** The web platform's `WebSocket`
+**Where a language's WebSocket stops short.** Where the library answers pings itself
+(Python's `websockets`, .NET's `ClientWebSocket`, Go's), the socket's idle clock is the
+library's own ping with `stream_idle_timeout` as its timeout (on .NET 8 a dead socket is
+found by TCP). Hooks see the server-sent events requests, not the socket's upgrade. The web platform's `WebSocket`
 (TypeScript) hides pings, the status of a refused upgrade, and backpressure. There the
 socket has no idle clock (a dead socket is found by its close), a refused upgrade gets
 one fresh token and then the retry budget, and a stream whose caller falls 64 items
