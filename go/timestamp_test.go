@@ -25,8 +25,8 @@ func TestParseTimestampReadsEmptyAsNoValue(t *testing.T) {
 func TestPtrPointsAtACopy(t *testing.T) {
 	s := "x"
 	p := inorbit.Ptr(s)
-	s = "y"
-	if *p != "x" {
-		t.Fatalf("got %q", *p)
+	*p = "y"
+	if s != "x" || *p != "y" {
+		t.Fatalf("got %q and %q", s, *p)
 	}
 }
