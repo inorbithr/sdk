@@ -291,6 +291,13 @@ public sealed class Driver(ITestOutputHelper output)
                 Description = Opt("description"),
                 EventTypes = args.TryGetProperty("event_types", out var types) ? types.EnumerateArray().Select(x => x.GetString()!).ToArray() : null,
             })).Raw,
+            "events.update_endpoint" => (await client.Events().UpdateEndpointAsync(Arg("endpoint_id"), new UpdateEndpointRequest
+            {
+                Url = Opt("url"),
+                Description = Opt("description"),
+                Enabled = args.TryGetProperty("enabled", out var enabled) ? enabled.GetBoolean() : null,
+                EventTypes = args.TryGetProperty("event_types", out var updated) ? updated.EnumerateArray().Select(x => x.GetString()!).ToArray() : null,
+            })).Raw,
             "events.delete_endpoint" => (await client.Events().DeleteEndpointAsync(Arg("endpoint_id"))).Raw,
             _ => throw new InvalidOperationException($"the conformance schema names an op this driver does not know: {op}"),
         };

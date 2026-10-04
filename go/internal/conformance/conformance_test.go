@@ -206,6 +206,15 @@ func call(ctx context.Context, api *public.Client, op string, args map[string]an
 		}
 		r, err := api.Events().CreateEndpoint(ctx, body)
 		return rawOf(r, err)
+	case "events.update_endpoint":
+		var body models.UpdateEndpointRequest
+		b, _ := json.Marshal(args)
+		if err := json.Unmarshal(b, &body); err != nil {
+			return nil, err
+		}
+		body.EndpointID = nil // the path carries it
+		r, err := api.Events().UpdateEndpoint(ctx, str(args, "endpoint_id"), body)
+		return rawOf(r, err)
 	case "events.delete_endpoint":
 		r, err := api.Events().DeleteEndpoint(ctx, str(args, "endpoint_id"))
 		return rawOf(r, err)

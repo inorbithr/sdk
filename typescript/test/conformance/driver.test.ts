@@ -138,6 +138,16 @@ function call(api: Public, action: Case["action"]): Promise<RawResponse> {
           },
         )
         .then((r) => r.raw);
+    case "events.update_endpoint": {
+      const { endpoint_id: _id, ...body } = args as {
+        endpoint_id?: string;
+        url?: string;
+        description?: string;
+        enabled?: boolean;
+        event_types?: string[];
+      };
+      return api.events.updateEndpoint(arg("endpoint_id") ?? "", body).then((r) => r.raw);
+    }
     case "events.delete_endpoint":
       return api.events.deleteEndpoint(arg("endpoint_id") ?? "").then((r) => r.raw);
     default:
