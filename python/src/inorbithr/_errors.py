@@ -339,11 +339,11 @@ class ConfigError(InOrbitError):
 
 
 class TooLargeError(InOrbitError):
-    """The answer is larger than 16 MiB."""
+    """The answer is larger than 16 MiB, or a stream's event than 1 MiB."""
 
-    def __init__(self) -> None:
-        """An answer over the cap."""
-        super().__init__("too_large", "the answer is larger than 16 MiB; refusing to read it")
+    def __init__(self, what: str = "the answer is larger than 16 MiB") -> None:
+        """An answer, or an event, over the cap."""
+        super().__init__("too_large", f"{what}; refusing to read it")
 
 
 class DecodeError(InOrbitError):

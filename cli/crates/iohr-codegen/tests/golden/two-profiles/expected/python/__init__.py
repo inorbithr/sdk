@@ -63,7 +63,7 @@ from .profiles import (
 )
 
 # A surface generated for another runtime contract refuses to import.
-codegen.check(1)
+codegen.check(2)
 
 __all__ = [
     "Account",

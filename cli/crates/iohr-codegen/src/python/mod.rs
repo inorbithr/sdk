@@ -553,6 +553,21 @@ fn render_operations(surface: &context::Surface, runtime: &str) -> String {
         if op.idempotent_override {
             body.push_str("        idempotent=True,\n");
         }
+        if op.stream {
+            // A stream's call on the socket names its RPC and takes its path parameters
+            // as fields, unencoded (design.md section 7).
+            if !op.rpc.is_empty() {
+                let _ = writeln!(body, "        rpc={},", py_string(&op.rpc));
+            }
+            if !op.path_params.is_empty() {
+                let pairs: Vec<String> = op
+                    .path_params
+                    .iter()
+                    .map(|p| format!("({}, {})", py_string(&p.name), naming.field_name(&p.name)))
+                    .collect();
+                let _ = writeln!(body, "        params=({},),", pairs.join(", "));
+            }
+        }
         body.push_str("    )\n");
     }
     let mut out = String::from(
@@ -716,6 +731,9 @@ fn profile_class(
 }
 
 fn profile_method(op: &Op, models: &[Model], client: &str, form: Form, uses: &mut Uses) -> String {
+    if op.stream {
+        return stream_method(op, client, form, uses);
+    }
     let naming = PyNaming;
     let mut params = parameters(op, uses);
     if !params.contains(&"*".to_owned()) {
@@ -742,6 +760,33 @@ fn profile_method(op: &Op, models: &[Model], client: &str, form: Form, uses: &mu
         out.push_str(&iterator_method(op, &paging, &params, form, uses));
     }
     out
+}
+
+/// A streaming operation: a method that hands back the runtime's `Stream` (blocking) or
+/// `AsyncStream` (`asyncio`), which open on the first step of the iteration and yield the
+/// answer's model once per event (design.md section 7).
+fn stream_method(op: &Op, client: &str, form: Form, uses: &mut Uses) -> String {
+    let naming = PyNaming;
+    let params = parameters(op, uses);
+    let item = op.response.clone().unwrap_or_else(|| "object".into());
+    if let Some(r) = &op.response {
+        uses.models.insert(r.clone());
+    }
+    let stream = match form {
+        Form::Sync => "Stream",
+        Form::Async => "AsyncStream",
+    };
+    uses.runtime.insert(stream.into());
+    let mut signature = vec!["self".to_owned()];
+    signature.extend(params);
+    format!(
+        "\n    def {}({}) -> {stream}[{item}]:\n        \"\"\"{}\"\"\"\n        return {client}.stream(_ops.{}({}), {item})\n",
+        naming.method_name(&op.name),
+        signature.join(", "),
+        op_doc(op),
+        builder_name(op),
+        call_arguments(op).join(", ")
+    )
 }
 
 /// `all_<op>`: every item of a paged list, page after page: a generator in the blocking
@@ -829,7 +874,7 @@ fn render_init(surface: &context::Surface, models: &[Model], runtime: &str, root
         ],
     ));
     out.push_str(
-        "\n# A surface generated for another runtime contract refuses to import.\ncodegen.check(1)\n\n__all__ = [\n",
+        "\n# A surface generated for another runtime contract refuses to import.\ncodegen.check(2)\n\n__all__ = [\n",
     );
     let mut all: Vec<&String> = model_names.iter().chain(profile_names.iter()).collect();
     all.sort();

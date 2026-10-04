@@ -39,6 +39,21 @@ its cut holds; pyright and mypy refuse a call a profile may not make.
 - A paged list has an `all_<operation>` beside its page method that follows the next-page
   token: `for d in api.radar.all_list_digests(): ...`, or `async for` on the `asyncio`
   class; stopping the loop fetches nothing more.
-- Python 3.11 or newer; the only dependencies are `httpx` and `pydantic` 2.
+- A streaming operation hands back a `Stream` that opens on the first step of the loop
+  and yields one model per event; `AsyncStream` on the `asyncio` class. Leaving the
+  `with` (or `close()`) stops it:
+
+  ```python
+  with api.events.stream_events(types="key.created") as events:
+      for event in events:
+          print(event.type, event.id)
+  ```
+
+  Streams open over server-sent events, or with `Client(streams="socket")` every stream of
+  the client shares one `/v1/ws` connection, opened again when the server ends it. A
+  stream silent for `stream_idle_timeout` (45 s) ends with `ApiTimeoutError`; an `error`
+  event or frame is an `ApiError`; a revoked key ends the stream with `unauthenticated`.
+- Python 3.11 or newer; the dependencies are `httpx`, `pydantic` 2 and `websockets` (for
+  the socket).
 
 How the SDKs behave in every language: [docs/design.md](../docs/design.md).

@@ -7,8 +7,10 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "InOrbit d.o.o." }]
 requires-python = ">=3.11"
-# The runtime's only dependencies (python/AGENTS.md): an HTTP client and the models.
-dependencies = ["httpx>=0.28,<1", "pydantic>=2.10,<3"]
+# The runtime's only dependencies (python/AGENTS.md): an HTTP client, the models, and a
+# WebSocket client for streams over /v1/ws (httpx has none; websockets has sync and asyncio
+# clients and no dependencies of its own).
+dependencies = ["httpx>=0.28,<1", "pydantic>=2.10,<3", "websockets>=14,<17"]
 keywords = ["inorbit", "api", "sdk", "client"]
 classifiers = [
   "Development Status :: 3 - Alpha",
