@@ -11,8 +11,10 @@ from typing import ClassVar
 
 from inorbithr.runtime import (
     AsyncClient,
+    AsyncStream,
     Client,
     Response,
+    Stream,
     codegen,
 )
 
@@ -47,6 +49,7 @@ from .models import (
     RetryDeliveryResponse,
     RotateSecretResponse,
     SendTestResponse,
+    StreamEventsResponse,
     UnitCategory,
     UpdateEndpointRequest,
 )
@@ -156,6 +159,10 @@ class PublicEvents:
             DeleteInboxResponse,
             timeout=timeout,
         )
+
+    def stream_events(self, *, types: str | None = None, account_id: str | None = None) -> Stream[StreamEventsResponse]:
+        """`GET /v1/events/events`; needs scope `events:read`. Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend."""
+        return self._client.stream(_ops.stream_events(types=types, account_id=account_id), StreamEventsResponse)
 
     def list_event_types(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListEventTypesResponse]:
         """`GET /v1/events/types`; needs scope `events:read`. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend."""
@@ -453,6 +460,10 @@ class AsyncPublicEvents:
             DeleteInboxResponse,
             timeout=timeout,
         )
+
+    def stream_events(self, *, types: str | None = None, account_id: str | None = None) -> AsyncStream[StreamEventsResponse]:
+        """`GET /v1/events/events`; needs scope `events:read`. Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend."""
+        return self._client.stream(_ops.stream_events(types=types, account_id=account_id), StreamEventsResponse)
 
     async def list_event_types(self, *, page_size: int | None = None, page_token: str | None = None, timeout: float | None = None) -> Response[ListEventTypesResponse]:
         """`GET /v1/events/types`; needs scope `events:read`. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend."""
