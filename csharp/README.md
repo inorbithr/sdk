@@ -46,7 +46,17 @@ await ci.Accounts().GetUsageAsync("acc_1");   // compiles only if ci's cut holds
   `IAsyncEnumerable<T>` that follows the next-page token:
   `await foreach (var d in client.Radar().AllListDigestsAsync(cancellationToken: ct))`;
   breaking out fetches nothing more, and the token stops it between pages.
-- No dependency beyond the framework (`HttpClient`, `System.Text.Json`); `https` only,
+- A stream (`events:read`: the account's events) is an `IAsyncEnumerable<T>` of its
+  events, opened on the first step of the loop and closed by leaving it or by the token:
+  `await foreach (var ev in client.Events().StreamEventsAsync(cancellationToken: ct))`.
+  Server-sent events by default; `Streams = StreamTransport.Socket` puts every stream of
+  the client on one `/v1/ws` socket, which reconnects and issues its calls again when
+  the server ends it, and ends them with the error when the key was revoked. A stream
+  silent for `StreamIdleTimeout` (45 s) fails with a timeout; an `error` event or frame
+  is an `ApiException` with its code and status. On .NET 9 and later the socket's pings
+  close a dead connection after the idle timeout; on .NET 8 that is left to TCP.
+- No dependency beyond the framework (`HttpClient`, `System.Text.Json`,
+  `System.Net.WebSockets`); `https` only,
   plain `http` only to this machine.
 
 - API documentation: <https://docs.inorbit.hr>

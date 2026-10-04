@@ -390,6 +390,12 @@ public sealed class RequestTimeoutException : InOrbitException
         Host = host;
     }
 
+    internal RequestTimeoutException(string host, TimeSpan after, string what)
+        : base("timeout", string.Create(CultureInfo.InvariantCulture, $"{what} {after.TotalSeconds:0.###} s ({host})"))
+    {
+        Host = host;
+    }
+
     /// <summary>The host that did not answer.</summary>
     public string Host { get; }
 }
@@ -425,6 +431,11 @@ public sealed class TooLargeException : InOrbitException
 {
     internal TooLargeException()
         : base("too_large", "the answer is larger than 16 MiB; refusing to read it")
+    {
+    }
+
+    internal TooLargeException(string message)
+        : base("too_large", message)
     {
     }
 }
