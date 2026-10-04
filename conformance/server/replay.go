@@ -205,6 +205,9 @@ func (s *Server) replay(w http.ResponseWriter, r *http.Request) {
 			"this request does not match the case; GET /_result for the expected one"))
 		return
 	}
+	s.mu.Lock()
+	session := s.session
+	s.mu.Unlock()
 	switch {
 	case resp.Socket != nil:
 		s.respondSocket(w, r, resp)
@@ -213,8 +216,12 @@ func (s *Server) replay(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.respond(w, resp)
 	}
+	// A stream or a socket can outlive its case; only an answer of the case still
+	// loaded moves the clock its next request's delay is measured from.
 	s.mu.Lock()
-	s.last = s.now()
+	if s.session == session {
+		s.last = s.now()
+	}
 	s.mu.Unlock()
 }
 
