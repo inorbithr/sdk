@@ -251,13 +251,14 @@ class ConformanceTest {
                         types.add(type.asText());
                     }
                 }
+                Boolean enabled = args.has("enabled") ? args.path("enabled").asBoolean() : null;
                 yield api.events()
                         .updateEndpoint(
                                 args.path("endpoint_id").asText(),
                                 UpdateEndpointRequest.builder()
                                         .url(text(args, "url"))
                                         .description(text(args, "description"))
-                                        .enabled(args.has("enabled") ? args.path("enabled").asBoolean() : null)
+                                        .enabled(enabled)
                                         .eventTypes(types)
                                         .build())
                         .raw();
