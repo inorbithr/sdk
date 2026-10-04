@@ -1,6 +1,6 @@
 [project]
 name = "inorbithr"
-version = "0.2.0"
+version = "0.2.1"
 description = "The InOrbit API for Python: the runtime and the public surface, sync and async."
 readme = "README.md"
 license = "Apache-2.0"
