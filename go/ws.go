@@ -48,12 +48,20 @@ type wsConn struct {
 	cancel func()
 }
 
+// maxClientFrame is the largest frame the client sends (frames.json max_frame_bytes).
+const maxClientFrame = 256 << 10
+
 func newWSConn(rwc io.ReadWriteCloser, cancel func()) *wsConn {
 	return &wsConn{rwc: rwc, br: bufio.NewReaderSize(rwc, 32<<10), cancel: cancel}
 }
 
 // write sends one final, masked frame.
 func (w *wsConn) write(op byte, payload []byte) error {
+	// A client frame is at most 256 KiB (the platform's limit), which also keeps the
+	// frame's size far from overflowing.
+	if len(payload) > maxClientFrame {
+		return errors.New("a WebSocket frame over 256 KiB")
+	}
 	var mask [4]byte
 	_, _ = rand.Read(mask[:])
 	head := []byte{0x80 | op}
