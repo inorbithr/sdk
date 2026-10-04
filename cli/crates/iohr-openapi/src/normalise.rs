@@ -1,8 +1,10 @@
-//! The rules N1 to N6 of `spec/README.md`, as `tools/spec-sync.py` applies them, in
-//! Rust: short schema names, every field of a transcoded message required,
-//! discriminators on `type` or `kind`, the production server, and the error envelope
-//! as its own schema with the code-to-status table. The two implementations are kept
-//! equal by a test that compares them byte for byte on the same document.
+//! The rules of `spec/README.md`, as `tools/spec-sync.py` applies them, in Rust: short
+//! schema names (N1), and the error envelope as its own schema. The facts the platform
+//! states itself since core #218 (answers' `required` fields, `Detail`'s discriminator,
+//! the production server, `Code`'s `x-http-status`; the former rules N2, N3, N4, N6)
+//! are checked, never patched in: a document without them fails. The two
+//! implementations are kept equal by a test that compares them byte for byte on the
+//! same document.
 //!
 //! Unlike the sync tool, [`normalise`] keeps every operation a document holds: a
 //! credential's document already is the cut, plan routes included. The sync tool's
@@ -20,36 +22,15 @@ const DEFS: &str = "#/$defs/";
 pub const METHODS: [&str; 8] = [
     "get", "put", "post", "delete", "options", "head", "patch", "trace",
 ];
-const DISCRIMINATORS: [&str; 2] = ["type", "kind"];
-
-/// N6: the HTTP status of every error code, the platform's `Code::http` table.
-pub const HTTP_STATUS: [(&str, u16); 18] = [
-    ("bad_request", 400),
-    ("failed_precondition", 400),
-    ("unauthenticated", 401),
-    ("forbidden", 403),
-    ("not_found", 404),
-    ("method_not_allowed", 405),
-    ("already_exists", 409),
-    ("conflict", 409),
-    ("payload_too_large", 413),
-    ("unsupported_media_type", 415),
-    ("unprocessable", 422),
-    ("rate_limited", 429),
-    ("quota_exceeded", 429),
-    ("cancelled", 499),
-    ("internal", 500),
-    ("unimplemented", 501),
-    ("unavailable", 503),
-    ("timeout", 504),
-];
-
+/// The production server, which the public document names first (former N4).
+pub const SERVER_URL: &str = "https://api.inorbit.hr";
 /// A normalised document and the error envelope as a JSON Schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Normalised {
     /// The OpenAPI document, rules applied.
     pub openapi: Value,
-    /// `spec/problem.json`: the `Problem` envelope with `Code.x-http-status`.
+    /// `spec/problem.json`: the `Problem` envelope with `Code.x-http-status`, as the
+    /// document states it.
     pub problem: Value,
 }
 
@@ -199,74 +180,196 @@ fn short_names(names: &BTreeSet<String>) -> Result<BTreeMap<String, String>, Nor
     Ok(out)
 }
 
-/// N2: a transcoded message always carries every field, so every field is required.
-fn require_all(schema: &mut Value) {
-    if schema.get("type") == Some(&json!("object"))
-        && let Some(props) = schema.get("properties").and_then(Value::as_object)
-    {
-        let required: Vec<Value> = props.keys().map(|k| Value::String(k.clone())).collect();
-        schema["required"] = Value::Array(required);
-    }
+fn reached_from(
+    node: &Value,
+    schemas: &Map<String, Value>,
+) -> Result<BTreeSet<String>, NormaliseError> {
+    let mut roots = BTreeSet::new();
+    refs(node, &mut roots);
+    reachable(schemas, roots)
 }
 
-/// Whether every value of `schema` has `prop` set to one known string.
-fn fixes(schema: &Value, prop: &str) -> bool {
-    let spec = schema
-        .pointer(&format!("/properties/{prop}"))
-        .cloned()
-        .unwrap_or(Value::Null);
-    let single = spec.get("const").is_some()
-        || spec
-            .get("enum")
-            .and_then(Value::as_array)
-            .is_some_and(|e| e.len() == 1);
-    let required = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .is_some_and(|r| r.iter().any(|v| v == prop));
-    single && required
-}
-
-/// N3: give a `oneOf` whose variants each fix `type` (or `kind`) a discriminator.
-fn discriminate(node: &mut Value, schemas: &Map<String, Value>) {
-    match node {
-        Value::Object(m) => {
-            if let Some(Value::Array(variants)) = m.get("oneOf")
-                && !m.contains_key("discriminator")
-            {
-                let resolved: Vec<Value> = variants
-                    .iter()
-                    .map(|v| {
-                        match v
-                            .get("$ref")
-                            .and_then(Value::as_str)
-                            .and_then(|r| r.strip_prefix(SCHEMAS))
-                        {
-                            Some(name) => schemas.get(name).cloned().unwrap_or(Value::Null),
-                            None => v.clone(),
-                        }
-                    })
-                    .collect();
-                for prop in DISCRIMINATORS {
-                    if resolved.iter().all(|v| fixes(v, prop)) {
-                        m.insert("discriminator".into(), json!({ "propertyName": prop }));
-                        break;
-                    }
+/// The schemas only an answer reaches: no request body or parameter leads to them.
+fn response_only(
+    paths: &Map<String, Value>,
+    schemas: &Map<String, Value>,
+) -> Result<BTreeSet<String>, NormaliseError> {
+    let mut asked = Map::new();
+    let mut answered = Map::new();
+    for (path, item) in paths {
+        let Some(item) = item.as_object() else {
+            continue;
+        };
+        for (method, op) in item.iter().filter(|(m, _)| is_method(m)) {
+            let key = format!("{method} {path}");
+            for part in ["requestBody", "parameters"] {
+                if let Some(v) = op.get(part) {
+                    asked.insert(format!("{key} {part}"), v.clone());
                 }
             }
-            m.values_mut().for_each(|v| discriminate(v, schemas));
+            if let Some(v) = op.get("responses") {
+                answered.insert(key, v.clone());
+            }
         }
-        Value::Array(a) => a.iter_mut().for_each(|v| discriminate(v, schemas)),
-        _ => {}
+        if let Some(v) = item.get("parameters") {
+            asked.insert(format!("{path} parameters"), v.clone());
+        }
+    }
+    let asked = reached_from(&Value::Object(asked), schemas)?;
+    let answered = reached_from(&Value::Object(answered), schemas)?;
+    Ok(answered.difference(&asked).cloned().collect())
+}
+
+fn regressed(rule: &str, detail: impl Into<String>) -> NormaliseError {
+    NormaliseError::Regressed {
+        rule: rule.to_owned(),
+        detail: detail.into(),
     }
 }
 
-fn status_table() -> BTreeMap<&'static str, u16> {
-    HTTP_STATUS.into_iter().collect()
+/// Former N2, fixed upstream (core #218): a message only an answer carries lists its
+/// fields without presence as `required`; a request-side message marks nothing. A
+/// document whose answers mark nothing, or name a field they do not define, fails.
+fn check_required(
+    paths: &Map<String, Value>,
+    schemas: &Map<String, Value>,
+) -> Result<(), NormaliseError> {
+    let answers: Vec<String> = response_only(paths, schemas)?
+        .into_iter()
+        .filter(|n| {
+            n.contains('.')
+                && !n.starts_with("google.")
+                && schemas[n].get("type") == Some(&json!("object"))
+        })
+        .collect();
+    let props_of = |n: &str| {
+        schemas[n]
+            .get("properties")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let required_of = |n: &str| -> Vec<String> {
+        schemas[n]
+            .get("required")
+            .and_then(Value::as_array)
+            .map(|r| {
+                r.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for name in &answers {
+        let props = props_of(name);
+        let mut unknown: Vec<String> = required_of(name)
+            .into_iter()
+            .filter(|r| !props.contains_key(r))
+            .collect();
+        unknown.sort();
+        if !unknown.is_empty() {
+            return Err(regressed(
+                "N2",
+                format!(
+                    "{name} requires fields it does not define: {}",
+                    format!("{unknown:?}").replace('"', "'")
+                ),
+            ));
+        }
+    }
+    let with_scalars = answers
+        .iter()
+        .any(|n| props_of(n).values().any(|p| p.get("$ref").is_none()));
+    if with_scalars && !answers.iter().any(|n| !required_of(n).is_empty()) {
+        return Err(regressed(
+            "N2",
+            "no answer's message marks a field required; the platform states which fields are always sent since core #218, so the document regressed upstream",
+        ));
+    }
+    Ok(())
 }
 
-/// N6: each `Detail` variant becomes its own definition, named `<Type>Detail`, and
-/// `Detail` a `oneOf` over them with a discriminator on `type`.
+/// Former N4, fixed upstream (core #218): the document names its server by an absolute
+/// https URL ([`SERVER_URL`] in production), not `/`.
+fn check_server(raw: &Value) -> Result<(), NormaliseError> {
+    let url = raw.pointer("/servers/0/url").and_then(Value::as_str);
+    if url.is_some_and(|u| u.len() > "https://".len() && u.starts_with("https://")) {
+        return Ok(());
+    }
+    let shown = url.map_or_else(|| "None".to_owned(), |u| format!("'{u}'"));
+    Err(regressed(
+        "N4",
+        format!(
+            "servers[0].url is {shown}, not an absolute https URL such as {SERVER_URL}; the document regressed upstream (core #218)"
+        ),
+    ))
+}
+
+/// Former N3 and N6, fixed upstream (core #218): `Detail` names its discriminator and
+/// `Code` carries `x-http-status`, a status for every code and no other.
+fn check_envelope(schemas: &Map<String, Value>) -> Result<(), NormaliseError> {
+    for name in ["Problem", "Code", "Detail"] {
+        if !schemas.contains_key(name) {
+            return Err(NormaliseError::Problem(format!(
+                "the document has no {name} schema"
+            )));
+        }
+    }
+    if schemas["Detail"].pointer("/discriminator/propertyName") != Some(&json!("type")) {
+        return Err(regressed(
+            "N3",
+            "Detail has no discriminator on `type`; the document regressed upstream (core #218)",
+        ));
+    }
+    let codes: BTreeSet<&str> = schemas["Code"]
+        .get("enum")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let Some(table) = schemas["Code"]
+        .get("x-http-status")
+        .and_then(Value::as_object)
+    else {
+        return Err(NormaliseError::Problem(
+            "Code has no x-http-status; the document regressed upstream (core #218)".into(),
+        ));
+    };
+    let list = |v: Vec<&str>| {
+        if v.is_empty() {
+            "none".to_owned()
+        } else {
+            format!("{v:?}").replace('"', "'")
+        }
+    };
+    let missing: Vec<&str> = codes
+        .iter()
+        .copied()
+        .filter(|c| !table.contains_key(*c))
+        .collect();
+    let extra: Vec<&str> = table
+        .keys()
+        .map(String::as_str)
+        .filter(|c| !codes.contains(c))
+        .collect();
+    let bad: Vec<&str> = table
+        .iter()
+        .filter(|(_, s)| !s.as_u64().is_some_and(|s| (100..=599).contains(&s)))
+        .map(|(c, _)| c.as_str())
+        .collect();
+    if !missing.is_empty() || !extra.is_empty() || !bad.is_empty() {
+        return Err(NormaliseError::Problem(format!(
+            "Code's x-http-status does not match its codes (codes without a status: {}; statuses for no code: {}; not an HTTP status: {})",
+            list(missing),
+            list(extra),
+            list(bad)
+        )));
+    }
+    Ok(())
+}
+
+/// `problem.json`: each `Detail` variant becomes its own definition, named
+/// `<Type>Detail`, and `Detail` a `oneOf` over them with the document's discriminator.
 fn detail_defs(detail_schema: &Value, defs: &mut Map<String, Value>) -> Result<(), NormaliseError> {
     let mut variants = Vec::new();
     for variant in detail_schema
@@ -307,46 +410,19 @@ fn detail_defs(detail_schema: &Value, defs: &mut Map<String, Value>) -> Result<(
         })
         .unwrap_or_default();
     detail.insert("oneOf".into(), Value::Array(variants));
-    detail.insert("discriminator".into(), json!({ "propertyName": "type" }));
     defs.insert("Detail".into(), Value::Object(detail));
     Ok(())
 }
 
-/// N6: the error envelope as a JSON Schema, with the code-to-status table.
+/// The error envelope as a JSON Schema: `Problem`, with `Code` (and its
+/// `x-http-status`) and each `Detail` variant as its own definition.
 fn problem_schema(schemas: &Map<String, Value>) -> Result<Value, NormaliseError> {
-    for name in ["Problem", "Code", "Detail"] {
-        if !schemas.contains_key(name) {
-            return Err(NormaliseError::Problem(format!(
-                "the document has no {name} schema"
-            )));
-        }
-    }
-    let codes: Vec<String> = schemas["Code"]
-        .get("enum")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    let table = status_table();
-    // A code the table does not know yet gets no status here, and every runtime reads it
-    // as its unknown code: a new platform code must never break `iohr sdk generate`.
-    // `tools/spec-sync.py` stays strict, so the repository's own spec catches it.
     let names: BTreeMap<String, String> = [("Code", "Code"), ("Detail", "Detail")]
         .into_iter()
         .map(|(a, b)| (a.to_owned(), b.to_owned()))
         .collect();
     let mut defs = Map::new();
-    let mut code = schemas["Code"].clone();
-    let statuses: Map<String, Value> = codes
-        .iter()
-        .filter_map(|c| table.get(c.as_str()).map(|s| (c.clone(), json!(s))))
-        .collect();
-    code["x-http-status"] = Value::Object(statuses);
-    defs.insert("Code".into(), code);
+    defs.insert("Code".into(), schemas["Code"].clone());
 
     detail_defs(&schemas["Detail"], &mut defs)?;
 
@@ -370,13 +446,14 @@ fn problem_schema(schemas: &Map<String, Value>) -> Result<Value, NormaliseError>
     Ok(Value::Object(out))
 }
 
-/// Applies N1 to N6 to `raw`, keeping every operation it holds.
+/// Applies N1 to `raw` and checks the facts the platform states itself (the former N2,
+/// N3, N4, N6), keeping every operation it holds.
 ///
 /// # Errors
 ///
 /// [`NormaliseError`] when the document is not OpenAPI 3.1, has no operation, points at
-/// a schema it does not define, has a name clash N1 cannot settle, or an error envelope
-/// that does not match the status table.
+/// a schema it does not define, has a name clash N1 cannot settle, or lacks one of the
+/// facts the platform states since core #218.
 pub fn normalise(raw: &Value) -> Result<Normalised, NormaliseError> {
     let version = raw
         .get("openapi")
@@ -402,28 +479,19 @@ pub fn normalise(raw: &Value) -> Result<Normalised, NormaliseError> {
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let mut roots = BTreeSet::new();
-    refs(&Value::Object(paths.clone()), &mut roots);
-    let kept = reachable(&all_schemas, roots)?;
+    let kept = reached_from(&Value::Object(paths.clone()), &all_schemas)?;
+    check_server(raw)?;
+    check_required(&paths, &all_schemas)?;
     let names = short_names(&kept)?;
 
     let mut schemas = Map::new();
     for original in &kept {
-        let mut schema = all_schemas[original].clone();
-        if original.contains('.') {
-            require_all(&mut schema);
-        }
         schemas.insert(
             names[original].clone(),
-            rewrite_refs(&schema, &names, SCHEMAS),
+            rewrite_refs(&all_schemas[original], &names, SCHEMAS),
         );
     }
-    let snapshot = schemas.clone();
-    let mut schemas_value = Value::Object(schemas);
-    discriminate(&mut schemas_value, &snapshot);
-    let Value::Object(schemas) = schemas_value else {
-        unreachable!("an object stays an object");
-    };
+    check_envelope(&schemas)?;
 
     let mut components = Map::new();
     components.insert("schemas".into(), Value::Object(schemas.clone()));
@@ -438,7 +506,7 @@ pub fn normalise(raw: &Value) -> Result<Normalised, NormaliseError> {
     );
     out.insert(
         "servers".into(),
-        json!([{ "url": "https://api.inorbit.hr", "description": "The InOrbit API" }]),
+        raw.get("servers").cloned().unwrap_or(Value::Null),
     );
     out.insert(
         "paths".into(),
@@ -496,20 +564,23 @@ mod tests {
         json!({
             "openapi": "3.1.0",
             "info": { "title": "t", "version": "1" },
+            "servers": [ { "url": "https://api.inorbit.hr", "description": "The API" } ],
             "paths": {
                 "/v1/me": { "get": { "operationId": "me", "x-iohr-public": true,
                     "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } } },
                                    "default": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } } } } },
-                "/v1/plan-only": { "get": { "operationId": "PlanService.Thing",
+                "/v1/plan-only": { "post": { "operationId": "PlanService.Thing",
+                    "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/iohr.plan.v1.ThingRequest" } } } },
                     "responses": { "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/iohr.plan.v1.Thing" } } } },
                                    "default": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } } } } }
             },
             "components": { "schemas": {
                 "Me": { "type": "object", "properties": { "subject": { "type": "string" } } },
-                "iohr.plan.v1.Thing": { "type": "object", "properties": { "b": { "type": "string" }, "a": { "type": "string" } } },
+                "iohr.plan.v1.ThingRequest": { "type": "object", "properties": { "a": { "type": "string" } } },
+                "iohr.plan.v1.Thing": { "type": "object", "required": ["b", "a"], "properties": { "b": { "type": "string" }, "a": { "type": "string" } } },
                 "Problem": { "type": "object", "properties": { "code": { "$ref": "#/components/schemas/Code" }, "details": { "type": "array", "items": { "$ref": "#/components/schemas/Detail" } } } },
-                "Code": { "type": "string", "enum": ["bad_request","failed_precondition","unauthenticated","forbidden","not_found","method_not_allowed","already_exists","conflict","payload_too_large","unsupported_media_type","rate_limited","quota_exceeded","cancelled","internal","unimplemented","unavailable","timeout"] },
-                "Detail": { "oneOf": [ { "type": "object", "required": ["type"], "properties": { "type": { "const": "retry" }, "after_seconds": { "type": "integer" } } } ] }
+                "Code": { "type": "string", "enum": ["not_found", "timeout"], "x-http-status": { "not_found": 404, "timeout": 504 } },
+                "Detail": { "discriminator": { "propertyName": "type" }, "oneOf": [ { "type": "object", "required": ["type"], "properties": { "type": { "const": "retry" }, "after_seconds": { "type": "integer" } } } ] }
             } }
         })
     }
@@ -520,16 +591,13 @@ mod tests {
         let all = normalise(&doc).unwrap();
         let paths = all.openapi["paths"].as_object().unwrap();
         assert!(paths.contains_key("/v1/plan-only") && paths.contains_key("/v1/me"));
-        // N2 on the proto schema only, N3 on the envelope, N6 with the table.
-        assert_eq!(
-            all.openapi["components"]["schemas"]["Thing"]["required"],
-            json!(["a", "b"])
-        );
-        assert!(
-            all.openapi["components"]["schemas"]["Me"]
-                .get("required")
-                .is_none()
-        );
+        // The document's own `required`, discriminator, status table and server pass
+        // through untouched; nothing is added to a request.
+        let schemas = &all.openapi["components"]["schemas"];
+        assert_eq!(schemas["Thing"]["required"], json!(["b", "a"]));
+        assert!(schemas["ThingRequest"].get("required").is_none());
+        assert!(schemas["Me"].get("required").is_none());
+        assert_eq!(all.openapi["servers"], doc["servers"]);
         assert_eq!(
             all.problem["$defs"]["Detail"]["discriminator"]["propertyName"],
             "type"
@@ -556,24 +624,58 @@ mod tests {
     }
 
     #[test]
-    fn n6_keeps_a_code_the_table_does_not_know_without_a_status() {
-        // A new platform code must not break `iohr sdk generate`: it stays in the enum,
-        // with no status, and the runtimes read it as their unknown code.
-        let mut doc = minimal();
-        doc["components"]["schemas"]["Code"]["enum"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!("brand_new"));
-        let out = normalise(&doc).unwrap();
-        let code = &out.problem["$defs"]["Code"];
-        assert!(
-            code["enum"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("brand_new"))
+    fn a_fact_missing_upstream_fails_instead_of_being_patched_in() {
+        let fails = |edit: &dyn Fn(&mut serde_json::Value), rule: &str| {
+            let mut doc = minimal();
+            edit(&mut doc);
+            let err = normalise(&doc).unwrap_err().to_string();
+            assert!(err.starts_with(&format!("{rule}:")), "{rule}: {err}");
+        };
+        fails(
+            &|d| {
+                d["components"]["schemas"]["iohr.plan.v1.Thing"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("required");
+            },
+            "N2",
         );
-        assert!(code["x-http-status"].get("brand_new").is_none());
-        assert_eq!(code["x-http-status"]["not_found"], json!(404));
+        fails(
+            &|d| d["components"]["schemas"]["iohr.plan.v1.Thing"]["required"] = json!(["c"]),
+            "N2",
+        );
+        fails(
+            &|d| {
+                d["components"]["schemas"]["Detail"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("discriminator");
+            },
+            "N3",
+        );
+        fails(&|d| d["servers"] = json!([{ "url": "/" }]), "N4");
+        fails(
+            &|d| {
+                d["components"]["schemas"]["Code"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("x-http-status");
+            },
+            "N6",
+        );
+        fails(
+            &|d| {
+                d["components"]["schemas"]["Code"]["enum"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!("brand_new"));
+            },
+            "N6",
+        );
+        fails(
+            &|d| d["components"]["schemas"]["Code"]["x-http-status"]["timeout"] = json!("504"),
+            "N6",
+        );
         let mut doc = minimal();
         doc["openapi"] = json!("3.0.3");
         assert!(matches!(

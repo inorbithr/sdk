@@ -1,7 +1,8 @@
 //! The platform's OpenAPI document, as `iohr sdk generate` reads it.
 //!
-//! Three steps, each a module: [`normalise`] applies the repository's rules N1 to N6
-//! (`spec/README.md`) so a generator never sees the platform's quirks; [`hash`]
+//! Three steps, each a module: [`normalise`] applies the repository's rule N1 and
+//! checks the facts the platform states itself (`spec/README.md`), so a generator
+//! never sees a quirk and a regression upstream fails instead of being patched; [`hash`]
 //! computes the cut hash the gateway stamps in `info.x-iohr-cut`, for a document that
 //! has none; [`model`] turns one or several normalised documents into an [`Api`]: the
 //! operations, which profiles may call each, and the schemas they use.

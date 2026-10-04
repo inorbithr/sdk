@@ -8,7 +8,8 @@ Run through `mise run spec:sync` (or `uv run --script tools/spec-sync.py [SOURCE
 SOURCE is a URL or a local file; the default is the API's public document.
 
 Steps (spec/README.md): keep the operations marked `x-iohr-public`, keep the schemas
-they reach, apply the normalisation rules N1 to N6, write spec/openapi.json,
+they reach, apply rule N1 (N5 is settled behaviour, not a rewrite), check the facts the platform
+states itself since core #218 (the former rules N2, N3, N4, N6), write spec/openapi.json,
 spec/problem.json and spec/SOURCE. The output is deterministic: the same document
 always produces the same files, and SOURCE keeps its date while the document's hash is
 unchanged.
@@ -37,41 +38,12 @@ ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "spec"
 DEFAULT_SOURCE = "https://api.inorbit.hr/openapi.json"
 DEFAULT_LAB = "https://docs.inorbit.hr/lab"
-SERVER = {"url": "https://api.inorbit.hr", "description": "The InOrbit API"}
+SERVER_URL = "https://api.inorbit.hr"
 SCHEMAS = "#/components/schemas/"
 METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 TIMEOUT_SECONDS = 30
 MAX_BYTES = 8 * 1024 * 1024
 USER_AGENT = "inorbithr-sdk-spec-sync (+https://github.com/inorbithr/sdk)"
-
-# N6: the HTTP status of every error code. The platform keeps this table in code
-# (crates/protocol/src/error.rs, `Code::http`) and in prose (docs.inorbit.hr/docs/errors),
-# not in the document. A code missing here, or one here that the document no longer
-# has, fails the sync, so the table cannot drift silently.
-HTTP_STATUS = {
-    "bad_request": 400,
-    "failed_precondition": 400,
-    "unauthenticated": 401,
-    "forbidden": 403,
-    "not_found": 404,
-    "method_not_allowed": 405,
-    "already_exists": 409,
-    "conflict": 409,
-    "payload_too_large": 413,
-    "unsupported_media_type": 415,
-    "unprocessable": 422,
-    "rate_limited": 429,
-    "quota_exceeded": 429,
-    "cancelled": 499,
-    "internal": 500,
-    "unimplemented": 501,
-    "unavailable": 503,
-    "timeout": 504,
-}
-
-# N3: the properties a union's variants are told apart by.
-DISCRIMINATORS = ("type", "kind")
-
 
 class SyncError(Exception):
     """The document cannot be turned into spec/; the message says why."""
@@ -181,59 +153,97 @@ def short_names(names: set[str]) -> dict[str, str]:
     return out
 
 
-def require_all(schema: dict[str, Any]) -> None:
-    """N2: a transcoded message always carries every field, so every field is required."""
-    if schema.get("type") == "object" and isinstance(schema.get("properties"), dict):
-        schema["required"] = sorted(schema["properties"])
+def response_only(paths: dict[str, Any], schemas: dict[str, Any]) -> set[str]:
+    """The schemas only an answer reaches: no request body or parameter leads to them."""
+    asked: set[str] = set()
+    answered: set[str] = set()
+    for item in paths.values():
+        for method, op in item.items():
+            if method not in METHODS:
+                continue
+            asked |= refs(op.get("requestBody", {})) | refs(op.get("parameters", []))
+            answered |= refs(op.get("responses", {}))
+        asked |= refs(item.get("parameters", []))
+    return reachable(schemas, answered) - reachable(schemas, asked)
 
 
-def discriminate(node: Any, schemas: dict[str, Any]) -> None:
-    """N3: give a `oneOf` whose variants each fix `type` (or `kind`) a discriminator."""
-    if isinstance(node, dict):
-        variants = node.get("oneOf")
-        if isinstance(variants, list) and "discriminator" not in node:
-            resolved = [
-                schemas.get(v["$ref"].removeprefix(SCHEMAS), {}) if "$ref" in v else v
-                for v in variants
-            ]
-            for prop in DISCRIMINATORS:
-                if all(fixes(v, prop) for v in resolved):
-                    node["discriminator"] = {"propertyName": prop}
-                    break
-        for value in node.values():
-            discriminate(value, schemas)
-    elif isinstance(node, list):
-        for value in node:
-            discriminate(value, schemas)
+def check_required(paths: dict[str, Any], schemas: dict[str, Any]) -> None:
+    """Former N2, fixed upstream (core #218): a message only an answer carries lists its
+    fields without presence as `required`; a request-side message marks nothing.
+
+    The sync fails when an answer's message has fields the platform always sends but
+    the document marks none (`required` gone from every answer), or names a field the
+    schema does not have, so a regression is caught here instead of patched over.
+    """
+    answers = [
+        n for n in sorted(response_only(paths, schemas))
+        if "." in n and not n.startswith("google.") and schemas[n].get("type") == "object"
+    ]
+    for name in answers:
+        listed = schemas[name].get("required", [])
+        unknown = sorted(set(listed) - set(schemas[name].get("properties", {})))
+        if unknown:
+            raise SyncError(f"N2: {name} requires fields it does not define: {unknown}")
+    with_scalars = [
+        n for n in answers
+        if any("$ref" not in p for p in schemas[n].get("properties", {}).values())
+    ]
+    if with_scalars and not any(schemas[n].get("required") for n in answers):
+        raise SyncError(
+            "N2: no answer's message marks a field required; the platform states which "
+            "fields are always sent since core #218, so the document regressed upstream"
+        )
 
 
-def fixes(schema: dict[str, Any], prop: str) -> bool:
-    """Whether every value of `schema` has `prop` set to one known string."""
-    spec = schema.get("properties", {}).get(prop, {})
-    single = "const" in spec or len(spec.get("enum", [])) == 1
-    return single and prop in schema.get("required", [])
+def check_server(doc: dict[str, Any]) -> None:
+    """Former N4, fixed upstream (core #218): the document names its server by an absolute
+    https URL (`https://api.inorbit.hr` in production), not `/`."""
+    servers = doc.get("servers") or [{}]
+    url = servers[0].get("url")
+    if not isinstance(url, str) or not url.startswith("https://") or len(url) <= len("https://"):
+        raise SyncError(
+            f"N4: servers[0].url is {url!r}, not an absolute https URL such as {SERVER_URL}; "
+            "the document regressed upstream (core #218)"
+        )
 
 
-def problem_schema(schemas: dict[str, Any]) -> dict[str, Any]:
-    """N6: the error envelope as a JSON Schema, with the code-to-status table."""
+def check_envelope(schemas: dict[str, Any]) -> None:
+    """Former N3 and N6, fixed upstream (core #218): `Detail` names its discriminator and
+    `Code` carries `x-http-status`, a status for every code and no other."""
     for name in ("Problem", "Code", "Detail"):
         if name not in schemas:
             raise SyncError(f"N6: the document has no {name} schema")
-    codes = schemas["Code"].get("enum", [])
-    missing = sorted(set(codes) - HTTP_STATUS.keys())
-    gone = sorted(HTTP_STATUS.keys() - set(codes))
-    if missing or gone:
+    if schemas["Detail"].get("discriminator", {}).get("propertyName") != "type":
         raise SyncError(
-            "N6: the status table no longer matches the codes "
-            f"(new codes without a status: {missing or 'none'}; table codes the document "
-            f"dropped: {gone or 'none'}); update HTTP_STATUS from the platform's Code::http"
+            "N3: Detail has no discriminator on `type`; the document regressed upstream "
+            "(core #218)"
+        )
+    codes = schemas["Code"].get("enum", [])
+    table = schemas["Code"].get("x-http-status")
+    if not isinstance(table, dict):
+        raise SyncError(
+            "N6: Code has no x-http-status; the document regressed upstream (core #218)"
+        )
+    missing = sorted(set(codes) - table.keys())
+    extra = sorted(table.keys() - set(codes))
+    bad = sorted(
+        c for c, s in table.items()
+        if isinstance(s, bool) or not isinstance(s, int) or not 100 <= s <= 599
+    )
+    if missing or extra or bad:
+        raise SyncError(
+            "N6: Code's x-http-status does not match its codes "
+            f"(codes without a status: {missing or 'none'}; statuses for no code: "
+            f"{extra or 'none'}; not an HTTP status: {bad or 'none'})"
         )
 
+
+def problem_schema(schemas: dict[str, Any]) -> dict[str, Any]:
+    """The error envelope as a JSON Schema: `Problem`, with `Code` (and its
+    `x-http-status`) and each `Detail` variant as its own definition."""
     defs: dict[str, Any] = {}
     names = {"Code": "Code", "Detail": "Detail"}
-    code = copy.deepcopy(schemas["Code"])
-    code["x-http-status"] = {c: HTTP_STATUS[c] for c in codes}
-    defs["Code"] = code
+    defs["Code"] = copy.deepcopy(schemas["Code"])
 
     variants = []
     for variant in schemas["Detail"].get("oneOf", []):
@@ -246,7 +256,6 @@ def problem_schema(schemas: dict[str, Any]) -> dict[str, Any]:
         variants.append({"$ref": f"#/$defs/{name}"})
     detail = {k: v for k, v in schemas["Detail"].items() if k != "oneOf"}
     detail["oneOf"] = variants
-    detail["discriminator"] = {"propertyName": "type"}
     defs["Detail"] = detail
 
     problem = rewrite_refs(copy.deepcopy(schemas["Problem"]), names, "#/$defs/")
@@ -263,20 +272,19 @@ def normalise(doc: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     paths = public_paths(doc)
     all_schemas = doc.get("components", {}).get("schemas", {})
     kept = reachable(all_schemas, refs(paths))
+    check_server(doc)
+    check_required(paths, all_schemas)
     names = short_names(kept)
 
     schemas: dict[str, Any] = {}
     for original in sorted(kept):
-        schema = copy.deepcopy(all_schemas[original])
-        if "." in original:
-            require_all(schema)
-        schemas[names[original]] = rewrite_refs(schema, names)
-    discriminate(schemas, schemas)
+        schemas[names[original]] = rewrite_refs(copy.deepcopy(all_schemas[original]), names)
+    check_envelope(schemas)
 
     out = {
         "openapi": doc["openapi"],
         "info": doc["info"],
-        "servers": [SERVER],
+        "servers": doc["servers"],
         "paths": rewrite_refs(paths, names),
         "components": {"schemas": schemas},
     }
