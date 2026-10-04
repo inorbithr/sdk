@@ -5,7 +5,7 @@ members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/ioh
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
