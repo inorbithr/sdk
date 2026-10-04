@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.6](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.5...iohr/v0.1.0-alpha.6) (2026-10-04)
+
+
+### Features
+
+* **cli:** iohr api --all walks every page of a list into one answer ([#95](https://github.com/inorbithr/sdk/issues/95)) ([ea86b94](https://github.com/inorbithr/sdk/commit/ea86b94fc45b30f2833c1ad850efb28e20759a20))
+
 ## [0.1.0-alpha.5](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.4...iohr/v0.1.0-alpha.5) (2026-10-04)
 
 
