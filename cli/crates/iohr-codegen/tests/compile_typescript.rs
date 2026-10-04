@@ -72,10 +72,19 @@ export async function create(ci: AcmeCi, body: CreateEndpointRequest): Promise<v
   void value.secret;
 }
 
+/** A stream: the events, typed, in a for-await loop. */
+export async function stream(ci: AcmeCi, signal: AbortSignal): Promise<void> {
+  for await (const event of ci.events.streamEvents({ types: "key.created" }, { signal })) {
+    void event.type;
+  }
+}
+
 /** The personal cut has no usage:read: the call must be a type error. */
 export async function wrong(personal: Personal): Promise<void> {
   // @ts-expect-error the personal profile may not call getUsage
   await personal.accounts.getUsage("acc_1");
+  // @ts-expect-error the personal profile holds no events:read, so no stream
+  personal.events.streamEvents();
 }
 "#,
     )
