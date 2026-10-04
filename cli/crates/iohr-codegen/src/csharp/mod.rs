@@ -754,6 +754,7 @@ fn parameters(op: &Op, receiver: &str, receiver_type: &str) -> (Vec<String>, Vec
 
 /// One operation as an extension method over the runtime's request path; a stream as an
 /// `IAsyncEnumerable` of its events (design.md section 7).
+#[allow(clippy::too_many_lines)] // one operation's rendering, unary and stream, read top to bottom
 fn operation(op: &Op, receiver: &str, receiver_type: &str, client: &str, ctx: &Ctx) -> String {
     let rt = &ctx.runtime;
     let naming = CsNaming;

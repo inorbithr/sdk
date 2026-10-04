@@ -515,6 +515,7 @@ impl Gen {
     }
 
     /// One operation's static method and its async twin.
+    #[allow(clippy::too_many_lines)] // one operation's rendering, unary and stream, read top to bottom
     fn operation(&self, op: &Op, imports: &mut Imports) -> String {
         let naming = JavaNaming;
         let client = self.rt("Client", imports);
