@@ -1431,6 +1431,7 @@ dependencies = [
  "time",
  "tokio",
  "toml",
+ "toml_edit",
  "url",
  "windows-native-keyring-store",
  "wiremock",
@@ -3088,6 +3089,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
