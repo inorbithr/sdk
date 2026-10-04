@@ -31,6 +31,9 @@ without the check.
 - 64-bit integers are `bigint`; errors are classes under `InOrbitError` with a stable
   `kind` and, for API errors, `code` and `status`.
 - Every call takes `{ signal, timeout }` (milliseconds) last.
+- Every request field is optional and left out when unset; an answer's field is
+  optional (`?`) unless the API always sends it. Timestamps stay the strings the API
+  sent; `parseTimestamp` reads one, `""` (unset) as `undefined`.
 - A paged list has an `all<Operation>` beside its page method, an async generator that
   follows the next-page token: `for await (const d of api.radar.allListDigests()) {}`;
   breaking out fetches nothing more, and `signal` stops it between pages.

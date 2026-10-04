@@ -39,6 +39,9 @@ await ci.Accounts().GetUsageAsync("acc_1");   // compiles only if ci's cut holds
 - Errors: `InOrbitException` and its kinds; `ApiException` carries the `Code` (unknown
   codes kept as the API wrote them), the HTTP status, typed details and the raw answer.
 - 64-bit integers are `long`, sent and read as decimal strings.
+- Every request property is nullable and left out when unset; an answer's property is
+  nullable unless the API always sends it. Timestamps stay the strings the API sent;
+  `Timestamps.Parse` reads one, `""` (unset) as `null`.
 - A paged list has an `All<Operation>Async` beside its page method, an
   `IAsyncEnumerable<T>` that follows the next-page token:
   `await foreach (var d in client.Radar().AllListDigestsAsync(cancellationToken: ct))`;

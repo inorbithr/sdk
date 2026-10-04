@@ -45,6 +45,7 @@ from inorbithr._errors import (
 )
 from inorbithr._hooks import Attempt, Hook
 from inorbithr._int64 import Int64
+from inorbithr._timestamp import parse_timestamp
 from inorbithr._version import SDK_VERSION
 
 __all__ = [
@@ -86,4 +87,5 @@ __all__ = [
     "TooLargeError",
     "UnknownDetail",
     "codegen",
+    "parse_timestamp",
 ]

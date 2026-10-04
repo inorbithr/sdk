@@ -45,6 +45,11 @@ if errors.As(err, &apiErr) && apiErr.Code == inorbit.CodeForbidden {
   }
   ```
 
+- Every request field is optional and left out when unset, so a scalar is a pointer:
+  `models.CreateEndpointRequest{URL: inorbit.Ptr("https://example.com/hook")}`. An
+  answer's field is a pointer unless the API always sends it. Timestamps stay the
+  strings the API sent; `inorbit.ParseTimestamp` reads one, `""` (unset) as the zero
+  `time.Time`.
 - Logging is off by default. `inorbit.WithHook(inorbit.SlogHook(logger))` logs each
   answer at Debug and a failed call at Warn through `log/slog`: operation, method,
   status, attempt, duration and request ids, never a bound path, query value, header,

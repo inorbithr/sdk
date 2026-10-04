@@ -121,7 +121,12 @@ function call(api: Public, action: Case["action"]): Promise<RawResponse> {
     case "events.create_endpoint":
       return api.events
         .createEndpoint(
-          args as { account_id: string; url: string; description: string; event_types: string[] },
+          args as {
+            account_id?: string;
+            url?: string;
+            description?: string;
+            event_types?: string[];
+          },
         )
         .then((r) => r.raw);
     case "events.delete_endpoint":

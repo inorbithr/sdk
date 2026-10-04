@@ -188,8 +188,13 @@ class ConformanceTest {
             case "radar.get_digest" ->
                 api.radar().getDigest(args.path("id").asText()).raw();
             case "events.create_endpoint" -> {
-                List<String> types = new ArrayList<>();
-                args.path("event_types").forEach(t -> types.add(t.asText()));
+                List<String> types = null;
+                if (args.has("event_types")) {
+                    types = new ArrayList<>();
+                    for (JsonNode type : args.path("event_types")) {
+                        types.add(type.asText());
+                    }
+                }
                 yield api.events()
                         .createEndpoint(CreateEndpointRequest.builder()
                                 .accountId(text(args, "account_id"))

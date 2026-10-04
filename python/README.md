@@ -33,6 +33,9 @@ its cut holds; pyright and mypy refuse a call a profile may not make.
   at most twice, honouring `Retry-After`; writes are not.
 - 64-bit integers are `int`, sent as decimal strings; a message field the API left out is
   `None`; fields this version does not know are kept.
+- Every request field is optional (`None` by default) and left out when unset; an
+  answer's field is optional unless the API always sends it. Timestamps stay the strings
+  the API sent; `parse_timestamp` reads one, `""` (unset) as `None`.
 - A paged list has an `all_<operation>` beside its page method that follows the next-page
   token: `for d in api.radar.all_list_digests(): ...`, or `async for` on the `asyncio`
   class; stopping the loop fetches nothing more.

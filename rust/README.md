@@ -86,6 +86,11 @@ while let Some(digest) = digests.next().await {
 
 Stopping early fetches nothing more; `.collect().await` gathers every item.
 
+Every request field is optional and left out of the body when unset, so a request is
+built from its default (`CreateEndpointRequest { url: Some(url.into()), ..Default::default() }`);
+an answer's field is an `Option` unless the API always sends it. Timestamps stay the
+strings the API sent; `inorbithr::parse_timestamp` reads one, `""` (unset) as `None`.
+
 A surface for your own credentials, with exactly the operations they may call and a
 compile-time refusal of the rest, comes from `iohr sdk generate` ([docs/design.md
 section 12](../docs/design.md#12-runtime-and-surface)).

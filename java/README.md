@@ -49,6 +49,10 @@ A paged list has an `all<Operation>` beside its page method: a lazy `Pages<T>`, 
 `Iterable` with `stream()`, that follows the next-page token and fetches nothing more once
 the loop stops (`for (Digest d : api.radar().allListDigests()) { ... }`).
 
+Every request field is optional (unset in the builder, left out of the body); an answer's
+field is `null` when the API may leave it out. Timestamps stay the strings the API sent;
+`Timestamps.parse` reads one, `""` (unset) as an empty `Optional`.
+
 ## Errors
 
 Every failure is an unchecked `InOrbitException`: `ApiException` (with `code()`,

@@ -225,4 +225,14 @@ class RuntimeTest {
         Pages<Integer> looping = Pages.of(t -> new Pages.Page<>(List.of(++calls[0]), "same"));
         assertEquals(List.of(1, 2), looping.stream().toList());
     }
+
+    @Test
+    void aTimestampReadsEmptyAsNoValue() {
+        assertTrue(Timestamps.parse("").isEmpty());
+        assertEquals(
+                java.time.OffsetDateTime.of(2026, 10, 4, 8, 0, 0, 500_000_000, java.time.ZoneOffset.UTC),
+                Timestamps.parse("2026-10-04T08:00:00.5Z").orElseThrow());
+        assertThrows(IllegalArgumentException.class, () -> Timestamps.parse("yesterday"));
+        assertThrows(IllegalArgumentException.class, () -> Timestamps.parse("2026-10-04"));
+    }
 }
