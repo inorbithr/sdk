@@ -1,0 +1,14 @@
+name: a-client-certificate-is-presented
+area: transport
+summary: Against a server that requires one, the client presents the configured client certificate.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 6.4; replay feature 3.
+client: { transport: mtls }
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token, client_cert: CN=conformance-client }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, client_cert: CN=conformance-client }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }

@@ -1,0 +1,19 @@
+name: allowlisted-headers-are-logged-others-redacted
+area: middleware
+summary: With header logging on, an allowlisted response header is logged with its value and any other by name with REDACTED.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 7.9.
+client:
+  log: debug
+  log_headers: true
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: tok-secret-1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 200, headers: { x-ratelimit-remaining: "9", x-internal-note: zzz-marker }, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }
+  logs:
+    contains: [{ event: response, headers: { x-ratelimit-remaining: "9", x-internal-note: REDACTED } }]
+    excludes: [zzz-marker, tok-secret-1]

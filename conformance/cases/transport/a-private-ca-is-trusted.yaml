@@ -1,0 +1,14 @@
+name: a-private-ca-is-trusted
+area: transport
+summary: Over HTTPS with a private CA, the client trusts the server once ca_bundle names the CA.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 6.3; replay feature 2.
+client: { transport: https }
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }

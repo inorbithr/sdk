@@ -1,0 +1,17 @@
+name: the-total-timeout-ends-the-retries
+area: retries
+summary: A retry whose Retry-After wait would pass the total timeout is not made; the call ends with the last error.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md sections 6.1 and 7.4.
+client: { max_retries: 2, total_timeout_ms: 1500 }
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 429, headers: { retry-after: "1" }, json: { code: rate_limited, error: Slow down., details: [] } }
+  - request: { method: GET, path: /v1/me, min_delay_ms: 1000 }
+    response: { status: 429, headers: { retry-after: "1" }, json: { code: rate_limited, error: Slow down., details: [] } }
+expect:
+  error: { kind: api, code: rate_limited, status: 429 }
+  attempts: 2

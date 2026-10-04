@@ -1,0 +1,21 @@
+name: spans-follow-the-http-client-conventions
+area: middleware
+summary: A call that is retried once makes one internal span and two client spans, the second with resend_count 1, and each attempt carries its own traceparent.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 7.10; the driver installs an in-memory exporter. The token exchange is not traced as an API attempt.
+client: { tracing: true }
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: tok-secret-1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, headers: { traceparent: "~00-[0-9a-f]{32}-[0-9a-f]{16}-01" } }
+    response: { status: 503, json: { code: unavailable, error: try again } }
+  - request: { method: GET, path: /v1/me, headers: { traceparent: "~00-[0-9a-f]{32}-[0-9a-f]{16}-01" } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }
+  attempts: 2
+  spans:
+    - { name: me, kind: internal, attributes: { inorbit.operation: me } }
+    - { name: GET /v1/me, kind: client, attributes: { http.request.method: GET, http.response.status_code: 503, url.template: /v1/me, error.type: "503" } }
+    - { name: GET /v1/me, kind: client, attributes: { http.request.method: GET, http.response.status_code: 200, http.request.resend_count: 1 } }

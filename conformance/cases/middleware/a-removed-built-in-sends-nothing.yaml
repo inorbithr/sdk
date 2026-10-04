@@ -1,0 +1,15 @@
+name: a-removed-built-in-sends-nothing
+area: middleware
+summary: Removing request_id from the pipeline leaves the x-request-id header out.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 7.3.
+client:
+  pipeline: { remove: [request_id] }
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: tok-secret-1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, headers_absent: [x-request-id] }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }
