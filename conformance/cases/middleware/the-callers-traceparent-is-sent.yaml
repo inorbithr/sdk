@@ -4,11 +4,11 @@ summary: With tracing off, a traceparent passed with the call is sent unchanged.
 pending: [go, rust, ts, py, java, csharp]
 notes: M6, docs/config.md section 7.10.
 client: { tracing: false }
-action: { op: me, options: { traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01 } }
+action: { op: me, options: { traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0cb902b7-01 } }
 exchanges:
   - request: { method: POST, path: /oauth2/token }
     response: { status: 200, json: { access_token: tok-secret-1, token_type: bearer, expires_in: 899 } }
-  - request: { method: GET, path: /v1/me, headers: { traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01 } }
+  - request: { method: GET, path: /v1/me, headers: { traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0cb902b7-01 } }
     response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
 expect:
   ok: { subject: ak_test }
