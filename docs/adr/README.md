@@ -21,3 +21,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0012](0012-extensions.md) | Extensions: signed OCI artifacts, run as separate processes | accepted |
 | [0013](0013-java-and-csharp.md) | Java and C#: names, runtimes, the surface shape | accepted |
 | [0014](0014-what-ci-runs-where.md) | What CI runs where: Linux on merges, everything nightly and on releases | accepted |
+| [0015](0015-configuration-and-middleware.md) | Configuration, credentials and the middleware pipeline | accepted |
