@@ -2,7 +2,7 @@
 
 | Page | What it covers |
 |---|---|
-| [requirements.md](requirements.md) | SR-01 to SR-28: what every SDK and the command line must do before 1.0, and how it is verified |
+| [requirements.md](requirements.md) | SR-01 to SR-30: what every SDK and the command line must do before 1.0, and how it is verified |
 | [threat-model.md](threat-model.md) | What we protect, the trust boundaries, threats and mitigations, residual risks |
 | [controls.md](controls.md) | How the repository maps to NIST SSDF, OpenSSF OSPS Baseline, CRA Annex I and SLSA |
 | [verifying-releases.md](verifying-releases.md) | How to check that a package you installed is the one we built |
