@@ -385,6 +385,15 @@ pub struct ApiCall {
     /// Print the status and the request id before the body.
     #[arg(short, long)]
     pub include: bool,
+    /// GET every page of a list: follow `next_page_token` until it is empty and print
+    /// one answer with every item.
+    #[arg(long, visible_alias = "paginate")]
+    pub all: bool,
+    /// With --all, stop after this many pages; the answer then keeps the token to go on
+    /// with (`-f page_token=...`).
+    #[arg(long, value_name = "N", default_value_t = 100, requires = "all",
+          value_parser = clap::value_parser!(u32).range(1..=10_000))]
+    pub max_pages: u32,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
