@@ -6,7 +6,7 @@
   "separate-pull-requests": true,
   "pull-request-title-pattern": "chore: release${component} ${version}",
   "bump-minor-pre-major": true,
-  "bump-patch-for-minor-pre-major": false,
+  "bump-patch-for-minor-pre-major": true,
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
     { "type": "fix", "section": "Bug fixes" },
@@ -24,15 +24,12 @@
       "release-type": "go",
       "component": "go",
       "package-name": "github.com/inorbithr/sdk/go",
-      "initial-version": "0.1.0",
-      "release-as": "0.2.0",
       "extra-files": ["version.go"]
     },
     "rust": {
       "release-type": "rust",
       "component": "rust",
       "package-name": "inorbithr",
-      "release-as": "0.2.0",
       "extra-files": [
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" },
         { "type": "toml", "path": "/cli/Cargo.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" },
@@ -43,8 +40,6 @@
       "release-type": "node",
       "component": "typescript",
       "package-name": "@inorbithr/sdk",
-      "initial-version": "0.1.0",
-      "release-as": "0.2.0",
       "extra-files": [
         { "type": "json", "path": "jsr.json", "jsonpath": "$.version" },
         "src/version.ts"
@@ -54,8 +49,6 @@
       "release-type": "python",
       "component": "python",
       "package-name": "inorbithr",
-      "initial-version": "0.1.0",
-      "release-as": "0.2.0",
       "extra-files": [
         { "type": "toml", "path": "uv.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" }
       ]
@@ -64,21 +57,18 @@
       "release-type": "simple",
       "component": "csharp",
       "package-name": "InOrbit.Sdk",
-      "release-as": "0.2.0",
       "extra-files": ["src/InOrbit.Sdk/InOrbit.Sdk.csproj"]
     },
     "java": {
       "release-type": "simple",
       "component": "java",
       "package-name": "hr.inorbit:inorbit-sdk",
-      "release-as": "0.2.0",
       "extra-files": ["pom.xml", "src/main/java/hr/inorbit/sdk/Client.java"]
     },
     "cli": {
       "release-type": "simple",
       "component": "iohr",
       "package-name": "iohr",
-      "release-as": "0.1.0-alpha.5",
       "versioning": "prerelease",
       "prerelease": true,
       "prerelease-type": "alpha",
