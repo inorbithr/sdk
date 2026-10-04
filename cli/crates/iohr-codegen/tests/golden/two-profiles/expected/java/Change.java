@@ -10,7 +10,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param advanced the <code>advanced</code> field
  * @param after the <code>after</code> field
  * @param area the <code>area</code> field
- * @param example the <code>example</code> field; <code>null</code> when the answer leaves it out
+ * @param example the <code>example</code> field; <code>null</code> when unset, and then left out on the wire
  * @param impact <code>iohr.radar.v1.Impact</code>
  * @param novice the <code>novice</code> field
  * @param practitioner the <code>practitioner</code> field

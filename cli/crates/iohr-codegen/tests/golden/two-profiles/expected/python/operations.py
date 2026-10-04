@@ -66,22 +66,24 @@ def get_usage(org_id: str, *, from_: str | None = None, to: str | None = None) -
     )
 
 
-def list_unit_categories() -> Operation:
+def list_unit_categories(*, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/accounts/units/categories`; needs scope `usage:read`. Transcoded from `/iohr.accounts.v1.AccountsService/ListUnitCategories` on the `accounts` backend."""
     return Operation(
         name="accounts.list_unit_categories",
         method="GET",
         path="/v1/accounts/units/categories",
+        query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("usage:read",),
     )
 
 
-def list_event_types() -> Operation:
+def list_event_types(*, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/events/types`; needs scope `events:read`. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend."""
     return Operation(
         name="events.list_event_types",
         method="GET",
         path="/v1/events/types",
+        query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("events:read",),
     )
 
@@ -96,13 +98,13 @@ def me() -> Operation:
     )
 
 
-def list_digests(*, language: str | None = None, lang: str | None = None, limit: int | None = None, include_drafts: bool | None = None, before_week: str | None = None) -> Operation:
+def list_digests(*, language: str | None = None, lang: str | None = None, limit: int | None = None, include_drafts: bool | None = None, before_week: str | None = None, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/radar/digests`; needs scope `radar:read`. Transcoded from `/iohr.radar.v1.RadarService/ListDigests` on the `radar` backend."""
     return Operation(
         name="radar.list_digests",
         method="GET",
         path="/v1/radar/digests",
-        query=(("language", language), ("lang", lang), ("limit", limit), ("include_drafts", include_drafts), ("before_week", before_week),),
+        query=(("language", language), ("lang", lang), ("limit", limit), ("include_drafts", include_drafts), ("before_week", before_week), ("page_size", page_size), ("page_token", page_token),),
         scopes=("radar:read",),
     )
 
@@ -117,24 +119,24 @@ def get_digest(id: str) -> Operation:
     )
 
 
-def list_items(*, language: str | None = None, limit: int | None = None) -> Operation:
+def list_items(*, language: str | None = None, limit: int | None = None, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/radar/items`; needs scope `radar:read`. Transcoded from `/iohr.radar.v1.RadarService/ListItems` on the `radar` backend."""
     return Operation(
         name="radar.list_items",
         method="GET",
         path="/v1/radar/items",
-        query=(("language", language), ("limit", limit),),
+        query=(("language", language), ("limit", limit), ("page_size", page_size), ("page_token", page_token),),
         scopes=("radar:read",),
     )
 
 
-def list_endpoints(*, account_id: str | None = None) -> Operation:
+def list_endpoints(*, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/webhooks/endpoints`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListEndpoints` on the `events` backend."""
     return Operation(
         name="events.list_endpoints",
         method="GET",
         path="/v1/webhooks/endpoints",
-        query=(("account_id", account_id),),
+        query=(("account_id", account_id), ("page_size", page_size), ("page_token", page_token),),
         scopes=("webhooks:read",),
     )
 
@@ -160,23 +162,24 @@ def list_deliveries(endpoint_id: str, *, status: str | None = None, page_token: 
     )
 
 
-def list_inboxes(*, account_id: str | None = None) -> Operation:
+def list_inboxes(*, account_id: str | None = None, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/webhooks/inboxes`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend."""
     return Operation(
         name="events.list_inboxes",
         method="GET",
         path="/v1/webhooks/inboxes",
-        query=(("account_id", account_id),),
+        query=(("account_id", account_id), ("page_size", page_size), ("page_token", page_token),),
         scopes=("webhooks:read",),
     )
 
 
-def list_inbox_requests(inbox_id: str) -> Operation:
+def list_inbox_requests(inbox_id: str, *, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/webhooks/inboxes/{inbox_id}/requests`; needs scope `webhooks:read`. Transcoded from `/iohr.events.v1.EventsService/ListInboxRequests` on the `events` backend."""
     return Operation(
         name="events.list_inbox_requests",
         method="GET",
         path=f"/v1/webhooks/inboxes/{codegen.path_segment(inbox_id)}/requests",
+        query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("webhooks:read",),
     )
 

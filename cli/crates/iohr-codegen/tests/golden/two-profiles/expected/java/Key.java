@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * The key claims, as <code>OpenAPI</code> sees them.
  *
  * @param id Key id.
- * @param parent The parent key, for a sub-key.; <code>null</code> when the answer leaves it out
+ * @param parent The parent key, for a sub-key.; <code>null</code> when unset, and then left out on the wire
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Key(

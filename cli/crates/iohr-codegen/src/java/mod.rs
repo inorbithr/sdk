@@ -411,7 +411,7 @@ impl Gen {
                 jdoc(&f.doc)
             };
             if boxed {
-                doc.push_str("; <code>null</code> when the answer leaves it out");
+                doc.push_str("; <code>null</code> when unset, and then left out on the wire");
             }
             tags.push(format!("@param {name} {doc}"));
             typed.push((name, ty));

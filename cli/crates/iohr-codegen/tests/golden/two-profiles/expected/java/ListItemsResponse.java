@@ -9,7 +9,9 @@ import java.util.List;
  * <code>iohr.radar.v1.ListItemsResponse</code>
  *
  * @param items the <code>items</code> field
+ * @param nextPageToken the <code>next_page_token</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ListItemsResponse(
-        @JsonProperty("items") List<Item> items) {}
+        @JsonProperty("items") List<Item> items,
+        @JsonProperty("next_page_token") String nextPageToken) {}

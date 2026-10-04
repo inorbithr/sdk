@@ -8,10 +8,10 @@ import java.util.List;
 /**
  * <code>iohr.accounts.v1.GetMeResponse</code>
  *
- * @param account the <code>account</code> field; <code>null</code> when the answer leaves it out
+ * @param account the <code>account</code> field; <code>null</code> when unset, and then left out on the wire
  * @param email the <code>email</code> field
  * @param emailVerified the <code>email_verified</code> field
- * @param key the <code>key</code> field; <code>null</code> when the answer leaves it out
+ * @param key the <code>key</code> field; <code>null</code> when unset, and then left out on the wire
  * @param name the <code>name</code> field
  * @param stub the <code>stub</code> field
  * @param subject the <code>subject</code> field

@@ -62,10 +62,30 @@ public final class AcmeCiEvents {
     /**
      * <code>GET /v1/events/types</code>; needs scope <code>events:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListEventTypes</code> on the <code>events</code> backend.
      *
+     * @param params the query parameters
+     * @return the answer, typed, and the raw one
+     */
+    public Response<ListEventTypesResponse> listEventTypes(EventsListEventTypesParams params) {
+        return Operations.listEventTypes(client, params);
+    }
+
+    /**
+     * <code>GET /v1/events/types</code>; needs scope <code>events:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListEventTypes</code> on the <code>events</code> backend. On the client's executor.
+     *
+     * @param params the query parameters
+     * @return the answer, when it arrives
+     */
+    public CompletableFuture<Response<ListEventTypesResponse>> listEventTypesAsync(EventsListEventTypesParams params) {
+        return Operations.listEventTypesAsync(client, params);
+    }
+
+    /**
+     * <code>GET /v1/events/types</code>; needs scope <code>events:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListEventTypes</code> on the <code>events</code> backend.
+     *
      * @return the answer, typed, and the raw one
      */
     public Response<ListEventTypesResponse> listEventTypes() {
-        return Operations.listEventTypes(client);
+        return Operations.listEventTypes(client, EventsListEventTypesParams.builder().build());
     }
 
     /**
@@ -74,7 +94,29 @@ public final class AcmeCiEvents {
      * @return the answer, when it arrives
      */
     public CompletableFuture<Response<ListEventTypesResponse>> listEventTypesAsync() {
-        return Operations.listEventTypesAsync(client);
+        return Operations.listEventTypesAsync(client, EventsListEventTypesParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/events/types</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<EventType> allListEventTypes(EventsListEventTypesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listEventTypes(client, new EventsListEventTypesParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.types(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/events/types</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<EventType> allListEventTypes() {
+        return allListEventTypes(EventsListEventTypesParams.builder().build());
     }
 
     /**
@@ -113,6 +155,28 @@ public final class AcmeCiEvents {
      */
     public CompletableFuture<Response<ListEndpointsResponse>> listEndpointsAsync() {
         return Operations.listEndpointsAsync(client, EventsListEndpointsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/endpoints</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Endpoint> allListEndpoints(EventsListEndpointsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listEndpoints(client, new EventsListEndpointsParams(params.accountId(), params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.endpoints(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/endpoints</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<Endpoint> allListEndpoints() {
+        return allListEndpoints(EventsListEndpointsParams.builder().build());
     }
 
     /**
@@ -240,13 +304,57 @@ public final class AcmeCiEvents {
     }
 
     /**
+     * Every item <code>GET /v1/webhooks/inboxes</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Inbox> allListInboxes(EventsListInboxesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listInboxes(client, new EventsListInboxesParams(params.accountId(), params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.inboxes(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/inboxes</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<Inbox> allListInboxes() {
+        return allListInboxes(EventsListInboxesParams.builder().build());
+    }
+
+    /**
+     * <code>GET /v1/webhooks/inboxes/{inbox_id}/requests</code>; needs scope <code>webhooks:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListInboxRequests</code> on the <code>events</code> backend.
+     *
+     * @param inboxId the <code>inbox_id</code> path parameter
+     * @param params the query parameters
+     * @return the answer, typed, and the raw one
+     */
+    public Response<ListInboxRequestsResponse> listInboxRequests(String inboxId, EventsListInboxRequestsParams params) {
+        return Operations.listInboxRequests(client, inboxId, params);
+    }
+
+    /**
+     * <code>GET /v1/webhooks/inboxes/{inbox_id}/requests</code>; needs scope <code>webhooks:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListInboxRequests</code> on the <code>events</code> backend. On the client's executor.
+     *
+     * @param inboxId the <code>inbox_id</code> path parameter
+     * @param params the query parameters
+     * @return the answer, when it arrives
+     */
+    public CompletableFuture<Response<ListInboxRequestsResponse>> listInboxRequestsAsync(String inboxId, EventsListInboxRequestsParams params) {
+        return Operations.listInboxRequestsAsync(client, inboxId, params);
+    }
+
+    /**
      * <code>GET /v1/webhooks/inboxes/{inbox_id}/requests</code>; needs scope <code>webhooks:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/ListInboxRequests</code> on the <code>events</code> backend.
      *
      * @param inboxId the <code>inbox_id</code> path parameter
      * @return the answer, typed, and the raw one
      */
     public Response<ListInboxRequestsResponse> listInboxRequests(String inboxId) {
-        return Operations.listInboxRequests(client, inboxId);
+        return Operations.listInboxRequests(client, inboxId, EventsListInboxRequestsParams.builder().build());
     }
 
     /**
@@ -256,7 +364,31 @@ public final class AcmeCiEvents {
      * @return the answer, when it arrives
      */
     public CompletableFuture<Response<ListInboxRequestsResponse>> listInboxRequestsAsync(String inboxId) {
-        return Operations.listInboxRequestsAsync(client, inboxId);
+        return Operations.listInboxRequestsAsync(client, inboxId, EventsListInboxRequestsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/inboxes/{inbox_id}/requests</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param inboxId the <code>inboxId</code> path parameter
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<InboxRequest> allListInboxRequests(String inboxId, EventsListInboxRequestsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listInboxRequests(client, inboxId, new EventsListInboxRequestsParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.requests(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/webhooks/inboxes/{inbox_id}/requests</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param inboxId the <code>inboxId</code> path parameter
+     * @return the walk
+     */
+    public Pages<InboxRequest> allListInboxRequests(String inboxId) {
+        return allListInboxRequests(inboxId, EventsListInboxRequestsParams.builder().build());
     }
 
     /**

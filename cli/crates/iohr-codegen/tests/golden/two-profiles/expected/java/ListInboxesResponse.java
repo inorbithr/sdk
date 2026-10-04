@@ -9,7 +9,9 @@ import java.util.List;
  * <code>iohr.events.v1.ListInboxesResponse</code>
  *
  * @param inboxes the <code>inboxes</code> field
+ * @param nextPageToken the <code>next_page_token</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ListInboxesResponse(
-        @JsonProperty("inboxes") List<Inbox> inboxes) {}
+        @JsonProperty("inboxes") List<Inbox> inboxes,
+        @JsonProperty("next_page_token") String nextPageToken) {}

@@ -9,13 +9,17 @@ package iohr;
  * @param limit <code>limit</code>; <code>null</code> to leave it out
  * @param includeDrafts <code>include_drafts</code>; <code>null</code> to leave it out
  * @param beforeWeek <code>before_week</code>; <code>null</code> to leave it out
+ * @param pageSize <code>page_size</code>; <code>null</code> to leave it out
+ * @param pageToken <code>page_token</code>; <code>null</code> to leave it out
  */
 public record RadarListDigestsParams(
         String language,
         String lang,
         Integer limit,
         Boolean includeDrafts,
-        String beforeWeek) {
+        String beforeWeek,
+        Integer pageSize,
+        String pageToken) {
 
     /**
      * A builder.
@@ -33,6 +37,8 @@ public record RadarListDigestsParams(
         private Integer limit;
         private Boolean includeDrafts;
         private String beforeWeek;
+        private Integer pageSize;
+        private String pageToken;
 
         private Builder() {}
 
@@ -92,12 +98,34 @@ public record RadarListDigestsParams(
         }
 
         /**
+         * Sets <code>pageSize</code>.
+         *
+         * @param pageSize the value
+         * @return this builder
+         */
+        public Builder pageSize(Integer pageSize) {
+            this.pageSize = pageSize;
+            return this;
+        }
+
+        /**
+         * Sets <code>pageToken</code>.
+         *
+         * @param pageToken the value
+         * @return this builder
+         */
+        public Builder pageToken(String pageToken) {
+            this.pageToken = pageToken;
+            return this;
+        }
+
+        /**
          * The value.
          *
          * @return the <code>RadarListDigestsParams</code>
          */
         public RadarListDigestsParams build() {
-            return new RadarListDigestsParams(language, lang, limit, includeDrafts, beforeWeek);
+            return new RadarListDigestsParams(language, lang, limit, includeDrafts, beforeWeek, pageSize, pageToken);
         }
     }
 }

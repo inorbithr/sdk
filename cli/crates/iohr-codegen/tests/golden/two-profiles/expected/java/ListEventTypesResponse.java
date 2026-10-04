@@ -8,8 +8,10 @@ import java.util.List;
 /**
  * <code>iohr.events.v1.ListEventTypesResponse</code>
  *
+ * @param nextPageToken the <code>next_page_token</code> field
  * @param types the <code>types</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ListEventTypesResponse(
+        @JsonProperty("next_page_token") String nextPageToken,
         @JsonProperty("types") List<EventType> types) {}

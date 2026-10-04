@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * <code>iohr.events.v1.CreateEndpointResponse</code>
  *
- * @param endpoint the <code>endpoint</code> field; <code>null</code> when the answer leaves it out
+ * @param endpoint the <code>endpoint</code> field; <code>null</code> when unset, and then left out on the wire
  * @param secret the <code>secret</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)

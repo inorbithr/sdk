@@ -10,8 +10,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * @param calls the <code>calls</code> field
  * @param category the <code>category</code> field
+ * @param clientErrors the <code>client_errors</code> field
  * @param keyId the <code>key_id</code> field
  * @param keyName the <code>key_name</code> field
+ * @param p50Ms the <code>p50_ms</code> field
+ * @param p95Ms the <code>p95_ms</code> field
+ * @param platformErrors the <code>platform_errors</code> field
  * @param rpc the <code>rpc</code> field
  * @param tokens the <code>tokens</code> field
  * @param units the <code>units</code> field
@@ -22,8 +26,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record UnitUsage(
         @JsonProperty("calls") @JsonFormat(shape = JsonFormat.Shape.STRING) long calls,
         @JsonProperty("category") String category,
+        @JsonProperty("client_errors") @JsonFormat(shape = JsonFormat.Shape.STRING) long clientErrors,
         @JsonProperty("key_id") String keyId,
         @JsonProperty("key_name") String keyName,
+        @JsonProperty("p50_ms") int p50Ms,
+        @JsonProperty("p95_ms") int p95Ms,
+        @JsonProperty("platform_errors") @JsonFormat(shape = JsonFormat.Shape.STRING) long platformErrors,
         @JsonProperty("rpc") String rpc,
         @JsonProperty("tokens") @JsonFormat(shape = JsonFormat.Shape.STRING) long tokens,
         @JsonProperty("units") @JsonFormat(shape = JsonFormat.Shape.STRING) long units,

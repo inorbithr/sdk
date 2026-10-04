@@ -83,13 +83,13 @@ type Change struct {
 
 // CreateEndpointRequest: `iohr.events.v1.CreateEndpointRequest`
 type CreateEndpointRequest struct {
-	AccountID string `json:"account_id"`
+	AccountID *string `json:"account_id,omitempty"`
 
-	Description string `json:"description"`
+	Description *string `json:"description,omitempty"`
 
-	EventTypes []string `json:"event_types"`
+	EventTypes []string `json:"event_types,omitempty"`
 
-	URL string `json:"url"`
+	URL *string `json:"url,omitempty"`
 }
 
 // CreateEndpointResponse: `iohr.events.v1.CreateEndpointResponse`
@@ -101,7 +101,7 @@ type CreateEndpointResponse struct {
 
 // CreateInboxRequest: `iohr.events.v1.CreateInboxRequest`
 type CreateInboxRequest struct {
-	AccountID string `json:"account_id"`
+	AccountID *string `json:"account_id,omitempty"`
 }
 
 // CreateInboxResponse: `iohr.events.v1.CreateInboxResponse`
@@ -375,15 +375,21 @@ type ListDeliveriesResponse struct {
 // ListDigestsResponse: `iohr.radar.v1.ListDigestsResponse`
 type ListDigestsResponse struct {
 	Digests []Digest `json:"digests"`
+
+	NextPageToken string `json:"next_page_token"`
 }
 
 // ListEndpointsResponse: `iohr.events.v1.ListEndpointsResponse`
 type ListEndpointsResponse struct {
 	Endpoints []Endpoint `json:"endpoints"`
+
+	NextPageToken string `json:"next_page_token"`
 }
 
 // ListEventTypesResponse: `iohr.events.v1.ListEventTypesResponse`
 type ListEventTypesResponse struct {
+	NextPageToken string `json:"next_page_token"`
+
 	Types []EventType `json:"types"`
 }
 
@@ -391,22 +397,30 @@ type ListEventTypesResponse struct {
 type ListInboxRequestsResponse struct {
 	Inbox *Inbox `json:"inbox,omitempty"`
 
+	NextPageToken string `json:"next_page_token"`
+
 	Requests []InboxRequest `json:"requests"`
 }
 
 // ListInboxesResponse: `iohr.events.v1.ListInboxesResponse`
 type ListInboxesResponse struct {
 	Inboxes []Inbox `json:"inboxes"`
+
+	NextPageToken string `json:"next_page_token"`
 }
 
 // ListItemsResponse: `iohr.radar.v1.ListItemsResponse`
 type ListItemsResponse struct {
 	Items []Item `json:"items"`
+
+	NextPageToken string `json:"next_page_token"`
 }
 
 // ListUnitCategoriesResponse: `iohr.accounts.v1.ListUnitCategoriesResponse`
 type ListUnitCategoriesResponse struct {
 	Categories []UnitCategory `json:"categories"`
+
+	NextPageToken string `json:"next_page_token"`
 }
 
 // Me: `GET /v1/me` body.
@@ -453,7 +467,7 @@ type Plan struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// Problem: `{"code","error","details"}`: the REST body and the SSE `error` payload.
+// Problem: `{"code","error","details","request_id"}`: the REST body and the SSE `error` payload.
 type Problem struct {
 	// The slug.
 	Code inorbit.Code `json:"code"`
@@ -463,6 +477,9 @@ type Problem struct {
 
 	// The sentence.
 	Error string `json:"error"`
+
+	// The request's id, the `x-request-id` the answer carries: name it when asking about a call. Empty on a socket or MQTT frame, whose own id names the call.
+	RequestID string `json:"request_id"`
 }
 
 // RetryDeliveryResponse: `iohr.events.v1.RetryDeliveryResponse`
@@ -497,15 +514,15 @@ type StreamEventsResponse struct {
 
 // UnitCategory: `iohr.accounts.v1.UnitCategory`
 type UnitCategory struct {
-	Description string `json:"description"`
+	Description *string `json:"description,omitempty"`
 
-	Name string `json:"name"`
+	Name *string `json:"name,omitempty"`
 
-	UnitsPer1kTokens inorbit.Int64 `json:"units_per_1k_tokens"`
+	UnitsPer1kTokens *inorbit.Int64 `json:"units_per_1k_tokens,omitempty"`
 
-	UnitsPerCall inorbit.Int64 `json:"units_per_call"`
+	UnitsPerCall *inorbit.Int64 `json:"units_per_call,omitempty"`
 
-	UpdatedAt string `json:"updated_at"`
+	UpdatedAt *string `json:"updated_at,omitempty"`
 }
 
 // UnitDay: `iohr.accounts.v1.UnitDay`
@@ -521,9 +538,17 @@ type UnitUsage struct {
 
 	Category string `json:"category"`
 
+	ClientErrors inorbit.Int64 `json:"client_errors"`
+
 	KeyID string `json:"key_id"`
 
 	KeyName string `json:"key_name"`
+
+	P50Ms int32 `json:"p50_ms"`
+
+	P95Ms int32 `json:"p95_ms"`
+
+	PlatformErrors inorbit.Int64 `json:"platform_errors"`
 
 	RPC string `json:"rpc"`
 
@@ -538,15 +563,15 @@ type UnitUsage struct {
 
 // UpdateEndpointRequest: `iohr.events.v1.UpdateEndpointRequest`
 type UpdateEndpointRequest struct {
-	Description string `json:"description"`
+	Description *string `json:"description,omitempty"`
 
-	Enabled bool `json:"enabled"`
+	Enabled *bool `json:"enabled,omitempty"`
 
-	EndpointID string `json:"endpoint_id"`
+	EndpointID *string `json:"endpoint_id,omitempty"`
 
-	EventTypes []string `json:"event_types"`
+	EventTypes []string `json:"event_types,omitempty"`
 
-	URL string `json:"url"`
+	URL *string `json:"url,omitempty"`
 }
 
 // UsageRow: `iohr.accounts.v1.UsageRow`
@@ -569,6 +594,24 @@ type AccountsGetUsageParams struct {
 	To *string
 }
 
+// AccountsListUnitCategoriesParams holds the query parameters of GET /v1/accounts/units/categories.
+type AccountsListUnitCategoriesParams struct {
+	// PageSize is the page_size parameter.
+	PageSize *int32
+
+	// PageToken is the page_token parameter.
+	PageToken *string
+}
+
+// EventsListEventTypesParams holds the query parameters of GET /v1/events/types.
+type EventsListEventTypesParams struct {
+	// PageSize is the page_size parameter.
+	PageSize *int32
+
+	// PageToken is the page_token parameter.
+	PageToken *string
+}
+
 // RadarListDigestsParams holds the query parameters of GET /v1/radar/digests.
 type RadarListDigestsParams struct {
 	// Language is the language parameter.
@@ -585,6 +628,12 @@ type RadarListDigestsParams struct {
 
 	// BeforeWeek is the before_week parameter.
 	BeforeWeek *string
+
+	// PageSize is the page_size parameter.
+	PageSize *int32
+
+	// PageToken is the page_token parameter.
+	PageToken *string
 }
 
 // RadarListItemsParams holds the query parameters of GET /v1/radar/items.
@@ -594,12 +643,24 @@ type RadarListItemsParams struct {
 
 	// Limit is the limit parameter.
 	Limit *int32
+
+	// PageSize is the page_size parameter.
+	PageSize *int32
+
+	// PageToken is the page_token parameter.
+	PageToken *string
 }
 
 // EventsListEndpointsParams holds the query parameters of GET /v1/webhooks/endpoints.
 type EventsListEndpointsParams struct {
 	// AccountID is the account_id parameter.
 	AccountID *string
+
+	// PageSize is the page_size parameter.
+	PageSize *int32
+
+	// PageToken is the page_token parameter.
+	PageToken *string
 }
 
 // EventsListDeliveriesParams holds the query parameters of GET /v1/webhooks/endpoints/{endpoint_id}/deliveries.
@@ -618,4 +679,19 @@ type EventsListDeliveriesParams struct {
 type EventsListInboxesParams struct {
 	// AccountID is the account_id parameter.
 	AccountID *string
+
+	// PageSize is the page_size parameter.
+	PageSize *int32
+
+	// PageToken is the page_token parameter.
+	PageToken *string
+}
+
+// EventsListInboxRequestsParams holds the query parameters of GET /v1/webhooks/inboxes/{inbox_id}/requests.
+type EventsListInboxRequestsParams struct {
+	// PageSize is the page_size parameter.
+	PageSize *int32
+
+	// PageToken is the page_token parameter.
+	PageToken *string
 }

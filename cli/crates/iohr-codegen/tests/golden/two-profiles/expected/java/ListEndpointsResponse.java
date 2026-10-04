@@ -9,7 +9,9 @@ import java.util.List;
  * <code>iohr.events.v1.ListEndpointsResponse</code>
  *
  * @param endpoints the <code>endpoints</code> field
+ * @param nextPageToken the <code>next_page_token</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ListEndpointsResponse(
-        @JsonProperty("endpoints") List<Endpoint> endpoints) {}
+        @JsonProperty("endpoints") List<Endpoint> endpoints,
+        @JsonProperty("next_page_token") String nextPageToken) {}

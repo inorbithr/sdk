@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * <code>iohr.events.v1.CreateInboxResponse</code>
  *
- * @param inbox the <code>inbox</code> field; <code>null</code> when the answer leaves it out
+ * @param inbox the <code>inbox</code> field; <code>null</code> when unset, and then left out on the wire
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record CreateInboxResponse(

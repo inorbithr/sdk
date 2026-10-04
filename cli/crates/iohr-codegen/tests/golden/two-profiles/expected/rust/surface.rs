@@ -91,11 +91,38 @@ impl<P: ops::ListUnitCategories> Accounts<'_, P> {
     /// `GET /v1/accounts/units/categories`; needs scope `usage:read`.
     pub async fn list_unit_categories(
         &self,
+        params: &AccountsListUnitCategoriesParams,
     ) -> Result<Response<ListUnitCategoriesResponse>, Error> {
         let op = Operation::new(Method::Get, "/v1/accounts/units/categories")
             .named("accounts.list_unit_categories")
-            .scopes(&["usage:read"]);
+            .scopes(&["usage:read"])
+            .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
+            .query_opt(
+                "page_token",
+                params.page_token.as_ref().map(ToString::to_string),
+            );
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/accounts/units/categories` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_unit_categories(
+        &self,
+        params: &AccountsListUnitCategoriesParams,
+    ) -> Pages<'_, UnitCategory> {
+        let client = self.0;
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                Box::pin(async move {
+                    let page = Self(client).list_unit_categories(&params).await?.value;
+                    Ok((page.categories, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 /// The `events` operations of a client.
@@ -135,11 +162,38 @@ impl<P: ops::ListEventTypes> Events<'_, P> {
     /// `GET /v1/events/types`; needs scope `events:read`.
     pub async fn list_event_types(
         &self,
+        params: &EventsListEventTypesParams,
     ) -> Result<Response<ListEventTypesResponse>, Error> {
         let op = Operation::new(Method::Get, "/v1/events/types")
             .named("events.list_event_types")
-            .scopes(&["events:read"]);
+            .scopes(&["events:read"])
+            .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
+            .query_opt(
+                "page_token",
+                params.page_token.as_ref().map(ToString::to_string),
+            );
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/events/types` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_event_types(
+        &self,
+        params: &EventsListEventTypesParams,
+    ) -> Pages<'_, EventType> {
+        let client = self.0;
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                Box::pin(async move {
+                    let page = Self(client).list_event_types(&params).await?.value;
+                    Ok((page.types, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 impl<P: ops::ListEndpoints> Events<'_, P> {
@@ -151,11 +205,34 @@ impl<P: ops::ListEndpoints> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/webhooks/endpoints")
             .named("events.list_endpoints")
             .scopes(&["webhooks:read"])
+            .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
+            .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
-                "account_id",
-                params.account_id.as_ref().map(ToString::to_string),
+                "page_token",
+                params.page_token.as_ref().map(ToString::to_string),
             );
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/webhooks/endpoints` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_endpoints(
+        &self,
+        params: &EventsListEndpointsParams,
+    ) -> Pages<'_, Endpoint> {
+        let client = self.0;
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                Box::pin(async move {
+                    let page = Self(client).list_endpoints(&params).await?.value;
+                    Ok((page.endpoints, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 impl<P: ops::GetEndpoint> Events<'_, P> {
@@ -230,11 +307,34 @@ impl<P: ops::ListInboxes> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/webhooks/inboxes")
             .named("events.list_inboxes")
             .scopes(&["webhooks:read"])
+            .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
+            .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
-                "account_id",
-                params.account_id.as_ref().map(ToString::to_string),
+                "page_token",
+                params.page_token.as_ref().map(ToString::to_string),
             );
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/webhooks/inboxes` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_inboxes(
+        &self,
+        params: &EventsListInboxesParams,
+    ) -> Pages<'_, Inbox> {
+        let client = self.0;
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                Box::pin(async move {
+                    let page = Self(client).list_inboxes(&params).await?.value;
+                    Ok((page.inboxes, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 impl<P: ops::ListInboxRequests> Events<'_, P> {
@@ -242,14 +342,47 @@ impl<P: ops::ListInboxRequests> Events<'_, P> {
     pub async fn list_inbox_requests(
         &self,
         inbox_id: &str,
+        params: &EventsListInboxRequestsParams,
     ) -> Result<Response<ListInboxRequestsResponse>, Error> {
         let op = Operation::new(
                 Method::Get,
                 format!("/v1/webhooks/inboxes/{}/requests", path_segment(inbox_id)),
             )
             .named("events.list_inbox_requests")
-            .scopes(&["webhooks:read"]);
+            .scopes(&["webhooks:read"])
+            .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
+            .query_opt(
+                "page_token",
+                params.page_token.as_ref().map(ToString::to_string),
+            );
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/webhooks/inboxes/{inbox_id}/requests` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_inbox_requests(
+        &self,
+        inbox_id: &str,
+        params: &EventsListInboxRequestsParams,
+    ) -> Pages<'_, InboxRequest> {
+        let client = self.0;
+        let inbox_id = inbox_id.to_owned();
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                let inbox_id = inbox_id.clone();
+                Box::pin(async move {
+                    let page = Self(client)
+                        .list_inbox_requests(&inbox_id, &params)
+                        .await?
+                        .value;
+                    Ok((page.requests, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 impl<P: ops::UpdateEndpoint> Events<'_, P> {
@@ -362,8 +495,34 @@ impl<P: ops::ListDigests> Radar<'_, P> {
             .query_opt(
                 "before_week",
                 params.before_week.as_ref().map(ToString::to_string),
+            )
+            .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
+            .query_opt(
+                "page_token",
+                params.page_token.as_ref().map(ToString::to_string),
             );
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/radar/digests` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_digests(
+        &self,
+        params: &RadarListDigestsParams,
+    ) -> Pages<'_, Digest> {
+        let client = self.0;
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                Box::pin(async move {
+                    let page = Self(client).list_digests(&params).await?.value;
+                    Ok((page.digests, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 impl<P: ops::GetDigest> Radar<'_, P> {
@@ -391,8 +550,31 @@ impl<P: ops::ListItems> Radar<'_, P> {
             .named("radar.list_items")
             .scopes(&["radar:read"])
             .query_opt("language", params.language.as_ref().map(ToString::to_string))
-            .query_opt("limit", params.limit.as_ref().map(ToString::to_string));
+            .query_opt("limit", params.limit.as_ref().map(ToString::to_string))
+            .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
+            .query_opt(
+                "page_token",
+                params.page_token.as_ref().map(ToString::to_string),
+            );
         self.0.request(op).await
+    }
+    /// Every item `GET /v1/radar/items` answers, page after page, following the next-page token
+    /// until the last page; see [`Pages`].
+    pub fn all_list_items(&self, params: &RadarListItemsParams) -> Pages<'_, Item> {
+        let client = self.0;
+        let params = params.clone();
+        pages(
+            Box::new(move |token| {
+                let mut params = params.clone();
+                if token.is_some() {
+                    params.page_token = token;
+                }
+                Box::pin(async move {
+                    let page = Self(client).list_items(&params).await?.value;
+                    Ok((page.items, page.next_page_token))
+                })
+            }),
+        )
     }
 }
 /// The query parameters of `GET /v1/accounts/orgs/{org_id}/usage`; every field is optional.
@@ -402,6 +584,22 @@ pub struct AccountsGetUsageParams {
     pub from: ::std::option::Option<::std::string::String>,
     /// `to`
     pub to: ::std::option::Option<::std::string::String>,
+}
+/// The query parameters of `GET /v1/accounts/units/categories`; every field is optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AccountsListUnitCategoriesParams {
+    /// `page_size`
+    pub page_size: ::std::option::Option<i32>,
+    /// `page_token`
+    pub page_token: ::std::option::Option<::std::string::String>,
+}
+/// The query parameters of `GET /v1/events/types`; every field is optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EventsListEventTypesParams {
+    /// `page_size`
+    pub page_size: ::std::option::Option<i32>,
+    /// `page_token`
+    pub page_token: ::std::option::Option<::std::string::String>,
 }
 /// The query parameters of `GET /v1/radar/digests`; every field is optional.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -416,6 +614,10 @@ pub struct RadarListDigestsParams {
     pub include_drafts: ::std::option::Option<bool>,
     /// `before_week`
     pub before_week: ::std::option::Option<::std::string::String>,
+    /// `page_size`
+    pub page_size: ::std::option::Option<i32>,
+    /// `page_token`
+    pub page_token: ::std::option::Option<::std::string::String>,
 }
 /// The query parameters of `GET /v1/radar/items`; every field is optional.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -424,12 +626,20 @@ pub struct RadarListItemsParams {
     pub language: ::std::option::Option<::std::string::String>,
     /// `limit`
     pub limit: ::std::option::Option<i32>,
+    /// `page_size`
+    pub page_size: ::std::option::Option<i32>,
+    /// `page_token`
+    pub page_token: ::std::option::Option<::std::string::String>,
 }
 /// The query parameters of `GET /v1/webhooks/endpoints`; every field is optional.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EventsListEndpointsParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
+    /// `page_size`
+    pub page_size: ::std::option::Option<i32>,
+    /// `page_token`
+    pub page_token: ::std::option::Option<::std::string::String>,
 }
 /// The query parameters of `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries`; every field is optional.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -446,4 +656,16 @@ pub struct EventsListDeliveriesParams {
 pub struct EventsListInboxesParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
+    /// `page_size`
+    pub page_size: ::std::option::Option<i32>,
+    /// `page_token`
+    pub page_token: ::std::option::Option<::std::string::String>,
+}
+/// The query parameters of `GET /v1/webhooks/inboxes/{inbox_id}/requests`; every field is optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EventsListInboxRequestsParams {
+    /// `page_size`
+    pub page_size: ::std::option::Option<i32>,
+    /// `page_token`
+    pub page_token: ::std::option::Option<::std::string::String>,
 }

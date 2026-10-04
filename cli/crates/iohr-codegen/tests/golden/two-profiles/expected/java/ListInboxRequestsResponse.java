@@ -8,10 +8,12 @@ import java.util.List;
 /**
  * <code>iohr.events.v1.ListInboxRequestsResponse</code>
  *
- * @param inbox the <code>inbox</code> field; <code>null</code> when the answer leaves it out
+ * @param inbox the <code>inbox</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param nextPageToken the <code>next_page_token</code> field
  * @param requests the <code>requests</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ListInboxRequestsResponse(
         @JsonProperty("inbox") Inbox inbox,
+        @JsonProperty("next_page_token") String nextPageToken,
         @JsonProperty("requests") List<InboxRequest> requests) {}

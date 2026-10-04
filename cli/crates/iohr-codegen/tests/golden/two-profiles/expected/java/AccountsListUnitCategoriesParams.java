@@ -2,14 +2,12 @@
 package iohr;
 
 /**
- * The query parameters of <code>GET /v1/webhooks/inboxes</code>.
+ * The query parameters of <code>GET /v1/accounts/units/categories</code>.
  *
- * @param accountId <code>account_id</code>; <code>null</code> to leave it out
  * @param pageSize <code>page_size</code>; <code>null</code> to leave it out
  * @param pageToken <code>page_token</code>; <code>null</code> to leave it out
  */
-public record EventsListInboxesParams(
-        String accountId,
+public record AccountsListUnitCategoriesParams(
         Integer pageSize,
         String pageToken) {
 
@@ -22,24 +20,12 @@ public record EventsListInboxesParams(
         return new Builder();
     }
 
-    /** Builds a <code>EventsListInboxesParams</code>. */
+    /** Builds a <code>AccountsListUnitCategoriesParams</code>. */
     public static final class Builder {
-        private String accountId;
         private Integer pageSize;
         private String pageToken;
 
         private Builder() {}
-
-        /**
-         * Sets <code>accountId</code>.
-         *
-         * @param accountId the value
-         * @return this builder
-         */
-        public Builder accountId(String accountId) {
-            this.accountId = accountId;
-            return this;
-        }
 
         /**
          * Sets <code>pageSize</code>.
@@ -66,10 +52,10 @@ public record EventsListInboxesParams(
         /**
          * The value.
          *
-         * @return the <code>EventsListInboxesParams</code>
+         * @return the <code>AccountsListUnitCategoriesParams</code>
          */
-        public EventsListInboxesParams build() {
-            return new EventsListInboxesParams(accountId, pageSize, pageToken);
+        public AccountsListUnitCategoriesParams build() {
+            return new AccountsListUnitCategoriesParams(pageSize, pageToken);
         }
     }
 }

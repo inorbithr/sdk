@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * <code>iohr.radar.v1.GetDigestResponse</code>
  *
- * @param digest the <code>digest</code> field; <code>null</code> when the answer leaves it out
+ * @param digest the <code>digest</code> field; <code>null</code> when unset, and then left out on the wire
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record GetDigestResponse(

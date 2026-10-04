@@ -67,7 +67,8 @@ pub struct Field {
     pub name: String,
     /// The type.
     pub ty: Type,
-    /// Whether the answer always carries it.
+    /// Whether the document marks it `required`: an answer always carries it. Nothing
+    /// in a request is required (core #218), so a request leaves out what is unset.
     pub required: bool,
     /// Whether it may be `null` on the wire.
     pub nullable: bool,
@@ -286,10 +287,10 @@ fn doc_of(schema: &Value) -> String {
         .unwrap_or_default()
 }
 
-/// N2 marks every field of a transcoded message required, and the gateway does send
-/// every scalar. A field that is itself a message (a `$ref` to an object) is left out
-/// of the answer when it was never set, so on the wire it is optional: every target
-/// reads a missing one as no value.
+/// A field that is itself a message (a `$ref` to an object) has presence: the gateway
+/// leaves it out of the answer when it was never set, and its document never lists it
+/// `required` (core #218). This keeps that true for a document that says otherwise (an
+/// older or hand-written one): every target reads a missing message as no value.
 pub fn relax_message_fields(schemas: &mut Value) {
     let Value::Object(all) = schemas else {
         return;

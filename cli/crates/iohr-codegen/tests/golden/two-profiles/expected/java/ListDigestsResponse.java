@@ -9,7 +9,9 @@ import java.util.List;
  * <code>iohr.radar.v1.ListDigestsResponse</code>
  *
  * @param digests the <code>digests</code> field
+ * @param nextPageToken the <code>next_page_token</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ListDigestsResponse(
-        @JsonProperty("digests") List<Digest> digests) {}
+        @JsonProperty("digests") List<Digest> digests,
+        @JsonProperty("next_page_token") String nextPageToken) {}

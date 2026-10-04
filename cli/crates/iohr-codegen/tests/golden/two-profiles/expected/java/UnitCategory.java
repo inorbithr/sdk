@@ -8,16 +8,16 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * <code>iohr.accounts.v1.UnitCategory</code>
  *
- * @param description the <code>description</code> field
- * @param name the <code>name</code> field
- * @param unitsPer1kTokens the <code>units_per_1k_tokens</code> field
- * @param unitsPerCall the <code>units_per_call</code> field
- * @param updatedAt the <code>updated_at</code> field
+ * @param description the <code>description</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param name the <code>name</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param unitsPer1kTokens the <code>units_per_1k_tokens</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param unitsPerCall the <code>units_per_call</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param updatedAt the <code>updated_at</code> field; <code>null</code> when unset, and then left out on the wire
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record UnitCategory(
         @JsonProperty("description") String description,
         @JsonProperty("name") String name,
-        @JsonProperty("units_per_1k_tokens") @JsonFormat(shape = JsonFormat.Shape.STRING) long unitsPer1kTokens,
-        @JsonProperty("units_per_call") @JsonFormat(shape = JsonFormat.Shape.STRING) long unitsPerCall,
+        @JsonProperty("units_per_1k_tokens") @JsonFormat(shape = JsonFormat.Shape.STRING) Long unitsPer1kTokens,
+        @JsonProperty("units_per_call") @JsonFormat(shape = JsonFormat.Shape.STRING) Long unitsPerCall,
         @JsonProperty("updated_at") String updatedAt) {}

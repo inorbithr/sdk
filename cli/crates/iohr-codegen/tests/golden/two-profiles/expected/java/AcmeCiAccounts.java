@@ -2,7 +2,9 @@
 package iohr;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
+import hr.inorbit.sdk.codegen.Codegen;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -100,10 +102,30 @@ public final class AcmeCiAccounts {
     /**
      * <code>GET /v1/accounts/units/categories</code>; needs scope <code>usage:read</code>. Transcoded from <code>/iohr.accounts.v1.AccountsService/ListUnitCategories</code> on the <code>accounts</code> backend.
      *
+     * @param params the query parameters
+     * @return the answer, typed, and the raw one
+     */
+    public Response<ListUnitCategoriesResponse> listUnitCategories(AccountsListUnitCategoriesParams params) {
+        return Operations.listUnitCategories(client, params);
+    }
+
+    /**
+     * <code>GET /v1/accounts/units/categories</code>; needs scope <code>usage:read</code>. Transcoded from <code>/iohr.accounts.v1.AccountsService/ListUnitCategories</code> on the <code>accounts</code> backend. On the client's executor.
+     *
+     * @param params the query parameters
+     * @return the answer, when it arrives
+     */
+    public CompletableFuture<Response<ListUnitCategoriesResponse>> listUnitCategoriesAsync(AccountsListUnitCategoriesParams params) {
+        return Operations.listUnitCategoriesAsync(client, params);
+    }
+
+    /**
+     * <code>GET /v1/accounts/units/categories</code>; needs scope <code>usage:read</code>. Transcoded from <code>/iohr.accounts.v1.AccountsService/ListUnitCategories</code> on the <code>accounts</code> backend.
+     *
      * @return the answer, typed, and the raw one
      */
     public Response<ListUnitCategoriesResponse> listUnitCategories() {
-        return Operations.listUnitCategories(client);
+        return Operations.listUnitCategories(client, AccountsListUnitCategoriesParams.builder().build());
     }
 
     /**
@@ -112,6 +134,28 @@ public final class AcmeCiAccounts {
      * @return the answer, when it arrives
      */
     public CompletableFuture<Response<ListUnitCategoriesResponse>> listUnitCategoriesAsync() {
-        return Operations.listUnitCategoriesAsync(client);
+        return Operations.listUnitCategoriesAsync(client, AccountsListUnitCategoriesParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/units/categories</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<UnitCategory> allListUnitCategories(AccountsListUnitCategoriesParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listUnitCategories(client, new AccountsListUnitCategoriesParams(params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.categories(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/accounts/units/categories</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<UnitCategory> allListUnitCategories() {
+        return allListUnitCategories(AccountsListUnitCategoriesParams.builder().build());
     }
 }

@@ -15,7 +15,7 @@ import java.util.List;
  * @param checked the <code>checked</code> field
  * @param createdAt the <code>created_at</code> field
  * @param drill the <code>drill</code> field
- * @param drillCode the <code>drill_code</code> field; <code>null</code> when the answer leaves it out
+ * @param drillCode the <code>drill_code</code> field; <code>null</code> when unset, and then left out on the wire
  * @param id the <code>id</code> field
  * @param itemCount the <code>item_count</code> field
  * @param lang the <code>lang</code> field

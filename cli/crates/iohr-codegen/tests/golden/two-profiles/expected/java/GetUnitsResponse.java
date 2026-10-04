@@ -14,7 +14,7 @@ import java.util.List;
  * @param days the <code>days</code> field
  * @param granted the <code>granted</code> field
  * @param month the <code>month</code> field
- * @param plan the <code>plan</code> field; <code>null</code> when the answer leaves it out
+ * @param plan the <code>plan</code> field; <code>null</code> when unset, and then left out on the wire
  * @param remaining the <code>remaining</code> field
  * @param resetsAt the <code>resets_at</code> field
  * @param usage the <code>usage</code> field

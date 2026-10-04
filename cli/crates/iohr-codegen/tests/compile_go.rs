@@ -87,7 +87,7 @@ func main() {
 	_, _ = ci.Accounts().GetMe(ctx)
 	from := "2026-09-01"
 	_, _ = ci.Accounts().GetUsage(ctx, "acc_1", &models.AccountsGetUsageParams{From: &from})
-	r, err := ci.Events().CreateEndpoint(ctx, models.CreateEndpointRequest{URL: "https://example.com/hook"})
+	r, err := ci.Events().CreateEndpoint(ctx, models.CreateEndpointRequest{URL: inorbit.Ptr("https://example.com/hook")})
 	if err == nil {
 		_ = r.Value.Secret
 	}
