@@ -37,7 +37,16 @@ The repository went public on 2026-10-01. These items waited for that.
 | Rust | `rust/vX.Y.Z` | `cargo publish` via `crates-io-auth-action` | `release-crates` |
 | TypeScript | `typescript/vX.Y.Z` | `npm stage publish` (provenance automatic), then a maintainer approves it; `jsr publish` | `release-npm` |
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
+| C# | `csharp/vX.Y.Z` | none yet (M4b): release-please only versions it, the `.csproj` `Version` | none |
+| Java | `java/vX.Y.Z` | none yet (M4b): release-please only versions it, `pom.xml` and `Client.SDK_VERSION` | none |
 | Command line | `iohr/vX.Y.Z` | builds six targets (`cli-build.yml`), attests every file, attaches archives, `.deb`, `.msi`, SBOMs and `SHA256SUMS` to the release; then runs the installers against it and opens the formula PR on `inorbithr/homebrew-tap` (release App token limited to the tap) ([ADR 0010](adr/0010-releasing-the-command-line.md)) | `release-cli` |
+
+C# and Java follow every change and carry the same version as the other four, so their
+registry release is one step once M4b lands: `IsPackable` stays `false` and the POM has no
+`distributionManagement` until then, and no job uploads them. A version the four take
+together is set once in `release-please-config.json` (`release-as` on each package,
+removed in the next pull request after the release); a `Release-As:` footer would also
+move every other component the commit touches, the command line included.
 
 ## The command line's channels
 

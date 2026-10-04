@@ -25,12 +25,14 @@
       "component": "go",
       "package-name": "github.com/inorbithr/sdk/go",
       "initial-version": "0.1.0",
+      "release-as": "0.2.0",
       "extra-files": ["version.go"]
     },
     "rust": {
       "release-type": "rust",
       "component": "rust",
       "package-name": "inorbithr",
+      "release-as": "0.2.0",
       "extra-files": [
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" }
       ]
@@ -40,6 +42,7 @@
       "component": "typescript",
       "package-name": "@inorbithr/sdk",
       "initial-version": "0.1.0",
+      "release-as": "0.2.0",
       "extra-files": [
         { "type": "json", "path": "jsr.json", "jsonpath": "$.version" },
         "src/version.ts"
@@ -50,14 +53,30 @@
       "component": "python",
       "package-name": "inorbithr",
       "initial-version": "0.1.0",
+      "release-as": "0.2.0",
       "extra-files": [
         { "type": "toml", "path": "uv.lock", "jsonpath": "$.package[?(@.name.value==='inorbithr')].version" }
       ]
+    },
+    "csharp": {
+      "release-type": "simple",
+      "component": "csharp",
+      "package-name": "InOrbit.Sdk",
+      "release-as": "0.2.0",
+      "extra-files": ["src/InOrbit.Sdk/InOrbit.Sdk.csproj"]
+    },
+    "java": {
+      "release-type": "simple",
+      "component": "java",
+      "package-name": "hr.inorbit:inorbit-sdk",
+      "release-as": "0.2.0",
+      "extra-files": ["pom.xml", "src/main/java/hr/inorbit/sdk/Client.java"]
     },
     "cli": {
       "release-type": "simple",
       "component": "iohr",
       "package-name": "iohr",
+      "release-as": "0.1.0-alpha.5",
       "versioning": "prerelease",
       "prerelease": true,
       "prerelease-type": "alpha",
