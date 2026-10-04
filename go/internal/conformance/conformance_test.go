@@ -37,6 +37,7 @@ type testCase struct {
 		Args       map[string]any `json:"args"`
 		Repeat     int            `json:"repeat"`
 		Concurrent int            `json:"concurrent"`
+		Take       int            `json:"take"`
 	} `json:"action"`
 	Client struct {
 		MaxRetries *int     `json:"max_retries"`
@@ -44,9 +45,12 @@ type testCase struct {
 		KeyID      string   `json:"key_id"`
 		KeySecret  string   `json:"key_secret"`
 		Scopes     []string `json:"scopes"`
+		Streams    string   `json:"streams"`
+		IdleMS     int      `json:"stream_idle_timeout_ms"`
 	} `json:"client"`
 	Expect struct {
-		OK    any `json:"ok"`
+		OK    any   `json:"ok"`
+		Items []any `json:"items"`
 		Error *struct {
 			Kind            string `json:"kind"`
 			Code            string `json:"code"`
@@ -141,6 +145,35 @@ func str(args map[string]any, k string) string {
 		return fmt.Sprint(v)
 	}
 	return ""
+}
+
+// stream runs a streaming action through the generated public surface: the items it
+// yielded, as wire JSON, and the error that ended it.
+func stream(ctx context.Context, api *public.Client, op string, args map[string]any, take int) ([]any, error) {
+	if op != "events.stream_events" {
+		return nil, fmt.Errorf("the conformance schema names a stream this driver does not know: %s", op)
+	}
+	p := &models.EventsStreamEventsParams{}
+	if v := str(args, "types"); v != "" {
+		p.Types = &v
+	}
+	if v := str(args, "account_id"); v != "" {
+		p.AccountID = &v
+	}
+	var items []any
+	for ev, err := range api.Events().StreamEvents(ctx, p) {
+		if err != nil {
+			return items, err
+		}
+		b, _ := json.Marshal(ev)
+		var item any
+		_ = json.Unmarshal(b, &item)
+		items = append(items, item)
+		if take > 0 && len(items) >= take {
+			break
+		}
+	}
+	return items, nil
 }
 
 // call runs an action through the generated public surface.
@@ -263,7 +296,7 @@ func TestEveryCasePasses(t *testing.T) {
 			t.Fatalf("%s: loading answered %d", name, status)
 		}
 		c := loaded.Case
-		if contains(c.Pending, "go") || c.Area == "sse" || c.Area == "socket" {
+		if contains(c.Pending, "go") {
 			t.Logf("skip %s: pending for go", name)
 			continue
 		}
@@ -278,11 +311,42 @@ func TestEveryCasePasses(t *testing.T) {
 		if c.Client.TimeoutMS > 0 {
 			opts = append(opts, inorbit.WithTimeout(time.Duration(c.Client.TimeoutMS)*time.Millisecond))
 		}
+		if c.Client.Streams != "" {
+			opts = append(opts, inorbit.WithStreams(inorbit.Streams(c.Client.Streams)))
+		}
+		if c.Client.IdleMS > 0 {
+			opts = append(opts, inorbit.WithStreamIdleTimeout(time.Duration(c.Client.IdleMS)*time.Millisecond))
+		}
 		client, err := inorbit.NewClient(opts...)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		api := public.New(client)
+		if c.Area == "sse" || c.Area == "socket" {
+			items, err := stream(context.Background(), api, c.Action.Op, c.Action.Args, c.Action.Take)
+			// The socket's close and the server's verdict settle a moment after the stream.
+			time.Sleep(50 * time.Millisecond)
+			var v verdict
+			getJSON(t, "GET", url+"/_result", nil, &v)
+			problems := verdictProblems(c, v)
+			if c.Expect.Items != nil && !subset(c.Expect.Items, orEmpty(items)) {
+				problems = append(problems, fmt.Sprintf("items: want %v, got %v", c.Expect.Items, items))
+			}
+			switch {
+			case err != nil && c.Expect.Error != nil:
+				problems = append(problems, checkError(err, c.Expect.Error.Kind, c.Expect.Error.Code, c.Expect.Error.Status, c.Expect.Error.MessageContains, c.Expect.Error.MessageExcludes)...)
+			case err != nil:
+				problems = append(problems, "want the stream to end cleanly, got "+err.Error())
+			case c.Expect.Error != nil:
+				problems = append(problems, "want an error, the stream ended cleanly")
+			}
+			if len(problems) == 0 {
+				t.Logf("pass %s", name)
+			} else {
+				failed = append(failed, name+":\n  "+strings.Join(problems, "\n  "))
+			}
+			continue
+		}
 		type result struct {
 			raw *inorbit.RawResponse
 			err error
@@ -306,16 +370,7 @@ func TestEveryCasePasses(t *testing.T) {
 		}
 		var v verdict
 		getJSON(t, "GET", url+"/_result", nil, &v)
-		var problems []string
-		if v.Status != "pass" {
-			problems = append(problems, fmt.Sprintf("server: %s mismatch=%v next=%v", v.Status, v.Mismatch, v.Next))
-		}
-		if c.Expect.Attempts != nil && v.Attempts != *c.Expect.Attempts {
-			problems = append(problems, fmt.Sprintf("attempts: want %d, got %d", *c.Expect.Attempts, v.Attempts))
-		}
-		if c.Expect.TokenExchanges != nil && v.TokenExchanges != *c.Expect.TokenExchanges {
-			problems = append(problems, fmt.Sprintf("token_exchanges: want %d, got %d", *c.Expect.TokenExchanges, v.TokenExchanges))
-		}
+		problems := verdictProblems(c, v)
 		for _, r := range results {
 			switch {
 			case r.err == nil && c.Expect.OK != nil:
@@ -341,6 +396,29 @@ func TestEveryCasePasses(t *testing.T) {
 	if len(failed) > 0 {
 		t.Fatal(strings.Join(failed, "\n"))
 	}
+}
+
+// verdictProblems compares the server's verdict with what the case expects.
+func verdictProblems(c testCase, v verdict) []string {
+	var problems []string
+	if v.Status != "pass" {
+		problems = append(problems, fmt.Sprintf("server: %s mismatch=%v next=%v", v.Status, v.Mismatch, v.Next))
+	}
+	if c.Expect.Attempts != nil && v.Attempts != *c.Expect.Attempts {
+		problems = append(problems, fmt.Sprintf("attempts: want %d, got %d", *c.Expect.Attempts, v.Attempts))
+	}
+	if c.Expect.TokenExchanges != nil && v.TokenExchanges != *c.Expect.TokenExchanges {
+		problems = append(problems, fmt.Sprintf("token_exchanges: want %d, got %d", *c.Expect.TokenExchanges, v.TokenExchanges))
+	}
+	return problems
+}
+
+// orEmpty is items as a JSON array, empty rather than nil.
+func orEmpty(items []any) []any {
+	if items == nil {
+		return []any{}
+	}
+	return items
 }
 
 func checkError(err error, wantKind, wantCode string, wantStatus int, contains, excludes string) []string {

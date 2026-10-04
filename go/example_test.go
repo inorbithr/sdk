@@ -11,6 +11,7 @@ import (
 
 	inorbit "github.com/inorbithr/sdk/go"
 	"github.com/inorbithr/sdk/go/public"
+	"github.com/inorbithr/sdk/go/public/models"
 )
 
 // The examples call the real API, so `go test` compiles them without running them.
@@ -108,5 +109,24 @@ func Example_pagination() {
 			log.Fatal(err)
 		}
 		fmt.Println(delivery.ID)
+	}
+}
+
+func ExampleStream() {
+	// A key with events:read. Each event arrives as it happens; an error ends the
+	// stream, and breaking out of the loop or ending ctx closes it. WithStreams
+	// (StreamsSocket) carries every stream of the client over one /v1/ws socket instead.
+	c, err := inorbit.FromEnv("", inorbit.WithStreams(inorbit.StreamsSSE))
+	if err != nil {
+		log.Fatal(err)
+	}
+	types := "key.created"
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	for ev, err := range public.New(c).Events().StreamEvents(ctx, &models.EventsStreamEventsParams{Types: &types}) {
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(ev.Type, ev.ID)
 	}
 }

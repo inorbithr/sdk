@@ -603,6 +603,15 @@ type AccountsListUnitCategoriesParams struct {
 	PageToken *string
 }
 
+// EventsStreamEventsParams holds the query parameters of GET /v1/events/events.
+type EventsStreamEventsParams struct {
+	// Types is the types parameter.
+	Types *string
+
+	// AccountID is the account_id parameter.
+	AccountID *string
+}
+
 // EventsListEventTypesParams holds the query parameters of GET /v1/events/types.
 type EventsListEventTypesParams struct {
 	// PageSize is the page_size parameter.

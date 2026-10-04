@@ -36,6 +36,8 @@ go/
   auth.go                TokenProvider, client credentials (single flight), static token
   errors.go              APIError, Code, Detail; errors.As targets
   retry.go, hooks.go, int64.go
+  stream.go              Stream, server-sent events (parser, idle timeout), the GET that opens a stream
+  socket.go, ws.go       the /v1/ws socket: one per client, reconnect and re-issue; a small RFC 6455 client
   codegen/               what generated surfaces import (Version, PathSegment, Pages)
   slog.go                SlogHook: log/slog records per attempt, nothing a call carries
   public/                written by iohr; never edit
@@ -59,7 +61,12 @@ go/
   single flight) run in a `testing/synctest` bubble with an in-memory transport, so a
   minute's wait is exact and instant; a real socket would stop the bubble's clock.
 - `codegen` is a contract with `iohr`: adding what new surfaces need adds a version
-  constant (`V2` added `Pages`) and keeps the old ones, so an old surface still builds.
+  constant (`V2` added `Pages`, `V3` streams: `Stream`, `Operation.RPC` and `Fields`)
+  and keeps the old ones, so an old surface still builds.
+- Streams follow docs/design.md section 7 and the `sse/` and `socket/` conformance
+  cases. The WebSocket client is ours (`ws.go`, RFC 6455, client side only): the
+  upgrade goes through the caller's `http.Client`, so its proxy and TLS settings hold,
+  and the module stays on the standard library.
 - A hook never sees or logs a header, body, query value or token; `SlogHook` logs the
   operation's name, not the bound path.
 - Never move or delete a released tag; retract instead (`docs/releasing.md`).
