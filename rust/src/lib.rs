@@ -41,6 +41,7 @@ mod pages;
 mod profile;
 mod retry;
 mod secret;
+mod timestamp;
 
 /// The public surface: every operation the public API offers, generated into this
 /// crate by `iohr sdk generate` from `spec/openapi.json` (ADR 0011). Import
@@ -60,6 +61,7 @@ pub use int64::Int64;
 pub use pages::Pages;
 pub use profile::{Profile, Public};
 pub use secret::Secret;
+pub use timestamp::parse_timestamp;
 
 /// What a generated surface imports: the client, the profile types, the operation
 /// builder and the error.

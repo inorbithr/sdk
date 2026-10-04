@@ -74,10 +74,10 @@ class Change(_Model):
 class CreateEndpointRequest(_Model):
     """`iohr.events.v1.CreateEndpointRequest`"""
 
-    account_id: str
-    description: str
-    event_types: list[str]
-    url: str
+    account_id: str | None = None
+    description: str | None = None
+    event_types: list[str] | None = None
+    url: str | None = None
 
 
 class CreateEndpointResponse(_Model):
@@ -90,7 +90,7 @@ class CreateEndpointResponse(_Model):
 class CreateInboxRequest(_Model):
     """`iohr.events.v1.CreateInboxRequest`"""
 
-    account_id: str
+    account_id: str | None = None
 
 
 class CreateInboxResponse(_Model):
@@ -293,17 +293,20 @@ class ListDigestsResponse(_Model):
     """`iohr.radar.v1.ListDigestsResponse`"""
 
     digests: list[Digest]
+    next_page_token: str
 
 
 class ListEndpointsResponse(_Model):
     """`iohr.events.v1.ListEndpointsResponse`"""
 
     endpoints: list[Endpoint]
+    next_page_token: str
 
 
 class ListEventTypesResponse(_Model):
     """`iohr.events.v1.ListEventTypesResponse`"""
 
+    next_page_token: str
     types: list[EventType]
 
 
@@ -311,6 +314,7 @@ class ListInboxRequestsResponse(_Model):
     """`iohr.events.v1.ListInboxRequestsResponse`"""
 
     inbox: Inbox | None = None
+    next_page_token: str
     requests: list[InboxRequest]
 
 
@@ -318,18 +322,21 @@ class ListInboxesResponse(_Model):
     """`iohr.events.v1.ListInboxesResponse`"""
 
     inboxes: list[Inbox]
+    next_page_token: str
 
 
 class ListItemsResponse(_Model):
     """`iohr.radar.v1.ListItemsResponse`"""
 
     items: list[Item]
+    next_page_token: str
 
 
 class ListUnitCategoriesResponse(_Model):
     """`iohr.accounts.v1.ListUnitCategoriesResponse`"""
 
     categories: list[UnitCategory]
+    next_page_token: str
 
 
 class Me(_Model):
@@ -366,7 +373,7 @@ class Plan(_Model):
 
 
 class Problem(_Model):
-    """`{"code","error","details"}`: the REST body and the SSE `error` payload."""
+    """`{"code","error","details","request_id"}`: the REST body and the SSE `error` payload."""
 
     code: Code
     """The slug."""
@@ -374,6 +381,8 @@ class Problem(_Model):
     """Typed details."""
     error: str
     """The sentence."""
+    request_id: str
+    """The request's id, the `x-request-id` the answer carries: name it when asking about a call. Empty on a socket or MQTT frame, whose own id names the call."""
 
 
 class RetryDeliveryResponse(_Model):
@@ -408,11 +417,11 @@ class StreamEventsResponse(_Model):
 class UnitCategory(_Model):
     """`iohr.accounts.v1.UnitCategory`"""
 
-    description: str
-    name: str
-    units_per_1k_tokens: Int64
-    units_per_call: Int64
-    updated_at: str
+    description: str | None = None
+    name: str | None = None
+    units_per_1k_tokens: Int64 | None = None
+    units_per_call: Int64 | None = None
+    updated_at: str | None = None
 
 
 class UnitDay(_Model):
@@ -427,8 +436,12 @@ class UnitUsage(_Model):
 
     calls: Int64
     category: str
+    client_errors: Int64
     key_id: str
     key_name: str
+    p50_ms: int
+    p95_ms: int
+    platform_errors: Int64
     rpc: str
     tokens: Int64
     units: Int64
@@ -439,11 +452,11 @@ class UnitUsage(_Model):
 class UpdateEndpointRequest(_Model):
     """`iohr.events.v1.UpdateEndpointRequest`"""
 
-    description: str
-    enabled: bool
-    endpoint_id: str
-    event_types: list[str]
-    url: str
+    description: str | None = None
+    enabled: bool | None = None
+    endpoint_id: str | None = None
+    event_types: list[str] | None = None
+    url: str | None = None
 
 
 class UsageRow(_Model):

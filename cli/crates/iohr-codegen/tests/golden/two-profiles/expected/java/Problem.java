@@ -8,14 +8,16 @@ import hr.inorbit.sdk.errors.Detail;
 import java.util.List;
 
 /**
- * <code>{"code","error","details"}</code>: the REST body and the SSE <code>error</code> payload.
+ * <code>{"code","error","details","request_id"}</code>: the REST body and the SSE <code>error</code> payload.
  *
  * @param code The slug.
  * @param details Typed details.
  * @param error The sentence.
+ * @param requestId The request's id, the <code>x-request-id</code> the answer carries: name it when asking about a call. Empty on a socket or MQTT frame, whose own id names the call.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Problem(
         @JsonProperty("code") Code code,
         @JsonProperty("details") List<Detail> details,
-        @JsonProperty("error") String error) {}
+        @JsonProperty("error") String error,
+        @JsonProperty("request_id") String requestId) {}

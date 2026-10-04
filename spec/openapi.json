@@ -33,15 +33,15 @@
           }
         },
         "required": [
-          "created_at",
-          "erase_after",
           "id",
           "kind",
+          "slug",
           "name",
           "plan",
+          "status",
           "role",
-          "slug",
-          "status"
+          "created_at",
+          "erase_after"
         ],
         "type": "object"
       },
@@ -86,17 +86,17 @@
           }
         },
         "required": [
-          "client_id",
-          "created_at",
-          "created_by",
-          "expires_at",
           "id",
-          "kind",
-          "last_used_at",
+          "client_id",
           "name",
+          "secret_hint",
+          "created_by",
+          "created_at",
+          "last_used_at",
           "revoked_at",
           "scopes",
-          "secret_hint"
+          "kind",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -137,15 +137,14 @@
           }
         },
         "required": [
-          "error_class",
+          "status",
+          "ok",
           "executor",
           "latency_ms",
-          "message",
-          "ok",
-          "output",
-          "started_at",
-          "status",
           "status_code",
+          "error_class",
+          "message",
+          "started_at",
           "use_id"
         ],
         "type": "object"
@@ -163,11 +162,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "domain",
-          "org_id",
-          "scope"
-        ],
         "type": "object"
       },
       "AddDomainResponse": {
@@ -177,9 +171,6 @@
             "$ref": "#/components/schemas/Domain"
           }
         },
-        "required": [
-          "domain"
-        ],
         "type": "object"
       },
       "Agent": {
@@ -189,6 +180,13 @@
             "type": "string"
           },
           "arch": {
+            "type": "string"
+          },
+          "checks": {
+            "$ref": "#/components/schemas/AgentChecks"
+          },
+          "clock_skew_ms": {
+            "format": "int64",
             "type": "string"
           },
           "domains": {
@@ -218,6 +216,14 @@
           "revoked_at": {
             "type": "string"
           },
+          "rtt_last_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "rtt_p95_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
           "status": {
             "type": "string"
           },
@@ -227,17 +233,45 @@
         },
         "required": [
           "agent_id",
-          "arch",
-          "domains",
-          "enrolled_at",
-          "environment",
-          "last_seen_at",
           "name",
-          "os",
-          "policy_hash",
-          "revoked_at",
+          "environment",
+          "domains",
           "status",
-          "version"
+          "version",
+          "os",
+          "arch",
+          "policy_hash",
+          "enrolled_at",
+          "last_seen_at",
+          "revoked_at"
+        ],
+        "type": "object"
+      },
+      "AgentChecks": {
+        "description": "`iohr.agents.v1.AgentChecks`",
+        "properties": {
+          "accepted": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "checks_hash": {
+            "type": "string"
+          },
+          "reconciled_at": {
+            "type": "string"
+          },
+          "rejected": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedCheck"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "checks_hash",
+          "accepted",
+          "rejected",
+          "reconciled_at"
         ],
         "type": "object"
       },
@@ -257,12 +291,6 @@
             "$ref": "#/components/schemas/Struct"
           }
         },
-        "required": [
-          "action",
-          "connection_id",
-          "org_id",
-          "params"
-        ],
         "type": "object"
       },
       "CallActionResponse": {
@@ -272,9 +300,6 @@
             "$ref": "#/components/schemas/ActionResult"
           }
         },
-        "required": [
-          "result"
-        ],
         "type": "object"
       },
       "CallToolRequest": {
@@ -287,10 +312,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "args_json",
-          "name"
-        ],
         "type": "object"
       },
       "CallToolResponse": {
@@ -311,10 +332,10 @@
           }
         },
         "required": [
-          "ms",
-          "ok",
+          "tool",
           "result_json",
-          "tool"
+          "ok",
+          "ms"
         ],
         "type": "object"
       },
@@ -366,18 +387,17 @@
           }
         },
         "required": [
-          "advanced",
-          "after",
-          "area",
-          "example",
+          "title",
           "impact",
+          "area",
+          "url",
+          "what",
+          "production_impact",
+          "try_it",
           "novice",
           "practitioner",
-          "production_impact",
-          "title",
-          "try_it",
-          "url",
-          "what"
+          "advanced",
+          "after"
         ],
         "type": "object"
       },
@@ -403,10 +423,10 @@
           }
         },
         "required": [
-          "error_class",
-          "latency_ms",
           "ok",
+          "latency_ms",
           "status_code",
+          "error_class",
           "tls_expires_at"
         ],
         "type": "object"
@@ -421,10 +441,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "domain",
-          "org_id"
-        ],
         "type": "object"
       },
       "CheckDomainResponse": {
@@ -444,9 +460,8 @@
           }
         },
         "required": [
-          "domain",
-          "resolvers",
-          "status"
+          "status",
+          "resolvers"
         ],
         "type": "object"
       },
@@ -472,7 +487,27 @@
           "method_not_allowed",
           "unprocessable"
         ],
-        "type": "string"
+        "type": "string",
+        "x-http-status": {
+          "already_exists": 409,
+          "bad_request": 400,
+          "cancelled": 499,
+          "conflict": 409,
+          "failed_precondition": 400,
+          "forbidden": 403,
+          "internal": 500,
+          "method_not_allowed": 405,
+          "not_found": 404,
+          "payload_too_large": 413,
+          "quota_exceeded": 429,
+          "rate_limited": 429,
+          "timeout": 504,
+          "unauthenticated": 401,
+          "unavailable": 503,
+          "unimplemented": 501,
+          "unprocessable": 422,
+          "unsupported_media_type": 415
+        }
       },
       "ConfirmDomainRequest": {
         "description": "`iohr.accounts.v1.ConfirmDomainRequest`",
@@ -484,10 +519,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "domain",
-          "org_id"
-        ],
         "type": "object"
       },
       "ConfirmDomainResponse": {
@@ -497,9 +528,6 @@
             "$ref": "#/components/schemas/Domain"
           }
         },
-        "required": [
-          "domain"
-        ],
         "type": "object"
       },
       "Connection": {
@@ -559,21 +587,19 @@
           }
         },
         "required": [
-          "account_id",
-          "config",
-          "created_at",
-          "credential",
-          "description",
-          "executor",
-          "grants",
           "id",
+          "account_id",
           "kind",
-          "last_test_at",
-          "last_test_error",
-          "last_test_ok",
           "name",
-          "receive_url",
+          "description",
+          "config",
           "status",
+          "last_test_at",
+          "last_test_ok",
+          "last_test_error",
+          "receive_url",
+          "grants",
+          "created_at",
           "updated_at"
         ],
         "type": "object"
@@ -588,10 +614,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "kind"
-        ],
         "type": "object"
       },
       "CreateConnectionRequest": {
@@ -625,16 +647,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "config",
-          "description",
-          "executor",
-          "kind",
-          "name",
-          "org_id",
-          "secret",
-          "secret_ref"
-        ],
         "type": "object"
       },
       "CreateConnectionResponse": {
@@ -648,7 +660,6 @@
           }
         },
         "required": [
-          "connection",
           "webhook_secret"
         ],
         "type": "object"
@@ -672,12 +683,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "account_id",
-          "description",
-          "event_types",
-          "url"
-        ],
         "type": "object"
       },
       "CreateEndpointResponse": {
@@ -691,7 +696,6 @@
           }
         },
         "required": [
-          "endpoint",
           "secret"
         ],
         "type": "object"
@@ -715,12 +719,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "domains",
-          "environment",
-          "name",
-          "org_id"
-        ],
         "type": "object"
       },
       "CreateEnrollmentResponse": {
@@ -738,8 +736,8 @@
         },
         "required": [
           "enrollment_id",
-          "expires_at",
-          "token"
+          "token",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -750,9 +748,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "account_id"
-        ],
         "type": "object"
       },
       "CreateInboxResponse": {
@@ -762,9 +757,6 @@
             "$ref": "#/components/schemas/Inbox"
           }
         },
-        "required": [
-          "inbox"
-        ],
         "type": "object"
       },
       "CreateMonitorRequest": {
@@ -789,16 +781,11 @@
           },
           "params": {
             "$ref": "#/components/schemas/MonitorParams"
+          },
+          "rfc": {
+            "type": "string"
           }
         },
-        "required": [
-          "connection_id",
-          "fail_after",
-          "interval_secs",
-          "name",
-          "org_id",
-          "params"
-        ],
         "type": "object"
       },
       "CreateMonitorResponse": {
@@ -808,9 +795,6 @@
             "$ref": "#/components/schemas/Monitor"
           }
         },
-        "required": [
-          "monitor"
-        ],
         "type": "object"
       },
       "Credential": {
@@ -830,6 +814,84 @@
           "kind",
           "reference",
           "set_at"
+        ],
+        "type": "object"
+      },
+      "DeclaredCheck": {
+        "description": "`iohr.connections.v1.DeclaredCheck`",
+        "properties": {
+          "expect": {
+            "$ref": "#/components/schemas/DeclaredExpect"
+          },
+          "key": {
+            "type": "string"
+          },
+          "refuse_by": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DeclaredTarget"
+          }
+        },
+        "required": [
+          "surface",
+          "refuse_by",
+          "key",
+          "service"
+        ],
+        "type": "object"
+      },
+      "DeclaredExpect": {
+        "description": "`iohr.connections.v1.DeclaredExpect`",
+        "properties": {
+          "max_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "valid_for_days": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "max_ms",
+          "valid_for_days"
+        ],
+        "type": "object"
+      },
+      "DeclaredTarget": {
+        "description": "`iohr.connections.v1.DeclaredTarget`",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "host",
+          "port",
+          "tls"
         ],
         "type": "object"
       },
@@ -897,17 +959,17 @@
           }
         },
         "required": [
-          "attempts",
-          "created_at",
+          "id",
           "endpoint_id",
           "event_id",
           "event_type",
-          "id",
-          "last_error",
-          "last_latency_ms",
-          "last_status_code",
-          "next_attempt_at",
           "status",
+          "attempts",
+          "last_status_code",
+          "last_latency_ms",
+          "last_error",
+          "next_attempt_at",
+          "created_at",
           "updated_at"
         ],
         "type": "object"
@@ -931,10 +993,10 @@
           }
         },
         "required": [
-          "count",
           "error",
-          "last_at",
-          "status_code"
+          "status_code",
+          "count",
+          "last_at"
         ],
         "type": "object"
       },
@@ -962,11 +1024,11 @@
           }
         },
         "required": [
+          "start",
+          "succeeded",
           "failed",
           "p50_ms",
-          "p95_ms",
-          "start",
-          "succeeded"
+          "p95_ms"
         ],
         "type": "object"
       },
@@ -986,9 +1048,9 @@
           }
         },
         "required": [
-          "failed",
+          "type",
           "succeeded",
-          "type"
+          "failed"
         ],
         "type": "object"
       },
@@ -1153,26 +1215,25 @@
           }
         },
         "required": [
-          "ai_written",
-          "changed",
-          "changes",
-          "checked",
-          "created_at",
-          "drill",
-          "drill_code",
           "id",
-          "item_count",
-          "lang",
+          "week",
           "language",
-          "model",
-          "origin",
-          "published_at",
+          "lang",
+          "created_at",
+          "changed",
+          "why",
+          "drill",
           "script",
-          "status",
+          "item_count",
+          "model",
+          "ai_written",
           "stub",
           "summary",
-          "week",
-          "why"
+          "changes",
+          "status",
+          "published_at",
+          "origin",
+          "checked"
         ],
         "type": "object"
       },
@@ -1214,17 +1275,17 @@
           }
         },
         "required": [
-          "created_at",
-          "dns_provider",
           "domain",
-          "expires_at",
-          "last_checked_at",
-          "record_name",
-          "record_value",
           "scope",
           "status",
-          "unverified_reason",
-          "verified_at"
+          "record_name",
+          "record_value",
+          "dns_provider",
+          "created_at",
+          "verified_at",
+          "last_checked_at",
+          "expires_at",
+          "unverified_reason"
         ],
         "type": "object"
       },
@@ -1251,12 +1312,12 @@
           }
         },
         "required": [
-          "output",
-          "solution",
           "starter",
+          "solution",
+          "output",
+          "toolchain",
           "stub",
-          "tests",
-          "toolchain"
+          "tests"
         ],
         "type": "object"
       },
@@ -1306,18 +1367,18 @@
           }
         },
         "required": [
-          "created_at",
-          "description",
-          "disabled_reason",
-          "enabled",
-          "event_types",
-          "failed_24h",
           "id",
+          "url",
+          "description",
+          "event_types",
+          "enabled",
+          "disabled_reason",
+          "created_at",
+          "secret_rotated_at",
           "last_delivery_at",
           "last_delivery_status",
-          "secret_rotated_at",
           "succeeded_24h",
-          "url"
+          "failed_24h"
         ],
         "type": "object"
       },
@@ -1336,9 +1397,9 @@
           }
         },
         "required": [
-          "count",
           "day",
-          "type"
+          "type",
+          "count"
         ],
         "type": "object"
       },
@@ -1356,9 +1417,9 @@
           }
         },
         "required": [
+          "type",
           "description",
-          "schema",
-          "type"
+          "schema"
         ],
         "type": "object"
       },
@@ -1386,11 +1447,11 @@
         },
         "required": [
           "source",
-          "stderr",
           "stdout",
+          "stderr",
+          "toolchain",
           "stub",
-          "tests",
-          "toolchain"
+          "tests"
         ],
         "type": "object"
       },
@@ -1404,10 +1465,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "agent_id",
-          "kind"
-        ],
         "type": "object"
       },
       "Expect": {
@@ -1422,10 +1479,6 @@
             "type": "integer"
           }
         },
-        "required": [
-          "max_ms",
-          "status"
-        ],
         "type": "object"
       },
       "Field": {
@@ -1462,14 +1515,14 @@
           }
         },
         "required": [
-          "choices",
-          "default_value",
-          "description",
-          "max",
-          "min",
           "name",
+          "type",
+          "description",
           "required",
-          "type"
+          "choices",
+          "min",
+          "max",
+          "default_value"
         ],
         "type": "object"
       },
@@ -1480,9 +1533,6 @@
             "$ref": "#/components/schemas/Agent"
           }
         },
-        "required": [
-          "agent"
-        ],
         "type": "object"
       },
       "GetConnectionResponse": {
@@ -1492,9 +1542,6 @@
             "$ref": "#/components/schemas/Connection"
           }
         },
-        "required": [
-          "connection"
-        ],
         "type": "object"
       },
       "GetDeliveryStatsResponse": {
@@ -1546,15 +1593,15 @@
           }
         },
         "required": [
+          "range",
           "bucket",
           "buckets",
-          "errors",
+          "succeeded",
           "failed",
           "in_flight",
           "p50_ms",
           "p95_ms",
-          "range",
-          "succeeded",
+          "errors",
           "types"
         ],
         "type": "object"
@@ -1566,9 +1613,6 @@
             "$ref": "#/components/schemas/Digest"
           }
         },
-        "required": [
-          "digest"
-        ],
         "type": "object"
       },
       "GetDomainResponse": {
@@ -1578,9 +1622,6 @@
             "$ref": "#/components/schemas/Domain"
           }
         },
-        "required": [
-          "domain"
-        ],
         "type": "object"
       },
       "GetEventStatsResponse": {
@@ -1637,15 +1678,13 @@
           }
         },
         "required": [
-          "account",
-          "email",
-          "email_verified",
-          "key",
-          "name",
-          "stub",
+          "user_id",
           "subject",
+          "email",
+          "name",
+          "email_verified",
           "teams",
-          "user_id"
+          "stub"
         ],
         "type": "object"
       },
@@ -1656,9 +1695,6 @@
             "$ref": "#/components/schemas/Monitor"
           }
         },
-        "required": [
-          "monitor"
-        ],
         "type": "object"
       },
       "GetMonitorSummaryResponse": {
@@ -1684,12 +1720,9 @@
           }
         },
         "required": [
-          "health",
-          "last_failure",
-          "latency_ms",
-          "since",
           "state",
-          "uptime"
+          "health",
+          "since"
         ],
         "type": "object"
       },
@@ -1719,11 +1752,11 @@
           }
         },
         "required": [
-          "by",
           "from",
-          "groups",
+          "to",
+          "by",
           "rows",
-          "to"
+          "groups"
         ],
         "type": "object"
       },
@@ -1773,15 +1806,14 @@
         },
         "required": [
           "account_id",
-          "allowance",
-          "days",
-          "granted",
           "month",
-          "plan",
-          "remaining",
           "resets_at",
+          "allowance",
+          "granted",
+          "used",
+          "remaining",
           "usage",
-          "used"
+          "days"
         ],
         "type": "object"
       },
@@ -1799,8 +1831,8 @@
           }
         },
         "required": [
-          "plan",
-          "rows"
+          "rows",
+          "plan"
         ],
         "type": "object"
       },
@@ -1839,15 +1871,14 @@
           }
         },
         "required": [
-          "actions",
+          "id",
           "connection_id",
-          "consumer",
+          "actions",
+          "expires_at",
           "created_at",
           "created_by",
-          "expires_at",
-          "id",
-          "revoked_at",
-          "status"
+          "status",
+          "revoked_at"
         ],
         "type": "object"
       },
@@ -1868,10 +1899,10 @@
           }
         },
         "required": [
-          "created_at",
-          "expires_at",
           "id",
-          "url"
+          "url",
+          "created_at",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -1911,15 +1942,15 @@
           }
         },
         "required": [
-          "body",
-          "content_type",
-          "endpoint_id",
-          "headers",
           "id",
-          "method",
           "received_at",
+          "method",
+          "content_type",
+          "headers",
+          "body",
+          "size",
           "signature",
-          "size"
+          "endpoint_id"
         ],
         "type": "object"
       },
@@ -1951,12 +1982,12 @@
         },
         "required": [
           "id",
-          "language",
-          "published_at",
           "source",
-          "summary",
+          "language",
           "title",
-          "url"
+          "url",
+          "published_at",
+          "summary"
         ],
         "type": "object"
       },
@@ -1983,12 +2014,10 @@
           }
         },
         "required": [
-          "detail",
-          "finished_at",
           "job_id",
-          "refusal",
+          "status",
           "started_at",
-          "status"
+          "finished_at"
         ],
         "type": "object"
       },
@@ -2050,14 +2079,14 @@
           }
         },
         "required": [
-          "actions",
+          "name",
+          "title",
+          "description",
           "auth",
           "config",
-          "description",
-          "executors",
-          "name",
+          "actions",
           "test_action",
-          "title"
+          "executors"
         ],
         "type": "object"
       },
@@ -2099,15 +2128,15 @@
           }
         },
         "required": [
-          "class",
-          "description",
-          "executors",
           "name",
+          "description",
+          "class",
           "params",
-          "reads_private",
-          "reads_untrusted",
           "schema",
-          "sends_out"
+          "reads_untrusted",
+          "reads_private",
+          "sends_out",
+          "executors"
         ],
         "type": "object"
       },
@@ -2123,10 +2152,6 @@
             "type": "integer"
           }
         },
-        "required": [
-          "p50",
-          "p95"
-        ],
         "type": "object"
       },
       "ListAgentsResponse": {
@@ -2262,8 +2287,8 @@
           }
         },
         "required": [
-          "next_page_token",
-          "types"
+          "types",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -2300,8 +2325,8 @@
           }
         },
         "required": [
-          "next_page_token",
-          "uses"
+          "uses",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -2322,9 +2347,8 @@
           }
         },
         "required": [
-          "inbox",
-          "next_page_token",
-          "requests"
+          "requests",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -2399,8 +2423,8 @@
           }
         },
         "required": [
-          "next_page_token",
-          "runs"
+          "runs",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -2419,6 +2443,49 @@
         },
         "required": [
           "monitors",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListNotificationsResponse": {
+        "description": "`iohr.events.v1.ListNotificationsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            },
+            "type": "array"
+          },
+          "unread": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "notifications",
+          "next_page_token",
+          "unread"
+        ],
+        "type": "object"
+      },
+      "ListRequestsResponse": {
+        "description": "`iohr.accounts.v1.ListRequestsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/RequestEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "requests",
           "next_page_token"
         ],
         "type": "object"
@@ -2456,8 +2523,8 @@
           }
         },
         "required": [
-          "next_page_token",
-          "tools"
+          "tools",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -2490,9 +2557,6 @@
             "type": "array"
           }
         },
-        "required": [
-          "values"
-        ],
         "type": "object"
       },
       "Me": {
@@ -2570,6 +2634,12 @@
       "Monitor": {
         "description": "`iohr.connections.v1.Monitor`",
         "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "check": {
+            "$ref": "#/components/schemas/DeclaredCheck"
+          },
           "connection_id": {
             "type": "string"
           },
@@ -2593,6 +2663,9 @@
           "last_run_at": {
             "type": "string"
           },
+          "managed_by": {
+            "type": "string"
+          },
           "monitor_id": {
             "type": "string"
           },
@@ -2608,24 +2681,28 @@
           "paused_reason": {
             "type": "string"
           },
+          "rfc": {
+            "type": "string"
+          },
           "state": {
             "type": "string"
           }
         },
         "required": [
-          "connection_id",
-          "created_at",
-          "executor",
-          "fail_after",
-          "health",
-          "interval_secs",
-          "last_run_at",
           "monitor_id",
+          "connection_id",
           "name",
-          "next_run_at",
-          "params",
+          "interval_secs",
+          "fail_after",
+          "state",
+          "health",
           "paused_reason",
-          "state"
+          "last_run_at",
+          "next_run_at",
+          "created_at",
+          "managed_by",
+          "agent_id",
+          "rfc"
         ],
         "type": "object"
       },
@@ -2644,11 +2721,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "expect_status",
-          "max_ms",
-          "path"
-        ],
         "type": "object"
       },
       "MonitorRun": {
@@ -2679,13 +2751,42 @@
           }
         },
         "required": [
-          "at",
-          "error_class",
-          "latency_ms",
-          "ok",
           "run_id",
+          "at",
           "status",
-          "status_code"
+          "ok",
+          "latency_ms"
+        ],
+        "type": "object"
+      },
+      "Notification": {
+        "description": "`iohr.events.v1.Notification`",
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "occurred_at",
+          "data",
+          "read"
         ],
         "type": "object"
       },
@@ -2714,12 +2815,12 @@
           }
         },
         "required": [
-          "accounts",
+          "name",
+          "monthly_units",
           "at_zero",
           "description",
-          "monthly_units",
-          "name",
-          "updated_at"
+          "updated_at",
+          "accounts"
         ],
         "type": "object"
       },
@@ -2764,10 +2865,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "endpoint_id",
-          "since"
-        ],
         "type": "object"
       },
       "RecoverEndpointResponse": {
@@ -2786,8 +2883,8 @@
           }
         },
         "required": [
-          "created",
           "retried",
+          "created",
           "truncated"
         ],
         "type": "object"
@@ -2804,8 +2901,69 @@
         ],
         "type": "object"
       },
+      "RejectedCheck": {
+        "description": "`iohr.agents.v1.RejectedCheck`",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "reason"
+        ],
+        "type": "object"
+      },
       "RemoveDomainResponse": {
         "description": "`iohr.accounts.v1.RemoveDomainResponse`",
+        "type": "object"
+      },
+      "RequestEntry": {
+        "description": "`iohr.accounts.v1.RequestEntry`",
+        "properties": {
+          "at": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "key_id": {
+            "type": "string"
+          },
+          "key_name": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "person_name": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "rpc": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "key_id",
+          "key_name",
+          "person_name",
+          "rpc",
+          "outcome",
+          "code",
+          "duration_ms",
+          "request_id"
+        ],
         "type": "object"
       },
       "ResolverAnswer": {
@@ -2828,11 +2986,11 @@
           }
         },
         "required": [
-          "answered",
-          "dnssec",
           "name",
           "seen",
-          "value"
+          "value",
+          "answered",
+          "dnssec"
         ],
         "type": "object"
       },
@@ -2843,9 +3001,6 @@
             "$ref": "#/components/schemas/Delivery"
           }
         },
-        "required": [
-          "delivery"
-        ],
         "type": "object"
       },
       "RevokeAgentRequest": {
@@ -2858,10 +3013,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "agent_id",
-          "org_id"
-        ],
         "type": "object"
       },
       "RevokeAgentResponse": {
@@ -2871,9 +3022,6 @@
             "$ref": "#/components/schemas/Agent"
           }
         },
-        "required": [
-          "agent"
-        ],
         "type": "object"
       },
       "RevokeGrantResponse": {
@@ -2883,9 +3031,6 @@
             "$ref": "#/components/schemas/Grant"
           }
         },
-        "required": [
-          "grant"
-        ],
         "type": "object"
       },
       "RotateSecretResponse": {
@@ -2899,8 +3044,8 @@
           }
         },
         "required": [
-          "previous_expires_at",
-          "secret"
+          "secret",
+          "previous_expires_at"
         ],
         "type": "object"
       },
@@ -2929,15 +3074,6 @@
             "$ref": "#/components/schemas/Target"
           }
         },
-        "required": [
-          "agent_id",
-          "auth",
-          "expect",
-          "org_id",
-          "service",
-          "surface",
-          "target"
-        ],
         "type": "object"
       },
       "RunCheckResponse": {
@@ -2947,9 +3083,6 @@
             "$ref": "#/components/schemas/JobResult"
           }
         },
-        "required": [
-          "result"
-        ],
         "type": "object"
       },
       "SendTestResponse": {
@@ -2959,9 +3092,6 @@
             "$ref": "#/components/schemas/Delivery"
           }
         },
-        "required": [
-          "delivery"
-        ],
         "type": "object"
       },
       "StreamEventsResponse": {
@@ -2987,11 +3117,11 @@
           }
         },
         "required": [
-          "account_id",
-          "data",
           "id",
+          "type",
           "occurred_at",
-          "type"
+          "account_id",
+          "data"
         ],
         "type": "object"
       },
@@ -3005,9 +3135,6 @@
             "type": "object"
           }
         },
-        "required": [
-          "fields"
-        ],
         "type": "object"
       },
       "Target": {
@@ -3027,12 +3154,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "host",
-          "port",
-          "tls",
-          "url"
-        ],
         "type": "object"
       },
       "TeamEvent": {
@@ -3064,14 +3185,14 @@
           }
         },
         "required": [
-          "action",
-          "actor_name",
-          "actor_sub",
-          "after",
-          "at",
-          "before",
           "id",
-          "subject"
+          "at",
+          "actor_sub",
+          "actor_name",
+          "action",
+          "subject",
+          "before",
+          "after"
         ],
         "type": "object"
       },
@@ -3082,9 +3203,6 @@
             "$ref": "#/components/schemas/ActionResult"
           }
         },
-        "required": [
-          "result"
-        ],
         "type": "object"
       },
       "ToolInfo": {
@@ -3110,12 +3228,12 @@
           }
         },
         "required": [
-          "account_id",
-          "action",
-          "connection_id",
-          "description",
           "name",
-          "schema_json"
+          "description",
+          "schema_json",
+          "connection_id",
+          "action",
+          "account_id"
         ],
         "type": "object"
       },
@@ -3140,13 +3258,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "description",
-          "name",
-          "units_per_1k_tokens",
-          "units_per_call",
-          "updated_at"
-        ],
         "type": "object"
       },
       "UnitDay": {
@@ -3226,15 +3337,15 @@
           }
         },
         "required": [
-          "calls",
-          "client_errors",
           "day",
           "group",
-          "p50_ms",
-          "p95_ms",
-          "platform_errors",
+          "calls",
           "tokens",
-          "units"
+          "units",
+          "client_errors",
+          "platform_errors",
+          "p50_ms",
+          "p95_ms"
         ],
         "type": "object"
       },
@@ -3289,19 +3400,19 @@
           }
         },
         "required": [
-          "calls",
+          "rpc",
           "category",
-          "client_errors",
           "key_id",
           "key_name",
-          "p50_ms",
-          "p95_ms",
-          "platform_errors",
-          "rpc",
-          "tokens",
+          "calls",
           "units",
+          "tokens",
           "user_id",
-          "user_name"
+          "user_name",
+          "client_errors",
+          "platform_errors",
+          "p50_ms",
+          "p95_ms"
         ],
         "type": "object"
       },
@@ -3339,17 +3450,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "config",
-          "connection_id",
-          "description",
-          "name",
-          "org_id",
-          "paused",
-          "rotate_webhook_secret",
-          "secret",
-          "secret_ref"
-        ],
         "type": "object"
       },
       "UpdateConnectionResponse": {
@@ -3363,7 +3463,6 @@
           }
         },
         "required": [
-          "connection",
           "webhook_secret"
         ],
         "type": "object"
@@ -3390,13 +3489,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "description",
-          "enabled",
-          "endpoint_id",
-          "event_types",
-          "url"
-        ],
         "type": "object"
       },
       "UpdateMonitorRequest": {
@@ -3422,19 +3514,13 @@
           "params": {
             "$ref": "#/components/schemas/MonitorParams"
           },
+          "rfc": {
+            "type": "string"
+          },
           "state": {
             "type": "string"
           }
         },
-        "required": [
-          "fail_after",
-          "interval_secs",
-          "monitor_id",
-          "name",
-          "org_id",
-          "params",
-          "state"
-        ],
         "type": "object"
       },
       "UpdateMonitorResponse": {
@@ -3444,9 +3530,6 @@
             "$ref": "#/components/schemas/Monitor"
           }
         },
-        "required": [
-          "monitor"
-        ],
         "type": "object"
       },
       "Uptime": {
@@ -3465,11 +3548,6 @@
             "type": "number"
           }
         },
-        "required": [
-          "d30",
-          "d7",
-          "h24"
-        ],
         "type": "object"
       },
       "UsageRow": {
@@ -3490,10 +3568,10 @@
           }
         },
         "required": [
-          "amount",
           "day",
+          "service",
           "metric",
-          "service"
+          "amount"
         ],
         "type": "object"
       },
@@ -3537,17 +3615,17 @@
           }
         },
         "required": [
-          "action",
-          "at",
-          "caller",
-          "caller_kind",
-          "error_class",
-          "executor",
-          "grant_id",
           "id",
-          "latency_ms",
+          "action",
+          "caller_kind",
+          "caller",
+          "grant_id",
+          "executor",
           "status",
-          "status_code"
+          "error_class",
+          "status_code",
+          "latency_ms",
+          "at"
         ],
         "type": "object"
       },
@@ -3578,14 +3656,6 @@
             "$ref": "#/components/schemas/Struct"
           }
         },
-        "required": [
-          "bool_value",
-          "list_value",
-          "null_value",
-          "number_value",
-          "string_value",
-          "struct_value"
-        ],
         "type": "object"
       }
     },
@@ -3606,7 +3676,7 @@
     "title": "InOrbit API",
     "version": "0.1.0",
     "x-iohr-cut": {
-      "hash": "sha256:43c8985d109bc2ca597c47125896c58fd6bbd949727f605821a53f857ddc46ce",
+      "hash": "sha256:6339411bc907ba74eb8778f783884753485f7c3aa5107d2a4793c162b231e31a",
       "plan": "public",
       "scopes": []
     }
@@ -3728,17 +3798,6 @@
             "name": "org_id",
             "required": true,
             "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
-            "in": "header",
-            "name": "idempotency-key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
               "type": "string"
             }
           }
@@ -5346,6 +5405,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5508,6 +5575,17 @@
             "name": "monitor_id",
             "required": true,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -5691,6 +5769,99 @@
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/requests": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/ListRequests` on the `accounts` backend.\n\nA key needs scope `usage:read`.",
+        "operationId": "AccountsService.ListRequests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRequestsResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.ListRequestsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/ListRequests",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-list": {
+          "items": "requests",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "usage:read"
         ]
       }
     },
@@ -6171,6 +6342,83 @@
         "tags": [
           "events"
         ],
+        "x-iohr-public": true,
+        "x-iohr-scopes": [
+          "events:read"
+        ]
+      }
+    },
+    "/v1/events/notifications": {
+      "get": {
+        "description": "Transcoded from `/iohr.events.v1.EventsService/ListNotifications` on the `events` backend.\n\nA key needs scope `events:read`.",
+        "operationId": "EventsService.ListNotifications",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListNotificationsResponse"
+                }
+              }
+            },
+            "description": "`iohr.events.v1.ListNotificationsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.events.v1.EventsService/ListNotifications",
+        "tags": [
+          "events"
+        ],
+        "x-iohr-list": {
+          "items": "notifications",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "events:read"
@@ -6973,17 +7221,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
-            "in": "header",
-            "name": "idempotency-key",
-            "required": false,
-            "schema": {
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -7455,7 +7692,7 @@
   ],
   "servers": [
     {
-      "description": "The InOrbit API",
+      "description": "The API",
       "url": "https://api.inorbit.hr"
     }
   ]

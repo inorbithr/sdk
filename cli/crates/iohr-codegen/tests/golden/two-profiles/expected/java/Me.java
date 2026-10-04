@@ -8,13 +8,13 @@ import java.util.List;
 /**
  * <code>GET /v1/me</code> body.
  *
- * @param clientId The OAuth client the call came through, if any.; <code>null</code> when the answer leaves it out
- * @param email E-mail address, when the token carries one (a person's ID token does).; <code>null</code> when the answer leaves it out
- * @param key the <code>key</code> field; <code>null</code> when the answer leaves it out
+ * @param clientId The OAuth client the call came through, if any.; <code>null</code> when unset, and then left out on the wire
+ * @param email E-mail address, when the token carries one (a person's ID token does).; <code>null</code> when unset, and then left out on the wire
+ * @param key the <code>key</code> field; <code>null</code> when unset, and then left out on the wire
  * @param kind <code>person</code>, <code>client</code> or <code>service</code>.
- * @param name Display name, when the token carries one.; <code>null</code> when the answer leaves it out
- * @param org Organisation, when minted.; <code>null</code> when the answer leaves it out
- * @param role Role, when the consent step stamped one.; <code>null</code> when the answer leaves it out
+ * @param name Display name, when the token carries one.; <code>null</code> when unset, and then left out on the wire
+ * @param org Organisation, when minted.; <code>null</code> when unset, and then left out on the wire
+ * @param role Role, when the consent step stamped one.; <code>null</code> when unset, and then left out on the wire
  * @param scopes Granted scopes.
  * @param subject The <code>sub</code> claim.
  */

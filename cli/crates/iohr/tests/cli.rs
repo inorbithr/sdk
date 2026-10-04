@@ -745,12 +745,13 @@ fn cut_document(account: &str, scopes: &[&str], with_radar: bool) -> serde_json:
     let mut doc = serde_json::json!({
         "openapi": "3.1.0",
         "info": { "title": "InOrbit API", "version": "0.1.0" },
+        "servers": [ { "url": "https://api.inorbit.hr" } ],
         "paths": paths,
         "components": { "schemas": {
             "Me": { "type": "object", "required": ["subject"], "properties": { "subject": { "type": "string" } } },
             "Problem": { "type": "object", "properties": { "code": { "$ref": "#/components/schemas/Code" }, "details": { "type": "array", "items": { "$ref": "#/components/schemas/Detail" } } } },
-            "Code": { "type": "string", "enum": ["bad_request","failed_precondition","unauthenticated","forbidden","not_found","method_not_allowed","already_exists","conflict","payload_too_large","unsupported_media_type","rate_limited","quota_exceeded","cancelled","internal","unimplemented","unavailable","timeout"] },
-            "Detail": { "oneOf": [ { "type": "object", "required": ["type"], "properties": { "type": { "const": "retry" } } } ] }
+            "Code": { "type": "string", "enum": ["not_found","timeout"], "x-http-status": { "not_found": 404, "timeout": 504 } },
+            "Detail": { "discriminator": { "propertyName": "type" }, "oneOf": [ { "type": "object", "required": ["type"], "properties": { "type": { "const": "retry" } } } ] }
         } }
     });
     let hash = format!(

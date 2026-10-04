@@ -5,6 +5,7 @@ package personal
 
 import (
 	"context"
+	"iter"
 
 	"example.com/app/iohr/internal/ops"
 	"example.com/app/iohr/models"
@@ -62,6 +63,24 @@ func (h Radar) ListDigests(ctx context.Context, params *models.RadarListDigestsP
 	return ops.ListDigests(ctx, h.c, params)
 }
 
+// AllListDigests iterates over every item ListDigests returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Radar) AllListDigests(ctx context.Context, params *models.RadarListDigestsParams) iter.Seq2[models.Digest, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.Digest, string, error) {
+		p := models.RadarListDigestsParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListDigests(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Digests, r.Value.NextPageToken, nil
+	})
+}
+
 // GetDigest calls GET /v1/radar/digests/{id}; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/GetDigest` on the `radar` backend.
 func (h Radar) GetDigest(ctx context.Context, id string) (*inorbit.Response[models.GetDigestResponse], error) {
 	return ops.GetDigest(ctx, h.c, id)
@@ -70,4 +89,22 @@ func (h Radar) GetDigest(ctx context.Context, id string) (*inorbit.Response[mode
 // ListItems calls GET /v1/radar/items; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/ListItems` on the `radar` backend.
 func (h Radar) ListItems(ctx context.Context, params *models.RadarListItemsParams) (*inorbit.Response[models.ListItemsResponse], error) {
 	return ops.ListItems(ctx, h.c, params)
+}
+
+// AllListItems iterates over every item ListItems returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Radar) AllListItems(ctx context.Context, params *models.RadarListItemsParams) iter.Seq2[models.Item, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.Item, string, error) {
+		p := models.RadarListItemsParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListItems(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Items, r.Value.NextPageToken, nil
+	})
 }

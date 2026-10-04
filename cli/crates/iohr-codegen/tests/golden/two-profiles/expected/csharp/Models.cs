@@ -151,19 +151,19 @@ namespace InOrbit.Generated
     {
         /// <summary>The <c>account_id</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("account_id")]
-        public string AccountId { get; init; } = "";
+        public string? AccountId { get; init; }
 
         /// <summary>The <c>description</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("description")]
-        public string Description { get; init; } = "";
+        public string? Description { get; init; }
 
         /// <summary>The <c>event_types</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("event_types")]
-        public global::System.Collections.Generic.IReadOnlyList<string> EventTypes { get; init; } = [];
+        public global::System.Collections.Generic.IReadOnlyList<string>? EventTypes { get; init; }
 
         /// <summary>The <c>url</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("url")]
-        public string Url { get; init; } = "";
+        public string? Url { get; init; }
     }
 
     /// <summary><c>iohr.events.v1.CreateEndpointResponse</c></summary>
@@ -183,7 +183,7 @@ namespace InOrbit.Generated
     {
         /// <summary>The <c>account_id</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("account_id")]
-        public string AccountId { get; init; } = "";
+        public string? AccountId { get; init; }
     }
 
     /// <summary><c>iohr.events.v1.CreateInboxResponse</c></summary>
@@ -692,6 +692,10 @@ namespace InOrbit.Generated
         /// <summary>The <c>digests</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("digests")]
         public global::System.Collections.Generic.IReadOnlyList<Digest> Digests { get; init; } = [];
+
+        /// <summary>The <c>next_page_token</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("next_page_token")]
+        public string NextPageToken { get; init; } = "";
     }
 
     /// <summary><c>iohr.events.v1.ListEndpointsResponse</c></summary>
@@ -700,11 +704,19 @@ namespace InOrbit.Generated
         /// <summary>The <c>endpoints</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("endpoints")]
         public global::System.Collections.Generic.IReadOnlyList<Endpoint> Endpoints { get; init; } = [];
+
+        /// <summary>The <c>next_page_token</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("next_page_token")]
+        public string NextPageToken { get; init; } = "";
     }
 
     /// <summary><c>iohr.events.v1.ListEventTypesResponse</c></summary>
     public sealed record ListEventTypesResponse
     {
+        /// <summary>The <c>next_page_token</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("next_page_token")]
+        public string NextPageToken { get; init; } = "";
+
         /// <summary>The <c>types</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("types")]
         public global::System.Collections.Generic.IReadOnlyList<EventType> Types { get; init; } = [];
@@ -717,6 +729,10 @@ namespace InOrbit.Generated
         [global::System.Text.Json.Serialization.JsonPropertyName("inbox")]
         public Inbox? Inbox { get; init; }
 
+        /// <summary>The <c>next_page_token</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("next_page_token")]
+        public string NextPageToken { get; init; } = "";
+
         /// <summary>The <c>requests</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("requests")]
         public global::System.Collections.Generic.IReadOnlyList<InboxRequest> Requests { get; init; } = [];
@@ -728,6 +744,10 @@ namespace InOrbit.Generated
         /// <summary>The <c>inboxes</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("inboxes")]
         public global::System.Collections.Generic.IReadOnlyList<Inbox> Inboxes { get; init; } = [];
+
+        /// <summary>The <c>next_page_token</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("next_page_token")]
+        public string NextPageToken { get; init; } = "";
     }
 
     /// <summary><c>iohr.radar.v1.ListItemsResponse</c></summary>
@@ -736,6 +756,10 @@ namespace InOrbit.Generated
         /// <summary>The <c>items</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("items")]
         public global::System.Collections.Generic.IReadOnlyList<Item> Items { get; init; } = [];
+
+        /// <summary>The <c>next_page_token</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("next_page_token")]
+        public string NextPageToken { get; init; } = "";
     }
 
     /// <summary><c>iohr.accounts.v1.ListUnitCategoriesResponse</c></summary>
@@ -744,6 +768,10 @@ namespace InOrbit.Generated
         /// <summary>The <c>categories</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("categories")]
         public global::System.Collections.Generic.IReadOnlyList<UnitCategory> Categories { get; init; } = [];
+
+        /// <summary>The <c>next_page_token</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("next_page_token")]
+        public string NextPageToken { get; init; } = "";
     }
 
     /// <summary><c>GET /v1/me</c> body.</summary>
@@ -816,7 +844,7 @@ namespace InOrbit.Generated
         public string UpdatedAt { get; init; } = "";
     }
 
-    /// <summary><c>{"code","error","details"}</c>: the REST body and the SSE <c>error</c> payload.</summary>
+    /// <summary><c>{"code","error","details","request_id"}</c>: the REST body and the SSE <c>error</c> payload.</summary>
     public sealed record Problem
     {
         /// <summary>The slug.</summary>
@@ -830,6 +858,10 @@ namespace InOrbit.Generated
         /// <summary>The sentence.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("error")]
         public string Error { get; init; } = "";
+
+        /// <summary>The request's id, the <c>x-request-id</c> the answer carries: name it when asking about a call. Empty on a socket or MQTT frame, whose own id names the call.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("request_id")]
+        public string RequestId { get; init; } = "";
     }
 
     /// <summary><c>iohr.events.v1.RetryDeliveryResponse</c></summary>
@@ -889,25 +921,25 @@ namespace InOrbit.Generated
     {
         /// <summary>The <c>description</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("description")]
-        public string Description { get; init; } = "";
+        public string? Description { get; init; }
 
         /// <summary>The <c>name</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("name")]
-        public string Name { get; init; } = "";
+        public string? Name { get; init; }
 
         /// <summary>The <c>units_per_1k_tokens</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("units_per_1k_tokens")]
         [global::System.Text.Json.Serialization.JsonNumberHandling(global::System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString | global::System.Text.Json.Serialization.JsonNumberHandling.WriteAsString)]
-        public long UnitsPer1kTokens { get; init; }
+        public long? UnitsPer1kTokens { get; init; }
 
         /// <summary>The <c>units_per_call</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("units_per_call")]
         [global::System.Text.Json.Serialization.JsonNumberHandling(global::System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString | global::System.Text.Json.Serialization.JsonNumberHandling.WriteAsString)]
-        public long UnitsPerCall { get; init; }
+        public long? UnitsPerCall { get; init; }
 
         /// <summary>The <c>updated_at</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("updated_at")]
-        public string UpdatedAt { get; init; } = "";
+        public string? UpdatedAt { get; init; }
     }
 
     /// <summary><c>iohr.accounts.v1.UnitDay</c></summary>
@@ -935,6 +967,11 @@ namespace InOrbit.Generated
         [global::System.Text.Json.Serialization.JsonPropertyName("category")]
         public string Category { get; init; } = "";
 
+        /// <summary>The <c>client_errors</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("client_errors")]
+        [global::System.Text.Json.Serialization.JsonNumberHandling(global::System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString | global::System.Text.Json.Serialization.JsonNumberHandling.WriteAsString)]
+        public long ClientErrors { get; init; }
+
         /// <summary>The <c>key_id</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("key_id")]
         public string KeyId { get; init; } = "";
@@ -942,6 +979,19 @@ namespace InOrbit.Generated
         /// <summary>The <c>key_name</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("key_name")]
         public string KeyName { get; init; } = "";
+
+        /// <summary>The <c>p50_ms</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("p50_ms")]
+        public int P50Ms { get; init; }
+
+        /// <summary>The <c>p95_ms</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("p95_ms")]
+        public int P95Ms { get; init; }
+
+        /// <summary>The <c>platform_errors</c> field.</summary>
+        [global::System.Text.Json.Serialization.JsonPropertyName("platform_errors")]
+        [global::System.Text.Json.Serialization.JsonNumberHandling(global::System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString | global::System.Text.Json.Serialization.JsonNumberHandling.WriteAsString)]
+        public long PlatformErrors { get; init; }
 
         /// <summary>The <c>rpc</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("rpc")]
@@ -971,23 +1021,23 @@ namespace InOrbit.Generated
     {
         /// <summary>The <c>description</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("description")]
-        public string Description { get; init; } = "";
+        public string? Description { get; init; }
 
         /// <summary>The <c>enabled</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("enabled")]
-        public bool Enabled { get; init; }
+        public bool? Enabled { get; init; }
 
         /// <summary>The <c>endpoint_id</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("endpoint_id")]
-        public string EndpointId { get; init; } = "";
+        public string? EndpointId { get; init; }
 
         /// <summary>The <c>event_types</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("event_types")]
-        public global::System.Collections.Generic.IReadOnlyList<string> EventTypes { get; init; } = [];
+        public global::System.Collections.Generic.IReadOnlyList<string>? EventTypes { get; init; }
 
         /// <summary>The <c>url</c> field.</summary>
         [global::System.Text.Json.Serialization.JsonPropertyName("url")]
-        public string Url { get; init; } = "";
+        public string? Url { get; init; }
     }
 
     /// <summary><c>iohr.accounts.v1.UsageRow</c></summary>

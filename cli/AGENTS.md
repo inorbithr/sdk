@@ -30,7 +30,8 @@ cli/
                       ext (OCI client, Sigstore trust, layer, lock, install store, token
                       channel, run)
                       main.rs: argv guard, parse, run, exit code
-  crates/iohr-openapi/ a document normalised (N1 to N6, equal to tools/spec-sync.py),
+  crates/iohr-openapi/ a document normalised (N1, and checks of what the platform states;
+                      equal to tools/spec-sync.py),
                       hashed (the cut hash) and modelled as operations per profile
   crates/iohr-lab/    `iohr lab check`: the lab document checks and redaction rules, the
                       generic rules embedded from spec/lab/rules.json, held to the site's

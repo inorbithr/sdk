@@ -42,4 +42,5 @@ export {
 } from "./errors.js";
 export type { Attempt, Hook } from "./hooks.js";
 export { formatInt64, type Int64, parseInt64 } from "./int64.js";
+export { parseTimestamp } from "./timestamp.js";
 export { SDK_VERSION } from "./version.js";

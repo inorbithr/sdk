@@ -93,10 +93,12 @@ grant_type=client_credentials&audience=iohr-api&scope=identity%3Aread%20account%
 
 ## 4. Requests and responses
 
-- **Wire format.** JSON, snake_case field names, every field present. 64-bit integers are
-  decimal strings; timestamps are RFC 3339 strings, empty string when unset; enums are
-  names. Each SDK exposes native types (`int64`/`i64`/`bigint`/`int`, a time type) and
-  converts at its boundary.
+- **Wire format.** JSON, snake_case field names. An answer carries every field the
+  document marks `required`; a request leaves out what is unset (section 12, "Wire
+  optionality"). 64-bit integers are decimal strings; timestamps are RFC 3339 strings,
+  empty string when unset (each runtime's timestamp helper reads `""` as no value); enums
+  are names. Each SDK exposes native types (`int64`/`i64`/`bigint`/`int`, a time type)
+  and converts at its boundary.
 - **Unknown fields are kept, not rejected.** The API adds fields within `/v1`; an older
   SDK must keep working. Typed models ignore unknown fields, and the raw response stays
   reachable.
@@ -302,10 +304,23 @@ check` fetches each profile's document again and fails with the lines added and 
 when a hash moved; `--files` also diffs the regenerated surface. In CI, where a person
 cannot sign in, `IOHR_TOKEN_<PROFILE>` stands in for a profile.
 
-**Wire optionality.** N2 (`spec/README.md`) marks every field of a transcoded message
-required, and the gateway does send every scalar; a field that is itself a message is
-left out when it was never set. A generated surface reads such a field as optional
-(`Option<T>` in Rust) and every other required field as present.
+**Wire optionality.** The document says it (core #218, `spec/README.md`): a message
+only an answer carries lists as `required` exactly the fields the gateway always sends
+(those without presence); a field with presence (a message, `optional`, a `oneof`) is
+left out when unset and never required. A message a request carries marks nothing
+required. So a generated surface reads a required answer field as present and every
+other field as optional (`Option<T>` in Rust, `T | None` in Python, `?` in TypeScript,
+a pointer in Go, nullable in C#, `null` in Java), and every request field is optional:
+what is unset is left out of the body, and the platform reads it as its default. Go
+fills a pointer field with `inorbit.Ptr(v)`; a Rust request is built with
+`..Default::default()`.
+
+**Unset timestamps** are `""` on the wire (rule N5, settled behaviour, not an upstream
+ask). Models keep the string as sent; each runtime has one helper that reads a
+timestamp and maps `""` to no value: `inorbithr::parse_timestamp` (Rust, `None`),
+`parseTimestamp` (TypeScript, `undefined`), `parse_timestamp` (Python, `None`),
+`inorbit.ParseTimestamp` (Go, the zero `time.Time`), `Timestamps.Parse` (C#, `null`),
+`Timestamps.parse` (Java, an empty `Optional`).
 
 **Streaming operations** (`text/event-stream`) are left out of a generated surface with
 a note until the runtime's streaming milestone (section 7).

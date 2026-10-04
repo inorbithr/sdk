@@ -52,6 +52,7 @@
               "headers": { "type": "object", "additionalProperties": { "type": "string" } },
               "form": { "type": "object", "additionalProperties": { "type": "string" } },
               "json": {},
+              "absent": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "description": "Top-level body fields the request must leave out: an unset field is not sent." },
               "min_delay_ms": { "type": "integer", "minimum": 0 },
               "max_delay_ms": { "type": "integer", "minimum": 0 }
             }

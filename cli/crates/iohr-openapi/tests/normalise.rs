@@ -1,6 +1,7 @@
 //! The Rust normaliser against the sync tool: on the same raw document, the public
-//! filter plus N1 to N6 give the same bytes `tools/spec-sync.py` wrote. The fixture
-//! pair is regenerated with `mise run cli:normalise-golden`.
+//! filter, N1 and the checks of what the platform states itself give the same bytes
+//! `tools/spec-sync.py` wrote. The fixture pair is regenerated with
+//! `mise run cli:normalise-golden`; its raw document is the live one `spec/` came from.
 
 #![allow(
     clippy::unwrap_used,

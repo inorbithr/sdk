@@ -9,7 +9,9 @@ import java.util.List;
  * <code>iohr.accounts.v1.ListUnitCategoriesResponse</code>
  *
  * @param categories the <code>categories</code> field
+ * @param nextPageToken the <code>next_page_token</code> field
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ListUnitCategoriesResponse(
-        @JsonProperty("categories") List<UnitCategory> categories) {}
+        @JsonProperty("categories") List<UnitCategory> categories,
+        @JsonProperty("next_page_token") String nextPageToken) {}

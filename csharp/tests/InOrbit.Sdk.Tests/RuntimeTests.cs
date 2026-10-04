@@ -150,4 +150,13 @@ public class RuntimeTests
 
         public static string Env => "ACME_CI";
     }
+
+    [Fact]
+    public void A_timestamp_reads_empty_as_no_value()
+    {
+        Assert.Null(Timestamps.Parse(""));
+        Assert.Equal(new DateTimeOffset(2026, 10, 4, 8, 0, 0, 500, TimeSpan.Zero), Timestamps.Parse("2026-10-04T08:00:00.5Z"));
+        Assert.Throws<FormatException>(() => Timestamps.Parse("yesterday"));
+        Assert.Throws<FormatException>(() => Timestamps.Parse("2026-10-04"));
+    }
 }

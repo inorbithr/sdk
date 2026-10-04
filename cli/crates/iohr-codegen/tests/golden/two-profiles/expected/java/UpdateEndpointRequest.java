@@ -8,16 +8,16 @@ import java.util.List;
 /**
  * <code>iohr.events.v1.UpdateEndpointRequest</code>
  *
- * @param description the <code>description</code> field
- * @param enabled the <code>enabled</code> field
- * @param endpointId the <code>endpoint_id</code> field
- * @param eventTypes the <code>event_types</code> field
- * @param url the <code>url</code> field
+ * @param description the <code>description</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param enabled the <code>enabled</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param endpointId the <code>endpoint_id</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param eventTypes the <code>event_types</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param url the <code>url</code> field; <code>null</code> when unset, and then left out on the wire
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record UpdateEndpointRequest(
         @JsonProperty("description") String description,
-        @JsonProperty("enabled") boolean enabled,
+        @JsonProperty("enabled") Boolean enabled,
         @JsonProperty("endpoint_id") String endpointId,
         @JsonProperty("event_types") List<String> eventTypes,
         @JsonProperty("url") String url) {
@@ -34,7 +34,7 @@ public record UpdateEndpointRequest(
     /** Builds a <code>UpdateEndpointRequest</code>. */
     public static final class Builder {
         private String description;
-        private boolean enabled;
+        private Boolean enabled;
         private String endpointId;
         private List<String> eventTypes;
         private String url;
@@ -58,7 +58,7 @@ public record UpdateEndpointRequest(
          * @param enabled the value
          * @return this builder
          */
-        public Builder enabled(boolean enabled) {
+        public Builder enabled(Boolean enabled) {
             this.enabled = enabled;
             return this;
         }

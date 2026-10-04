@@ -12,6 +12,7 @@ import {
   StaticToken,
 } from "../src/index.js";
 import { backoffMs, retryAfterMs } from "../src/retry.js";
+import { parseTimestamp } from "../src/timestamp.js";
 
 function raw(status: number, body: string, headers: Record<string, string> = {}): RawResponse {
   return new RawResponse({
@@ -226,5 +227,17 @@ describe("codegen.pages", () => {
     const got: number[] = [];
     for await (const n of codegen.pages(looping)) got.push(n);
     assert.deepEqual(got, [1, 2]);
+  });
+});
+
+describe("timestamps", () => {
+  it("read an unset one as undefined and refuse what is not RFC 3339", () => {
+    assert.equal(parseTimestamp(""), undefined);
+    assert.equal(
+      parseTimestamp("2026-10-04T08:00:00.5Z")?.toISOString(),
+      "2026-10-04T08:00:00.500Z",
+    );
+    assert.throws(() => parseTimestamp("yesterday"), RangeError);
+    assert.throws(() => parseTimestamp("2026-10-04"), RangeError);
   });
 });

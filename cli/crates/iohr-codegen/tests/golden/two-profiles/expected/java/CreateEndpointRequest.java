@@ -8,10 +8,10 @@ import java.util.List;
 /**
  * <code>iohr.events.v1.CreateEndpointRequest</code>
  *
- * @param accountId the <code>account_id</code> field
- * @param description the <code>description</code> field
- * @param eventTypes the <code>event_types</code> field
- * @param url the <code>url</code> field
+ * @param accountId the <code>account_id</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param description the <code>description</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param eventTypes the <code>event_types</code> field; <code>null</code> when unset, and then left out on the wire
+ * @param url the <code>url</code> field; <code>null</code> when unset, and then left out on the wire
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record CreateEndpointRequest(

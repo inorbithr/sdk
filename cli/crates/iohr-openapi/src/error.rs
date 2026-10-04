@@ -25,9 +25,19 @@ pub enum NormaliseError {
         /// The short name both would get.
         short: String,
     },
-    /// The error envelope's schemas are missing or do not match the status table.
+    /// The error envelope's schemas are missing, or `Code` states no status table that
+    /// matches its codes.
     #[error("N6: {0}")]
     Problem(String),
+    /// A fact the platform states itself since core #218 is missing from the document:
+    /// a regression upstream, reported instead of patched over.
+    #[error("{rule}: {detail}")]
+    Regressed {
+        /// The former rule (`N2`, `N3`, `N4`).
+        rule: String,
+        /// What is missing.
+        detail: String,
+    },
 }
 
 /// Why documents could not be modelled as one API.

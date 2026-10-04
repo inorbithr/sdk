@@ -5,9 +5,13 @@ package iohr;
  * The query parameters of <code>GET /v1/webhooks/endpoints</code>.
  *
  * @param accountId <code>account_id</code>; <code>null</code> to leave it out
+ * @param pageSize <code>page_size</code>; <code>null</code> to leave it out
+ * @param pageToken <code>page_token</code>; <code>null</code> to leave it out
  */
 public record EventsListEndpointsParams(
-        String accountId) {
+        String accountId,
+        Integer pageSize,
+        String pageToken) {
 
     /**
      * A builder.
@@ -21,6 +25,8 @@ public record EventsListEndpointsParams(
     /** Builds a <code>EventsListEndpointsParams</code>. */
     public static final class Builder {
         private String accountId;
+        private Integer pageSize;
+        private String pageToken;
 
         private Builder() {}
 
@@ -36,12 +42,34 @@ public record EventsListEndpointsParams(
         }
 
         /**
+         * Sets <code>pageSize</code>.
+         *
+         * @param pageSize the value
+         * @return this builder
+         */
+        public Builder pageSize(Integer pageSize) {
+            this.pageSize = pageSize;
+            return this;
+        }
+
+        /**
+         * Sets <code>pageToken</code>.
+         *
+         * @param pageToken the value
+         * @return this builder
+         */
+        public Builder pageToken(String pageToken) {
+            this.pageToken = pageToken;
+            return this;
+        }
+
+        /**
          * The value.
          *
          * @return the <code>EventsListEndpointsParams</code>
          */
         public EventsListEndpointsParams build() {
-            return new EventsListEndpointsParams(accountId);
+            return new EventsListEndpointsParams(accountId, pageSize, pageToken);
         }
     }
 }

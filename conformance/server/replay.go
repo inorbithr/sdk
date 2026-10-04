@@ -417,6 +417,17 @@ func mismatch(want Request, got Seen) string {
 			return "body: " + path + " differs"
 		}
 	}
+	if len(want.Absent) > 0 {
+		body, ok := got.JSON.(map[string]any)
+		if !ok {
+			return "body: want a JSON object, got none or another value"
+		}
+		for _, k := range slices.Sorted(slices.Values(want.Absent)) {
+			if _, sent := body[k]; sent {
+				return "body: $." + k + " was sent; an unset field is left out"
+			}
+		}
+	}
 	return ""
 }
 

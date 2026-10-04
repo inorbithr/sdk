@@ -197,10 +197,10 @@ public sealed class Driver(ITestOutputHelper output)
             "radar.get_digest" => (await client.Radar().GetDigestAsync(Arg("id"))).Raw,
             "events.create_endpoint" => (await client.Events().CreateEndpointAsync(new CreateEndpointRequest
             {
-                AccountId = Arg("account_id"),
-                Url = Arg("url"),
-                Description = Arg("description"),
-                EventTypes = args.GetProperty("event_types").EnumerateArray().Select(x => x.GetString()!).ToArray(),
+                AccountId = Opt("account_id"),
+                Url = Opt("url"),
+                Description = Opt("description"),
+                EventTypes = args.TryGetProperty("event_types", out var types) ? types.EnumerateArray().Select(x => x.GetString()!).ToArray() : null,
             })).Raw,
             "events.delete_endpoint" => (await client.Events().DeleteEndpointAsync(Arg("endpoint_id"))).Raw,
             _ => throw new InvalidOperationException($"the conformance schema names an op this driver does not know: {op}"),

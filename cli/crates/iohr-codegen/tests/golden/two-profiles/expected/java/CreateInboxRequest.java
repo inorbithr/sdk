@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * <code>iohr.events.v1.CreateInboxRequest</code>
  *
- * @param accountId the <code>account_id</code> field
+ * @param accountId the <code>account_id</code> field; <code>null</code> when unset, and then left out on the wire
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record CreateInboxRequest(

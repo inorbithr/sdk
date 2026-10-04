@@ -27,6 +27,7 @@ from inorbithr import (
     TooLargeError,
     UnknownDetail,
     codegen,
+    parse_timestamp,
 )
 from inorbithr._errors import CODES, code_for_status
 from inorbithr._retry import backoff
@@ -274,3 +275,16 @@ def test_apages_walks_every_page() -> None:
         return [n async for n in codegen.apages(fetch)]
 
     assert asyncio.run(collect()) == [1, 2, 3, 4]
+
+
+def test_a_timestamp_reads_empty_as_no_value() -> None:
+    assert parse_timestamp("") is None
+    t = parse_timestamp("2026-10-04T08:00:00.5Z")
+    assert t is not None
+    assert t.isoformat() == "2026-10-04T08:00:00.500000+00:00"
+    assert parse_timestamp("2026-10-04T10:00:00.123456789+02:00") == parse_timestamp(
+        "2026-10-04T08:00:00.123456Z"
+    )
+    for bad in ("yesterday", "2026-10-04", "2026-10-04T08:00:00"):
+        with pytest.raises(ValueError, match="RFC 3339"):
+            parse_timestamp(bad)

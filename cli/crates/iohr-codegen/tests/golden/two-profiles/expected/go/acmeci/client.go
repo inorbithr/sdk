@@ -74,8 +74,26 @@ func (h Accounts) GetUsage(ctx context.Context, orgID string, params *models.Acc
 }
 
 // ListUnitCategories calls GET /v1/accounts/units/categories; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/ListUnitCategories` on the `accounts` backend.
-func (h Accounts) ListUnitCategories(ctx context.Context) (*inorbit.Response[models.ListUnitCategoriesResponse], error) {
-	return ops.ListUnitCategories(ctx, h.c)
+func (h Accounts) ListUnitCategories(ctx context.Context, params *models.AccountsListUnitCategoriesParams) (*inorbit.Response[models.ListUnitCategoriesResponse], error) {
+	return ops.ListUnitCategories(ctx, h.c, params)
+}
+
+// AllListUnitCategories iterates over every item ListUnitCategories returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Accounts) AllListUnitCategories(ctx context.Context, params *models.AccountsListUnitCategoriesParams) iter.Seq2[models.UnitCategory, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.UnitCategory, string, error) {
+		p := models.AccountsListUnitCategoriesParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListUnitCategories(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Categories, r.Value.NextPageToken, nil
+	})
 }
 
 // Events returns the events operations the profile may call.
@@ -99,13 +117,49 @@ func (h Events) DeleteInbox(ctx context.Context, inboxID string) (*inorbit.Respo
 }
 
 // ListEventTypes calls GET /v1/events/types; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend.
-func (h Events) ListEventTypes(ctx context.Context) (*inorbit.Response[models.ListEventTypesResponse], error) {
-	return ops.ListEventTypes(ctx, h.c)
+func (h Events) ListEventTypes(ctx context.Context, params *models.EventsListEventTypesParams) (*inorbit.Response[models.ListEventTypesResponse], error) {
+	return ops.ListEventTypes(ctx, h.c, params)
+}
+
+// AllListEventTypes iterates over every item ListEventTypes returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Events) AllListEventTypes(ctx context.Context, params *models.EventsListEventTypesParams) iter.Seq2[models.EventType, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.EventType, string, error) {
+		p := models.EventsListEventTypesParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListEventTypes(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Types, r.Value.NextPageToken, nil
+	})
 }
 
 // ListEndpoints calls GET /v1/webhooks/endpoints; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListEndpoints` on the `events` backend.
 func (h Events) ListEndpoints(ctx context.Context, params *models.EventsListEndpointsParams) (*inorbit.Response[models.ListEndpointsResponse], error) {
 	return ops.ListEndpoints(ctx, h.c, params)
+}
+
+// AllListEndpoints iterates over every item ListEndpoints returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Events) AllListEndpoints(ctx context.Context, params *models.EventsListEndpointsParams) iter.Seq2[models.Endpoint, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.Endpoint, string, error) {
+		p := models.EventsListEndpointsParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListEndpoints(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Endpoints, r.Value.NextPageToken, nil
+	})
 }
 
 // GetEndpoint calls GET /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/GetEndpoint` on the `events` backend.
@@ -141,9 +195,45 @@ func (h Events) ListInboxes(ctx context.Context, params *models.EventsListInboxe
 	return ops.ListInboxes(ctx, h.c, params)
 }
 
+// AllListInboxes iterates over every item ListInboxes returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Events) AllListInboxes(ctx context.Context, params *models.EventsListInboxesParams) iter.Seq2[models.Inbox, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.Inbox, string, error) {
+		p := models.EventsListInboxesParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListInboxes(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Inboxes, r.Value.NextPageToken, nil
+	})
+}
+
 // ListInboxRequests calls GET /v1/webhooks/inboxes/{inbox_id}/requests; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListInboxRequests` on the `events` backend.
-func (h Events) ListInboxRequests(ctx context.Context, inboxID string) (*inorbit.Response[models.ListInboxRequestsResponse], error) {
-	return ops.ListInboxRequests(ctx, h.c, inboxID)
+func (h Events) ListInboxRequests(ctx context.Context, inboxID string, params *models.EventsListInboxRequestsParams) (*inorbit.Response[models.ListInboxRequestsResponse], error) {
+	return ops.ListInboxRequests(ctx, h.c, inboxID, params)
+}
+
+// AllListInboxRequests iterates over every item ListInboxRequests returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Events) AllListInboxRequests(ctx context.Context, inboxID string, params *models.EventsListInboxRequestsParams) iter.Seq2[models.InboxRequest, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.InboxRequest, string, error) {
+		p := models.EventsListInboxRequestsParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListInboxRequests(ctx, h.c, inboxID, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Requests, r.Value.NextPageToken, nil
+	})
 }
 
 // UpdateEndpoint calls PATCH /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/UpdateEndpoint` on the `events` backend.
@@ -191,6 +281,24 @@ func (h Radar) ListDigests(ctx context.Context, params *models.RadarListDigestsP
 	return ops.ListDigests(ctx, h.c, params)
 }
 
+// AllListDigests iterates over every item ListDigests returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Radar) AllListDigests(ctx context.Context, params *models.RadarListDigestsParams) iter.Seq2[models.Digest, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.Digest, string, error) {
+		p := models.RadarListDigestsParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListDigests(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Digests, r.Value.NextPageToken, nil
+	})
+}
+
 // GetDigest calls GET /v1/radar/digests/{id}; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/GetDigest` on the `radar` backend.
 func (h Radar) GetDigest(ctx context.Context, id string) (*inorbit.Response[models.GetDigestResponse], error) {
 	return ops.GetDigest(ctx, h.c, id)
@@ -199,4 +307,22 @@ func (h Radar) GetDigest(ctx context.Context, id string) (*inorbit.Response[mode
 // ListItems calls GET /v1/radar/items; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/ListItems` on the `radar` backend.
 func (h Radar) ListItems(ctx context.Context, params *models.RadarListItemsParams) (*inorbit.Response[models.ListItemsResponse], error) {
 	return ops.ListItems(ctx, h.c, params)
+}
+
+// AllListItems iterates over every item ListItems returns, page after page, following NextPageToken until the last page. It stops at the first error, which it yields, and when the loop breaks or ctx is done.
+func (h Radar) AllListItems(ctx context.Context, params *models.RadarListItemsParams) iter.Seq2[models.Item, error] {
+	return codegen.Pages(ctx, func(ctx context.Context, token string) ([]models.Item, string, error) {
+		p := models.RadarListItemsParams{}
+		if params != nil {
+			p = *params
+		}
+		if token != "" {
+			p.PageToken = &token
+		}
+		r, err := ops.ListItems(ctx, h.c, &p)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Value.Items, r.Value.NextPageToken, nil
+	})
 }

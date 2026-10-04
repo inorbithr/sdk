@@ -1,105 +1,6 @@
 {
   "components": {
     "schemas": {
-      "Account": {
-        "description": "`iohr.accounts.v1.Account`",
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "erase_after": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "plan": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "created_at",
-          "erase_after",
-          "id",
-          "kind",
-          "name",
-          "plan",
-          "role",
-          "slug",
-          "status"
-        ],
-        "type": "object"
-      },
-      "AccountsKey": {
-        "description": "`iohr.accounts.v1.Key`",
-        "properties": {
-          "client_id": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "created_by": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "last_used_at": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "revoked_at": {
-            "type": "string"
-          },
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "secret_hint": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "client_id",
-          "created_at",
-          "created_by",
-          "expires_at",
-          "id",
-          "kind",
-          "last_used_at",
-          "name",
-          "revoked_at",
-          "scopes",
-          "secret_hint"
-        ],
-        "type": "object"
-      },
       "Change": {
         "description": "`iohr.radar.v1.Change`",
         "properties": {
@@ -148,18 +49,17 @@
           }
         },
         "required": [
-          "advanced",
-          "after",
-          "area",
-          "example",
+          "title",
           "impact",
+          "area",
+          "url",
+          "what",
+          "production_impact",
+          "try_it",
           "novice",
           "practitioner",
-          "production_impact",
-          "title",
-          "try_it",
-          "url",
-          "what"
+          "advanced",
+          "after"
         ],
         "type": "object"
       },
@@ -182,143 +82,30 @@
           "internal",
           "unsupported_media_type",
           "payload_too_large",
-          "method_not_allowed"
+          "method_not_allowed",
+          "unprocessable"
         ],
-        "type": "string"
-      },
-      "CreateEndpointRequest": {
-        "description": "`iohr.events.v1.CreateEndpointRequest`",
-        "properties": {
-          "account_id": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "event_types": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "account_id",
-          "description",
-          "event_types",
-          "url"
-        ],
-        "type": "object"
-      },
-      "CreateEndpointResponse": {
-        "description": "`iohr.events.v1.CreateEndpointResponse`",
-        "properties": {
-          "endpoint": {
-            "$ref": "#/components/schemas/Endpoint"
-          },
-          "secret": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "endpoint",
-          "secret"
-        ],
-        "type": "object"
-      },
-      "CreateInboxRequest": {
-        "description": "`iohr.events.v1.CreateInboxRequest`",
-        "properties": {
-          "account_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "account_id"
-        ],
-        "type": "object"
-      },
-      "CreateInboxResponse": {
-        "description": "`iohr.events.v1.CreateInboxResponse`",
-        "properties": {
-          "inbox": {
-            "$ref": "#/components/schemas/Inbox"
-          }
-        },
-        "required": [
-          "inbox"
-        ],
-        "type": "object"
-      },
-      "DeleteEndpointResponse": {
-        "description": "`iohr.events.v1.DeleteEndpointResponse`",
-        "type": "object"
-      },
-      "DeleteInboxResponse": {
-        "description": "`iohr.events.v1.DeleteInboxResponse`",
-        "type": "object"
-      },
-      "Delivery": {
-        "description": "`iohr.events.v1.Delivery`",
-        "properties": {
-          "attempts": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "endpoint_id": {
-            "type": "string"
-          },
-          "event_id": {
-            "type": "string"
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "last_error": {
-            "type": "string"
-          },
-          "last_latency_ms": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "last_status_code": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "next_attempt_at": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "attempts",
-          "created_at",
-          "endpoint_id",
-          "event_id",
-          "event_type",
-          "id",
-          "last_error",
-          "last_latency_ms",
-          "last_status_code",
-          "next_attempt_at",
-          "status",
-          "updated_at"
-        ],
-        "type": "object"
+        "type": "string",
+        "x-http-status": {
+          "already_exists": 409,
+          "bad_request": 400,
+          "cancelled": 499,
+          "conflict": 409,
+          "failed_precondition": 400,
+          "forbidden": 403,
+          "internal": 500,
+          "method_not_allowed": 405,
+          "not_found": 404,
+          "payload_too_large": 413,
+          "quota_exceeded": 429,
+          "rate_limited": 429,
+          "timeout": 504,
+          "unauthenticated": 401,
+          "unavailable": 503,
+          "unimplemented": 501,
+          "unprocessable": 422,
+          "unsupported_media_type": 415
+        }
       },
       "Detail": {
         "description": "A typed detail, translated from `google.rpc` error details.",
@@ -481,26 +268,25 @@
           }
         },
         "required": [
-          "ai_written",
-          "changed",
-          "changes",
-          "checked",
-          "created_at",
-          "drill",
-          "drill_code",
           "id",
-          "item_count",
-          "lang",
+          "week",
           "language",
-          "model",
-          "origin",
-          "published_at",
+          "lang",
+          "created_at",
+          "changed",
+          "why",
+          "drill",
           "script",
-          "status",
+          "item_count",
+          "model",
+          "ai_written",
           "stub",
           "summary",
-          "week",
-          "why"
+          "changes",
+          "status",
+          "published_at",
+          "origin",
+          "checked"
         ],
         "type": "object"
       },
@@ -527,93 +313,12 @@
           }
         },
         "required": [
-          "output",
-          "solution",
           "starter",
+          "solution",
+          "output",
+          "toolchain",
           "stub",
-          "tests",
-          "toolchain"
-        ],
-        "type": "object"
-      },
-      "Endpoint": {
-        "description": "`iohr.events.v1.Endpoint`",
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "disabled_reason": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "event_types": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "failed_24h": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "id": {
-            "type": "string"
-          },
-          "last_delivery_at": {
-            "type": "string"
-          },
-          "last_delivery_status": {
-            "type": "string"
-          },
-          "secret_rotated_at": {
-            "type": "string"
-          },
-          "succeeded_24h": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "created_at",
-          "description",
-          "disabled_reason",
-          "enabled",
-          "event_types",
-          "failed_24h",
-          "id",
-          "last_delivery_at",
-          "last_delivery_status",
-          "secret_rotated_at",
-          "succeeded_24h",
-          "url"
-        ],
-        "type": "object"
-      },
-      "EventType": {
-        "description": "`iohr.events.v1.EventType`",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "schema": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "description",
-          "schema",
-          "type"
+          "tests"
         ],
         "type": "object"
       },
@@ -641,11 +346,11 @@
         },
         "required": [
           "source",
-          "stderr",
           "stdout",
+          "stderr",
+          "toolchain",
           "stub",
-          "tests",
-          "toolchain"
+          "tests"
         ],
         "type": "object"
       },
@@ -656,205 +361,6 @@
             "$ref": "#/components/schemas/Digest"
           }
         },
-        "required": [
-          "digest"
-        ],
-        "type": "object"
-      },
-      "GetMeResponse": {
-        "description": "`iohr.accounts.v1.GetMeResponse`",
-        "properties": {
-          "account": {
-            "$ref": "#/components/schemas/Account"
-          },
-          "email": {
-            "type": "string"
-          },
-          "email_verified": {
-            "type": "boolean"
-          },
-          "key": {
-            "$ref": "#/components/schemas/AccountsKey"
-          },
-          "name": {
-            "type": "string"
-          },
-          "stub": {
-            "type": "boolean"
-          },
-          "subject": {
-            "type": "string"
-          },
-          "teams": {
-            "items": {
-              "$ref": "#/components/schemas/Account"
-            },
-            "type": "array"
-          },
-          "user_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "account",
-          "email",
-          "email_verified",
-          "key",
-          "name",
-          "stub",
-          "subject",
-          "teams",
-          "user_id"
-        ],
-        "type": "object"
-      },
-      "GetUnitsResponse": {
-        "description": "`iohr.accounts.v1.GetUnitsResponse`",
-        "properties": {
-          "account_id": {
-            "type": "string"
-          },
-          "allowance": {
-            "format": "int64",
-            "type": "string"
-          },
-          "days": {
-            "items": {
-              "$ref": "#/components/schemas/UnitDay"
-            },
-            "type": "array"
-          },
-          "granted": {
-            "format": "int64",
-            "type": "string"
-          },
-          "month": {
-            "type": "string"
-          },
-          "plan": {
-            "$ref": "#/components/schemas/Plan"
-          },
-          "remaining": {
-            "format": "int64",
-            "type": "string"
-          },
-          "resets_at": {
-            "type": "string"
-          },
-          "usage": {
-            "items": {
-              "$ref": "#/components/schemas/UnitUsage"
-            },
-            "type": "array"
-          },
-          "used": {
-            "format": "int64",
-            "type": "string"
-          }
-        },
-        "required": [
-          "account_id",
-          "allowance",
-          "days",
-          "granted",
-          "month",
-          "plan",
-          "remaining",
-          "resets_at",
-          "usage",
-          "used"
-        ],
-        "type": "object"
-      },
-      "GetUsageResponse": {
-        "description": "`iohr.accounts.v1.GetUsageResponse`",
-        "properties": {
-          "plan": {
-            "type": "string"
-          },
-          "rows": {
-            "items": {
-              "$ref": "#/components/schemas/UsageRow"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "plan",
-          "rows"
-        ],
-        "type": "object"
-      },
-      "Inbox": {
-        "description": "`iohr.events.v1.Inbox`",
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "created_at",
-          "expires_at",
-          "id",
-          "url"
-        ],
-        "type": "object"
-      },
-      "InboxRequest": {
-        "description": "`iohr.events.v1.InboxRequest`",
-        "properties": {
-          "body": {
-            "type": "string"
-          },
-          "content_type": {
-            "type": "string"
-          },
-          "endpoint_id": {
-            "type": "string"
-          },
-          "headers": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "id": {
-            "type": "string"
-          },
-          "method": {
-            "type": "string"
-          },
-          "received_at": {
-            "type": "string"
-          },
-          "signature": {
-            "type": "string"
-          },
-          "size": {
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "body",
-          "content_type",
-          "endpoint_id",
-          "headers",
-          "id",
-          "method",
-          "received_at",
-          "signature",
-          "size"
-        ],
         "type": "object"
       },
       "Item": {
@@ -885,12 +391,12 @@
         },
         "required": [
           "id",
-          "language",
-          "published_at",
           "source",
-          "summary",
+          "language",
           "title",
-          "url"
+          "url",
+          "published_at",
+          "summary"
         ],
         "type": "object"
       },
@@ -914,25 +420,6 @@
         ],
         "type": "object"
       },
-      "ListDeliveriesResponse": {
-        "description": "`iohr.events.v1.ListDeliveriesResponse`",
-        "properties": {
-          "deliveries": {
-            "items": {
-              "$ref": "#/components/schemas/Delivery"
-            },
-            "type": "array"
-          },
-          "next_page_token": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "deliveries",
-          "next_page_token"
-        ],
-        "type": "object"
-      },
       "ListDigestsResponse": {
         "description": "`iohr.radar.v1.ListDigestsResponse`",
         "properties": {
@@ -941,74 +428,14 @@
               "$ref": "#/components/schemas/Digest"
             },
             "type": "array"
-          }
-        },
-        "required": [
-          "digests"
-        ],
-        "type": "object"
-      },
-      "ListEndpointsResponse": {
-        "description": "`iohr.events.v1.ListEndpointsResponse`",
-        "properties": {
-          "endpoints": {
-            "items": {
-              "$ref": "#/components/schemas/Endpoint"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "endpoints"
-        ],
-        "type": "object"
-      },
-      "ListEventTypesResponse": {
-        "description": "`iohr.events.v1.ListEventTypesResponse`",
-        "properties": {
-          "types": {
-            "items": {
-              "$ref": "#/components/schemas/EventType"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "types"
-        ],
-        "type": "object"
-      },
-      "ListInboxRequestsResponse": {
-        "description": "`iohr.events.v1.ListInboxRequestsResponse`",
-        "properties": {
-          "inbox": {
-            "$ref": "#/components/schemas/Inbox"
           },
-          "requests": {
-            "items": {
-              "$ref": "#/components/schemas/InboxRequest"
-            },
-            "type": "array"
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "inbox",
-          "requests"
-        ],
-        "type": "object"
-      },
-      "ListInboxesResponse": {
-        "description": "`iohr.events.v1.ListInboxesResponse`",
-        "properties": {
-          "inboxes": {
-            "items": {
-              "$ref": "#/components/schemas/Inbox"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "inboxes"
+          "digests",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -1020,25 +447,14 @@
               "$ref": "#/components/schemas/Item"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "items"
-        ],
-        "type": "object"
-      },
-      "ListUnitCategoriesResponse": {
-        "description": "`iohr.accounts.v1.ListUnitCategoriesResponse`",
-        "properties": {
-          "categories": {
-            "items": {
-              "$ref": "#/components/schemas/UnitCategory"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "categories"
+          "items",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -1114,42 +530,8 @@
         ],
         "type": "object"
       },
-      "Plan": {
-        "description": "`iohr.accounts.v1.Plan`",
-        "properties": {
-          "accounts": {
-            "format": "int64",
-            "type": "string"
-          },
-          "at_zero": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "monthly_units": {
-            "format": "int64",
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "accounts",
-          "at_zero",
-          "description",
-          "monthly_units",
-          "name",
-          "updated_at"
-        ],
-        "type": "object"
-      },
       "Problem": {
-        "description": "`{\"code\",\"error\",\"details\"}`: the REST body and the SSE `error` payload.",
+        "description": "`{\"code\",\"error\",\"details\",\"request_id\"}`: the REST body and the SSE `error` payload.",
         "properties": {
           "code": {
             "$ref": "#/components/schemas/Code",
@@ -1165,233 +547,17 @@
           "error": {
             "description": "The sentence.",
             "type": "string"
+          },
+          "request_id": {
+            "description": "The request's id, the `x-request-id` the answer carries: name it when\nasking about a call. Empty on a socket or MQTT frame, whose own id\nnames the call.",
+            "type": "string"
           }
         },
         "required": [
           "code",
           "error",
-          "details"
-        ],
-        "type": "object"
-      },
-      "RetryDeliveryResponse": {
-        "description": "`iohr.events.v1.RetryDeliveryResponse`",
-        "properties": {
-          "delivery": {
-            "$ref": "#/components/schemas/Delivery"
-          }
-        },
-        "required": [
-          "delivery"
-        ],
-        "type": "object"
-      },
-      "RotateSecretResponse": {
-        "description": "`iohr.events.v1.RotateSecretResponse`",
-        "properties": {
-          "previous_expires_at": {
-            "type": "string"
-          },
-          "secret": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "previous_expires_at",
-          "secret"
-        ],
-        "type": "object"
-      },
-      "SendTestResponse": {
-        "description": "`iohr.events.v1.SendTestResponse`",
-        "properties": {
-          "delivery": {
-            "$ref": "#/components/schemas/Delivery"
-          }
-        },
-        "required": [
-          "delivery"
-        ],
-        "type": "object"
-      },
-      "StreamEventsResponse": {
-        "description": "`iohr.events.v1.StreamEventsResponse`",
-        "properties": {
-          "account_id": {
-            "type": "string"
-          },
-          "data": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "id": {
-            "type": "string"
-          },
-          "occurred_at": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "account_id",
-          "data",
-          "id",
-          "occurred_at",
-          "type"
-        ],
-        "type": "object"
-      },
-      "UnitCategory": {
-        "description": "`iohr.accounts.v1.UnitCategory`",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "units_per_1k_tokens": {
-            "format": "int64",
-            "type": "string"
-          },
-          "units_per_call": {
-            "format": "int64",
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "description",
-          "name",
-          "units_per_1k_tokens",
-          "units_per_call",
-          "updated_at"
-        ],
-        "type": "object"
-      },
-      "UnitDay": {
-        "description": "`iohr.accounts.v1.UnitDay`",
-        "properties": {
-          "day": {
-            "type": "string"
-          },
-          "units": {
-            "format": "int64",
-            "type": "string"
-          }
-        },
-        "required": [
-          "day",
-          "units"
-        ],
-        "type": "object"
-      },
-      "UnitUsage": {
-        "description": "`iohr.accounts.v1.UnitUsage`",
-        "properties": {
-          "calls": {
-            "format": "int64",
-            "type": "string"
-          },
-          "category": {
-            "type": "string"
-          },
-          "key_id": {
-            "type": "string"
-          },
-          "key_name": {
-            "type": "string"
-          },
-          "rpc": {
-            "type": "string"
-          },
-          "tokens": {
-            "format": "int64",
-            "type": "string"
-          },
-          "units": {
-            "format": "int64",
-            "type": "string"
-          },
-          "user_id": {
-            "type": "string"
-          },
-          "user_name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "calls",
-          "category",
-          "key_id",
-          "key_name",
-          "rpc",
-          "tokens",
-          "units",
-          "user_id",
-          "user_name"
-        ],
-        "type": "object"
-      },
-      "UpdateEndpointRequest": {
-        "description": "`iohr.events.v1.UpdateEndpointRequest`",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "endpoint_id": {
-            "type": "string"
-          },
-          "event_types": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "description",
-          "enabled",
-          "endpoint_id",
-          "event_types",
-          "url"
-        ],
-        "type": "object"
-      },
-      "UsageRow": {
-        "description": "`iohr.accounts.v1.UsageRow`",
-        "properties": {
-          "amount": {
-            "format": "int64",
-            "type": "string"
-          },
-          "day": {
-            "type": "string"
-          },
-          "metric": {
-            "type": "string"
-          },
-          "service": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "amount",
-          "day",
-          "metric",
-          "service"
+          "details",
+          "request_id"
         ],
         "type": "object"
       }
@@ -1505,6 +671,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1533,6 +716,12 @@
         "tags": [
           "radar"
         ],
+        "x-iohr-list": {
+          "items": "digests",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "radar:read"
@@ -1607,6 +796,23 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1635,6 +841,12 @@
         "tags": [
           "radar"
         ],
+        "x-iohr-list": {
+          "items": "items",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "radar:read"
@@ -1649,7 +861,7 @@
   ],
   "servers": [
     {
-      "description": "The InOrbit API",
+      "description": "The API",
       "url": "https://api.inorbit.hr"
     }
   ]

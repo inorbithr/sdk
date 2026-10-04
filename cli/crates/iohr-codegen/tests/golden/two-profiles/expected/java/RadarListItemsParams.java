@@ -6,10 +6,14 @@ package iohr;
  *
  * @param language <code>language</code>; <code>null</code> to leave it out
  * @param limit <code>limit</code>; <code>null</code> to leave it out
+ * @param pageSize <code>page_size</code>; <code>null</code> to leave it out
+ * @param pageToken <code>page_token</code>; <code>null</code> to leave it out
  */
 public record RadarListItemsParams(
         String language,
-        Integer limit) {
+        Integer limit,
+        Integer pageSize,
+        String pageToken) {
 
     /**
      * A builder.
@@ -24,6 +28,8 @@ public record RadarListItemsParams(
     public static final class Builder {
         private String language;
         private Integer limit;
+        private Integer pageSize;
+        private String pageToken;
 
         private Builder() {}
 
@@ -50,12 +56,34 @@ public record RadarListItemsParams(
         }
 
         /**
+         * Sets <code>pageSize</code>.
+         *
+         * @param pageSize the value
+         * @return this builder
+         */
+        public Builder pageSize(Integer pageSize) {
+            this.pageSize = pageSize;
+            return this;
+        }
+
+        /**
+         * Sets <code>pageToken</code>.
+         *
+         * @param pageToken the value
+         * @return this builder
+         */
+        public Builder pageToken(String pageToken) {
+            this.pageToken = pageToken;
+            return this;
+        }
+
+        /**
          * The value.
          *
          * @return the <code>RadarListItemsParams</code>
          */
         public RadarListItemsParams build() {
-            return new RadarListItemsParams(language, limit);
+            return new RadarListItemsParams(language, limit, pageSize, pageToken);
         }
     }
 }

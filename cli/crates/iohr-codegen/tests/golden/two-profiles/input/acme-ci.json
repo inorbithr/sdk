@@ -33,15 +33,15 @@
           }
         },
         "required": [
-          "created_at",
-          "erase_after",
           "id",
           "kind",
+          "slug",
           "name",
           "plan",
+          "status",
           "role",
-          "slug",
-          "status"
+          "created_at",
+          "erase_after"
         ],
         "type": "object"
       },
@@ -86,17 +86,17 @@
           }
         },
         "required": [
-          "client_id",
-          "created_at",
-          "created_by",
-          "expires_at",
           "id",
-          "kind",
-          "last_used_at",
+          "client_id",
           "name",
+          "secret_hint",
+          "created_by",
+          "created_at",
+          "last_used_at",
           "revoked_at",
           "scopes",
-          "secret_hint"
+          "kind",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -148,18 +148,17 @@
           }
         },
         "required": [
-          "advanced",
-          "after",
-          "area",
-          "example",
+          "title",
           "impact",
+          "area",
+          "url",
+          "what",
+          "production_impact",
+          "try_it",
           "novice",
           "practitioner",
-          "production_impact",
-          "title",
-          "try_it",
-          "url",
-          "what"
+          "advanced",
+          "after"
         ],
         "type": "object"
       },
@@ -182,9 +181,30 @@
           "internal",
           "unsupported_media_type",
           "payload_too_large",
-          "method_not_allowed"
+          "method_not_allowed",
+          "unprocessable"
         ],
-        "type": "string"
+        "type": "string",
+        "x-http-status": {
+          "already_exists": 409,
+          "bad_request": 400,
+          "cancelled": 499,
+          "conflict": 409,
+          "failed_precondition": 400,
+          "forbidden": 403,
+          "internal": 500,
+          "method_not_allowed": 405,
+          "not_found": 404,
+          "payload_too_large": 413,
+          "quota_exceeded": 429,
+          "rate_limited": 429,
+          "timeout": 504,
+          "unauthenticated": 401,
+          "unavailable": 503,
+          "unimplemented": 501,
+          "unprocessable": 422,
+          "unsupported_media_type": 415
+        }
       },
       "CreateEndpointRequest": {
         "description": "`iohr.events.v1.CreateEndpointRequest`",
@@ -205,12 +225,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "account_id",
-          "description",
-          "event_types",
-          "url"
-        ],
         "type": "object"
       },
       "CreateEndpointResponse": {
@@ -224,7 +238,6 @@
           }
         },
         "required": [
-          "endpoint",
           "secret"
         ],
         "type": "object"
@@ -236,9 +249,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "account_id"
-        ],
         "type": "object"
       },
       "CreateInboxResponse": {
@@ -248,9 +258,6 @@
             "$ref": "#/components/schemas/Inbox"
           }
         },
-        "required": [
-          "inbox"
-        ],
         "type": "object"
       },
       "DeleteEndpointResponse": {
@@ -305,17 +312,17 @@
           }
         },
         "required": [
-          "attempts",
-          "created_at",
+          "id",
           "endpoint_id",
           "event_id",
           "event_type",
-          "id",
-          "last_error",
-          "last_latency_ms",
-          "last_status_code",
-          "next_attempt_at",
           "status",
+          "attempts",
+          "last_status_code",
+          "last_latency_ms",
+          "last_error",
+          "next_attempt_at",
+          "created_at",
           "updated_at"
         ],
         "type": "object"
@@ -481,26 +488,25 @@
           }
         },
         "required": [
-          "ai_written",
-          "changed",
-          "changes",
-          "checked",
-          "created_at",
-          "drill",
-          "drill_code",
           "id",
-          "item_count",
-          "lang",
+          "week",
           "language",
-          "model",
-          "origin",
-          "published_at",
+          "lang",
+          "created_at",
+          "changed",
+          "why",
+          "drill",
           "script",
-          "status",
+          "item_count",
+          "model",
+          "ai_written",
           "stub",
           "summary",
-          "week",
-          "why"
+          "changes",
+          "status",
+          "published_at",
+          "origin",
+          "checked"
         ],
         "type": "object"
       },
@@ -527,12 +533,12 @@
           }
         },
         "required": [
-          "output",
-          "solution",
           "starter",
+          "solution",
+          "output",
+          "toolchain",
           "stub",
-          "tests",
-          "toolchain"
+          "tests"
         ],
         "type": "object"
       },
@@ -582,18 +588,18 @@
           }
         },
         "required": [
-          "created_at",
-          "description",
-          "disabled_reason",
-          "enabled",
-          "event_types",
-          "failed_24h",
           "id",
+          "url",
+          "description",
+          "event_types",
+          "enabled",
+          "disabled_reason",
+          "created_at",
+          "secret_rotated_at",
           "last_delivery_at",
           "last_delivery_status",
-          "secret_rotated_at",
           "succeeded_24h",
-          "url"
+          "failed_24h"
         ],
         "type": "object"
       },
@@ -611,9 +617,9 @@
           }
         },
         "required": [
+          "type",
           "description",
-          "schema",
-          "type"
+          "schema"
         ],
         "type": "object"
       },
@@ -641,11 +647,11 @@
         },
         "required": [
           "source",
-          "stderr",
           "stdout",
+          "stderr",
+          "toolchain",
           "stub",
-          "tests",
-          "toolchain"
+          "tests"
         ],
         "type": "object"
       },
@@ -656,9 +662,6 @@
             "$ref": "#/components/schemas/Digest"
           }
         },
-        "required": [
-          "digest"
-        ],
         "type": "object"
       },
       "GetMeResponse": {
@@ -696,15 +699,13 @@
           }
         },
         "required": [
-          "account",
-          "email",
-          "email_verified",
-          "key",
-          "name",
-          "stub",
+          "user_id",
           "subject",
+          "email",
+          "name",
+          "email_verified",
           "teams",
-          "user_id"
+          "stub"
         ],
         "type": "object"
       },
@@ -754,15 +755,14 @@
         },
         "required": [
           "account_id",
-          "allowance",
-          "days",
-          "granted",
           "month",
-          "plan",
-          "remaining",
           "resets_at",
+          "allowance",
+          "granted",
+          "used",
+          "remaining",
           "usage",
-          "used"
+          "days"
         ],
         "type": "object"
       },
@@ -780,8 +780,8 @@
           }
         },
         "required": [
-          "plan",
-          "rows"
+          "rows",
+          "plan"
         ],
         "type": "object"
       },
@@ -802,10 +802,10 @@
           }
         },
         "required": [
-          "created_at",
-          "expires_at",
           "id",
-          "url"
+          "url",
+          "created_at",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -845,15 +845,15 @@
           }
         },
         "required": [
-          "body",
-          "content_type",
-          "endpoint_id",
-          "headers",
           "id",
-          "method",
           "received_at",
+          "method",
+          "content_type",
+          "headers",
+          "body",
+          "size",
           "signature",
-          "size"
+          "endpoint_id"
         ],
         "type": "object"
       },
@@ -885,12 +885,12 @@
         },
         "required": [
           "id",
-          "language",
-          "published_at",
           "source",
-          "summary",
+          "language",
           "title",
-          "url"
+          "url",
+          "published_at",
+          "summary"
         ],
         "type": "object"
       },
@@ -941,10 +941,14 @@
               "$ref": "#/components/schemas/Digest"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "digests"
+          "digests",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -956,16 +960,23 @@
               "$ref": "#/components/schemas/Endpoint"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "endpoints"
+          "endpoints",
+          "next_page_token"
         ],
         "type": "object"
       },
       "ListEventTypesResponse": {
         "description": "`iohr.events.v1.ListEventTypesResponse`",
         "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
           "types": {
             "items": {
               "$ref": "#/components/schemas/EventType"
@@ -974,7 +985,8 @@
           }
         },
         "required": [
-          "types"
+          "types",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -984,6 +996,9 @@
           "inbox": {
             "$ref": "#/components/schemas/Inbox"
           },
+          "next_page_token": {
+            "type": "string"
+          },
           "requests": {
             "items": {
               "$ref": "#/components/schemas/InboxRequest"
@@ -992,8 +1007,8 @@
           }
         },
         "required": [
-          "inbox",
-          "requests"
+          "requests",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -1005,10 +1020,14 @@
               "$ref": "#/components/schemas/Inbox"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "inboxes"
+          "inboxes",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -1020,10 +1039,14 @@
               "$ref": "#/components/schemas/Item"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "items"
+          "items",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -1035,10 +1058,14 @@
               "$ref": "#/components/schemas/UnitCategory"
             },
             "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
           }
         },
         "required": [
-          "categories"
+          "categories",
+          "next_page_token"
         ],
         "type": "object"
       },
@@ -1139,17 +1166,17 @@
           }
         },
         "required": [
-          "accounts",
+          "name",
+          "monthly_units",
           "at_zero",
           "description",
-          "monthly_units",
-          "name",
-          "updated_at"
+          "updated_at",
+          "accounts"
         ],
         "type": "object"
       },
       "Problem": {
-        "description": "`{\"code\",\"error\",\"details\"}`: the REST body and the SSE `error` payload.",
+        "description": "`{\"code\",\"error\",\"details\",\"request_id\"}`: the REST body and the SSE `error` payload.",
         "properties": {
           "code": {
             "$ref": "#/components/schemas/Code",
@@ -1165,12 +1192,17 @@
           "error": {
             "description": "The sentence.",
             "type": "string"
+          },
+          "request_id": {
+            "description": "The request's id, the `x-request-id` the answer carries: name it when\nasking about a call. Empty on a socket or MQTT frame, whose own id\nnames the call.",
+            "type": "string"
           }
         },
         "required": [
           "code",
           "error",
-          "details"
+          "details",
+          "request_id"
         ],
         "type": "object"
       },
@@ -1181,9 +1213,6 @@
             "$ref": "#/components/schemas/Delivery"
           }
         },
-        "required": [
-          "delivery"
-        ],
         "type": "object"
       },
       "RotateSecretResponse": {
@@ -1197,8 +1226,8 @@
           }
         },
         "required": [
-          "previous_expires_at",
-          "secret"
+          "secret",
+          "previous_expires_at"
         ],
         "type": "object"
       },
@@ -1209,9 +1238,6 @@
             "$ref": "#/components/schemas/Delivery"
           }
         },
-        "required": [
-          "delivery"
-        ],
         "type": "object"
       },
       "StreamEventsResponse": {
@@ -1237,11 +1263,11 @@
           }
         },
         "required": [
-          "account_id",
-          "data",
           "id",
+          "type",
           "occurred_at",
-          "type"
+          "account_id",
+          "data"
         ],
         "type": "object"
       },
@@ -1266,13 +1292,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "description",
-          "name",
-          "units_per_1k_tokens",
-          "units_per_call",
-          "updated_at"
-        ],
         "type": "object"
       },
       "UnitDay": {
@@ -1302,10 +1321,26 @@
           "category": {
             "type": "string"
           },
+          "client_errors": {
+            "format": "int64",
+            "type": "string"
+          },
           "key_id": {
             "type": "string"
           },
           "key_name": {
+            "type": "string"
+          },
+          "p50_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "platform_errors": {
+            "format": "int64",
             "type": "string"
           },
           "rpc": {
@@ -1327,15 +1362,19 @@
           }
         },
         "required": [
-          "calls",
+          "rpc",
           "category",
           "key_id",
           "key_name",
-          "rpc",
-          "tokens",
+          "calls",
           "units",
+          "tokens",
           "user_id",
-          "user_name"
+          "user_name",
+          "client_errors",
+          "platform_errors",
+          "p50_ms",
+          "p95_ms"
         ],
         "type": "object"
       },
@@ -1361,13 +1400,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "description",
-          "enabled",
-          "endpoint_id",
-          "event_types",
-          "url"
-        ],
         "type": "object"
       },
       "UsageRow": {
@@ -1388,10 +1420,10 @@
           }
         },
         "required": [
-          "amount",
           "day",
+          "service",
           "metric",
-          "service"
+          "amount"
         ],
         "type": "object"
       }
@@ -1577,6 +1609,25 @@
       "get": {
         "description": "Transcoded from `/iohr.accounts.v1.AccountsService/ListUnitCategories` on the `accounts` backend.\n\nA key needs scope `usage:read`.",
         "operationId": "AccountsService.ListUnitCategories",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1603,6 +1654,12 @@
         "tags": [
           "accounts"
         ],
+        "x-iohr-list": {
+          "items": "categories",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "usage:read"
@@ -1667,6 +1724,25 @@
       "get": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend.\n\nA key needs scope `events:read`.",
         "operationId": "EventsService.ListEventTypes",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1693,6 +1769,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "types",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "events:read"
@@ -1780,6 +1862,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1808,6 +1907,12 @@
         "tags": [
           "radar"
         ],
+        "x-iohr-list": {
+          "items": "digests",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "radar:read"
@@ -1882,6 +1987,23 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1910,6 +2032,12 @@
         "tags": [
           "radar"
         ],
+        "x-iohr-list": {
+          "items": "items",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "radar:read"
@@ -1926,6 +2054,17 @@
             "name": "delivery_id",
             "required": true,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -1974,6 +2113,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2002,6 +2158,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "endpoints",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "webhooks:read"
@@ -2010,6 +2172,19 @@
       "post": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend.\n\nA key needs scope `webhooks:write`.",
         "operationId": "EventsService.CreateEndpoint",
+        "parameters": [
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2263,6 +2438,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "deliveries",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "webhooks:read"
@@ -2279,6 +2460,17 @@
             "name": "endpoint_id",
             "required": true,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -2327,6 +2519,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2373,6 +2576,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2401,6 +2621,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "inboxes",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "webhooks:read"
@@ -2409,6 +2635,19 @@
       "post": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend.\n\nA key needs scope `webhooks:write`.",
         "operationId": "EventsService.CreateInbox",
+        "parameters": [
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2510,6 +2749,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2538,6 +2794,12 @@
         "tags": [
           "events"
         ],
+        "x-iohr-list": {
+          "items": "requests",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "webhooks:read"
@@ -2552,7 +2814,7 @@
   ],
   "servers": [
     {
-      "description": "The InOrbit API",
+      "description": "The API",
       "url": "https://api.inorbit.hr"
     }
   ]

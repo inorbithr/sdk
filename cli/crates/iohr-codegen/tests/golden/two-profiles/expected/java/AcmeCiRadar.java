@@ -2,7 +2,9 @@
 package iohr;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
+import hr.inorbit.sdk.codegen.Codegen;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -53,6 +55,28 @@ public final class AcmeCiRadar {
      */
     public CompletableFuture<Response<ListDigestsResponse>> listDigestsAsync() {
         return Operations.listDigestsAsync(client, RadarListDigestsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/radar/digests</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Digest> allListDigests(RadarListDigestsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listDigests(client, new RadarListDigestsParams(params.language(), params.lang(), params.limit(), params.includeDrafts(), params.beforeWeek(), params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.digests(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/radar/digests</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<Digest> allListDigests() {
+        return allListDigests(RadarListDigestsParams.builder().build());
     }
 
     /**
@@ -111,5 +135,27 @@ public final class AcmeCiRadar {
      */
     public CompletableFuture<Response<ListItemsResponse>> listItemsAsync() {
         return Operations.listItemsAsync(client, RadarListItemsParams.builder().build());
+    }
+
+    /**
+     * Every item <code>GET /v1/radar/items</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @param params the query parameters; the page token is set for each page
+     * @return the walk
+     */
+    public Pages<Item> allListItems(RadarListItemsParams params) {
+        return Codegen.pages(token -> {
+            var page = Operations.listItems(client, new RadarListItemsParams(params.language(), params.limit(), params.pageSize(), token != null ? token : params.pageToken())).value();
+            return new Pages.Page<>(page.items(), page.nextPageToken());
+        });
+    }
+
+    /**
+     * Every item <code>GET /v1/radar/items</code> answers, page after page, following <code>next_page_token</code> until the last page; see {@link Pages}.
+     *
+     * @return the walk
+     */
+    public Pages<Item> allListItems() {
+        return allListItems(RadarListItemsParams.builder().build());
     }
 }
