@@ -722,6 +722,21 @@ pub enum SdkCommand {
     /// runtime, as JSON keyed by operation id: what the API reference shows beside each
     /// operation. Every snippet builds against the runtime's public surface.
     Examples(SdkExamples),
+    /// Print the configuration an SDK client built with `load` would use here: every
+    /// setting with where its value came from, the credential chain, the pipeline and
+    /// what was ignored, as the SDKs' `describe()` gives it (`docs/config.md` section
+    /// 2.6). Secrets are redacted. Reads the environment (`INORBIT_*`) and the config
+    /// file; contacts no host. `--profile NAME` stands for `profile` in the client's
+    /// code; `IOHR_PROFILE` is not read, as the SDKs do not read it.
+    Config(SdkConfig),
+}
+
+#[derive(Debug, Args)]
+pub struct SdkConfig {
+    /// Resolve for a generated profile type of this name (`Client<AcmeCi>`), which reads
+    /// `INORBIT_<NAME>_*` and its own table, instead of the public client.
+    #[arg(long = "for", value_name = "PROFILE")]
+    pub profile_type: Option<ProfileName>,
 }
 
 #[derive(Debug, Args)]

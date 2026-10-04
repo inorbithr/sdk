@@ -45,6 +45,7 @@ url.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+serde_yaml_ng.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 wiremock.workspace = true
