@@ -50,7 +50,9 @@ iohr login --with-token --profile ci < token.txt
 For CI and one-off use, `IOHR_TOKEN` is used in memory and nothing is written:
 
 ```sh
-IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
+IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f page_size=5
+# every page of a list as one answer (at most 100 pages; --max-pages N)
+iohr api GET /v1/webhooks/endpoints --all
 ```
 
 ## Commands
@@ -64,7 +66,7 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 | `iohr whoami` | Subject, account, plan, scopes and expiry of the active profile |
 | `iohr accounts list` | The accounts the credential can see |
 | `iohr token create \| list \| revoke` | API tokens for an account (a signed-in person only) |
-| `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file` |
+| `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
