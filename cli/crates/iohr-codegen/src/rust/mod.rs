@@ -6,6 +6,9 @@
 
 mod models;
 
+mod example;
+pub(crate) use example::example;
+
 use std::collections::BTreeSet;
 
 use heck::{ToSnakeCase as _, ToUpperCamelCase as _};

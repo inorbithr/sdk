@@ -687,6 +687,24 @@ pub enum SdkCommand {
     /// Fetch every profile's document again and fail when the cut has moved since the
     /// surface was generated (run it in CI with `IOHR_TOKEN_<PROFILE>` per profile).
     Check(SdkCheck),
+    /// Write a short program per operation and language that calls it with the published
+    /// runtime, as JSON keyed by operation id: what the API reference shows beside each
+    /// operation. Every snippet builds against the runtime's public surface.
+    Examples(SdkExamples),
+}
+
+#[derive(Debug, Args)]
+pub struct SdkExamples {
+    /// A language; repeat it for several. Every language when left out.
+    #[arg(long, value_enum)]
+    pub lang: Vec<Lang>,
+    /// The document to write examples for, as NAME=FILE or FILE (the public document,
+    /// `iohr openapi pull` or the platform's `openapi.public.json`).
+    #[arg(long = "from", value_name = "[NAME=]FILE")]
+    pub from: String,
+    /// The file to write, or `-` for standard output.
+    #[arg(long, value_name = "FILE", default_value = "-")]
+    pub out: PathBuf,
 }
 
 #[derive(Debug, Args)]

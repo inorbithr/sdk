@@ -9,6 +9,9 @@
 //! answer may leave out is a boxed, nullable type. The generated code compiles with
 //! `-Xlint:all -Xdoclint:all/protected -Werror`, so every public element has Javadoc.
 
+mod example;
+pub(crate) use example::example;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 

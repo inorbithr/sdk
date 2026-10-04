@@ -71,7 +71,16 @@ fn arguments(call: &Call<'_>) -> String {
             .iter()
             .map(|f| format!("{}={}", field_name(&f.name).0, literal(&f.ty, &f.value)))
             .collect();
-        args.push(format!("{model}({})", fields.join(", ")));
+        if fields.len() > 1 {
+            let mut text = format!("{model}(\n");
+            for f in &fields {
+                let _ = writeln!(text, "        {f},");
+            }
+            text.push_str("    )");
+            args.push(text);
+        } else {
+            args.push(format!("{model}({})", fields.join(", ")));
+        }
     }
     for (name, ty, value) in &call.query {
         args.push(format!(

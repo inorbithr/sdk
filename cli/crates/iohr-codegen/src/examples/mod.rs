@@ -116,10 +116,6 @@ impl Call<'_> {
         }
     }
 
-    /// The model of `name`, if it is one.
-    pub(crate) fn model(&self, name: &str) -> Option<&Model> {
-        self.models.iter().find(|m| m.name == name)
-    }
 }
 
 /// Renders the examples of `api` in `langs`.
@@ -364,11 +360,6 @@ pub(crate) fn strings(value: &Value) -> Vec<String> {
         .as_array()
         .map(|a| a.iter().map(scalar).collect())
         .unwrap_or_default()
-}
-
-/// Whether `ty` is an IR string type (a plain string, or an enumeration carried as one).
-pub(crate) fn is_string(ty: &Type) -> bool {
-    matches!(ty, Type::String | Type::Enum { .. })
 }
 
 /// The models the IR reads, for a target that needs `ir` itself.

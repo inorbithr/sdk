@@ -8,6 +8,9 @@
 //! `shapes`, which the runtime's `codegen.decode`/`encode` walk to convert at the
 //! boundary and nowhere else.
 
+mod example;
+pub(crate) use example::example;
+
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 

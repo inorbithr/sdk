@@ -4,8 +4,7 @@
 //! construction against each runtime.
 //!
 //! Each template holds the imports it needs (merged into the snippet's own) and the
-//! lines that leave the profile's surface in a variable named [`VAR`] (`API` in C#,
-//! whose convention is a `client`).
+//! lines that leave the profile's surface in a variable named [`VAR`].
 
 /// The variable the examples call the operations on.
 pub const VAR: &str = "api";
@@ -20,6 +19,7 @@ pub struct Construction {
 }
 
 /// What the comment on each construction says.
+#[cfg(test)]
 const FROM_ENV: &str = "INORBIT_TOKEN, or INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES";
 
 /// TypeScript and JavaScript, on `@inorbithr/sdk`.
