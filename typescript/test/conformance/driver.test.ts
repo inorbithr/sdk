@@ -18,16 +18,25 @@ interface Case {
   name: string;
   area: string;
   pending?: string[];
-  action: { op: string; args?: Record<string, unknown>; repeat?: number; concurrent?: number };
+  action: {
+    op: string;
+    args?: Record<string, unknown>;
+    repeat?: number;
+    concurrent?: number;
+    take?: number;
+  };
   client?: {
     max_retries?: number;
     timeout_ms?: number;
     key_id?: string;
     key_secret?: string;
     scopes?: string[];
+    streams?: "sse" | "socket";
+    stream_idle_timeout_ms?: number;
   };
   expect: {
     ok?: unknown;
+    items?: unknown[];
     error?: {
       kind?: string;
       code?: string;
@@ -136,6 +145,38 @@ function call(api: Public, action: Case["action"]): Promise<RawResponse> {
   }
 }
 
+/** A stream action: every item until the stream ends, `take` items, or the error. */
+async function stream(
+  api: Public,
+  action: Case["action"],
+): Promise<{ items: unknown[]; error?: InOrbitError }> {
+  const args = action.args ?? {};
+  if (action.op !== "events.stream_events") {
+    throw new Error(
+      `the conformance schema names a stream op this driver does not know: ${action.op}`,
+    );
+  }
+  const params = Object.fromEntries(
+    Object.entries({ types: args.types, account_id: args.account_id }).filter(
+      ([, v]) => v !== undefined,
+    ),
+  ) as { types?: string; account_id?: string };
+  const items: unknown[] = [];
+  try {
+    for await (const item of api.events.streamEvents(params)) {
+      items.push(item);
+      if (action.take !== undefined && items.length >= action.take) {
+        break;
+      }
+    }
+  } catch (e) {
+    return { items, error: e as InOrbitError };
+  }
+  // The cancel frame leaves on the break; give the server a moment to read it.
+  await new Promise((r) => setTimeout(r, 100));
+  return { items };
+}
+
 function checkError(
   e: InOrbitError & { code?: string; status?: number },
   want: NonNullable<Case["expect"]["error"]>,
@@ -187,7 +228,7 @@ test("every case passes", async () => {
       }
       assert.ok(loaded.ok, `${name}: loading answered ${loaded.status}`);
       const c = ((await loaded.json()) as { case: Case }).case;
-      if (c.pending?.includes("ts") || c.area === "sse" || c.area === "socket") {
+      if (c.pending?.includes("ts")) {
         console.log(`skip ${name}: pending for ts`);
         continue;
       }
@@ -200,8 +241,51 @@ test("every case passes", async () => {
         scopes: o.scopes ?? ["identity:read"],
         maxRetries: o.max_retries ?? 2,
         ...(o.timeout_ms === undefined ? {} : { timeout: o.timeout_ms }),
+        ...(o.streams === undefined ? {} : { streams: o.streams }),
+        ...(o.stream_idle_timeout_ms === undefined
+          ? {}
+          : { streamIdleTimeout: o.stream_idle_timeout_ms }),
       });
       const api = new Public(client);
+      if (c.action.op === "events.stream_events") {
+        const got = await stream(api, c.action);
+        const verdict = (await (await fetch(`${replay.url}/_result`)).json()) as Verdict;
+        const problems: string[] = [];
+        if (verdict.status !== "pass") {
+          problems.push(
+            `server: ${verdict.status} mismatch=${JSON.stringify(verdict.mismatch)} next=${JSON.stringify(verdict.next)}`,
+          );
+        }
+        if (c.expect.attempts !== undefined && verdict.attempts !== c.expect.attempts) {
+          problems.push(`attempts: want ${c.expect.attempts}, got ${verdict.attempts}`);
+        }
+        if (
+          c.expect.token_exchanges !== undefined &&
+          verdict.token_exchanges !== c.expect.token_exchanges
+        ) {
+          problems.push(
+            `token_exchanges: want ${c.expect.token_exchanges}, got ${verdict.token_exchanges}`,
+          );
+        }
+        if (c.expect.items !== undefined && !subset(c.expect.items, got.items)) {
+          problems.push(
+            `items: want ${JSON.stringify(c.expect.items)}, got ${JSON.stringify(got.items)}`,
+          );
+        }
+        if (got.error !== undefined && c.expect.error === undefined) {
+          problems.push(`want the stream to end cleanly, got ${got.error.message}`);
+        } else if (got.error === undefined && c.expect.error !== undefined) {
+          problems.push("want an error, the stream ended cleanly");
+        } else if (got.error !== undefined && c.expect.error !== undefined) {
+          problems.push(...checkError(got.error, c.expect.error));
+        }
+        if (problems.length === 0) {
+          console.log(`pass ${name}`);
+        } else {
+          failed.push(`${name}:\n  ${problems.join("\n  ")}`);
+        }
+        continue;
+      }
       const run = (): Promise<RawResponse | InOrbitError> =>
         call(api, c.action).catch((e: InOrbitError) => e);
       const results: (RawResponse | InOrbitError)[] = [];

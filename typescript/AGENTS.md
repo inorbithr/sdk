@@ -40,6 +40,7 @@ typescript/
     client.ts         Client, the builder options, the one request path
     auth.ts           TokenProvider, client credentials (single flight), static token
     errors.ts         InOrbitError tree, Code, Detail, RawResponse
+    stream.ts         the server-sent events parser and the /v1/ws socket (design.md section 7)
     retry.ts, hooks.ts, int64.ts, version.ts
     codegen.ts        what generated surfaces import (VERSION, pathSegment, the Int64 shapes); semver-tracked
     runtime.ts        the runtime alone, which a generated surface imports
@@ -58,5 +59,13 @@ typescript/
 - `int64` values are `bigint` in the public types (`Int64` reads a decimal string).
 - Errors are classes with a stable `name` and `code`; `instanceof` and `err.code` work.
 - Every call takes an options bag with `signal` and `timeout`.
+- Streams (design.md section 7): `Client.stream` is the one stream path, an async
+  generator over server-sent events (fetch streaming, never `EventSource`, which cannot
+  send the token) or, with `streams: "socket"`, over the client's one `/v1/ws`
+  connection (the global `WebSocket` with an `Authorization` header: Node 22+, Deno,
+  Bun). The WebSocket API hides pings and the refusal's status, so the socket has no
+  idle clock of its own (the server closes a dead one) and a failed upgrade gets one
+  fresh token, then the retry budget. It cannot pause the socket either: a reader 64
+  items behind has its stream stopped with a `ConnectionError`.
 - `toJSON` and `util.inspect` output of credentials redacts the secret; a test asserts it.
 - `"private": true` in `package.json` keeps it off npm until the first release (M4).
