@@ -1,0 +1,140 @@
+[
+  {
+    "idempotency_key": false,
+    "line": "DELETE /v1/webhooks/endpoints/{endpoint_id}",
+    "operation": "events.delete_endpoint",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "DELETE /v1/webhooks/inboxes/{inbox_id}",
+    "operation": "events.delete_inbox",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/accounts/me",
+    "operation": "accounts.get_me",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/accounts/orgs/{org_id}/units",
+    "operation": "accounts.get_units",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/accounts/orgs/{org_id}/usage",
+    "operation": "accounts.get_usage",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/accounts/units/categories",
+    "operation": "accounts.list_unit_categories",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/events/events",
+    "operation": "events.stream_events",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/events/types",
+    "operation": "events.list_event_types",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/me",
+    "operation": "me",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/radar/digests",
+    "operation": "radar.list_digests",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/radar/digests/{id}",
+    "operation": "radar.get_digest",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/radar/items",
+    "operation": "radar.list_items",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/webhooks/endpoints",
+    "operation": "events.list_endpoints",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/webhooks/endpoints/{endpoint_id}",
+    "operation": "events.get_endpoint",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/webhooks/endpoints/{endpoint_id}/deliveries",
+    "operation": "events.list_deliveries",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/webhooks/inboxes",
+    "operation": "events.list_inboxes",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "GET /v1/webhooks/inboxes/{inbox_id}/requests",
+    "operation": "events.list_inbox_requests",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "PATCH /v1/webhooks/endpoints/{endpoint_id}",
+    "operation": "events.update_endpoint",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/deliveries/{delivery_id}/retry",
+    "operation": "events.retry_delivery",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/endpoints",
+    "operation": "events.create_endpoint",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/endpoints/{endpoint_id}/rotate",
+    "operation": "events.rotate_secret",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/endpoints/{endpoint_id}/test",
+    "operation": "events.send_test",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/inboxes",
+    "operation": "events.create_inbox",
+    "retry_safe": false
+  }
+]

@@ -76,7 +76,8 @@ cli/
   get only data. `token create` prints the new token alone on stdout.
 - Dependencies: the table in `README.md`. A new one needs a reason there and in the PR.
 - The generator's output is deterministic and golden-tested per language
-  (`iohr-codegen/tests/golden/<case>/expected/<lang>/`, `IOHR_UPDATE_GOLDEN=1` rewrites,
+  (`iohr-codegen/tests/golden/<case>/expected/<lang>/`, and the language-neutral marks
+  per operation in `expected/operations.json`; `IOHR_UPDATE_GOLDEN=1` rewrites,
   review the diff). `IOHR_TEST_COMPILE=<lang,...>` (or `all`) builds a generated surface
   against each language's runtime and proves the wrong profile does not compile.
   `rust/src/generated/` is this generator's output; never edit it, run `mise run rust:gen`.

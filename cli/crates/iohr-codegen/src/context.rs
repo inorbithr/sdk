@@ -135,6 +135,10 @@ pub struct Param {
 
 /// One operation, as every target renders it.
 #[derive(Debug, Clone, Serialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts about one operation that every target reads by name"
+)]
 pub struct Op {
     /// The model's `snake_case` name (`get_me`).
     pub name: String,
@@ -172,6 +176,12 @@ pub struct Op {
     /// Whether the operation is marked idempotent although its method is not, which the
     /// runtime must be told.
     pub idempotent_override: bool,
+    /// Whether the operation takes an `Idempotency-Key` header, which the runtime's
+    /// `idempotency_key` middleware generates once per call and sends on every attempt,
+    /// so the write may be retried (`docs/config.md` section 7.5). A target passes it to
+    /// the runtime's operation as it does [`idempotent_override`](Self::idempotent_override)
+    /// once the runtime has the field (M6).
+    pub idempotency_key: bool,
     /// The profiles that may call it.
     pub profiles: Vec<String>,
     /// Whether the answer is a stream (`text/event-stream`): the method yields the
@@ -369,6 +379,7 @@ fn op_context(op: &Operation, marker: String) -> Op {
         scopes: op.scopes.clone(),
         retry_safe: op.idempotent || op.method.is_idempotent(),
         idempotent_override: op.idempotent && !op.method.is_idempotent(),
+        idempotency_key: op.idempotency_key,
         profiles: op.profiles.iter().cloned().collect(),
         stream: op.response.media == Media::EventStream,
         rpc: op.rpc.clone().unwrap_or_default(),
