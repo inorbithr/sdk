@@ -43,15 +43,28 @@ The repository went public on 2026-10-01. These items waited for that.
 
 C# and Java follow every change and carry the same version as the other four, so their
 registry release is one step once M4b lands: `IsPackable` stays `false` and the POM has no
-`distributionManagement` until then, and no job uploads them. A version the four take
-together is set once in `release-please-config.json` (`release-as` on each package,
-removed in the next pull request after the release); a `Release-As:` footer would also
-move every other component the commit touches, the command line included. A pinned
-version that may break the API (a new major, or a new minor before 1.0) is the declared
-break `rust:api` and `py:api` accept: Rust is checked as a major release, Python's
-changes are listed without failing (`tools/release-as.py`).
+`distributionManagement` until then, and no job uploads them.
 
-## The command line's channels
+## Versions
+
+Every component follows SemVer, and release-please derives each version from the
+Conventional Commits that touched it; nobody sets one by hand (no `release-as`, no
+`Release-As:` footer).
+
+- **Before 1.0** (`bump-minor-pre-major`, `bump-patch-for-minor-pre-major`): a breaking
+  change bumps the minor (0.2.0 to 0.3.0), a `feat` or `fix` the patch (0.2.0 to 0.2.1).
+- **From 1.0**, which comes when the API is stable: breaking is major, `feat` minor, `fix`
+  patch.
+- A breaking change says so in its commit, `feat(go)!: ...` or a `BREAKING CHANGE:` footer,
+  and the squash-merge subject and body keep it. `rust:api` and `py:api` accept a break
+  only when such a commit since the last tag declares it (`tools/declared-break.py`): Rust
+  is then checked as a breaking release, Python's changes are listed without failing.
+- The command line is the same rule on its `alpha` pre-release line (`0.1.0-alpha.N`)
+  until its first stable release.
+- Before merging a release PR, check its title and the manifest line carry the version
+  the commits call for.
+
+## The command line's channels## The command line's channels
 
 | Channel | How a release reaches it | Credential |
 |---|---|---|

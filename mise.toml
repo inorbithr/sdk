@@ -288,10 +288,11 @@ dir = "rust"
 run = """
 [ -f Cargo.toml ] || exit 0
 base=$(git describe --tags --abbrev=0 --match 'rust/v*' 2>/dev/null) || { echo "rust:api: no release yet"; exit 0; }
-# A breaking release pinned with release-as in release-please-config.json is declared: check
-# against it as a major release (Cargo's reading of 0.1 to 0.2) instead of the crate's version.
-if [ "$(python3 ../tools/release-as.py rust "$base")" = breaking ]; then
-  echo "rust:api: release-as pins a breaking release over $base; checking it as one"
+# A breaking change declared in a commit (`!`, `BREAKING CHANGE:`) is what the next release
+# turns into a breaking version: check it as a major release (Cargo's reading of 0.1 to 0.2)
+# instead of the crate's current version.
+if [ "$(python3 ../tools/declared-break.py . "$base")" = breaking ]; then
+  echo "rust:api: a commit since $base declares a breaking change; checking it as a breaking release"
   cargo semver-checks --baseline-rev "$base" --release-type major
 else
   cargo semver-checks --baseline-rev "$base"
@@ -556,10 +557,10 @@ run = """
 [ -f pyproject.toml ] || exit 0
 base=$(git describe --tags --abbrev=0 --match 'python/v*' 2>/dev/null) || { echo "py:api: no release yet"; exit 0; }
 cd ..
-# A breaking release pinned with release-as in release-please-config.json is declared: the
-# changes are listed for review, and do not fail the check.
-if [ "$(python3 tools/release-as.py python "$base")" = breaking ]; then
-  echo "py:api: release-as pins a breaking release over $base; the breaking changes below are declared"
+# A breaking change declared in a commit (`!`, `BREAKING CHANGE:`) is listed for review and
+# does not fail the check: the next release is a breaking version.
+if [ "$(python3 tools/declared-break.py python "$base")" = breaking ]; then
+  echo "py:api: a commit since $base declares a breaking change; the changes below are declared"
   uv run --project python griffe check inorbithr --search python/src --against "$base" || true
 else
   uv run --project python griffe check inorbithr --search python/src --against "$base"
