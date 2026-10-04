@@ -238,5 +238,5 @@ without calling `next`. Resolve configuration in a test without touching the pro
 environment by passing the environment to `load`:
 
 ```python
-client = Client.load(_sources=LoadOptions(env={"INORBIT_TOKEN": "t"}, config_file="off"))
+client = Client.load(config_file="off", load_options=LoadOptions(env={"INORBIT_TOKEN": "t"}))
 ```

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/inorbithr/sdk/conformance/vector.schema.json",
+  "title": "Conformance vector",
+  "description": "A pure-function test: resolution, paths, no_proxy matching, rate-limit headers, durations (docs/config.md section 9.2). Each runtime runs every vector as a unit test; no server is involved.",
+  "type": "object",
+  "required": ["name", "kind", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "kind": { "enum": ["config", "config-path", "no-proxy", "rate-limit", "durations"], "description": "Also the directory the file sits in." },
+    "summary": { "type": "string" },
+    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp"] } },
+    "notes": { "type": "string" },
+    "input": {
+      "type": "object",
+      "description": "kind config: what `load` is given.",
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "object", "description": "Options set in code, by catalogue name; durations as strings (`5s`), lists as arrays. `http_client: custom` means a caller-supplied client." },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "The environment, injected. `{dir}` is the vector's temporary directory." },
+        "config_file": { "type": "string", "description": "TOML text written to `{file}` = `{dir}/config.toml` and passed as config_file, unless `home` places it at the OS default instead." },
+        "home": { "type": "boolean", "description": "Write config_file at the OS default location under a home directory of `{dir}/home` instead of passing it; with no config_file, an empty home." },
+        "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Other files written into `{dir}`." },
+        "os": { "enum": ["linux", "macos", "windows"], "description": "Default linux." },
+        "profile_type": { "type": "string", "description": "Resolve for a typed (generated) profile of this name instead of the public client." },
+        "cli": { "enum": ["present", "absent"], "description": "Whether `cli_path` resolves to an executable; default absent." }
+      }
+    },
+    "expect": {
+      "type": "object",
+      "description": "kind config: a subset of describe() (config.md section 2.6), or the error. Paths compare after `\\` becomes `/`; `{dir}` and `{file}` are substituted.",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {},
+        "config_file": {},
+        "settings": { "type": "object" },
+        "settings_absent": { "type": "array", "items": { "type": "string" }, "description": "Settings that must not appear in describe()." },
+        "credential": { "type": "object" },
+        "pipeline": { "type": "array", "items": { "type": "string" } },
+        "ignored": { "type": "array" },
+        "excludes": { "type": "array", "items": { "type": "string" }, "description": "Strings that appear nowhere in describe() or in the error." },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["config"] },
+            "problems": {
+              "type": "array",
+              "description": "In order, the count exact.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { "setting": { "type": "string" }, "source": { "type": "string" }, "message_contains": { "type": "string" } }
+              }
+            },
+            "message_contains": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "description": "Kinds other than config: one input and its expected output per item.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "summary": { "type": "string" },
+          "os": { "enum": ["linux", "macos", "windows"] },
+          "home": { "type": ["string", "null"] },
+          "env": { "type": "object", "additionalProperties": { "type": "string" } },
+          "code": { "type": "object" },
+          "url": { "type": "string" },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "value": { "type": "string" },
+          "expect": { "description": "config-path: the path or null; no-proxy: the proxy URL or null; rate-limit: the snapshot or null; durations: milliseconds or the string `error`. `{ \"error\": \"config\" }` where resolution must fail." }
+        }
+      }
+    }
+  }
+}

@@ -7,9 +7,9 @@
   "additionalProperties": false,
   "properties": {
     "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
-    "area": { "enum": ["auth", "errors", "retries", "operations", "sse", "socket"] },
+    "area": { "enum": ["auth", "errors", "retries", "operations", "sse", "socket", "credentials", "middleware", "transport"] },
     "summary": { "type": "string" },
-    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp"] }, "description": "Languages that do not pass yet; each needs an issue link in `notes`." },
+    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp"] }, "description": "Languages that do not pass yet; each needs an issue link in `notes`, or the milestone that lands it." },
     "notes": { "type": "string" },
     "client": {
       "type": "object",
@@ -21,7 +21,43 @@
         "key_secret": { "type": "string" },
         "scopes": { "type": "array", "items": { "type": "string" }, "description": "Scopes the client asks for; default [identity:read]." },
         "streams": { "enum": ["sse", "socket"], "description": "How the client opens streams: server-sent events (the default) or the one multiplexed /v1/ws socket." },
-        "stream_idle_timeout_ms": { "type": "integer", "minimum": 1, "description": "How long a stream may be silent (no event, no comment, no frame) before it fails with a timeout; default 45000." }
+        "stream_idle_timeout_ms": { "type": "integer", "minimum": 1, "description": "How long a stream may be silent (no event, no comment, no frame) before it fails with a timeout; default 45000." },
+        "load": { "type": "boolean", "description": "Build the client with `load` (config.md section 1) instead of explicit options. The driver then injects nothing but `env`, `config_file` and `files`: the case's `env` sets the URLs." },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "The environment `load` sees, injected (never the process environment). `{replay}` is the replay server's URL, `{dir}` the temporary directory." },
+        "config_file": { "type": "string", "description": "TOML text the driver writes to `{dir}/config.toml` and passes as `config_file`; placeholders as in `env`." },
+        "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Files written into `{dir}` before the client is built, name to content." },
+        "profile": { "type": "string", "description": "The `profile` option in code." },
+        "credential_sources": { "type": "array", "items": { "enum": ["env", "workload", "file", "cli"] } },
+        "cli": { "type": "boolean", "description": "Point `cli_path` at the replay binary, which acts as a fake `iohr auth token` (replay feature 6)." },
+        "pipeline": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Probe middlewares to add and built-ins to remove. A probe records what each request it saw carried and passes it on.",
+          "properties": {
+            "add": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "stage"],
+                "additionalProperties": false,
+                "properties": { "name": { "type": "string" }, "stage": { "enum": ["per_call", "per_retry"] }, "before": { "type": "string" }, "after": { "type": "string" } }
+              }
+            },
+            "remove": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "log": { "enum": ["off", "error", "warn", "info", "debug"], "description": "Capture log records at this level." },
+        "log_headers": { "type": "boolean" },
+        "log_allow_headers": { "type": "array", "items": { "type": "string" } },
+        "rate_limit": { "enum": ["observe", "wait", "off"] },
+        "total_timeout_ms": { "type": "integer", "minimum": 1 },
+        "retry_budget_capacity": { "type": "integer", "minimum": 0 },
+        "tracing": { "type": "boolean", "description": "Install an in-memory OpenTelemetry exporter and turn tracing on; false turns it off." },
+        "transport": {
+          "enum": ["http", "https", "mtls", "proxy"],
+          "description": "Which replay listener to use (replay features 2 to 5). `https` and `proxy` set `ca_bundle` to the replay CA; `mtls` also sets `client_cert` and `client_key`; `proxy` sets `proxy` to the replay proxy."
+        },
+        "no_proxy": { "type": "string" }
       }
     },
     "action": {
@@ -33,7 +69,23 @@
         "args": { "type": "object" },
         "repeat": { "type": "integer", "minimum": 1, "description": "Run the action this many times on one client." },
         "concurrent": { "type": "integer", "minimum": 1, "description": "Run the action this many times at once on one client." },
-        "take": { "type": "integer", "minimum": 1, "description": "A stream: stop reading after this many items, as a caller that breaks out of its loop." }
+        "take": { "type": "integer", "minimum": 1, "description": "A stream: stop reading after this many items, as a caller that breaks out of its loop." },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-call options.",
+          "properties": { "idempotency_key": { "type": "string" }, "traceparent": { "type": "string" }, "timeout_ms": { "type": "integer", "minimum": 1 } }
+        },
+        "rewrite": {
+          "type": "object",
+          "required": ["after", "files"],
+          "additionalProperties": false,
+          "description": "After `after` calls of a repeated action, rewrite these files in `{dir}` (rotation).",
+          "properties": {
+            "after": { "type": "integer", "minimum": 1 },
+            "files": { "type": "object", "additionalProperties": { "type": "string" } }
+          }
+        }
       }
     },
     "exchanges": {
@@ -52,12 +104,19 @@
               "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
               "path": { "type": "string" },
               "query": { "type": "object", "additionalProperties": { "type": "string" } },
-              "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+              "headers": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "Subset match. A value `*` means present with any value; `$name` is captured the first time and must be equal afterwards; `~<regex>` must match the whole value."
+              },
               "form": { "type": "object", "additionalProperties": { "type": "string" } },
               "json": {},
               "absent": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "description": "Top-level body fields the request must leave out: an unset field is not sent." },
               "min_delay_ms": { "type": "integer", "minimum": 0 },
-              "max_delay_ms": { "type": "integer", "minimum": 0 }
+              "max_delay_ms": { "type": "integer", "minimum": 0 },
+              "headers_absent": { "type": "array", "items": { "type": "string" }, "description": "Header names the request must not carry." },
+              "via": { "enum": ["proxy", "direct"], "description": "Whether the request came through the replay proxy (replay feature 4)." },
+              "client_cert": { "type": "string", "description": "Subject of the client certificate presented (replay feature 3)." }
             }
           },
           "response": {
@@ -75,10 +134,7 @@
                 "description": "Send the body with chunked transfer encoding, `bytes` at a time, waiting `delay_ms` between chunks (a slow body).",
                 "required": ["bytes"],
                 "additionalProperties": false,
-                "properties": {
-                  "bytes": { "type": "integer", "minimum": 1 },
-                  "delay_ms": { "type": "integer", "minimum": 0 }
-                }
+                "properties": { "bytes": { "type": "integer", "minimum": 1 }, "delay_ms": { "type": "integer", "minimum": 0 } }
               },
               "sse": {
                 "type": "object",
@@ -91,13 +147,7 @@
                     "items": {
                       "type": "object",
                       "additionalProperties": false,
-                      "properties": {
-                        "comment": { "type": "string" },
-                        "event": { "type": "string" },
-                        "data": {},
-                        "raw": { "type": "string", "description": "Written as is." },
-                        "delay_ms": { "type": "integer", "minimum": 0 }
-                      }
+                      "properties": { "comment": { "type": "string" }, "event": { "type": "string" }, "data": {}, "raw": { "type": "string", "description": "Written as is." }, "delay_ms": { "type": "integer", "minimum": 0 } }
                     }
                   },
                   "hold_ms": { "type": "integer", "minimum": 0 }
@@ -114,13 +164,7 @@
                     "items": {
                       "type": "object",
                       "additionalProperties": false,
-                      "properties": {
-                        "expect": { "type": "object" },
-                        "as": { "type": "string" },
-                        "send": { "type": "object" },
-                        "delay_ms": { "type": "integer", "minimum": 0 },
-                        "close": { "type": "integer" }
-                      }
+                      "properties": { "expect": { "type": "object" }, "as": { "type": "string" }, "send": { "type": "object" }, "delay_ms": { "type": "integer", "minimum": 0 }, "close": { "type": "integer" } }
                     }
                   }
                 }
@@ -149,7 +193,43 @@
         },
         "items": { "type": "array", "description": "A stream: the items it yielded, in order, each a subset in wire names; the count must match." },
         "attempts": { "type": "integer", "minimum": 1 },
-        "token_exchanges": { "type": "integer", "minimum": 0 }
+        "token_exchanges": { "type": "integer", "minimum": 0 },
+        "probes": {
+          "type": "object",
+          "description": "Per probe name: how many requests it saw, and a subset of the headers of each, in order (matchers as in request headers).",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "count": { "type": "integer", "minimum": 0 },
+              "seen": {
+                "type": "array",
+                "items": { "type": "object", "additionalProperties": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "logs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contains": { "type": "array", "description": "Each is a subset of some captured record (fields of config.md section 7.9).", "items": { "type": "object" } },
+            "excludes": { "type": "array", "items": { "type": "string" }, "description": "Strings that appear in no captured record, in any field." }
+          }
+        },
+        "spans": {
+          "type": "array",
+          "description": "Finished spans in start order: name, kind, an attribute subset; the count must match.",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": { "name": { "type": "string" }, "kind": { "enum": ["internal", "client"] }, "attributes": { "type": "object" } }
+          }
+        },
+        "rate_limit": { "type": ["object", "null"], "description": "The snapshot on the result: limit, remaining, reset_ms, policy." },
+        "idempotency_key": { "type": "string", "description": "The key on the result; `*` for any." },
+        "config": { "type": "object", "description": "A subset of `describe()` (config.md section 2.6)." }
       }
     }
   }
