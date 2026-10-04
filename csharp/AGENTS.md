@@ -44,7 +44,8 @@ csharp/
     Client.cs             Client<P>, the builder, the one request path
     Auth/, Errors/        ITokenProvider, client credentials (single flight); ApiException, Code, Detail
     Hooks.cs, Profile.cs  IHook; IProfile and PublicProfile
-    Codegen.cs            what generated surfaces call (Version, PathSegment, Operation, WithQuery, WithJson, enum and raw-JSON converters)
+    Codegen.cs            what generated surfaces call (Version, PathSegment, Operation, WithQuery, WithJson, WithCall, enum and raw-JSON converters)
+    Streams.cs            streams (design.md section 7): SseReader, the SSE path, SocketHub (one /v1/ws per client)
     Generated/            written by iohr; never edit
   tests/InOrbit.Sdk.Tests/
     Conformance/          the driver for conformance/cases
@@ -52,7 +53,12 @@ csharp/
 
 ## Rules
 
-- Runtime dependencies: none beyond the framework (`HttpClient`, `System.Text.Json`).
+- Runtime dependencies: none beyond the framework (`HttpClient`, `System.Text.Json`,
+  `ClientWebSocket`, `System.Threading.Channels`).
+- A stream operation is generated as `XxxAsync` returning `IAsyncEnumerable<T>` over
+  `Client.StreamAsync`, with `Codegen.WithCall` naming its RPC and call body for the
+  socket. `KeepAliveTimeout` is set by reflection because the library targets `net8.0`
+  and the property exists from .NET 9; keep it that way until the target moves.
   A dependency needs an ADR.
 - Every call is `async` and takes a `CancellationToken` last.
 - Errors: `InOrbitException` base, `ApiException` with `Code`, `Status`, `Details`;

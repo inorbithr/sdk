@@ -36,6 +36,11 @@ namespace InOrbit.Generated
     {
     }
 
+    /// <summary>A profile whose cut holds <c>GET /v1/events/events</c>.</summary>
+    public interface IStreamEvents : global::InOrbit.Sdk.IProfile
+    {
+    }
+
     /// <summary>A profile whose cut holds <c>GET /v1/events/types</c>.</summary>
     public interface IListEventTypes : global::InOrbit.Sdk.IProfile
     {
@@ -140,6 +145,7 @@ namespace InOrbit.Generated
           IGetUnits,
           IGetUsage,
           IListUnitCategories,
+          IStreamEvents,
           IListEventTypes,
           IMe,
           IListDigests,

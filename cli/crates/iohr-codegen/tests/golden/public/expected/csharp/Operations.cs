@@ -33,6 +33,16 @@ namespace InOrbit.Generated
         public string? PageToken { get; init; }
     }
 
+    /// <summary>The query parameters of <c>GET /v1/events/events</c>.</summary>
+    public sealed record EventsStreamEventsParams
+    {
+        /// <summary><c>types</c>.</summary>
+        public string? Types { get; init; }
+
+        /// <summary><c>account_id</c>.</summary>
+        public string? AccountId { get; init; }
+    }
+
     /// <summary>The query parameters of <c>GET /v1/events/types</c>.</summary>
     public sealed record EventsListEventTypesParams
     {
@@ -297,6 +307,21 @@ namespace InOrbit.Generated
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.delete_inbox", global::InOrbit.Sdk.Method.Delete, $"/v1/webhooks/inboxes/{(global::InOrbit.Sdk.Codegen.PathSegment(inboxId))}", ["webhooks:write"]);
             return events.Client.RequestAsync<DeleteInboxResponse>(operation, cancellationToken);
+        }
+
+        /// <summary><c>GET /v1/events/events</c>; needs scope <c>events:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/StreamEvents</c> on the <c>events</c> backend. A stream: each event as it happens, until the server ends it; for <c>await foreach</c>.</summary>
+        /// <typeparam name="TProfile">The client's profile, whose cut holds the operation.</typeparam>
+        /// <param name="events">The client, or its handle.</param>
+        /// <param name="query">The query parameters.</param>
+        /// <param name="cancellationToken">Stops the stream.</param>
+        /// <returns>The events, in order; the stream opens on the first step of the loop.</returns>
+        public static global::System.Collections.Generic.IAsyncEnumerable<StreamEventsResponse> StreamEventsAsync<TProfile>(this EventsHandle<TProfile> events, EventsStreamEventsParams? query = null, global::System.Threading.CancellationToken cancellationToken = default)
+            where TProfile : IStreamEvents
+        {
+            var operation = global::InOrbit.Sdk.Codegen.Operation("events.stream_events", global::InOrbit.Sdk.Method.Get, "/v1/events/events", ["events:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("types", query?.Types), ("account_id", query?.AccountId));
+            operation = global::InOrbit.Sdk.Codegen.WithCall(operation, "iohr.events.v1.EventsService/StreamEvents", ("types", query?.Types), ("account_id", query?.AccountId));
+            return events.Client.StreamAsync<StreamEventsResponse>(operation, cancellationToken);
         }
 
         /// <summary><c>GET /v1/events/types</c>; needs scope <c>events:read</c>. Transcoded from <c>/iohr.events.v1.EventsService/ListEventTypes</c> on the <c>events</c> backend.</summary>

@@ -53,6 +53,12 @@ public sealed record ClientOptions
     /// <summary>The client to send requests with (default: one of its own, which follows no redirect).</summary>
     public HttpClient? HttpClient { get; init; }
 
+    /// <summary>How streams open: server-sent events (the default) or every stream over one <c>/v1/ws</c> socket.</summary>
+    public StreamTransport? Streams { get; init; }
+
+    /// <summary>How long a stream may be silent (no event, no comment) before it fails with a timeout (default 45 seconds).</summary>
+    public TimeSpan? StreamIdleTimeout { get; init; }
+
     /// <summary>Never a secret.</summary>
     /// <returns>Which credential is set, and the base URL.</returns>
     public override string ToString()
@@ -60,6 +66,16 @@ public sealed record ClientOptions
         var credential = TokenProvider is not null ? "token provider" : Token is not null ? "token <redacted>" : KeyId is not null ? $"key {KeyId}, secret <redacted>" : "none";
         return $"ClientOptions({credential}, {BaseUrl?.ToString() ?? Transport.DefaultBaseUrl.ToString()})";
     }
+}
+
+/// <summary>How a client opens streams (design.md section 7).</summary>
+public enum StreamTransport
+{
+    /// <summary>One server-sent events request per stream.</summary>
+    Sse,
+
+    /// <summary>Every stream of the client as a call on one multiplexed <c>/v1/ws</c> socket.</summary>
+    Socket,
 }
 
 /// <summary>An HTTP method.</summary>
@@ -117,6 +133,12 @@ public sealed class Operation
 
     /// <summary>Retry it like an idempotent method although its method is not.</summary>
     public bool Idempotent { get; init; }
+
+    /// <summary>The RPC a <c>/v1/ws</c> call frame names (<c>iohr.events.v1.EventsService/StreamEvents</c>); <see langword="null"/> when the operation has none.</summary>
+    public string? Rpc { get; init; }
+
+    /// <summary>The <c>/v1/ws</c> call frame's body: the path and query parameters as one JSON object.</summary>
+    public ReadOnlyMemory<byte>? CallBody { get; init; }
 
     /// <summary>Whether a failed attempt may be retried.</summary>
     internal bool RetrySafe => Idempotent || Method is Method.Get or Method.Put or Method.Delete or Method.Head;
@@ -184,6 +206,24 @@ public sealed class Client<TProfile> : IDisposable
         {
             throw new DecodeException(e.Message, raw, e);
         }
+    }
+
+    /// <summary>
+    /// Opens the stream <paramref name="operation"/> answers and yields each event as <typeparamref name="T"/>:
+    /// over server-sent events, or as a call on the client's <c>/v1/ws</c> socket when
+    /// <see cref="ClientOptions.Streams"/> says so (design.md section 7). The stream opens on the first
+    /// step of the loop; leaving the loop, or <paramref name="cancellationToken"/>, closes it.
+    /// </summary>
+    /// <typeparam name="T">The event's model.</typeparam>
+    /// <param name="operation">The streaming call.</param>
+    /// <param name="cancellationToken">Stops the stream.</param>
+    /// <returns>The events, in order.</returns>
+    /// <exception cref="ApiException">The API refused the stream, or ended it with an error.</exception>
+    /// <exception cref="InOrbitException">The connection, a timeout (silence past the idle timeout), the token, the size or the decoding failed.</exception>
+    public IAsyncEnumerable<T> StreamAsync<T>(Operation operation, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        return _transport.StreamAsync<T>(operation, cancellationToken);
     }
 
     /// <summary>Calls <paramref name="operation"/> and hands back the answer as it came, a 2xx one only.</summary>
@@ -286,7 +326,7 @@ internal static class Environmental
 }
 
 /// <summary>The one request path: the token, the attempt, the retries and the hooks (design.md sections 3 to 6).</summary>
-internal sealed class Transport : IDisposable
+internal sealed partial class Transport : IDisposable
 {
     internal static readonly Uri DefaultBaseUrl = new("https://api.inorbit.hr");
 
@@ -335,6 +375,12 @@ internal sealed class Transport : IDisposable
         _maxRetries = options.MaxRetries ?? 2;
         _userAgent = UserAgent(options.UserAgentSuffix);
         _hooks = options.Hooks ?? [];
+        _streams = options.Streams ?? StreamTransport.Sse;
+        _idle = options.StreamIdleTimeout ?? TimeSpan.FromSeconds(45);
+        if (_idle <= TimeSpan.Zero)
+        {
+            throw new ConfigException("the stream idle timeout must be positive");
+        }
     }
 
     internal Uri BaseUrl { get; }
@@ -347,6 +393,7 @@ internal sealed class Transport : IDisposable
 
     public void Dispose()
     {
+        _socket?.Dispose();
         _ownedProvider?.Dispose();
         if (_ownsHttp)
         {
@@ -354,7 +401,11 @@ internal sealed class Transport : IDisposable
         }
     }
 
-    internal async Task<RawResponse> SendAsync(Operation op, CancellationToken cancellationToken)
+    internal async Task<RawResponse> SendAsync(Operation op, CancellationToken cancellationToken) =>
+        (await SendCoreAsync(op, stream: false, cancellationToken).ConfigureAwait(false)).Raw!;
+
+    /// <summary>The attempts of one call: the answer, or for a stream the opened response, whose body is the caller's to read and dispose.</summary>
+    private async Task<Outcome> SendCoreAsync(Operation op, bool stream, CancellationToken cancellationToken)
     {
         var url = Url(op);
         var id = Retry.RequestId();
@@ -366,7 +417,7 @@ internal sealed class Transport : IDisposable
             Outcome outcome;
             try
             {
-                outcome = await AttemptAsync(op, url, attempt, cancellationToken).ConfigureAwait(false);
+                outcome = await AttemptAsync(op, url, attempt, stream, cancellationToken).ConfigureAwait(false);
             }
             catch (InOrbitException e)
             {
@@ -377,7 +428,7 @@ internal sealed class Transport : IDisposable
             switch (outcome.Kind)
             {
                 case OutcomeKind.Done:
-                    return outcome.Raw!;
+                    return outcome;
                 case OutcomeKind.Unauthorized when !refreshed:
                     await _provider.InvalidateAsync().ConfigureAwait(false);
                     refreshed = true;
@@ -429,7 +480,7 @@ internal sealed class Transport : IDisposable
         return new Uri(builder.ToString());
     }
 
-    private async Task<Outcome> AttemptAsync(Operation op, Uri url, Attempt attempt, CancellationToken cancellationToken)
+    private async Task<Outcome> AttemptAsync(Operation op, Uri url, Attempt attempt, bool stream, CancellationToken cancellationToken)
     {
         Token token;
         try
@@ -447,7 +498,7 @@ internal sealed class Transport : IDisposable
 
         using var request = new HttpRequestMessage(ToHttp(op.Method), url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Access);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(stream ? "text/event-stream" : "application/json"));
         request.Headers.TryAddWithoutValidation("user-agent", _userAgent);
         request.Headers.TryAddWithoutValidation("x-request-id", attempt.RequestId);
         if (op.Body is { } body)
@@ -475,6 +526,18 @@ internal sealed class Transport : IDisposable
         catch (HttpRequestException e)
         {
             return Outcome.Retry(null, new ConnectionException(BaseUrl.Host, e.Message, e));
+        }
+
+        if (stream && response.IsSuccessStatusCode)
+        {
+            // The body is the stream: handed over unread, the caller reads and disposes it.
+            var opened = new RawResponse((int)response.StatusCode, Headers(response), [], attempt.RequestId, attempt.Number);
+            foreach (var h in _hooks)
+            {
+                h.OnResponse(attempt, opened);
+            }
+
+            return Outcome.Opened(opened, response);
         }
 
         using (response)
@@ -574,9 +637,11 @@ internal sealed class Transport : IDisposable
         Retry,
     }
 
-    private sealed record Outcome(OutcomeKind Kind, RawResponse? Raw, InOrbitException? Error, TimeSpan? Wait)
+    private sealed record Outcome(OutcomeKind Kind, RawResponse? Raw, InOrbitException? Error, TimeSpan? Wait, HttpResponseMessage? Response = null)
     {
         public static Outcome Done(RawResponse raw) => new(OutcomeKind.Done, raw, null, null);
+
+        public static Outcome Opened(RawResponse raw, HttpResponseMessage response) => new(OutcomeKind.Done, raw, null, null, response);
 
         public static Outcome Unauthorized(RawResponse raw) => new(OutcomeKind.Unauthorized, raw, null, null);
 

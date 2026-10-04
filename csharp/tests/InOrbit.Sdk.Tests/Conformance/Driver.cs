@@ -67,7 +67,7 @@ public sealed class Driver(ITestOutputHelper output)
                 var c = JsonDocument.Parse(await loaded.Content.ReadAsStringAsync()).RootElement.GetProperty("case");
                 var area = c.GetProperty("area").GetString();
                 var pending = c.TryGetProperty("pending", out var p) && p.EnumerateArray().Any(x => x.GetString() == Self);
-                if (pending || area is "sse" or "socket")
+                if (pending)
                 {
                     output.WriteLine($"skip {name}: pending for {Self}");
                     continue;
@@ -101,6 +101,7 @@ public sealed class Driver(ITestOutputHelper output)
             ? s.EnumerateArray().Select(x => x.GetString()!).ToArray()
             : ["identity:read"];
         var timeout = Int(o, "timeout_ms");
+        var idle = Int(o, "stream_idle_timeout_ms");
         using var client = new Client<PublicProfile>(new ClientOptions
         {
             BaseUrl = new Uri(url),
@@ -110,9 +111,17 @@ public sealed class Driver(ITestOutputHelper output)
             Scopes = scopes,
             MaxRetries = Int(o, "max_retries") ?? 2,
             Timeout = timeout is { } ms ? TimeSpan.FromMilliseconds(ms) : null,
+            Streams = Str(o, "streams") == "socket" ? StreamTransport.Socket : StreamTransport.Sse,
+            StreamIdleTimeout = idle is { } im ? TimeSpan.FromMilliseconds(im) : null,
         });
         var action = c.GetProperty("action");
         var args = action.TryGetProperty("args", out var a) ? a : default;
+        var expect = c.GetProperty("expect");
+        if (action.GetProperty("op").GetString() == "events.stream_events")
+        {
+            return await StreamAsync(client, action, args, expect, http);
+        }
+
         var results = new List<object>();
         async Task<object> Run()
         {
@@ -139,21 +148,7 @@ public sealed class Driver(ITestOutputHelper output)
             }
         }
 
-        var verdict = JsonDocument.Parse(await http.GetStringAsync("/_result")).RootElement;
-        var expect = c.GetProperty("expect");
-        var problems = new List<string>();
-        if (verdict.GetProperty("status").GetString() != "pass")
-        {
-            problems.Add($"server: {verdict.GetRawText()}");
-        }
-
-        foreach (var key in new[] { "attempts", "token_exchanges" })
-        {
-            if (expect.TryGetProperty(key, out var want) && (!verdict.TryGetProperty(key, out var got) || got.GetInt32() != want.GetInt32()))
-            {
-                problems.Add($"{key}: want {want.GetInt32()}, got {(verdict.TryGetProperty(key, out var g) ? g.GetRawText() : "none")}");
-            }
-        }
+        var problems = await VerdictAsync(http, expect);
 
         var wantOk = expect.TryGetProperty("ok", out var ok) ? ok : (JsonElement?)null;
         var wantError = expect.TryGetProperty("error", out var err) ? err : (JsonElement?)null;
@@ -179,6 +174,100 @@ public sealed class Driver(ITestOutputHelper output)
                     problems.Add($"want ok, got {e.Message}");
                     break;
             }
+        }
+
+        return problems;
+    }
+
+    /// <summary>The server's verdict and the counts the case expects.</summary>
+    private static async Task<List<string>> VerdictAsync(HttpClient http, JsonElement expect)
+    {
+        var problems = new List<string>();
+        JsonElement verdict = default;
+        // A socket's last steps may still be running when the stream ends: wait for the server to see them.
+        for (var i = 0; i < 50; i++)
+        {
+            verdict = JsonDocument.Parse(await http.GetStringAsync("/_result")).RootElement;
+            if (verdict.GetProperty("status").GetString() != "incomplete")
+            {
+                break;
+            }
+
+            await Task.Delay(20);
+        }
+
+        if (verdict.GetProperty("status").GetString() != "pass")
+        {
+            problems.Add($"server: {verdict.GetRawText()}");
+        }
+
+        foreach (var key in new[] { "attempts", "token_exchanges" })
+        {
+            if (expect.TryGetProperty(key, out var want) && (!verdict.TryGetProperty(key, out var got) || got.GetInt32() != want.GetInt32()))
+            {
+                problems.Add($"{key}: want {want.GetInt32()}, got {(verdict.TryGetProperty(key, out var g) ? g.GetRawText() : "none")}");
+            }
+        }
+
+        return problems;
+    }
+
+    /// <summary>A stream case: read the events (stopping after <c>take</c>), then compare the items and the error.</summary>
+    private static async Task<List<string>> StreamAsync(Client<PublicProfile> client, JsonElement action, JsonElement args, JsonElement expect, HttpClient http)
+    {
+        var take = action.TryGetProperty("take", out var t) ? t.GetInt32() : int.MaxValue;
+        var types = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("types", out var ty) ? ty.GetString() : null;
+        var items = new List<JsonElement>();
+        InOrbitException? error = null;
+        try
+        {
+            await foreach (var ev in client.Events().StreamEventsAsync(types is null ? null : new EventsStreamEventsParams { Types = types }))
+            {
+                items.Add(JsonSerializer.SerializeToElement(ev));
+                if (items.Count >= take)
+                {
+                    break;
+                }
+            }
+        }
+        catch (InOrbitException e)
+        {
+            error = e;
+        }
+
+        var problems = await VerdictAsync(http, expect);
+        if (expect.TryGetProperty("items", out var want))
+        {
+            if (want.GetArrayLength() != items.Count)
+            {
+                problems.Add($"items: want {want.GetArrayLength()}, got {items.Count}{(error is null ? string.Empty : $" then {error.Message}")}");
+            }
+            else
+            {
+                foreach (var (w, g) in want.EnumerateArray().Zip(items))
+                {
+                    if (!Subset(w, g))
+                    {
+                        problems.Add($"item: want a superset of {w.GetRawText()}, got {g.GetRawText()}");
+                    }
+                }
+            }
+        }
+
+        if (expect.TryGetProperty("error", out var we))
+        {
+            if (error is null)
+            {
+                problems.Add("want an error, the stream ended cleanly");
+            }
+            else
+            {
+                problems.AddRange(CheckError(error, we));
+            }
+        }
+        else if (error is not null)
+        {
+            problems.Add($"want a clean end, got {error.Message}");
         }
 
         return problems;
