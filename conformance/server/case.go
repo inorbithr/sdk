@@ -45,12 +45,22 @@ type Exchange struct {
 
 // Request is matched as a subset: only the fields a case sets are compared.
 type Request struct {
-	Method  string            `yaml:"method" json:"method"`
-	Path    string            `yaml:"path" json:"path"`
-	Query   map[string]string `yaml:"query" json:"query,omitempty"`
+	Method string            `yaml:"method" json:"method"`
+	Path   string            `yaml:"path" json:"path"`
+	Query  map[string]string `yaml:"query" json:"query,omitempty"`
+	// Headers match by name; a value is a literal, `*` (present, any value), `$name`
+	// (captured the first time, equal afterwards) or `~regex` (matches the whole value).
 	Headers map[string]string `yaml:"headers" json:"headers,omitempty"`
-	Form    map[string]string `yaml:"form" json:"form,omitempty"`
-	JSON    any               `yaml:"json" json:"json,omitempty"`
+	// HeadersAbsent names headers the request must not carry.
+	HeadersAbsent []string `yaml:"headers_absent" json:"headers_absent,omitempty"`
+	// Via is `proxy` when the request must come through the replay proxy, `direct` when
+	// it must not.
+	Via string `yaml:"via" json:"via,omitempty"`
+	// ClientCert is the subject of the client certificate the request was sent with
+	// (`CN=conformance-client`, or the bare common name).
+	ClientCert string            `yaml:"client_cert" json:"client_cert,omitempty"`
+	Form       map[string]string `yaml:"form" json:"form,omitempty"`
+	JSON       any               `yaml:"json" json:"json,omitempty"`
 	// Absent names top-level body fields the request must leave out (an unset field is
 	// not sent; `json` alone matches as a subset and cannot say so).
 	Absent     []string `yaml:"absent" json:"absent,omitempty"`
@@ -76,6 +86,16 @@ type Response struct {
 type Chunked struct {
 	Bytes   int `yaml:"bytes" json:"bytes"`
 	DelayMS int `yaml:"delay_ms" json:"delay_ms"`
+}
+
+// transport is the case's client.transport (http, https, mtls or proxy); "" for http.
+func (c *Case) transport() string {
+	if client, ok := c.Client.(map[string]any); ok {
+		if t, ok := client["transport"].(string); ok {
+			return t
+		}
+	}
+	return ""
 }
 
 // loadCase finds a case by name ("token-is-cached" or "auth/token-is-cached") under dir.
@@ -130,6 +150,9 @@ func parseCase(data []byte) (*Case, error) {
 		ex := &c.Exchanges[i]
 		if ex.Request.Method == "" || !strings.HasPrefix(ex.Request.Path, "/") {
 			return nil, fmt.Errorf("case %q exchange %d: a request needs a method and a path", c.Name, i)
+		}
+		if err := checkMatchers(ex.Request); err != nil {
+			return nil, fmt.Errorf("case %q exchange %d: %w", c.Name, i, err)
 		}
 		if ex.Response.Fault != "" && ex.Response.Fault != "reset" {
 			return nil, fmt.Errorf("case %q exchange %d: unknown fault %q", c.Name, i, ex.Response.Fault)
