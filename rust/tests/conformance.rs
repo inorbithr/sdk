@@ -271,7 +271,11 @@ async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, E
             let body: UpdateEndpointRequest =
                 serde_json::from_value(Value::Object(fields.into_iter().collect()))
                     .expect("the case's args are an UpdateEndpointRequest");
-            client.events().update_endpoint(&id, &body).await.map(|r| r.raw)
+            client
+                .events()
+                .update_endpoint(&id, &body)
+                .await
+                .map(|r| r.raw)
         }
         "events.delete_endpoint" => {
             let id = arg("endpoint_id").unwrap_or_default();
