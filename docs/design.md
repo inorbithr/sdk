@@ -189,7 +189,8 @@ keep-alive, every 15 s); `data:` lines join with a newline, one leading space dr
 `event:` names the event; a blank line dispatches; `id`, `retry` and unknown fields are
 ignored. A default event's data is one JSON object, decoded as the model. An `error`
 event's data is the error envelope: the stream ends with that `ApiError`, its status
-from the code (`problem.json`'s `x-http-status`). The end of the body ends the stream
+from the code (`problem.json`'s `x-http-status`; a code the SDK does not know keeps its
+slug and has no status, 0 or none as the language spells it). The end of the body ends the stream
 cleanly. Bounds: an event's data is at most 1 MiB (`TooLarge` otherwise), and nothing
 at all, not even a comment, for `stream_idle_timeout` (45 s) ends the stream with a
 timeout error. The platform sets no event ids and honours no `Last-Event-ID`, so an
@@ -226,7 +227,7 @@ upgrade, and the platform does not cut a socket when that token expires, so the 
 not reconnect for token expiry.
 
 **Where a language's WebSocket stops short.** Where the library answers pings itself
-(Python's `websockets`, .NET's `ClientWebSocket`, Go's), the socket's idle clock is the
+(Python's `websockets`, .NET's `ClientWebSocket`; Go's own client counts pings as activity), the socket's idle clock is the
 library's own ping with `stream_idle_timeout` as its timeout (on .NET 8 a dead socket is
 found by TCP). Hooks see the server-sent events requests, not the socket's upgrade. The web platform's `WebSocket`
 (TypeScript) hides pings, the status of a refused upgrade, and backpressure. There the
