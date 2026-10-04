@@ -683,6 +683,7 @@ struct OpsUses {
     types: Uses,
     strconv: bool,
     codegen: bool,
+    iter: bool,
 }
 
 fn render_ops(ops: &[Op], layout: &Layout) -> String {
@@ -696,6 +697,9 @@ fn render_ops(ops: &[Op], layout: &Layout) -> String {
     imports.std("context");
     if uses.types.json {
         imports.std("encoding/json");
+    }
+    if uses.iter {
+        imports.std("iter");
     }
     if uses.strconv {
         imports.std("strconv");
@@ -725,11 +729,20 @@ fn operation_function(op: &Op, uses: &mut OpsUses) -> String {
     ];
     sig.extend(decl);
     let mut out = op_doc(&name, op, "");
-    let _ = writeln!(
-        out,
-        "func {name}({}) (*inorbit.Response[{response}], error) {{",
-        sig.join(", ")
-    );
+    if op.stream {
+        uses.iter = true;
+        let _ = writeln!(
+            out,
+            "func {name}({}) iter.Seq2[*{response}, error] {{",
+            sig.join(", ")
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "func {name}({}) (*inorbit.Response[{response}], error) {{",
+            sig.join(", ")
+        );
+    }
     let path: Vec<String> = op
         .segments
         .iter()
@@ -762,7 +775,60 @@ fn operation_function(op: &Op, uses: &mut OpsUses) -> String {
         uses.codegen = true;
         out.push_str(&query_block(op, &mut uses.strconv));
     }
+    if op.stream {
+        if !op.rpc.is_empty() {
+            let _ = writeln!(out, "\top.RPC = {:?}", op.rpc);
+            out.push_str(&fields_block(op));
+        }
+        let _ = writeln!(out, "\treturn inorbit.Stream[{response}](ctx, c, op)\n}}");
+        return out;
+    }
     let _ = writeln!(out, "\treturn inorbit.Call[{response}](ctx, c, op)\n}}");
+    out
+}
+
+/// The statements that set `op.Fields`, the path and query parameters as the request
+/// message's fields in wire names: the body of a socket call frame (design.md section
+/// 7). Unset ones are left out.
+fn fields_block(op: &Op) -> String {
+    let mut out = String::from("\tf := map[string]any{}\n");
+    for p in &op.path_params {
+        let _ = writeln!(out, "\tf[{:?}] = {}", p.name, unexported(&p.name));
+    }
+    if op.params_type.is_some() {
+        let pointer = !op.query.iter().any(|q| q.required);
+        let indent = if pointer { "\t\t" } else { "\t" };
+        if pointer {
+            out.push_str("\tif params != nil {\n");
+        }
+        let names = field_names(op.query.iter().map(|q| q.name.as_str()));
+        for (q, field) in op.query.iter().zip(&names) {
+            let access = format!("params.{field}");
+            match &q.ty {
+                Type::Array { .. } => {
+                    let _ = writeln!(
+                        out,
+                        "{indent}if len({access}) > 0 {{\n{indent}\tf[{:?}] = {access}\n{indent}}}",
+                        q.name
+                    );
+                }
+                _ if !q.required => {
+                    let _ = writeln!(
+                        out,
+                        "{indent}if {access} != nil {{\n{indent}\tf[{:?}] = *{access}\n{indent}}}",
+                        q.name
+                    );
+                }
+                _ => {
+                    let _ = writeln!(out, "{indent}f[{:?}] = {access}", q.name);
+                }
+            }
+        }
+        if pointer {
+            out.push_str("\t}\n");
+        }
+    }
+    out.push_str("\top.Fields = f\n");
     out
 }
 
@@ -870,7 +936,7 @@ fn render_profile(
         .collect();
     let handle_types = member_names(&handles, &flat)?;
     let mut uses = Uses::default();
-    // Whether an iterator over a paged list is rendered, which imports iter.
+    // Whether an iterator over a paged list or a stream is rendered, which imports iter.
     let mut paged = false;
     let mut body = String::new();
     let env_doc = if p.is_public {
@@ -889,10 +955,11 @@ fn render_profile(
     };
     let _ = write!(
         body,
-        "// The surface was generated for the runtime's contract 2: a runtime with another contract fails to build here, so run iohr sdk generate again.\nconst _ = codegen.V2\n\n// Profile is the profile's name.\nconst Profile = {name:?}\n\n// Client calls the operations profile {name} may call.\ntype Client struct {{\n\tc *inorbit.Client\n}}\n\n// New returns the profile's surface on c, a client built for its credential.\nfunc New(c *inorbit.Client) *Client {{\n\treturn &Client{{c: c}}\n}}\n\n// FromEnv returns the profile's surface with its credential from the environment; opts apply after it.\nfunc FromEnv(opts ...inorbit.Option) (*Client, error) {{\n\tc, err := inorbit.FromEnv({env_arg:?}, opts...)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\treturn New(c), nil\n}}\n\n// Runtime returns the client underneath, for a raw call with Send.\nfunc (p *Client) Runtime() *inorbit.Client {{\n\treturn p.c\n}}\n",
+        "// The surface was generated for the runtime's contract 3: a runtime with another contract fails to build here, so run iohr sdk generate again.\nconst _ = codegen.V3\n\n// Profile is the profile's name.\nconst Profile = {name:?}\n\n// Client calls the operations profile {name} may call.\ntype Client struct {{\n\tc *inorbit.Client\n}}\n\n// New returns the profile's surface on c, a client built for its credential.\nfunc New(c *inorbit.Client) *Client {{\n\treturn &Client{{c: c}}\n}}\n\n// FromEnv returns the profile's surface with its credential from the environment; opts apply after it.\nfunc FromEnv(opts ...inorbit.Option) (*Client, error) {{\n\tc, err := inorbit.FromEnv({env_arg:?}, opts...)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\treturn New(c), nil\n}}\n\n// Runtime returns the client underneath, for a raw call with Send.\nfunc (p *Client) Runtime() *inorbit.Client {{\n\treturn p.c\n}}\n",
         name = p.name
     );
     for op in &flat {
+        paged |= op.stream;
         body.push('\n');
         body.push_str(&method(op, "p *Client", "p.c", &mut uses));
         if let Some(paging) = paging(op, models) {
@@ -910,6 +977,7 @@ fn render_profile(
             name = p.name
         );
         for op in ops {
+            paged |= op.stream;
             body.push('\n');
             body.push_str(&method(op, &format!("h {ty}"), "h.c", &mut uses));
             if let Some(paging) = paging(op, models) {
@@ -954,6 +1022,15 @@ fn method(op: &Op, receiver: &str, client: &str, uses: &mut Uses) -> String {
     sig.extend(decl);
     let mut args = vec!["ctx".to_owned(), client.to_owned()];
     args.extend(call);
+    if op.stream {
+        return format!(
+            "{}// It yields each event as it arrives; an error ends the stream, and breaking out of the loop or ending ctx closes it.\nfunc ({receiver}) {name}({}) iter.Seq2[*{response}, error] {{\n\treturn ops.{}({})\n}}\n",
+            op_doc(&name, op, ""),
+            sig.join(", "),
+            function_name(op),
+            args.join(", ")
+        );
+    }
     format!(
         "{}func ({receiver}) {name}({}) (*inorbit.Response[{response}], error) {{\n\treturn ops.{}({})\n}}\n",
         op_doc(&name, op, ""),
@@ -983,6 +1060,9 @@ struct Paging {
 fn paging(op: &Op, models: &[Model]) -> Option<Paging> {
     const TOKEN: [&str; 2] = ["page_token", "pageToken"];
     const NEXT: [&str; 2] = ["next_page_token", "nextPageToken"];
+    if op.stream {
+        return None;
+    }
     let token = op
         .query
         .iter()
