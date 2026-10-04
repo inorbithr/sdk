@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/inorbithr/sdk/compare/rust/v0.1.0...rust/v0.2.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* request fields are optional in every language (a Rust request is built with ..Default::default(), a Go scalar is a pointer set with inorbit.Ptr); answer fields with presence (messages, optional, oneof) are optional where they used to be typed as always present.
+
+### Features
+
+* the contract states what the sync patched in; requests leave out unset fields ([#85](https://github.com/inorbithr/sdk/issues/85)) ([9eff311](https://github.com/inorbithr/sdk/commit/9eff311ab88bee9873a777b90197c16b471809e2))
+
 ## 0.1.0 (2026-10-03)
 
 
