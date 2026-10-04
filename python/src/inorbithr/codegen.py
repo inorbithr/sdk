@@ -12,12 +12,10 @@ from urllib.parse import quote
 
 T = TypeVar("T")
 
-#: The surface contract this runtime implements: 2 added stream methods
-#: (`Client.stream`, `Operation.rpc` and `Operation.params`). A surface generated for
-#: an earlier contract still imports.
-VERSION = 2
-#: The oldest contract this runtime still serves.
-OLDEST = 1
+#: The surface contract this runtime implements. Stream methods (`Client.stream`,
+#: `Operation.rpc`, `Operation.params`) were added to it, not changed in it, so a surface
+#: generated before them imports unchanged.
+VERSION = 1
 
 
 def path_segment(value: str) -> str:
@@ -45,7 +43,7 @@ def check(version: int) -> None:
         ImportError: The surface and this runtime do not match; run `iohr sdk generate`
             again.
     """
-    if not OLDEST <= version <= VERSION:
+    if version != VERSION:
         raise ImportError(
             f"this surface was generated for runtime contract {version}, and this inorbithr "
             f"implements {VERSION}: run `iohr sdk generate` again"

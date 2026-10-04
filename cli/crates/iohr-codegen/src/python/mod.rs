@@ -874,7 +874,7 @@ fn render_init(surface: &context::Surface, models: &[Model], runtime: &str, root
         ],
     ));
     out.push_str(
-        "\n# A surface generated for another runtime contract refuses to import.\ncodegen.check(2)\n\n__all__ = [\n",
+        "\n# A surface generated for another runtime contract refuses to import.\ncodegen.check(1)\n\n__all__ = [\n",
     );
     let mut all: Vec<&String> = model_names.iter().chain(profile_names.iter()).collect();
     all.sort();
