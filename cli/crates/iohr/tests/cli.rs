@@ -12,7 +12,7 @@ use std::process::{Command, Output, Stdio};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use wiremock::matchers::{body_json, header, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const ACCOUNT: &str = "acc_test1";
@@ -280,6 +280,96 @@ async fn get_is_retried_after_a_503_and_post_is_not() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn api_all_walks_every_page_into_one_answer() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["finance:read"]);
+    // Raw bodies keep the server's key order: the list comes first, and another
+    // array (`party_ids`) sorts before it, as finance's transactions answer does.
+    let page = |items: &str, next: &str| {
+        ResponseTemplate::new(200).set_body_raw(
+            format!(r#"{{"things":[{items}],"party_ids":["p1"],"next_page_token":"{next}"}}"#),
+            "application/json",
+        )
+    };
+    Mock::given(method("GET"))
+        .and(path("/v1/things"))
+        .and(query_param("kind", "a"))
+        .and(query_param_is_missing("page_token"))
+        .respond_with(page("1,2", "t2"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/things"))
+        .and(query_param("kind", "a"))
+        .and(query_param("page_token", "t2"))
+        .respond_with(page("3", "t3"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/things"))
+        .and(query_param("kind", "a"))
+        .and(query_param("page_token", "t3"))
+        .respond_with(page("4", ""))
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(&t, &["api", "GET", "/v1/things", "-f", "kind=a", "--all"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["things"], serde_json::json!([1, 2, 3, 4]));
+    assert_eq!(
+        v["party_ids"],
+        serde_json::json!(["p1"]),
+        "other fields from page one"
+    );
+    assert_eq!(v["next_page_token"], "");
+
+    // A bound stops the walk and keeps the token to go on with.
+    let o = r.with_token(
+        &t,
+        &[
+            "api",
+            "GET",
+            "/v1/things",
+            "-f",
+            "kind=a",
+            "--paginate",
+            "--max-pages",
+            "2",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["things"], serde_json::json!([1, 2, 3]));
+    assert_eq!(v["next_page_token"], "t3");
+    assert!(String::from_utf8_lossy(&o.stderr).contains("stopped after 2 pages"));
+
+    // An answer that does not page is printed as it is.
+    me(&server, &t).await;
+    let o = r.with_token(&t, &["api", "GET", "/v1/me", "--all"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&o.stdout)
+            .unwrap()
+            .is_object()
+    );
+
+    // Usage: GET only, and the walk owns page_token; --max-pages needs --all.
+    for args in [
+        vec!["api", "POST", "/v1/things", "--all"],
+        vec!["api", "GET", "/v1/things", "-f", "page_token=x", "--all"],
+        vec!["api", "GET", "/v1/things", "--max-pages", "3"],
+    ] {
+        assert_eq!(code(&r.with_token(&t, &args)), 2, "{args:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn token_create_prints_the_new_token_alone_on_stdout() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
@@ -471,6 +561,7 @@ async fn verbose_output_never_shows_the_token() {
         vec!["token", "revoke", "key_1"],
         vec!["token", "create", "--name", "n", "--scope", "radar:read"],
         vec!["api", "GET", "/v1/me", "-f", "a=b"],
+        vec!["api", "GET", "/v1/me", "--all"],
         vec!["openapi", "pull", "-o", out_file],
         vec![
             "sdk", "generate", "--lang", "rust", "--for", "ci", "--out", gen_dir,
