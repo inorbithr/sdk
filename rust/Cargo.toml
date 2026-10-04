@@ -1,6 +1,6 @@
 [package]
 name = "inorbithr"
-version = "0.2.0"
+version = "0.2.1"
 description = "The InOrbit API client for Rust: the runtime every generated SDK surface runs on."
 edition = "2024"
 rust-version = "1.94"
