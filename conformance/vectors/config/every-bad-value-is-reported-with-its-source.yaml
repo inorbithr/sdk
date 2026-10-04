@@ -1,0 +1,15 @@
+name: every-bad-value-is-reported-with-its-source
+kind: config
+summary: Two bad values from two sources are reported together, in catalogue order, each with its source.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t, INORBIT_TIMEOUT: "30" }
+  config_file: |
+    [sdk]
+    max_retries = "two"
+expect:
+  error:
+    kind: config
+    problems:
+      - { setting: timeout, source: env INORBIT_TIMEOUT, message_contains: 30s }
+      - { setting: max_retries, source: "file {file} [sdk]" }

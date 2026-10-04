@@ -225,7 +225,7 @@ follow section 2.3. "File" says whether the key may appear in the config file.
 | `config_file` | `INORBIT_CONFIG_FILE` | no | path or `off` | the OS location (section 4.1) | Which file to read; `off` reads none |
 | `base_url` | `INORBIT_BASE_URL` | yes | URL | `https://api.inorbit.hr` | The API origin. `https://`, or `http://` on loopback only (SR-07) |
 | `token_url` | `INORBIT_TOKEN_URL` | yes | URL | `https://auth.inorbit.hr/oauth2/token` | The token endpoint; same rule |
-| `region` | reserved | reserved | `eu`, `us` | none | Reserved until the API offers regions (SR-09); setting it today is a `ConfigError` |
+| `region` | `INORBIT_REGION` (reserved) | reserved | `eu`, `us` | none | Reserved until the API offers regions (SR-09); setting it today is a `ConfigError` |
 
 ### 3.2 Credentials
 
@@ -990,8 +990,8 @@ without a server, from `conformance/vectors/` (schema `conformance/vector.schema
 | `durations/` | strings | the value or an error |
 
 To run them, each runtime exposes resolution with injected inputs: `load` takes an
-environment map, an OS name and a home directory in its test options
-(`LoadOptions { env, os, home }`). That is public, because the same hook lets a user's
+environment map, an OS name and a home directory as `load_options`
+(`LoadOptions { env, os, home }`; `loadOptions`, `WithLoadOptions`, `LoadOptions`). That is public, because the same hook lets a user's
 own tests resolve a configuration without touching the process environment. Each
 language's driver runs every vector as a unit test next to its conformance driver.
 

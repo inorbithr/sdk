@@ -1,0 +1,18 @@
+name: the-profile-table-beats-the-sdk-table
+kind: config
+summary: The file's default profile is chosen; its table wins over the sdk table, which still fills the rest.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t }
+  config_file: |
+    default = "work"
+    [sdk]
+    timeout = "20s"
+    log = "warn"
+    [profiles.work]
+    timeout = "15s"
+expect:
+  profile: { name: work, source: "file {file}" }
+  settings:
+    timeout: { value: 15s, source: "file {file} [profiles.work]" }
+    log: { value: warn, source: "file {file} [sdk]" }

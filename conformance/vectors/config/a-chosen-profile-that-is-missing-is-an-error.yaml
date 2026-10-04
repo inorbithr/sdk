@@ -1,0 +1,13 @@
+name: a-chosen-profile-that-is-missing-is-an-error
+kind: config
+summary: A profile chosen in the environment that the file does not have fails the load.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t, INORBIT_PROFILE: nope }
+  config_file: |
+    [profiles.work]
+    timeout = "1s"
+expect:
+  error:
+    kind: config
+    problems: [{ setting: profile, source: env INORBIT_PROFILE, message_contains: nope }]

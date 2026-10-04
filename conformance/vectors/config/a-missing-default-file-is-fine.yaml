@@ -1,0 +1,10 @@
+name: a-missing-default-file-is-fine
+kind: config
+summary: No file at the default location is normal, not an error.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t }
+  home: true
+expect:
+  config_file: null
+  credential: { source: env }

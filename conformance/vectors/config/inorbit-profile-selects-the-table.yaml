@@ -1,0 +1,16 @@
+name: inorbit-profile-selects-the-table
+kind: config
+summary: INORBIT_PROFILE wins over the file's default profile.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t, INORBIT_PROFILE: b }
+  config_file: |
+    default = "a"
+    [profiles.a]
+    timeout = "1s"
+    [profiles.b]
+    timeout = "2s"
+expect:
+  profile: { name: b, source: env INORBIT_PROFILE }
+  settings:
+    timeout: { value: 2s, source: "file {file} [profiles.b]" }

@@ -1,0 +1,14 @@
+name: the-default-location-is-read
+kind: config
+summary: Without INORBIT_CONFIG_FILE, the command line's file at the OS default location is read.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t }
+  home: true
+  config_file: |
+    [sdk]
+    timeout = "7s"
+expect:
+  config_file: "{dir}/home/.config/iohr/config.toml"
+  settings:
+    timeout: { value: 7s }

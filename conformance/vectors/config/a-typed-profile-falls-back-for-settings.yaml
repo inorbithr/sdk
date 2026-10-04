@@ -1,0 +1,13 @@
+name: a-typed-profile-falls-back-for-settings
+kind: config
+summary: A typed profile reads its own prefixed settings first and the bare ones second.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  profile_type: acme-ci
+  env: { INORBIT_ACME_CI_TOKEN: t, INORBIT_TIMEOUT: 7s, INORBIT_MAX_RETRIES: "1", INORBIT_ACME_CI_MAX_RETRIES: "5", INORBIT_CONFIG_FILE: "off" }
+expect:
+  profile: { name: acme-ci }
+  settings:
+    timeout: { value: 7s, source: env INORBIT_TIMEOUT }
+    max_retries: { value: 5, source: env INORBIT_ACME_CI_MAX_RETRIES }
+  credential: { source: env, kind: static_token }
