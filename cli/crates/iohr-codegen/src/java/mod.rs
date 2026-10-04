@@ -847,7 +847,8 @@ impl Gen {
             if op.stream {
                 let stream = self.rt("EventStream", imports);
                 let mut stream_tags = tags;
-                stream_tags.push("@return the events, one model each; close it to stop early".into());
+                stream_tags
+                    .push("@return the events, one model each; close it to stop early".into());
                 out.push('\n');
                 out.push_str(&javadoc("    ", &op_doc(op), &stream_tags));
                 let _ = write!(
