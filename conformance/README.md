@@ -11,7 +11,7 @@ languages and fails in the sixth is a parity bug.
 | Path | Contents |
 |---|---|
 | `case.schema.json` | JSON Schema for a case file; editors validate against it |
-| `cases/<area>/<name>.yaml` | The cases, grouped by area (`auth`, `errors`, `retries`, `operations`, later `sse`, `socket`) |
+| `cases/<area>/<name>.yaml` | The cases, grouped by area (`auth`, `errors`, `retries`, `operations`, `sse`, `socket`) |
 | `server/` | The replay server, a Go program with one dependency (a YAML parser) |
 | `drivers/` | Nothing yet; each language keeps its driver next to its tests (`go/internal/conformance`, `rust/tests/conformance.rs`, `typescript/test/conformance`, `python/tests/conformance`) |
 
@@ -80,8 +80,19 @@ Rules the server applies:
 - `min_delay_ms` and `max_delay_ms` are measured from the previous answer.
 - The first mismatch fails the case for good; that request, and every one after it, gets
   `400` with code `conformance_mismatch`, which no SDK retries.
-- Cases in the areas `sse` and `socket` are refused with `501`: server-sent events and
-  WebSocket frames come with the streaming milestone (docs/roadmap.md, M5).
+- `sse: { events: [...], hold_ms }` answers `text/event-stream`: each event is a
+  `comment`, a `data` object (named by `event`, default `message`), `raw` text written as
+  is, with an optional `delay_ms` before it; after the last one the body ends, or stays
+  open and silent for `hold_ms` first (what an idle timeout is tested against).
+- `socket: { steps: [...] }` answers a WebSocket upgrade (a minimal RFC 6455 server, no
+  dependency) and runs the steps in order: `expect` is a subset of the client's next
+  frame, and `as` names the call id it carries; `send` sends a frame, where a string
+  `"$name"` is the id named before; `close` sends a close frame; `delay_ms` pauses. A
+  frame that does not match fails the case like a request that does not match. After the
+  steps the server waits up to 5 s for the client to close.
+- A streaming case's action names `take: N` when the caller stops after N items, its
+  client may set `streams: socket` and `stream_idle_timeout_ms`, and its `expect.items`
+  lists what the stream yielded, in order, each as a subset, the count exact.
 
 `mise run conformance:server:check` runs gofmt, vet, golangci-lint and a self-test that
 plays every case's exchanges against the server and expects a pass.
