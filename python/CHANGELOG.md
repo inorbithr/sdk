@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/inorbithr/sdk/compare/python/v0.2.0...python/v0.2.1) (2026-10-04)
+
+
+### Features
+
+* streams in all six languages, over server-sent events or the /v1/ws socket (M5) ([#96](https://github.com/inorbithr/sdk/issues/96)) ([7ff73fe](https://github.com/inorbithr/sdk/commit/7ff73fe986f4706299d188ef9a4d5273dc0ca7ee))
+
 ## [0.2.0](https://github.com/inorbithr/sdk/compare/python/v0.1.0...python/v0.2.0) (2026-10-04)
 
 
