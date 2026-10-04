@@ -76,7 +76,7 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n := buf.Reader.Buffered(); n > 0 {
-		early, _ := buf.Reader.Peek(n)
+		early, _ := buf.Peek(n)
 		if _, err := upstream.Write(early); err != nil {
 			_ = client.Close()
 			_ = upstream.Close()
