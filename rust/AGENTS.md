@@ -31,6 +31,8 @@ rust/
     retry.rs        the retry policy: Retry-After, full jitter
     hooks.rs        Attempt, Hook
     profile.rs      Profile, Public, the INORBIT_<NAME>_ environment prefix
+    stream.rs       EventStream<T>, Streams, the server-sent events parser and reader
+    socket.rs       the /v1/ws socket task: one connection, calls by id, reconnect and re-issue
     secret.rs       Secret<T>: redacted, not Serialize, zeroed on drop
     int64.rs        Int64: a decimal string on the wire
     generated/      the public surface, written by `iohr sdk generate`; do not edit
@@ -57,5 +59,9 @@ examples/rust/      programs CI compiles and the README quotes
   runs as a doctest against nothing (`no_run`).
 - `__codegen::VERSION` is the contract with generated surfaces: bump it when a surface
   written for the previous runtime would not compile or would behave differently.
+- Streams (design.md section 7): a reader task feeds a bounded channel (64 items) the
+  `EventStream` drains, so a slow caller holds back its own stream; dropping the stream
+  aborts the SSE reader or sends the socket a `cancel`. The socket task owns the
+  connection and the table of calls; it closes the socket when the last call ends.
 - The conformance driver calls the public API only (`Client::send` and the generated
   surface), never internals.

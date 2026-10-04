@@ -91,17 +91,41 @@ built from its default (`CreateEndpointRequest { url: Some(url.into()), ..Defaul
 an answer's field is an `Option` unless the API always sends it. Timestamps stay the
 strings the API sent; `inorbithr::parse_timestamp` reads one, `""` (unset) as `None`.
 
+## Streams
+
+A streaming operation (today the account's events, `events.stream_events`, scope
+`events:read`) answers an `EventStream<T>`: a `futures_core::Stream` of `Result<T, Error>`
+with an inherent `next().await` ([docs/design.md section 7](../docs/design.md#7-streaming)):
+
+```rust
+use inorbithr::public::{EventsStreamEventsParams, Surface as _};
+let mut events = client.events().stream_events(&EventsStreamEventsParams::default()).await?;
+while let Some(event) = events.next().await {
+    let event = event?;
+    println!("{} {}", event.type_, event.id);
+}
+```
+
+The `.await` opens the stream with the rules of any `GET` (a fresh token after a `401`,
+retries after `429`, `503`, `504`); errors after that arrive as the stream's last item.
+Dropping the stream closes it. By default each stream is server-sent events;
+`Client::builder().streams(Streams::Socket)` sends every stream of the client over one
+`/v1/ws` connection, which the client reconnects, and on which it issues again every
+call that had not ended, when the server ends the socket or it goes silent. A stream
+silent for `stream_idle_timeout` (45 s; the server sends a keep-alive every 15 s) fails
+with `Error::Timeout` over server-sent events. A revoked key ends the stream with
+`Error::Api` and code `unauthenticated`. `examples/rust/src/bin/stream_events.rs` is a
+complete program.
+
 A surface for your own credentials, with exactly the operations they may call and a
 compile-time refusal of the rest, comes from `iohr sdk generate` ([docs/design.md
 section 12](../docs/design.md#12-runtime-and-surface)).
 
 ## Not here yet
 
-- Server-sent events and the socket (`docs/design.md` section 7) come with the streaming
-  milestone.
 - `native-tls`, `ca_bundle`, `client_cert`, `proxy`, `pinned_keys` and `region` are
   designed but not built; the client uses rustls with the platform's trust roots and the
-  system proxy settings.
+  system proxy settings. The socket connects directly, without a proxy.
 
 ## Dependencies
 
@@ -117,3 +141,6 @@ Each runtime dependency, and why (SR-20):
 | time | RFC 3339 timestamps in models |
 | getrandom | request ids and retry jitter |
 | zeroize | secrets wiped on drop |
+| futures-core, futures-util | the `Stream` trait an `EventStream` implements, and the socket's stream and sink combinators (both already come with reqwest) |
+| tokio-tungstenite | the `/v1/ws` socket's WebSocket protocol, over the crate's own TCP and TLS (no TLS feature of its own) |
+| rustls, tokio-rustls, rustls-platform-verifier (feature `rustls`) | the socket's TLS: the same provider and platform verifier reqwest uses |

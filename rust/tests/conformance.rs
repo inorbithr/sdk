@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use inorbithr::{Client, Code, Error, Public, RawResponse};
+use inorbithr::{Client, Code, Error, Public, RawResponse, Streams};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -46,6 +46,8 @@ struct Action {
     repeat: Option<u32>,
     #[serde(default)]
     concurrent: Option<u32>,
+    #[serde(default)]
+    take: Option<usize>,
 }
 
 #[derive(Deserialize, Default)]
@@ -55,12 +57,15 @@ struct ClientOptions {
     key_id: Option<String>,
     key_secret: Option<String>,
     scopes: Option<Vec<String>>,
+    streams: Option<String>,
+    stream_idle_timeout_ms: Option<u64>,
 }
 
 #[derive(Deserialize, Default)]
 struct Expect {
     ok: Option<Value>,
     error: Option<ExpectError>,
+    items: Option<Vec<Value>>,
     attempts: Option<u32>,
     token_exchanges: Option<u32>,
 }
@@ -213,6 +218,12 @@ fn build_client(url: &str, options: &ClientOptions) -> Client<Public> {
     if let Some(ms) = options.timeout_ms {
         b = b.timeout(Duration::from_millis(ms));
     }
+    if options.streams.as_deref() == Some("socket") {
+        b = b.streams(Streams::Socket);
+    }
+    if let Some(ms) = options.stream_idle_timeout_ms {
+        b = b.stream_idle_timeout(Duration::from_millis(ms));
+    }
     b.build().expect("the client builds")
 }
 
@@ -257,6 +268,64 @@ async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, E
         }
         other => panic!("the conformance schema names an op this driver does not know: {other}"),
     }
+}
+
+/// A stream's action: every item it yielded, as wire JSON, and the error it ended with.
+async fn stream(client: &Client<Public>, action: &Action) -> (Vec<Value>, Option<Error>) {
+    use inorbithr::public::{EventsStreamEventsParams, Surface as _};
+    assert_eq!(action.op, "events.stream_events", "an unknown stream op");
+    let arg = |k: &str| {
+        action
+            .args
+            .get(k)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    let params = EventsStreamEventsParams {
+        types: arg("types"),
+        account_id: arg("account_id"),
+    };
+    let mut items = Vec::new();
+    let mut events = match client.events().stream_events(&params).await {
+        Ok(s) => s,
+        Err(e) => return (items, Some(e)),
+    };
+    while let Some(event) = events.next().await {
+        match event {
+            Ok(ev) => items.push(serde_json::to_value(ev).expect("a model serialises")),
+            Err(e) => return (items, Some(e)),
+        }
+        if action.take.is_some_and(|n| items.len() >= n) {
+            break;
+        }
+    }
+    (items, None)
+}
+
+fn check_stream(case: &Case, items: &[Value], error: Option<&Error>) -> Vec<String> {
+    let mut problems = Vec::new();
+    if let Some(want) = &case.expect.items {
+        if want.len() == items.len() {
+            for (i, (w, g)) in want.iter().zip(items).enumerate() {
+                if !subset(w, g) {
+                    problems.push(format!("item {i}: want a superset of {w}, got {g}"));
+                }
+            }
+        } else {
+            problems.push(format!(
+                "items: want {}, got {}: {items:?}",
+                want.len(),
+                items.len()
+            ));
+        }
+    }
+    match (error, &case.expect.error) {
+        (Some(e), Some(want)) => problems.extend(check_error(e, want)),
+        (Some(e), None) => problems.push(format!("want a clean end, got {e}")),
+        (None, Some(_)) => problems.push("want an error, got a clean end".into()),
+        (None, None) => {}
+    }
+    problems
 }
 
 /// `want` is a subset of `got`: objects by key, arrays element by element, scalars equal.
@@ -393,11 +462,24 @@ async fn every_case_passes() {
             eprintln!("skip {name}: pending for rust");
             continue;
         }
+        let client = build_client(&replay.url, &case.client);
         if matches!(case.area.as_str(), "sse" | "socket") {
-            eprintln!("skip {name}: streaming comes with the streaming milestone");
+            let (items, error) = stream(&client, &case.action).await;
+            drop(client);
+            // A socket's cancel and close go out after the caller stopped reading.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let v = verdict(&http, &replay.url).await;
+            let mut problems = check(&case, &[], &v);
+            problems.extend(check_stream(&case, &items, error.as_ref()));
+            ran += 1;
+            if problems.is_empty() {
+                eprintln!("pass {name}");
+            } else {
+                eprintln!("FAIL {name}:\n  {}", problems.join("\n  "));
+                failed.push(case.name.clone());
+            }
             continue;
         }
-        let client = build_client(&replay.url, &case.client);
         let results: Vec<Result<RawResponse, Error>> = if let Some(n) = case.action.concurrent {
             let action = std::sync::Arc::new(case.action.clone());
             let calls = (0..n).map(|_| {
