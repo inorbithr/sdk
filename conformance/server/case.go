@@ -44,17 +44,17 @@ type Exchange struct {
 
 // Request is matched as a subset: only the fields a case sets are compared.
 type Request struct {
-	Method     string            `yaml:"method" json:"method"`
-	Path       string            `yaml:"path" json:"path"`
-	Query      map[string]string `yaml:"query" json:"query,omitempty"`
-	Headers    map[string]string `yaml:"headers" json:"headers,omitempty"`
-	Form       map[string]string `yaml:"form" json:"form,omitempty"`
-	JSON       any               `yaml:"json" json:"json,omitempty"`
+	Method  string            `yaml:"method" json:"method"`
+	Path    string            `yaml:"path" json:"path"`
+	Query   map[string]string `yaml:"query" json:"query,omitempty"`
+	Headers map[string]string `yaml:"headers" json:"headers,omitempty"`
+	Form    map[string]string `yaml:"form" json:"form,omitempty"`
+	JSON    any               `yaml:"json" json:"json,omitempty"`
 	// Absent names top-level body fields the request must leave out (an unset field is
 	// not sent; `json` alone matches as a subset and cannot say so).
-	Absent     []string          `yaml:"absent" json:"absent,omitempty"`
-	MinDelayMS *int              `yaml:"min_delay_ms" json:"min_delay_ms,omitempty"`
-	MaxDelayMS *int              `yaml:"max_delay_ms" json:"max_delay_ms,omitempty"`
+	Absent     []string `yaml:"absent" json:"absent,omitempty"`
+	MinDelayMS *int     `yaml:"min_delay_ms" json:"min_delay_ms,omitempty"`
+	MaxDelayMS *int     `yaml:"max_delay_ms" json:"max_delay_ms,omitempty"`
 }
 
 // Response is sent as written: status, headers, a JSON or text body, an optional delay,
