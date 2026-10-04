@@ -2,6 +2,7 @@
 package iohr;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.EventStream;
 import hr.inorbit.sdk.Pages;
 import hr.inorbit.sdk.Response;
 import hr.inorbit.sdk.codegen.Codegen;
@@ -57,6 +58,25 @@ public final class PublicEvents {
      */
     public CompletableFuture<Response<DeleteInboxResponse>> deleteInboxAsync(String inboxId) {
         return Operations.deleteInboxAsync(client, inboxId);
+    }
+
+    /**
+     * <code>GET /v1/events/events</code>; needs scope <code>events:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/StreamEvents</code> on the <code>events</code> backend.
+     *
+     * @param params the query parameters
+     * @return the events, one model each; close it to stop early
+     */
+    public EventStream<StreamEventsResponse> streamEvents(EventsStreamEventsParams params) {
+        return Operations.streamEvents(client, params);
+    }
+
+    /**
+     * <code>GET /v1/events/events</code>; needs scope <code>events:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/StreamEvents</code> on the <code>events</code> backend.
+     *
+     * @return the events, one model each; close it to stop early
+     */
+    public EventStream<StreamEventsResponse> streamEvents() {
+        return Operations.streamEvents(client, EventsStreamEventsParams.builder().build());
     }
 
     /**
