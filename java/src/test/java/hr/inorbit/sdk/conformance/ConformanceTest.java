@@ -6,12 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.EventStream;
 import hr.inorbit.sdk.RawResponse;
+import hr.inorbit.sdk.StreamTransport;
 import hr.inorbit.sdk.errors.ApiException;
 import hr.inorbit.sdk.errors.InOrbitException;
 import hr.inorbit.sdk.generated.AccountsGetUsageParams;
 import hr.inorbit.sdk.generated.CreateEndpointRequest;
+import hr.inorbit.sdk.generated.EventsStreamEventsParams;
 import hr.inorbit.sdk.generated.Public;
+import hr.inorbit.sdk.generated.StreamEventsResponse;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -97,7 +101,7 @@ class ConformanceTest {
         assertEquals(200, loaded.statusCode(), name + ": loading answered " + loaded.statusCode());
         JsonNode c = JSON.readTree(loaded.body()).path("case");
         String area = c.path("area").asText();
-        if (contains(c.path("pending"), "java") || area.equals("sse") || area.equals("socket")) {
+        if (contains(c.path("pending"), "java")) {
             System.out.println("skip " + name + ": pending for java");
             return;
         }
@@ -115,9 +119,19 @@ class ConformanceTest {
         if (o.has("timeout_ms")) {
             b.timeout(Duration.ofMillis(o.path("timeout_ms").asLong()));
         }
+        if (o.path("streams").asText("sse").equals("socket")) {
+            b.streams(StreamTransport.SOCKET);
+        }
+        if (o.has("stream_idle_timeout_ms")) {
+            b.streamIdleTimeout(
+                    Duration.ofMillis(o.path("stream_idle_timeout_ms").asLong()));
+        }
         Public api = new Public(b.build());
         JsonNode action = c.path("action");
         Callable<Object> run = () -> {
+            if (action.path("op").asText().equals("events.stream_events")) {
+                return stream(api, action);
+            }
             try {
                 return call(api, action);
             } catch (InOrbitException e) {
@@ -171,6 +185,30 @@ class ConformanceTest {
         }
     }
 
+    /** What a stream yielded before it ended, and the error that ended it, if one did. */
+    private record Streamed(List<JsonNode> items, InOrbitException error) {}
+
+    /** Reads the stream, stopping after {@code take} items when the case says so. */
+    private static Streamed stream(Public api, JsonNode action) {
+        JsonNode args = action.path("args");
+        int take = action.path("take").asInt(Integer.MAX_VALUE);
+        List<JsonNode> items = new ArrayList<>();
+        try (EventStream<StreamEventsResponse> events = api.events()
+                .streamEvents(EventsStreamEventsParams.builder()
+                        .types(text(args, "types"))
+                        .build())) {
+            for (StreamEventsResponse ev : events) {
+                items.add(JSON.valueToTree(ev));
+                if (items.size() >= take) {
+                    break;
+                }
+            }
+        } catch (InOrbitException e) {
+            return new Streamed(items, e);
+        }
+        return new Streamed(items, null);
+    }
+
     private static RawResponse call(Public api, JsonNode action) {
         JsonNode args = action.path("args");
         return switch (action.path("op").asText()) {
@@ -213,6 +251,21 @@ class ConformanceTest {
     }
 
     private static void check(Object result, JsonNode expect, List<String> problems) {
+        if (result instanceof Streamed streamed) {
+            JsonNode want = expect.path("items");
+            if (expect.has("items")
+                    && (want.size() != streamed.items().size() || !subset(want, JSON.valueToTree(streamed.items())))) {
+                problems.add("items: want " + want + ", got " + streamed.items());
+            }
+            if (streamed.error() != null) {
+                result = streamed.error();
+            } else if (expect.has("error")) {
+                problems.add("want the stream to end with an error, it ended cleanly");
+                return;
+            } else {
+                return;
+            }
+        }
         boolean isError = result instanceof InOrbitException;
         if (!isError && expect.has("ok")) {
             JsonNode got = ((RawResponse) result).json();

@@ -53,6 +53,13 @@ java/
 - `int64` values are `long` through `Int64`; a message field the gateway left out is
   `null` (`Optional` in accessors where it reads better).
 - `toString()` of credentials redacts the secret; a test asserts it.
+- Streams (design.md section 7): `Client.stream` answers an `EventStream<T>`; `SseSource` parses
+  server-sent events from a `Flow` subscriber that requests one chunk at a time (the bound),
+  `SocketHub` runs every stream of a client on one `java.net.http.WebSocket` (reconnect and
+  re-issue, cancel frames, a 64-item queue per call, the idle clock on `Streams.TIMER`). The
+  generator gives a stream operation one method returning `EventStream<T>` (no async twin)
+  and passes its parameters both as the query and as typed `field`s for the socket's call
+  frame, with `rpc` from `x-iohr-rpc`.
 - Javadoc on every public type and method.
 - Publishing stays off until the first release (M4); Maven Central needs the
   `hr.inorbit` namespace verified by a DNS record first.

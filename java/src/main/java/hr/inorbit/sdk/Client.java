@@ -66,6 +66,9 @@ public final class Client {
     private final List<Hook> hooks;
     private final HttpClient http;
     private final Executor executor;
+    private final StreamTransport streams;
+    private final Duration streamIdleTimeout;
+    private SocketHub hub;
 
     private Client(
             URI base,
@@ -75,7 +78,9 @@ public final class Client {
             String userAgent,
             List<Hook> hooks,
             HttpClient http,
-            Executor executor) {
+            Executor executor,
+            StreamTransport streams,
+            Duration streamIdleTimeout) {
         this.base = base;
         this.provider = provider;
         this.timeout = timeout;
@@ -84,6 +89,8 @@ public final class Client {
         this.hooks = hooks;
         this.http = http;
         this.executor = executor;
+        this.streams = streams;
+        this.streamIdleTimeout = streamIdleTimeout;
     }
 
     /**
@@ -169,7 +176,17 @@ public final class Client {
      * @return the client
      */
     public Client withTimeout(Duration timeout) {
-        return new Client(base, provider, positive(timeout), maxRetries, userAgent, hooks, http, executor);
+        return new Client(
+                base,
+                provider,
+                positive(timeout),
+                maxRetries,
+                userAgent,
+                hooks,
+                http,
+                executor,
+                streams,
+                streamIdleTimeout);
     }
 
     /**
@@ -260,6 +277,146 @@ public final class Client {
      */
     public CompletableFuture<RawResponse> sendAsync(Operation op) {
         return CompletableFuture.supplyAsync(() -> send(op), executor);
+    }
+
+    /**
+     * Opens a stream operation and reads its events as {@code type} (design.md section 7): over
+     * server-sent events, or as a call on the client's one {@code /v1/ws} socket when the client
+     * was built with {@link StreamTransport#SOCKET} and the operation names its RPC. The stream
+     * opens on the first step of the iteration, with the retry and token rules of {@link #send}.
+     *
+     * @param op the call
+     * @param type the model of one event
+     * @param <T> the model of one event
+     * @return the events; close it to stop early
+     */
+    public <T> EventStream<T> stream(Operation op, Class<T> type) {
+        if (streams == StreamTransport.SOCKET && op.rpc() != null && !op.rpc().isEmpty()) {
+            return new EventStream<>(hub().call(op, type));
+        }
+        return new EventStream<>(new SseSource<>(this, op, type, streamIdleTimeout));
+    }
+
+    /** The client's one socket, made when the first stream asks for it. */
+    private synchronized SocketHub hub() {
+        if (hub == null) {
+            hub = new SocketHub(this);
+        }
+        return hub;
+    }
+
+    /** A stream's response as it opened, with the ids its errors name. */
+    record Opened(
+            HttpResponse<java.util.concurrent.Flow.Publisher<List<java.nio.ByteBuffer>>> response,
+            String requestId,
+            int attempts) {}
+
+    /** The server-sent events request for {@code op}, retried like {@link #send}. */
+    Opened openSse(Operation op) {
+        URI url = url(op);
+        String id = Retry.requestId();
+        int retries = 0;
+        boolean refreshed = false;
+        for (int number = 1; ; number++) {
+            Hook.Attempt attempt = new Hook.Attempt(op.name(), op.method(), op.path(), number, id);
+            Token token = provider.token();
+            HttpRequest req = HttpRequest.newBuilder(url)
+                    .timeout(timeout)
+                    .header("authorization", "Bearer " + token.access())
+                    .header("accept", "text/event-stream")
+                    .header("user-agent", userAgent)
+                    .header("x-request-id", id)
+                    .GET()
+                    .build();
+            for (Hook h : hooks) {
+                h.onRequest(attempt);
+            }
+            HttpResponse<java.util.concurrent.Flow.Publisher<List<java.nio.ByteBuffer>>> resp;
+            InOrbitException failure = null;
+            RawResponse raw = null;
+            try {
+                resp = http.send(req, HttpResponse.BodyHandlers.ofPublisher());
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    return new Opened(resp, id, number);
+                }
+                raw = new RawResponse(resp.statusCode(), resp.headers(), drain(resp.body()), id, number);
+                for (Hook h : hooks) {
+                    h.onResponse(attempt, raw);
+                }
+            } catch (HttpTimeoutException e) {
+                failure = new TimeoutException(base.getHost(), timeout.toSeconds(), e);
+            } catch (IOException e) {
+                failure = new ConnectionException(base.getHost(), describe(e), e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new ConnectionException(base.getHost(), "interrupted", e);
+            }
+            if (raw != null && raw.status() == 401 && !refreshed) {
+                provider.invalidate();
+                refreshed = true;
+                continue;
+            }
+            boolean again = failure != null || (raw != null && Retry.retryableStatus(raw.status()));
+            if (again && retries < maxRetries) {
+                Optional<Duration> wait = raw != null ? Retry.retryAfter(raw.headers()) : Optional.empty();
+                Retry.sleep(wait.orElseGet(() -> Retry.backoff(attempt.number() - 1)), base.getHost());
+                retries++;
+                continue;
+            }
+            InOrbitException error = failure != null ? failure : ApiException.of(raw);
+            failed(attempt, error);
+            throw error;
+        }
+    }
+
+    /** An error answer's body, at most {@link #MAX_BODY}. */
+    private static byte[] drain(java.util.concurrent.Flow.Publisher<List<java.nio.ByteBuffer>> body)
+            throws IOException, InterruptedException {
+        java.util.concurrent.CompletableFuture<byte[]> bytes = new java.util.concurrent.CompletableFuture<>();
+        HttpResponse.BodySubscriber<byte[]> sub = HttpResponse.BodySubscribers.ofByteArray();
+        body.subscribe(sub);
+        sub.getBody().whenComplete((b, e) -> {
+            if (e != null) {
+                bytes.completeExceptionally(e);
+            } else {
+                bytes.complete(b);
+            }
+        });
+        try {
+            byte[] b = bytes.get();
+            if (b.length > MAX_BODY) {
+                throw new TooLargeException();
+            }
+            return b;
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new IOException(describe(e.getCause()), e.getCause());
+        }
+    }
+
+    // Package-private views the socket uses.
+
+    TokenProvider provider() {
+        return provider;
+    }
+
+    HttpClient http() {
+        return http;
+    }
+
+    int maxRetries() {
+        return maxRetries;
+    }
+
+    Duration streamIdleTimeout() {
+        return streamIdleTimeout;
+    }
+
+    String userAgent() {
+        return userAgent;
+    }
+
+    Duration timeout() {
+        return timeout;
     }
 
     private void failed(Hook.Attempt attempt, InOrbitException e) {
@@ -400,8 +557,34 @@ public final class Client {
         private final List<Hook> hooks = new ArrayList<>();
         private HttpClient httpClient;
         private Executor executor;
+        private StreamTransport streams = StreamTransport.SSE;
+        private Duration streamIdleTimeout = Duration.ofSeconds(45);
 
         private Builder() {}
+
+        /**
+         * How streams open: {@link StreamTransport#SSE} (default) or every stream over one
+         * {@code /v1/ws} socket.
+         *
+         * @param streams the transport
+         * @return this builder
+         */
+        public Builder streams(StreamTransport streams) {
+            this.streams = Objects.requireNonNull(streams, "streams");
+            return this;
+        }
+
+        /**
+         * How long a stream may be silent (no event, comment or ping) before it fails with a
+         * timeout, or on the socket reconnects (default 45 s).
+         *
+         * @param idle the limit
+         * @return this builder
+         */
+        public Builder streamIdleTimeout(Duration idle) {
+            this.streamIdleTimeout = idle;
+            return this;
+        }
 
         /**
          * An API token (from the console or {@code iohr token create}).
@@ -590,7 +773,9 @@ public final class Client {
                     ua,
                     List.copyOf(hooks),
                     http,
-                    executor != null ? executor : Pool.EXECUTOR);
+                    executor != null ? executor : Pool.EXECUTOR,
+                    streams,
+                    positive(streamIdleTimeout));
         }
 
         private static URI checkUrl(String what, String raw, boolean originOnly) {
