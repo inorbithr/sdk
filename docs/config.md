@@ -352,9 +352,11 @@ Rules:
   line or SDK can add keys without breaking an older reader, and a typo is still visible.
 - A value of the wrong type is a `ConfigError`, the same as a bad environment value.
 
-Before any SDK reads the file, the command line must keep what it does not know: today
-`iohr` rewrites `config.toml` from its own types and would drop the `[sdk]` table and
-unknown profile keys. That is the first item of M6 (section 10).
+The command line keeps what it does not own. It changes only `default`, its own profile
+keys (`kind`, `account`, `storage`, `issuer`, `client_id`) and the `[ext]` table, and keeps
+every other key, table and comment (`toml_edit`). A profile without `kind` holds SDK keys
+only: `iohr` does not list it as one of its profiles. `iohr logout` removes the profile's
+command-line keys and leaves its SDK keys; the table goes when nothing is left.
 
 ## 5. Credentials
 
@@ -466,9 +468,21 @@ The `cli` source runs the command line rather than reading the keychain itself:
   error (at most 200 characters); standard output is never logged.
 - The token is cached by section 5.3's rules; the command runs again in the refresh
   window, which with 15-minute tokens is about four times an hour.
-- `iohr auth token` is new (a follow-up in `cli/`). It refreshes the stored session with
-  the command line's own rules (re-reading the store, rotation, SR-24) and prints the
-  access token only, never the refresh token.
+- `iohr auth token` (iohr 0.1.0-alpha.8 and later) refreshes the stored session with the
+  command line's own rules (re-reading the store, rotation, SR-24) when less than 60 s of
+  the access token is left, and prints the access token only, never the refresh token.
+- Its output is one line of JSON on standard output, with exactly these fields:
+  `access_token`; `expires_at`, RFC 3339 in UTC, or `null` for a token without an
+  expiry (an API token may have none); `profile`, the profile's name; `account`, the
+  account id the profile acts for. Standard error is empty on success.
+- Exit codes are the command line's: `0` printed; `2` a usage error (a malformed profile
+  name); `3` not signed in (no such profile, no credential stored, an expired API token,
+  or a session the sign-in service ended: `iohr login` again); `1` anything else, such as
+  the sign-in service being unreachable. On a non-zero exit standard output is empty and
+  standard error carries one line saying what to do.
+- `--profile` is always passed. Without it, `iohr` uses `IOHR_PROFILE`, then
+  `IOHR_TOKEN` (and prints `"profile": null`), then its default profile; the SDK never
+  relies on that.
 
 Running the command line, as Azure's `AzureCliCredential` runs `az`, keeps the keychain,
 refresh-token rotation and the session file format in one program instead of six. The
@@ -1000,6 +1014,7 @@ language's driver runs every vector as a unit test next to its conformance drive
 1. `cli/`: keep unknown keys and the `[sdk]` table when rewriting `config.toml`
    (`toml_edit`, which also keeps comments), add `iohr auth token` and
    `iohr sdk config`, and fix `IOHR_TOKEN` being ignored once a default profile exists.
+   Done in iohr 0.1.0-alpha.8.
 2. The replay server features of section 9.1; `tools/validate-cases.py` validates
    vectors.
 3. The generator marks operations that take `Idempotency-Key`. `a-write-is-not-retried`

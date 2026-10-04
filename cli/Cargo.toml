@@ -45,6 +45,7 @@ thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util", "fs", "net", "sync", "process", "signal"] }
 toml = "1"
+toml_edit = "0.25"
 url = "2"
 zeroize = "1"
 

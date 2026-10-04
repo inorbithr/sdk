@@ -145,13 +145,17 @@ behind `--insecure-storage`, mode 0600 in a 0700 directory. A token from `IOHR_T
 stays in memory. A token is never accepted as a command-line argument. A connection's
 secret (`iohr connections add` and `reconnect`) is typed without echo, or read from a
 file or stdin; it stays in wiped memory until the one request that carries it, and is
-never stored, printed or accepted as an argument.
+never stored, printed or accepted as an argument. `iohr auth token` prints a profile's access token on
+standard output, for a program that runs it (the SDKs' `cli` source); the refresh token
+never leaves the credential store, and the command writes nothing but the store's own
+rotation.
 - Why: a developer machine holds credentials for several accounts; shell history, the
   process list and dotfile backups are where tokens leak.
 - Verify: unit tests for entry keys and file modes; a test that refuses a token in
   `argv`; a test that runs every command with `--verbose` and finds no token or
   connection secret in the output; a test that a connection secret travels only in the
-  body of the call that makes the connection; the credential store tested on each operating system in CI.
+  body of the call that makes the connection; a test that `iohr auth token` prints the
+  access token and never the refresh token; the credential store tested on each operating system in CI.
 - Refs: CRA I.2(e); clig.dev "Arguments and flags".
 
 **SR-29. No secrets in the config file.** The SDK refuses a key secret, a token, a

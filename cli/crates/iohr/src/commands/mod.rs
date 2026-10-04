@@ -1,6 +1,7 @@
 //! One module per command.
 
 mod accounts;
+mod auth;
 mod call;
 mod config;
 mod connections;
@@ -18,7 +19,9 @@ mod whoami;
 use clap::CommandFactory as _;
 
 use crate::Env;
-use crate::cli::{AccountsCommand, Cli, Command, LabCommand, OpenapiCommand, SdkCommand};
+use crate::cli::{
+    AccountsCommand, AuthCommand, Cli, Command, LabCommand, OpenapiCommand, SdkCommand,
+};
 use crate::error::Error;
 use crate::output::Out;
 
@@ -37,6 +40,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Logout => login::logout(g, out).await,
         Command::Profile(cmd) => profile::run(g, &env, cmd, out).await,
         Command::Whoami => whoami::run(g, &env, out).await,
+        Command::Auth(AuthCommand::Token(args)) => auth::token(g, &env, &args, out).await,
         Command::Accounts(AccountsCommand::List) => accounts::list(g, &env, out).await,
         Command::Token(cmd) => token::run(g, &env, cmd, out).await,
         Command::Api(call) => call::run(g, &env, call, out).await,

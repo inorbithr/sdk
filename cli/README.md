@@ -47,7 +47,9 @@ history and the process list would keep it.
 iohr login --with-token --profile ci < token.txt
 ```
 
-For CI and one-off use, `IOHR_TOKEN` is used in memory and nothing is written:
+For CI and one-off use, `IOHR_TOKEN` is used in memory and nothing is written. It wins
+over the default profile; a profile named with `--profile` or `IOHR_PROFILE` wins over it
+(a named profile reads only `IOHR_TOKEN_<PROFILE>` from the environment):
 
 ```sh
 IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f page_size=5
@@ -64,6 +66,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr logout` | Forget the profile and its credential on this machine |
 | `iohr profile list \| use \| show` | The profiles here; the default one |
 | `iohr whoami` | Subject, account, plan, scopes and expiry of the active profile |
+| `iohr auth token [--format text\|json]` | The profile's access token on stdout, refreshed first when less than a minute is left; for programs, such as the SDKs, that call with your login (below) |
 | `iohr accounts list` | The accounts the credential can see |
 | `iohr token create \| list \| revoke` | API tokens for an account (a signed-in person only) |
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
@@ -87,6 +90,24 @@ a query value or a body.
 
 Exit codes: 0 success, 1 a failed call, 2 a usage error, 3 not signed in or the token
 was refused, 4 forbidden by scope, role or plan.
+
+## Your login in other programs
+
+`iohr auth token` prints the active profile's access token, refreshing a signed-in
+session first when less than a minute of it is left. The SDKs' `cli` credential source
+runs it ([docs/config.md](../docs/config.md) section 5.4), so `iohr login` is enough for a
+program on your machine to call the API as you:
+
+```sh
+iohr auth token --profile work --format json
+# {"access_token":"eyJ...","expires_at":"2026-10-04T10:15:00Z","profile":"work","account":"acc_8d2e"}
+```
+
+`expires_at` is RFC 3339 in UTC, or `null` for a token without an expiry; `profile` is
+`null` when the token came from `IOHR_TOKEN`. Without `--format json` the token is printed
+alone on one line. The refresh token never leaves the credential store. Exit codes are the
+usual ones: 3 when there is no such profile, no credential, or the session has ended
+(`iohr login` again), 1 when the sign-in service cannot be reached.
 
 ## An SDK for your account
 
@@ -206,7 +227,12 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 
 - Profiles: `config.toml` in the platform's config directory (`~/.config/iohr` on
   Linux, `~/Library/Application Support/hr.InOrbit.iohr` on macOS,
-  `%APPDATA%\InOrbit\iohr\config` on Windows). No secret is ever written there.
+  `%APPDATA%\InOrbit\iohr\config` on Windows). No secret is ever written there. The
+  SDKs read the same file ([docs/config.md](../docs/config.md) section 4): their `[sdk]`
+  table, their keys inside `[profiles.<name>]`, and profiles that hold only SDK keys.
+  `iohr` changes only its own keys (`default`, a profile's `kind`, `account`, `storage`,
+  `issuer`, `client_id`, and `[ext]`) and keeps every other key and comment; `iohr
+  logout` removes a profile's own keys and leaves the SDK's.
 - Secrets: the operating system's credential store (macOS Keychain, Windows Credential
   Manager, the Secret Service on Linux), one entry per profile and account. On a machine
   without one, `--insecure-storage` keeps the token in a file with mode 0600 instead.
@@ -231,6 +257,7 @@ Each runtime dependency, and why (SR-20):
 | inorbithr | The Rust SDK's runtime: the client every command calls through, with its retries, errors and user agent (ADR 0009, ADR 0011) |
 | reqwest (rustls) | HTTPS with the platform's trust store; no OpenSSL (the sign-in flows in iohr-auth) |
 | serde, serde_json, toml | The config file and the API's JSON |
+| toml_edit | Rewriting `config.toml` without dropping the SDKs' keys or anyone's comments; already in the lock through proc-macro-crate |
 | thiserror | Typed errors in the libraries |
 | time, url | RFC 3339 timestamps; URL checks (HTTPS only, the path stays on the API host) |
 | keyring-core and one store per OS | The OS credential store: apple-native-keyring-store, windows-native-keyring-store, zbus-secret-service-keyring-store (pure Rust D-Bus, no libdbus) |

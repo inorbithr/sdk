@@ -264,6 +264,8 @@ pub(crate) fn response(raw: RawResponse) -> Response {
 pub(crate) struct Session {
     /// The profile's name, or `IOHR_TOKEN`.
     pub(crate) label: String,
+    /// The profile, when the run has one (none for `IOHR_TOKEN`).
+    pub(crate) profile: Option<ProfileName>,
     pub(crate) kind: Kind,
     pub(crate) account: String,
     pub(crate) claims: Claims,
@@ -272,11 +274,23 @@ pub(crate) struct Session {
     pub(crate) credential: Arc<AnyCredential>,
 }
 
-/// The session for this run: `IOHR_TOKEN` when set, otherwise the chosen profile.
+/// The session for this run: a profile named by `--profile` or `IOHR_PROFILE`, else
+/// `IOHR_TOKEN` when set, else the default profile. `IOHR_TOKEN` wins over the default
+/// profile (README, ADR 0009): a token set for one command is the one it calls with.
 pub(crate) async fn session(global: &Global, env: &Env) -> Result<Session, Error> {
     let ctx = Ctx::load(global)?;
-    let chosen = ctx.chosen(global).ok();
+    let chosen = run_profile(global, env, &ctx);
     session_for(global, env, &ctx, chosen.as_ref()).await
+}
+
+/// The profile a run uses: `--profile` or `IOHR_PROFILE`; none when `IOHR_TOKEN` is set
+/// without one; otherwise the default profile, if any.
+pub(crate) fn run_profile(global: &Global, env: &Env, ctx: &Ctx) -> Option<ProfileName> {
+    match &global.profile {
+        Some(name) => Some(name.clone()),
+        None if env.token.is_some() => None,
+        None => ctx.config.default.clone(),
+    }
 }
 
 /// The session of one named profile: `IOHR_TOKEN_<PROFILE>` when set (CI, where a
@@ -307,6 +321,7 @@ pub(crate) async fn session_for(
                 || "IOHR_TOKEN".into(),
                 |n| format!("{n} (IOHR_TOKEN_{})", env_name(n.as_str())),
             ),
+            profile: name.cloned(),
             kind: Kind::Token,
             account,
             claims,
@@ -361,6 +376,7 @@ pub(crate) async fn session_for(
     let api = Api::new(base, Arc::clone(&credential), global.verbose)?;
     Ok(Session {
         label: name.to_string(),
+        profile: Some(name),
         kind: profile.kind,
         account: profile.account,
         claims,

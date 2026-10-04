@@ -1825,3 +1825,287 @@ async fn connections_delete_asks_first_unless_yes() {
     );
     assert_eq!(deletes().await, 1);
 }
+
+/// A token for `account` with `scopes` that expires at `exp` (Unix seconds).
+fn token_until(scopes: &[&str], exp: i64) -> String {
+    let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
+    format!(
+        "{}.{}.TOKENSIGNATUREMARKER",
+        enc(serde_json::json!({"alg": "RS256"})),
+        enc(serde_json::json!({
+            "sub": "ak_tok1", "aud": ["iohr-api"], "exp": exp,
+            "scp": scopes, "org": ACCOUNT, "plan": "free", "key": "key_1"
+        }))
+    )
+}
+
+/// Regression: `IOHR_TOKEN` was ignored once a default profile existed, though the
+/// README and ADR 0009 say it is used. A profile named by `--profile` still wins.
+#[tokio::test(flavor = "multi_thread")]
+async fn iohr_token_wins_over_the_default_profile() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let stored = token(&["identity:read"]);
+    let from_env = token(&["identity:read", "radar:read"]);
+    me(&server, &stored).await;
+    let o = r.with_stdin(
+        &format!("{stored}\n"),
+        &[
+            "login",
+            "--with-token",
+            "--insecure-storage",
+            "--profile",
+            "ci",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    Mock::given(method("GET"))
+        .and(path("/v1/me"))
+        .and(header(
+            "authorization",
+            format!("Bearer {from_env}").as_str(),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "subject": "ak_from_env", "kind": "client", "org": ACCOUNT, "scopes": ["identity:read"]
+        })))
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(&from_env, &["whoami", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["profile"], "IOHR_TOKEN", "{v}");
+    assert_eq!(v["me"]["subject"], "ak_from_env", "{v}");
+
+    let o = r.with_token(&from_env, &["whoami", "--json", "--profile", "ci"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["profile"], "ci", "{v}");
+    assert_eq!(v["me"]["subject"], "ak_tok1", "{v}");
+}
+
+/// `iohr auth token`: the SDKs' `cli` credential source (docs/config.md section 5.4).
+#[tokio::test(flavor = "multi_thread")]
+async fn auth_token_prints_the_profiles_token_and_its_expiry() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["identity:read"]);
+    me(&server, &t).await;
+    let o = r.with_stdin(
+        &format!("{t}\n"),
+        &[
+            "login",
+            "--with-token",
+            "--insecure-storage",
+            "--profile",
+            "ci",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
+    let o = r.run(&["auth", "token", "--profile", "ci", "--format", "json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(o.stderr.is_empty(), "{}", text(&o));
+    let stdout = String::from_utf8(o.stdout.clone()).unwrap();
+    assert_eq!(stdout.lines().count(), 1, "one line: {stdout}");
+    let v: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(v["access_token"], t.as_str());
+    assert_eq!(v["expires_at"], "2100-01-01T00:00:00Z");
+    assert_eq!(v["profile"], "ci");
+    assert_eq!(v["account"], ACCOUNT);
+    assert_eq!(v.as_object().unwrap().len(), 4, "{v}");
+
+    // Text: the token alone; the default profile when none is named; --json is json.
+    let o = r.run(&["auth", "token"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(String::from_utf8(o.stdout).unwrap(), format!("{t}\n"));
+    let o = r.run(&["auth", "token", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["profile"], "ci");
+
+    // IOHR_TOKEN: no profile.
+    let o = r.with_token(&t, &["auth", "token", "--format", "json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["profile"], serde_json::Value::Null);
+
+    // Not signed in: exit 3, nothing on stdout, one line on stderr.
+    for args in [
+        vec!["auth", "token", "--profile", "missing", "--format", "json"],
+        vec!["auth", "token", "--profile", "BAD NAME"],
+    ] {
+        let o = r.run(&args);
+        let want = if args.contains(&"BAD NAME") { 2 } else { 3 };
+        assert_eq!(code(&o), want, "{args:?}: {}", text(&o));
+        assert!(o.stdout.is_empty(), "{args:?}");
+    }
+    let expired = token_until(&["identity:read"], 1_000_000_000);
+    let o = r.with_token(&expired, &["auth", "token", "--format", "json"]);
+    assert_eq!(code(&o), 3, "{}", text(&o));
+    assert!(o.stdout.is_empty() && !text(&o).contains("TOKENSIGNATUREMARKER"));
+}
+
+/// A signed-in person whose access token has run out: `iohr auth token` refreshes,
+/// stores the rotated refresh token and prints only the new access token.
+#[tokio::test(flavor = "multi_thread")]
+async fn auth_token_refreshes_a_person_and_never_prints_the_refresh_token() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mock_provider(&server).await;
+    let uri = server.uri();
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .and(wiremock::matchers::body_string_contains(
+            "grant_type=refresh_token",
+        ))
+        .and(wiremock::matchers::body_string_contains(
+            "refresh_token=OLDREFRESH",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(person_tokens(&uri)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    std::fs::write(
+        dir.path().join("config.toml"),
+        format!(
+            "default = \"me\"\n\n[sdk]\nlog = \"warn\"\n\n[profiles.me]\nkind = \"person\"\naccount = \"{ACCOUNT}\"\nstorage = \"file\"\nissuer = \"{uri}\"\nclient_id = \"iohr-cli\"\ntimeout = \"10s\"\n"
+        ),
+    )
+    .unwrap();
+    let old_access = token_until(&["iohr.api"], 1_000_000_000);
+    std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
+    std::fs::write(
+        dir.path().join(format!("secrets/me.{ACCOUNT}")),
+        serde_json::json!({"refresh_token": "OLDREFRESH", "access_token": old_access, "expires_at": 1_000_000_000}).to_string(),
+    )
+    .unwrap();
+
+    let o = r.run(&["auth", "token", "--profile", "me", "--format", "json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let all = text(&o);
+    assert!(
+        !all.contains("REFRESHMARKER") && !all.contains("OLDREFRESH"),
+        "{all}"
+    );
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let want = person_tokens(&uri)["access_token"].clone();
+    assert_eq!(v["access_token"], want);
+    assert_eq!(v["profile"], "me");
+    let stored = std::fs::read_to_string(dir.path().join(format!("secrets/me.{ACCOUNT}"))).unwrap();
+    assert!(
+        stored.contains("REFRESHMARKER"),
+        "the rotated refresh token is stored"
+    );
+    // The run read the config and did not rewrite it; the SDK keys are there.
+    let config = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(config.contains("[sdk]") && config.contains("timeout = \"10s\""));
+}
+
+/// The commands that write `config.toml` keep what the SDKs keep there (docs/config.md
+/// section 4.2): the `[sdk]` table, SDK keys in a profile, SDK-only profiles, comments.
+#[tokio::test(flavor = "multi_thread")]
+async fn commands_that_write_the_config_keep_sdk_keys_and_comments() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["identity:read"]);
+    me(&server, &t).await;
+    let file = dir.path().join("config.toml");
+    std::fs::write(
+        &file,
+        "# Shared with the SDKs; keep this.\n\n[sdk]                # every profile\nlog = \"warn\"\nproxy = \"http://proxy.corp.example:3128\"\n\n[profiles.ci]        # SDK only\nkey_id = \"ak_7f3c\"\nkey_secret_file = \"/run/secrets/inorbit-ci\"\nscopes = [\"identity:read\"]\n\n[profiles.work]\ntimeout = \"10s\"      # SDK key before login\n",
+    )
+    .unwrap();
+    let check = |step: &str| {
+        let text = std::fs::read_to_string(&file).unwrap();
+        for kept in [
+            "# Shared with the SDKs; keep this.",
+            "# every profile",
+            "log = \"warn\"",
+            "proxy = \"http://proxy.corp.example:3128\"",
+            "# SDK only",
+            "key_id = \"ak_7f3c\"",
+            "key_secret_file = \"/run/secrets/inorbit-ci\"",
+            "timeout = \"10s\"      # SDK key before login",
+        ] {
+            assert!(text.contains(kept), "{step} dropped {kept}:\n{text}");
+        }
+        text
+    };
+    // An SDK-only profile is not one of the command line's.
+    let o = r.run(&["profile", "list", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["profiles"].as_object().unwrap().len(), 0, "{v}");
+
+    for (step, args) in [
+        (
+            "login",
+            vec![
+                "login",
+                "--with-token",
+                "--insecure-storage",
+                "--profile",
+                "work",
+            ],
+        ),
+        (
+            "login a second",
+            vec![
+                "login",
+                "--with-token",
+                "--insecure-storage",
+                "--profile",
+                "other",
+            ],
+        ),
+    ] {
+        let o = r.with_stdin(&format!("{t}\n"), &args);
+        assert_eq!(code(&o), 0, "{step}: {}", text(&o));
+        check(step);
+    }
+    let text_now = check("login");
+    assert!(text_now.contains("kind = \"token\""), "{text_now}");
+    for (step, args) in [
+        ("profile use", vec!["profile", "use", "other"]),
+        (
+            "config set",
+            vec![
+                "config",
+                "set",
+                "ext.registry",
+                "registry.acme.hr/inorbit/iohr-ext",
+            ],
+        ),
+        ("config unset", vec!["config", "unset", "ext.registry"]),
+        ("logout", vec!["logout", "--profile", "work"]),
+    ] {
+        let o = r.run(&args);
+        assert_eq!(code(&o), 0, "{step}: {}", text(&o));
+        check(step);
+    }
+    let text_now = check("end");
+    let t: toml::Table = text_now.parse().unwrap();
+    assert_eq!(t["default"].as_str(), Some("other"));
+    // logout took the command line's keys from `work` and left the SDK's.
+    assert_eq!(
+        t["profiles"]["work"].as_table().unwrap().len(),
+        1,
+        "{text_now}"
+    );
+}
