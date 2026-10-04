@@ -441,7 +441,14 @@ internal sealed class SocketHub(Transport transport) : IDisposable
                 }
             }
 
-            stop?.Cancel();
+            try
+            {
+                stop?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // A newer run replaced and disposed it: the run it stopped is over already.
+            }
         }
     }
 
