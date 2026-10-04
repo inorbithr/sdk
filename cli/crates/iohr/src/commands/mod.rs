@@ -3,6 +3,8 @@
 mod accounts;
 mod call;
 mod config;
+mod connections;
+mod connectors;
 mod domains;
 mod ext;
 mod lab;
@@ -44,6 +46,8 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sdk(SdkCommand::Generate(args)) => sdk::generate(g, &env, &args, out).await,
         Command::Sdk(SdkCommand::Check(args)) => sdk::check(g, &env, &args, out).await,
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
+        Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
+        Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
@@ -63,4 +67,47 @@ pub(crate) fn day(ts: &str) -> String {
     ts.get(..10)
         .filter(|d| d.len() == 10 && d.as_bytes()[4] == b'-')
         .map_or_else(|| ts.to_owned(), str::to_owned)
+}
+
+/// The items of every page of a list (AIP-158), until the last page or `limit` items.
+pub(crate) async fn pages(
+    api: &crate::context::Api,
+    path: &str,
+    query: &[(&str, &str)],
+    items: &str,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, inorbithr::Error> {
+    let mut all: Vec<serde_json::Value> = Vec::new();
+    let mut page_token = String::new();
+    let page_size = limit.clamp(1, 200).to_string();
+    loop {
+        let mut q: Vec<(&str, &str)> = query.to_vec();
+        q.push(("page_size", &page_size));
+        if !page_token.is_empty() {
+            q.push(("page_token", &page_token));
+        }
+        let page: serde_json::Value = api.get(path, &q).await?;
+        all.extend(
+            page.get(items)
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        );
+        page.get("next_page_token")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .clone_into(&mut page_token);
+        if page_token.is_empty() || all.len() >= limit {
+            break;
+        }
+    }
+    all.truncate(limit);
+    Ok(all)
+}
+
+/// A string field of a JSON object; `""` when it is missing or not a string.
+pub(crate) fn str_of<'a>(v: &'a serde_json::Value, k: &str) -> &'a str {
+    v.get(k)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
 }

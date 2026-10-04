@@ -87,6 +87,14 @@ pub enum Command {
     /// Domains an account controls, proved with one DNS record.
     #[command(subcommand)]
     Domains(DomainsCommand),
+    /// The apps a connection can be made from: incident tools, chat, observability, AI models
+    /// (RFC 0044).
+    #[command(subcommand)]
+    Connectors(ConnectorsCommand),
+    /// The account's connections to outside systems: add one with a key or by signing
+    /// in, test, pause, grant its actions, delete it (RFC 0044).
+    #[command(subcommand)]
+    Connections(ConnectionsCommand),
     /// Extensions: separate programs iohr installs from a registry, verifies, pins and
     /// runs as `iohr <name> ...`.
     #[command(subcommand)]
@@ -175,6 +183,261 @@ pub enum DomainsCommand {
         #[arg(long)]
         account: Option<String>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConnectorsCommand {
+    /// List the catalogue.
+    List {
+        /// Only connectors in this category.
+        #[arg(long, value_enum)]
+        category: Option<ConnectorCategory>,
+    },
+    /// One connector: its sign-in modes and their fields, settings, actions and the
+    /// hosts it may call.
+    Show {
+        /// The connector's id, such as pagerduty.
+        id: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConnectorCategory {
+    Ai,
+    Incident,
+    Chat,
+    Code,
+    Observability,
+    Enterprise,
+    Generic,
+}
+
+impl ConnectorCategory {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ai => "ai",
+            Self::Incident => "incident",
+            Self::Chat => "chat",
+            Self::Code => "code",
+            Self::Observability => "observability",
+            Self::Enterprise => "enterprise",
+            Self::Generic => "generic",
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConnectionsCommand {
+    /// List the account's connections.
+    List {
+        /// Only connections in this state.
+        #[arg(long, value_enum)]
+        status: Option<ConnectionStatus>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// One connection: who it is at the provider, its health and grants. Never shows
+    /// a credential.
+    Show {
+        /// The connection's name or id (con_...).
+        connection: String,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Connect an app. A key is asked for without echo, or read with --secret-file or
+    /// --secret-stdin, never from an argument; signing in opens the provider in a
+    /// browser and waits for it.
+    Add(ConnectionsAdd),
+    /// Run the connector's test request now and keep the outcome as the health.
+    Test {
+        /// The connection's name or id.
+        connection: String,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Every use of the account's connections, or of one, newest first: who, which
+    /// action, the outcome; never the content.
+    History {
+        /// Only this connection's uses (name or id).
+        connection: Option<String>,
+        /// Only this action's ("test" for tests).
+        #[arg(long)]
+        action: Option<String>,
+        /// Only this outcome.
+        #[arg(long, value_enum)]
+        status: Option<UseStatus>,
+        /// Only this consumer's, as KIND:ID (product:reliability, key:ak_..., agent:NAME).
+        #[arg(long)]
+        consumer: Option<String>,
+        /// At most this many.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Pause a connection: every call with it is refused until it is resumed.
+    Pause {
+        /// The connection's name or id.
+        connection: String,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Resume a paused connection.
+    Resume {
+        /// The connection's name or id.
+        connection: String,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Give a connection a new name (tools are named after it).
+    Rename {
+        /// The connection's name or id.
+        connection: String,
+        /// The new name: lowercase letters, digits and '-'.
+        new_name: String,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Delete a connection: its credential is destroyed and its grants stop working.
+    /// Asks first unless --yes.
+    Delete {
+        /// The connection's name or id.
+        connection: String,
+        /// Do not ask.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Give a connection a new credential: a key is asked for again, a signed-in
+    /// connection opens the provider in a browser.
+    Reconnect(ConnectionsReconnect),
+    /// Grant a consumer named actions of a connection, until an expiry. A signed-in
+    /// owner or admin only.
+    Grant {
+        /// The connection's name or id.
+        connection: String,
+        /// Who: product:NAME, key:ID, agent:NAME or avatar:ID.
+        #[arg(long = "to", value_name = "KIND:ID")]
+        to: String,
+        /// The actions, separated with commas or repeated.
+        #[arg(long, required = true, value_delimiter = ',')]
+        actions: Vec<String>,
+        /// How long it lasts: days such as 90d, or an RFC 3339 time (default: the
+        /// platform's, 90 days).
+        #[arg(long)]
+        expires: Option<String>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// The grants on a connection.
+    Grants {
+        /// The connection's name or id.
+        connection: String,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Revoke a grant; the next call it covered is refused.
+    RevokeGrant {
+        /// The connection's name or id.
+        connection: String,
+        /// The grant's id (gnt_...).
+        grant: String,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+}
+
+/// `--account`, for commands that act on an account's objects.
+#[derive(Debug, Clone, Args)]
+pub struct AccountArg {
+    /// The account (default: the profile's).
+    #[arg(long)]
+    pub account: Option<String>,
+}
+
+/// Where secret fields come from: never an argument.
+#[derive(Debug, Clone, Args)]
+pub struct SecretInput {
+    /// Read a secret field from a file, as FIELD=PATH; repeat it for several fields.
+    #[arg(long = "secret-file", value_name = "FIELD=PATH")]
+    pub files: Vec<String>,
+    /// Read one secret field from standard input.
+    #[arg(long = "secret-stdin", value_name = "FIELD")]
+    pub stdin: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ConnectionsAdd {
+    /// The connector's id, such as incident-io (`iohr connectors list`).
+    pub connector: String,
+    /// The sign-in mode (default: the connector's first; `iohr connectors show` lists
+    /// them).
+    #[arg(long)]
+    pub mode: Option<String>,
+    /// The connection's name (default: the connector's id).
+    #[arg(long)]
+    pub name: Option<String>,
+    /// A setting, as KEY=VALUE; repeat it. Never a secret.
+    #[arg(long = "config", value_name = "KEY=VALUE")]
+    pub config: Vec<String>,
+    /// For a mode that signs in: a scope to ask for besides the defaults; repeat it or
+    /// separate with commas.
+    #[arg(long = "scope", value_delimiter = ',')]
+    pub scopes: Vec<String>,
+    #[command(flatten)]
+    pub secrets: SecretInput,
+    #[command(flatten)]
+    pub account: AccountArg,
+}
+
+#[derive(Debug, Args)]
+pub struct ConnectionsReconnect {
+    /// The connection's name or id.
+    pub connection: String,
+    /// Switch to another of the connector's sign-in modes.
+    #[arg(long)]
+    pub mode: Option<String>,
+    #[command(flatten)]
+    pub secrets: SecretInput,
+    #[command(flatten)]
+    pub account: AccountArg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConnectionStatus {
+    Active,
+    Paused,
+    NeedsReauth,
+    Error,
+}
+
+impl ConnectionStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Paused => "paused",
+            Self::NeedsReauth => "needs_reauth",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum UseStatus {
+    Ok,
+    Failed,
+    Refused,
+}
+
+impl UseStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Failed => "failed",
+            Self::Refused => "refused",
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]

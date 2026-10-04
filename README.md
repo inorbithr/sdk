@@ -51,7 +51,8 @@ iohr whoami
 iohr api GET /v1/me
 ```
 
-`iohr` keeps several accounts as profiles, creates and revokes API tokens, and talks
+`iohr` keeps several accounts as profiles, creates and revokes API tokens, connects an
+account's apps (`iohr connectors`, `iohr connections`: a key or a browser sign-in), and talks
 only to `api.inorbit.hr` and `auth.inorbit.hr`, with no telemetry. Releases before 1.0
 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
 check with `gh attestation verify`. [cli/README.md](cli/README.md) has every command.

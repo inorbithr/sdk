@@ -68,22 +68,29 @@ impl Run<'_> {
             .unwrap()
     }
 
-    fn with_stdin(&self, input: &str, args: &[&str]) -> Output {
-        let mut child = self
-            .cmd(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(input.as_bytes())
-            .unwrap();
-        child.wait_with_output().unwrap()
+    fn with_token_and_stdin(&self, token: &str, input: &str, args: &[&str]) -> Output {
+        spawn_with_stdin(self.cmd(args).env("IOHR_TOKEN", token), input)
     }
+
+    fn with_stdin(&self, input: &str, args: &[&str]) -> Output {
+        spawn_with_stdin(&mut self.cmd(args), input)
+    }
+}
+
+fn spawn_with_stdin(cmd: &mut Command, input: &str) -> Output {
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
 }
 
 fn text(o: &Output) -> String {
@@ -510,6 +517,7 @@ async fn plain_http_to_another_host_is_refused() {
 /// Every command, with `--verbose`, against a server that answers everything: the
 /// caller's token appears nowhere in the output (SR-24, SR-13).
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines, reason = "one list: every command that calls")]
 async fn verbose_output_never_shows_the_token() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
@@ -531,7 +539,9 @@ async fn verbose_output_never_shows_the_token() {
     Mock::given(wiremock::matchers::any())
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "subject": "ak_tok1", "account": {"id": ACCOUNT}, "teams": [], "keys": [], "paths": {},
-            "token": {"id": "k"}, "access_token": "NEWTOKENVALUE", "expires_at": ""
+            "token": {"id": "k"}, "access_token": "NEWTOKENVALUE", "expires_at": "",
+            "connection": connection_json(), "connector": incident_io(),
+            "result": {"ok": true, "status": "ok"}, "grant": {"id": "gnt_1"}
         })))
         .mount(&server)
         .await;
@@ -554,6 +564,9 @@ async fn verbose_output_never_shows_the_token() {
     let gen_dir = gen_dir.to_str().unwrap();
     let lock_file = dir.path().join("proj/src/iohr.lock");
     let lock_file = lock_file.to_str().unwrap();
+    let secret_file = dir.path().join("key.txt");
+    std::fs::write(&secret_file, format!("{SECRET}\n")).unwrap();
+    let secret_arg = format!("api_key={}", secret_file.to_str().unwrap());
     let commands: Vec<Vec<&str>> = vec![
         vec!["whoami"],
         vec!["accounts", "list"],
@@ -572,6 +585,41 @@ async fn verbose_output_never_shows_the_token() {
         vec!["domains", "verify", "acme.hr"],
         vec!["domains", "confirm", "acme.hr"],
         vec!["domains", "rm", "acme.hr"],
+        vec!["connectors", "list"],
+        vec!["connectors", "show", "incident-io"],
+        vec!["connections", "list"],
+        vec!["connections", "show", "con_1"],
+        vec![
+            "connections",
+            "add",
+            "incident-io",
+            "--secret-file",
+            &secret_arg,
+        ],
+        vec![
+            "connections",
+            "reconnect",
+            "con_1",
+            "--secret-file",
+            &secret_arg,
+        ],
+        vec!["connections", "test", "con_1"],
+        vec!["connections", "history"],
+        vec!["connections", "pause", "con_1"],
+        vec!["connections", "resume", "con_1"],
+        vec!["connections", "rename", "con_1", "pd"],
+        vec![
+            "connections",
+            "grant",
+            "con_1",
+            "--to",
+            "product:reliability",
+            "--actions",
+            "create_incident",
+        ],
+        vec!["connections", "grants", "con_1"],
+        vec!["connections", "revoke-grant", "con_1", "gnt_1"],
+        vec!["connections", "delete", "con_1", "--yes"],
     ];
     for args in commands {
         let mut args = args.clone();
@@ -580,8 +628,8 @@ async fn verbose_output_never_shows_the_token() {
         assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
         let all = text(&o);
         assert!(
-            !all.contains("TOKENSIGNATUREMARKER"),
-            "{args:?} leaked the token"
+            !all.contains("TOKENSIGNATUREMARKER") && !all.contains(SECRET),
+            "{args:?} leaked the token or a connection's secret"
         );
         assert!(
             all.contains("request id"),
@@ -1224,4 +1272,556 @@ async fn profile_account_points_a_person_at_one_of_their_teams() {
     assert_eq!(code(&o), 2, "{}", text(&o));
     assert!(text(&o).contains("acme"), "{}", text(&o));
     assert!(!text(&o).contains("TOKENSIGNATUREMARKER"));
+}
+
+// --- connectors and connections (RFC 0044) ---------------------------------------------
+
+/// A connection's secret, as a marker easy to find in any output.
+const SECRET: &str = "CONNECTIONSECRETMARKER";
+
+fn incident_io() -> serde_json::Value {
+    serde_json::json!({
+        "id": "incident-io", "name": "incident.io", "category": "incident",
+        "status": "available", "hosts": ["api.incident.io"],
+        "auth_modes": [{"mode": "api_key", "label": "API key",
+            "fields": [{"name": "api_key", "label": "API key", "secret": true}]}],
+        "config_fields": [],
+        "actions": [{"name": "create_incident", "class": "write_reversible",
+            "model": "incident.create", "params": [{"name": "title", "required": true}]}]
+    })
+}
+
+fn slack() -> serde_json::Value {
+    serde_json::json!({
+        "id": "slack", "name": "Slack", "category": "chat", "status": "available",
+        "hosts": ["slack.com"],
+        "auth_modes": [{"mode": "oauth2", "label": "Sign in with Slack", "fields": [],
+            "scopes": ["chat:write", "channels:read"]}],
+        "actions": []
+    })
+}
+
+fn connection_json() -> serde_json::Value {
+    serde_json::json!({
+        "id": "con_1", "name": "incident-io", "kind": "incident-io",
+        "connector": "incident-io", "auth_mode": "api_key",
+        "label": "https://app.incident.io/acme", "status": "active", "grants": 1,
+        "credential": {"kind": "sealed", "set_at": "2026-10-04T09:00:00Z"},
+        "last_test_at": "2026-10-04T09:00:00Z", "last_test_ok": true,
+        "created_at": "2026-10-04T09:00:00Z", "owner": "Ana"
+    })
+}
+
+fn connections_base() -> String {
+    format!("/v1/accounts/orgs/{ACCOUNT}/connections")
+}
+
+async fn catalogue(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/v1/connectors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "connectors": [incident_io(), slack()], "next_page_token": ""
+        })))
+        .mount(server)
+        .await;
+    for c in [incident_io(), slack()] {
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v1/connectors/{}",
+                c["id"].as_str().unwrap()
+            )))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "connector": c })),
+            )
+            .mount(server)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path(connections_base()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "connections": [connection_json()], "next_page_token": ""
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{}/con_1", connections_base())))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "connection": connection_json()
+        })))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connectors_and_connections_list_and_show() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["connections:read"]);
+    catalogue(&server).await;
+
+    let o = r.with_token(&t, &["connectors", "list"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        stdout.contains("incident-io") && stdout.contains("slack"),
+        "{stdout}"
+    );
+    let o = r.with_token(&t, &["connectors", "list", "--category", "chat", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v.as_array().map(Vec::len), Some(1), "{v}");
+    assert_eq!(v[0]["id"], "slack");
+
+    let o = r.with_token(&t, &["connectors", "show", "incident-io"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        stdout.contains("api_key (secret)") && stdout.contains("create_incident"),
+        "{stdout}"
+    );
+    let o = r.with_token(&t, &["connectors", "show", "Not/AnId"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+
+    let o = r.with_token(&t, &["connections", "list"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        String::from_utf8_lossy(&o.stdout).contains("https://app.incident.io/acme"),
+        "{}",
+        text(&o)
+    );
+    let o = r.with_token(&t, &["connections", "list", "--status", "paused", "--json"]);
+    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "[]");
+    let o = r.with_token(&t, &["connections", "show", "incident-io", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["id"], "con_1");
+    let o = r.with_token(&t, &["connections", "show", "nope"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("iohr connections list"), "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connections_add_reads_a_key_from_stdin_and_never_shows_it() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["connections:read", "connections:write"]);
+    catalogue(&server).await;
+    Mock::given(method("POST"))
+        .and(path(connections_base()))
+        .and(body_json(serde_json::json!({
+            "kind": "incident-io", "auth_mode": "api_key", "name": "incidents",
+            "config": {}, "credentials": {"api_key": SECRET}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "connection": connection_json()
+        })))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "connections",
+        "add",
+        "incident-io",
+        "--name",
+        "incidents",
+        "--secret-stdin",
+        "api_key",
+    ];
+    let o = r.with_token_and_stdin(&t, &format!("{SECRET}\n"), &args);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("Connected incident-io as https://app.incident.io/acme on incident.io"),
+        "{}",
+        text(&o)
+    );
+    assert!(!text(&o).contains(SECRET));
+    let mut json_args = args.to_vec();
+    json_args.push("--json");
+    let o = r.with_token_and_stdin(&t, SECRET, &json_args);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["name"], "incident-io");
+    assert!(!text(&o).contains(SECRET));
+
+    // The secret travelled only in the body of the create call: never in a path, a
+    // query or a header.
+    let requests = server.received_requests().await.unwrap();
+    let mut bodies = 0;
+    for req in &requests {
+        assert!(!req.url.as_str().contains(SECRET), "{}", req.url);
+        for (_, v) in &req.headers {
+            assert!(!v.to_str().unwrap_or_default().contains(SECRET));
+        }
+        if String::from_utf8_lossy(&req.body).contains(SECRET) {
+            assert_eq!(req.method.as_str(), "POST");
+            assert_eq!(req.url.path(), connections_base());
+            bodies += 1;
+        }
+    }
+    assert_eq!(bodies, 2);
+
+    // Never as an argument, and an unknown field is named, not echoed.
+    let o = r.with_token(
+        &t,
+        &[
+            "connections",
+            "add",
+            "incident-io",
+            "--config",
+            &format!("api_key={SECRET}"),
+        ],
+    );
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(!text(&o).contains(SECRET), "{}", text(&o));
+    let o = r.with_token(&t, &["connections", "add", "incident-io"]);
+    assert_eq!(code(&o), 2, "no terminal to ask on: {}", text(&o));
+    assert!(text(&o).contains("--secret-stdin"), "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_key_is_a_failed_call_and_nothing_is_stored() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["connections:write"]);
+    catalogue(&server).await;
+    Mock::given(method("POST"))
+        .and(path(connections_base()))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "code": "bad_request",
+            "error": "the key was refused: auth (the provider answered 401)"
+        })))
+        .mount(&server)
+        .await;
+    let o = r.with_token_and_stdin(
+        &t,
+        SECRET,
+        &[
+            "connections",
+            "add",
+            "incident-io",
+            "--secret-stdin",
+            "api_key",
+        ],
+    );
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    let all = text(&o);
+    assert!(
+        all.contains("the key was refused") && all.contains("Nothing was stored"),
+        "{all}"
+    );
+    assert!(!all.contains(SECRET));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connections_add_signs_in_at_the_provider_and_waits_on_the_session() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["connections:read", "connections:write"]);
+    catalogue(&server).await;
+    let expires = (time::OffsetDateTime::now_utc() + time::Duration::minutes(10))
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+    Mock::given(method("POST"))
+        .and(path(format!("{}/connect", connections_base())))
+        .and(body_json(serde_json::json!({
+            "connector": "slack", "auth_mode": "oauth2", "config": {}, "name": "chat"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "authorize_url": "https://slack.com/oauth/v2/authorize?client_id=1&state=STATE1",
+            "expires_at": expires, "session_id": "cs_1"
+        })))
+        .mount(&server)
+        .await;
+    let session = format!("{}/connect/cs_1", connections_base());
+    Mock::given(method("GET"))
+        .and(path(&session))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    let mut slack_connection = connection_json();
+    slack_connection["name"] = "chat".into();
+    slack_connection["connector"] = "slack".into();
+    slack_connection["label"] = "Acme workspace".into();
+    Mock::given(method("GET"))
+        .and(path(&session))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "completed", "connection": slack_connection
+        })))
+        .mount(&server)
+        .await;
+
+    let started = std::time::Instant::now();
+    let o = r.with_token(&t, &["connections", "add", "slack", "--name", "chat"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let all = text(&o);
+    assert!(
+        all.contains("https://slack.com/oauth/v2/authorize?client_id=1&state=STATE1"),
+        "no browser here, so the link is printed: {all}"
+    );
+    assert!(
+        all.contains("Connected chat as Acme workspace on Slack"),
+        "{all}"
+    );
+    assert!(
+        started.elapsed() >= std::time::Duration::from_secs(2),
+        "polled twice"
+    );
+    let polls = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|q| q.url.path() == session)
+        .count();
+    assert_eq!(polls, 2);
+
+    // A key flag with a mode that signs in is a usage error.
+    let o = r.with_token(&t, &["connections", "add", "slack", "--secret-stdin", "x"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_sign_in_says_why() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["connections:write"]);
+    catalogue(&server).await;
+    Mock::given(method("POST"))
+        .and(path(format!("{}/connect", connections_base())))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "authorize_url": "https://slack.com/oauth/v2/authorize?state=S",
+            "session_id": "cs_2"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{}/connect/cs_2", connections_base())))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "failed", "error": "access_denied: the person declined"
+        })))
+        .mount(&server)
+        .await;
+    let o = r.with_token(&t, &["--json", "connections", "add", "slack"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("the person declined"), "{}", text(&o));
+    assert!(o.stdout.is_empty(), "no result on stdout");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario, grant then list then revoke"
+)]
+async fn connections_grant_list_and_revoke() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["connections:read", "connections:write"]);
+    catalogue(&server).await;
+    let grants = format!("{}/con_1/grants", connections_base());
+    let grant = serde_json::json!({
+        "id": "gnt_1", "connection_id": "con_1",
+        "consumer": {"kind": "product", "id": "reliability"},
+        "actions": ["create_incident"], "expires_at": "2027-01-02T10:00:00Z", "status": "active"
+    });
+    Mock::given(method("POST"))
+        .and(path(&grants))
+        .and(body_json(serde_json::json!({
+            "consumer": {"kind": "product", "id": "reliability"},
+            "actions": ["create_incident"]
+        })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "grant": grant })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(&grants))
+        .and(wiremock::matchers::body_partial_json(serde_json::json!({
+            "consumer": {"kind": "agent", "id": "triage"},
+        })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "grant": grant })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&grants))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "grants": [grant], "next_page_token": ""
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{grants}/gnt_1")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "grant": {"id": "gnt_1", "revoked_at": "2026-10-04T10:00:00Z", "status": "revoked"}
+        })))
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(
+        &t,
+        &[
+            "connections",
+            "grant",
+            "incident-io",
+            "--to",
+            "product:reliability",
+            "--actions",
+            "create_incident",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(String::from_utf8_lossy(&o.stdout), "gnt_1\n");
+    let o = r.with_token(
+        &t,
+        &[
+            "connections",
+            "grant",
+            "con_1",
+            "--to",
+            "agent:triage",
+            "--actions",
+            "create_incident,list_statuses",
+            "--expires",
+            "30d",
+            "--json",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["id"], "gnt_1");
+    let sent = server.received_requests().await.unwrap();
+    let body: serde_json::Value = sent
+        .iter()
+        .rev()
+        .find(|q| q.method.as_str() == "POST")
+        .map(|q| serde_json::from_slice(&q.body).unwrap())
+        .unwrap();
+    assert_eq!(
+        body["actions"],
+        serde_json::json!(["create_incident", "list_statuses"])
+    );
+    assert!(
+        body["expires_at"].as_str().unwrap().ends_with('Z'),
+        "{body}"
+    );
+
+    let o = r.with_token(&t, &["connections", "grants", "incident-io"]);
+    assert!(
+        String::from_utf8_lossy(&o.stdout).contains("product:reliability"),
+        "{}",
+        text(&o)
+    );
+    let o = r.with_token(&t, &["connections", "grants", "con_1", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v[0]["id"], "gnt_1");
+    let o = r.with_token(
+        &t,
+        &[
+            "connections",
+            "revoke-grant",
+            "incident-io",
+            "gnt_1",
+            "--json",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["status"], "revoked");
+
+    for bad in [
+        vec![
+            "connections",
+            "grant",
+            "con_1",
+            "--to",
+            "person:x",
+            "--actions",
+            "a",
+        ],
+        vec![
+            "connections",
+            "grant",
+            "con_1",
+            "--to",
+            "key:k",
+            "--actions",
+            "a",
+            "--expires",
+            "soon",
+        ],
+    ] {
+        let o = r.with_token(&t, &bad);
+        assert_eq!(code(&o), 2, "{bad:?}: {}", text(&o));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connections_delete_asks_first_unless_yes() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&["connections:read", "connections:write"]);
+    catalogue(&server).await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{}/con_1", connections_base())))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .mount(&server)
+        .await;
+    let deletes = || async {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|q| q.method.as_str() == "DELETE")
+            .count()
+    };
+
+    let o = r.with_token(&t, &["connections", "delete", "incident-io"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("--yes"), "{}", text(&o));
+    assert_eq!(deletes().await, 0, "nothing deleted without a confirmation");
+
+    let o = r.with_token(
+        &t,
+        &["connections", "delete", "incident-io", "--yes", "--json"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({"id": "con_1", "name": "incident-io", "deleted": true})
+    );
+    assert_eq!(deletes().await, 1);
 }
