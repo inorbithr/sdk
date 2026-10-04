@@ -217,6 +217,19 @@ impl Api {
         raw.json()
     }
 
+    /// [`send`](Self::send) with any serialisable body, so a body that carries a secret
+    /// borrows it instead of copying it into a [`Value`]; the bytes sent are the
+    /// runtime's, dropped with the call.
+    pub(crate) async fn send_body<B: serde::Serialize + ?Sized>(
+        &self,
+        method: Method,
+        path: &str,
+        body: &B,
+    ) -> Result<RawResponse, inorbithr::Error> {
+        let op = Operation::new(method, path.to_owned()).json(body)?;
+        self.client.send(op).await
+    }
+
     /// One call, as the runtime makes it: idempotent methods retried, a 401 answered by
     /// one fresh token (SR-18).
     pub(crate) async fn send(

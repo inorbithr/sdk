@@ -16,6 +16,7 @@ mod context;
 mod error;
 mod lock;
 mod output;
+mod prompt;
 
 pub use args::refuse_secrets_in_args;
 pub use commands::run;

@@ -48,7 +48,9 @@ cli/
 - Every secret is a `Redacted<String>` from the moment it is read until the one place it
   is sent or stored. Never `Debug`-print, log or put a secret in an error message.
 - A token never comes from argv (`refuse_secrets_in_args` runs before parsing). New
-  input of a secret goes through stdin or the environment.
+  input of a secret goes through stdin, the environment, a file named by a flag, or
+  `prompt::secret` (no echo, a terminal only); `iohr connections` reads connector
+  secrets that way and sends them borrowed (`Api::send_body`), never in a `Value`.
 - Secrets go only through `Store`: `KeyringStore` by default, `FileStore` only with
   `--insecure-storage`. The config file never holds one. Entries are keyed by profile and
   account (`EntryKey`).

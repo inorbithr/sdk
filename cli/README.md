@@ -70,6 +70,9 @@ IOHR_TOKEN="$(cat token.txt)" iohr api GET /v1/radar/digests -f limit=5
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
+| `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
+| `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
+| `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
 | `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install, verify and pin them; `iohr <name> ...` runs one |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter, status logs, redaction on public documents; offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
@@ -115,6 +118,39 @@ iohr domains confirm acme.hr             # marks it verified for the account
 `--subdomain` proves only a subdomain's subtree (`staging.acme.hr`). The token expires
 after 7 days unless the domain is verified, and a verified domain is checked again every
 day. The calls need the `domains:read` and `domains:write` scopes.
+
+## Connections
+
+```sh
+iohr connectors list --category incident        # what can be connected
+iohr connectors show pagerduty                  # its modes, fields, settings and actions
+iohr connections add incident-io                # asks for the API key without echo
+iohr connections add pagerduty --mode api_key --config region=eu.pagerduty.com \
+  --secret-file api_key=./pd.key                # or --secret-stdin api_key < pd.key
+iohr connections add slack                      # opens Slack in a browser, waits until done
+iohr connections grant incident-io --to product:reliability --actions create_incident --expires 90d
+iohr connections history incident-io --status failed
+iohr connections delete incident-io             # asks first; --yes in a script
+```
+
+A secret field (an API key, a bot token, a password) is never an argument: `iohr` asks for
+it without echo on a terminal, or reads it from `--secret-file FIELD=PATH` or
+`--secret-stdin FIELD`. It is held in memory that is wiped when dropped, sent once in the
+body of the call that makes or reconnects the connection, and never printed, logged or
+written anywhere. The platform tests the key before it stores anything: a refused key
+exits 1 with the reason and nothing is kept, a passing one prints who the account is at
+the provider ("Connected incident-io as … on incident.io"). Settings that are not secret
+go in `--config KEY=VALUE`.
+
+A mode that signs in (OAuth) starts a connect session on the platform and opens the
+provider's page in your browser, or prints the link over SSH and without a display.
+You finish on the provider's page and the console page it returns to; `iohr` asks the
+session every 2 seconds until it completes, fails or expires (10 minutes), then prints the
+connection. `iohr connections reconnect NAME` gives a connection a new credential the same
+way. Connecting and deleting need an owner or admin of the account and the
+`connections:write` scope; listing needs `connections:read`; grants are made by a
+signed-in person, not by a token. An AI model's connector says so: what you send in
+prompts goes to that provider under your own agreement with them.
 
 ## Extensions
 
@@ -178,6 +214,7 @@ Each runtime dependency, and why (SR-20):
 | time, url | RFC 3339 timestamps; URL checks (HTTPS only, the path stays on the API host) |
 | keyring-core and one store per OS | The OS credential store: apple-native-keyring-store, windows-native-keyring-store, zbus-secret-service-keyring-store (pure Rust D-Bus, no libdbus) |
 | zeroize | Secrets are wiped from memory when dropped |
+| rpassword | `iohr connections add` and `reconnect`: a secret field typed on the terminal without echo (Unix and Windows consoles); with rtoolbox, two small crates and no new transitive dependency |
 | etcetera | The platform's config directory |
 | base64, sha2 | Reading a token's claims to name its account; the PKCE S256 challenge |
 | getrandom | Request ids and retry jitter |

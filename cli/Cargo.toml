@@ -36,6 +36,7 @@ semver = "1"
 sigstore-verify = { version = "0.14", default-features = false }
 syn = { version = "3", features = ["full"] }
 typify = "0.8"
+rpassword = "7"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "query", "form", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
