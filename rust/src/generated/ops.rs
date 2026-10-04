@@ -86,6 +86,9 @@ impl ListKinds for super::profiles::Public {}
 /// `GET /v1/connections/tools`
 pub trait ListTools: crate::Profile {}
 impl ListTools for super::profiles::Public {}
+/// `GET /v1/events/events`
+pub trait StreamEvents: crate::Profile {}
+impl StreamEvents for super::profiles::Public {}
 /// `GET /v1/events/notifications`
 pub trait ListNotifications: crate::Profile {}
 impl ListNotifications for super::profiles::Public {}

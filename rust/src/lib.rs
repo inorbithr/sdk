@@ -41,6 +41,8 @@ mod pages;
 mod profile;
 mod retry;
 mod secret;
+mod socket;
+mod stream;
 mod timestamp;
 
 /// The public surface: every operation the public API offers, generated into this
@@ -61,6 +63,7 @@ pub use int64::Int64;
 pub use pages::Pages;
 pub use profile::{Profile, Public};
 pub use secret::Secret;
+pub use stream::{EventStream, Streams};
 pub use timestamp::parse_timestamp;
 
 /// What a generated surface imports: the client, the profile types, the operation
@@ -70,6 +73,7 @@ pub mod prelude {
     pub use crate::error::Error;
     pub use crate::int64::Int64;
     pub use crate::profile::{Profile, Public};
+    pub use crate::stream::EventStream;
 }
 
 /// The contract between this runtime and the code `iohr sdk generate` writes. A

@@ -16,7 +16,7 @@ categories = ["api-bindings", "web-programming::http-client"]
 default = ["rustls"]
 # TLS through rustls with the platform's trust roots. Without it the crate builds, but
 # a client can only call plain-HTTP loopback addresses (tests, local stacks).
-rustls = ["reqwest/rustls"]
+rustls = ["reqwest/rustls", "dep:rustls", "dep:tokio-rustls", "dep:rustls-platform-verifier"]
 
 [dependencies]
 # HTTP; TLS is chosen by the features above, so no TLS backend is a hard dependency.
@@ -27,7 +27,7 @@ serde_json = "1"
 # Typed errors.
 thiserror = "2"
 # The runtime: timers for backoff and the single-flight token exchange.
-tokio = { version = "1", features = ["rt", "sync", "time"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "net", "macros"] }
 # URL checks and joins (SR-07).
 url = "2"
 # RFC 3339 timestamps in models.
@@ -36,6 +36,17 @@ time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 getrandom = "0.4"
 # Secrets are zeroed on drop (SR-11).
 zeroize = "1"
+# Streams (design.md section 7): the standard `Stream` trait an `EventStream` implements,
+# and the socket's `Stream`/`Sink` combinators. Both already come with reqwest.
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# The /v1/ws socket: the WebSocket protocol only, over our own TCP and TLS, so no second
+# TLS stack or trust store comes with it.
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+# The socket's TLS: the same rustls, provider and platform verifier reqwest uses.
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"], optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"], optional = true }
+rustls-platform-verifier = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }

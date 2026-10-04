@@ -38,14 +38,16 @@ fn two_profiles_share_models_and_keep_their_own_operations() {
         api.profiles["personal"].hash,
         format!("sha256:{}", "ab".repeat(32))
     );
+    // The stream is generated, and gated like every other operation (design.md §7).
+    assert!(ops.contains("impl StreamEvents for super::profiles::AcmeCi {}"));
+    assert!(!ops.contains("impl StreamEvents for super::profiles::Personal {}"));
+    let surface = text(&files, "surface.rs");
     assert!(
-        files
-            .notes()
-            .iter()
-            .any(|n| n.contains("text/event-stream")),
-        "{:?}",
-        files.notes()
+        surface.contains("EventStream<StreamEventsResponse>"),
+        "{surface}"
     );
+    assert!(surface.contains(".rpc(\"iohr.events.v1.EventsService/StreamEvents\")"));
+    assert!(files.notes().is_empty(), "{:?}", files.notes());
 }
 
 #[test]
