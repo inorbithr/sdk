@@ -34,6 +34,7 @@ type Action struct {
 	Args       any    `yaml:"args" json:"args,omitempty"`
 	Repeat     int    `yaml:"repeat" json:"repeat,omitempty"`
 	Concurrent int    `yaml:"concurrent" json:"concurrent,omitempty"`
+	Take       int    `yaml:"take" json:"take,omitempty"`
 }
 
 // Exchange is one request the SDK must make and the answer it gets.
