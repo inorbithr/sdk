@@ -222,6 +222,14 @@ The frames are `spec/frames.json`, synced from the platform's `/frames.json`
 upgrade, and the platform does not cut a socket when that token expires, so the SDK does
 not reconnect for token expiry.
 
+**Where a language's WebSocket stops short.** The web platform's `WebSocket`
+(TypeScript) hides pings, the status of a refused upgrade, and backpressure. There the
+socket has no idle clock (a dead socket is found by its close), a refused upgrade gets
+one fresh token and then the retry budget, and a stream whose caller falls 64 items
+behind is stopped with a `ConnectionError` and a cancel frame instead of holding the
+server back. Browsers cannot set a header on a WebSocket, so `streams: "socket"` is for
+Node, Deno and Bun; browsers use server-sent events.
+
 Errors are those of section 5 everywhere; the conformance cases under
 `conformance/cases/sse` and `conformance/cases/socket` hold every language to these
 rules.
