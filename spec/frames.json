@@ -1,0 +1,197 @@
+{
+  "$defs": {
+    "Call": {
+      "additionalProperties": false,
+      "description": "Start a call.",
+      "properties": {
+        "body": {
+          "description": "The whole request message as proto3 JSON (path and query parameters are fields of it); absent or null is an empty message. Unknown fields are refused.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The client's handle for the call, unique among its calls in flight; free again after the call's `end` or `error`.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "method": {
+          "description": "The RPC's full name, `iohr.events.v1.EventsService/StreamEvents`: the operation's `x-iohr-rpc` in /openapi.json.",
+          "type": "string"
+        },
+        "type": {
+          "const": "call"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "Cancel": {
+      "additionalProperties": false,
+      "description": "Stop a call in flight. It ends with `end`, like any other.",
+      "properties": {
+        "id": {
+          "description": "The client's handle for the call, unique among its calls in flight; free again after the call's `end` or `error`.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "cancel"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "type": "object"
+    },
+    "ClientFrame": {
+      "description": "A frame the client sends.",
+      "discriminator": {
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Call"
+        },
+        {
+          "$ref": "#/$defs/Cancel"
+        }
+      ]
+    },
+    "Data": {
+      "description": "One response message: the same JSON the REST route answers, or one event of its stream.",
+      "properties": {
+        "body": {
+          "type": "object"
+        },
+        "id": {
+          "description": "The client's handle for the call, unique among its calls in flight; free again after the call's `end` or `error`.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "data"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "body"
+      ],
+      "type": "object"
+    },
+    "End": {
+      "description": "The call is over and its id is free again.",
+      "properties": {
+        "id": {
+          "description": "The client's handle for the call, unique among its calls in flight; free again after the call's `end` or `error`.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "end"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "type": "object"
+    },
+    "Error": {
+      "description": "The call failed, or a frame did not make sense; the keys are the REST error envelope's. Without `id` it concerns the socket: one sent as the server ends the socket (a revoked key: `unauthenticated`; the longest life: `unavailable`) precedes the close.",
+      "properties": {
+        "code": {
+          "description": "The error code; a client keeps a code it does not know.",
+          "examples": [
+            "bad_request",
+            "not_found",
+            "already_exists",
+            "conflict",
+            "forbidden",
+            "unauthenticated",
+            "rate_limited",
+            "quota_exceeded",
+            "failed_precondition",
+            "unimplemented",
+            "unavailable",
+            "timeout",
+            "cancelled",
+            "internal",
+            "unsupported_media_type",
+            "payload_too_large",
+            "method_not_allowed",
+            "unprocessable"
+          ],
+          "type": "string"
+        },
+        "details": {
+          "description": "Typed details, the REST envelope's `details` (`Problem` in /openapi.json).",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "error": {
+          "description": "A sentence for a person.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The client's handle for the call, unique among its calls in flight; free again after the call's `end` or `error`.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "error"
+        }
+      },
+      "required": [
+        "type",
+        "code",
+        "error",
+        "details"
+      ],
+      "type": "object"
+    },
+    "ServerFrame": {
+      "description": "A frame the server sends.",
+      "discriminator": {
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Data"
+        },
+        {
+          "$ref": "#/$defs/End"
+        },
+        {
+          "$ref": "#/$defs/Error"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The multiplexed socket at /v1/ws: every public RPC over one WebSocket, many calls at once told apart by the client's id. Text frames, one JSON object each. A client sends `call` and `cancel`; the server answers each call with `data` frames (one for a unary RPC, one per message for a stream) and exactly one `end` or `error`. A key or scoped token calls what its scopes admit, the same routes as on REST; anything else is an `error` frame with code `forbidden`. The identity is fixed at the upgrade.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ClientFrame"
+    },
+    {
+      "$ref": "#/$defs/ServerFrame"
+    }
+  ],
+  "title": "The /v1/ws frames",
+  "x-iohr-limits": {
+    "idle_timeout_seconds": 300,
+    "max_calls": 64,
+    "max_frame_bytes": 262144,
+    "ping_every_seconds": 15
+  }
+}

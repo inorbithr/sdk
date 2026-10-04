@@ -1,0 +1,28 @@
+name: a-socket-the-server-ends-is-opened-again
+area: socket
+summary: When the server ends the socket with an id-less unavailable error frame (its longest life), the client opens a new socket and issues the stream's call again; the caller sees one stream.
+action: { op: events.stream_events, args: { types: key.created } }
+client: { scopes: [events:read], streams: socket }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/ws }
+    response:
+      socket:
+        steps:
+          - { expect: { type: call, method: iohr.events.v1.EventsService/StreamEvents, body: { types: key.created } }, as: c }
+          - { send: { type: data, id: $c, body: { id: evt_1, type: key.created, occurred_at: "", account_id: acc_1, data: {} } } }
+          - { send: { type: error, code: unavailable, error: this stream reached its longest life; open it again, details: [{ type: retry, after_seconds: 0 }] } }
+          - { close: 1000 }
+  - request: { method: GET, path: /v1/ws }
+    response:
+      socket:
+        steps:
+          - { expect: { type: call, method: iohr.events.v1.EventsService/StreamEvents, body: { types: key.created } }, as: c }
+          - { send: { type: data, id: $c, body: { id: evt_2, type: key.created, occurred_at: "", account_id: acc_1, data: {} } } }
+          - { send: { type: end, id: $c } }
+expect:
+  items:
+    - { id: evt_1 }
+    - { id: evt_2 }
+  attempts: 2

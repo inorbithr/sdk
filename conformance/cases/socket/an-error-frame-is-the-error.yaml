@@ -1,0 +1,18 @@
+name: an-error-frame-is-the-error
+area: socket
+summary: An error frame for the call is the error envelope; the stream fails with its code and the status the code maps to.
+action: { op: events.stream_events, args: { types: key.created } }
+client: { scopes: [events:read], streams: socket }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/ws }
+    response:
+      socket:
+        steps:
+          - { expect: { type: call, method: iohr.events.v1.EventsService/StreamEvents, body: { types: key.created } }, as: c }
+          - { send: { type: error, id: $c, code: forbidden, error: "this token's scopes do not admit iohr.events.v1.EventsService/StreamEvents", details: [] } }
+expect:
+  items: []
+  error: { kind: api, code: forbidden, status: 403 }
+  attempts: 1

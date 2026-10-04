@@ -1,0 +1,23 @@
+name: keep-alive-comments-hold-the-stream-open
+area: sse
+summary: A comment is a keep-alive; it resets the idle clock, so a stream quiet for longer than the idle timeout in all but its comments stays open.
+action: { op: events.stream_events }
+client: { scopes: [events:read], stream_idle_timeout_ms: 400 }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events }
+    response:
+      sse:
+        events:
+          - { comment: open }
+          - { data: { id: evt_1, type: key.created, occurred_at: "", account_id: acc_1, data: {} } }
+          - { comment: keep-alive, delay_ms: 250 }
+          - { comment: keep-alive, delay_ms: 250 }
+          - { comment: keep-alive, delay_ms: 250 }
+          - { data: { id: evt_2, type: key.created, occurred_at: "", account_id: acc_1, data: {} }, delay_ms: 250 }
+expect:
+  items:
+    - { id: evt_1 }
+    - { id: evt_2 }
+  attempts: 1

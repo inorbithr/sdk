@@ -1,0 +1,21 @@
+name: a-revoked-key-ends-the-stream
+area: socket
+summary: An id-less unauthenticated error frame (the key was revoked) ends every stream on the socket with that error; the client does not reconnect.
+action: { op: events.stream_events, args: { types: key.created } }
+client: { scopes: [events:read], streams: socket }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/ws }
+    response:
+      socket:
+        steps:
+          - { expect: { type: call, method: iohr.events.v1.EventsService/StreamEvents, body: { types: key.created } }, as: c }
+          - { send: { type: data, id: $c, body: { id: evt_1, type: key.created, occurred_at: "", account_id: acc_1, data: {} } } }
+          - { send: { type: error, code: unauthenticated, error: the key or token that opened this stream was revoked or has expired, details: [] } }
+          - { close: 1000 }
+expect:
+  items:
+    - { id: evt_1 }
+  error: { kind: api, code: unauthenticated, status: 401 }
+  attempts: 1

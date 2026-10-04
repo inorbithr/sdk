@@ -189,6 +189,9 @@ pub struct Operation {
     pub idempotent: bool,
     /// The description, first paragraph.
     pub doc: String,
+    /// The RPC's full name (`x-iohr-rpc`, `iohr.events.v1.EventsService/StreamEvents`):
+    /// what a `/v1/ws` call frame names. Absent on the gateway's own routes.
+    pub rpc: Option<String>,
 }
 
 impl Operation {
@@ -518,6 +521,11 @@ fn read_operation(method: Method, path: &str, op: &Value) -> Result<Operation, M
         profiles: BTreeSet::new(),
         idempotent: method.is_idempotent(),
         doc,
+        rpc: op
+            .get("x-iohr-rpc")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
     })
 }
 

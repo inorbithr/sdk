@@ -1,0 +1,14 @@
+name: a-refused-open-is-an-api-error
+area: sse
+summary: A stream the token's scopes do not admit is refused before it opens; the error is the envelope's, and a 403 is not retried.
+action: { op: events.stream_events }
+client: { scopes: [events:read] }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events }
+    response: { status: 403, json: { code: forbidden, error: "the token may not make this call: a scope or role it does not hold", details: [] } }
+expect:
+  items: []
+  error: { kind: api, code: forbidden, status: 403 }
+  attempts: 1

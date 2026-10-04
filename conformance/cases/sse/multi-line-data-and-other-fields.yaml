@@ -1,0 +1,19 @@
+name: multi-line-data-and-other-fields
+area: sse
+summary: An event's data lines join with newlines (WHATWG event-stream), CRLF ends lines too, and fields a client does not use (id, retry, unknown ones) and comments are skipped.
+action: { op: events.stream_events }
+client: { scopes: [events:read] }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events }
+    response:
+      sse:
+        events:
+          - { raw: ": open\n\nid: 7\nretry: 1000\nfoo: bar\ndata: {\"id\": \"evt_1\",\ndata:  \"type\": \"key.created\", \"occurred_at\": \"\", \"account_id\": \"acc_1\", \"data\": {}}\n\n" }
+          - { raw: "data: {\"id\": \"evt_2\", \"type\": \"key.revoked\", \"occurred_at\": \"\", \"account_id\": \"acc_1\", \"data\": {}}\r\n\r\n" }
+expect:
+  items:
+    - { id: evt_1, type: key.created }
+    - { id: evt_2, type: key.revoked }
+  attempts: 1
