@@ -138,6 +138,11 @@ func TestEveryCaseReplays(t *testing.T) {
 				} else {
 					wantCalls++
 				}
+				if ex.Response.Socket != nil {
+					playSocket(t, ts, ex.Request, ex.Response.Socket)
+					last = time.Now()
+					continue
+				}
 				resp, body, err := send(t, ts, ex.Request)
 				last = time.Now()
 				if ex.Response.Fault == "reset" {
@@ -148,6 +153,10 @@ func TestEveryCaseReplays(t *testing.T) {
 				}
 				if err != nil {
 					t.Fatalf("exchange %d: %v", i, err)
+				}
+				if ex.Response.SSE != nil {
+					checkSSE(t, i, ex.Response.SSE, resp, body)
+					continue
 				}
 				checkResponse(t, i, ex.Response, resp, body)
 			}
@@ -329,15 +338,6 @@ func TestResetIsAConnectionError(t *testing.T) {
 	var urlErr *url.Error
 	if err == nil || !errors.As(err, &urlErr) {
 		t.Fatalf("want a connection error, got %v", err)
-	}
-}
-
-func TestStreamingAreasAreNotImplemented(t *testing.T) {
-	ts := start(t)
-	status, out := load(t, ts, `{"case": {"name": "x", "area": "sse", "action": {"op": "me"},
-		"exchanges": [{"request": {"method": "GET", "path": "/v1/ws"}}]}}`)
-	if status != http.StatusNotImplemented || !strings.Contains(out["error"].(string), "not implemented") {
-		t.Fatalf("%d %v", status, out)
 	}
 }
 

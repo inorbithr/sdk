@@ -1,0 +1,20 @@
+name: an-error-event-ends-the-stream
+area: sse
+summary: An event named error carries the error envelope; the stream yields what came before it, then fails with that error, code and status from the envelope.
+action: { op: events.stream_events }
+client: { scopes: [events:read] }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events, headers: { accept: text/event-stream } }
+    response:
+      sse:
+        events:
+          - { comment: open }
+          - { data: { id: evt_1, type: key.created, occurred_at: "2026-10-04T10:00:00Z", account_id: acc_1, data: {} } }
+          - { event: error, data: { code: unauthenticated, error: the key or token that opened this stream was revoked or has expired, details: [] } }
+expect:
+  items:
+    - { id: evt_1 }
+  error: { kind: api, code: unauthenticated, status: 401 }
+  attempts: 1

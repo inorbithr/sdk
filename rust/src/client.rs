@@ -20,12 +20,17 @@ use crate::hooks::{Attempt, Hook};
 use crate::profile::{Profile, Public, env_prefix};
 use crate::retry::{backoff, request_id, retry_after, retryable_status};
 use crate::secret::Secret;
+use crate::socket::{Ctx as SocketCtx, Hub};
+use crate::stream::{EventStream, Guard, QUEUE, Streams, opened, read_sse};
 
 /// The API every client calls unless told otherwise.
 pub const DEFAULT_BASE_URL: &str = "https://api.inorbit.hr";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_RETRIES: u32 = 2;
+const DEFAULT_STREAM_IDLE: Duration = Duration::from_secs(45);
+/// A stream has no deadline of its own; the platform ends one after 24 hours.
+const STREAM_DEADLINE: Duration = Duration::from_hours(48);
 
 /// An HTTP method, as the operations use them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -99,6 +104,8 @@ pub struct Operation<'a> {
     body: Option<Vec<u8>>,
     idempotent: bool,
     scopes: &'static [&'static str],
+    rpc: Option<&'static str>,
+    fields: serde_json::Map<String, serde_json::Value>,
 }
 
 impl<'a> Operation<'a> {
@@ -113,6 +120,8 @@ impl<'a> Operation<'a> {
             body: None,
             idempotent: method.is_idempotent(),
             scopes: &[],
+            rpc: None,
+            fields: serde_json::Map::new(),
         }
     }
 
@@ -183,6 +192,52 @@ impl<'a> Operation<'a> {
         self
     }
 
+    /// The RPC a stream's call names on the `/v1/ws` socket
+    /// (`iohr.events.v1.EventsService/StreamEvents`, the operation's `x-iohr-rpc`).
+    #[must_use]
+    pub fn rpc(mut self, name: &'static str) -> Self {
+        self.rpc = Some(name);
+        self
+    }
+
+    /// One field of the request message a stream's call carries on the socket: a path
+    /// or query parameter by its wire name, `a.b` for a nested one. A value that does not
+    /// serialise is left out.
+    #[must_use]
+    pub fn field(mut self, name: &str, value: impl Serialize) -> Self {
+        let Ok(value) = serde_json::to_value(value) else {
+            return self;
+        };
+        let mut parts = name.split('.').peekable();
+        let mut node = &mut self.fields;
+        while let Some(part) = parts.next() {
+            if parts.peek().is_none() {
+                node.insert(part.to_owned(), value);
+                break;
+            }
+            let entry = node
+                .entry(part.to_owned())
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if !entry.is_object() {
+                *entry = serde_json::Value::Object(serde_json::Map::new());
+            }
+            let serde_json::Value::Object(next) = entry else {
+                break;
+            };
+            node = next;
+        }
+        self
+    }
+
+    /// [`field`](Self::field) when `value` is `Some`.
+    #[must_use]
+    pub fn field_opt(self, name: &str, value: Option<impl Serialize>) -> Self {
+        match value {
+            Some(v) => self.field(name, v),
+            None => self,
+        }
+    }
+
     /// The operation's name.
     #[must_use]
     pub fn name(&self) -> &'static str {
@@ -213,6 +268,10 @@ pub struct Response<T> {
 }
 
 struct Inner {
+    streams: Streams,
+    idle: Duration,
+    hub: Arc<Hub>,
+    socket: Arc<SocketCtx>,
     http: reqwest::Client,
     base: Url,
     host: String,
@@ -387,6 +446,88 @@ impl<P: Profile> Client<P> {
     }
 }
 
+impl<P: Profile> Client<P> {
+    /// Opens a stream (`docs/design.md` section 7): server-sent events, or a call on
+    /// the client's `/v1/ws` socket when it was built with [`Streams::Socket`]. The
+    /// opening follows the rules of any `GET`: one fresh token after a `401`, retries
+    /// after a connection failure, `429`, `503` or `504`.
+    ///
+    /// # Errors
+    ///
+    /// The error the opening ended with, as [`send`](Self::send) has them; errors after
+    /// the stream opened arrive as its items.
+    pub async fn stream<T: DeserializeOwned>(
+        &self,
+        op: Operation<'_>,
+    ) -> Result<EventStream<T>, Error> {
+        match (self.inner.streams, op.rpc) {
+            (Streams::Socket, Some(rpc)) => {
+                let body = serde_json::Value::Object(op.fields.clone());
+                self.inner.hub.open(&self.inner.socket, rpc, body).await
+            }
+            _ => self.open_sse(&op).await,
+        }
+    }
+
+    async fn open_sse<T: DeserializeOwned>(
+        &self,
+        op: &Operation<'_>,
+    ) -> Result<EventStream<T>, Error> {
+        let inner = &self.inner;
+        let url = inner.url(&op.path)?;
+        let request_id = request_id();
+        let mut retries = 0;
+        let mut refreshed = false;
+        let mut number = 1;
+        loop {
+            let attempt = Attempt {
+                operation: op.name,
+                method: op.method,
+                path: op.path.to_string(),
+                number,
+                request_id: request_id.clone(),
+            };
+            let outcome = match inner.open_attempt(op, &url, &attempt).await {
+                Ok(resp) => {
+                    let (tx, rx) = tokio::sync::mpsc::channel(QUEUE);
+                    let task = tokio::spawn(read_sse(
+                        resp,
+                        tx,
+                        inner.idle,
+                        inner.host.clone(),
+                        request_id.clone(),
+                    ));
+                    return Ok(EventStream::new(rx, Guard::Task(task.abort_handle())));
+                }
+                Err(outcome) => outcome,
+            };
+            let result = match outcome {
+                Outcome::Unauthorized(_) if !refreshed => {
+                    inner.provider.invalidate().await;
+                    refreshed = true;
+                    number += 1;
+                    continue;
+                }
+                Outcome::Retry { wait, .. } if retries < inner.max_retries => {
+                    tokio::time::sleep(wait.unwrap_or_else(|| backoff(retries))).await;
+                    retries += 1;
+                    number += 1;
+                    continue;
+                }
+                Outcome::Unauthorized(raw) => Err(ApiError::parse(raw).into()),
+                Outcome::Retry { result, .. } => {
+                    result.and_then(|raw| Err(ApiError::parse(raw).into()))
+                }
+                Outcome::Done(result) => result.and_then(|raw| Err(ApiError::parse(raw).into())),
+            };
+            if let Err(e) = &result {
+                inner.hooks.iter().for_each(|h| h.on_error(&attempt, e));
+            }
+            return result;
+        }
+    }
+}
+
 /// What one attempt came to.
 enum Outcome {
     /// The call is over: a final answer, or an error nothing can be done about.
@@ -401,6 +542,73 @@ enum Outcome {
 }
 
 impl Inner {
+    /// One attempt to open a server-sent events stream: the response when it opened,
+    /// else what the attempt came to.
+    async fn open_attempt(
+        &self,
+        op: &Operation<'_>,
+        url: &Url,
+        attempt: &Attempt,
+    ) -> Result<reqwest::Response, Outcome> {
+        let token = match self.provider.token().await {
+            Ok(t) => t,
+            Err(e) => return Err(Outcome::Done(Err(Error::Auth(e)))),
+        };
+        let req = self
+            .http
+            .get(url.clone())
+            .query(&op.query)
+            .bearer_auth(token.expose())
+            .header(header::ACCEPT, "text/event-stream")
+            .header("x-request-id", &attempt.request_id)
+            .timeout(STREAM_DEADLINE);
+        self.hooks.iter().for_each(|h| h.on_request(attempt));
+        let resp = match tokio::time::timeout(self.timeout, req.send()).await {
+            Err(_) => {
+                return Err(Outcome::Retry {
+                    wait: None,
+                    result: Err(Error::Timeout {
+                        host: self.host.clone(),
+                        secs: self.timeout.as_secs(),
+                    }),
+                });
+            }
+            Ok(Err(e)) => {
+                let error = Error::Connection {
+                    host: self.host.clone(),
+                    reason: transport_reason(&e),
+                };
+                return Err(if e.is_connect() || e.is_request() {
+                    Outcome::Retry {
+                        wait: None,
+                        result: Err(error),
+                    }
+                } else {
+                    Outcome::Done(Err(error))
+                });
+            }
+            Ok(Ok(r)) => r,
+        };
+        if resp.status().is_success() {
+            let raw = opened(&resp, &attempt.request_id, attempt.number);
+            self.hooks.iter().for_each(|h| h.on_response(attempt, &raw));
+            return Ok(resp);
+        }
+        let raw = match read(resp, &attempt.request_id, attempt.number, &self.host).await {
+            Ok(r) => r,
+            Err(e) => return Err(Outcome::Done(Err(e))),
+        };
+        self.hooks.iter().for_each(|h| h.on_response(attempt, &raw));
+        Err(match raw.status {
+            401 => Outcome::Unauthorized(raw),
+            s if retryable_status(s) => Outcome::Retry {
+                wait: retry_after(&raw.headers),
+                result: Ok(raw),
+            },
+            _ => Outcome::Done(Ok(raw)),
+        })
+    }
+
     async fn attempt(&self, op: &Operation<'_>, url: &Url, attempt: &Attempt) -> Outcome {
         let token = match self.provider.token().await {
             Ok(t) => t,
@@ -591,6 +799,8 @@ pub struct ClientBuilder<P: Profile = Public> {
     max_retries: u32,
     user_agent_suffix: Option<String>,
     hooks: Vec<Arc<dyn Hook>>,
+    streams: Streams,
+    stream_idle_timeout: Duration,
     _profile: PhantomData<fn() -> P>,
 }
 
@@ -604,6 +814,7 @@ impl<P: Profile> fmt::Debug for ClientBuilder<P> {
             .field("scopes", &self.scopes)
             .field("timeout", &self.timeout)
             .field("max_retries", &self.max_retries)
+            .field("streams", &self.streams)
             .finish_non_exhaustive()
     }
 }
@@ -629,6 +840,8 @@ impl<P: Profile> ClientBuilder<P> {
             max_retries: DEFAULT_MAX_RETRIES,
             user_agent_suffix: None,
             hooks: Vec::new(),
+            streams: Streams::Sse,
+            stream_idle_timeout: DEFAULT_STREAM_IDLE,
             _profile: PhantomData,
         }
     }
@@ -696,6 +909,22 @@ impl<P: Profile> ClientBuilder<P> {
         self
     }
 
+    /// How streams open: server-sent events (the default), or one `/v1/ws` socket for
+    /// every stream of the client (`docs/design.md` section 7).
+    #[must_use]
+    pub fn streams(mut self, streams: Streams) -> Self {
+        self.streams = streams;
+        self
+    }
+
+    /// How long a stream may be silent, not even a keep-alive, before it fails (or, on
+    /// the socket, reconnects); 45 s by default.
+    #[must_use]
+    pub fn stream_idle_timeout(mut self, timeout: Duration) -> Self {
+        self.stream_idle_timeout = timeout;
+        self
+    }
+
     /// Observes every attempt.
     #[must_use]
     pub fn hook(mut self, hook: impl Hook + 'static) -> Self {
@@ -736,8 +965,9 @@ impl<P: Profile> ClientBuilder<P> {
         };
         let mut headers = HeaderMap::new();
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        let agent = user_agent(self.user_agent_suffix.as_deref());
         let http = reqwest::Client::builder()
-            .user_agent(user_agent(self.user_agent_suffix.as_deref()))
+            .user_agent(agent.clone())
             .default_headers(headers)
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(self.timeout)
@@ -746,8 +976,21 @@ impl<P: Profile> ClientBuilder<P> {
             .build()
             .map_err(|e| ConfigError::Http(e.to_string()))?;
         let host = base.host_str().unwrap_or_default().to_owned();
+        let socket = Arc::new(SocketCtx {
+            base: base.clone(),
+            host: host.clone(),
+            provider: Arc::clone(&provider),
+            max_retries: self.max_retries,
+            idle: self.stream_idle_timeout,
+            timeout: self.timeout,
+            user_agent: agent,
+        });
         Ok(Client {
             inner: Arc::new(Inner {
+                streams: self.streams,
+                idle: self.stream_idle_timeout,
+                hub: Arc::new(Hub::default()),
+                socket,
                 http,
                 base,
                 host,

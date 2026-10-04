@@ -68,7 +68,7 @@ pub struct Surface {
     pub handles: Vec<Handle>,
     /// The operations whose id names no service (`me`), in `METHOD /path` order.
     pub flat: Vec<Op>,
-    /// Why an operation was left out (a stream, an answer that is not JSON).
+    /// Why an operation was left out (an answer that is neither JSON nor a stream).
     pub notes: Vec<String>,
 }
 
@@ -174,6 +174,12 @@ pub struct Op {
     pub idempotent_override: bool,
     /// The profiles that may call it.
     pub profiles: Vec<String>,
+    /// Whether the answer is a stream (`text/event-stream`): the method yields the
+    /// `response` model once per event instead of answering once (design.md section 7).
+    pub stream: bool,
+    /// The RPC's full name a `/v1/ws` call frame names (`x-iohr-rpc`); empty when the
+    /// document gives none, and then the stream opens over server-sent events only.
+    pub rpc: String,
 }
 
 /// How a list operation pages, by wire names: the query parameter that carries the
@@ -227,8 +233,8 @@ pub fn paging(op: &Op, models: &[ir::Model]) -> Option<Paging> {
     })
 }
 
-/// The surface of `api`: every operation whose answer is JSON; a stream or another
-/// media type is left out with a note.
+/// The surface of `api`: every operation whose answer is JSON or a stream of JSON
+/// events; another media type is left out with a note.
 #[must_use]
 pub fn surface(api: &Api) -> Surface {
     let markers = marker_names(api);
@@ -239,9 +245,10 @@ pub fn surface(api: &Api) -> Surface {
     for op in api.operations.values() {
         match &op.response.media {
             Media::Json => {}
+            Media::EventStream if op.response.schema.is_some() => {}
             Media::EventStream => {
                 notes.push(format!(
-                    "{}: a stream (text/event-stream); streaming comes with the runtime's streaming milestone, so the operation is left out",
+                    "{}: a stream whose events name no schema; left out",
                     op.line()
                 ));
                 continue;
@@ -363,6 +370,8 @@ fn op_context(op: &Operation, marker: String) -> Op {
         retry_safe: op.idempotent || op.method.is_idempotent(),
         idempotent_override: op.idempotent && !op.method.is_idempotent(),
         profiles: op.profiles.iter().cloned().collect(),
+        stream: op.response.media == Media::EventStream,
+        rpc: op.rpc.clone().unwrap_or_default(),
     }
 }
 

@@ -26,8 +26,8 @@ This table is the **public surface**: what the published package offers, generat
 from `spec/openapi.json`. It is one surface of many. A developer generates their own
 with `iohr sdk generate`, cut to what their credentials may call (section 12). Names are
 the operation id in the language's case (`accounts.get_me`, `radar.list_digests`), the
-bare ids flat (`me`). Server-sent events, the multiplexed socket (`/v1/ws`) and MCP are
-designed below but not shipped until the platform opens them to API keys
+bare ids flat (`me`). Streams are served over server-sent events or the multiplexed
+socket (`/v1/ws`), section 7; MCP is designed there but not shipped
 ([ADR 0004](adr/0004-transport-scope.md), as amended by ADR 0008).
 
 ## 2. The client
@@ -51,6 +51,8 @@ Configuration, same names everywhere (case adjusted):
 | `token_url` | `https://auth.inorbit.hr/oauth2/token` | env `INORBIT_TOKEN_URL`. |
 | `timeout` | 30 s per attempt | Unary calls; streams use a connect timeout and a 45 s idle timeout (section 11). |
 | `max_retries` | 2 | 0 disables. |
+| `streams` | `sse` | `socket` opens every stream over one `/v1/ws` connection (section 7). |
+| `stream_idle_timeout` | 45 s | A stream silent this long (no event, comment or ping) fails or, on the socket, reconnects. |
 | `http_client` | the language default | Bring your own transport, proxies, TLS. |
 | `region` | none (`base_url` decides) | `eu` or `us` when the API offers them; never a silent fallback (section 11). |
 | `ca_bundle` | system trust store | Extra CA certificates in PEM, for TLS-inspecting proxies. |
@@ -151,24 +153,93 @@ One error family per language, rooted in a single type the caller can match.
   retry budget.
 - Every attempt is visible to hooks (section 8), with its number.
 
-## 7. Streaming (designed, not shipped)
+## 7. Streaming
 
-**Server-sent events.** Routes ending in `/events`. Parse per the WHATWG event-stream
-rules (multi-line `data`, comments as keep-alives every 15 s). Each `data` is one JSON
-object shaped like the REST answer. `event: error` carries the envelope and ends the
-stream. The platform sets no event ids and does not honour `Last-Event-ID`, so the SDK
-does not resume; it exposes the stream as the language's async iterator and lets the
-caller reopen. Browsers use `fetch` streaming, not `EventSource`, because the request
-needs an `Authorization` header.
+A streaming operation (its answer is `text/event-stream`; today the account's events,
+`events.stream_events`, scope `events:read`) is a method of the same name that yields
+the answer's model once per event. The platform's rules for streams are RFC 0048:
+what a key may open is what its scopes admit, a key holds at most 32 open streams and
+an account 128, a stream lives at most 24 hours, and a revoked key's open streams end
+within seconds.
 
-**The socket (`/v1/ws`).** One connection per client, many calls over it:
+| Language | Method | Use |
+|---|---|---|
+| Rust | `stream_events(&params).await?` → `inorbithr::EventStream<T>`, a `futures_core::Stream<Item = Result<T, Error>>` with an inherent `next().await` | `while let Some(ev) = s.next().await { let ev = ev?; }` |
+| TypeScript | `streamEvents(params, { signal })` → `AsyncGenerator<T>` | `for await (const ev of api.events.streamEvents())` |
+| Python | `stream_events(...)` → `Stream[T]`, an `Iterator[T]` and a context manager; `AsyncStream[T]` (`AsyncIterator[T]`) on the asyncio class | `with api.events.stream_events() as s: for ev in s:` / `async for` |
+| Go | `StreamEvents(ctx, params) iter.Seq2[*T, error]` | `for ev, err := range api.Events().StreamEvents(ctx, p)` |
+| Java | `streamEvents(params)` → `EventStream<T>`, an `Iterator<T>`, `Iterable<T>` and `AutoCloseable` | `try (var s = api.events().streamEvents(p)) { for (var ev : s) ... }` |
+| C# | `StreamEventsAsync(query, cancellationToken)` → `IAsyncEnumerable<T>` | `await foreach (var ev in client.Events().StreamEventsAsync())` |
 
-- client frames `{"type":"call","id","method","body"}` and `{"type":"cancel","id"}`;
-- server frames `data`, `end` and `error` (the envelope plus `id`);
-- every call ends with exactly one `end` or `error`; 64 calls in flight at most; a frame
-  is at most 256 KiB;
-- the token is checked only at the upgrade, so the SDK reconnects before the token
-  expires and re-issues calls that have not ended, only if they are idempotent.
+The generator emits a stream method only for the profiles whose cut holds the
+operation, behind the same marker as every other method, so a profile without
+`events:read` does not compile a call to it (section 12).
+
+**Opening.** A stream opens with a `GET` and the same rules as any other `GET`
+(sections 3 and 6): one fresh token after a `401`, retries after a connection failure,
+`429`, `503` or `504` with `Retry-After` honoured (too many open streams is a `429`), and
+any other error answer is an `ApiError` before the first item. Where a language opens
+lazily (TypeScript, Python, Go, Java, C#), the opening error is raised by the first
+step of the iteration.
+
+**Server-sent events** (the default, `streams: "sse"`). `Accept: text/event-stream`,
+the query parameters as on REST. The body is parsed by the WHATWG event-stream rules:
+lines end with LF, CRLF or CR; a line starting `:` is a comment (the server's
+keep-alive, every 15 s); `data:` lines join with a newline, one leading space dropped;
+`event:` names the event; a blank line dispatches; `id`, `retry` and unknown fields are
+ignored. A default event's data is one JSON object, decoded as the model. An `error`
+event's data is the error envelope: the stream ends with that `ApiError`, its status
+from the code (`problem.json`'s `x-http-status`; a code the SDK does not know keeps its
+slug and has no status, 0 or none as the language spells it). The end of the body ends the stream
+cleanly. Bounds: an event's data is at most 1 MiB (`TooLarge` otherwise), and nothing
+at all, not even a comment, for `stream_idle_timeout` (45 s) ends the stream with a
+timeout error. The platform sets no event ids and honours no `Last-Event-ID`, so an
+ended stream is not resumed: the caller opens it again.
+
+**The socket** (`streams: "socket"`). Every stream of the client goes over one
+`/v1/ws` connection (`wss://` for `https://`), opened when the first stream starts, with
+`Authorization: Bearer`, the upgrade retried like a `GET`, and closed when the last
+stream ends. A stream is one call:
+
+- `{"type":"call","id":"<n>","method":"<x-iohr-rpc>","body":{…}}`, the body being the
+  path and query parameters as one JSON object in wire names (unset ones left out); ids
+  are the client's, never reused on a connection;
+- each `data` frame's `body` is one item; `end` ends the stream cleanly; an `error` frame
+  for the id ends it with that `ApiError`;
+- a caller that stops reading (break, drop, cancel, close) sends `{"type":"cancel","id"}`
+  and ignores what still arrives for that id;
+- an `error` frame without an id concerns the socket. `unauthenticated` (the key was
+  revoked) ends every stream on it with that error and nothing reconnects. Any other code
+  (`unavailable`: the socket reached its longest life), a close, or silence past
+  `stream_idle_timeout` (the server pings every 15 s) reconnects with a token from the
+  provider and issues again every call that had not ended: streams are reads, so a
+  call is safe to repeat. Reconnects follow the retry budget and backoff of section 6;
+  the caller sees one stream;
+- frames wait in a bounded queue per stream (64 items). The socket has one reader, so a
+  stream whose queue is full pauses that reader: a caller that reads slowly holds back
+  every stream on its client's socket, never the server's other connections or memory
+  (open a second client for a stream read slowly). A frame from the client is at most
+  256 KiB.
+
+The frames are `spec/frames.json`, synced from the platform's `/frames.json`
+(ADR 0004), which also carries the socket's limits. The token is checked once, at the
+upgrade, and the platform does not cut a socket when that token expires, so the SDK does
+not reconnect for token expiry.
+
+**Where a language's WebSocket stops short.** Where the library answers pings itself
+(Python's `websockets`, .NET's `ClientWebSocket`; Go's own client counts pings as activity), the socket's idle clock is the
+library's own ping with `stream_idle_timeout` as its timeout (on .NET 8 a dead socket is
+found by TCP). Hooks see the server-sent events requests, not the socket's upgrade. The web platform's `WebSocket`
+(TypeScript) hides pings, the status of a refused upgrade, and backpressure. There the
+socket has no idle clock (a dead socket is found by its close), a refused upgrade gets
+one fresh token and then the retry budget, and a stream whose caller falls 64 items
+behind is stopped with a `ConnectionError` and a cancel frame instead of holding the
+server back. Browsers cannot set a header on a WebSocket, so `streams: "socket"` is for
+Node, Deno and Bun; browsers use server-sent events.
+
+Errors are those of section 5 everywhere; the conformance cases under
+`conformance/cases/sse` and `conformance/cases/socket` hold every language to these
+rules.
 
 **MCP.** Wrap the official MCP SDK of each language and supply the token; do not
 reimplement the protocol.
@@ -322,6 +393,6 @@ timestamp and maps `""` to no value: `inorbithr::parse_timestamp` (Rust, `None`)
 `inorbit.ParseTimestamp` (Go, the zero `time.Time`), `Timestamps.Parse` (C#, `null`),
 `Timestamps.parse` (Java, an empty `Optional`).
 
-**Streaming operations** (`text/event-stream`) are left out of a generated surface with
-a note until the runtime's streaming milestone (section 7).
+**Streaming operations** (`text/event-stream`) are generated as stream methods
+(section 7), gated by profile like every other operation.
 

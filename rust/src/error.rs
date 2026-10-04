@@ -129,6 +129,18 @@ impl RawResponse {
         }
     }
 
+    /// A part of a stream: an event's data or an error frame, with its status.
+    pub(crate) fn part(status: u16, body: Vec<u8>, request_id: String) -> Self {
+        Self {
+            status,
+            headers: Headers::default(),
+            body,
+            request_id,
+            server_request_id: None,
+            attempts: 1,
+        }
+    }
+
     /// The body as `T`.
     ///
     /// # Errors

@@ -5,6 +5,7 @@ package ops
 
 import (
 	"context"
+	"iter"
 	"strconv"
 
 	inorbit "github.com/inorbithr/sdk/go"
@@ -360,6 +361,33 @@ func ListTools(ctx context.Context, c *inorbit.Client, params *models.Connection
 		op.Query = q
 	}
 	return inorbit.Call[models.ListToolsResponse](ctx, c, op)
+}
+
+// StreamEvents calls GET /v1/events/events; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend.
+func StreamEvents(ctx context.Context, c *inorbit.Client, params *models.EventsStreamEventsParams) iter.Seq2[*models.StreamEventsResponse, error] {
+	op := inorbit.Operation{Name: "events.stream_events", Method: "GET", Path: "/v1/events/events", Scopes: []string{"events:read"}}
+	if params != nil {
+		q := codegen.Query()
+		if params.Types != nil {
+			q.Set("types", *params.Types)
+		}
+		if params.AccountID != nil {
+			q.Set("account_id", *params.AccountID)
+		}
+		op.Query = q
+	}
+	op.RPC = "iohr.events.v1.EventsService/StreamEvents"
+	f := map[string]any{}
+	if params != nil {
+		if params.Types != nil {
+			f["types"] = *params.Types
+		}
+		if params.AccountID != nil {
+			f["account_id"] = *params.AccountID
+		}
+	}
+	op.Fields = f
+	return inorbit.Stream[models.StreamEventsResponse](ctx, c, op)
 }
 
 // ListNotifications calls GET /v1/events/notifications; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/ListNotifications` on the `events` backend.

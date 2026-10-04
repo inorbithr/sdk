@@ -241,3 +241,59 @@ describe("timestamps", () => {
     assert.throws(() => parseTimestamp("2026-10-04"), RangeError);
   });
 });
+
+describe("streams", () => {
+  it("parses the WHATWG event-stream rules", async () => {
+    const { SseParser } = await import("../src/stream.js");
+    const p = new SseParser();
+    assert.deepEqual(p.push(': open\n\nid: 1\nretry: 5\nfoo\ndata: {"a":\ndata:  1}\n\n'), [
+      { event: "message", data: '{"a":\n 1}' },
+    ]);
+    // CR, CRLF split across chunks, a named event.
+    assert.deepEqual(p.push("event: error\r"), []);
+    // A CR at the end may be half a CRLF, so the blank line waits for the next chunk.
+    assert.deepEqual(p.push("\ndata: {}\r\r"), []);
+    assert.deepEqual(p.push("data: x\n"), [{ event: "error", data: "{}" }]);
+    assert.deepEqual(p.push("\n"), [{ event: "message", data: "x" }]);
+  });
+
+  it("refuses an event over 1 MiB", async () => {
+    const { SseParser, MAX_EVENT } = await import("../src/stream.js");
+    const p = new SseParser();
+    assert.throws(() => p.push(`data: ${"x".repeat(MAX_EVENT)}\n`), { name: "TooLargeError" });
+  });
+
+  it("yields events and ends with an error event's ApiError, status from the code", async () => {
+    const body =
+      'data: {"id":"1"}\n\nevent: error\ndata: {"code":"forbidden","error":"no","details":[]}\n\n';
+    const fake = (async () =>
+      new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const client = new Client({ token: "t", fetch: fake });
+    const got: unknown[] = [];
+    await assert.rejects(
+      async () => {
+        for await (const ev of client.stream({ method: "GET", path: "/v1/events/events" })) {
+          got.push(ev);
+        }
+      },
+      (e: unknown) => e instanceof ApiError && e.code === "forbidden" && e.status === 403,
+    );
+    assert.deepEqual(got, [{ id: "1" }]);
+  });
+
+  it("refuses an unknown transport and a socket stream without an RPC", async () => {
+    assert.throws(
+      () => new Client({ token: "t", streams: "carrier-pigeon" as "sse" }),
+      ConfigError,
+    );
+    const client = new Client({ token: "t", streams: "socket" });
+    await assert.rejects(async () => {
+      for await (const _ of client.stream({ method: "GET", path: "/v1/x/events" })) {
+        // never reached
+      }
+    }, ConfigError);
+  });
+});

@@ -3714,6 +3714,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetMe",
         "x-iohr-scopes": [
           "account:read"
         ]
@@ -3783,6 +3784,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.agents.v1.AgentsService/ListAgents",
         "x-iohr-scopes": [
           "agents:read"
         ]
@@ -3840,6 +3842,7 @@
           "agents"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.agents.v1.AgentsService/CreateEnrollment",
         "x-iohr-scopes": [
           "agents:write"
         ]
@@ -3894,6 +3897,7 @@
           "agents"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.agents.v1.AgentsService/DeleteAgent",
         "x-iohr-scopes": [
           "agents:write"
         ]
@@ -3946,6 +3950,7 @@
           "agents"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.agents.v1.AgentsService/GetAgent",
         "x-iohr-scopes": [
           "agents:read"
         ]
@@ -4022,6 +4027,7 @@
           "agents"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.agents.v1.AgentsService/RunCheck",
         "x-iohr-scopes": [
           "agents:write"
         ]
@@ -4098,6 +4104,7 @@
           "agents"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.agents.v1.AgentsService/RevokeAgent",
         "x-iohr-scopes": [
           "agents:write"
         ]
@@ -4224,6 +4231,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/ListTeamEvents",
         "x-iohr-scopes": [
           "account:audit"
         ]
@@ -4293,6 +4301,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListConnections",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -4359,6 +4368,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/CreateConnection",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -4413,6 +4423,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/DeleteConnection",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -4465,6 +4476,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/GetConnection",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -4528,6 +4540,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/UpdateConnection",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -4612,6 +4625,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/CallAction",
         "x-iohr-scopes": [
           "connections:use"
         ]
@@ -4689,6 +4703,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListGrants",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -4751,6 +4766,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/RevokeGrant",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -4828,6 +4844,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListHistory",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -4904,6 +4921,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/CreateMonitor",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -4969,6 +4987,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/TestConnection",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -5039,6 +5058,7 @@
           "total_size": "total_size"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/ListDomains",
         "x-iohr-scopes": [
           "domains:read"
         ]
@@ -5105,6 +5125,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/AddDomain",
         "x-iohr-scopes": [
           "domains:write"
         ]
@@ -5159,6 +5180,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/RemoveDomain",
         "x-iohr-scopes": [
           "domains:write"
         ]
@@ -5211,6 +5233,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetDomain",
         "x-iohr-scopes": [
           "domains:read"
         ]
@@ -5287,6 +5310,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/CheckDomain",
         "x-iohr-scopes": [
           "domains:write"
         ]
@@ -5363,6 +5387,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/ConfirmDomain",
         "x-iohr-scopes": [
           "domains:write"
         ]
@@ -5448,6 +5473,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListMonitors",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -5502,6 +5528,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/DeleteMonitor",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -5554,6 +5581,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/GetMonitor",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -5628,6 +5656,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/UpdateMonitor",
         "x-iohr-scopes": [
           "connections:write"
         ]
@@ -5713,6 +5742,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListMonitorRuns",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -5767,6 +5797,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/GetMonitorSummary",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -5860,6 +5891,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/ListRequests",
         "x-iohr-scopes": [
           "usage:read"
         ]
@@ -5906,6 +5938,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetUnits",
         "x-iohr-scopes": [
           "usage:read"
         ]
@@ -5976,6 +6009,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetUnitSeries",
         "x-iohr-scopes": [
           "usage:read"
         ]
@@ -6038,6 +6072,7 @@
           "accounts"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetUsage",
         "x-iohr-scopes": [
           "usage:read"
         ]
@@ -6099,6 +6134,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/ListUnitCategories",
         "x-iohr-scopes": [
           "usage:read"
         ]
@@ -6160,6 +6196,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListKinds",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -6221,6 +6258,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListTools",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -6289,6 +6327,7 @@
           "connections"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/CallTool",
         "x-iohr-scopes": [
           "connections:use"
         ]
@@ -6343,6 +6382,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/StreamEvents",
         "x-iohr-scopes": [
           "events:read"
         ]
@@ -6420,6 +6460,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/ListNotifications",
         "x-iohr-scopes": [
           "events:read"
         ]
@@ -6474,6 +6515,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/GetEventStats",
         "x-iohr-scopes": [
           "events:read"
         ]
@@ -6535,6 +6577,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/ListEventTypes",
         "x-iohr-scopes": [
           "events:read"
         ]
@@ -6673,6 +6716,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.radar.v1.RadarService/ListDigests",
         "x-iohr-scopes": [
           "radar:read"
         ]
@@ -6720,6 +6764,7 @@
           "radar"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.radar.v1.RadarService/GetDigest",
         "x-iohr-scopes": [
           "radar:read"
         ]
@@ -6798,6 +6843,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.radar.v1.RadarService/ListItems",
         "x-iohr-scopes": [
           "radar:read"
         ]
@@ -6855,6 +6901,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/RetryDelivery",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -6924,6 +6971,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/ListEndpoints",
         "x-iohr-scopes": [
           "webhooks:read"
         ]
@@ -6982,6 +7030,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/CreateEndpoint",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7028,6 +7077,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/DeleteEndpoint",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7072,6 +7122,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/GetEndpoint",
         "x-iohr-scopes": [
           "webhooks:read"
         ]
@@ -7127,6 +7178,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/UpdateEndpoint",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7204,6 +7256,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/ListDeliveries",
         "x-iohr-scopes": [
           "webhooks:read"
         ]
@@ -7261,6 +7314,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/RecoverEndpoint",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7318,6 +7372,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/RotateSecret",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7375,6 +7430,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/SendTest",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7444,6 +7500,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/ListInboxes",
         "x-iohr-scopes": [
           "webhooks:read"
         ]
@@ -7502,6 +7559,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/CreateInbox",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7548,6 +7606,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/DeleteInbox",
         "x-iohr-scopes": [
           "webhooks:write"
         ]
@@ -7617,6 +7676,7 @@
           "page_token": "page_token"
         },
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/ListInboxRequests",
         "x-iohr-scopes": [
           "webhooks:read"
         ]
@@ -7679,6 +7739,7 @@
           "events"
         ],
         "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.events.v1.EventsService/GetDeliveryStats",
         "x-iohr-scopes": [
           "webhooks:read"
         ]

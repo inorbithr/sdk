@@ -34,6 +34,7 @@ type Action struct {
 	Args       any    `yaml:"args" json:"args,omitempty"`
 	Repeat     int    `yaml:"repeat" json:"repeat,omitempty"`
 	Concurrent int    `yaml:"concurrent" json:"concurrent,omitempty"`
+	Take       int    `yaml:"take" json:"take,omitempty"`
 }
 
 // Exchange is one request the SDK must make and the answer it gets.
@@ -67,6 +68,8 @@ type Response struct {
 	DelayMS int               `yaml:"delay_ms" json:"delay_ms,omitempty"`
 	Fault   string            `yaml:"fault" json:"fault,omitempty"`
 	Chunked *Chunked          `yaml:"chunked" json:"chunked,omitempty"`
+	SSE     *SSE              `yaml:"sse" json:"sse,omitempty"`
+	Socket  *Socket           `yaml:"socket" json:"socket,omitempty"`
 }
 
 // Chunked writes the body Bytes at a time, waiting DelayMS between writes.
@@ -74,10 +77,6 @@ type Chunked struct {
 	Bytes   int `yaml:"bytes" json:"bytes"`
 	DelayMS int `yaml:"delay_ms" json:"delay_ms"`
 }
-
-// errStreaming marks the areas this server does not replay yet.
-var errStreaming = errors.New("not implemented: server-sent event and WebSocket cases " +
-	"(areas sse and socket) come with the streaming milestone (docs/roadmap.md M5)")
 
 // loadCase finds a case by name ("token-is-cached" or "auth/token-is-cached") under dir.
 func loadCase(dir, name string) (*Case, error) {
@@ -113,9 +112,6 @@ func parseCase(data []byte) (*Case, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("case: %w", err)
 	}
-	if c.Area == "sse" || c.Area == "socket" {
-		return nil, errStreaming
-	}
 	if len(c.Exchanges) == 0 {
 		return nil, fmt.Errorf("case %q has no exchanges", c.Name)
 	}
@@ -138,6 +134,12 @@ func parseCase(data []byte) (*Case, error) {
 		if ex.Response.Fault != "" && ex.Response.Fault != "reset" {
 			return nil, fmt.Errorf("case %q exchange %d: unknown fault %q", c.Name, i, ex.Response.Fault)
 		}
+		if ex.Response.SSE != nil && ex.Response.Socket != nil {
+			return nil, fmt.Errorf("case %q exchange %d: an answer is SSE or a socket, not both", c.Name, i)
+		}
+		if err := streamsAsJSON(&ex.Response); err != nil {
+			return nil, fmt.Errorf("case %q exchange %d: %w", c.Name, i, err)
+		}
 		if ex.Response.Chunked != nil && ex.Response.Chunked.Bytes < 1 {
 			return nil, fmt.Errorf("case %q exchange %d: chunked.bytes must be at least 1", c.Name, i)
 		}
@@ -150,6 +152,30 @@ func parseCase(data []byte) (*Case, error) {
 		}
 	}
 	return &c, nil
+}
+
+// streamsAsJSON gives the JSON shapes to an SSE answer's data and a socket's frames.
+func streamsAsJSON(resp *Response) error {
+	var err error
+	if resp.SSE != nil {
+		for j := range resp.SSE.Events {
+			if resp.SSE.Events[j].Data, err = asJSON(resp.SSE.Events[j].Data); err != nil {
+				return fmt.Errorf("sse event %d: %w", j, err)
+			}
+		}
+	}
+	if resp.Socket != nil {
+		for j := range resp.Socket.Steps {
+			step := &resp.Socket.Steps[j]
+			if step.Expect, err = asJSON(step.Expect); err != nil {
+				return fmt.Errorf("socket step %d: %w", j, err)
+			}
+			if step.Send, err = asJSON(step.Send); err != nil {
+				return fmt.Errorf("socket step %d: %w", j, err)
+			}
+		}
+	}
+	return nil
 }
 
 // asJSON round-trips a value through encoding/json so numbers are float64 and maps are

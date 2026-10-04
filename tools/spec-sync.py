@@ -19,6 +19,10 @@ which `iohr lab check` embeds, from the developer docs into spec/lab/ (`--lab` f
 another folder or URL). `--only lab` syncs those alone and leaves the API contract as
 it is, since a newer contract means regenerating every SDK.
 
+And the JSON Schema of the `/v1/ws` frames (RFC 0048, served beside the document) into
+spec/frames.json (`--frames` for another file or URL), checked for its five frames and
+its limits.
+
 `--check` writes nothing and exits 1 when spec/ would change.
 """
 
@@ -38,6 +42,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "spec"
 DEFAULT_SOURCE = "https://api.inorbit.hr/openapi.json"
 DEFAULT_LAB = "https://docs.inorbit.hr/lab"
+DEFAULT_FRAMES = "https://api.inorbit.hr/frames.json"
+FRAME_DEFS = ("Call", "Cancel", "Data", "End", "Error")
 SERVER_URL = "https://api.inorbit.hr"
 SCHEMAS = "#/components/schemas/"
 METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
@@ -318,8 +324,30 @@ def lab_files(source: str) -> tuple[dict[str, str], str]:
     return {"rules.json": render(rules), "conformance.json": render(cases)}, digest
 
 
+def frames_file(source: str) -> tuple[str, str]:
+    """spec/frames.json: the socket's frames, checked for shape, and its sha256."""
+    raw = fetch(source)
+    frames = json.loads(raw)
+    defs = frames.get("$defs", {})
+    missing = [name for name in FRAME_DEFS if name not in defs]
+    if missing:
+        raise SyncError(f"frames.json lacks $defs {', '.join(missing)}")
+    limits = frames.get("x-iohr-limits", {})
+    for key in ("max_calls", "max_frame_bytes", "idle_timeout_seconds", "ping_every_seconds"):
+        if not isinstance(limits.get(key), int) or limits[key] <= 0:
+            raise SyncError(f"frames.json: x-iohr-limits.{key} is not a positive integer")
+    return render(frames), hashlib.sha256(raw).hexdigest()
+
+
 def source_file(
-    source: str, digest: str, doc: dict[str, Any], operations: int, lab: str, lab_digest: str
+    source: str,
+    digest: str,
+    doc: dict[str, Any],
+    operations: int,
+    lab: str,
+    lab_digest: str,
+    frames: str,
+    frames_digest: str,
 ) -> str:
     """SOURCE, keeping the previous date when neither the document nor the lab changed."""
     synced = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -328,7 +356,12 @@ def source_file(
         old = dict(
             line.split(": ", 1) for line in previous.read_text().splitlines() if ": " in line
         )
-        if old.get("sha256") == digest and old.get("lab_sha256") == lab_digest and "synced" in old:
+        if (
+            old.get("sha256") == digest
+            and old.get("lab_sha256") == lab_digest
+            and old.get("frames_sha256") == frames_digest
+            and "synced" in old
+        ):
             synced = old["synced"]
     return (
         f"source: {source}\n"
@@ -340,6 +373,8 @@ def source_file(
         "commit: the platform does not publish it in the document yet (spec/README.md)\n"
         f"lab_source: {lab}\n"
         f"lab_sha256: {lab_digest}\n"
+        f"frames_source: {frames}\n"
+        f"frames_sha256: {frames_digest}\n"
     )
 
 
@@ -380,6 +415,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("source", nargs="?", default=DEFAULT_SOURCE, help="URL or file")
     parser.add_argument("--lab", default=DEFAULT_LAB, help="URL or folder of the lab files")
+    parser.add_argument("--frames", default=DEFAULT_FRAMES, help="URL or file of frames.json")
     parser.add_argument("--check", action="store_true", help="exit 1 if spec/ would change")
     parser.add_argument("--only", choices=["lab"], help="sync only this part of spec/")
     args = parser.parse_args()
@@ -394,6 +430,7 @@ def main() -> int:
             raise SyncError(f"expected OpenAPI 3.1, got {doc.get('openapi')!r}")
         openapi, problem = normalise(doc)
         lab, lab_digest = lab_files(args.lab)
+        frames, frames_digest = frames_file(args.frames)
     except (SyncError, OSError, json.JSONDecodeError) as err:
         print(f"spec:sync: {err}", file=sys.stderr)
         return 1
@@ -404,8 +441,16 @@ def main() -> int:
     files = {
         SPEC / "openapi.json": render(openapi),
         SPEC / "problem.json": render(problem),
+        SPEC / "frames.json": frames,
         SPEC / "SOURCE": source_file(
-            args.source, hashlib.sha256(raw).hexdigest(), doc, operations, args.lab, lab_digest
+            args.source,
+            hashlib.sha256(raw).hexdigest(),
+            doc,
+            operations,
+            args.lab,
+            lab_digest,
+            args.frames,
+            frames_digest,
         ),
         **{SPEC / "lab" / name: text for name, text in lab.items()},
     }

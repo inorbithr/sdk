@@ -45,6 +45,24 @@ if errors.As(err, &apiErr) && apiErr.Code == inorbit.CodeForbidden {
   }
   ```
 
+- A streaming operation (the account's events, `StreamEvents`, scope `events:read`)
+  returns `iter.Seq2[*T, error]`: each event as it arrives, an error ends the stream,
+  and breaking out of the loop or ending `ctx` closes it. It opens like any GET (a fresh
+  token after a 401, retries after a 429, 503 or 504). By default each stream is one
+  server-sent events request; `inorbit.WithStreams(inorbit.StreamsSocket)` carries every
+  stream of the client over one `/v1/ws` socket, which reconnects and resumes its streams
+  when the server ends it. A stream silent for 45 s (`WithStreamIdleTimeout`) fails
+  with a `*TimeoutError`; a revoked key ends it with an `unauthenticated` `*APIError`.
+
+  ```go
+  for ev, err := range api.Events().StreamEvents(ctx, nil) {
+  	if err != nil {
+  		return err
+  	}
+  	fmt.Println(ev.Type, ev.ID)
+  }
+  ```
+
 - Every request field is optional and left out when unset, so a scalar is a pointer:
   `models.CreateEndpointRequest{URL: inorbit.Ptr("https://example.com/hook")}`. An
   answer's field is a pointer unless the API always sends it. Timestamps stay the

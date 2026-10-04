@@ -1,0 +1,19 @@
+name: too-many-streams-is-retried-after-the-delay
+area: sse
+summary: Opening a stream is a GET, retried like one; a 429 for too many open streams waits Retry-After, then the stream opens.
+action: { op: events.stream_events }
+client: { scopes: [events:read] }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events }
+    response: { status: 429, headers: { retry-after: "1" }, json: { code: rate_limited, error: "this key holds 32 open streams, the most it may; close one and try again", details: [{ type: retry, after_seconds: 1 }] } }
+  - request: { method: GET, path: /v1/events/events, min_delay_ms: 900 }
+    response:
+      sse:
+        events:
+          - { data: { id: evt_1, type: key.created, occurred_at: "", account_id: acc_1, data: {} } }
+expect:
+  items:
+    - { id: evt_1 }
+  attempts: 2

@@ -14,6 +14,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -35,7 +36,16 @@ ROOT = Path(__file__).resolve().parents[3]
 BIN = ROOT / ("conformance/server/bin/replay" + (".exe" if sys.platform == "win32" else ""))
 FORMS = ("sync", "async")
 
-Result = RawResponse | InOrbitError
+
+@dataclass
+class Streamed:
+    """What a stream yielded, in wire names, and the error that ended it, if any."""
+
+    items: list[object] = field(default_factory=list[object])
+    error: InOrbitError | None = None
+
+
+Result = RawResponse | InOrbitError | Streamed
 
 
 @pytest.fixture(scope="module")
@@ -85,6 +95,40 @@ def subset(want: object, got: object) -> bool:
 def _arg(args: dict[str, Any], key: str) -> str:
     value = args.get(key)
     return "" if value is None else str(value)
+
+
+def stream_sync(api: Public, action: dict[str, Any]) -> Streamed:
+    """Reads a stream with the blocking surface, `take` items at most."""
+    args: dict[str, Any] = action.get("args") or {}
+    out = Streamed()
+    try:
+        with api.events.stream_events(
+            types=args.get("types"), account_id=args.get("account_id")
+        ) as events:
+            for event in events:
+                out.items.append(event.model_dump(mode="json", by_alias=True))
+                if len(out.items) == action.get("take"):
+                    break
+    except InOrbitError as e:
+        out.error = e
+    return out
+
+
+async def stream_async(api: AsyncPublic, action: dict[str, Any]) -> Streamed:
+    """Reads a stream with the `asyncio` surface, `take` items at most."""
+    args: dict[str, Any] = action.get("args") or {}
+    out = Streamed()
+    try:
+        async with api.events.stream_events(
+            types=args.get("types"), account_id=args.get("account_id")
+        ) as events:
+            async for event in events:
+                out.items.append(event.model_dump(mode="json", by_alias=True))
+                if len(out.items) == action.get("take"):
+                    break
+    except InOrbitError as e:
+        out.error = e
+    return out
 
 
 def call_sync(api: Public, action: dict[str, Any]) -> RawResponse:
@@ -144,6 +188,10 @@ def options(case: dict[str, Any], url: str) -> dict[str, Any]:
     }
     if "timeout_ms" in o:
         found["timeout"] = o["timeout_ms"] / 1000
+    if "streams" in o:
+        found["streams"] = o["streams"]
+    if "stream_idle_timeout_ms" in o:
+        found["stream_idle_timeout"] = o["stream_idle_timeout_ms"] / 1000
     return found
 
 
@@ -154,6 +202,8 @@ def run_sync(case: dict[str, Any], url: str) -> list[Result]:
         api = Public(client)
 
         def once() -> Result:
+            if action["op"] == "events.stream_events":
+                return stream_sync(api, action)
             try:
                 return call_sync(api, action)
             except InOrbitError as e:
@@ -175,6 +225,8 @@ def run_async(case: dict[str, Any], url: str) -> list[Result]:
             api = AsyncPublic(client)
 
             async def once() -> Result:
+                if action["op"] == "events.stream_events":
+                    return await stream_async(api, action)
                 try:
                     return await call_async(api, action)
                 except InOrbitError as e:
@@ -206,6 +258,22 @@ def check_error(e: InOrbitError, want: dict[str, Any]) -> list[str]:
     return problems
 
 
+def check_stream(expect: dict[str, Any], r: Streamed) -> list[str]:
+    """What differs between a stream's run and the case's `expect`."""
+    problems: list[str] = []
+    want: list[object] = expect.get("items", [])
+    if not subset(want, r.items):
+        problems.append(f"items: want {want}, got {r.items}")
+    if "error" in expect:
+        if r.error is None:
+            problems.append("want the stream to end with an error, it ended cleanly")
+        else:
+            problems.extend(check_error(r.error, expect["error"]))
+    elif r.error is not None:
+        problems.append(f"want the stream to end cleanly, got {r.error}")
+    return problems
+
+
 def check(case: dict[str, Any], results: list[Result], verdict: dict[str, Any]) -> list[str]:
     """What differs between a run and the case's `expect`."""
     expect: dict[str, Any] = case["expect"]
@@ -219,7 +287,9 @@ def check(case: dict[str, Any], results: list[Result], verdict: dict[str, Any]) 
         if key in expect and verdict.get(key) != expect[key]:
             problems.append(f"{key}: want {expect[key]}, got {verdict.get(key)}")
     for r in results:
-        if isinstance(r, RawResponse):
+        if isinstance(r, Streamed):
+            problems.extend(check_stream(expect, r))
+        elif isinstance(r, RawResponse):
             if "ok" in expect and not subset(expect["ok"], r.json()):
                 problems.append(f"ok: want a superset of {expect['ok']}, got {r.json()}")
             elif "error" in expect:
@@ -246,11 +316,9 @@ def test_every_case_passes(replay: str, form: str) -> None:
     ran: list[str] = []
     for name in cases:
         loaded = httpx.post(f"{replay}/_case", json={"name": name})
-        if loaded.status_code == 501:
-            continue
         assert loaded.is_success, f"{name}: loading answered {loaded.status_code}"
         case: dict[str, Any] = loaded.json()["case"]
-        if "py" in (case.get("pending") or []) or case["area"] in ("sse", "socket"):
+        if "py" in (case.get("pending") or []):
             continue
         ran.append(name)
         results = RUNNERS[form](case, replay)

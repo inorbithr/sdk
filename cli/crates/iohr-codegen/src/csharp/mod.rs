@@ -618,7 +618,7 @@ fn render_operations(surface: &Surface, models: &[Model], ctx: &Ctx) -> String {
 fn iterator(op: &Op, receiver: &str, receiver_type: &str, models: &[Model], ctx: &Ctx) -> String {
     let rt = &ctx.runtime;
     let naming = CsNaming;
-    if op.body.is_some() {
+    if op.body.is_some() || op.stream {
         return String::new();
     }
     let (Some(paging), Some(params_type), Some(response)) = (
@@ -752,7 +752,9 @@ fn parameters(op: &Op, receiver: &str, receiver_type: &str) -> (Vec<String>, Vec
     (params, docs)
 }
 
-/// One operation as an extension method over the runtime's request path.
+/// One operation as an extension method over the runtime's request path; a stream as an
+/// `IAsyncEnumerable` of its events (design.md section 7).
+#[allow(clippy::too_many_lines)] // one operation's rendering, unary and stream, read top to bottom
 fn operation(op: &Op, receiver: &str, receiver_type: &str, client: &str, ctx: &Ctx) -> String {
     let rt = &ctx.runtime;
     let naming = CsNaming;
@@ -818,6 +820,39 @@ fn operation(op: &Op, receiver: &str, receiver_type: &str, client: &str, ctx: &C
     let mut text = format!("<c>{}</c>{}.", op.line, scopes_note(op));
     if !op.doc.is_empty() {
         let _ = write!(text, " {}", xml(&op.doc));
+    }
+    if op.stream {
+        // The call a `/v1/ws` socket makes of it: the RPC and the parameters by wire name.
+        let mut fields: Vec<String> = op
+            .path_params
+            .iter()
+            .map(|p| format!("(\"{}\", {})", p.name, naming.field_name(&p.name)))
+            .collect();
+        fields.extend(op.query.iter().map(|q| {
+            let prop = property(&q.name, op.params_type.as_deref().unwrap_or_default());
+            format!("(\"{}\", query?.{prop})", q.name)
+        }));
+        let fields = if fields.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", fields.join(", "))
+        };
+        let _ = writeln!(
+            body,
+            "            operation = {rt}.Codegen.WithCall(operation, \"{}\"{fields});",
+            op.rpc
+        );
+        let docs: Vec<String> = docs
+            .iter()
+            .map(|d| d.replace("Cancels the call, retries included.", "Stops the stream."))
+            .collect();
+        return format!(
+            "        /// <summary>{text} A stream: each event as it happens, until the server ends it; for <c>await foreach</c>.</summary>\n        /// <typeparam name=\"TProfile\">The client's profile, whose cut holds the operation.</typeparam>\n{}\n        /// <returns>The events, in order; the stream opens on the first step of the loop.</returns>\n        public static global::System.Collections.Generic.IAsyncEnumerable<{response}> {}Async<TProfile>({})\n            where TProfile : {}\n        {{\n{body}            return {client}.StreamAsync<{response}>(operation, cancellationToken);\n        }}\n",
+            docs.join("\n"),
+            naming.method_name(&op.name),
+            params.join(", "),
+            marker(&op.marker)
+        );
     }
     format!(
         "        /// <summary>{text}</summary>\n        /// <typeparam name=\"TProfile\">The client's profile, whose cut holds the operation.</typeparam>\n{}\n        /// <returns>The answer, typed, and the raw one.</returns>\n        public static global::System.Threading.Tasks.Task<{rt}.Response<{response}>> {}Async<TProfile>({})\n            where TProfile : {}\n        {{\n{body}            return {client}.RequestAsync<{response}>(operation, cancellationToken);\n        }}\n",

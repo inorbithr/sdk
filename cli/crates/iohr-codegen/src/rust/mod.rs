@@ -38,6 +38,8 @@ struct Context {
     params_structs: Vec<ParamsCtx>,
     /// Whether any operation pages, which imports the runtime's pager.
     paged: bool,
+    /// Whether any operation streams, which imports the runtime's `EventStream`.
+    streamed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,6 +84,12 @@ struct OpCtx {
     idempotent: bool,
     /// How the operation pages, when it does and takes no body (design.md §9).
     paging: Option<PagingCtx>,
+    /// Whether the answer is a stream of events (design.md §7).
+    stream: bool,
+    /// The RPC a socket call names (`x-iohr-rpc`); empty for none.
+    rpc: String,
+    /// The path parameters' wire names, beside `path_args`.
+    path_wire: Vec<String>,
 }
 
 /// What `all_<operation>` needs: the item type, the params field the token goes in,
@@ -263,6 +271,11 @@ fn context(api: &Api, runtime: &str, in_crate: bool, files: &mut Files) -> Conte
         paged: handles
             .iter()
             .any(|h: &HandleCtx| h.ops.iter().any(|o| o.paging.is_some())),
+        streamed: handles
+            .iter()
+            .flat_map(|h: &HandleCtx| h.ops.iter())
+            .chain(flat.iter())
+            .any(|o| o.stream),
         handles,
         flat,
         params_structs,
@@ -346,7 +359,14 @@ fn op_context(
             .unwrap_or_else(|| "::serde_json::Value".to_owned()),
         scopes: op.scopes.clone(),
         idempotent: op.idempotent_override,
-        paging: paging_context(op, models),
+        paging: if op.stream {
+            None
+        } else {
+            paging_context(op, models)
+        },
+        stream: op.stream,
+        rpc: op.rpc.clone(),
+        path_wire: op.path_params.iter().map(|p| p.name.clone()).collect(),
     }
 }
 

@@ -350,10 +350,16 @@ type ConfigError struct {
 
 func (e *ConfigError) Error() string { return e.Message }
 
-// TooLargeError is an answer larger than 16 MiB.
-type TooLargeError struct{}
+// TooLargeError is an answer larger than 16 MiB, or a stream's event larger than 1 MiB.
+type TooLargeError struct {
+	// Event is set when one event of a stream was too large.
+	Event bool
+}
 
-func (*TooLargeError) Error() string {
+func (e *TooLargeError) Error() string {
+	if e.Event {
+		return "a stream's event is larger than 1 MiB; refusing to read it"
+	}
 	return "the answer is larger than 16 MiB; refusing to read it"
 }
 

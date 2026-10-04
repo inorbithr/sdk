@@ -19,7 +19,9 @@
         "timeout_ms": { "type": "integer", "minimum": 1 },
         "key_id": { "type": "string" },
         "key_secret": { "type": "string" },
-        "scopes": { "type": "array", "items": { "type": "string" }, "description": "Scopes the client asks for; default [identity:read]." }
+        "scopes": { "type": "array", "items": { "type": "string" }, "description": "Scopes the client asks for; default [identity:read]." },
+        "streams": { "enum": ["sse", "socket"], "description": "How the client opens streams: server-sent events (the default) or the one multiplexed /v1/ws socket." },
+        "stream_idle_timeout_ms": { "type": "integer", "minimum": 1, "description": "How long a stream may be silent (no event, no comment, no frame) before it fails with a timeout; default 45000." }
       }
     },
     "action": {
@@ -27,10 +29,11 @@
       "required": ["op"],
       "additionalProperties": false,
       "properties": {
-        "op": { "enum": ["me", "accounts.get_me", "accounts.get_usage", "radar.get_digest", "events.create_endpoint", "events.delete_endpoint"] },
+        "op": { "enum": ["me", "accounts.get_me", "accounts.get_usage", "radar.get_digest", "events.create_endpoint", "events.delete_endpoint", "events.stream_events"] },
         "args": { "type": "object" },
         "repeat": { "type": "integer", "minimum": 1, "description": "Run the action this many times on one client." },
-        "concurrent": { "type": "integer", "minimum": 1, "description": "Run the action this many times at once on one client." }
+        "concurrent": { "type": "integer", "minimum": 1, "description": "Run the action this many times at once on one client." },
+        "take": { "type": "integer", "minimum": 1, "description": "A stream: stop reading after this many items, as a caller that breaks out of its loop." }
       }
     },
     "exchanges": {
@@ -76,6 +79,51 @@
                   "bytes": { "type": "integer", "minimum": 1 },
                   "delay_ms": { "type": "integer", "minimum": 0 }
                 }
+              },
+              "sse": {
+                "type": "object",
+                "description": "A server-sent events answer: the events in order, then the body ends (after `hold_ms` of silence when set).",
+                "required": ["events"],
+                "additionalProperties": false,
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "comment": { "type": "string" },
+                        "event": { "type": "string" },
+                        "data": {},
+                        "raw": { "type": "string", "description": "Written as is." },
+                        "delay_ms": { "type": "integer", "minimum": 0 }
+                      }
+                    }
+                  },
+                  "hold_ms": { "type": "integer", "minimum": 0 }
+                }
+              },
+              "socket": {
+                "type": "object",
+                "description": "A WebSocket answer: after the upgrade, the steps in order. `expect` is a subset of the client's next frame (`as` names its id), `send` a frame to send (\"$name\" is a named id), `close` a close code.",
+                "required": ["steps"],
+                "additionalProperties": false,
+                "properties": {
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "expect": { "type": "object" },
+                        "as": { "type": "string" },
+                        "send": { "type": "object" },
+                        "delay_ms": { "type": "integer", "minimum": 0 },
+                        "close": { "type": "integer" }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -99,6 +147,7 @@
             "message_excludes": { "type": "string" }
           }
         },
+        "items": { "type": "array", "description": "A stream: the items it yielded, in order, each a subset in wire names; the count must match." },
         "attempts": { "type": "integer", "minimum": 1 },
         "token_exchanges": { "type": "integer", "minimum": 0 }
       }

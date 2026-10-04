@@ -37,5 +37,15 @@ without the check.
 - A paged list has an `all<Operation>` beside its page method, an async generator that
   follows the next-page token: `for await (const d of api.radar.allListDigests()) {}`;
   breaking out fetches nothing more, and `signal` stops it between pages.
+- A stream (the account's events, scope `events:read`) is an async generator:
+  `for await (const ev of api.events.streamEvents({ types: "key.created" })) {}`.
+  The first step opens it (an opening error is thrown there), breaking out or `signal`
+  closes it, an `error` event ends it with that `ApiError`, and 45 s without an event
+  or a keep-alive ends it with `TimeoutError` (`streamIdleTimeout`). By default each
+  stream is a server-sent events request; `new Client({ ..., streams: "socket" })`
+  carries every stream of the client over one `/v1/ws` connection, reconnecting and
+  opening the streams again when the server ends it. The socket sends the token as a
+  header, which Node 22+, Deno and Bun allow and browsers do not: browsers use the
+  default. See [examples/typescript/src/events.ts](../examples/typescript/src/events.ts).
 - How the SDKs behave, in every language: [docs/design.md](../docs/design.md)
 - Contributing: [CONTRIBUTING.md](../CONTRIBUTING.md)

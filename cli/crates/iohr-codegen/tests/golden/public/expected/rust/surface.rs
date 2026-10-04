@@ -4,7 +4,7 @@
 //! [`ops`](super::ops) is implemented.
 use std::future::Future;
 use inorbithr::__codegen::{pages, path_segment};
-use inorbithr::{Client, Error, Method, Operation, Pages, Profile, Response};
+use inorbithr::{Client, Error, EventStream, Method, Operation, Pages, Profile, Response};
 use super::models::*;
 use super::ops;
 /// The operations, as methods on [`Client`].
@@ -156,6 +156,23 @@ impl<P: ops::DeleteInbox> Events<'_, P> {
             .named("events.delete_inbox")
             .scopes(&["webhooks:write"]);
         self.0.request(op).await
+    }
+}
+impl<P: ops::StreamEvents> Events<'_, P> {
+    /// `GET /v1/events/events`; needs scope `events:read`. A stream of events: see [`EventStream`].
+    pub async fn stream_events(
+        &self,
+        params: &EventsStreamEventsParams,
+    ) -> Result<EventStream<StreamEventsResponse>, Error> {
+        let op = Operation::new(Method::Get, "/v1/events/events")
+            .named("events.stream_events")
+            .scopes(&["events:read"])
+            .query_opt("types", params.types.as_ref().map(ToString::to_string))
+            .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
+            .rpc("iohr.events.v1.EventsService/StreamEvents")
+            .field_opt("types", params.types.as_ref())
+            .field_opt("account_id", params.account_id.as_ref());
+        self.0.stream(op).await
     }
 }
 impl<P: ops::ListEventTypes> Events<'_, P> {
@@ -592,6 +609,14 @@ pub struct AccountsListUnitCategoriesParams {
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
+}
+/// The query parameters of `GET /v1/events/events`; every field is optional.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EventsStreamEventsParams {
+    /// `types`
+    pub types: ::std::option::Option<::std::string::String>,
+    /// `account_id`
+    pub account_id: ::std::option::Option<::std::string::String>,
 }
 /// The query parameters of `GET /v1/events/types`; every field is optional.
 #[derive(Debug, Clone, Default, PartialEq)]

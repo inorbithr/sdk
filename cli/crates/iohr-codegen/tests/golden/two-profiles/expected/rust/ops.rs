@@ -20,6 +20,9 @@ impl GetUsage for super::profiles::AcmeCi {}
 /// `GET /v1/accounts/units/categories`
 pub trait ListUnitCategories: inorbithr::Profile {}
 impl ListUnitCategories for super::profiles::AcmeCi {}
+/// `GET /v1/events/events`
+pub trait StreamEvents: inorbithr::Profile {}
+impl StreamEvents for super::profiles::AcmeCi {}
 /// `GET /v1/events/types`
 pub trait ListEventTypes: inorbithr::Profile {}
 impl ListEventTypes for super::profiles::AcmeCi {}

@@ -130,6 +130,8 @@ public static class Codegen
             Idempotent = operation.Idempotent,
             Body = operation.Body,
             Query = list,
+            Rpc = operation.Rpc,
+            CallBody = operation.CallBody,
         };
     }
 
@@ -148,6 +150,41 @@ public static class Codegen
             Idempotent = operation.Idempotent,
             Query = operation.Query,
             Body = JsonSerializer.SerializeToUtf8Bytes(body, Json.Options),
+            Rpc = operation.Rpc,
+            CallBody = operation.CallBody,
+        };
+    }
+
+    /// <summary>
+    /// Names the RPC a streaming operation is on <c>/v1/ws</c> and its call frame's body: the
+    /// parameters given, by wire name, <see langword="null"/> ones left out (design.md section 7).
+    /// </summary>
+    /// <param name="operation">The operation.</param>
+    /// <param name="rpc">The RPC's full name (<c>x-iohr-rpc</c>).</param>
+    /// <param name="fields">The path and query parameters, by wire name.</param>
+    /// <returns>The operation with its call.</returns>
+    public static Operation WithCall(this Operation operation, string rpc, params (string Name, object? Value)[] fields)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        ArgumentNullException.ThrowIfNull(fields);
+        var body = new System.Text.Json.Nodes.JsonObject();
+        foreach (var (name, value) in fields)
+        {
+            if (value is not null)
+            {
+                body[name] = JsonSerializer.SerializeToNode(value, value.GetType(), Json.Options);
+            }
+        }
+
+        return new Operation(operation.Method, operation.Path)
+        {
+            Name = operation.Name,
+            Scopes = operation.Scopes,
+            Idempotent = operation.Idempotent,
+            Query = operation.Query,
+            Body = operation.Body,
+            Rpc = string.IsNullOrEmpty(rpc) ? null : rpc,
+            CallBody = JsonSerializer.SerializeToUtf8Bytes(body, Json.Options),
         };
     }
 

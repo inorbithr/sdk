@@ -12,7 +12,9 @@ from urllib.parse import quote
 
 T = TypeVar("T")
 
-#: The surface contract this runtime implements.
+#: The surface contract this runtime implements. Stream methods (`Client.stream`,
+#: `Operation.rpc`, `Operation.params`) were added to it, not changed in it, so a surface
+#: generated before them imports unchanged.
 VERSION = 1
 
 

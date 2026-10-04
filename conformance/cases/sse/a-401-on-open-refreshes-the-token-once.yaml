@@ -1,0 +1,22 @@
+name: a-401-on-open-refreshes-the-token-once
+area: sse
+summary: A 401 when the stream opens fetches one fresh token and opens it again, as for any call.
+action: { op: events.stream_events }
+client: { scopes: [events:read] }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events, headers: { authorization: Bearer t1 } }
+    response: { status: 401, json: { code: unauthenticated, error: authentication required, details: [] } }
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t2, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events, headers: { authorization: Bearer t2 } }
+    response:
+      sse:
+        events:
+          - { data: { id: evt_1, type: key.created, occurred_at: "", account_id: acc_1, data: {} } }
+expect:
+  items:
+    - { id: evt_1 }
+  attempts: 2
+  token_exchanges: 2

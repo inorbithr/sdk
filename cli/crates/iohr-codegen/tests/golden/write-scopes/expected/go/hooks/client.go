@@ -12,8 +12,8 @@ import (
 	"github.com/inorbithr/sdk/go/codegen"
 )
 
-// The surface was generated for the runtime's contract 2: a runtime with another contract fails to build here, so run iohr sdk generate again.
-const _ = codegen.V2
+// The surface was generated for the runtime's contract 3: a runtime with another contract fails to build here, so run iohr sdk generate again.
+const _ = codegen.V3
 
 // Profile is the profile's name.
 const Profile = "hooks"

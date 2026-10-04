@@ -146,6 +146,11 @@ namespace InOrbit.Sdk.Api
     {
     }
 
+    /// <summary>A profile whose cut holds <c>GET /v1/events/events</c>.</summary>
+    public interface IStreamEvents : global::InOrbit.Sdk.IProfile
+    {
+    }
+
     /// <summary>A profile whose cut holds <c>GET /v1/events/notifications</c>.</summary>
     public interface IListNotifications : global::InOrbit.Sdk.IProfile
     {
@@ -368,6 +373,7 @@ namespace InOrbit.Sdk
           global::InOrbit.Sdk.Api.IListUnitCategories,
           global::InOrbit.Sdk.Api.IListKinds,
           global::InOrbit.Sdk.Api.IListTools,
+          global::InOrbit.Sdk.Api.IStreamEvents,
           global::InOrbit.Sdk.Api.IListNotifications,
           global::InOrbit.Sdk.Api.IGetEventStats,
           global::InOrbit.Sdk.Api.IListEventTypes,

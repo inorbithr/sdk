@@ -1,0 +1,20 @@
+name: events-arrive-in-order
+area: sse
+summary: events.stream_events opens GET /v1/events/events as server-sent events and yields each event, typed, in order; the stream ends when the server ends it.
+action: { op: events.stream_events, args: { types: key.created } }
+client: { scopes: [events:read] }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events, query: { types: key.created }, headers: { authorization: Bearer t1, accept: text/event-stream } }
+    response:
+      sse:
+        events:
+          - { comment: open }
+          - { data: { id: evt_1, type: key.created, occurred_at: "2026-10-04T10:00:00Z", account_id: acc_1, data: { key_id: key_1 } } }
+          - { data: { id: evt_2, type: key.created, occurred_at: "2026-10-04T10:00:01Z", account_id: acc_1, data: { key_id: key_2 } } }
+expect:
+  items:
+    - { id: evt_1, type: key.created, data: { key_id: key_1 } }
+    - { id: evt_2, account_id: acc_1 }
+  attempts: 1

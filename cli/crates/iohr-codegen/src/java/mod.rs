@@ -134,6 +134,7 @@ const RUNTIME: &[&str] = &[
     "Code",
     "Detail",
     "Pages",
+    "EventStream",
 ];
 
 impl Target for JavaTarget {
@@ -514,6 +515,7 @@ impl Gen {
     }
 
     /// One operation's static method and its async twin.
+    #[allow(clippy::too_many_lines)] // one operation's rendering, unary and stream, read top to bottom
     fn operation(&self, op: &Op, imports: &mut Imports) -> String {
         let naming = JavaNaming;
         let client = self.rt("Client", imports);
@@ -558,10 +560,47 @@ impl Gen {
         if op.idempotent_override {
             build.push_str("\n                .idempotent(true)");
         }
+        if op.stream {
+            // The socket's call frame carries the parameters typed, by wire name.
+            for p in &op.path_params {
+                let _ = write!(
+                    build,
+                    "\n                .field({}, {})",
+                    lit(&p.name),
+                    naming.field_name(&p.name)
+                );
+            }
+            for q in &op.query {
+                let _ = write!(
+                    build,
+                    "\n                .field({}, params.{}())",
+                    lit(&q.name),
+                    naming.field_name(&q.name)
+                );
+            }
+            if !op.rpc.is_empty() {
+                let _ = write!(build, "\n                .rpc({})", lit(&op.rpc));
+            }
+        }
         build.push_str("\n                .build()");
         let mut all_tags =
             vec!["@param client the client of a profile that may call it".to_owned()];
         all_tags.extend(tags);
+        if op.stream {
+            let stream = self.rt("EventStream", imports);
+            all_tags.push("@return the events, one model each; close it to stop early".into());
+            let args = std::iter::once(format!("{client} client"))
+                .chain(decl)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut out = String::from("\n");
+            out.push_str(&javadoc("    ", &op_doc(op), &all_tags));
+            let _ = write!(
+                out,
+                "    public static {stream}<{answer}> {fname}({args}) {{\n        return client.stream({build}, {answer}.class);\n    }}\n"
+            );
+            return out;
+        }
         let mut sync_tags = all_tags.clone();
         sync_tags.push("@return the answer, typed, and the raw one".into());
         let mut async_tags = all_tags;
@@ -806,6 +845,19 @@ impl Gen {
                 .chain(call)
                 .collect::<Vec<_>>()
                 .join(", ");
+            if op.stream {
+                let stream = self.rt("EventStream", imports);
+                let mut stream_tags = tags;
+                stream_tags
+                    .push("@return the events, one model each; close it to stop early".into());
+                out.push('\n');
+                out.push_str(&javadoc("    ", &op_doc(op), &stream_tags));
+                let _ = write!(
+                    out,
+                    "    public {stream}<{answer}> {name}({args}) {{\n        return Operations.{fname}({pass});\n    }}\n"
+                );
+                continue;
+            }
             let mut sync_tags = tags.clone();
             sync_tags.push("@return the answer, typed, and the raw one".into());
             let mut async_tags = tags;
@@ -828,6 +880,7 @@ impl Gen {
             );
         }
         if op.body.is_none()
+            && !op.stream
             && let Some(paging) = context::paging(op, &self.models)
         {
             out.push_str(&self.iterator(op, &paging, imports));

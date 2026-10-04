@@ -11,8 +11,9 @@ import ipaddress
 import json
 import os
 import platform
+import threading
 import time
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, TypeAlias, TypeVar, cast
 from urllib.parse import urlencode, urlsplit
@@ -41,6 +42,18 @@ from inorbithr._errors import (
 )
 from inorbithr._hooks import Attempt, Hook
 from inorbithr._retry import backoff, request_id, retry_after, retryable_status
+from inorbithr._stream import (
+    AsyncSocket,
+    AsyncStream,
+    SocketSettings,
+    SseParser,
+    Stream,
+    StreamTransport,
+    SyncSocket,
+    call_body,
+    decode_item,
+    problem_error,
+)
 from inorbithr._version import SDK_VERSION
 
 #: Where the API is.
@@ -73,6 +86,10 @@ class Operation:
     """The scopes the operation needs, for the record."""
     idempotent: bool = False
     """Retry it like an idempotent method although its method is not."""
+    rpc: str = ""
+    """A stream's RPC (`x-iohr-rpc`), what its call on the socket names."""
+    params: Sequence[tuple[str, object]] = ()
+    """A stream's path parameters by wire name, unencoded, for its call on the socket."""
 
 
 @dataclass(frozen=True)
@@ -199,7 +216,16 @@ class _Config:
         max_retries: int,
         user_agent_suffix: str | None,
         hooks: Sequence[Hook],
+        *,
+        streams: StreamTransport = "sse",
+        stream_idle_timeout: float = 45.0,
     ) -> None:
+        if streams not in ("sse", "socket"):
+            raise ConfigError(f'streams is "sse" or "socket", not {streams!r}')
+        if stream_idle_timeout <= 0:
+            raise ConfigError("stream_idle_timeout must be more than 0 seconds")
+        self.streams: StreamTransport = streams
+        self.idle = stream_idle_timeout
         self.base = _check_url("the base URL", base_url, origin_only=True)
         self.host = urlsplit(self.base).netloc
         self.timeout = timeout
@@ -221,10 +247,30 @@ class _Config:
             pairs.extend((name, _query_value(v)) for v in values if v is not None)
         return self.base + p + (f"?{urlencode(pairs)}" if pairs else "")
 
-    def request(self, op: Operation, url: str, access: str, attempt: Attempt) -> httpx.Request:
+    def socket_settings(self) -> SocketSettings:
+        return SocketSettings(
+            self.base, self.host, self.user_agent, self.timeout, self.idle, self.max_retries
+        )
+
+    def socket_body(self, op: Operation) -> dict[str, object]:
+        if not op.rpc:
+            raise ConfigError(
+                f"{op.name or op.path} names no RPC, so it cannot stream over the socket; "
+                'use streams="sse"'
+            )
+        return call_body([*op.params, *op.query])
+
+    def request(
+        self,
+        op: Operation,
+        url: str,
+        access: str,
+        attempt: Attempt,
+        accept: str = "application/json",
+    ) -> httpx.Request:
         headers = {
             "authorization": f"Bearer {access}",
-            "accept": "application/json",
+            "accept": accept,
             "user-agent": self.user_agent,
             "x-request-id": attempt.request_id,
         }
@@ -257,6 +303,13 @@ class _Config:
         if isinstance(e, httpx.TimeoutException):
             return _Outcome("retry", error=ApiTimeoutError(self.host, timeout))
         return _Outcome("retry", error=ApiConnectionError(self.host, type(e).__name__))
+
+    def opened(self, attempt: Attempt, status: int, headers: httpx.Headers) -> _Outcome:
+        """A stream's answer opened: the hooks see it without a body."""
+        raw = RawResponse(status, headers, b"", attempt.request_id, attempt.number)
+        for h in self.hooks:
+            h.on_response(attempt, raw)
+        return _Outcome("done", raw)
 
     def failed(self, attempt: Attempt, error: InOrbitError) -> None:
         for h in self.hooks:
@@ -303,6 +356,8 @@ class Client:
         user_agent_suffix: str | None = None,
         hooks: Sequence[Hook] = (),
         http_client: httpx.Client | None = None,
+        streams: StreamTransport = "sse",
+        stream_idle_timeout: float = 45.0,
     ) -> None:
         """A client with one credential.
 
@@ -321,11 +376,23 @@ class Client:
             user_agent_suffix: Appended to the user agent.
             hooks: Observers of every attempt.
             http_client: The `httpx.Client` to use (default: one of its own).
+            streams: How streams open: `"sse"` (server-sent events, the default), or
+                `"socket"`, every stream over one `/v1/ws` connection.
+            stream_idle_timeout: Seconds a stream may be silent (no event, no keep-alive)
+                before it fails, or on the socket reconnects.
 
         Raises:
             ConfigError: No credential is given, a key has no scopes, or a URL is not https.
         """
-        self._config = _Config(base_url, timeout, max_retries, user_agent_suffix, hooks)
+        self._config = _Config(
+            base_url,
+            timeout,
+            max_retries,
+            user_agent_suffix,
+            hooks,
+            streams=streams,
+            stream_idle_timeout=stream_idle_timeout,
+        )
         tokens = _check_url("the token URL", token_url, origin_only=False)
         self._owned = http_client is None
         self._http = http_client or httpx.Client(follow_redirects=False)
@@ -350,6 +417,8 @@ class Client:
             raise ConfigError(
                 "no credentials: set INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET"
             )
+        self._socket: SyncSocket | None = None
+        self._socket_lock = threading.Lock()
 
     @classmethod
     def from_env(cls, profile: str | None = None, **options: Any) -> Client:  # noqa: ANN401
@@ -455,6 +524,107 @@ class Client:
             resp.close()
         return cfg.outcome(attempt, resp.status_code, resp.headers, bytes(body))
 
+    def stream(self, op: Operation, into: type[T]) -> Stream[T]:
+        """Opens the stream `op` answers and reads each event as `into`.
+
+        The stream opens on the first step of the iteration, over server-sent events or
+        the client's socket (`streams`); design.md section 7 has the rules.
+
+        Raises:
+            ConfigError: The socket is asked for and `op` names no RPC.
+        """
+        if self._config.streams == "socket":
+            body = self._config.socket_body(op)
+            return Stream(self._socket_items(op.rpc, body, into))
+        return Stream(self._sse_items(op, into))
+
+    def _socket_items(self, rpc: str, body: dict[str, object], into: type[T]) -> Iterator[T]:
+        with self._socket_lock:
+            if self._socket is None:
+                self._socket = SyncSocket(self._config.socket_settings(), self._provider)
+            socket = self._socket
+        yield from cast("Iterator[T]", socket.items(rpc, body, into))
+
+    def _sse_items(self, op: Operation, into: type[T]) -> Iterator[T]:
+        cfg = self._config
+        resp, attempt = self._open(op)
+        parser = SseParser()
+        try:
+            for chunk in resp.iter_bytes():
+                for name, data in parser.feed(chunk):
+                    if name == "error":
+                        raise problem_error(
+                            data.encode(), resp.headers, attempt.request_id, attempt.number
+                        )
+                    yield cast("T", decode_item(data, into, resp.headers, attempt.request_id))
+        except httpx.TimeoutException:
+            error: InOrbitError = ApiTimeoutError(cfg.host, cfg.idle)
+            cfg.failed(attempt, error)
+            raise error from None
+        except httpx.TransportError as e:
+            error = ApiConnectionError(cfg.host, type(e).__name__)
+            cfg.failed(attempt, error)
+            raise error from None
+        except InOrbitError as e:
+            cfg.failed(attempt, e)
+            raise
+        finally:
+            resp.close()
+
+    def _open(self, op: Operation) -> tuple[httpx.Response, Attempt]:
+        cfg = self._config
+        url = cfg.url(op)
+        rid = request_id()
+        retries = 0
+        refreshed = False
+        number = 0
+        while True:
+            number += 1
+            attempt = cfg.attempt(op, number, rid)
+            try:
+                outcome, resp = self._open_attempt(op, url, attempt)
+            except InOrbitError as e:
+                cfg.failed(attempt, e)
+                raise
+            if resp is not None:
+                return resp, attempt
+            if outcome.kind == "unauthorized" and not refreshed:
+                self._provider.invalidate()
+                refreshed = True
+                continue
+            if outcome.kind == "retry" and retries < cfg.max_retries:
+                time.sleep(outcome.wait if outcome.wait is not None else backoff(retries))
+                retries += 1
+                continue
+            error = outcome.error or ApiError(cast("RawResponse", outcome.raw))
+            cfg.failed(attempt, error)
+            raise error
+
+    def _open_attempt(
+        self, op: Operation, url: str, attempt: Attempt
+    ) -> tuple[_Outcome, httpx.Response | None]:
+        cfg = self._config
+        access = self._provider.token().access
+        request = cfg.request(op, url, access, attempt, accept="text/event-stream")
+        request.extensions["timeout"] = httpx.Timeout(cfg.timeout, read=cfg.idle).as_dict()
+        try:
+            resp = self._http.send(request, stream=True)
+        except httpx.TransportError as e:
+            return cfg.transport(e, cfg.timeout), None
+        if 200 <= resp.status_code < 300:
+            return cfg.opened(attempt, resp.status_code, resp.headers), resp
+        try:
+            body = bytearray()
+            for chunk in resp.iter_bytes():
+                body.extend(chunk)
+                if len(body) > MAX_BODY:
+                    raise TooLargeError
+        except httpx.TransportError as e:
+            return cfg.transport(e, cfg.timeout), None
+        finally:
+            resp.close()
+        return cfg.outcome(attempt, resp.status_code, resp.headers, bytes(body)), None
+
 
 class AsyncClient:
     """`Client` for asyncio. Safe to share between tasks on one event loop.
@@ -482,13 +652,23 @@ class AsyncClient:
         user_agent_suffix: str | None = None,
         hooks: Sequence[Hook] = (),
         http_client: httpx.AsyncClient | None = None,
+        streams: StreamTransport = "sse",
+        stream_idle_timeout: float = 45.0,
     ) -> None:
         """A client with one credential; the options are `Client`'s.
 
         Raises:
             ConfigError: No credential is given, a key has no scopes, or a URL is not https.
         """
-        self._config = _Config(base_url, timeout, max_retries, user_agent_suffix, hooks)
+        self._config = _Config(
+            base_url,
+            timeout,
+            max_retries,
+            user_agent_suffix,
+            hooks,
+            streams=streams,
+            stream_idle_timeout=stream_idle_timeout,
+        )
         tokens = _check_url("the token URL", token_url, origin_only=False)
         self._owned = http_client is None
         self._http = http_client or httpx.AsyncClient(follow_redirects=False)
@@ -513,6 +693,7 @@ class AsyncClient:
             raise ConfigError(
                 "no credentials: set INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET"
             )
+        self._socket: AsyncSocket | None = None
 
     @classmethod
     def from_env(cls, profile: str | None = None, **options: Any) -> AsyncClient:  # noqa: ANN401
@@ -611,3 +792,111 @@ class AsyncClient:
         finally:
             await resp.aclose()
         return cfg.outcome(attempt, resp.status_code, resp.headers, bytes(body))
+
+    def stream(self, op: Operation, into: type[T]) -> AsyncStream[T]:
+        """Opens the stream `op` answers and reads each event as `into`, for `async for`.
+
+        The stream opens on the first step of the iteration, over server-sent events or
+        the client's socket (`streams`); design.md section 7 has the rules.
+
+        Raises:
+            ConfigError: The socket is asked for and `op` names no RPC.
+        """
+        if self._config.streams == "socket":
+            body = self._config.socket_body(op)
+            return AsyncStream(self._socket_items(op.rpc, body, into))
+        return AsyncStream(self._sse_items(op, into))
+
+    async def _socket_items(
+        self, rpc: str, body: dict[str, object], into: type[T]
+    ) -> AsyncIterator[T]:
+        if self._socket is None:
+            self._socket = AsyncSocket(self._config.socket_settings(), self._provider)
+        items = cast("AsyncIterator[T]", self._socket.items(rpc, body, into))
+        try:
+            async for item in items:
+                yield item
+        finally:
+            aclose = getattr(items, "aclose", None)
+            if aclose is not None:
+                await aclose()
+
+    async def _sse_items(self, op: Operation, into: type[T]) -> AsyncIterator[T]:
+        cfg = self._config
+        resp, attempt = await self._open(op)
+        parser = SseParser()
+        try:
+            async for chunk in resp.aiter_bytes():
+                for name, data in parser.feed(chunk):
+                    if name == "error":
+                        raise problem_error(
+                            data.encode(), resp.headers, attempt.request_id, attempt.number
+                        )
+                    yield cast("T", decode_item(data, into, resp.headers, attempt.request_id))
+        except httpx.TimeoutException:
+            error: InOrbitError = ApiTimeoutError(cfg.host, cfg.idle)
+            cfg.failed(attempt, error)
+            raise error from None
+        except httpx.TransportError as e:
+            error = ApiConnectionError(cfg.host, type(e).__name__)
+            cfg.failed(attempt, error)
+            raise error from None
+        except InOrbitError as e:
+            cfg.failed(attempt, e)
+            raise
+        finally:
+            await resp.aclose()
+
+    async def _open(self, op: Operation) -> tuple[httpx.Response, Attempt]:
+        cfg = self._config
+        url = cfg.url(op)
+        rid = request_id()
+        retries = 0
+        refreshed = False
+        number = 0
+        while True:
+            number += 1
+            attempt = cfg.attempt(op, number, rid)
+            try:
+                outcome, resp = await self._open_attempt(op, url, attempt)
+            except InOrbitError as e:
+                cfg.failed(attempt, e)
+                raise
+            if resp is not None:
+                return resp, attempt
+            if outcome.kind == "unauthorized" and not refreshed:
+                await self._provider.invalidate()
+                refreshed = True
+                continue
+            if outcome.kind == "retry" and retries < cfg.max_retries:
+                await asyncio.sleep(outcome.wait if outcome.wait is not None else backoff(retries))
+                retries += 1
+                continue
+            error = outcome.error or ApiError(cast("RawResponse", outcome.raw))
+            cfg.failed(attempt, error)
+            raise error
+
+    async def _open_attempt(
+        self, op: Operation, url: str, attempt: Attempt
+    ) -> tuple[_Outcome, httpx.Response | None]:
+        cfg = self._config
+        access = (await self._provider.token()).access
+        request = cfg.request(op, url, access, attempt, accept="text/event-stream")
+        request.extensions["timeout"] = httpx.Timeout(cfg.timeout, read=cfg.idle).as_dict()
+        try:
+            resp = await self._http.send(request, stream=True)
+        except httpx.TransportError as e:
+            return cfg.transport(e, cfg.timeout), None
+        if 200 <= resp.status_code < 300:
+            return cfg.opened(attempt, resp.status_code, resp.headers), resp
+        try:
+            body = bytearray()
+            async for chunk in resp.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > MAX_BODY:
+                    raise TooLargeError
+        except httpx.TransportError as e:
+            return cfg.transport(e, cfg.timeout), None
+        finally:
+            await resp.aclose()
+        return cfg.outcome(attempt, resp.status_code, resp.headers, bytes(body)), None

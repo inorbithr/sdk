@@ -77,6 +77,18 @@ def list_unit_categories(*, page_size: int | None = None, page_token: str | None
     )
 
 
+def stream_events(*, types: str | None = None, account_id: str | None = None) -> Operation:
+    """`GET /v1/events/events`; needs scope `events:read`. Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend."""
+    return Operation(
+        name="events.stream_events",
+        method="GET",
+        path="/v1/events/events",
+        query=(("types", types), ("account_id", account_id),),
+        scopes=("events:read",),
+        rpc="iohr.events.v1.EventsService/StreamEvents",
+    )
+
+
 def list_event_types(*, page_size: int | None = None, page_token: str | None = None) -> Operation:
     """`GET /v1/events/types`; needs scope `events:read`. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend."""
     return Operation(

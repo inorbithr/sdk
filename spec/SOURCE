@@ -1,9 +1,11 @@
 source: https://api.inorbit.hr/openapi.json
-sha256: 427bb47c037e3bfe4652c2307bae2b927e305eb6a35fe31ff06166e951378e1b
+sha256: 49dcc584770c1181af97431c4f5612164da09f45ffb16cf70f8e43a87e2ff773
 api_version: 0.1.0
 openapi: 3.1.0
 operations: 62
-synced: 2026-10-04T08:37:23Z
+synced: 2026-10-04T10:02:13Z
 commit: the platform does not publish it in the document yet (spec/README.md)
 lab_source: https://docs.inorbit.hr/lab
 lab_sha256: 394cd19d17699325b17666cb4f10cd178eefd6b610d11fdf5e38455d5c2d97c9
+frames_source: https://api.inorbit.hr/frames.json
+frames_sha256: fb9041e2d657bfda84054d0f74ae0ef0688bee1a0b106d2acfea6ed8f06fae6d

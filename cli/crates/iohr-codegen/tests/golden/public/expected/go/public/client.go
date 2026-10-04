@@ -13,8 +13,8 @@ import (
 	"github.com/inorbithr/sdk/go/codegen"
 )
 
-// The surface was generated for the runtime's contract 2: a runtime with another contract fails to build here, so run iohr sdk generate again.
-const _ = codegen.V2
+// The surface was generated for the runtime's contract 3: a runtime with another contract fails to build here, so run iohr sdk generate again.
+const _ = codegen.V3
 
 // Profile is the profile's name.
 const Profile = "public"
@@ -114,6 +114,12 @@ func (h Events) DeleteEndpoint(ctx context.Context, endpointID string) (*inorbit
 // DeleteInbox calls DELETE /v1/webhooks/inboxes/{inbox_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/DeleteInbox` on the `events` backend.
 func (h Events) DeleteInbox(ctx context.Context, inboxID string) (*inorbit.Response[models.DeleteInboxResponse], error) {
 	return ops.DeleteInbox(ctx, h.c, inboxID)
+}
+
+// StreamEvents calls GET /v1/events/events; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend.
+// It yields each event as it arrives; an error ends the stream, and breaking out of the loop or ending ctx closes it.
+func (h Events) StreamEvents(ctx context.Context, params *models.EventsStreamEventsParams) iter.Seq2[*models.StreamEventsResponse, error] {
+	return ops.StreamEvents(ctx, h.c, params)
 }
 
 // ListEventTypes calls GET /v1/events/types; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend.

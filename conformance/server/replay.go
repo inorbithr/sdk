@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -41,6 +40,7 @@ type Server struct {
 	fail    *Mismatch
 	tokens  int
 	calls   int
+	session int // bumped by every load, so a socket left from an earlier case fails nothing
 }
 
 // NewServer replays cases read from casesDir.
@@ -120,11 +120,7 @@ func (s *Server) loadHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		c, err = loadCase(s.casesDir, body.Name)
 	}
-	switch {
-	case errors.Is(err, errStreaming):
-		writeJSON(w, http.StatusNotImplemented, problem("unimplemented", err.Error()))
-		return
-	case err != nil:
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, problem("bad_request", err.Error()))
 		return
 	}
@@ -138,6 +134,7 @@ func (s *Server) loadHandler(w http.ResponseWriter, r *http.Request) {
 	s.last = s.now()
 	s.fail = nil
 	s.tokens, s.calls = 0, 0
+	s.session++
 	// The loaded case goes back as JSON, so a driver reads client, action and expect
 	// from here instead of parsing YAML itself.
 	writeJSON(w, http.StatusOK, map[string]any{"loaded": c.Name, "exchanges": len(c.Exchanges), "case": c})
@@ -208,9 +205,23 @@ func (s *Server) replay(w http.ResponseWriter, r *http.Request) {
 			"this request does not match the case; GET /_result for the expected one"))
 		return
 	}
-	s.respond(w, resp)
 	s.mu.Lock()
-	s.last = s.now()
+	session := s.session
+	s.mu.Unlock()
+	switch {
+	case resp.Socket != nil:
+		s.respondSocket(w, r, resp)
+	case resp.SSE != nil:
+		s.respondSSE(w, resp.Status, resp)
+	default:
+		s.respond(w, resp)
+	}
+	// A stream or a socket can outlive its case; only an answer of the case still
+	// loaded moves the clock its next request's delay is measured from.
+	s.mu.Lock()
+	if s.session == session {
+		s.last = s.now()
+	}
 	s.mu.Unlock()
 }
 

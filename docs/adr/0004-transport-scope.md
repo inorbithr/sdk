@@ -1,6 +1,6 @@
 # 0004. REST first; SSE, socket and MCP when the platform opens them
 
-Status: accepted, 2026-10-01; amended by [0008](0008-key-scopes-and-iohr-identifiers.md) (scopes and identifiers)
+Status: accepted, 2026-10-01; amended by [0008](0008-key-scopes-and-iohr-identifiers.md) (scopes and identifiers); server-sent events and the socket shipped in 0.2.1 (2026-10-04) once the platform opened them to keys (platform RFC 0048)
 
 ## Context
 

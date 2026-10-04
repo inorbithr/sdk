@@ -71,6 +71,10 @@ pub async fn fine() -> Result<(), inorbithr::Error> {
     let ci: Client<AcmeCi> = Client::builder().token("t").build()?;
     let _ = ci.accounts().get_me().await?;
     let _ = ci.accounts().get_usage("acc_1", &Default::default()).await?;
+    let mut events = ci.events().stream_events(&iohr::EventsStreamEventsParams { types: Some("key.created".into()), ..Default::default() }).await?;
+    while let Some(event) = events.next().await {
+        let _: iohr::StreamEventsResponse = event?;
+    }
     Ok(())
 }
 
@@ -99,6 +103,24 @@ pub async fn wrong(personal: Client<Personal>) -> Result<(), inorbithr::Error> {
     std::fs::write(root.join("src/lib.rs"), "pub mod iohr;\npub mod wrong;\n").unwrap();
     let (ok, text) = cargo_check(root);
     assert!(!ok, "a call the personal profile may not make compiled");
+    assert!(
+        text.contains("E0599") || text.contains("trait bound") || text.contains("no method named"),
+        "unexpected failure: {text}"
+    );
+
+    // Nor may it open the event stream, which needs events:read (design.md section 7).
+    std::fs::write(
+        root.join("src/wrong.rs"),
+        r"use crate::iohr::prelude::*;
+pub async fn wrong(personal: Client<Personal>) -> Result<(), inorbithr::Error> {
+    let _ = personal.events().stream_events(&Default::default()).await?;
+    Ok(())
+}
+",
+    )
+    .unwrap();
+    let (ok, text) = cargo_check(root);
+    assert!(!ok, "a stream the personal profile may not open compiled");
     assert!(
         text.contains("E0599") || text.contains("trait bound") || text.contains("no method named"),
         "unexpected failure: {text}"

@@ -1,0 +1,21 @@
+name: a-stream-over-the-socket
+area: socket
+summary: With streams over the socket, events.stream_events opens /v1/ws with the token, sends one call frame naming the RPC with the parameters as its body, and yields each data frame's body until end.
+action: { op: events.stream_events, args: { types: key.created } }
+client: { scopes: [events:read], streams: socket }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/ws, headers: { authorization: Bearer t1 } }
+    response:
+      socket:
+        steps:
+          - { expect: { type: call, method: iohr.events.v1.EventsService/StreamEvents, body: { types: key.created } }, as: c }
+          - { send: { type: data, id: $c, body: { id: evt_1, type: key.created, occurred_at: "", account_id: acc_1, data: {} } } }
+          - { send: { type: data, id: $c, body: { id: evt_2, type: key.created, occurred_at: "", account_id: acc_1, data: {} } } }
+          - { send: { type: end, id: $c } }
+expect:
+  items:
+    - { id: evt_1 }
+    - { id: evt_2 }
+  attempts: 1

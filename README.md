@@ -7,7 +7,7 @@ The repository holds two things: the `iohr` command line, released as a pre-rele
 and six client libraries. Each library is a hand-written runtime plus an API surface that
 `iohr sdk generate` writes, cut to what your credentials may call
 ([ADR 0011](docs/adr/0011-runtime-and-surface.md)). The libraries pass the shared conformance
-suite. Rust, TypeScript, Python and Go are released; the C# and Java registry releases
+suite, streams included (server-sent events or one `/v1/ws` socket, [design.md](docs/design.md) section 7). Rust, TypeScript, Python and Go are released; the C# and Java registry releases
 (NuGet, Maven Central) come later; both carry the same version and are ready to publish. Status on 2026-10-04 (iohr 0.1.0-alpha.5 generates all six):
 
 | Part | Package | Status |

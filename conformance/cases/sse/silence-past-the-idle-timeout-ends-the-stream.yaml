@@ -1,0 +1,20 @@
+name: silence-past-the-idle-timeout-ends-the-stream
+area: sse
+summary: Nothing at all, not even a comment, for the stream idle timeout (45 s by default) ends the stream with a timeout error, after the events that came.
+action: { op: events.stream_events }
+client: { scopes: [events:read], stream_idle_timeout_ms: 300 }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events }
+    response:
+      sse:
+        events:
+          - { comment: open }
+          - { data: { id: evt_1, type: key.created, occurred_at: "", account_id: acc_1, data: {} } }
+        hold_ms: 2000
+expect:
+  items:
+    - { id: evt_1 }
+  error: { kind: timeout }
+  attempts: 1

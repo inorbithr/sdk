@@ -9,7 +9,7 @@ hand.** `mise run spec:sync` refreshes them; CI checks them; a mistake is fixed 
 | `openapi.json` | The public slice of the platform's OpenAPI 3.1 document, normalised for code generators | `spec:sync` (fetch, filter, normalise, check); the same rules and checks live in `cli/crates/iohr-openapi` for `iohr sdk generate`, kept byte-equal by a golden pair (`mise run cli:normalise-golden`) whose raw document is the live one `spec/` came from |
 | `problem.json` | JSON Schema of the error envelope (`code`, `error`, `details`, `request_id`), with the document's code-to-status table (`Code.x-http-status`) | `spec:sync`, extracted from the `Problem`, `Code` and `Detail` components |
 | `lab/rules.json`, `lab/conformance.json` | The lab's generic redaction rules and the fixture documents with the findings expected of each (RFC 0035), which `iohr lab check` embeds and is tested against | `spec:sync`, from `https://docs.inorbit.hr/lab/`, checked for shape (no lookaround in a rule); `--only lab` syncs them without touching the contract |
-| `frames.json` | JSON Schema of `/v1/ws` client and server frames | added when the socket opens to API keys (ADR 0004) |
+| `frames.json` | JSON Schema of the `/v1/ws` client and server frames, with the socket's limits in `x-iohr-limits` (platform RFC 0048) | `spec:sync`, from `https://api.inorbit.hr/frames.json`, checked for its five frames and its limits; `--frames` syncs another file or URL |
 
 ## How a sync works
 
@@ -18,10 +18,12 @@ hand.** `mise run spec:sync` refreshes them; CI checks them; a mistake is fixed 
 2. Keep only operations marked `x-iohr-public: true`, plus the schemas they reach.
 3. Apply the normalisation rules below, and check the facts the platform states itself
    (the former rules N2, N3, N4, N6): a document without one fails the sync.
-4. Write the files and `SOURCE`; `mise run gen` regenerates the models; the PR shows both.
+4. Fetch `https://api.inorbit.hr/frames.json`, the socket's frames, and check it.
+5. Write the files and `SOURCE`; `mise run gen` regenerates the models; the PR shows both.
+   Each operation keeps `x-iohr-rpc`, the RPC a `/v1/ws` call frame names.
 
 The output is deterministic: the same document gives the same files, and `SOURCE` keeps
-its `synced` date while the document's `sha256` is unchanged. `--check` writes nothing
+its `synced` date while the document's, the lab's and the frames' `sha256` are unchanged. `--check` writes nothing
 and exits 1 when `spec/` would change. `SOURCE` records the URL, the document's
 `sha256`, the API version and the number of operations; the platform commit is added
 once the document carries it (an upstream ask below).

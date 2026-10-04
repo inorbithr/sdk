@@ -23,6 +23,7 @@ export {
   type Method,
   type Operation,
   type Response,
+  type StreamOperation,
 } from "./client.js";
 export * as codegen from "./codegen.js";
 export {
@@ -42,5 +43,6 @@ export {
 } from "./errors.js";
 export type { Attempt, Hook } from "./hooks.js";
 export { formatInt64, type Int64, parseInt64 } from "./int64.js";
+export { MAX_EVENT, SOCKET_QUEUE, type StreamTransport } from "./stream.js";
 export { parseTimestamp } from "./timestamp.js";
 export { SDK_VERSION } from "./version.js";

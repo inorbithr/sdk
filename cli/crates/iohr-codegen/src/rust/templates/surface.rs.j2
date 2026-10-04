@@ -6,11 +6,10 @@ use std::future::Future;
 
 {% if paged %}
 use {{ runtime }}::__codegen::{pages, path_segment};
-use {{ runtime }}::{Client, Error, Method, Operation, Pages, Profile, Response};
 {% else %}
 use {{ runtime }}::__codegen::path_segment;
-use {{ runtime }}::{Client, Error, Method, Operation, Profile, Response};
 {% endif %}
+use {{ runtime }}::{Client, Error, {% if streamed %}EventStream, {% endif %}Method, Operation, {% if paged %}Pages, {% endif %}Profile, Response};
 use super::models::*;
 use super::ops;
 
@@ -35,6 +34,23 @@ Operation::new(Method::{{ op.method }}, {% if op.path_literal %}"{{ op.path_lite
     {%- if op.body_type %}
     .json(body)?
     {%- endif %}
+    {%- if op.stream and op.rpc %}
+    .rpc("{{ op.rpc }}")
+    {%- for a in op.path_args %}
+    .field("{{ op.path_wire[loop.index0] }}", {{ a }})
+    {%- endfor %}
+    {%- for q in op.query %}
+    .field_opt("{{ q.name }}", params.{{ q.field }}.as_ref())
+    {%- endfor %}
+    {%- endif %}
+{%- endmacro -%}
+
+{%- macro answer(op) -%}
+{% if op.stream %}EventStream<{{ op.response_type }}>{% else %}Response<{{ op.response_type }}>{% endif %}
+{%- endmacro -%}
+
+{%- macro scopes_line(op) -%}
+`{{ op.line }}`{% if op.scopes %}; needs scope{% if op.scopes|length > 1 %}s{% endif %} {% for s in op.scopes %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.{% if op.stream %} A stream of events: see [`EventStream`].{% endif %}
 {%- endmacro -%}
 
 /// The operations, as methods on [`Client`].
@@ -44,8 +60,8 @@ pub trait Surface<P: Profile> {
     fn {{ h.method_name }}(&self) -> {{ h.type_name }}<'_, P>;
 {% endfor %}
 {% for op in flat %}
-    /// `{{ op.line }}`{% if op.scopes %}; needs scope{% if op.scopes|length > 1 %}s{% endif %} {% for s in op.scopes %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.
-    fn {{ op.name }}{{ signature(op) }} -> impl Future<Output = Result<Response<{{ op.response_type }}>, Error>> + Send
+    /// {{ scopes_line(op) }}
+    fn {{ op.name }}{{ signature(op) }} -> impl Future<Output = Result<{{ answer(op) }}, Error>> + Send
     where
         P: ops::{{ op.marker }};
 {% endfor %}
@@ -58,13 +74,13 @@ impl<P: Profile> Surface<P> for Client<P> {
     }
 {% endfor %}
 {% for op in flat %}
-    fn {{ op.name }}{{ signature(op) }} -> impl Future<Output = Result<Response<{{ op.response_type }}>, Error>> + Send
+    fn {{ op.name }}{{ signature(op) }} -> impl Future<Output = Result<{{ answer(op) }}, Error>> + Send
     where
         P: ops::{{ op.marker }},
     {
         async move {
             let op = {{ build(op) }};
-            self.request(op).await
+            self.{% if op.stream %}stream{% else %}request{% endif %}(op).await
         }
     }
 {% endfor %}
@@ -77,10 +93,10 @@ pub struct {{ h.type_name }}<'a, P: Profile>(&'a Client<P>);
 
 {% for op in h.ops %}
 impl<P: ops::{{ op.marker }}> {{ h.type_name }}<'_, P> {
-    /// `{{ op.line }}`{% if op.scopes %}; needs scope{% if op.scopes|length > 1 %}s{% endif %} {% for s in op.scopes %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.
-    pub async fn {{ op.name }}{{ signature(op) }} -> Result<Response<{{ op.response_type }}>, Error> {
+    /// {{ scopes_line(op) }}
+    pub async fn {{ op.name }}{{ signature(op) }} -> Result<{{ answer(op) }}, Error> {
         let op = {{ build(op) }};
-        self.0.request(op).await
+        self.0.{% if op.stream %}stream{% else %}request{% endif %}(op).await
     }
 {% if op.paging %}
 

@@ -18,13 +18,14 @@ import {
   ConfigError,
   ConnectionError,
   DecodeError,
-  type InOrbitError,
+  InOrbitError,
   RawResponse,
   TimeoutError,
   TooLargeError,
 } from "./errors.js";
 import type { Attempt, Hook } from "./hooks.js";
 import { backoffMs, requestId, retryAfterMs, retryableStatus, sleep } from "./retry.js";
+import { envelopeError, SocketHub, SseParser, type StreamTransport } from "./stream.js";
 import { SDK_VERSION } from "./version.js";
 
 /** Where the API is. */
@@ -54,6 +55,14 @@ export interface Operation {
   readonly scopes?: readonly string[];
   /** Retry it like an idempotent method although its method is not. */
   readonly idempotent?: boolean;
+}
+
+/** A streaming operation: the call, and how the socket names it. */
+export interface StreamOperation extends Operation {
+  /** The RPC a `/v1/ws` call frame names (`iohr.events.v1.EventsService/StreamEvents`). */
+  readonly rpc?: string;
+  /** The path and query parameters as one JSON object, the socket call's body. */
+  readonly fields?: Readonly<Record<string, unknown>>;
 }
 
 /** Per-call options. */
@@ -98,6 +107,14 @@ export interface ClientOptions {
   readonly hooks?: readonly Hook[];
   /** The `fetch` to use (default the global one). */
   readonly fetch?: typeof fetch;
+  /**
+   * How streams open (default `"sse"`): server-sent events, or `"socket"`, every stream
+   * over one `/v1/ws` connection. The socket sends the token as a header, which the
+   * browsers' WebSocket cannot: use it on Node, Deno and Bun; browsers use `"sse"`.
+   */
+  readonly streams?: StreamTransport;
+  /** Milliseconds a stream may be silent, not even a keep-alive, before it fails (default 45 000). */
+  readonly streamIdleTimeout?: number;
 }
 
 function checkUrl(what: string, raw: string, originOnly: boolean): URL {
@@ -146,6 +163,12 @@ function userAgent(suffix: string | undefined): string {
 /** What one attempt came to. */
 type Outcome =
   | { readonly kind: "done"; readonly raw: RawResponse }
+  | {
+      readonly kind: "open";
+      readonly resp: globalThis.Response;
+      readonly abort: AbortController;
+      readonly attempt: Attempt;
+    }
   | { readonly kind: "unauthorized"; readonly raw: RawResponse }
   | {
       readonly kind: "retry";
@@ -169,6 +192,9 @@ export class Client {
   readonly #userAgent: string;
   readonly #hooks: readonly Hook[];
   readonly #fetch: typeof fetch;
+  readonly #streams: StreamTransport;
+  readonly #idle: number;
+  #hub: SocketHub | undefined;
 
   /**
    * A client with `options`.
@@ -206,6 +232,11 @@ export class Client {
     this.#maxRetries = options.maxRetries ?? 2;
     this.#userAgent = userAgent(options.userAgentSuffix);
     this.#hooks = options.hooks ?? [];
+    this.#streams = options.streams ?? "sse";
+    if (this.#streams !== "sse" && this.#streams !== "socket") {
+      throw new ConfigError(`streams is "sse" or "socket", not ${JSON.stringify(this.#streams)}`);
+    }
+    this.#idle = options.streamIdleTimeout ?? 45_000;
   }
 
   /**
@@ -287,6 +318,126 @@ export class Client {
 
   /** Calls `op` and hands back the answer as it came, a 2xx one only. */
   async send(op: Operation, options?: CallOptions): Promise<RawResponse> {
+    const outcome = await this.#call(op, options, false);
+    if (outcome.kind !== "done") {
+      throw new ConfigError("a stream's answer was read as a call's");
+    }
+    return outcome.raw;
+  }
+
+  /**
+   * Opens the stream `op` and yields each event, typed, until the server ends it
+   * (design.md section 7). Opening follows the rules of a `GET`; the first `next()` opens
+   * it, so an opening error is thrown there. Stopping the loop, or aborting
+   * `options.signal`, closes the stream.
+   *
+   * @throws {ApiError} for an error answer or an `error` event, {@link TimeoutError}
+   *   after `streamIdleTimeout` of silence, and the other {@link InOrbitError}s.
+   */
+  async *stream<T>(
+    op: StreamOperation,
+    options?: CallOptions,
+    shape?: Shape,
+    shapes?: Shapes,
+  ): AsyncGenerator<T, void, undefined> {
+    const typed = (value: unknown): T =>
+      (shape !== undefined && shapes !== undefined ? decode(value, shape, shapes) : value) as T;
+    if (this.#streams === "socket") {
+      if (op.rpc === undefined || op.rpc === "") {
+        throw new ConfigError(
+          `${op.name ?? op.path} names no RPC, so it cannot go over the socket`,
+        );
+      }
+      this.#hub ??= this.#socketHub();
+      for await (const body of this.#hub.call(op.rpc, op.fields ?? {}, options?.signal)) {
+        yield typed(body);
+      }
+      return;
+    }
+    const outcome = await this.#call(op, options, true);
+    if (outcome.kind !== "open") {
+      throw new ConfigError("a call's answer was read as a stream's");
+    }
+    const { resp, abort, attempt } = outcome;
+    const body = resp.body;
+    if (body === null) {
+      return;
+    }
+    const reader = body.getReader();
+    const text = new TextDecoder();
+    const parser = new SseParser();
+    try {
+      for (;;) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const idle = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new TimeoutError(this.#base.host, Math.round(this.#idle / 1000))),
+            this.#idle,
+          );
+        });
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await Promise.race([reader.read(), idle]);
+        } catch (e) {
+          if (options?.signal?.aborted) {
+            throw options.signal.reason;
+          }
+          if (e instanceof InOrbitError) {
+            throw e;
+          }
+          throw new ConnectionError(this.#base.host, describe(e), { cause: e });
+        } finally {
+          clearTimeout(timer);
+        }
+        if (chunk.done) {
+          return;
+        }
+        for (const event of parser.push(text.decode(chunk.value, { stream: true }))) {
+          let value: unknown;
+          try {
+            value = JSON.parse(event.data);
+          } catch (e) {
+            throw new DecodeError(
+              describe(e),
+              new RawResponse({
+                status: resp.status,
+                headers: resp.headers,
+                body: new TextEncoder().encode(event.data),
+                requestId: attempt.requestId,
+                attempts: attempt.number,
+              }),
+            );
+          }
+          if (event.event === "error") {
+            throw envelopeError(value, attempt.requestId);
+          }
+          if (event.event === "message") {
+            yield typed(value);
+          }
+        }
+      }
+    } finally {
+      abort.abort();
+      reader.cancel().catch(() => undefined);
+    }
+  }
+
+  #socketHub(): SocketHub {
+    const url = new URL("/v1/ws", this.#base);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const provider = this.#provider;
+    return new SocketHub({
+      url: url.href,
+      host: this.#base.host,
+      token: async () => (await provider.token()).access,
+      invalidate: async () => {
+        await provider.invalidate?.();
+      },
+      maxRetries: this.#maxRetries,
+    });
+  }
+
+  async #call(op: Operation, options: CallOptions | undefined, stream: boolean): Promise<Outcome> {
     const url = this.#url(op);
     const id = requestId();
     const retrySafe = op.idempotent === true || IDEMPOTENT.has(op.method);
@@ -302,13 +453,13 @@ export class Client {
       };
       let outcome: Outcome;
       try {
-        outcome = await this.#attempt(op, url, attempt, options);
+        outcome = await this.#attempt(op, url, attempt, options, stream);
       } catch (e) {
         this.#failed(attempt, e);
         throw e;
       }
-      if (outcome.kind === "done") {
-        return outcome.raw;
+      if (outcome.kind === "done" || outcome.kind === "open") {
+        return outcome;
       }
       if (outcome.kind === "unauthorized" && !refreshed) {
         await this.#provider.invalidate?.();
@@ -358,11 +509,12 @@ export class Client {
     url: URL,
     attempt: Attempt,
     options: CallOptions | undefined,
+    stream: boolean,
   ): Promise<Outcome> {
     const token = await this.#provider.token();
     const headers: Record<string, string> = {
       authorization: `Bearer ${token.access}`,
-      accept: "application/json",
+      accept: stream ? "text/event-stream" : "application/json",
       "user-agent": this.#userAgent,
       "x-request-id": attempt.requestId,
     };
@@ -375,13 +527,17 @@ export class Client {
       h.onRequest?.(attempt);
     }
     const timeout = options?.timeout ?? this.#timeout;
-    const timer = AbortSignal.timeout(timeout);
+    // A stream's body outlives the attempt's clock, so the clock aborts the headers only.
+    const abort = new AbortController();
+    const clock = setTimeout(() => abort.abort(new Error("timeout")), timeout);
+    const timer = abort.signal;
     const signal = options?.signal === undefined ? timer : AbortSignal.any([timer, options.signal]);
     let resp: globalThis.Response;
     try {
       const init: RequestInit = { method: op.method, headers, redirect: "manual", signal };
       resp = await this.#fetch(url, body === undefined ? init : { ...init, body });
     } catch (e) {
+      clearTimeout(clock);
       if (options?.signal?.aborted) {
         throw options.signal.reason;
       }
@@ -390,14 +546,21 @@ export class Client {
         : new ConnectionError(this.#base.host, describe(e), { cause: e });
       return { kind: "retry", waitMs: undefined, error };
     }
+    if (stream && resp.status >= 200 && resp.status < 300) {
+      clearTimeout(clock);
+      return { kind: "open", resp, abort, attempt };
+    }
     const length = Number(resp.headers.get("content-length") ?? "0");
     if (length > MAX_BODY) {
+      clearTimeout(clock);
       throw new TooLargeError();
     }
     let bytes: Uint8Array;
     try {
       bytes = new Uint8Array(await resp.arrayBuffer());
+      clearTimeout(clock);
     } catch (e) {
+      clearTimeout(clock);
       if (options?.signal?.aborted) {
         throw options.signal.reason;
       }

@@ -1717,7 +1717,8 @@
         "x-iohr-public": true,
         "x-iohr-scopes": [
           "events:read"
-        ]
+        ],
+        "x-iohr-rpc": "iohr.events.v1.EventsService/StreamEvents"
       }
     },
     "/v1/events/types": {
