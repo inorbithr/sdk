@@ -70,6 +70,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
+| `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
@@ -108,6 +109,24 @@ per profile in `IOHR_TOKEN_<PROFILE>` (`IOHR_TOKEN_CI`, `IOHR_TOKEN_DEFAULT`), `
 check` fails with a diff when the API's cut has moved, so a plan change or a revoked
 scope is a failing check, not a surprise in production. A person profile cannot sign in
 on CI: give it a token there, or leave it out of the lock.
+
+## Examples for a reference
+
+```sh
+iohr sdk examples --from openapi.public.json --out examples.json
+```
+
+For every operation of the document, one program per language that builds the client,
+makes the call with its path and required query parameters filled (the document's
+`example`, or a `<name>` placeholder), walks every page of a list, reads a stream in a
+loop, and reports the API's error code and request id. The output is JSON:
+`operations.<operationId>.code.<lang>`, with the generator's version, the document's
+API version and its cut hash. Each snippet uses the published runtime's public surface,
+and the compile tests build every one against each runtime (`compile_examples.rs`). How
+a snippet builds its client is one template per language
+(`crates/iohr-codegen/src/examples/client.rs`), so a change to the client configuration
+changes every example in one place. The docs site (docs.inorbit.hr) shows these beside
+each operation of its API reference.
 
 ## Domains
 

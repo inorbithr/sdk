@@ -34,6 +34,13 @@ use crate::target::RenderError;
 /// few enough to read at a glance.
 const BODY_FIELDS: usize = 4;
 
+/// Names a loop variable may not take in some language; the item is then `item`.
+const TAKEN: &[&str] = &[
+    "api", "case", "class", "default", "delete", "e", "err", "event", "for", "function", "import",
+    "in", "match", "mod", "new", "object", "package", "pages", "ref", "res", "stream", "string",
+    "type", "use", "value", "var",
+];
+
 /// The examples of one API, as `iohr sdk examples` writes them.
 #[derive(Debug, Clone, Serialize)]
 pub struct Examples {
@@ -109,13 +116,14 @@ impl Call<'_> {
         match &self.flow {
             Flow::Stream => "event".into(),
             Flow::Pages(p) => match &p.item {
-                Type::Ref { name } => name.to_snake_case(),
+                Type::Ref { name } if !TAKEN.contains(&name.to_snake_case().as_str()) => {
+                    name.to_snake_case()
+                }
                 _ => "item".into(),
             },
             Flow::Unary => "value".into(),
         }
     }
-
 }
 
 /// Renders the examples of `api` in `langs`.
@@ -129,11 +137,8 @@ pub fn render(api: &Api, langs: &[Language], generator: &str) -> Result<Examples
     }
     let surface = context::surface(api);
     let models = context::models(api);
-    let ids: BTreeMap<String, &iohr_openapi::Operation> = api
-        .operations
-        .values()
-        .map(|o| (o.line(), o))
-        .collect();
+    let ids: BTreeMap<String, &iohr_openapi::Operation> =
+        api.operations.values().map(|o| (o.line(), o)).collect();
     let mut operations = BTreeMap::new();
     let handled = surface
         .handles
@@ -318,9 +323,9 @@ fn fill(name: &str, ty: &Type, schema: Option<&Value>) -> Option<Value> {
                 .filter(Value::is_string)
                 .unwrap_or_else(|| Value::String(placeholder(name))),
         ),
-        Type::Array { item } if **item == Type::String => Some(Value::Array(vec![Value::String(
-            placeholder(name),
-        )])),
+        Type::Array { item } if **item == Type::String => {
+            Some(Value::Array(vec![Value::String(placeholder(name))]))
+        }
         Type::Integer { bits: 32 } => given.filter(Value::is_i64),
         Type::Bool => given.filter(Value::is_boolean),
         _ => None,
@@ -386,13 +391,17 @@ mod tests {
 
     #[test]
     fn a_body_never_gets_a_guessed_number_or_flag() {
+        assert_eq!(fill("url", &Type::String, None), Some(json!("<url>")));
         assert_eq!(
-            fill("url", &Type::String, None),
-            Some(json!("<url>"))
+            fill("interval_secs", &Type::Integer { bits: 32 }, None),
+            None
         );
-        assert_eq!(fill("interval_secs", &Type::Integer { bits: 32 }, None), None);
         assert_eq!(
-            fill("interval_secs", &Type::Integer { bits: 32 }, Some(&json!({"default": 60}))),
+            fill(
+                "interval_secs",
+                &Type::Integer { bits: 32 },
+                Some(&json!({"default": 60}))
+            ),
             Some(json!(60))
         );
         assert_eq!(fill("paused", &Type::Bool, None), None);

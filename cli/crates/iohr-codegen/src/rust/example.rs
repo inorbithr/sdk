@@ -55,6 +55,24 @@ pub(crate) fn example(call: &Call<'_>) -> String {
         }
         Flow::Pages(_) => {
             let item = call.item();
+            // The walk borrows the parameters, so they live in a variable.
+            let (bind, args) = match args.split_once('&') {
+                Some((path, params)) if call.op.params_type.is_some() => (
+                    format!("    let params = {params};\n"),
+                    format!("{path}&params"),
+                ),
+                _ => (String::new(), args),
+            };
+            out.push_str(&bind);
+            // The handle too.
+            let receiver = match call.tag {
+                Some(tag) => {
+                    let name = tag.to_snake_case();
+                    let _ = writeln!(out, "    let {name} = {receiver};");
+                    name
+                }
+                None => receiver.clone(),
+            };
             let _ = write!(
                 out,
                 "    let mut pages = {receiver}.all_{method}({args});\n    while let Some({item}) = pages.next().await {{\n        println!(\"{{:?}}\", {item}?);\n    }}\n"

@@ -158,7 +158,8 @@ pub(crate) fn examples(args: &SdkExamples, out: Out) -> Result<(), Error> {
     } else {
         format!("public={}", args.from)
     };
-    let api = Api::from_documents(from_files(&[spec])?).map_err(|e| Error::Failed(e.to_string()))?;
+    let api =
+        Api::from_documents(from_files(&[spec])?).map_err(|e| Error::Failed(e.to_string()))?;
     let langs: Vec<Language> = if args.lang.is_empty() {
         Language::ALL.to_vec()
     } else {
