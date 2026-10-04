@@ -16,6 +16,7 @@
 
 pub mod context;
 pub mod csharp;
+pub mod examples;
 mod files;
 pub mod go;
 pub mod ir;

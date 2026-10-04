@@ -10,7 +10,7 @@ use iohr_openapi::Api;
 use serde_json::Value;
 
 use crate::Env;
-use crate::cli::{Global, SdkCheck, SdkGenerate};
+use crate::cli::{Global, SdkCheck, SdkExamples, SdkGenerate};
 use crate::context::{Ctx, Session, session_for};
 use crate::error::Error;
 use crate::lock::Lock;
@@ -149,6 +149,54 @@ async fn fetch_cut(g: &Global, env: &Env, ctx: &Ctx, name: &ProfileName) -> Resu
         }
     }
     Ok(doc)
+}
+
+/// `iohr sdk examples`: one snippet per operation and language, as JSON.
+pub(crate) fn examples(args: &SdkExamples, out: Out) -> Result<(), Error> {
+    let spec = if args.from.contains('=') {
+        args.from.clone()
+    } else {
+        format!("public={}", args.from)
+    };
+    let api =
+        Api::from_documents(from_files(&[spec])?).map_err(|e| Error::Failed(e.to_string()))?;
+    let langs: Vec<Language> = if args.lang.is_empty() {
+        Language::ALL.to_vec()
+    } else {
+        args.lang.iter().map(|l| l.language()).collect()
+    };
+    let examples = iohr_codegen::examples::render(
+        &api,
+        &langs,
+        &format!("iohr {}", env!("CARGO_PKG_VERSION")),
+    )
+    .map_err(|e| Error::Failed(e.to_string()))?;
+    let text = examples.to_json();
+    for note in &examples.notes {
+        Out::note(&format!("note: {note}"));
+    }
+    if args.out.as_os_str() == "-" {
+        Out::raw(text.as_bytes());
+        return Ok(());
+    }
+    std::fs::write(&args.out, &text)
+        .map_err(|e| Error::Failed(format!("cannot write {}: {e}", args.out.display())))?;
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "out": args.out,
+            "operations": examples.operations.len(),
+            "languages": examples.languages,
+            "notes": examples.notes,
+        }));
+    } else {
+        Out::note(&format!(
+            "Wrote examples for {} operations in {} languages to {}.",
+            examples.operations.len(),
+            examples.languages.len(),
+            args.out.display()
+        ));
+    }
+    Ok(())
 }
 
 fn from_files(specs: &[String]) -> Result<Vec<(String, Value)>, Error> {

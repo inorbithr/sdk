@@ -11,6 +11,9 @@
 //! The output is gofmt-clean by construction: every struct field and constant stands
 //! alone, so nothing needs column alignment, and imports are grouped and sorted.
 
+mod example;
+pub(crate) use example::example;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;

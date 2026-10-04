@@ -7,6 +7,9 @@
 //! pydantic reads both forms and writes the string. A field a model's message may leave
 //! out is `None`.
 
+mod example;
+pub(crate) use example::example;
+
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 

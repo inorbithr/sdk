@@ -9,6 +9,9 @@
 //! as decimal strings through `JsonNumberHandling`; string enums keep a value this
 //! version does not know.
 
+mod example;
+pub(crate) use example::example;
+
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
