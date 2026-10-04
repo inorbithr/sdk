@@ -23,7 +23,7 @@
         "streams": { "enum": ["sse", "socket"], "description": "How the client opens streams: server-sent events (the default) or the one multiplexed /v1/ws socket." },
         "stream_idle_timeout_ms": { "type": "integer", "minimum": 1, "description": "How long a stream may be silent (no event, no comment, no frame) before it fails with a timeout; default 45000." },
         "load": { "type": "boolean", "description": "Build the client with `load` (config.md section 1) instead of explicit options. The driver then injects nothing but `env`, `config_file` and `files`: the case's `env` sets the URLs." },
-        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "The environment `load` sees, injected (never the process environment). `{replay}` is the replay server's URL, `{dir}` the temporary directory." },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "The environment `load` sees, injected (never the process environment). `{replay}` is the URL of the replay listener `transport` selects (`base_url` in the /_case answer), `{dir}` the temporary directory." },
         "config_file": { "type": "string", "description": "TOML text the driver writes to `{dir}/config.toml` and passes as `config_file`; placeholders as in `env`." },
         "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Files written into `{dir}` before the client is built, name to content." },
         "profile": { "type": "string", "description": "The `profile` option in code." },

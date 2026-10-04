@@ -968,7 +968,8 @@ schema additions (`conformance/case.schema.json`):
   `rate_limit`, `total_timeout_ms`, `retry_budget_capacity`, `tracing: true` (an
   in-memory exporter), `transport` (`https`, `mtls`, `proxy`: which replay listener and
   settings to use), `ca_bundle: false` (leave the replay CA out).
-  In `env` and `config_file`, `{replay}` is the replay server's URL and `{dir}` the
+  In `env` and `config_file`, `{replay}` is the URL of the replay listener the case's
+  `transport` selects (the `base_url` of the `/_case` answer) and `{dir}` the
   temporary directory.
 - `action`: `options` (per-call `idempotency_key`, `traceparent`, `timeout_ms`) and
   `rewrite` (`after` N calls, files to rewrite: rotation).
@@ -980,22 +981,30 @@ schema additions (`conformance/case.schema.json`):
   no record), `spans` (name, kind, attribute subsets, count), `rate_limit` (the snapshot
   on the result), `config` (a subset of `describe()`), `idempotency_key` (on the result).
 
-Replay server features, needed before the first runtime can pass them:
+Replay server features, needed before the first runtime can pass them (all built;
+`conformance/README.md` describes them):
 
-1. Header matchers `*`, `$name` and `~regex`, and `headers_absent`.
-2. A TLS listener with a CA generated at start (`ca.pem` in a temporary directory) and
-   a leaf for `127.0.0.1` and `localhost`.
+1. Header matchers `*`, `$name` and `~regex` (RE2, the whole value), and
+   `headers_absent`. `$name` captures last for the session and are kept only from an
+   exchange that matched as a whole.
+2. A TLS listener with a CA generated at start (ECDSA P-256; `ca.pem` in a temporary
+   directory) and a leaf for `127.0.0.1`, `::1` and `localhost`. HTTP/1.1 only.
 3. An mTLS listener requiring a client certificate signed by that CA, with a client
-   certificate and key written next to it, and `client_cert` matching.
-4. A CONNECT proxy listener that tunnels to the TLS listener and marks the requests it
-   carried, so `via` can be matched.
+   certificate (`CN=conformance-client`) and key (PKCS#8) written next to it, and
+   `client_cert` matching the subject, or its common name alone.
+4. A CONNECT proxy listener that tunnels to the replay's own listeners only and marks the
+   requests it carried, so `via` can be matched. The `Proxy-Authorization` sent on
+   `CONNECT` shows on those requests as the `proxy-authorization` header.
 5. `POST /_case` answers these locations (`https_url`, `mtls_url`, `proxy_url`,
-   `ca_file`, `client_cert_file`, `client_key_file`) next to the case.
+   `ca_file`, `client_cert_file`, `client_key_file`, and `http_url`) next to the case,
+   with `base_url`: the listener the case's `transport` selects (`https` and `proxy`:
+   `https_url`; `mtls`: `mtls_url`; otherwise `http_url`).
 6. A fake `iohr`: the replay binary, run as `replay auth token --profile P --format json`,
-   prints `{"access_token":"cli-<P>","expires_at":<now + 15 min>}`, and exits 1 with a
-   message for a profile named `missing`.
+   prints `{"access_token":"cli-<P>","expires_at":"<now + 15 min, RFC 3339 UTC>","profile":"<P>"}`
+   (no `account`: the fake has none, and the SDK reads only the token and its expiry),
+   and exits 1 with a one-line message on standard error for a profile named `missing`.
 7. The self-test learns the new matchers, so it sends values that satisfy them instead of
-   the literal patterns.
+   the literal patterns, and sends each request through the listener its case names.
 
 ### 9.2 Vectors
 
