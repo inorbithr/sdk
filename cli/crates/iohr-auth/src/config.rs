@@ -46,7 +46,11 @@ struct Source(Option<toml_edit::DocumentMut>);
 
 impl fmt::Debug for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(if self.0.is_some() { "Source(file)" } else { "Source(new)" })
+        f.write_str(if self.0.is_some() {
+            "Source(file)"
+        } else {
+            "Source(new)"
+        })
     }
 }
 
@@ -322,16 +326,13 @@ impl Config {
         if let Some(all) = doc.get_mut("profiles").and_then(Item::as_table_like_mut) {
             let made_here: Vec<String> = all
                 .iter()
-                .filter(|(_, item)| {
-                    item.as_table_like().is_some_and(|t| t.contains_key("kind"))
-                })
+                .filter(|(_, item)| item.as_table_like().is_some_and(|t| t.contains_key("kind")))
                 .map(|(k, _)| k.to_owned())
                 .collect();
             for name in made_here {
                 let ours = name
                     .parse::<ProfileName>()
-                    .ok()
-                    .is_some_and(|n| self.profiles.contains_key(&n));
+                    .is_ok_and(|n| self.profiles.contains_key(&n));
                 if ours {
                     continue;
                 }
@@ -352,8 +353,7 @@ impl Config {
                 if !all.contains_key(name.as_str()) {
                     all.insert(name.as_str(), Item::Table(Table::new()));
                 }
-                let Some(t) = all.get_mut(name.as_str()).and_then(Item::as_table_like_mut)
-                else {
+                let Some(t) = all.get_mut(name.as_str()).and_then(Item::as_table_like_mut) else {
                     // Not a table: the typed parse would have refused the file.
                     continue;
                 };
@@ -367,7 +367,7 @@ impl Config {
         if doc
             .get("profiles")
             .and_then(Item::as_table_like)
-            .is_some_and(|t| t.is_empty())
+            .is_some_and(toml_edit::TableLike::is_empty)
         {
             doc.remove("profiles");
         }
@@ -464,7 +464,10 @@ fn set_str(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<&str>) {
             }
             let mut new = toml_edit::Value::from(v);
             // Keep a comment written after the old value.
-            if let Some(decor) = old.and_then(toml_edit::Item::as_value).map(toml_edit::Value::decor) {
+            if let Some(decor) = old
+                .and_then(toml_edit::Item::as_value)
+                .map(toml_edit::Value::decor)
+            {
                 *new.decor_mut() = decor.clone();
             }
             // Assigning in place keeps the key and the comments above it.
@@ -656,7 +659,10 @@ mirror_note = "kept"
         assert_eq!(t["profiles"]["work"]["account"].as_str(), Some("acc_9"));
         assert_eq!(t["profiles"]["work"]["timeout"].as_str(), Some("10s"));
         assert_eq!(t["profiles"]["ci"]["key_id"].as_str(), Some("ak_7f3c"));
-        assert_eq!(t["profiles"]["ci"]["scopes"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            t["profiles"]["ci"]["scopes"].as_array().map(Vec::len),
+            Some(2)
+        );
         assert_eq!(t["profiles"]["new"]["kind"].as_str(), Some("token"));
         assert_eq!(t["profiles"]["new"]["storage"].as_str(), Some("file"));
         assert_eq!(t["ext"]["mirror_note"].as_str(), Some("kept"));

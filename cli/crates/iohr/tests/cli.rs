@@ -1854,12 +1854,21 @@ async fn iohr_token_wins_over_the_default_profile() {
     me(&server, &stored).await;
     let o = r.with_stdin(
         &format!("{stored}\n"),
-        &["login", "--with-token", "--insecure-storage", "--profile", "ci"],
+        &[
+            "login",
+            "--with-token",
+            "--insecure-storage",
+            "--profile",
+            "ci",
+        ],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
     Mock::given(method("GET"))
         .and(path("/v1/me"))
-        .and(header("authorization", format!("Bearer {from_env}").as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {from_env}").as_str(),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "subject": "ak_from_env", "kind": "client", "org": ACCOUNT, "scopes": ["identity:read"]
         })))
@@ -1892,7 +1901,13 @@ async fn auth_token_prints_the_profiles_token_and_its_expiry() {
     me(&server, &t).await;
     let o = r.with_stdin(
         &format!("{t}\n"),
-        &["login", "--with-token", "--insecure-storage", "--profile", "ci"],
+        &[
+            "login",
+            "--with-token",
+            "--insecure-storage",
+            "--profile",
+            "ci",
+        ],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
 
@@ -1952,8 +1967,12 @@ async fn auth_token_refreshes_a_person_and_never_prints_the_refresh_token() {
     let uri = server.uri();
     Mock::given(method("POST"))
         .and(path("/oauth2/token"))
-        .and(wiremock::matchers::body_string_contains("grant_type=refresh_token"))
-        .and(wiremock::matchers::body_string_contains("refresh_token=OLDREFRESH"))
+        .and(wiremock::matchers::body_string_contains(
+            "grant_type=refresh_token",
+        ))
+        .and(wiremock::matchers::body_string_contains(
+            "refresh_token=OLDREFRESH",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(person_tokens(&uri)))
         .expect(1)
         .mount(&server)
@@ -1976,13 +1995,19 @@ async fn auth_token_refreshes_a_person_and_never_prints_the_refresh_token() {
     let o = r.run(&["auth", "token", "--profile", "me", "--format", "json"]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     let all = text(&o);
-    assert!(!all.contains("REFRESHMARKER") && !all.contains("OLDREFRESH"), "{all}");
+    assert!(
+        !all.contains("REFRESHMARKER") && !all.contains("OLDREFRESH"),
+        "{all}"
+    );
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     let want = person_tokens(&uri)["access_token"].clone();
     assert_eq!(v["access_token"], want);
     assert_eq!(v["profile"], "me");
     let stored = std::fs::read_to_string(dir.path().join(format!("secrets/me.{ACCOUNT}"))).unwrap();
-    assert!(stored.contains("REFRESHMARKER"), "the rotated refresh token is stored");
+    assert!(
+        stored.contains("REFRESHMARKER"),
+        "the rotated refresh token is stored"
+    );
     // The run read the config and did not rewrite it; the SDK keys are there.
     let config = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
     assert!(config.contains("[sdk]") && config.contains("timeout = \"10s\""));
@@ -2029,8 +2054,26 @@ async fn commands_that_write_the_config_keep_sdk_keys_and_comments() {
     assert_eq!(v["profiles"].as_object().unwrap().len(), 0, "{v}");
 
     for (step, args) in [
-        ("login", vec!["login", "--with-token", "--insecure-storage", "--profile", "work"]),
-        ("login a second", vec!["login", "--with-token", "--insecure-storage", "--profile", "other"]),
+        (
+            "login",
+            vec![
+                "login",
+                "--with-token",
+                "--insecure-storage",
+                "--profile",
+                "work",
+            ],
+        ),
+        (
+            "login a second",
+            vec![
+                "login",
+                "--with-token",
+                "--insecure-storage",
+                "--profile",
+                "other",
+            ],
+        ),
     ] {
         let o = r.with_stdin(&format!("{t}\n"), &args);
         assert_eq!(code(&o), 0, "{step}: {}", text(&o));
@@ -2040,7 +2083,15 @@ async fn commands_that_write_the_config_keep_sdk_keys_and_comments() {
     assert!(text_now.contains("kind = \"token\""), "{text_now}");
     for (step, args) in [
         ("profile use", vec!["profile", "use", "other"]),
-        ("config set", vec!["config", "set", "ext.registry", "registry.acme.hr/inorbit/iohr-ext"]),
+        (
+            "config set",
+            vec![
+                "config",
+                "set",
+                "ext.registry",
+                "registry.acme.hr/inorbit/iohr-ext",
+            ],
+        ),
         ("config unset", vec!["config", "unset", "ext.registry"]),
         ("logout", vec!["logout", "--profile", "work"]),
     ] {
@@ -2052,5 +2103,9 @@ async fn commands_that_write_the_config_keep_sdk_keys_and_comments() {
     let t: toml::Table = text_now.parse().unwrap();
     assert_eq!(t["default"].as_str(), Some("other"));
     // logout took the command line's keys from `work` and left the SDK's.
-    assert_eq!(t["profiles"]["work"].as_table().unwrap().len(), 1, "{text_now}");
+    assert_eq!(
+        t["profiles"]["work"].as_table().unwrap().len(),
+        1,
+        "{text_now}"
+    );
 }

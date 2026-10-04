@@ -19,7 +19,9 @@ mod whoami;
 use clap::CommandFactory as _;
 
 use crate::Env;
-use crate::cli::{AccountsCommand, AuthCommand, Cli, Command, LabCommand, OpenapiCommand, SdkCommand};
+use crate::cli::{
+    AccountsCommand, AuthCommand, Cli, Command, LabCommand, OpenapiCommand, SdkCommand,
+};
 use crate::error::Error;
 use crate::output::Out;
 
