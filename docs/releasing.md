@@ -46,7 +46,10 @@ registry release is one step once M4b lands: `IsPackable` stays `false` and the 
 `distributionManagement` until then, and no job uploads them. A version the four take
 together is set once in `release-please-config.json` (`release-as` on each package,
 removed in the next pull request after the release); a `Release-As:` footer would also
-move every other component the commit touches, the command line included.
+move every other component the commit touches, the command line included. A pinned
+version that may break the API (a new major, or a new minor before 1.0) is the declared
+break `rust:api` and `py:api` accept: Rust is checked as a major release, Python's
+changes are listed without failing (`tools/release-as.py`).
 
 ## The command line's channels
 
