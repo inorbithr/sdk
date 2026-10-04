@@ -2,6 +2,7 @@
 package hr.inorbit.sdk.generated;
 
 import hr.inorbit.sdk.Client;
+import hr.inorbit.sdk.EventStream;
 import hr.inorbit.sdk.Method;
 import hr.inorbit.sdk.Operation;
 import hr.inorbit.sdk.Response;
@@ -932,6 +933,25 @@ public final class Operations {
                 .query("page_token", params.pageToken())
                 .scopes("connections:read")
                 .build(), ListToolsResponse.class);
+    }
+
+    /**
+     * <code>GET /v1/events/events</code>; needs scope <code>events:read</code>. Transcoded from <code>/iohr.events.v1.EventsService/StreamEvents</code> on the <code>events</code> backend.
+     *
+     * @param client the client of a profile that may call it
+     * @param params the query parameters
+     * @return the events, one model each; close it to stop early
+     */
+    public static EventStream<StreamEventsResponse> streamEvents(Client client, EventsStreamEventsParams params) {
+        return client.stream(Operation.builder(Method.GET, "/v1/events/events")
+                .name("events.stream_events")
+                .query("types", params.types())
+                .query("account_id", params.accountId())
+                .scopes("events:read")
+                .field("types", params.types())
+                .field("account_id", params.accountId())
+                .rpc("iohr.events.v1.EventsService/StreamEvents")
+                .build(), StreamEventsResponse.class);
     }
 
     /**

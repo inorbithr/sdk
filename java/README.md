@@ -53,6 +53,29 @@ Every request field is optional (unset in the builder, left out of the body); an
 field is `null` when the API may leave it out. Timestamps stay the strings the API sent;
 `Timestamps.parse` reads one, `""` (unset) as an empty `Optional`.
 
+## Streams
+
+A stream operation (the account's events, `streamEvents`, scope `events:read`) answers an
+`EventStream<T>`: an `Iterator`, an `Iterable` and an `AutoCloseable`. It opens on the first
+step of the loop, with the same token and retry rules as any `GET`, and closing it (or
+leaving the `try`) stops it:
+
+```java
+try (EventStream<StreamEventsResponse> events = api.events().streamEvents()) {
+    for (StreamEventsResponse ev : events) {
+        System.out.println(ev.type() + " " + ev.id());
+    }
+}
+```
+
+By default each stream is server-sent events. `Client.builder().streams(StreamTransport.SOCKET)`
+runs every stream of the client as a call on one `/v1/ws` WebSocket instead
+(`java.net.http.WebSocket`, no extra dependency); when the server ends that socket the client
+opens a new one and issues the calls again, and a revoked key ends them with
+`ApiException` `unauthenticated`. A stream silent for `streamIdleTimeout` (45 s; the server
+keeps it alive every 15 s) fails with `TimeoutException`. An `error` event or frame ends the
+stream with its `ApiException`. A stream ended by the server is not resumed: open it again.
+
 ## Errors
 
 Every failure is an unchecked `InOrbitException`: `ApiException` (with `code()`,

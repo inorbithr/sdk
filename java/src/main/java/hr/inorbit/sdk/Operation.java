@@ -18,6 +18,8 @@ public final class Operation {
     private final Object body;
     private final List<String> scopes;
     private final boolean idempotent;
+    private final String rpc;
+    private final Map<String, Object> fields;
 
     private Operation(Builder b) {
         this.name = b.name;
@@ -27,6 +29,8 @@ public final class Operation {
         this.body = b.body;
         this.scopes = List.copyOf(b.scopes);
         this.idempotent = b.idempotent;
+        this.rpc = b.rpc;
+        this.fields = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(b.fields));
     }
 
     /**
@@ -103,6 +107,26 @@ public final class Operation {
         return idempotent || method.isIdempotent();
     }
 
+    /**
+     * The RPC's full name a {@code /v1/ws} call frame names ({@code
+     * iohr.events.v1.EventsService/StreamEvents}), or {@code null} when the operation has none.
+     *
+     * @return the name, or {@code null}
+     */
+    public String rpc() {
+        return rpc;
+    }
+
+    /**
+     * The path and query parameters as typed values by wire name, the body of a {@code /v1/ws}
+     * call frame; unset ones are absent.
+     *
+     * @return the fields, in the order given
+     */
+    public Map<String, Object> fields() {
+        return fields;
+    }
+
     @Override
     public String toString() {
         return "Operation[" + method + " " + path + "]";
@@ -118,6 +142,8 @@ public final class Operation {
         private Object body;
         private final List<String> scopes = new ArrayList<>();
         private boolean idempotent;
+        private String rpc;
+        private final Map<String, Object> fields = new java.util.LinkedHashMap<>();
 
         private Builder(Method method, String path) {
             this.method = method;
@@ -183,6 +209,32 @@ public final class Operation {
          */
         public Builder idempotent(boolean idempotent) {
             this.idempotent = idempotent;
+            return this;
+        }
+
+        /**
+         * The RPC's full name, for a stream opened over {@code /v1/ws}.
+         *
+         * @param rpc the name ({@code iohr.events.v1.EventsService/StreamEvents})
+         * @return this builder
+         */
+        public Builder rpc(String rpc) {
+            this.rpc = rpc;
+            return this;
+        }
+
+        /**
+         * One path or query parameter as its typed value, for the body of a {@code /v1/ws} call
+         * frame; {@code null} leaves it out. The query and the path are given separately.
+         *
+         * @param name the wire name ({@code a.b} for a nested field)
+         * @param value the value
+         * @return this builder
+         */
+        public Builder field(String name, Object value) {
+            if (value != null) {
+                fields.put(name, value);
+            }
             return this;
         }
 
