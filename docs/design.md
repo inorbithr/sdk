@@ -37,10 +37,14 @@ One entry type per language, constructed once and shared across threads or tasks
 | | TypeScript | Python | Go | Java | C# | Rust |
 |---|---|---|---|---|---|---|
 | Type | `Client` | `Client`, `AsyncClient` | `inorbit.Client` | `hr.inorbit.sdk.Client` | `InOrbit.Sdk.Client<P>` | `inorbithr::Client<P>` |
-| Build | `new Client({...})` | `Client(...)` | `inorbit.NewClient(opts...)` | `Client.builder()...build()` | `Client<P>.Builder()...Build()` | `Client::builder()...build()?` |
+| Build | `new Client({...})` | `Client(...)` | `inorbit.NewClient(opts...)` | `Client.builder()...build()` | `new Client<P>(new ClientOptions {...})` | `Client::builder()...build()?` |
+| Load (M6) | `Client.load()` | `Client.load()` | `inorbit.Load()` | `Client.load()` | `Client.Load()` | `Client::load()?` |
 | Per call | `{ signal, timeout }` options | keyword `timeout=` | `ctx context.Context` first | a sync call, a `CompletableFuture` beside it | `async`, `CancellationToken` last | `.await` |
 
-Configuration, same names everywhere (case adjusted):
+Configuration, same names everywhere (case adjusted). [config.md](config.md) is the full
+contract (ADR 0015): every setting's environment variable and config-file key, the
+precedence (code, environment, config file, defaults), the credential chain and the
+middleware pipeline. The table below is the summary as built before M6.
 
 | Option | Default | Notes |
 |---|---|---|
@@ -146,7 +150,9 @@ One error family per language, rooted in a single type the caller can match.
   exchange on the same conditions. Never retried: any other 4xx, `500`, `501`.
 - Only idempotent methods are retried automatically (`GET`, `HEAD`, `PUT`, `DELETE`).
   `POST` is retried only when the operation is marked idempotent or the caller passes an
-  idempotency key (the platform does not support the header yet; ADR 0004).
+  idempotency key. Since RFC 0033 the platform takes `Idempotency-Key` on its create and
+  trigger operations; M6 sends one on every such call and retries it (config.md
+  section 7.5).
 - Delay: the server's `Retry-After` header or `retry` detail when present, capped at
   60 s; otherwise exponential backoff with full jitter, base 0.5 s, cap 8 s.
 - `max_retries` counts retries, not attempts. The caller's deadline always wins over the
@@ -245,6 +251,9 @@ rules.
 reimplement the protocol.
 
 ## 8. Hooks and observability
+
+M6 replaces this section's mechanisms with the named pipeline of config.md section 7;
+hooks stay and run inside it.
 
 - A middleware or hook point around every attempt: request out, response in, error.
   Enough to add logging, metrics or tracing without the SDK depending on any of them.

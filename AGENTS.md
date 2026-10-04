@@ -97,6 +97,8 @@ A task for a language whose package does not exist yet prints a skip line and ex
 ## Where to look
 
 - Cross-language API rules: `docs/design.md`
+- Configuration, credentials and the middleware pipeline: `docs/config.md` (recipes in
+  `docs/recipes.md`)
 - Why things are the way they are: `docs/adr/`
 - Writing style for READMEs, docs and error messages: `docs/style.md`
 - Releasing: `docs/releasing.md`
