@@ -1,0 +1,18 @@
+name: code-beats-env-beats-file
+kind: config
+summary: Each setting takes the first source that sets it, code then environment then the file.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  code: { timeout: 5s }
+  env: { INORBIT_TOKEN: t, INORBIT_TIMEOUT: 10s, INORBIT_MAX_RETRIES: "4" }
+  config_file: |
+    [sdk]
+    timeout = "20s"
+    max_retries = 1
+    connect_timeout = "3s"
+expect:
+  config_file: "{file}"
+  settings:
+    timeout: { value: 5s, source: code }
+    max_retries: { value: 4, source: env INORBIT_MAX_RETRIES }
+    connect_timeout: { value: 3s, source: "file {file} [sdk]" }

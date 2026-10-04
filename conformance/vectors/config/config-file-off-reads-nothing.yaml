@@ -1,0 +1,14 @@
+name: config-file-off-reads-nothing
+kind: config
+summary: INORBIT_CONFIG_FILE=off ignores a file at the default location.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off" }
+  home: true
+  config_file: |
+    [sdk]
+    timeout = "7s"
+expect:
+  config_file: null
+  settings:
+    timeout: { value: 30s, source: default }

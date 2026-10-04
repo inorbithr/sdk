@@ -1,0 +1,24 @@
+name: rate-limit-headers
+kind: rate-limit
+summary: The snapshot read from the edge's X-RateLimit headers and the IETF RateLimit fields.
+pending: [go, rust, ts, py, java, csharp]
+notes: docs/config.md section 7.8. Header names compare without case. reset_ms and window_ms are milliseconds.
+checks:
+  - summary: Envoy draft-03 headers
+    headers: { X-RateLimit-Limit: "1000", X-RateLimit-Remaining: "0", X-RateLimit-Reset: "3" }
+    expect: { limit: 1000, remaining: 0, reset_ms: 3000 }
+  - summary: IETF draft 11 fields
+    headers: { RateLimit: '"default";r=50;t=30', RateLimit-Policy: '"default";q=100;w=60' }
+    expect: { limit: 100, remaining: 50, reset_ms: 30000, policy: { name: default, quota: 100, window_ms: 60000 } }
+  - summary: the IETF fields win when both are sent
+    headers: { RateLimit: '"default";r=5;t=2', RateLimit-Policy: '"default";q=10', X-RateLimit-Limit: "1000", X-RateLimit-Remaining: "999", X-RateLimit-Reset: "60" }
+    expect: { limit: 10, remaining: 5, reset_ms: 2000, policy: { name: default, quota: 10 } }
+  - summary: RateLimit without t has no reset
+    headers: { RateLimit: '"default";r=7' }
+    expect: { remaining: 7 }
+  - summary: a malformed value is ignored, not an error
+    headers: { X-RateLimit-Limit: "10", X-RateLimit-Remaining: abc, X-RateLimit-Reset: "1" }
+    expect: null
+  - summary: no headers, no snapshot
+    headers: {}
+    expect: null

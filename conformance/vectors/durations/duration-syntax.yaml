@@ -1,0 +1,18 @@
+name: duration-syntax
+kind: durations
+summary: The one duration syntax for the environment and the config file, digits then ms, s, m or h.
+pending: [go, rust, ts, py, java, csharp]
+notes: docs/config.md section 2.4. The expectation is milliseconds, or error.
+checks:
+  - { value: 500ms, expect: 500 }
+  - { value: 30s, expect: 30000 }
+  - { value: 2m, expect: 120000 }
+  - { value: 1h, expect: 3600000 }
+  - { value: "30", expect: error }
+  - { value: 1.5s, expect: error }
+  - { value: 0s, expect: error }
+  - { value: 30S, expect: error }
+  - { value: " 30s", expect: error }
+  - { value: 30 s, expect: error }
+  - { value: "-5s", expect: error }
+  - { value: 1h30m, expect: error }

@@ -1,0 +1,32 @@
+name: no-proxy-matching
+kind: no-proxy
+summary: Which proxy, if any, each URL goes through, for the variables and no_proxy forms of docs/config.md section 6.2.
+pending: [go, rust, ts, py, java, csharp]
+notes: The expectation is the proxy URL used, or null for a direct connection.
+checks:
+  - { summary: a domain matches itself, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: example.com }, url: "https://example.com/v1/me", expect: null }
+  - { summary: a domain matches its subdomains, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: example.com }, url: "https://api.example.com/v1/me", expect: null }
+  - { summary: a domain does not match a longer name, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: example.com }, url: "https://notexample.com/", expect: "http://proxy.example:3128" }
+  - { summary: a leading dot changes nothing, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: .example.com }, url: "https://example.com/", expect: null }
+  - { summary: a star alone matches every host, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: "*" }, url: "https://api.inorbit.hr/", expect: null }
+  - { summary: a star inside a name is not a wildcard and is an error, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: "*.example.com" }, url: "https://a.example.com/", expect: { error: config } }
+  - { summary: a port limits the entry, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: "example.com:8443" }, url: "https://example.com/", expect: "http://proxy.example:3128" }
+  - { summary: the matching port, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: "example.com:8443" }, url: "https://example.com:8443/", expect: null }
+  - { summary: CIDR matches an IP literal, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: 10.0.0.0/8 }, url: "https://10.1.2.3/", expect: null }
+  - { summary: CIDR never resolves names, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: 10.0.0.0/8 }, url: "https://ten.example.com/", expect: "http://proxy.example:3128" }
+  - { summary: IPv6 CIDR, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: "fd00::/8" }, url: "https://[fd00::1]/", expect: null }
+  - { summary: IPv6 literal in brackets, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: "[2001:db8::1]" }, url: "https://[2001:db8::1]/", expect: null }
+  - { summary: case and spaces do not matter and empty entries are skipped, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: " Example.COM , ,foo.org " }, url: "https://API.example.com/", expect: null }
+  - { summary: a bad CIDR is an error, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: 10.0.0.0/33 }, url: "https://10.0.0.1/", expect: { error: config } }
+  - { summary: lower case no_proxy wins over NO_PROXY, env: { HTTPS_PROXY: "http://proxy.example:3128", no_proxy: a.com, NO_PROXY: b.com }, url: "https://b.com/", expect: "http://proxy.example:3128" }
+  - { summary: INORBIT_NO_PROXY wins over both, env: { HTTPS_PROXY: "http://proxy.example:3128", INORBIT_NO_PROXY: c.com, no_proxy: a.com }, url: "https://a.com/", expect: "http://proxy.example:3128" }
+  - { summary: lower case https_proxy wins over HTTPS_PROXY, env: { https_proxy: "http://lower:3128", HTTPS_PROXY: "http://upper:3128" }, url: "https://api.inorbit.hr/", expect: "http://lower:3128" }
+  - { summary: INORBIT_PROXY wins over the standard variables, env: { INORBIT_PROXY: "http://ours:3128", https_proxy: "http://lower:3128" }, url: "https://api.inorbit.hr/", expect: "http://ours:3128" }
+  - { summary: HTTP_PROXY is not read, env: { HTTP_PROXY: "http://proxy.example:3128" }, url: "https://api.inorbit.hr/", expect: null }
+  - { summary: ALL_PROXY is not read, env: { ALL_PROXY: "http://proxy.example:3128" }, url: "https://api.inorbit.hr/", expect: null }
+  - { summary: off turns the standard variables off, env: { INORBIT_PROXY: "off", HTTPS_PROXY: "http://proxy.example:3128" }, url: "https://api.inorbit.hr/", expect: null }
+  - { summary: an environment proxy skips localhost, env: { HTTPS_PROXY: "http://proxy.example:3128" }, url: "https://localhost:8443/", expect: null }
+  - { summary: an environment proxy skips 127.0.0.0/8, env: { HTTPS_PROXY: "http://proxy.example:3128" }, url: "https://127.0.0.2/", expect: null }
+  - { summary: an environment proxy skips ::1, env: { HTTPS_PROXY: "http://proxy.example:3128" }, url: "https://[::1]/", expect: null }
+  - { summary: an explicit proxy applies to loopback, env: { INORBIT_PROXY: "http://proxy.example:3128" }, url: "https://127.0.0.1:8443/", expect: "http://proxy.example:3128" }
+  - { summary: a proxy set in code wins and no_proxy still applies, env: { INORBIT_NO_PROXY: example.com }, code: { proxy: "http://proxy.example:3128" }, url: "https://example.com/", expect: null }

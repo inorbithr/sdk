@@ -11,7 +11,8 @@ languages and fails in the sixth is a parity bug.
 | Path | Contents |
 |---|---|
 | `case.schema.json` | JSON Schema for a case file; editors validate against it |
-| `cases/<area>/<name>.yaml` | The cases, grouped by area (`auth`, `errors`, `retries`, `operations`, `sse`, `socket`) |
+| `cases/<area>/<name>.yaml` | The cases, grouped by area (`auth`, `errors`, `retries`, `operations`, `sse`, `socket`, and from M6 `credentials`, `middleware`, `transport`) |
+| `vector.schema.json`, `vectors/<kind>/<name>.yaml` | Pure-function vectors, run by each language as unit tests without a server: configuration resolution, config file paths, `no_proxy`, rate-limit headers, durations (`docs/config.md` section 9.2) |
 | `server/` | The replay server, a Go program with one dependency (a YAML parser) |
 | `drivers/` | Nothing yet; each language keeps its driver next to its tests (`go/internal/conformance`, `rust/tests/conformance.rs`, `typescript/test/conformance`, `python/tests/conformance`) |
 
@@ -96,6 +97,18 @@ Rules the server applies:
 
 `mise run conformance:server:check` runs gofmt, vet, golangci-lint and a self-test that
 plays every case's exchanges against the server and expects a pass.
+
+## Configuration and middleware cases (M6, pending)
+
+The cases under `credentials`, `middleware`, `transport` and the M6 cases in `retries`
+use schema fields no runtime or replay feature supports yet. Every one is `pending` for
+all six languages. The fields are `client.load`, `env`, `config_file`, `files`,
+`pipeline` probes, `log`, `tracing` and `transport`; `action.options` and `rewrite`;
+request matchers `*`, `$name`, `~regex`, `headers_absent`, `via` and `client_cert`; and
+`expect.probes`, `logs`, `spans`, `rate_limit` and `config`. `docs/config.md` section 9.1
+lists the replay server features they need: matchers, TLS, mTLS and proxy listeners, and
+a fake `iohr`. Until those land, the server ignores the new request fields, and its
+self-test sends matcher patterns literally, so these cases replay as plain exchanges.
 
 ## Writing a case
 

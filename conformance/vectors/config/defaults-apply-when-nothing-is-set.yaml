@@ -1,0 +1,26 @@
+name: defaults-apply-when-nothing-is-set
+kind: config
+summary: With only a token in the environment and no file, every other setting is its default.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off" }
+expect:
+  config_file: null
+  settings:
+    base_url: { value: "https://api.inorbit.hr", source: default }
+    token_url: { value: "https://auth.inorbit.hr/oauth2/token", source: default }
+    connect_timeout: { value: 10s, source: default }
+    timeout: { value: 30s, source: default }
+    total_timeout: { value: 120s, source: default }
+    stream_idle_timeout: { value: 45s, source: default }
+    max_retries: { value: 2, source: default }
+    retry_base_delay: { value: 500ms, source: default }
+    retry_max_delay: { value: 8s, source: default }
+    retry_after_max: { value: 60s, source: default }
+    retry_budget: { value: true, source: default }
+    streams: { value: sse, source: default }
+    log: { value: "off", source: default }
+    rate_limit: { value: observe, source: default }
+    token: { value: "<redacted>", source: env INORBIT_TOKEN }
+  credential: { source: env, kind: static_token }
+  pipeline: [request_id, user_agent, idempotency_key, call_tracing, deadline, retry, auth, rate_limit, attempt_tracing, logging, hooks, timeout]

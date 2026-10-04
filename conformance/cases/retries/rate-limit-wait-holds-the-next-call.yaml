@@ -1,0 +1,17 @@
+name: rate-limit-wait-holds-the-next-call
+area: retries
+summary: In wait mode, an answer that says nothing remains holds the next call until the window resets.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 7.8.
+client: { rate_limit: wait }
+action: { op: me, repeat: 2 }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 200, headers: { x-ratelimit-limit: "10", x-ratelimit-remaining: "0", x-ratelimit-reset: "1" }, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+  - request: { method: GET, path: /v1/me, min_delay_ms: 1000 }
+    response: { status: 200, headers: { x-ratelimit-limit: "10", x-ratelimit-remaining: "9", x-ratelimit-reset: "10" }, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }
+  attempts: 2

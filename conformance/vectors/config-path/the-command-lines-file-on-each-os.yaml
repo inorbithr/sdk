@@ -1,0 +1,17 @@
+name: the-command-lines-file-on-each-os
+kind: config-path
+summary: The config file is found where the iohr command line keeps it, with INORBIT_CONFIG_FILE and IOHR_CONFIG_DIR as overrides.
+pending: [go, rust, ts, py, java, csharp]
+notes: docs/config.md section 4.1. The expected path is compared as written, with the OS's own separator.
+checks:
+  - { summary: Linux default, os: linux, home: /home/ana, env: {}, expect: /home/ana/.config/iohr/config.toml }
+  - { summary: XDG_CONFIG_HOME, os: linux, home: /home/ana, env: { XDG_CONFIG_HOME: /xdg }, expect: /xdg/iohr/config.toml }
+  - { summary: a relative XDG_CONFIG_HOME is ignored, os: linux, home: /home/ana, env: { XDG_CONFIG_HOME: rel/dir }, expect: /home/ana/.config/iohr/config.toml }
+  - { summary: an empty XDG_CONFIG_HOME is unset, os: linux, home: /home/ana, env: { XDG_CONFIG_HOME: "" }, expect: /home/ana/.config/iohr/config.toml }
+  - { summary: macOS default, os: macos, home: /Users/ana, env: {}, expect: /Users/ana/Library/Application Support/hr.InOrbit.iohr/config.toml }
+  - { summary: Windows default, os: windows, home: 'C:\Users\ana', env: { APPDATA: 'C:\Users\ana\AppData\Roaming' }, expect: 'C:\Users\ana\AppData\Roaming\InOrbit\iohr\config\config.toml' }
+  - { summary: IOHR_CONFIG_DIR, os: linux, home: /home/ana, env: { IOHR_CONFIG_DIR: /etc/iohr }, expect: /etc/iohr/config.toml }
+  - { summary: INORBIT_CONFIG_FILE wins, os: linux, home: /home/ana, env: { IOHR_CONFIG_DIR: /etc/iohr, INORBIT_CONFIG_FILE: /srv/inorbit.toml }, expect: /srv/inorbit.toml }
+  - { summary: "off reads no file", os: linux, home: /home/ana, env: { INORBIT_CONFIG_FILE: "off" }, expect: null }
+  - { summary: no home directory, os: linux, home: null, env: {}, expect: null }
+  - { summary: code wins over everything, os: linux, home: /home/ana, env: { INORBIT_CONFIG_FILE: /srv/inorbit.toml }, code: { config_file: /opt/app/inorbit.toml }, expect: /opt/app/inorbit.toml }

@@ -1,0 +1,16 @@
+name: unknown-file-keys-are-listed
+kind: config
+summary: Keys the SDK does not know are ignored and listed; the command line's own keys are not.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t, INORBIT_PROFILE: work }
+  config_file: |
+    [sdk]
+    colour = "blue"
+    [profiles.work]
+    kind = "token"
+    account = "acc_1"
+    storage = "keyring"
+expect:
+  ignored:
+    - { key: colour, source: "file {file} [sdk]", reason: unknown key }

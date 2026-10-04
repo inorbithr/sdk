@@ -1,0 +1,16 @@
+name: the-request-id-is-the-same-on-every-attempt
+area: middleware
+summary: The request id is made once per call and sent unchanged on the retry.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 7.2 (request_id).
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: tok-secret-1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, headers: { x-request-id: "$rid" } }
+    response: { status: 503, json: { code: unavailable, error: try again } }
+  - request: { method: GET, path: /v1/me, headers: { x-request-id: "$rid" } }
+    response: { status: 200, headers: { x-request-id: srv-1 }, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }
+  attempts: 2

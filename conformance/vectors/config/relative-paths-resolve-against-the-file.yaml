@@ -1,0 +1,14 @@
+name: relative-paths-resolve-against-the-file
+kind: config
+summary: A relative path in the config file is relative to the file's directory.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_PROFILE: w }
+  config_file: |
+    [profiles.w]
+    token_file = "secrets/tok"
+  files: { secrets/tok: abc }
+expect:
+  settings:
+    token_file: { value: "{dir}/secrets/tok", source: "file {file} [profiles.w]" }
+  credential: { source: file, kind: token_file }

@@ -1,0 +1,15 @@
+name: the-cli-source-without-iohr-is-skipped
+kind: config
+summary: Without iohr installed, the cli source is skipped with a reason and the load fails.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  cli: absent
+  config_file: |
+    default = "dev"
+    [profiles.dev]
+    kind = "person"
+    account = "acc_1"
+expect:
+  error:
+    kind: config
+    message_contains: ["cli: iohr not found"]

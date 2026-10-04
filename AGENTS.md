@@ -72,7 +72,7 @@ A task for a language whose package does not exist yet prints a skip line and ex
 
 ## Security and compliance
 
-- The security requirements in `docs/security/requirements.md` (SR-01 to SR-28) are as
+- The security requirements in `docs/security/requirements.md` (SR-01 to SR-30) are as
   binding as `docs/design.md`; code review rejects a change that breaks one.
 - Never put a key secret, token, health data (PHI), personal data or card number in a
   log line, error message, URL, test fixture or example output.
@@ -97,6 +97,8 @@ A task for a language whose package does not exist yet prints a skip line and ex
 ## Where to look
 
 - Cross-language API rules: `docs/design.md`
+- Configuration, credentials and the middleware pipeline: `docs/config.md` (recipes in
+  `docs/recipes.md`)
 - Why things are the way they are: `docs/adr/`
 - Writing style for READMEs, docs and error messages: `docs/style.md`
 - Releasing: `docs/releasing.md`

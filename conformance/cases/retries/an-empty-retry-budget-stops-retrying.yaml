@@ -1,0 +1,17 @@
+name: an-empty-retry-budget-stops-retrying
+area: retries
+summary: With a retry budget of 10, the first retry after a 503 spends it and the second is not made.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 7.4. A retry after a 503 without Retry-After costs 10.
+client: { max_retries: 2, retry_budget_capacity: 10 }
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 503, json: { code: unavailable, error: try again } }
+  - request: { method: GET, path: /v1/me }
+    response: { status: 503, json: { code: unavailable, error: try again } }
+expect:
+  error: { kind: api, code: unavailable, status: 503 }
+  attempts: 2

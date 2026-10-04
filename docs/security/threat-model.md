@@ -48,7 +48,7 @@ build, (4) CI to registry, (5) contributor to `main`.
 | I | Personal data copied into URLs or error messages | SR-15 |
 | I | SDK reports usage or data somewhere else | SR-16 no telemetry |
 | D | Hung call ties up the customer's threads | SR-19 bounded time |
-| D | Retry storm against the API after an outage | Design section 6: capped retries, full jitter, `Retry-After` honoured |
+| D | Retry storm against the API after an outage | Design section 6: capped retries, full jitter, `Retry-After` honoured; from M6 a per-client retry budget (`config.md` section 7.4) |
 | T | Retried write applied twice | SR-18 idempotency keys |
 
 ### Configuration and credentials
@@ -58,6 +58,10 @@ build, (4) CI to registry, (5) contributor to `main`.
 | S | Attacker sets `INORBIT_BASE_URL` or `INORBIT_TOKEN_URL` to their host and harvests the key | SR-07 HTTPS only; residual risk: control of the environment is control of the process (see below) |
 | I | Key committed to source control by a user | Out of SDK scope; docs show environment variables; GitHub secret scanning recognises the key format once registered (planned) |
 | E | Overly broad key used where a narrow one would do | Keys carry scopes on the API side; docs recommend one key per workload |
+| I | Secret written into the shared config file and copied by backups | SR-29: the SDK refuses secrets in the file and names the alternatives (M6) |
+| S | A config file or `PATH` entry the attacker controls makes the `cli` credential source run their program | Same trust as the environment: the file and `PATH` belong to the user; production narrows the chain with `credential_sources` (`config.md` section 5.1); the SDK runs no command named in the file other than `cli_path` (M6) |
+| E | A developer's `iohr` login on a shared host is picked up by a service | `INORBIT_CREDENTIAL_SOURCES=env` pins the credential; `describe()` shows which source was used (M6) |
+| I | Header values or proxy passwords in debug logs | SR-30 allowlist and never-log set; `describe()` redacts secrets and URL user-info (M6) |
 
 ### The command line on a developer machine
 

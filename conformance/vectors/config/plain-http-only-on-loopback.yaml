@@ -1,0 +1,10 @@
+name: plain-http-only-on-loopback
+kind: config
+summary: An http base URL is refused unless the host is loopback.
+pending: [go, rust, ts, py, java, csharp]
+input:
+  env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off", INORBIT_BASE_URL: "http://api.example.com" }
+expect:
+  error:
+    kind: config
+    problems: [{ setting: base_url, source: env INORBIT_BASE_URL, message_contains: https }]

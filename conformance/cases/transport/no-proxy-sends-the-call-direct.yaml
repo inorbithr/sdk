@@ -1,0 +1,14 @@
+name: no-proxy-sends-the-call-direct
+area: transport
+summary: A host that no_proxy names is reached directly even when a proxy is set.
+pending: [go, rust, ts, py, java, csharp]
+notes: M6, docs/config.md section 6.2.
+client: { transport: proxy, no_proxy: "127.0.0.1" }
+action: { op: me }
+exchanges:
+  - request: { method: POST, path: /oauth2/token, via: direct }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, via: direct }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  ok: { subject: ak_test }

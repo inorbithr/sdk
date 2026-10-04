@@ -154,6 +154,25 @@ never stored, printed or accepted as an argument.
   body of the call that makes the connection; the credential store tested on each operating system in CI.
 - Refs: CRA I.2(e); clig.dev "Arguments and flags".
 
+**SR-29. No secrets in the config file.** The SDK refuses a key secret, a token, a
+private-key password or a proxy password found in the config file it shares with the
+command line, and names the alternatives (a secret file, the environment, `iohr login`).
+Secrets reach the SDK from code, the environment, a file holding only the secret, or the
+command line's credential store (ADR 0015).
+- Why: a config file is copied by dotfile backups, support bundles and configuration
+  management; a secret in it outlives every rotation.
+- Verify: vectors `a-secret-in-the-file-is-refused`, `a-proxy-password-in-the-file-is-refused`.
+- Refs: CRA I.2(e).
+
+**SR-30. Logging by allowlist.** With logging on, header values are logged only from an
+allowlist, other headers by name with `REDACTED`, and `authorization`,
+`proxy-authorization`, `cookie` and `set-cookie` never, whatever the configuration.
+Bodies and query values are never logged (SR-13). `describe()` and every error redact
+secrets and URL user-info.
+- Verify: conformance cases `logs-carry-metadata-never-secrets-or-bodies`,
+  `allowlisted-headers-are-logged-others-redacted`; vector `secrets-are-redacted-in-describe`.
+- Refs: SSDF PW.5; CRA I.2(e), I.2(g).
+
 ## Command-line extensions
 
 Added by [ADR 0012](../adr/0012-extensions.md). They bind the `iohr` command line only.
@@ -218,10 +237,12 @@ one, the server's request id.
 - Refs: CRA I.2(l).
 
 **SR-18. Idempotency before retrying writes.** A non-idempotent request (`POST`,
-`PATCH`) is retried automatically only when it carries an idempotency key, generated
-once per logical call and reused on every attempt. Until the API supports the header,
-such requests are not retried (ADR 0004).
-- Verify: conformance case.
+`PATCH`) is retried automatically only when its operation takes `Idempotency-Key` (the
+platform does since RFC 0033) and the request carries one: the caller's, or one the SDK
+generates once per logical call and reuses on every attempt. Any other `POST` or `PATCH`
+is never retried automatically (ADR 0015, `config.md` section 7.5).
+- Verify: conformance cases `a-write-is-not-retried`,
+  `a-write-with-an-idempotency-key-is-retried`.
 - Refs: CRA I.2(f).
 
 **SR-19. Bounded time everywhere.** Every operation has a connect timeout and a total
