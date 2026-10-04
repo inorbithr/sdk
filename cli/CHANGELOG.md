@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.8](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.7...iohr/v0.1.0-alpha.8) (2026-10-04)
+
+
+### Features
+
+* **cli:** iohr sdk examples, one compile-checked snippet per operation and language ([#107](https://github.com/inorbithr/sdk/issues/107)) ([f0b871e](https://github.com/inorbithr/sdk/commit/f0b871e14112179b4caed8285e387ad015972af6))
+* **cli:** share config.toml with the SDKs, add iohr auth token ([#109](https://github.com/inorbithr/sdk/issues/109)) ([16cb8ef](https://github.com/inorbithr/sdk/commit/16cb8ef26303385fedda8ce3fcbfa4235b2b2606))
+
+
+### Bug fixes
+
+* **cli:** IOHR_TOKEN wins over the default profile, as the README and ADR 0009 say ([16cb8ef](https://github.com/inorbithr/sdk/commit/16cb8ef26303385fedda8ce3fcbfa4235b2b2606))
+
 ## [0.1.0-alpha.7](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.6...iohr/v0.1.0-alpha.7) (2026-10-04)
 
 
