@@ -510,8 +510,37 @@ fn operation_function(op: &Op, needs: &BTreeSet<String>, uses_shapes: &mut bool)
     if op.idempotent_override {
         fields.push("idempotent: true".into());
     }
+    if op.stream {
+        // The socket's call names the RPC and carries the parameters as one body
+        // (design.md section 7); unset ones drop out of the JSON.
+        if !op.rpc.is_empty() {
+            fields.push(format!("rpc: \"{}\"", op.rpc));
+        }
+        let mut wire: Vec<String> = op
+            .path_params
+            .iter()
+            .map(|p| format!("{}: {}", key(&p.name), naming.field_name(&p.name)))
+            .collect();
+        wire.extend(op.query.iter().map(|q| {
+            let access = if key(&q.name) == q.name {
+                format!("params.{}", q.name)
+            } else {
+                format!("params[\"{}\"]", q.name)
+            };
+            format!("{}: {access}", key(&q.name))
+        }));
+        fields.push(format!("fields: {{ {} }}", wire.join(", ")));
+    }
+    let (call, returns) = if op.stream {
+        (
+            "stream",
+            format!("AsyncGenerator<{response}, void, undefined>"),
+        )
+    } else {
+        ("request", format!("Promise<Response<{response}>>"))
+    };
     let mut out = format!(
-        "\n{}export function {}({decl}): Promise<Response<{response}>> {{\n  return client.request(\n    {{\n",
+        "\n{}export function {}({decl}): {returns} {{\n  return client.{call}(\n    {{\n",
         op_doc(op, ""),
         function_name(op)
     );
@@ -680,12 +709,20 @@ fn profile_method(
     if let Some(t) = &op.params_type {
         params.insert(t.clone());
     }
+    let returns = if op.stream {
+        format!("AsyncGenerator<{response}, void, undefined>")
+    } else {
+        format!("Promise<Response<{response}>>")
+    };
     let mut out = format!(
-        "\n{}  {}({decl}): Promise<Response<{response}>> {{\n    return ops.{}({call});\n  }}\n",
+        "\n{}  {}({decl}): {returns} {{\n    return ops.{}({call});\n  }}\n",
         op_doc(op, "  "),
         naming.method_name(&op.name),
         function_name(op)
     );
+    if op.stream {
+        return out;
+    }
     if let Some(paging) = context::paging(op, all_models) {
         out.push_str(&iterator_method(op, &paging, &decl, models));
     }
