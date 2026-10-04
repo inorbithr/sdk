@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.7](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.6...iohr/v0.1.0-alpha.7) (2026-10-04)
+
+
+### Features
+
+* **cli:** iohr connectors and iohr connections (RFC 0044) ([#105](https://github.com/inorbithr/sdk/issues/105)) ([a964223](https://github.com/inorbithr/sdk/commit/a96422376ddcd970c4b18900d1b0349639d497ba))
+* streams in all six languages, over server-sent events or the /v1/ws socket (M5) ([#96](https://github.com/inorbithr/sdk/issues/96)) ([7ff73fe](https://github.com/inorbithr/sdk/commit/7ff73fe986f4706299d188ef9a4d5273dc0ca7ee))
+
 ## [0.1.0-alpha.6](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.5...iohr/v0.1.0-alpha.6) (2026-10-04)
 
 
