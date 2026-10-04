@@ -50,6 +50,9 @@ type Request struct {
 	Headers    map[string]string `yaml:"headers" json:"headers,omitempty"`
 	Form       map[string]string `yaml:"form" json:"form,omitempty"`
 	JSON       any               `yaml:"json" json:"json,omitempty"`
+	// Absent names top-level body fields the request must leave out (an unset field is
+	// not sent; `json` alone matches as a subset and cannot say so).
+	Absent     []string          `yaml:"absent" json:"absent,omitempty"`
 	MinDelayMS *int              `yaml:"min_delay_ms" json:"min_delay_ms,omitempty"`
 	MaxDelayMS *int              `yaml:"max_delay_ms" json:"max_delay_ms,omitempty"`
 }

@@ -38,7 +38,7 @@ expect:
 Unless a case says otherwise, the driver builds the client with `key_id: ak_test`,
 `key_secret: s3cr3t`, `scopes: [identity:read]`, `max_retries: 2`, and `base_url` and `token_url` pointing at the
 replay server. Header names are lower case. `json` bodies match as subsets on requests and are sent
-verbatim on responses. `fault: reset` closes the connection instead of answering.
+verbatim on responses; `absent` lists the request body's top-level fields that must not be sent. `fault: reset` closes the connection instead of answering.
 `delay_ms` holds the answer back; `chunked: { bytes: 3, delay_ms: 50 }` sends the body
 with chunked transfer encoding, 3 bytes at a time, 50 ms apart.
 

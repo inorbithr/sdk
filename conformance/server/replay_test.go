@@ -233,6 +233,25 @@ func TestSubsetMatchingOfFormHeadersAndJSON(t *testing.T) {
 	}
 }
 
+func TestAbsentFieldsMustBeLeftOut(t *testing.T) {
+	ts := start(t)
+	inline := `{"case": {"name": "inline", "area": "operations", "action": {"op": "me"}, "exchanges": [
+		{"request": {"method": "POST", "path": "/v1/things", "json": {"a": 1}, "absent": ["b", "c"]},
+		 "response": {"status": 201, "json": {"ok": true}}}]}}`
+	load(t, ts, inline)
+	if resp, _, err := send(t, ts, Request{Method: "POST", Path: "/v1/things", JSON: map[string]any{"a": 1, "d": 2}}); err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("%v %v", resp, err)
+	}
+	if res := result(t, ts); res.Status != "pass" {
+		t.Fatalf("%+v", res)
+	}
+	load(t, ts, inline)
+	_, _, _ = send(t, ts, Request{Method: "POST", Path: "/v1/things", JSON: map[string]any{"a": 1, "c": ""}})
+	if res := result(t, ts); res.Status != "fail" || !strings.Contains(res.Mismatch.Reason, "$.c was sent") {
+		t.Fatalf("%+v", res)
+	}
+}
+
 func TestTooEarlyRequestFails(t *testing.T) {
 	ts := start(t)
 	load(t, ts, `{"name": "rate-limited-honours-retry-after"}`)
