@@ -16,52 +16,131 @@ Edition 2024, Rust 1.94 or later.
 
 ## First call
 
-Credentials come from the environment: an API token in `INORBIT_TOKEN` (made in the
-console or with `iohr token create`), or an API key in `INORBIT_KEY_ID` and
-`INORBIT_KEY_SECRET` with the scopes to ask for in `INORBIT_SCOPES`. The client exchanges
-a key for a 15-minute token, caches it and refreshes it; a token is sent as it is.
+`Client::load()` finds its configuration the way the other five SDKs do: code first,
+then `INORBIT_*` variables, then the config file `iohr login` writes, then defaults, each
+setting on its own ([docs/config.md](../docs/config.md)). Credentials come from the first
+source that has any: code, the environment (`INORBIT_TOKEN`, `INORBIT_TOKEN_FILE`, or
+`INORBIT_KEY_ID` with `INORBIT_KEY_SECRET` or `INORBIT_KEY_SECRET_FILE` and
+`INORBIT_SCOPES`), the config file's profile, and last your `iohr login`. A developer who
+has signed in with `iohr` needs nothing else.
 
 ```rust
-use inorbithr::{Client, Error, Method, Operation, Response};
+use std::time::Duration;
+
+use inorbithr::public::Surface as _;
+use inorbithr::{Client, Error};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Error> {
-    let client: Client = Client::from_env()?;
-    let me: Response<serde_json::Value> = client
-        .request(Operation::new(Method::Get, "/v1/me"))
-        .await?;
-    println!(
-        "{} ({}), scopes {}, request id {}",
-        me.value["subject"], me.value["kind"], me.value["scopes"], me.raw.request_id
-    );
+    // An option set in code always wins over the environment and the file.
+    let client: Client = Client::builder()
+        .user_agent_suffix("load-example/1.0")
+        .total_timeout(Duration::from_secs(60))
+        .load()?;
+    let described = client.config().describe();
+    println!("credential from {}", described["credential"]["source"]);
+    let me = client.me().await?;
+    println!("{} ({} attempt), request id {}", me.value.subject, me.raw.attempts, me.raw.request_id);
     Ok(())
 }
 ```
 
-That is [`examples/rust/src/bin/whoami.rs`](../examples/rust/src/bin/whoami.rs);
-[`custom_token.rs`](../examples/rust/src/bin/custom_token.rs) beside it plugs in a
-`TokenProvider` of its own and matches on error codes.
+That is [`examples/rust/src/bin/load.rs`](../examples/rust/src/bin/load.rs).
+`client.config().describe()` (or `iohr sdk config` on the command line) says what the
+client uses and where each value came from, with secrets redacted; a configuration that
+cannot work fails `load` with one `ConfigError::Invalid` listing every problem.
+
+Two other ways to build a client stay as they were:
+`Client::builder()...build()` reads only what you set in code (for libraries and tests),
+and `Client::from_env()` reads the six variables it always read; `load` supersedes it.
+[`whoami.rs`](../examples/rust/src/bin/whoami.rs) uses `from_env`, and
+[`custom_token.rs`](../examples/rust/src/bin/custom_token.rs) plugs in a `TokenProvider`
+of its own and matches on error codes.
+
+Recipes for CI, Kubernetes, a corporate proxy, a private CA, mTLS, serverless and
+OpenTelemetry are in [docs/recipes.md](../docs/recipes.md).
 
 ## What the client does
 
-- **Retries** connection failures, timeouts and `429`, `503`, `504`, on idempotent
-  calls only, 2 times by default, honouring `Retry-After` up to 60 s and otherwise
-  backing off with jitter from 0.5 s to 8 s. A `401` gets one fresh token and one more
-  attempt.
+- **Credentials**: an API key is exchanged for a 15-minute token, cached, refreshed when
+  a fifth of its life is left (one refresh at a time, the old token kept if a refresh
+  fails); a secret file is read before every exchange and a token file again when it
+  changes, so rotated Kubernetes Secrets need no restart. `TokenFile`, `CliToken`,
+  `CachedToken` and `ChainedCredential` are public for a chain of your own.
+- **Retries** connection failures, timeouts and `429`, `503`, `504`, on idempotent calls
+  and on writes that take an `Idempotency-Key` (a key per call, the same on every
+  attempt), 2 times by default, honouring `Retry-After` (seconds or a date) up to 60 s and
+  otherwise backing off with jitter from 0.5 s to 8 s. A retry budget per client turns a
+  storm of retries into fast failures. A `401` gets one fresh token and one more attempt.
+- **Timeouts**: 10 s to connect, 30 s per attempt (the whole body included), 120 s per
+  call with every retry and wait, 45 s of silence on a stream.
+- **Transport**: `HTTPS_PROXY` and `NO_PROXY` (lower case first) or `INORBIT_PROXY`, a CA
+  bundle added to the system's trust, mTLS with a client certificate that may rotate,
+  pinned keys, or your own `reqwest::Client` with `http_client`. The `/v1/ws` socket uses
+  the same proxy and TLS settings.
 - **Errors** are one family, `Error`: `Api` carries the platform's error `code` (an enum
   with an `Unknown` fallback that keeps the slug), its `details` and the raw answer;
   `Connection`, `Timeout`, `Auth` and `Config` say what failed and what to do.
 - **Secrets never print.** `Secret` redacts in `Debug` and `Display`, has no
-  `Serialize`, and is zeroed on drop.
-- **Raw access.** Every answer carries `raw`: status, headers, body and the request ids
-  both ways; `Client::send` returns it alone, for a route the surface does not model.
-- **Hooks** see every attempt (method, path, attempt number, request id, status), never
-  a header, a query value or a body.
+  `Serialize`, and is zeroed on drop. The config file may not hold one.
+- **Raw access.** Every answer carries `raw`: status, headers, body, the request ids both
+  ways, the idempotency key and the rate-limit snapshot; `Client::send` returns it alone,
+  for a route the surface does not model.
+- **Logging and tracing**: off until `INORBIT_LOG` (or `.log(..)`) is set; records go to
+  `tracing` events with target `inorbithr`, or to your `logger`, and never carry a body, a
+  query value, a credential or a header outside the allowlist. With the `otel` feature
+  each call is an OpenTelemetry span with one HTTP client span per attempt.
 - Talks to `api.inorbit.hr` and `auth.inorbit.hr` only, over HTTPS (plain HTTP to
   loopback for a local stack), with no telemetry.
 
 `docs/design.md` is the design every language follows; the shared conformance cases
-run against this crate with `mise run conformance:rust`.
+and vectors run against this crate with `mise run conformance:rust`.
+
+## The pipeline
+
+Every call goes through named middlewares, outermost first: `request_id`, `user_agent`,
+`idempotency_key`, `call_tracing`, `deadline`, then `retry`, then on every attempt
+`auth`, `rate_limit`, `attempt_tracing`, `logging`, `hooks` and `timeout`
+([docs/config.md section 7](../docs/config.md#7-the-middleware-pipeline)). A middleware of
+your own implements `Middleware` and goes in by name: `add_per_call` (once per call,
+before `retry`), `add_per_retry` (on every attempt, before `timeout`), `insert_before`,
+`insert_after`, `replace` or `remove`. `retry`, `auth` and `timeout` can be replaced but
+not removed.
+
+```rust
+use std::time::Instant;
+
+use inorbithr::middleware::{BoxFuture, CallOptions, Middleware, Next, Request, Response};
+use inorbithr::{Client, Error};
+
+struct Team(&'static str);
+
+impl Middleware for Team {
+    fn name(&self) -> &'static str {
+        "team"
+    }
+
+    fn handle<'a>(&'a self, mut req: Request, next: Next<'a>) -> BoxFuture<'a, Result<Response, Error>> {
+        req.headers_mut().insert("x-team", self.0);
+        Box::pin(async move {
+            let operation = req.info().operation();
+            let started = Instant::now();
+            let result = next.run(req).await;
+            eprintln!("{operation} took {:?}", started.elapsed());
+            result
+        })
+    }
+}
+
+let client: Client = Client::builder()
+    .pipeline(|p| p.add_per_call(Team("payments")).remove("rate_limit"))
+    .load()?;
+```
+
+Per-call options (a timeout, an idempotency key, a `traceparent`) go on a copy of the
+client: `client.with_options(CallOptions::new().idempotency_key("order-42")).events().create_endpoint(&body)`.
+[`middleware.rs`](../examples/rust/src/bin/middleware.rs) is the complete program. A
+middleware of your own must not log secrets or bodies; the built-ins never do.
 
 ## The surface
 
@@ -121,11 +200,21 @@ A surface for your own credentials, with exactly the operations they may call an
 compile-time refusal of the rest, comes from `iohr sdk generate` ([docs/design.md
 section 12](../docs/design.md#12-runtime-and-surface)).
 
+## Features
+
+| Feature | Default | What it adds |
+|---|---|---|
+| `rustls` | on | HTTPS through rustls with the platform's trust roots; without it, plain-HTTP loopback only |
+| `tracing` | on | log records as `tracing` events, target `inorbithr` |
+| `otel` | off | OpenTelemetry spans and metrics through the `opentelemetry` API crate, from the global providers or `tracer_provider` / `meter_provider` |
+| `encrypted-key` | off | a client key encrypted with `client_key_password` (PKCS#8) |
+
 ## Not here yet
 
-- `native-tls`, `ca_bundle`, `client_cert`, `proxy`, `pinned_keys` and `region` are
-  designed but not built; the client uses rustls with the platform's trust roots and the
-  system proxy settings. The socket connects directly, without a proxy.
+- `native-tls` and `region` are designed but not built; workload identity is reserved
+  until the platform can exchange an outside token ([docs/config.md section 5.5](../docs/config.md#55-what-the-platform-accepts-today)).
+- A `tower` adapter for the pipeline can follow behind a feature; today a `tower` service
+  is wrapped in a `Middleware` by hand.
 
 ## Dependencies
 
@@ -144,3 +233,9 @@ Each runtime dependency, and why (SR-20):
 | futures-core, futures-util | the `Stream` trait an `EventStream` implements, and the socket's stream and sink combinators (both already come with reqwest) |
 | tokio-tungstenite | the `/v1/ws` socket's WebSocket protocol, over the crate's own TCP and TLS (no TLS feature of its own) |
 | rustls, tokio-rustls, rustls-platform-verifier (feature `rustls`) | the socket's TLS: the same provider and platform verifier reqwest uses |
+| rustls-webpki (feature `rustls`) | the server key a pin is checked against, with the parser rustls already uses |
+| toml | the config file the `iohr` command line shares (docs/config.md section 4) |
+| base64 | pinned keys, a JWT's expiry, proxy credentials (already a dependency of reqwest) |
+| tracing (feature `tracing`, default) | log records as `tracing` events |
+| opentelemetry (feature `otel`) | spans and metrics, the API crate only |
+| pkcs8 (feature `encrypted-key`) | decrypting a password-protected client key |
