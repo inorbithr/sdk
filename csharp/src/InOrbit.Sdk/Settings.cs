@@ -889,202 +889,202 @@ internal sealed class Resolver
         switch (setting.Ty)
         {
             case Settings.Ty.OneOf:
-            {
-                var v = Text("a string");
-                if (System.Array.IndexOf(setting.OneOf, v) < 0)
                 {
-                    throw new FormatException($"{Quote(v)} is not one of {string.Join(", ", setting.OneOf)}");
-                }
+                    var v = Text("a string");
+                    if (System.Array.IndexOf(setting.OneOf, v) < 0)
+                    {
+                        throw new FormatException($"{Quote(v)} is not one of {string.Join(", ", setting.OneOf)}");
+                    }
 
-                return (v, v);
-            }
+                    return (v, v);
+                }
 
             case Settings.Ty.Duration:
-            {
-                if (raw.From == Settings.From.Code)
                 {
-                    if (raw.Value is not TimeSpan d || d <= TimeSpan.Zero || d == System.Threading.Timeout.InfiniteTimeSpan)
+                    if (raw.From == Settings.From.Code)
                     {
-                        throw new FormatException("must be a duration greater than zero");
+                        if (raw.Value is not TimeSpan d || d <= TimeSpan.Zero || d == System.Threading.Timeout.InfiniteTimeSpan)
+                        {
+                            throw new FormatException("must be a duration greater than zero");
+                        }
+
+                        var ms = TimeSpan.FromMilliseconds(Math.Ceiling(d.TotalMilliseconds));
+                        return (Settings.ShowDuration(ms), ms);
                     }
 
-                    var ms = TimeSpan.FromMilliseconds(Math.Ceiling(d.TotalMilliseconds));
-                    return (Settings.ShowDuration(ms), ms);
-                }
+                    var v = Text("a duration string such as \"30s\"");
+                    if (Settings.ParseDuration(v) is not { } parsed)
+                    {
+                        throw new FormatException(Settings.ParseDuration(v + "s") is not null
+                            ? $"{Quote(v)} is not a duration; write it with a unit, such as 30s"
+                            : $"{Quote(v)} is not a duration greater than zero: digits, then ms, s, m or h, such as 30s");
+                    }
 
-                var v = Text("a duration string such as \"30s\"");
-                if (Settings.ParseDuration(v) is not { } parsed)
-                {
-                    throw new FormatException(Settings.ParseDuration(v + "s") is not null
-                        ? $"{Quote(v)} is not a duration; write it with a unit, such as 30s"
-                        : $"{Quote(v)} is not a duration greater than zero: digits, then ms, s, m or h, such as 30s");
+                    return (Settings.ShowDuration(parsed), parsed);
                 }
-
-                return (Settings.ShowDuration(parsed), parsed);
-            }
 
             case Settings.Ty.Int:
-            {
-                if (raw.Value is string s && raw.From == Settings.From.Env)
                 {
-                    if (!int.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+                    if (raw.Value is string s && raw.From == Settings.From.Env)
                     {
-                        throw new FormatException($"{Quote(s)} is not a whole number of 0 or more");
+                        if (!int.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+                        {
+                            throw new FormatException($"{Quote(s)} is not a whole number of 0 or more");
+                        }
+
+                        return (n, n);
                     }
 
-                    return (n, n);
+                    switch (raw.Value)
+                    {
+                        case int i when i >= 0:
+                            return (i, i);
+                        case long l when l is >= 0 and <= int.MaxValue:
+                            return ((int)l, (int)l);
+                        case not (int or long) when fromFile:
+                            throw new FormatException($"must be an integer, not {TomlType(raw.Value)}");
+                        default:
+                            throw new FormatException("must be a whole number of 0 or more");
+                    }
                 }
-
-                switch (raw.Value)
-                {
-                    case int i when i >= 0:
-                        return (i, i);
-                    case long l when l is >= 0 and <= int.MaxValue:
-                        return ((int)l, (int)l);
-                    case not (int or long) when fromFile:
-                        throw new FormatException($"must be an integer, not {TomlType(raw.Value)}");
-                    default:
-                        throw new FormatException("must be a whole number of 0 or more");
-                }
-            }
 
             case Settings.Ty.Bool:
-            {
-                if (raw.From == Settings.From.Env && raw.Value is string s)
                 {
-                    switch (s.ToLowerInvariant())
+                    if (raw.From == Settings.From.Env && raw.Value is string s)
                     {
-                        case "true" or "1":
-                            return (true, true);
-                        case "false" or "0":
-                            return (false, false);
-                        default:
-                            throw new FormatException($"{Quote(s)} is not true, false, 1 or 0");
+                        switch (s.ToLowerInvariant())
+                        {
+                            case "true" or "1":
+                                return (true, true);
+                            case "false" or "0":
+                                return (false, false);
+                            default:
+                                throw new FormatException($"{Quote(s)} is not true, false, 1 or 0");
+                        }
                     }
-                }
 
-                if (raw.Value is bool b)
-                {
-                    return (b, b);
-                }
+                    if (raw.Value is bool b)
+                    {
+                        return (b, b);
+                    }
 
-                throw new FormatException(fromFile ? $"must be a boolean, not {TomlType(raw.Value)}" : "must be a boolean");
-            }
+                    throw new FormatException(fromFile ? $"must be a boolean, not {TomlType(raw.Value)}" : "must be a boolean");
+                }
 
             case Settings.Ty.Scopes:
-            {
-                var l = List(comma: false);
-                return (JArray(l), l);
-            }
+                {
+                    var l = List(comma: false);
+                    return (JArray(l), l);
+                }
 
             case Settings.Ty.List:
-            {
-                var l = List(comma: true);
-                if (setting.Name == "credential_sources" && l.FirstOrDefault(x => System.Array.IndexOf(Settings.Sources, x) < 0) is { } bad)
                 {
-                    throw new FormatException($"{Quote(bad)} is not a credential source; use env, workload, file or cli");
-                }
+                    var l = List(comma: true);
+                    if (setting.Name == "credential_sources" && l.FirstOrDefault(x => System.Array.IndexOf(Settings.Sources, x) < 0) is { } bad)
+                    {
+                        throw new FormatException($"{Quote(bad)} is not a credential source; use env, workload, file or cli");
+                    }
 
-                if (setting.Name == "no_proxy" && l.FirstOrDefault(x => NoProxy.ParseEntry(x) is null) is { } wrong)
-                {
-                    throw new FormatException($"{Quote(wrong)} is not a no_proxy entry: a host, .domain, host:port, an IP address or a CIDR range");
-                }
+                    if (setting.Name == "no_proxy" && l.FirstOrDefault(x => NoProxy.ParseEntry(x) is null) is { } wrong)
+                    {
+                        throw new FormatException($"{Quote(wrong)} is not a no_proxy entry: a host, .domain, host:port, an IP address or a CIDR range");
+                    }
 
-                if (setting.Name == "log_allow_headers")
-                {
-                    l = l.Select(x => x.ToLowerInvariant()).ToArray();
-                }
+                    if (setting.Name == "log_allow_headers")
+                    {
+                        l = l.Select(x => x.ToLowerInvariant()).ToArray();
+                    }
 
-                return (JArray(l), l);
-            }
+                    return (JArray(l), l);
+                }
 
             case Settings.Ty.Url:
-            {
-                var v = Text("a URL string");
-                if (!Uri.TryCreate(v, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps && !v.Contains("://", StringComparison.Ordinal)))
                 {
-                    throw new FormatException($"{Quote(v)} is not an absolute URL");
-                }
+                    var v = Text("a URL string");
+                    if (!Uri.TryCreate(v, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps && !v.Contains("://", StringComparison.Ordinal)))
+                    {
+                        throw new FormatException($"{Quote(v)} is not an absolute URL");
+                    }
 
-                if (!(u.Scheme == Uri.UriSchemeHttps || (u.Scheme == Uri.UriSchemeHttp && IsLoopbackHost(u.Host))))
-                {
-                    throw new FormatException($"{Quote(v)} must use https (plain http is allowed only for localhost and loopback addresses)");
-                }
+                    if (!(u.Scheme == Uri.UriSchemeHttps || (u.Scheme == Uri.UriSchemeHttp && IsLoopbackHost(u.Host))))
+                    {
+                        throw new FormatException($"{Quote(v)} must use https (plain http is allowed only for localhost and loopback addresses)");
+                    }
 
-                if (u.UserInfo.Length > 0 || u.Fragment.Length > 0)
-                {
-                    throw new FormatException($"{Quote(v)} must not carry credentials or a fragment");
-                }
+                    if (u.UserInfo.Length > 0 || u.Fragment.Length > 0)
+                    {
+                        throw new FormatException($"{Quote(v)} must not carry credentials or a fragment");
+                    }
 
-                if (setting.Name == "base_url" && (u.AbsolutePath != "/" || u.Query.Length > 0))
-                {
-                    throw new FormatException($"{Quote(v)} is an origin only, such as https://api.inorbit.hr");
-                }
+                    if (setting.Name == "base_url" && (u.AbsolutePath != "/" || u.Query.Length > 0))
+                    {
+                        throw new FormatException($"{Quote(v)} is an origin only, such as https://api.inorbit.hr");
+                    }
 
-                return (v, v);
-            }
+                    return (v, v);
+                }
 
             case Settings.Ty.Path:
-            {
-                var p = PathOf(Text("a path string"), fromFile);
-                return (p, p);
-            }
+                {
+                    var p = PathOf(Text("a path string"), fromFile);
+                    return (p, p);
+                }
 
             case Settings.Ty.Secret:
                 return raw.Value is string secret ? (Settings.Redacted, secret) : throw new FormatException("must be a string");
 
             case Settings.Ty.Str:
-            {
-                var v = Text("a string");
-                if (setting.Name == "user_agent_suffix" && (v.Length > 128 || v.Any(ch => ch is < ' ' or > '~')))
                 {
-                    throw new FormatException("must be product tokens (such as myapp/1.2), at most 128 printable ASCII characters");
-                }
+                    var v = Text("a string");
+                    if (setting.Name == "user_agent_suffix" && (v.Length > 128 || v.Any(ch => ch is < ' ' or > '~')))
+                    {
+                        throw new FormatException("must be product tokens (such as myapp/1.2), at most 128 printable ASCII characters");
+                    }
 
-                return (v, v);
-            }
+                    return (v, v);
+                }
 
             case Settings.Ty.Proxy:
-            {
-                var v = Text("a URL string");
-                if (v == "off")
                 {
-                    return ("off", "off");
-                }
+                    var v = Text("a URL string");
+                    if (v == "off")
+                    {
+                        return ("off", "off");
+                    }
 
-                var shown = RedactUserinfo(v);
-                if (!Uri.TryCreate(v, UriKind.Absolute, out var u))
-                {
-                    throw new FormatException($"{Quote(shown)} is not an absolute URL");
-                }
+                    var shown = RedactUserinfo(v);
+                    if (!Uri.TryCreate(v, UriKind.Absolute, out var u))
+                    {
+                        throw new FormatException($"{Quote(shown)} is not an absolute URL");
+                    }
 
-                if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)
-                {
-                    throw new FormatException($"{Quote(shown)} must be an http:// or https:// proxy URL, or off");
-                }
+                    if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)
+                    {
+                        throw new FormatException($"{Quote(shown)} must be an http:// or https:// proxy URL, or off");
+                    }
 
-                return (shown, v);
-            }
+                    return (shown, v);
+                }
 
             case Settings.Ty.Pins:
-            {
-                var l = List(comma: true);
-                if (l.Length < 2)
                 {
-                    throw new FormatException("pin at least two keys (the current one and a backup)");
-                }
-
-                foreach (var p in l)
-                {
-                    var buffer = new byte[48];
-                    if (!Convert.TryFromBase64String(p, buffer, out var n) || n != 32)
+                    var l = List(comma: true);
+                    if (l.Length < 2)
                     {
-                        throw new FormatException($"{Quote(p)} is not a base64 SHA-256 of a public key");
+                        throw new FormatException("pin at least two keys (the current one and a backup)");
                     }
-                }
 
-                return (JArray(l), l);
-            }
+                    foreach (var p in l)
+                    {
+                        var buffer = new byte[48];
+                        if (!Convert.TryFromBase64String(p, buffer, out var n) || n != 32)
+                        {
+                            throw new FormatException($"{Quote(p)} is not a base64 SHA-256 of a public key");
+                        }
+                    }
+
+                    return (JArray(l), l);
+                }
 
             default:
                 throw new FormatException("region is reserved until the API offers regions; remove it");
