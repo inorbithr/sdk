@@ -20,7 +20,7 @@ updates:
     commit-message: { prefix: "ci", include: scope }
 
   - package-ecosystem: gomod
-    directories: [/go, /examples/go]
+    directories: [/go, /go/otel, /examples/go]
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
     groups:
