@@ -799,6 +799,19 @@ fn operation(op: &Op, receiver: &str, receiver_type: &str, client: &str, ctx: &C
             ""
         }
     );
+    // The path template names attempt spans (docs/config.md section 7.10); the mark makes the
+    // runtime send one Idempotency-Key per call and retry the write (section 7.5).
+    let _ = writeln!(
+        body,
+        "            operation = {rt}.Codegen.WithTemplate(operation, \"{}\");",
+        op.path
+    );
+    if op.idempotency_key {
+        let _ = writeln!(
+            body,
+            "            operation = {rt}.Codegen.WithIdempotencyKey(operation);"
+        );
+    }
     if !op.query.is_empty() {
         let q: Vec<String> = op
             .query

@@ -176,6 +176,7 @@ namespace InOrbit.Generated
             where TProfile : IMe
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("me", global::InOrbit.Sdk.Method.Get, "/v1/me", ["identity:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/me");
             return client.RequestAsync<Me>(operation, cancellationToken);
         }
     }
@@ -205,6 +206,7 @@ namespace InOrbit.Generated
             where TProfile : IGetMe
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("accounts.get_me", global::InOrbit.Sdk.Method.Get, "/v1/accounts/me", ["account:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/accounts/me");
             return accounts.Client.RequestAsync<GetMeResponse>(operation, cancellationToken);
         }
 
@@ -218,6 +220,7 @@ namespace InOrbit.Generated
             where TProfile : IGetUnits
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("accounts.get_units", global::InOrbit.Sdk.Method.Get, $"/v1/accounts/orgs/{(global::InOrbit.Sdk.Codegen.PathSegment(orgId))}/units", ["usage:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/accounts/orgs/{org_id}/units");
             return accounts.Client.RequestAsync<GetUnitsResponse>(operation, cancellationToken);
         }
 
@@ -232,6 +235,7 @@ namespace InOrbit.Generated
             where TProfile : IGetUsage
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("accounts.get_usage", global::InOrbit.Sdk.Method.Get, $"/v1/accounts/orgs/{(global::InOrbit.Sdk.Codegen.PathSegment(orgId))}/usage", ["usage:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/accounts/orgs/{org_id}/usage");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("from", query?.From), ("to", query?.To));
             return accounts.Client.RequestAsync<GetUsageResponse>(operation, cancellationToken);
         }
@@ -246,6 +250,7 @@ namespace InOrbit.Generated
             where TProfile : IListUnitCategories
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("accounts.list_unit_categories", global::InOrbit.Sdk.Method.Get, "/v1/accounts/units/categories", ["usage:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/accounts/units/categories");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return accounts.Client.RequestAsync<ListUnitCategoriesResponse>(operation, cancellationToken);
         }
@@ -293,6 +298,7 @@ namespace InOrbit.Generated
             where TProfile : IDeleteEndpoint
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.delete_endpoint", global::InOrbit.Sdk.Method.Delete, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}");
             return events.Client.RequestAsync<DeleteEndpointResponse>(operation, cancellationToken);
         }
 
@@ -306,6 +312,7 @@ namespace InOrbit.Generated
             where TProfile : IDeleteInbox
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.delete_inbox", global::InOrbit.Sdk.Method.Delete, $"/v1/webhooks/inboxes/{(global::InOrbit.Sdk.Codegen.PathSegment(inboxId))}", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/inboxes/{inbox_id}");
             return events.Client.RequestAsync<DeleteInboxResponse>(operation, cancellationToken);
         }
 
@@ -319,6 +326,7 @@ namespace InOrbit.Generated
             where TProfile : IStreamEvents
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.stream_events", global::InOrbit.Sdk.Method.Get, "/v1/events/events", ["events:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/events/events");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("types", query?.Types), ("account_id", query?.AccountId));
             operation = global::InOrbit.Sdk.Codegen.WithCall(operation, "iohr.events.v1.EventsService/StreamEvents", ("types", query?.Types), ("account_id", query?.AccountId));
             return events.Client.StreamAsync<StreamEventsResponse>(operation, cancellationToken);
@@ -334,6 +342,7 @@ namespace InOrbit.Generated
             where TProfile : IListEventTypes
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_event_types", global::InOrbit.Sdk.Method.Get, "/v1/events/types", ["events:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/events/types");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return events.Client.RequestAsync<ListEventTypesResponse>(operation, cancellationToken);
         }
@@ -364,6 +373,7 @@ namespace InOrbit.Generated
             where TProfile : IListEndpoints
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_endpoints", global::InOrbit.Sdk.Method.Get, "/v1/webhooks/endpoints", ["webhooks:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("account_id", query?.AccountId), ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return events.Client.RequestAsync<ListEndpointsResponse>(operation, cancellationToken);
         }
@@ -394,6 +404,7 @@ namespace InOrbit.Generated
             where TProfile : IGetEndpoint
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.get_endpoint", global::InOrbit.Sdk.Method.Get, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}", ["webhooks:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}");
             return events.Client.RequestAsync<Endpoint>(operation, cancellationToken);
         }
 
@@ -408,6 +419,7 @@ namespace InOrbit.Generated
             where TProfile : IListDeliveries
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_deliveries", global::InOrbit.Sdk.Method.Get, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}/deliveries", ["webhooks:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}/deliveries");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("status", query?.Status), ("page_token", query?.PageToken), ("page_size", query?.PageSize));
             return events.Client.RequestAsync<ListDeliveriesResponse>(operation, cancellationToken);
         }
@@ -439,6 +451,7 @@ namespace InOrbit.Generated
             where TProfile : IListInboxes
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_inboxes", global::InOrbit.Sdk.Method.Get, "/v1/webhooks/inboxes", ["webhooks:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/inboxes");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("account_id", query?.AccountId), ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return events.Client.RequestAsync<ListInboxesResponse>(operation, cancellationToken);
         }
@@ -470,6 +483,7 @@ namespace InOrbit.Generated
             where TProfile : IListInboxRequests
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.list_inbox_requests", global::InOrbit.Sdk.Method.Get, $"/v1/webhooks/inboxes/{(global::InOrbit.Sdk.Codegen.PathSegment(inboxId))}/requests", ["webhooks:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/inboxes/{inbox_id}/requests");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return events.Client.RequestAsync<ListInboxRequestsResponse>(operation, cancellationToken);
         }
@@ -502,6 +516,7 @@ namespace InOrbit.Generated
             where TProfile : IUpdateEndpoint
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.update_endpoint", global::InOrbit.Sdk.Method.Patch, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}");
             operation = global::InOrbit.Sdk.Codegen.WithJson(operation, body);
             return events.Client.RequestAsync<Endpoint>(operation, cancellationToken);
         }
@@ -516,6 +531,8 @@ namespace InOrbit.Generated
             where TProfile : IRetryDelivery
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.retry_delivery", global::InOrbit.Sdk.Method.Post, $"/v1/webhooks/deliveries/{(global::InOrbit.Sdk.Codegen.PathSegment(deliveryId))}/retry", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/deliveries/{delivery_id}/retry");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             return events.Client.RequestAsync<RetryDeliveryResponse>(operation, cancellationToken);
         }
 
@@ -529,6 +546,8 @@ namespace InOrbit.Generated
             where TProfile : ICreateEndpoint
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.create_endpoint", global::InOrbit.Sdk.Method.Post, "/v1/webhooks/endpoints", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             operation = global::InOrbit.Sdk.Codegen.WithJson(operation, body);
             return events.Client.RequestAsync<CreateEndpointResponse>(operation, cancellationToken);
         }
@@ -543,6 +562,8 @@ namespace InOrbit.Generated
             where TProfile : IRotateSecret
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.rotate_secret", global::InOrbit.Sdk.Method.Post, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}/rotate", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}/rotate");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             return events.Client.RequestAsync<RotateSecretResponse>(operation, cancellationToken);
         }
 
@@ -556,6 +577,8 @@ namespace InOrbit.Generated
             where TProfile : ISendTest
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.send_test", global::InOrbit.Sdk.Method.Post, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}/test", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}/test");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             return events.Client.RequestAsync<SendTestResponse>(operation, cancellationToken);
         }
 
@@ -569,6 +592,8 @@ namespace InOrbit.Generated
             where TProfile : ICreateInbox
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.create_inbox", global::InOrbit.Sdk.Method.Post, "/v1/webhooks/inboxes", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/inboxes");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             operation = global::InOrbit.Sdk.Codegen.WithJson(operation, body);
             return events.Client.RequestAsync<CreateInboxResponse>(operation, cancellationToken);
         }
@@ -600,6 +625,7 @@ namespace InOrbit.Generated
             where TProfile : IListDigests
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("radar.list_digests", global::InOrbit.Sdk.Method.Get, "/v1/radar/digests", ["radar:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/radar/digests");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("language", query?.Language), ("lang", query?.Lang), ("limit", query?.Limit), ("include_drafts", query?.IncludeDrafts), ("before_week", query?.BeforeWeek), ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return radar.Client.RequestAsync<ListDigestsResponse>(operation, cancellationToken);
         }
@@ -630,6 +656,7 @@ namespace InOrbit.Generated
             where TProfile : IGetDigest
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("radar.get_digest", global::InOrbit.Sdk.Method.Get, $"/v1/radar/digests/{(global::InOrbit.Sdk.Codegen.PathSegment(id))}", ["radar:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/radar/digests/{id}");
             return radar.Client.RequestAsync<GetDigestResponse>(operation, cancellationToken);
         }
 
@@ -643,6 +670,7 @@ namespace InOrbit.Generated
             where TProfile : IListItems
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("radar.list_items", global::InOrbit.Sdk.Method.Get, "/v1/radar/items", ["radar:read"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/radar/items");
             operation = global::InOrbit.Sdk.Codegen.WithQuery(operation, ("language", query?.Language), ("limit", query?.Limit), ("page_size", query?.PageSize), ("page_token", query?.PageToken));
             return radar.Client.RequestAsync<ListItemsResponse>(operation, cancellationToken);
         }
