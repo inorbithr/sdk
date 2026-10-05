@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
@@ -1018,8 +1019,8 @@ func (r *resolver) parse(s setting, raw rawValue) (any, any, error) {
 	case tyInt:
 		switch v := raw.value.(type) {
 		case string:
-			n, ok := digits(v)
-			if raw.from != fromEnv || !ok || n > 0xffffffff {
+			n, err := strconv.ParseInt(v, 10, 32)
+			if raw.from != fromEnv || err != nil || !isDigits(v) {
 				if raw.from == fromFile {
 					return nil, nil, fmt.Errorf("must be an integer, not %s", tomlType(v))
 				}
@@ -1027,11 +1028,11 @@ func (r *resolver) parse(s setting, raw rawValue) (any, any, error) {
 			}
 			return int(n), int(n), nil
 		case int64:
-			if v >= 0 && v <= 0xffffffff {
+			if v >= 0 && v <= math.MaxInt32 {
 				return int(v), int(v), nil
 			}
 		case int:
-			if v >= 0 && v <= 0xffffffff {
+			if v >= 0 && v <= math.MaxInt32 {
 				return v, v, nil
 			}
 		default:
@@ -1157,6 +1158,12 @@ func (r *resolver) parse(s setting, raw rawValue) (any, any, error) {
 		return l, l, nil
 	}
 	return nil, nil, errors.New("region is reserved until the API offers regions; remove it")
+}
+
+// isDigits reports whether s is decimal digits only, no sign.
+func isDigits(s string) bool {
+	_, ok := digits(s)
+	return ok
 }
 
 func printableASCII(s string) bool {
