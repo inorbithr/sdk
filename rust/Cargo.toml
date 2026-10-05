@@ -64,7 +64,7 @@ base64 = "0.23"
 # Log records (feature `tracing`, on by default).
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 # Spans and metrics (feature `otel`): the API crate only.
-opentelemetry = { version = "0.32", default-features = false, features = ["trace", "metrics"], optional = true }
+opentelemetry = { version = "0.33", default-features = false, features = ["trace", "metrics"], optional = true }
 # An encrypted client key (feature `encrypted-key`).
 pkcs8 = { version = "0.11", features = ["encryption", "pem", "std"], optional = true }
 
@@ -73,8 +73,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io
 wiremock = "0.6"
 serde_yaml_ng = "0.10"
 tempfile = "3"
-opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "testing"] }
-opentelemetry = { version = "0.32", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "testing"] }
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
 regex = "1"
 
 [lints.rust]
