@@ -838,7 +838,7 @@ fn check_url(what: &'static str, raw: &str, origin_only: bool) -> Result<Url, Co
     Ok(url)
 }
 
-type PipelineEdit = Box<dyn for<'p> FnOnce(&'p mut Pipeline) -> &'p mut Pipeline>;
+type PipelineEdit = Box<dyn for<'p> FnOnce(&'p mut Pipeline) -> &'p mut Pipeline + Send + Sync>;
 
 /// The credential a client ends up with, before the transport exists.
 enum Credential {
@@ -1275,7 +1275,7 @@ impl<P: Profile> ClientBuilder<P> {
     #[must_use]
     pub fn pipeline(
         mut self,
-        edit: impl for<'p> FnOnce(&'p mut Pipeline) -> &'p mut Pipeline + 'static,
+        edit: impl for<'p> FnOnce(&'p mut Pipeline) -> &'p mut Pipeline + Send + Sync + 'static,
     ) -> Self {
         self.pipeline.push(Box::new(edit));
         self
@@ -1765,5 +1765,16 @@ mod tests {
                 .idempotent(true)
                 .idempotent
         );
+    }
+}
+
+#[cfg(test)]
+mod auto_traits {
+    /// The builder and the client stay `Send` and `Sync` (cargo semver-checks).
+    #[test]
+    fn builder_and_client_are_send_and_sync() {
+        fn check<T: Send + Sync>() {}
+        check::<super::ClientBuilder>();
+        check::<super::Client>();
     }
 }
