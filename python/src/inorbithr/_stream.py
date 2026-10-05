@@ -15,13 +15,14 @@ from __future__ import annotations
 import asyncio
 import codecs
 import contextlib
+import inspect
 import json
 import queue
 import threading
 import time
 from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeAlias, TypedDict, TypeVar, cast
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -70,6 +71,18 @@ QUEUE = 64
 PING_EVERY = 15.0
 
 _EMPTY = httpx.Headers()
+
+
+class _SyncLegacy(TypedDict, total=False):
+    legacy: Literal[True]
+
+
+# websockets 17 warns when the blocking connect() is not used as a context manager, unless
+# `legacy=True` asks for the connection itself, which is what the socket keeps; 15 and 16
+# return the connection without the flag and do not take it.
+_SYNC_LEGACY: _SyncLegacy = (
+    {"legacy": True} if "legacy" in inspect.signature(sync_connect).parameters else {}
+)
 
 
 class Stream(Generic[T]):
@@ -477,6 +490,7 @@ class SyncSocket:
                     ping_timeout=s.idle,
                     max_size=MAX_EVENT,
                     max_queue=QUEUE,
+                    **_SYNC_LEGACY,
                 )
             except InvalidStatus as e:
                 raw = _upgrade_error(e, rid, number)
