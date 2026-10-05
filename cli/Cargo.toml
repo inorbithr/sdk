@@ -31,7 +31,7 @@ keyring-core = "1"
 minijinja = "2"
 prettyplease = "0.3"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
-schemars = "0.8"
+schemars = "1.2"
 semver = "1"
 sigstore-verify = { version = "0.14", default-features = false }
 syn = { version = "3", features = ["full"] }
