@@ -1,7 +1,6 @@
 name: the-total-timeout-ends-the-retries
 area: retries
 summary: A retry whose Retry-After wait would pass the total timeout is not made; the call ends with the last error.
-pending: [java]
 notes: M6, docs/config.md sections 6.1 and 7.4.
 client: { max_retries: 2, total_timeout_ms: 1500 }
 action: { op: me }

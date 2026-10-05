@@ -36,6 +36,16 @@ public final class Hooks {
     }
 
     /**
+     * The profile from code, the environment, the <code>iohr</code> config file and login, and the defaults (docs/config.md).
+     *
+     * @return the profile
+     * @throws hr.inorbit.sdk.errors.ConfigException listing every problem found, each with its setting and source
+     */
+    public static Hooks load() {
+        return new Hooks(Client.builder().profileType("hooks").load());
+    }
+
+    /**
      * The client the profile calls with.
      *
      * @return the client

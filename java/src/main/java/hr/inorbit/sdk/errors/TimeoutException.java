@@ -23,6 +23,18 @@ public final class TimeoutException extends InOrbitException {
     }
 
     /**
+     * A limit passed for another reason than a silent host, which {@code message} says.
+     *
+     * @param host the host
+     * @param message what limit passed, and while waiting for what
+     * @param cause the underlying failure, or {@code null}
+     */
+    public TimeoutException(String host, String message, Throwable cause) {
+        super(message, cause);
+        this.host = host;
+    }
+
+    /**
      * The host that did not answer.
      *
      * @return the host

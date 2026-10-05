@@ -1,7 +1,6 @@
 name: the-cli-source-without-iohr-is-skipped
 kind: config
 summary: Without iohr installed, the cli source is skipped with a reason and the load fails.
-pending: [java]
 input:
   cli: absent
   config_file: |

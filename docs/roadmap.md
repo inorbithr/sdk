@@ -42,7 +42,7 @@ Shared work first, in this order:
       #111; each target emits it with its runtime's field); move
       `a-write-is-not-retried` to `events.update_endpoint` and teach every driver that
       operation (#113)
-- [ ] Drivers: run `conformance/vectors/` as unit tests in each language
+- [x] Drivers: run `conformance/vectors/` as unit tests in each language
 
 Per language (each box: settings and `load`, `describe`, the credential chain, the
 pipeline and its built-ins, transport, logging, tracing, every M6 case and vector
@@ -57,7 +57,10 @@ passing, README showing `load` first):
 - [x] Go (`inorbit.Load(ctx)`, RoundTripper middlewares, its own `http.Transport` for
       proxy, CA, mTLS and pinning, OpenTelemetry in the `go/otel` module; every case and
       vector passing)
-- [ ] Java (`inorbit-sdk-otel` artifact)
+- [x] Java (`Client.load()` and `Builder.load()`, a pipeline of named `Middleware`s,
+      the JDK's `HttpClient` with the SDK's own `ProxySelector` and `SSLContext` for
+      proxy, CA, mTLS and pinning, `System.Logger`, `opentelemetry-api` as an optional
+      dependency; every case and vector passing)
 - [x] C# (`Client.Load`, the pipeline with `Middleware.FromHandler` for `DelegatingHandler`s,
       proxy, CA and mTLS on `SocketsHttpHandler`, `ActivitySource` and `Meter` built in;
       every case and vector passing)

@@ -235,9 +235,11 @@ final class SocketHub {
                     }
                     failure = ApiException.of(raw);
                     again = Retry.retryableStatus(status);
-                    if (again && retries < client.maxRetries()) {
+                    if (again
+                            && retries < client.maxRetries()
+                            && client.engine().budget.draw(RetryBudget.COST_OTHER)) {
                         Optional<Duration> wait = Retry.retryAfter(raw.headers());
-                        Retry.sleep(wait.orElseGet(() -> Retry.backoff(0)), host());
+                        Engine.sleep(wait.orElseGet(() -> Retry.backoff(0)), host());
                         retries++;
                         continue;
                     }
@@ -252,8 +254,8 @@ final class SocketHub {
                 Thread.currentThread().interrupt();
                 throw new ConnectionException(host(), "interrupted", e);
             }
-            if (again && retries < client.maxRetries()) {
-                Retry.sleep(Retry.backoff(retries), host());
+            if (again && retries < client.maxRetries() && client.engine().budget.draw(RetryBudget.COST_OTHER)) {
+                Engine.sleep(Retry.backoff(retries), host());
                 retries++;
                 continue;
             }
