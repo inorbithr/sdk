@@ -26,6 +26,12 @@
       "package-name": "github.com/inorbithr/sdk/go",
       "extra-files": ["version.go"]
     },
+    "go/otel": {
+      "release-type": "go",
+      "component": "go/otel",
+      "package-name": "github.com/inorbithr/sdk/go/otel",
+      "release-as": "0.2.2"
+    },
     "rust": {
       "release-type": "rust",
       "component": "rust",
