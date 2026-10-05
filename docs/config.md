@@ -527,7 +527,7 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 - A retry whose delay would pass `total_timeout` is not made: the call ends with the
   last error.
 - In M6 the attempt timeout covers the body in every language. Today Java's covers only
-  the headers and Python's applies per read.
+  the headers.
 
 ### 6.2 Proxies
 
@@ -561,7 +561,7 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
   `INORBIT_NO_PROXY` wins over `no_proxy`, which wins over `NO_PROXY`. The vectors in
   `conformance/vectors/no-proxy/` are the contract.
 - Streams and the `/v1/ws` socket use the same proxy as every other request. Today the
-  Rust, Python and C# sockets ignore it; that is fixed in M6.
+  Rust and C# sockets ignore it; that is fixed in M6.
 
 ### 6.3 Trust
 
@@ -905,8 +905,7 @@ The socket upgrade goes through the pipeline in Rust, Go and Java. TypeScript's
 `WebSocket`, Python's `websockets` and .NET's `ClientWebSocket` cannot pass a request
 through a pipeline. There the built-ins set their headers directly, user middleware does
 not see the upgrade, and `design.md` section 7 lists the exception. In every runtime the
-upgrade sends `x-request-id` in the `iohr-` form; today TypeScript and C# send none and
-Python sends another form.
+upgrade sends `x-request-id` in the `iohr-` form; today TypeScript and C# send none.
 
 ### 7.13 The middleware contract
 

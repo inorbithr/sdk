@@ -36,7 +36,7 @@ non-default feature or build tag and is named `dangerous_*`.
 
 **SR-03. Custom CA bundle.** A caller can add CA certificates (PEM) to verify the API
 host, for corporate proxies that re-sign TLS. The system trust store stays the default
-(Rust: `rustls-platform-verifier`).
+(Rust: `rustls-platform-verifier`; Python: `truststore`).
 - Verify: unit test with a private CA.
 - Refs: SSDF PW.9.
 

@@ -22,6 +22,7 @@ def delete_endpoint(endpoint_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         scopes=("webhooks:write",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -32,6 +33,7 @@ def delete_inbox(inbox_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/webhooks/inboxes/{codegen.path_segment(inbox_id)}",
         scopes=("webhooks:write",),
+        template="/v1/webhooks/inboxes/{inbox_id}",
     )
 
 
@@ -52,6 +54,7 @@ def get_units(org_id: str) -> Operation:
         method="GET",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/units",
         scopes=("usage:read",),
+        template="/v1/accounts/orgs/{org_id}/units",
     )
 
 
@@ -63,6 +66,7 @@ def get_usage(org_id: str, *, from_: str | None = None, to: str | None = None) -
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/usage",
         query=(("from", from_), ("to", to),),
         scopes=("usage:read",),
+        template="/v1/accounts/orgs/{org_id}/usage",
     )
 
 
@@ -128,6 +132,7 @@ def get_digest(id: str) -> Operation:
         method="GET",
         path=f"/v1/radar/digests/{codegen.path_segment(id)}",
         scopes=("radar:read",),
+        template="/v1/radar/digests/{id}",
     )
 
 
@@ -160,6 +165,7 @@ def get_endpoint(endpoint_id: str) -> Operation:
         method="GET",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         scopes=("webhooks:read",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -171,6 +177,7 @@ def list_deliveries(endpoint_id: str, *, status: str | None = None, page_token: 
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/deliveries",
         query=(("status", status), ("page_token", page_token), ("page_size", page_size),),
         scopes=("webhooks:read",),
+        template="/v1/webhooks/endpoints/{endpoint_id}/deliveries",
     )
 
 
@@ -193,6 +200,7 @@ def list_inbox_requests(inbox_id: str, *, page_size: int | None = None, page_tok
         path=f"/v1/webhooks/inboxes/{codegen.path_segment(inbox_id)}/requests",
         query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("webhooks:read",),
+        template="/v1/webhooks/inboxes/{inbox_id}/requests",
     )
 
 
@@ -204,6 +212,7 @@ def update_endpoint(endpoint_id: str, body: UpdateEndpointRequest) -> Operation:
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         body=body,
         scopes=("webhooks:write",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -214,6 +223,8 @@ def retry_delivery(delivery_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/deliveries/{codegen.path_segment(delivery_id)}/retry",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/deliveries/{delivery_id}/retry",
     )
 
 
@@ -225,6 +236,7 @@ def create_endpoint(body: CreateEndpointRequest) -> Operation:
         path="/v1/webhooks/endpoints",
         body=body,
         scopes=("webhooks:write",),
+        idempotency_key=True,
     )
 
 
@@ -235,6 +247,8 @@ def rotate_secret(endpoint_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/rotate",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/endpoints/{endpoint_id}/rotate",
     )
 
 
@@ -245,6 +259,8 @@ def send_test(endpoint_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/test",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/endpoints/{endpoint_id}/test",
     )
 
 
@@ -256,4 +272,5 @@ def create_inbox(body: CreateInboxRequest) -> Operation:
         path="/v1/webhooks/inboxes",
         body=body,
         scopes=("webhooks:write",),
+        idempotency_key=True,
     )

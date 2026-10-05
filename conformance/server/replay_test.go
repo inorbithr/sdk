@@ -443,6 +443,17 @@ func TestTheCaseListAndTheLoadedCaseServeTheDrivers(t *testing.T) {
 	if c["client"].(map[string]any)["key_secret"] != "s3cr3t-do-not-print" {
 		t.Fatalf("client options are not handed back: %v", c["client"])
 	}
+	// The action's per-call options and file rewrites are the driver's, handed back too.
+	_, out = load(t, ts, `{"name": "the-callers-idempotency-key-is-sent"}`)
+	action := out["case"].(map[string]any)["action"].(map[string]any)
+	if action["options"].(map[string]any)["idempotency_key"] != "order-42" {
+		t.Fatalf("action options are not handed back: %v", action)
+	}
+	_, out = load(t, ts, `{"name": "a-token-file-is-read-again-after-a-401"}`)
+	action = out["case"].(map[string]any)["action"].(map[string]any)
+	if action["rewrite"].(map[string]any)["after"] != float64(1) {
+		t.Fatalf("action rewrites are not handed back: %v", action)
+	}
 }
 
 func TestThePathIsComparedAsSent(t *testing.T) {

@@ -1,7 +1,7 @@
 name: the-default-location-is-read
 kind: config
 summary: Without INORBIT_CONFIG_FILE, the command line's file at the OS default location is read.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 input:
   env: { INORBIT_TOKEN: t }
   home: true

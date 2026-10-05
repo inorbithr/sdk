@@ -1,7 +1,7 @@
 name: the-command-lines-file-on-each-os
 kind: config-path
 summary: The config file is found where the iohr command line keeps it, with INORBIT_CONFIG_FILE and IOHR_CONFIG_DIR as overrides.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 notes: docs/config.md section 4.1. The expected path is compared as written, with the OS's own separator.
 checks:
   - { summary: Linux default, os: linux, home: /home/ana, env: {}, expect: /home/ana/.config/iohr/config.toml }

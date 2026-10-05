@@ -34,6 +34,7 @@ def delete_agent(org_id: str, agent_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/agents/{codegen.path_segment(agent_id)}",
         scopes=("agents:write",),
+        template="/v1/accounts/orgs/{org_id}/agents/{agent_id}",
     )
 
 
@@ -44,6 +45,7 @@ def delete_connection(org_id: str, connection_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}",
         scopes=("connections:write",),
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}",
     )
 
 
@@ -54,6 +56,7 @@ def revoke_grant(org_id: str, connection_id: str, grant_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}/grants/{codegen.path_segment(grant_id)}",
         scopes=("connections:write",),
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id}",
     )
 
 
@@ -64,6 +67,7 @@ def remove_domain(org_id: str, domain: str) -> Operation:
         method="DELETE",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/domains/{codegen.path_segment(domain)}",
         scopes=("domains:write",),
+        template="/v1/accounts/orgs/{org_id}/domains/{domain}",
     )
 
 
@@ -74,6 +78,7 @@ def delete_monitor(org_id: str, monitor_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/monitors/{codegen.path_segment(monitor_id)}",
         scopes=("connections:write",),
+        template="/v1/accounts/orgs/{org_id}/monitors/{monitor_id}",
     )
 
 
@@ -84,6 +89,7 @@ def delete_endpoint(endpoint_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         scopes=("webhooks:write",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -94,6 +100,7 @@ def delete_inbox(inbox_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/webhooks/inboxes/{codegen.path_segment(inbox_id)}",
         scopes=("webhooks:write",),
+        template="/v1/webhooks/inboxes/{inbox_id}",
     )
 
 
@@ -115,6 +122,7 @@ def list_agents(org_id: str, *, page_size: int | None = None, page_token: str | 
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/agents",
         query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("agents:read",),
+        template="/v1/accounts/orgs/{org_id}/agents",
     )
 
 
@@ -125,6 +133,7 @@ def get_agent(org_id: str, agent_id: str) -> Operation:
         method="GET",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/agents/{codegen.path_segment(agent_id)}",
         scopes=("agents:read",),
+        template="/v1/accounts/orgs/{org_id}/agents/{agent_id}",
     )
 
 
@@ -136,6 +145,7 @@ def list_team_events(org_id: str, *, action: str | None = None, actor: str | Non
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/audit",
         query=(("action", action), ("actor", actor), ("from", from_), ("to", to), ("query", query), ("page_token", page_token), ("limit", limit), ("after", after), ("page_size", page_size),),
         scopes=("account:audit",),
+        template="/v1/accounts/orgs/{org_id}/audit",
     )
 
 
@@ -147,6 +157,7 @@ def list_connections(org_id: str, *, page_size: int | None = None, page_token: s
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections",
         query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/connections",
     )
 
 
@@ -157,6 +168,7 @@ def get_connection(org_id: str, connection_id: str) -> Operation:
         method="GET",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}",
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}",
     )
 
 
@@ -168,6 +180,7 @@ def list_grants(org_id: str, connection_id: str, *, page_size: int | None = None
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}/grants",
         query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants",
     )
 
 
@@ -179,6 +192,7 @@ def list_history(org_id: str, connection_id: str, *, page_size: int | None = Non
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}/history",
         query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}/history",
     )
 
 
@@ -190,6 +204,7 @@ def list_domains(org_id: str, *, page_size: int | None = None, page_token: str |
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/domains",
         query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("domains:read",),
+        template="/v1/accounts/orgs/{org_id}/domains",
     )
 
 
@@ -200,6 +215,7 @@ def get_domain(org_id: str, domain: str) -> Operation:
         method="GET",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/domains/{codegen.path_segment(domain)}",
         scopes=("domains:read",),
+        template="/v1/accounts/orgs/{org_id}/domains/{domain}",
     )
 
 
@@ -211,6 +227,7 @@ def list_monitors(org_id: str, *, page_size: int | None = None, page_token: str 
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/monitors",
         query=(("page_size", page_size), ("page_token", page_token), ("connection_id", connection_id), ("agent_id", agent_id),),
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/monitors",
     )
 
 
@@ -221,6 +238,7 @@ def get_monitor(org_id: str, monitor_id: str) -> Operation:
         method="GET",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/monitors/{codegen.path_segment(monitor_id)}",
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/monitors/{monitor_id}",
     )
 
 
@@ -232,6 +250,7 @@ def list_monitor_runs(org_id: str, monitor_id: str, *, page_size: int | None = N
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/monitors/{codegen.path_segment(monitor_id)}/runs",
         query=(("page_size", page_size), ("page_token", page_token), ("from", from_),),
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs",
     )
 
 
@@ -242,6 +261,7 @@ def get_monitor_summary(org_id: str, monitor_id: str) -> Operation:
         method="GET",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/monitors/{codegen.path_segment(monitor_id)}/summary",
         scopes=("connections:read",),
+        template="/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary",
     )
 
 
@@ -253,6 +273,7 @@ def list_requests(org_id: str, *, page_size: int | None = None, page_token: str 
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/requests",
         query=(("page_size", page_size), ("page_token", page_token), ("status", status), ("query", query), ("after", after),),
         scopes=("usage:read",),
+        template="/v1/accounts/orgs/{org_id}/requests",
     )
 
 
@@ -263,6 +284,7 @@ def get_units(org_id: str) -> Operation:
         method="GET",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/units",
         scopes=("usage:read",),
+        template="/v1/accounts/orgs/{org_id}/units",
     )
 
 
@@ -274,6 +296,7 @@ def get_unit_series(org_id: str, *, from_: str | None = None, to: str | None = N
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/units/series",
         query=(("from", from_), ("to", to), ("by", by),),
         scopes=("usage:read",),
+        template="/v1/accounts/orgs/{org_id}/units/series",
     )
 
 
@@ -285,6 +308,7 @@ def get_usage(org_id: str, *, from_: str | None = None, to: str | None = None) -
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/usage",
         query=(("from", from_), ("to", to),),
         scopes=("usage:read",),
+        template="/v1/accounts/orgs/{org_id}/usage",
     )
 
 
@@ -394,6 +418,7 @@ def get_digest(id: str) -> Operation:
         method="GET",
         path=f"/v1/radar/digests/{codegen.path_segment(id)}",
         scopes=("radar:read",),
+        template="/v1/radar/digests/{id}",
     )
 
 
@@ -426,6 +451,7 @@ def get_endpoint(endpoint_id: str) -> Operation:
         method="GET",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         scopes=("webhooks:read",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -437,6 +463,7 @@ def list_deliveries(endpoint_id: str, *, status: str | None = None, page_token: 
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/deliveries",
         query=(("status", status), ("page_token", page_token), ("page_size", page_size),),
         scopes=("webhooks:read",),
+        template="/v1/webhooks/endpoints/{endpoint_id}/deliveries",
     )
 
 
@@ -459,6 +486,7 @@ def list_inbox_requests(inbox_id: str, *, page_size: int | None = None, page_tok
         path=f"/v1/webhooks/inboxes/{codegen.path_segment(inbox_id)}/requests",
         query=(("page_size", page_size), ("page_token", page_token),),
         scopes=("webhooks:read",),
+        template="/v1/webhooks/inboxes/{inbox_id}/requests",
     )
 
 
@@ -481,6 +509,7 @@ def update_connection(org_id: str, connection_id: str, body: UpdateConnectionReq
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}",
         body=body,
         scopes=("connections:write",),
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}",
     )
 
 
@@ -492,6 +521,8 @@ def update_monitor(org_id: str, monitor_id: str, body: UpdateMonitorRequest) -> 
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/monitors/{codegen.path_segment(monitor_id)}",
         body=body,
         scopes=("connections:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/monitors/{monitor_id}",
     )
 
 
@@ -503,6 +534,7 @@ def update_endpoint(endpoint_id: str, body: UpdateEndpointRequest) -> Operation:
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         body=body,
         scopes=("webhooks:write",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -514,6 +546,7 @@ def create_enrollment(org_id: str, body: CreateEnrollmentRequest) -> Operation:
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/agents/enrollments",
         body=body,
         scopes=("agents:write",),
+        template="/v1/accounts/orgs/{org_id}/agents/enrollments",
     )
 
 
@@ -525,6 +558,8 @@ def run_check(org_id: str, agent_id: str, body: RunCheckRequest) -> Operation:
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/agents/{codegen.path_segment(agent_id)}/checks",
         body=body,
         scopes=("agents:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/agents/{agent_id}/checks",
     )
 
 
@@ -536,6 +571,8 @@ def revoke_agent(org_id: str, agent_id: str, body: RevokeAgentRequest) -> Operat
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/agents/{codegen.path_segment(agent_id)}/revoke",
         body=body,
         scopes=("agents:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke",
     )
 
 
@@ -547,6 +584,8 @@ def create_connection(org_id: str, body: CreateConnectionRequest) -> Operation:
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections",
         body=body,
         scopes=("connections:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/connections",
     )
 
 
@@ -558,6 +597,8 @@ def call_action(org_id: str, connection_id: str, action: str, body: CallActionRe
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}/actions/{codegen.path_segment(action)}",
         body=body,
         scopes=("connections:use",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}",
     )
 
 
@@ -569,6 +610,8 @@ def create_monitor(org_id: str, connection_id: str, body: CreateMonitorRequest) 
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}/monitors",
         body=body,
         scopes=("connections:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors",
     )
 
 
@@ -579,6 +622,8 @@ def test_connection(org_id: str, connection_id: str) -> Operation:
         method="POST",
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/connections/{codegen.path_segment(connection_id)}/test",
         scopes=("connections:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/connections/{connection_id}/test",
     )
 
 
@@ -590,6 +635,8 @@ def add_domain(org_id: str, body: AddDomainRequest) -> Operation:
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/domains",
         body=body,
         scopes=("domains:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/domains",
     )
 
 
@@ -601,6 +648,8 @@ def check_domain(org_id: str, domain: str, body: CheckDomainRequest) -> Operatio
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/domains/{codegen.path_segment(domain)}/check",
         body=body,
         scopes=("domains:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/domains/{domain}/check",
     )
 
 
@@ -612,6 +661,8 @@ def confirm_domain(org_id: str, domain: str, body: ConfirmDomainRequest) -> Oper
         path=f"/v1/accounts/orgs/{codegen.path_segment(org_id)}/domains/{codegen.path_segment(domain)}/confirm",
         body=body,
         scopes=("domains:write",),
+        idempotency_key=True,
+        template="/v1/accounts/orgs/{org_id}/domains/{domain}/confirm",
     )
 
 
@@ -623,6 +674,8 @@ def call_tool(name: str, body: CallToolRequest) -> Operation:
         path=f"/v1/connections/tools/{codegen.path_segment(name)}",
         body=body,
         scopes=("connections:use",),
+        idempotency_key=True,
+        template="/v1/connections/tools/{name}",
     )
 
 
@@ -633,6 +686,8 @@ def retry_delivery(delivery_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/deliveries/{codegen.path_segment(delivery_id)}/retry",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/deliveries/{delivery_id}/retry",
     )
 
 
@@ -644,6 +699,7 @@ def create_endpoint(body: CreateEndpointRequest) -> Operation:
         path="/v1/webhooks/endpoints",
         body=body,
         scopes=("webhooks:write",),
+        idempotency_key=True,
     )
 
 
@@ -655,6 +711,7 @@ def recover_endpoint(endpoint_id: str, body: RecoverEndpointRequest) -> Operatio
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/recover",
         body=body,
         scopes=("webhooks:write",),
+        template="/v1/webhooks/endpoints/{endpoint_id}/recover",
     )
 
 
@@ -665,6 +722,8 @@ def rotate_secret(endpoint_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/rotate",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/endpoints/{endpoint_id}/rotate",
     )
 
 
@@ -675,6 +734,8 @@ def send_test(endpoint_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/test",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/endpoints/{endpoint_id}/test",
     )
 
 
@@ -686,4 +747,5 @@ def create_inbox(body: CreateInboxRequest) -> Operation:
         path="/v1/webhooks/inboxes",
         body=body,
         scopes=("webhooks:write",),
+        idempotency_key=True,
     )

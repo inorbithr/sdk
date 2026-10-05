@@ -1,7 +1,7 @@
 name: defaults-apply-when-nothing-is-set
 kind: config
 summary: With only a token in the environment and no file, every other setting is its default.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off" }
 expect:
