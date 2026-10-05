@@ -94,4 +94,9 @@ cli/
   only through `ext::socket` for its manifest's scopes; never pass it `IOHR_TOKEN*`, the
   store or a refresh token. `tests/ext.rs` runs a registry on loopback: add a case for
   every new refusal.
+- `iohr sdk add` (SR-31) decides in `commands::sdk_add::plan` from files alone, then runs
+  one program with an argument vector: never a shell, sudo or a global pip, the program
+  only from absolute `PATH` entries. Package names stay constants checked against the
+  manifests; the first-call snippets are lines of each language's README (a test holds
+  them to it).
 - Commit scope `cli`.

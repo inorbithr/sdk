@@ -729,6 +729,44 @@ pub enum SdkCommand {
     /// file; contacts no host. `--profile NAME` stands for `profile` in the client's
     /// code; `IOHR_PROFILE` is not read, as the SDKs do not read it.
     Config(SdkConfig),
+    /// Add the published SDK to the project here with the package manager it already
+    /// uses: `cargo add`, `npm install` (or pnpm, yarn, bun, deno), `uv add` (or poetry,
+    /// pdm, pip in the active virtualenv) or `go get`.
+    ///
+    /// The language is read from the nearest project file between this directory and the
+    /// repository root when it is not given. The command is printed first and then run,
+    /// as a program with its arguments (no shell, never sudo); iohr itself contacts no
+    /// host, the package manager reaches its own registry. Exit code: the package
+    /// manager's, or 2 when no project or manager can be chosen.
+    #[command(disable_version_flag = true)]
+    Add(SdkAdd),
+}
+
+#[derive(Debug, Args)]
+pub struct SdkAdd {
+    /// rust, typescript (ts, js), python (py) or go. Read from the project when left out.
+    #[arg(value_enum)]
+    pub lang: Option<AddLang>,
+    /// Install this version, such as 0.2.1 (default: the newest release, recorded the way
+    /// the package manager records it).
+    #[arg(long, value_name = "VERSION")]
+    pub version: Option<String>,
+    /// Print the command and run nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// The languages `iohr sdk add` knows; C# and Java are refused until they are published.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum AddLang {
+    Rust,
+    #[value(alias = "ts", alias = "js")]
+    Typescript,
+    #[value(alias = "py")]
+    Python,
+    Go,
+    Csharp,
+    Java,
 }
 
 #[derive(Debug, Args)]

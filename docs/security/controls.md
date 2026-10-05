@@ -12,7 +12,7 @@ hosted API, audits) is maintained separately and is not public.
 
 | Practice | What we do | Status |
 |---|---|---|
-| PO.1 Security requirements | [requirements.md](requirements.md), SR-01 to SR-30 | met |
+| PO.1 Security requirements | [requirements.md](requirements.md), SR-01 to SR-31 | met |
 | PO.2 Roles and responsibilities | [GOVERNANCE.md](../../GOVERNANCE.md) | partial: one maintainer |
 | PO.3 Toolchain | mise-pinned toolchains, CodeQL, zizmor, actionlint, dependency review, Scorecard | met |
 | PO.4 Security check criteria | SR-21 vulnerability gate; `ci-ok` required | partial: scanners land with code |

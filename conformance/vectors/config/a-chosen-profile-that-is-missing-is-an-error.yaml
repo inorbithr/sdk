@@ -1,7 +1,6 @@
 name: a-chosen-profile-that-is-missing-is-an-error
 kind: config
 summary: A profile chosen in the environment that the file does not have fails the load.
-pending: [java]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_PROFILE: nope }
   config_file: |

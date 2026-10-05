@@ -57,6 +57,15 @@ only to `api.inorbit.hr` and `auth.inorbit.hr`, with no telemetry. Releases befo
 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
 check with `gh attestation verify`. [cli/README.md](cli/README.md) has every command.
 
+## Add a library to your project
+
+```sh
+iohr sdk add        # cargo add, npm/pnpm/yarn/bun/deno add, uv/poetry/pdm add or go get, from your project's files
+```
+
+The command is printed, then run by your project's own package manager
+([cli/README.md](cli/README.md#add-the-sdk-to-a-project)).
+
 ## Generate a client for your account
 
 ```sh

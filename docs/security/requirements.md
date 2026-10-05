@@ -133,7 +133,8 @@ the code, status and request id, and never echo request values.
 
 **SR-16. No telemetry.** The SDK sends nothing anywhere except the requests the caller
 makes to the API and the token endpoint: no usage pings, no crash reports, no update
-checks. The command line has one exception, the extension registry, under SR-25.
+checks. The command line has one exception, the extension registry, under SR-25;
+`iohr sdk add` contacts nothing itself and runs the project's package manager (SR-31).
 - Verify: review; conformance runs with only the replay server reachable.
 - Refs: CRA I.2(g).
 
@@ -229,6 +230,23 @@ exactly a lock's entries and refuses another digest, version or signer. Only
   be able to read what that is.
 - Verify: integration tests for install with `--lock`, sync and a signer mismatch.
 - Refs: SSDF PS.3; CRA I.2(c).
+
+**SR-31. `iohr sdk add` runs the project's package manager and nothing else.** It
+chooses the manager from the project's own files (a lock file, `packageManager`, an
+active virtualenv), prints the exact command, and runs that one program with an argument
+vector in the project directory: no shell, never sudo, never pip outside an active
+virtualenv. The program is looked up only in absolute `PATH` entries, so a file of that
+name in the project is never run. `iohr` contacts no host for it; the package manager
+reaches its own registry and writes what it always writes. Package names are fixed in
+the binary and a version is checked to be one (digits, letters, `.`, `-`, `+`). With
+`--dry-run` nothing runs.
+- Why: installing a dependency is the person's decision on their machine; a command line
+  that adds a shell, elevated rights or a global install would turn that into a way to
+  run something else.
+- Verify: unit tests over temporary directories for every manager, the virtualenv rule
+  and refused versions; an integration test that runs a stand-in program and checks the
+  arguments it received and the exit code passed on.
+- Refs: CRA I.2(d); least privilege.
 
 ## Reliability and traceability
 

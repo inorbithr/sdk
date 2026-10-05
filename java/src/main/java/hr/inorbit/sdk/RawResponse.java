@@ -15,6 +15,8 @@ public final class RawResponse {
     private final byte[] body;
     private final String requestId;
     private final int attempts;
+    private final String idempotencyKey;
+    private final RateLimit rateLimit;
 
     /**
      * An answer read off the wire.
@@ -26,11 +28,35 @@ public final class RawResponse {
      * @param attempts how many attempts the call took
      */
     public RawResponse(int status, HttpHeaders headers, byte[] body, String requestId, int attempts) {
+        this(status, headers, body, requestId, attempts, null, null);
+    }
+
+    /**
+     * An answer read off the wire, with what the pipeline learned about it.
+     *
+     * @param status the HTTP status
+     * @param headers the response headers
+     * @param body the body, at most 16 MiB
+     * @param requestId the {@code x-request-id} the SDK sent
+     * @param attempts how many attempts the call took
+     * @param idempotencyKey the {@code Idempotency-Key} the call sent, or {@code null}
+     * @param rateLimit the rate-limit snapshot of the answer, or {@code null}
+     */
+    public RawResponse(
+            int status,
+            HttpHeaders headers,
+            byte[] body,
+            String requestId,
+            int attempts,
+            String idempotencyKey,
+            RateLimit rateLimit) {
         this.status = status;
         this.headers = headers;
         this.body = body.clone();
         this.requestId = requestId;
         this.attempts = attempts;
+        this.idempotencyKey = idempotencyKey;
+        this.rateLimit = rateLimit;
     }
 
     /**
@@ -120,6 +146,36 @@ public final class RawResponse {
      */
     public int attempts() {
         return attempts;
+    }
+
+    /**
+     * The {@code Idempotency-Key} the call sent (docs/config.md section 7.5).
+     *
+     * @return the key, for an operation that takes one
+     */
+    public Optional<String> idempotencyKey() {
+        return Optional.ofNullable(idempotencyKey);
+    }
+
+    /**
+     * Whether the API answered what an earlier call with the same idempotency key did ({@code
+     * Idempotency-Replayed: true}).
+     *
+     * @return whether the answer is a replay
+     */
+    public boolean idempotencyReplayed() {
+        return headers.firstValue("idempotency-replayed")
+                .map(v -> v.strip().equalsIgnoreCase("true"))
+                .orElse(false);
+    }
+
+    /**
+     * The rate-limit snapshot this answer carried (docs/config.md section 7.8).
+     *
+     * @return the snapshot, if the API sent one and {@code rate_limit} is not {@code off}
+     */
+    public Optional<RateLimit> rateLimit() {
+        return Optional.ofNullable(rateLimit);
     }
 
     /** The status, the size and the request id; never the body or a header. */

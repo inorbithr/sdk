@@ -30,6 +30,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.delete_endpoint")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), DeleteEndpointResponse.class);
     }
 
@@ -44,6 +45,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.delete_endpoint")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), DeleteEndpointResponse.class);
     }
 
@@ -58,6 +60,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/webhooks/inboxes/" + Codegen.pathSegment(inboxId))
                 .name("events.delete_inbox")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/inboxes/{inbox_id}")
                 .build(), DeleteInboxResponse.class);
     }
 
@@ -72,6 +75,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/webhooks/inboxes/" + Codegen.pathSegment(inboxId))
                 .name("events.delete_inbox")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/inboxes/{inbox_id}")
                 .build(), DeleteInboxResponse.class);
     }
 
@@ -112,6 +116,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/units")
                 .name("accounts.get_units")
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/units")
                 .build(), GetUnitsResponse.class);
     }
 
@@ -126,6 +131,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/units")
                 .name("accounts.get_units")
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/units")
                 .build(), GetUnitsResponse.class);
     }
 
@@ -143,6 +149,7 @@ public final class Operations {
                 .query("from", params.from())
                 .query("to", params.to())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/usage")
                 .build(), GetUsageResponse.class);
     }
 
@@ -160,6 +167,7 @@ public final class Operations {
                 .query("from", params.from())
                 .query("to", params.to())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/usage")
                 .build(), GetUsageResponse.class);
     }
 
@@ -325,6 +333,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/radar/digests/" + Codegen.pathSegment(id))
                 .name("radar.get_digest")
                 .scopes("radar:read")
+                .template("/v1/radar/digests/{id}")
                 .build(), GetDigestResponse.class);
     }
 
@@ -339,6 +348,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/radar/digests/" + Codegen.pathSegment(id))
                 .name("radar.get_digest")
                 .scopes("radar:read")
+                .template("/v1/radar/digests/{id}")
                 .build(), GetDigestResponse.class);
     }
 
@@ -423,6 +433,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.get_endpoint")
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -437,6 +448,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.get_endpoint")
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -455,6 +467,7 @@ public final class Operations {
                 .query("page_token", params.pageToken())
                 .query("page_size", params.pageSize())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}/deliveries")
                 .build(), ListDeliveriesResponse.class);
     }
 
@@ -473,6 +486,7 @@ public final class Operations {
                 .query("page_token", params.pageToken())
                 .query("page_size", params.pageSize())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}/deliveries")
                 .build(), ListDeliveriesResponse.class);
     }
 
@@ -524,6 +538,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/inboxes/{inbox_id}/requests")
                 .build(), ListInboxRequestsResponse.class);
     }
 
@@ -541,6 +556,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/inboxes/{inbox_id}/requests")
                 .build(), ListInboxRequestsResponse.class);
     }
 
@@ -557,6 +573,7 @@ public final class Operations {
                 .name("events.update_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -573,6 +590,7 @@ public final class Operations {
                 .name("events.update_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -587,6 +605,8 @@ public final class Operations {
         return client.request(Operation.builder(Method.POST, "/v1/webhooks/deliveries/" + Codegen.pathSegment(deliveryId) + "/retry")
                 .name("events.retry_delivery")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/deliveries/{delivery_id}/retry")
                 .build(), RetryDeliveryResponse.class);
     }
 
@@ -601,6 +621,8 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.POST, "/v1/webhooks/deliveries/" + Codegen.pathSegment(deliveryId) + "/retry")
                 .name("events.retry_delivery")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/deliveries/{delivery_id}/retry")
                 .build(), RetryDeliveryResponse.class);
     }
 
@@ -616,6 +638,7 @@ public final class Operations {
                 .name("events.create_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateEndpointResponse.class);
     }
 
@@ -631,6 +654,7 @@ public final class Operations {
                 .name("events.create_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateEndpointResponse.class);
     }
 
@@ -645,6 +669,8 @@ public final class Operations {
         return client.request(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/rotate")
                 .name("events.rotate_secret")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/rotate")
                 .build(), RotateSecretResponse.class);
     }
 
@@ -659,6 +685,8 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/rotate")
                 .name("events.rotate_secret")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/rotate")
                 .build(), RotateSecretResponse.class);
     }
 
@@ -673,6 +701,8 @@ public final class Operations {
         return client.request(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/test")
                 .name("events.send_test")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/test")
                 .build(), SendTestResponse.class);
     }
 
@@ -687,6 +717,8 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/test")
                 .name("events.send_test")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/test")
                 .build(), SendTestResponse.class);
     }
 
@@ -702,6 +734,7 @@ public final class Operations {
                 .name("events.create_inbox")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateInboxResponse.class);
     }
 
@@ -717,6 +750,7 @@ public final class Operations {
                 .name("events.create_inbox")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateInboxResponse.class);
     }
 }
