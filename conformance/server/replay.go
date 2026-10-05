@@ -41,6 +41,13 @@ type Server struct {
 	tokens  int
 	calls   int
 	session int // bumped by every load, so a socket left from an earlier case fails nothing
+	// captures holds the header values `$name` matchers captured in this session.
+	captures map[string]string
+
+	// endpoints are the listeners' locations (set by Start); tunnels the proxy's open
+	// tunnels by the local address of their upstream connection.
+	endpoints Endpoints
+	tunnels   sync.Map
 }
 
 // NewServer replays cases read from casesDir.
@@ -65,6 +72,9 @@ type Seen struct {
 	Form    map[string]string `json:"form,omitempty"`
 	JSON    any               `json:"json,omitempty"`
 	Body    string            `json:"body,omitempty"`
+	// Via is proxy or direct; ClientCert the subject of the certificate presented.
+	Via        string `json:"via"`
+	ClientCert string `json:"client_cert,omitempty"`
 }
 
 // Result is what GET /_result answers.
@@ -134,10 +144,18 @@ func (s *Server) loadHandler(w http.ResponseWriter, r *http.Request) {
 	s.last = s.now()
 	s.fail = nil
 	s.tokens, s.calls = 0, 0
+	s.captures = map[string]string{}
 	s.session++
 	// The loaded case goes back as JSON, so a driver reads client, action and expect
-	// from here instead of parsing YAML itself.
-	writeJSON(w, http.StatusOK, map[string]any{"loaded": c.Name, "exchanges": len(c.Exchanges), "case": c})
+	// from here instead of parsing YAML itself; next to it, where the listeners are and
+	// which one the case's client.transport selects (`base_url`, what `{replay}` means).
+	e := s.endpoints
+	writeJSON(w, http.StatusOK, map[string]any{
+		"loaded": c.Name, "exchanges": len(c.Exchanges), "case": c,
+		"base_url": e.baseURL(c.transport()), "http_url": e.HTTPURL,
+		"https_url": e.HTTPSURL, "mtls_url": e.MTLSURL, "proxy_url": e.ProxyURL,
+		"ca_file": e.CAFile, "client_cert_file": e.ClientCertFile, "client_key_file": e.ClientKeyFile,
+	})
 }
 
 // listHandler answers GET /_cases with every case name under the cases directory.
@@ -193,7 +211,7 @@ func (s *Server) Result() Result {
 
 // replay matches one SDK request against the case and sends the exchange's response.
 func (s *Server) replay(w http.ResponseWriter, r *http.Request) {
-	seen, err := read(r)
+	seen, err := s.read(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, problem("bad_request", err.Error()))
 		return
@@ -254,11 +272,12 @@ func (s *Server) match(seen Seen) (Response, bool) {
 		}
 		tried++
 		want := s.current.Exchanges[i].Request
-		reason := mismatch(want, seen)
+		reason, fresh := mismatch(want, seen, s.captures)
 		if reason == "" {
 			reason = timing(want, elapsed)
 		}
 		if reason == "" {
+			maps.Copy(s.captures, fresh)
 			s.used[i] = true
 			for s.next < len(s.used) && s.used[s.next] {
 				s.next++
@@ -349,8 +368,10 @@ func reset(w http.ResponseWriter) {
 }
 
 // read captures a request in the shape cases describe: lower-case header names, the
-// first value of each query parameter, a form or JSON body.
-func read(r *http.Request) (Seen, error) {
+// first value of each query parameter, a form or JSON body, whether it came through the
+// proxy and the client certificate it was sent with. A request the proxy carried also
+// shows the Proxy-Authorization its CONNECT sent, as the `proxy-authorization` header.
+func (s *Server) read(r *http.Request) (Seen, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil {
 		return Seen{}, fmt.Errorf("reading the body: %w", err)
@@ -364,6 +385,14 @@ func read(r *http.Request) (Seen, error) {
 	}
 	if host := r.Host; host != "" {
 		seen.Headers["host"] = host
+	}
+	var t tunnel
+	seen.Via, t = s.via(r)
+	if _, sent := seen.Headers["proxy-authorization"]; !sent && t.auth != "" {
+		seen.Headers["proxy-authorization"] = t.auth
+	}
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+		seen.ClientCert = r.TLS.PeerCertificates[0].Subject.String()
 	}
 	if len(body) == 0 {
 		return seen, nil
@@ -399,24 +428,33 @@ func first(values map[string][]string) map[string]string {
 	return out
 }
 
-// mismatch says why a request is not the expected one, or "" when it is.
-func mismatch(want Request, got Seen) string {
+// mismatch says why a request is not the expected one, or "" when it is, with the
+// header values it captures for `$name` matchers seen for the first time.
+func mismatch(want Request, got Seen, captures map[string]string) (string, map[string]string) {
 	if !strings.EqualFold(want.Method, got.Method) {
-		return fmt.Sprintf("method: want %s, got %s", want.Method, got.Method)
+		return fmt.Sprintf("method: want %s, got %s", want.Method, got.Method), nil
 	}
 	if want.Path != got.Path {
-		return fmt.Sprintf("path: want %s, got %s", want.Path, got.Path)
+		return fmt.Sprintf("path: want %s, got %s", want.Path, got.Path), nil
+	}
+	if reason := matchTransport(want, got); reason != "" {
+		return reason, nil
 	}
 	if reason := subsetMap("query", want.Query, got.Query); reason != "" {
-		return reason
+		return reason, nil
 	}
-	lower := make(map[string]string, len(want.Headers))
-	for k, v := range want.Headers {
-		lower[strings.ToLower(k)] = v
+	reason, fresh := matchHeaders(want.Headers, got.Headers, captures)
+	if reason != "" {
+		return reason, nil
 	}
-	if reason := subsetMap("header", lower, got.Headers); reason != "" {
-		return reason
+	if reason := matchAbsent(want.HeadersAbsent, got.Headers); reason != "" {
+		return reason, nil
 	}
+	return mismatchBody(want, got), fresh
+}
+
+// mismatchBody compares the form and the JSON body, and the fields that must be absent.
+func mismatchBody(want Request, got Seen) string {
 	if reason := subsetMap("form field", want.Form, got.Form); reason != "" {
 		return reason
 	}

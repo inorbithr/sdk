@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strings"
@@ -16,7 +15,7 @@ import (
 
 // playSocket plays a socket answer's steps from the client's side: it sends what the
 // server expects (with "c1" for a captured id) and reads what the server sends.
-func playSocket(t *testing.T, ts *httptest.Server, req Request, sock *Socket) {
+func playSocket(t *testing.T, ts *testServer, req Request, sock *Socket) {
 	t.Helper()
 	u, _ := url.Parse(ts.URL)
 	conn, err := net.Dial("tcp", u.Host)

@@ -16,6 +16,7 @@ import hr.inorbit.sdk.generated.CreateEndpointRequest;
 import hr.inorbit.sdk.generated.EventsStreamEventsParams;
 import hr.inorbit.sdk.generated.Public;
 import hr.inorbit.sdk.generated.StreamEventsResponse;
+import hr.inorbit.sdk.generated.UpdateEndpointRequest;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -240,6 +241,26 @@ class ConformanceTest {
                                 .description(text(args, "description"))
                                 .eventTypes(types)
                                 .build())
+                        .raw();
+            }
+            case "events.update_endpoint" -> {
+                List<String> types = null;
+                if (args.has("event_types")) {
+                    types = new ArrayList<>();
+                    for (JsonNode type : args.path("event_types")) {
+                        types.add(type.asText());
+                    }
+                }
+                Boolean enabled = args.has("enabled") ? args.path("enabled").asBoolean() : null;
+                yield api.events()
+                        .updateEndpoint(
+                                args.path("endpoint_id").asText(),
+                                UpdateEndpointRequest.builder()
+                                        .url(text(args, "url"))
+                                        .description(text(args, "description"))
+                                        .enabled(enabled)
+                                        .eventTypes(types)
+                                        .build())
                         .raw();
             }
             case "events.delete_endpoint" ->

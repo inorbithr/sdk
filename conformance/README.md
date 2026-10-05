@@ -38,29 +38,86 @@ expect:
 
 Unless a case says otherwise, the driver builds the client with `key_id: ak_test`,
 `key_secret: s3cr3t`, `scopes: [identity:read]`, `max_retries: 2`, and `base_url` and `token_url` pointing at the
-replay server. Header names are lower case. `json` bodies match as subsets on requests and are sent
+replay server. Header names are lower case. A request header value is a literal, `*` (present, any
+value), `$name` (captured the first time, equal afterwards) or `~regex` (the regex matches
+the whole value); `headers_absent` lists headers that must not be sent. `json` bodies match as subsets on requests and are sent
 verbatim on responses; `absent` lists the request body's top-level fields that must not be sent. `fault: reset` closes the connection instead of answering.
 `delay_ms` holds the answer back; `chunked: { bytes: 3, delay_ms: 50 }` sends the body
 with chunked transfer encoding, 3 bytes at a time, 50 ms apart.
 
 ## The replay server
 
-`conformance/server` plays the API and the token endpoint on one port, one case at a
-time. `mise run conformance:server` runs it; `mise run conformance:server:build` builds
+`conformance/server` plays the API and the token endpoint, one case at a time, on four
+listeners that share one session: plain HTTP, TLS, mTLS and a CONNECT proxy. `mise run
+conformance:server` runs it; `mise run conformance:server:build` builds
 `conformance/server/bin/replay` for the drivers, which start one server per test run:
 
 ```sh
 replay --addr 127.0.0.1:0 --cases conformance/cases
 # replay: listening on http://127.0.0.1:41733     (the first line; drivers read it)
+# replay: tls on https://127.0.0.1:41734, mtls on https://127.0.0.1:41735, proxy on http://127.0.0.1:41736
+# replay: ca /tmp/replay-pki-123/ca.pem, client certificate .../client.pem, key .../client-key.pem
 ```
+
+Only the first line is a contract; the listeners' locations reach a driver in every
+`/_case` answer. `--https-addr`, `--mtls-addr` and `--proxy-addr` pin the other
+listeners (by default the plain listener's host, a free port each), and `--dir` names
+the directory for the certificate files (by default a new temporary one, removed when the
+server stops on SIGINT or SIGTERM; one left by a killed server is removed by a later
+start once it is a day old).
+
+At start the server makes a throwaway CA (ECDSA P-256, valid 7 days) and signs a server
+leaf for `127.0.0.1`, `::1` and `localhost` and a client certificate with subject
+`CN=conformance-client`. It writes `ca.pem`, `client.pem` and `client-key.pem` (PKCS#8,
+mode 0600); the CA's and the server's keys never leave memory. Nothing of it is
+committed. Every listener speaks HTTP/1.1 only, so an answer behaves the same over TLS as
+over plain HTTP.
+
+- **TLS** trusts nobody's client certificate and asks for none.
+- **mTLS** refuses a handshake without a client certificate signed by the CA.
+- **The proxy** answers `CONNECT` to the replay's own listeners only (any loopback name
+  or the listener's host, with a listener's port; anything else is `403`), and a plain
+  `http://` request in absolute form to the plain listener. The listener at the other
+  end knows which requests came through it, so `via` can be matched. The
+  `Proxy-Authorization` the client sent on `CONNECT` appears on each request the tunnel
+  carried as the `proxy-authorization` header, so a case can match it.
+
+The binary is also a fake `iohr` for the `cli` credential source (docs/config.md section
+5.4): a driver points `cli_path` at it, and
+
+```sh
+replay auth token --profile dev --format json
+# {"access_token":"cli-dev","expires_at":"2026-10-04T10:15:00Z","profile":"dev"}
+```
+
+prints the token for any profile, `expires_at` 15 minutes ahead in UTC. It carries no
+`account`: the fake has no login to take one from, and an SDK reads only the token and
+its expiry. For the profile `missing` it prints one line on standard error and exits 1;
+a call without `--profile` or with a format other than `json` exits 2.
 
 A driver then:
 
 1. `GET /_cases` lists every case as `area/name`, so a driver needs no YAML reader.
 2. `POST /_case` with `{"name": "auth/token-is-cached"}` (or the bare name, or
    `{"case": {...}}` for a case written inline). This starts a new session, and the
-   answer carries the loaded case as JSON (`client`, `action`, `expect`, `pending`).
-3. Points `base_url` and `token_url` at the server and runs the case's action.
+   answer carries the loaded case as JSON (`client`, `action`, `expect`, `pending`) and,
+   next to it, the listeners and files:
+
+   ```json
+   { "loaded": "a-private-ca-is-trusted", "exchanges": 2, "case": { ... },
+     "base_url": "https://127.0.0.1:41734", "http_url": "http://127.0.0.1:41733",
+     "https_url": "https://127.0.0.1:41734", "mtls_url": "https://127.0.0.1:41735",
+     "proxy_url": "http://127.0.0.1:41736", "ca_file": "/tmp/replay-pki-123/ca.pem",
+     "client_cert_file": "/tmp/replay-pki-123/client.pem",
+     "client_key_file": "/tmp/replay-pki-123/client-key.pem" }
+   ```
+
+   `base_url` is the listener the case's `client.transport` selects: `http_url` for
+   none or `http`, `https_url` for `https` and `proxy` (with `proxy_url` as the proxy),
+   `mtls_url` for `mtls`. It is what `{replay}` stands for in `env` and `config_file`.
+3. Points `base_url` and `token_url` (`{base_url}/oauth2/token`) at it, sets `ca_bundle`,
+   `client_cert`, `client_key` and `proxy` as `client.transport` says, and runs the
+   case's action.
 4. `GET /_result`:
 
 ```json
@@ -75,6 +132,16 @@ request; drivers compare them with the case's `expect`.
 
 Rules the server applies:
 
+- Header matchers: `*` needs the header with any value; `$name` takes the value the
+  first time a matching exchange carries it and wants the same value afterwards, for the
+  rest of the session (captures are kept only when the whole exchange matched, and are
+  separate from the socket steps' `$name` ids); `~regex` is Go RE2 syntax and must match
+  the whole value. A literal that starts with `*`, `$` or `~` is written as a regex
+  (`~\$5`). A pattern that does not compile, or a `$` with no name, fails the load.
+- `headers_absent` fails a request that carries any of the named headers. `via: proxy`
+  wants the request through the proxy, `via: direct` not; `client_cert` wants the
+  subject the client presented (`CN=conformance-client`, or just the common name), so
+  it fails over plain HTTP and TLS, where no certificate is presented.
 - Requests match the case's exchanges in order. A case whose action has `concurrent: N`
   lets a request match any of the next N unused exchanges, since parallel calls arrive
   in any order.
@@ -96,19 +163,32 @@ Rules the server applies:
   lists what the stream yielded, in order, each as a subset, the count exact.
 
 `mise run conformance:server:check` runs gofmt, vet, golangci-lint and a self-test that
-plays every case's exchanges against the server and expects a pass.
+plays every case's exchanges against the server and expects a pass. The self-test sends
+values that satisfy the matchers (any value for `*`, one fixed value per `$name`, a
+string generated from the regex for `~`), leaves out `headers_absent`, and sends each
+request through the listener the case's `client.transport` and the request's `via` and
+`client_cert` call for, so every case, the pending ones included, plays to a pass.
 
 ## Configuration and middleware cases (M6, pending)
 
 The cases under `credentials`, `middleware`, `transport` and the M6 cases in `retries`
-use schema fields no runtime or replay feature supports yet. Every one is `pending` for
-all six languages. The fields are `client.load`, `env`, `config_file`, `files`,
-`pipeline` probes, `log`, `tracing` and `transport`; `action.options` and `rewrite`;
-request matchers `*`, `$name`, `~regex`, `headers_absent`, `via` and `client_cert`; and
-`expect.probes`, `logs`, `spans`, `rate_limit` and `config`. `docs/config.md` section 9.1
-lists the replay server features they need: matchers, TLS, mTLS and proxy listeners, and
-a fake `iohr`. Until those land, the server ignores the new request fields, and its
-self-test sends matcher patterns literally, so these cases replay as plain exchanges.
+use schema fields no runtime supports yet. Every one is `pending` for all six languages
+until a runtime passes it. The replay server supports what they need from it
+(`docs/config.md` section 9.1): the header matchers, `headers_absent`, `via` and
+`client_cert`, the TLS, mTLS and proxy listeners, their locations in the `/_case`
+answer, and the fake `iohr`; its self-test plays all of them to a pass.
+
+The rest is the driver's. Where each new field is handled:
+
+| Field | Handled by |
+|---|---|
+| request `headers` matchers, `headers_absent`, `via`, `client_cert` | server |
+| `client.transport` | driver, with the server's `base_url`, `proxy_url`, `ca_file`, `client_cert_file`, `client_key_file` |
+| `client.cli` | driver (`cli_path` = the replay binary), the server binary answers |
+| `client.load`, `env`, `config_file`, `files`, `profile`, `credential_sources`; `{replay}` (= `base_url`) and `{dir}` substitution | driver |
+| `client.pipeline`, `log`, `log_headers`, `log_allow_headers`, `tracing`, `rate_limit`, `total_timeout_ms`, `retry_budget_capacity`, `no_proxy` | driver |
+| `action.options`, `action.rewrite` (file rotation between calls) | driver |
+| `expect.probes` (with the same matchers as request headers), `logs`, `spans`, `rate_limit`, `idempotency_key`, `config` | driver |
 
 ## Writing a case
 

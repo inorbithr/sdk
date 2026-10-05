@@ -230,7 +230,9 @@ fn build_client(url: &str, options: &ClientOptions) -> Client<Public> {
 /// The operations the cases name, called through the generated public surface
 /// (`inorbithr::public`), so a passing case proves the generated code.
 async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, Error> {
-    use inorbithr::public::{AccountsGetUsageParams, CreateEndpointRequest, Surface as _};
+    use inorbithr::public::{
+        AccountsGetUsageParams, CreateEndpointRequest, Surface as _, UpdateEndpointRequest,
+    };
     let arg = |k: &str| {
         action
             .args
@@ -261,6 +263,19 @@ async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, E
                 serde_json::from_value(Value::Object(action.args.clone().into_iter().collect()))
                     .expect("the case's args are a CreateEndpointRequest");
             client.events().create_endpoint(&body).await.map(|r| r.raw)
+        }
+        "events.update_endpoint" => {
+            let id = arg("endpoint_id").unwrap_or_default();
+            let mut fields = action.args.clone();
+            fields.remove("endpoint_id"); // the path carries it
+            let body: UpdateEndpointRequest =
+                serde_json::from_value(Value::Object(fields.into_iter().collect()))
+                    .expect("the case's args are an UpdateEndpointRequest");
+            client
+                .events()
+                .update_endpoint(&id, &body)
+                .await
+                .map(|r| r.raw)
         }
         "events.delete_endpoint" => {
             let id = arg("endpoint_id").unwrap_or_default();

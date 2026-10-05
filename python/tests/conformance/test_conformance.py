@@ -30,6 +30,7 @@ from inorbithr import (
     InOrbitError,
     Public,
     RawResponse,
+    UpdateEndpointRequest,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -131,7 +132,7 @@ async def stream_async(api: AsyncPublic, action: dict[str, Any]) -> Streamed:
     return out
 
 
-def call_sync(api: Public, action: dict[str, Any]) -> RawResponse:
+def call_sync(api: Public, action: dict[str, Any]) -> RawResponse:  # noqa: PLR0911 - one return per op
     """Runs one action through the blocking surface."""
     args: dict[str, Any] = action.get("args") or {}
     op = action["op"]
@@ -147,12 +148,17 @@ def call_sync(api: Public, action: dict[str, Any]) -> RawResponse:
         return api.radar.get_digest(_arg(args, "id")).raw
     if op == "events.create_endpoint":
         return api.events.create_endpoint(CreateEndpointRequest.model_validate(args)).raw
+    if op == "events.update_endpoint":
+        body = UpdateEndpointRequest.model_validate(
+            {k: v for k, v in args.items() if k != "endpoint_id"}
+        )
+        return api.events.update_endpoint(_arg(args, "endpoint_id"), body).raw
     if op == "events.delete_endpoint":
         return api.events.delete_endpoint(_arg(args, "endpoint_id")).raw
     raise AssertionError(f"the conformance schema names an op this driver does not know: {op}")
 
 
-async def call_async(api: AsyncPublic, action: dict[str, Any]) -> RawResponse:
+async def call_async(api: AsyncPublic, action: dict[str, Any]) -> RawResponse:  # noqa: PLR0911 - one return per op
     """Runs one action through the `asyncio` surface."""
     args: dict[str, Any] = action.get("args") or {}
     op = action["op"]
@@ -170,6 +176,11 @@ async def call_async(api: AsyncPublic, action: dict[str, Any]) -> RawResponse:
     if op == "events.create_endpoint":
         body = CreateEndpointRequest.model_validate(args)
         return (await api.events.create_endpoint(body)).raw
+    if op == "events.update_endpoint":
+        body = UpdateEndpointRequest.model_validate(
+            {k: v for k, v in args.items() if k != "endpoint_id"}
+        )
+        return (await api.events.update_endpoint(_arg(args, "endpoint_id"), body)).raw
     if op == "events.delete_endpoint":
         return (await api.events.delete_endpoint(_arg(args, "endpoint_id"))).raw
     raise AssertionError(f"the conformance schema names an op this driver does not know: {op}")

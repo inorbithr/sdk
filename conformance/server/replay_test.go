@@ -6,11 +6,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp/syntax"
 	"strings"
 	"testing"
 	"time"
@@ -18,12 +18,21 @@ import (
 
 const casesDir = "../cases"
 
-// start runs a server on a free loopback port for one test.
-func start(t *testing.T) *httptest.Server {
+// testServer is the whole replay stack for one test; URL is the plain listener.
+type testServer struct {
+	*Stack
+	URL string
+}
+
+// start runs every listener on free loopback ports for one test.
+func start(t *testing.T) *testServer {
 	t.Helper()
-	ts := httptest.NewServer(NewServer(casesDir))
-	t.Cleanup(ts.Close)
-	return ts
+	st, err := Start(Options{Addr: "127.0.0.1:0", CasesDir: casesDir, Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return &testServer{Stack: st, URL: st.Endpoints.HTTPURL}
 }
 
 // client never reuses a connection, so a reset is never retried by net/http itself.
@@ -32,7 +41,7 @@ var client = &http.Client{
 	Transport: &http.Transport{DisableKeepAlives: true},
 }
 
-func load(t *testing.T, ts *httptest.Server, body string) (int, map[string]any) {
+func load(t *testing.T, ts *testServer, body string) (int, map[string]any) {
 	t.Helper()
 	resp, err := client.Post(ts.URL+"/_case", "application/json", strings.NewReader(body))
 	if err != nil {
@@ -44,7 +53,7 @@ func load(t *testing.T, ts *httptest.Server, body string) (int, map[string]any) 
 	return resp.StatusCode, out
 }
 
-func result(t *testing.T, ts *httptest.Server) Result {
+func result(t *testing.T, ts *testServer) Result {
 	t.Helper()
 	resp, err := client.Get(ts.URL + "/_result")
 	if err != nil {
@@ -58,10 +67,45 @@ func result(t *testing.T, ts *httptest.Server) Result {
 	return res
 }
 
-// send makes the request an exchange describes, as an SDK would.
-func send(t *testing.T, ts *httptest.Server, req Request) (*http.Response, []byte, error) {
+// send makes the request an exchange describes, as an SDK would, to the plain listener
+// unless the request names `via` or `client_cert`.
+func send(t *testing.T, ts *testServer, req Request) (*http.Response, []byte, error) {
 	t.Helper()
-	target := ts.URL + req.Path
+	return sendOver(t, ts, "", req)
+}
+
+// route picks the listener and the client a request goes through: the case's
+// client.transport, overridden by the request's own `via` and `client_cert`.
+func route(t *testing.T, ts *testServer, transport string, req Request) (string, *http.Client) {
+	t.Helper()
+	e := ts.Endpoints
+	viaProxy := req.Via == "proxy" || (transport == "proxy" && req.Via != "direct")
+	withCert := req.ClientCert != "" || transport == "mtls"
+	if !viaProxy && !withCert && transport != "https" && transport != "proxy" {
+		return e.HTTPURL, client
+	}
+	cfg, err := ts.PKI.clientTLS(withCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := &http.Transport{DisableKeepAlives: true, TLSClientConfig: cfg}
+	if viaProxy {
+		proxy, _ := url.Parse(e.ProxyURL)
+		tr.Proxy = http.ProxyURL(proxy)
+	}
+	base := e.HTTPSURL
+	if withCert {
+		base = e.MTLSURL
+	}
+	return base, &http.Client{Timeout: 10 * time.Second, Transport: tr}
+}
+
+// sendOver is send through the listener transport selects (see route). Header matchers
+// become values that satisfy them, and headers the case says are absent are left out.
+func sendOver(t *testing.T, ts *testServer, transport string, req Request) (*http.Response, []byte, error) {
+	t.Helper()
+	base, httpClient := route(t, ts, transport, req)
+	target := base + req.Path
 	if len(req.Query) > 0 {
 		q := url.Values{}
 		for k, v := range req.Query {
@@ -92,9 +136,15 @@ func send(t *testing.T, ts *httptest.Server, req Request) (*http.Response, []byt
 		r.Header.Set("content-type", contentType)
 	}
 	for k, v := range req.Headers {
-		r.Header.Set(k, v)
+		r.Header.Set(k, satisfy(t, v))
 	}
-	resp, err := client.Do(r)
+	for _, k := range req.HeadersAbsent {
+		r.Header.Del(k)
+		if strings.EqualFold(k, "user-agent") {
+			r.Header["User-Agent"] = []string{""} // net/http then sends none
+		}
+	}
+	resp, err := httpClient.Do(r)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -124,8 +174,12 @@ func TestEveryCaseReplays(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if status, out := load(t, ts, `{"name": "`+area+"/"+name+`"}`); status != http.StatusOK {
+			status, out := load(t, ts, `{"name": "`+area+"/"+name+`"}`)
+			if status != http.StatusOK {
 				t.Fatalf("load: %d %v", status, out)
+			}
+			if out["base_url"] != ts.Endpoints.baseURL(c.transport()) {
+				t.Fatalf("load: base_url %v for transport %q", out["base_url"], c.transport())
 			}
 			wantTokens, wantCalls := 0, 0
 			last := time.Now()
@@ -143,7 +197,7 @@ func TestEveryCaseReplays(t *testing.T) {
 					last = time.Now()
 					continue
 				}
-				resp, body, err := send(t, ts, ex.Request)
+				resp, body, err := sendOver(t, ts, c.transport(), ex.Request)
 				last = time.Now()
 				if ex.Response.Fault == "reset" {
 					if err == nil {
@@ -405,5 +459,70 @@ func TestThePathIsComparedAsSent(t *testing.T) {
 	_, _, _ = send(t, ts, Request{Method: "GET", Path: "/v1/radar/digests/a%2Fb%20c"})
 	if res := result(t, ts); res.Status != "pass" {
 		t.Fatalf("%+v", res)
+	}
+}
+
+// satisfy turns a header matcher into a value it accepts: `*` into any value, `$name`
+// into a value fixed per name, `~regex` into a string the regex matches; a literal stays.
+func satisfy(t *testing.T, pattern string) string {
+	t.Helper()
+	switch {
+	case pattern == "*":
+		return "any-value"
+	case strings.HasPrefix(pattern, "$"):
+		return "captured-" + pattern[1:]
+	case strings.HasPrefix(pattern, "~"):
+		v, err := sample(pattern[1:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		re, _ := wholeMatch(pattern[1:])
+		if !re.MatchString(v) {
+			t.Fatalf("sample %q does not match %s", v, pattern[1:])
+		}
+		return v
+	default:
+		return pattern
+	}
+}
+
+// sample makes the shortest plain string a regex accepts: the first alternative, the
+// lowest printable character of a class, the minimum of a repeat.
+func sample(expr string) (string, error) {
+	re, err := syntax.Parse(expr, syntax.Perl)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	writeSample(&b, re.Simplify())
+	return b.String(), nil
+}
+
+func writeSample(b *strings.Builder, re *syntax.Regexp) {
+	switch re.Op {
+	case syntax.OpLiteral:
+		b.WriteString(string(re.Rune))
+	case syntax.OpCharClass:
+		for i := 0; i+1 < len(re.Rune); i += 2 {
+			if lo, hi := max(re.Rune[i], '!'), min(re.Rune[i+1], '~'); lo <= hi {
+				b.WriteRune(lo)
+				return
+			}
+		}
+	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		b.WriteByte('a')
+	case syntax.OpCapture, syntax.OpPlus:
+		writeSample(b, re.Sub[0])
+	case syntax.OpRepeat:
+		for range re.Min {
+			writeSample(b, re.Sub[0])
+		}
+	case syntax.OpConcat:
+		for _, sub := range re.Sub {
+			writeSample(b, sub)
+		}
+	case syntax.OpAlternate:
+		writeSample(b, re.Sub[0])
+	default: // star, quest, empty matches and anchors add nothing
 	}
 }
