@@ -36,7 +36,7 @@ func fakeIohr(args []string, now time.Time, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *profile == missingProfile {
-		_, _ = fmt.Fprintf(stderr, "iohr: no login for profile %q; run iohr auth login --profile %s\n", *profile, *profile)
+		_, _ = fmt.Fprintf(stderr, "iohr: no login for profile %q; run iohr login --profile %s\n", *profile, *profile)
 		return 1
 	}
 	out, err := json.Marshal(map[string]string{
