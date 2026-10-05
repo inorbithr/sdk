@@ -161,7 +161,9 @@ npm audit signatures
 [tasks."ts:sbom"]
 dir = "typescript"
 shell = "bash -e -o pipefail -c"
-run = "[ -f package.json ] || exit 0; mkdir -p ../dist/sbom; npm sbom --sbom-format cyclonedx --omit dev > ../dist/sbom/typescript.cdx.json"
+# pnpm, not npm: npm sbom reads a pnpm node_modules as linked packages and fails on
+# their dev dependencies (smol-toml, 2026-10-05).
+run = "[ -f package.json ] || exit 0; mkdir -p ../dist/sbom; pnpm sbom --sbom-format cyclonedx --prod > ../dist/sbom/typescript.cdx.json"
 
 [tasks."py:audit"]
 dir = "python"
@@ -701,7 +703,7 @@ found=0
 [ -d examples/rust ] && { found=1; (cd examples/rust && cargo check --all-targets) || exit 1; }
 [ -d examples/typescript ] && { found=1; (cd typescript && pnpm install --frozen-lockfile) && (cd examples/typescript && pnpm install --frozen-lockfile && pnpm exec tsc --noEmit) || exit 1; }
 [ -d examples/python ] && { found=1; (cd examples/python && uv run pyright) || exit 1; }
-[ -d examples/csharp ] && { found=1; (cd examples/csharp/Whoami && dotnet build -warnaserror -nologo -v q) || exit 1; }
+[ -d examples/csharp ] && { found=1; for d in examples/csharp/*/; do (cd "$d" && dotnet build -warnaserror -nologo -v q) || exit 1; done; }
 [ -d examples/java ] && { found=1; (cd java && mvn -B -q -DskipTests -Dspotless.check.skip=true package dependency:build-classpath -Dmdep.includeScope=compile -Dmdep.outputFile=target/classpath.txt) && javac --release 17 -Xlint:all -Werror -d java/target/examples -cp "java/target/classes:$(cat java/target/classpath.txt)" $(find examples/java -name "*.java") || exit 1; }
 [ "$found" = 1 ] || echo "examples: none yet, skipping"
 """

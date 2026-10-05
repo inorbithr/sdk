@@ -26,7 +26,7 @@ public class PagesTests
     {
         var fetched = new List<string?>();
         var all = new List<int>();
-        await foreach (var n in Codegen.Pages(Book(fetched)))
+        await foreach (var n in Codegen.Pages(Book(fetched), TestContext.Current.CancellationToken))
         {
             all.Add(n);
         }
@@ -35,7 +35,7 @@ public class PagesTests
         Assert.Equal([null, "b", "c"], fetched);
 
         fetched.Clear();
-        await foreach (var n in Codegen.Pages(Book(fetched)))
+        await foreach (var n in Codegen.Pages(Book(fetched), TestContext.Current.CancellationToken))
         {
             if (n == 2)
             {
@@ -56,7 +56,7 @@ public class PagesTests
                 : throw new InvalidOperationException("boom");
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await foreach (var n in Codegen.Pages<int>(Failing))
+            await foreach (var n in Codegen.Pages<int>(Failing, TestContext.Current.CancellationToken))
             {
                 got.Add(n);
             }
@@ -65,7 +65,7 @@ public class PagesTests
 
         var calls = 0;
         var looping = new List<int>();
-        await foreach (var n in Codegen.Pages<int>((_, _) => Task.FromResult<(IReadOnlyList<int>?, string?)>(([++calls], "same"))))
+        await foreach (var n in Codegen.Pages<int>((_, _) => Task.FromResult<(IReadOnlyList<int>?, string?)>(([++calls], "same")), TestContext.Current.CancellationToken))
         {
             looping.Add(n);
         }

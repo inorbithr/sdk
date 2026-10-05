@@ -603,7 +603,7 @@ mod tls {
                 format!("{path} is not an encrypted PKCS#8 key: {e}"),
             )
         })?;
-        let info = pkcs8::EncryptedPrivateKeyInfo::try_from(doc.as_bytes()).map_err(|e| {
+        let info = pkcs8::EncryptedPrivateKeyInfoRef::try_from(doc.as_bytes()).map_err(|e| {
             problem(
                 "client_key",
                 format!("{path} is not an encrypted PKCS#8 key: {e}"),

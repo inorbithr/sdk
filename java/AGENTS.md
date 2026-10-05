@@ -34,19 +34,34 @@ names the surface's package.
 java/
   pom.xml                 hr.inorbit:inorbit-sdk, --release 17, -Werror
   src/main/java/hr/inorbit/sdk/
-    Client.java           the client, its builder, the one request path
-    auth/, errors/, ...   TokenProvider, client credentials (single flight); ApiError, Code, Detail
+    Client.java           the client, its builder (build, load), the one request path
+    Config.java           resolution (docs/config.md 2-5), a port of the Rust resolver; pure
+    Engine.java           the twelve built-in middlewares and the transport
+    Transport.java        HttpClient: NoProxy selector, SSLContext (CA, mTLS, pins)
+    SdkLog.java, OtelTelemetry.java   logging (System.Logger) and optional OpenTelemetry
+    middleware/           Middleware, Chain, Request, Response, CallInfo, Pipeline (public)
+    auth/, errors/, ...   TokenProvider, ClientCredentials, TokenFile, CliToken, CachedToken,
+                          ChainedCredential, DefaultCredential; ApiError, Code, Detail
     Int64.java, Hook.java
     codegen/              what generated surfaces import (VERSION, pathSegment)
     generated/            written by iohr; never edit
   src/test/java/hr/inorbit/sdk/
     conformance/          the driver for conformance/cases
+    VectorsTest.java      conformance/vectors, read through `replay vectors` (no YAML reader)
 ```
 
 ## Rules
 
-- Runtime dependencies: `java.net.http` (the JDK) and Jackson databind only. A
-  dependency needs an ADR.
+- Runtime dependencies: `java.net.http` (the JDK), Jackson databind, and
+  `jackson-dataformat-toml` for the config file (ADR 0015). `opentelemetry-api` is an
+  `optional` dependency: only `OtelTelemetry` (loaded when it is on the class path) and the
+  builder's `tracerProvider`/`meterProvider` signatures name its types. A dependency needs an ADR.
+- M6 (docs/config.md): `Client.load()` / `Builder.load(LoadOptions)` resolve through
+  `Config`, `Builder.build()` resolves the same way with an empty environment and no file,
+  keeping its old messages. Every call runs `Engine`'s pipeline; per-call options are a
+  view (`withOptions`, `withTimeout`). A refused static token is an `AuthException` only
+  under `load`. The socket upgrade cannot go through the pipeline (`java.net.http.WebSocket`
+  takes no request); its reconnects draw from the retry budget.
 - Synchronous calls return the answer; `CompletableFuture` variants sit beside them.
 - Errors: `InOrbitException` base, `ApiException` with `code()`, `status()`,
   `details()`; connection, timeout, auth and config exceptions as subclasses. Unchecked.

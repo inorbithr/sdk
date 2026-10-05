@@ -102,6 +102,42 @@ Conventional Commits that touched it; nobody sets one by hand (no `release-as`, 
 - [ ] Java on Maven Central: a Central user token and a dedicated signing key as secrets,
       then the publish job. The namespace `hr.inorbit` is verified (2026-10-03).
 
+## Dependencies
+
+Every dependency, toolchain and action stays on its latest version, majors included.
+A major update adapts our code in the same pull request; it is never skipped or pinned
+back.
+
+- **The one exception is a minimum runtime.** A type package or toolchain that defines the
+  oldest runtime a published library supports stays at that minimum (ADR 0006): today
+  `@types/node` follows Node 22 (`engines`), `go` in `go.mod` stays 1.26, `rust-version`
+  1.94, `requires-python` 3.11, Java `release` 17, C# `net8.0`. Raising one is a breaking
+  change for users and is decided on its own, never as part of an update. `@types/node`
+  majors are the only `ignore` rule in `.github/dependabot.yml`; an update that would
+  raise another minimum (a crate needing a newer Rust, a module needing a newer Go) fails
+  the oldest-version CI cell and waits.
+- **Dependabot** watches every manifest: Go, Rust (with `cli/` and the examples, so the
+  lockfiles that build against `rust/` move together), npm, uv, Maven, NuGet and the
+  workflows' actions. It groups updates into one pull request per ecosystem for patch
+  and minor and one for majors, weekly on Mondays (actions daily), never younger than the
+  7-day cooldown (ADR 0005). Security updates come at once.
+- **Auto-merge** (`.github/workflows/dependabot-automerge.yml`): a Dependabot pull
+  request whose updates are all patch, or minor at 1.0 or later, gets `gh pr merge --auto
+  --squash`, so it lands once `ci-ok` passes. Majors and 0.x minors (breaking under
+  SemVer) wait for a maintainer, who adapts the code on the branch. The job runs only for
+  pull requests Dependabot opened, with a token limited to that merge. A merge made by
+  that token starts no workflows, so release-please picks it up on the next push to
+  `main`.
+- **Toolchains and tools in `mise.toml`** are outside Dependabot: `mise outdated --bump`
+  lists them, and a `chore(deps)` pull request moves them, with the CI matrix's newest
+  cells (`ci.yml`) and the release build image (`cli/release/dist.sh`) in step.
+- **Dependency changes are `build(<lang>)`, `ci` or `chore(deps)`**, so they release as
+  nothing or a patch. An update that changes our public API (a re-exported type, a
+  raised minimum) is breaking and is decided before it lands.
+- **Known vulnerabilities**: `mise run audit` (OSV over every lockfile, `govulncheck`,
+  `cargo deny check advisories`, `pnpm audit`, `pip-audit`) runs in CI; Dependabot
+  alerts are fixed by updating, never by an ignore.
+
 ## Lock files in a release
 
 release-please updates every lock file that records a package's own version, so the
@@ -145,3 +181,6 @@ publisher and approval environment: Actions, `release`, "Run workflow", with
 `typescript/v0.1.0`), one per run. Python publishes the release's attached, attested
 files; TypeScript rebuilds from the tag and stages on npm, where a maintainer approves it
 with 2FA. release-please does not run on a manual run, so nothing new is tagged.
+When the version is already staged on npm and a later step failed (the SBOM, the
+attestation, the release files or JSR), add `typescript_npm_staged`: the run builds and
+packs the same tag again but does not stage it a second time.

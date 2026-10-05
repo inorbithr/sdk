@@ -128,6 +128,8 @@ public static class Codegen
             Name = operation.Name,
             Scopes = operation.Scopes,
             Idempotent = operation.Idempotent,
+            Template = operation.Template,
+            TakesIdempotencyKey = operation.TakesIdempotencyKey,
             Body = operation.Body,
             Query = list,
             Rpc = operation.Rpc,
@@ -148,6 +150,8 @@ public static class Codegen
             Name = operation.Name,
             Scopes = operation.Scopes,
             Idempotent = operation.Idempotent,
+            Template = operation.Template,
+            TakesIdempotencyKey = operation.TakesIdempotencyKey,
             Query = operation.Query,
             Body = JsonSerializer.SerializeToUtf8Bytes(body, Json.Options),
             Rpc = operation.Rpc,
@@ -181,12 +185,47 @@ public static class Codegen
             Name = operation.Name,
             Scopes = operation.Scopes,
             Idempotent = operation.Idempotent,
+            Template = operation.Template,
+            TakesIdempotencyKey = operation.TakesIdempotencyKey,
             Query = operation.Query,
             Body = operation.Body,
             Rpc = string.IsNullOrEmpty(rpc) ? null : rpc,
             CallBody = JsonSerializer.SerializeToUtf8Bytes(body, Json.Options),
         };
     }
+
+    /// <summary>Names the operation's path template (<c>/v1/radar/digests/{digest_id}</c>), which spans are named for (docs/config.md section 7.10).</summary>
+    /// <param name="operation">The operation.</param>
+    /// <param name="template">The path as the API document writes it.</param>
+    /// <returns>The operation with its template.</returns>
+    public static Operation WithTemplate(this Operation operation, string template)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        return Copy(operation, template, operation.TakesIdempotencyKey);
+    }
+
+    /// <summary>Marks the operation as one that takes an <c>Idempotency-Key</c> (docs/config.md section 7.5): one key is sent on every attempt, so the write is retried like a read.</summary>
+    /// <param name="operation">The operation.</param>
+    /// <returns>The operation, marked.</returns>
+    public static Operation WithIdempotencyKey(this Operation operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        return Copy(operation, operation.Template, true);
+    }
+
+    private static Operation Copy(Operation operation, string? template, bool takesKey) =>
+        new(operation.Method, operation.Path)
+        {
+            Name = operation.Name,
+            Scopes = operation.Scopes,
+            Idempotent = operation.Idempotent,
+            Template = template,
+            TakesIdempotencyKey = takesKey,
+            Query = operation.Query,
+            Body = operation.Body,
+            Rpc = operation.Rpc,
+            CallBody = operation.CallBody,
+        };
 
     private static string Format(object v) => v switch
     {

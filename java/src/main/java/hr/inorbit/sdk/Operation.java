@@ -18,6 +18,8 @@ public final class Operation {
     private final Object body;
     private final List<String> scopes;
     private final boolean idempotent;
+    private final boolean idempotencyKey;
+    private final String template;
     private final String rpc;
     private final Map<String, Object> fields;
 
@@ -29,6 +31,8 @@ public final class Operation {
         this.body = b.body;
         this.scopes = List.copyOf(b.scopes);
         this.idempotent = b.idempotent;
+        this.idempotencyKey = b.idempotencyKey;
+        this.template = b.template;
         this.rpc = b.rpc;
         this.fields = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(b.fields));
     }
@@ -108,6 +112,26 @@ public final class Operation {
     }
 
     /**
+     * Whether the operation takes {@code Idempotency-Key} (docs/config.md section 7.5): the call
+     * then sends one key on every attempt and may be retried like a read.
+     *
+     * @return whether it takes the key
+     */
+    public boolean takesIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    /**
+     * The path template ({@code /v1/webhooks/endpoints/{endpoint_id}}), which names an attempt's
+     * span without the identifiers; {@code null} when the generator gave none.
+     *
+     * @return the template, or {@code null}
+     */
+    public String template() {
+        return template;
+    }
+
+    /**
      * The RPC's full name a {@code /v1/ws} call frame names ({@code
      * iohr.events.v1.EventsService/StreamEvents}), or {@code null} when the operation has none.
      *
@@ -142,6 +166,8 @@ public final class Operation {
         private Object body;
         private final List<String> scopes = new ArrayList<>();
         private boolean idempotent;
+        private boolean idempotencyKey;
+        private String template;
         private String rpc;
         private final Map<String, Object> fields = new java.util.LinkedHashMap<>();
 
@@ -209,6 +235,29 @@ public final class Operation {
          */
         public Builder idempotent(boolean idempotent) {
             this.idempotent = idempotent;
+            return this;
+        }
+
+        /**
+         * Marks an operation that takes {@code Idempotency-Key}: the call gets one key, sent on
+         * every attempt, and is retried like a read.
+         *
+         * @param takesKey whether the operation takes the key
+         * @return this builder
+         */
+        public Builder idempotencyKey(boolean takesKey) {
+            this.idempotencyKey = takesKey;
+            return this;
+        }
+
+        /**
+         * The path template, for span names ({@code /v1/radar/digests/{digest_id}}).
+         *
+         * @param template the template
+         * @return this builder
+         */
+        public Builder template(String template) {
+            this.template = template;
             return this;
         }
 

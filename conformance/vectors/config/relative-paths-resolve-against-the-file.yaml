@@ -1,7 +1,6 @@
 name: relative-paths-resolve-against-the-file
 kind: config
 summary: A relative path in the config file is relative to the file's directory.
-pending: [java, csharp]
 input:
   env: { INORBIT_PROFILE: w }
   config_file: |

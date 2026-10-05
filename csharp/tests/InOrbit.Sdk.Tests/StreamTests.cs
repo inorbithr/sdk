@@ -55,7 +55,7 @@ public class StreamTests
     {
         Assert.Throws<ConfigException>(() => new Client<PublicProfile>(new ClientOptions { Token = "t", StreamIdleTimeout = TimeSpan.Zero }));
         using var client = new Client<PublicProfile>(new ClientOptions { Token = "t", Streams = StreamTransport.Socket });
-        Assert.Throws<ConfigException>(() => client.StreamAsync<object>(new Operation(Method.Get, "/v1/x/events")));
+        Assert.Throws<ConfigException>(() => client.StreamAsync<object>(new Operation(Method.Get, "/v1/x/events"), TestContext.Current.CancellationToken));
     }
 
     /// <summary>A body that never sends a byte.</summary>

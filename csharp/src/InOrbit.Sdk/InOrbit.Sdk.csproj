@@ -14,6 +14,11 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <!-- docs/config.md section 8 (SR-20): the config file's TOML, and logging through ILogger. -->
+    <PackageReference Include="Tomlyn" Version="2.10.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="InOrbit.Sdk.Tests" />
   </ItemGroup>
 </Project>

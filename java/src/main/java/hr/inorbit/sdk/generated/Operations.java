@@ -31,6 +31,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/agents/" + Codegen.pathSegment(agentId))
                 .name("agents.delete_agent")
                 .scopes("agents:write")
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}")
                 .build(), DeleteAgentResponse.class);
     }
 
@@ -46,6 +47,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/agents/" + Codegen.pathSegment(agentId))
                 .name("agents.delete_agent")
                 .scopes("agents:write")
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}")
                 .build(), DeleteAgentResponse.class);
     }
 
@@ -61,6 +63,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId))
                 .name("connections.delete_connection")
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}")
                 .build(), DeleteConnectionResponse.class);
     }
 
@@ -76,6 +79,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId))
                 .name("connections.delete_connection")
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}")
                 .build(), DeleteConnectionResponse.class);
     }
 
@@ -92,6 +96,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId) + "/grants/" + Codegen.pathSegment(grantId))
                 .name("connections.revoke_grant")
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id}")
                 .build(), RevokeGrantResponse.class);
     }
 
@@ -108,6 +113,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId) + "/grants/" + Codegen.pathSegment(grantId))
                 .name("connections.revoke_grant")
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id}")
                 .build(), RevokeGrantResponse.class);
     }
 
@@ -123,6 +129,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/domains/" + Codegen.pathSegment(domain))
                 .name("accounts.remove_domain")
                 .scopes("domains:write")
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}")
                 .build(), RemoveDomainResponse.class);
     }
 
@@ -138,6 +145,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/domains/" + Codegen.pathSegment(domain))
                 .name("accounts.remove_domain")
                 .scopes("domains:write")
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}")
                 .build(), RemoveDomainResponse.class);
     }
 
@@ -153,6 +161,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/monitors/" + Codegen.pathSegment(monitorId))
                 .name("connections.delete_monitor")
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}")
                 .build(), DeleteMonitorResponse.class);
     }
 
@@ -168,6 +177,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/monitors/" + Codegen.pathSegment(monitorId))
                 .name("connections.delete_monitor")
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}")
                 .build(), DeleteMonitorResponse.class);
     }
 
@@ -182,6 +192,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.delete_endpoint")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), DeleteEndpointResponse.class);
     }
 
@@ -196,6 +207,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.delete_endpoint")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), DeleteEndpointResponse.class);
     }
 
@@ -210,6 +222,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.DELETE, "/v1/webhooks/inboxes/" + Codegen.pathSegment(inboxId))
                 .name("events.delete_inbox")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/inboxes/{inbox_id}")
                 .build(), DeleteInboxResponse.class);
     }
 
@@ -224,6 +237,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.DELETE, "/v1/webhooks/inboxes/" + Codegen.pathSegment(inboxId))
                 .name("events.delete_inbox")
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/inboxes/{inbox_id}")
                 .build(), DeleteInboxResponse.class);
     }
 
@@ -267,6 +281,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("agents:read")
+                .template("/v1/accounts/orgs/{org_id}/agents")
                 .build(), ListAgentsResponse.class);
     }
 
@@ -284,6 +299,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("agents:read")
+                .template("/v1/accounts/orgs/{org_id}/agents")
                 .build(), ListAgentsResponse.class);
     }
 
@@ -299,6 +315,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/agents/" + Codegen.pathSegment(agentId))
                 .name("agents.get_agent")
                 .scopes("agents:read")
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}")
                 .build(), GetAgentResponse.class);
     }
 
@@ -314,6 +331,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/agents/" + Codegen.pathSegment(agentId))
                 .name("agents.get_agent")
                 .scopes("agents:read")
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}")
                 .build(), GetAgentResponse.class);
     }
 
@@ -338,6 +356,7 @@ public final class Operations {
                 .query("after", params.after())
                 .query("page_size", params.pageSize())
                 .scopes("account:audit")
+                .template("/v1/accounts/orgs/{org_id}/audit")
                 .build(), ListTeamEventsResponse.class);
     }
 
@@ -362,6 +381,7 @@ public final class Operations {
                 .query("after", params.after())
                 .query("page_size", params.pageSize())
                 .scopes("account:audit")
+                .template("/v1/accounts/orgs/{org_id}/audit")
                 .build(), ListTeamEventsResponse.class);
     }
 
@@ -379,6 +399,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections")
                 .build(), ListConnectionsResponse.class);
     }
 
@@ -396,6 +417,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections")
                 .build(), ListConnectionsResponse.class);
     }
 
@@ -411,6 +433,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId))
                 .name("connections.get_connection")
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}")
                 .build(), GetConnectionResponse.class);
     }
 
@@ -426,6 +449,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId))
                 .name("connections.get_connection")
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}")
                 .build(), GetConnectionResponse.class);
     }
 
@@ -444,6 +468,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants")
                 .build(), ListGrantsResponse.class);
     }
 
@@ -462,6 +487,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants")
                 .build(), ListGrantsResponse.class);
     }
 
@@ -480,6 +506,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/history")
                 .build(), ListHistoryResponse.class);
     }
 
@@ -498,6 +525,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/history")
                 .build(), ListHistoryResponse.class);
     }
 
@@ -515,6 +543,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("domains:read")
+                .template("/v1/accounts/orgs/{org_id}/domains")
                 .build(), ListDomainsResponse.class);
     }
 
@@ -532,6 +561,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("domains:read")
+                .template("/v1/accounts/orgs/{org_id}/domains")
                 .build(), ListDomainsResponse.class);
     }
 
@@ -547,6 +577,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/domains/" + Codegen.pathSegment(domain))
                 .name("accounts.get_domain")
                 .scopes("domains:read")
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}")
                 .build(), GetDomainResponse.class);
     }
 
@@ -562,6 +593,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/domains/" + Codegen.pathSegment(domain))
                 .name("accounts.get_domain")
                 .scopes("domains:read")
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}")
                 .build(), GetDomainResponse.class);
     }
 
@@ -581,6 +613,7 @@ public final class Operations {
                 .query("connection_id", params.connectionId())
                 .query("agent_id", params.agentId())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors")
                 .build(), ListMonitorsResponse.class);
     }
 
@@ -600,6 +633,7 @@ public final class Operations {
                 .query("connection_id", params.connectionId())
                 .query("agent_id", params.agentId())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors")
                 .build(), ListMonitorsResponse.class);
     }
 
@@ -615,6 +649,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/monitors/" + Codegen.pathSegment(monitorId))
                 .name("connections.get_monitor")
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}")
                 .build(), GetMonitorResponse.class);
     }
 
@@ -630,6 +665,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/monitors/" + Codegen.pathSegment(monitorId))
                 .name("connections.get_monitor")
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}")
                 .build(), GetMonitorResponse.class);
     }
 
@@ -649,6 +685,7 @@ public final class Operations {
                 .query("page_token", params.pageToken())
                 .query("from", params.from())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs")
                 .build(), ListMonitorRunsResponse.class);
     }
 
@@ -668,6 +705,7 @@ public final class Operations {
                 .query("page_token", params.pageToken())
                 .query("from", params.from())
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs")
                 .build(), ListMonitorRunsResponse.class);
     }
 
@@ -683,6 +721,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/monitors/" + Codegen.pathSegment(monitorId) + "/summary")
                 .name("connections.get_monitor_summary")
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary")
                 .build(), GetMonitorSummaryResponse.class);
     }
 
@@ -698,6 +737,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/monitors/" + Codegen.pathSegment(monitorId) + "/summary")
                 .name("connections.get_monitor_summary")
                 .scopes("connections:read")
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary")
                 .build(), GetMonitorSummaryResponse.class);
     }
 
@@ -718,6 +758,7 @@ public final class Operations {
                 .query("query", params.query())
                 .query("after", params.after())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/requests")
                 .build(), ListRequestsResponse.class);
     }
 
@@ -738,6 +779,7 @@ public final class Operations {
                 .query("query", params.query())
                 .query("after", params.after())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/requests")
                 .build(), ListRequestsResponse.class);
     }
 
@@ -752,6 +794,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/units")
                 .name("accounts.get_units")
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/units")
                 .build(), GetUnitsResponse.class);
     }
 
@@ -766,6 +809,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/units")
                 .name("accounts.get_units")
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/units")
                 .build(), GetUnitsResponse.class);
     }
 
@@ -784,6 +828,7 @@ public final class Operations {
                 .query("to", params.to())
                 .query("by", params.by())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/units/series")
                 .build(), GetUnitSeriesResponse.class);
     }
 
@@ -802,6 +847,7 @@ public final class Operations {
                 .query("to", params.to())
                 .query("by", params.by())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/units/series")
                 .build(), GetUnitSeriesResponse.class);
     }
 
@@ -819,6 +865,7 @@ public final class Operations {
                 .query("from", params.from())
                 .query("to", params.to())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/usage")
                 .build(), GetUsageResponse.class);
     }
 
@@ -836,6 +883,7 @@ public final class Operations {
                 .query("from", params.from())
                 .query("to", params.to())
                 .scopes("usage:read")
+                .template("/v1/accounts/orgs/{org_id}/usage")
                 .build(), GetUsageResponse.class);
     }
 
@@ -1133,6 +1181,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/radar/digests/" + Codegen.pathSegment(id))
                 .name("radar.get_digest")
                 .scopes("radar:read")
+                .template("/v1/radar/digests/{id}")
                 .build(), GetDigestResponse.class);
     }
 
@@ -1147,6 +1196,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/radar/digests/" + Codegen.pathSegment(id))
                 .name("radar.get_digest")
                 .scopes("radar:read")
+                .template("/v1/radar/digests/{id}")
                 .build(), GetDigestResponse.class);
     }
 
@@ -1231,6 +1281,7 @@ public final class Operations {
         return client.request(Operation.builder(Method.GET, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.get_endpoint")
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -1245,6 +1296,7 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.GET, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId))
                 .name("events.get_endpoint")
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -1263,6 +1315,7 @@ public final class Operations {
                 .query("page_token", params.pageToken())
                 .query("page_size", params.pageSize())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}/deliveries")
                 .build(), ListDeliveriesResponse.class);
     }
 
@@ -1281,6 +1334,7 @@ public final class Operations {
                 .query("page_token", params.pageToken())
                 .query("page_size", params.pageSize())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/endpoints/{endpoint_id}/deliveries")
                 .build(), ListDeliveriesResponse.class);
     }
 
@@ -1332,6 +1386,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/inboxes/{inbox_id}/requests")
                 .build(), ListInboxRequestsResponse.class);
     }
 
@@ -1349,6 +1404,7 @@ public final class Operations {
                 .query("page_size", params.pageSize())
                 .query("page_token", params.pageToken())
                 .scopes("webhooks:read")
+                .template("/v1/webhooks/inboxes/{inbox_id}/requests")
                 .build(), ListInboxRequestsResponse.class);
     }
 
@@ -1400,6 +1456,7 @@ public final class Operations {
                 .name("connections.update_connection")
                 .body(body)
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}")
                 .build(), UpdateConnectionResponse.class);
     }
 
@@ -1417,6 +1474,7 @@ public final class Operations {
                 .name("connections.update_connection")
                 .body(body)
                 .scopes("connections:write")
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}")
                 .build(), UpdateConnectionResponse.class);
     }
 
@@ -1434,6 +1492,8 @@ public final class Operations {
                 .name("connections.update_monitor")
                 .body(body)
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}")
                 .build(), UpdateMonitorResponse.class);
     }
 
@@ -1451,6 +1511,8 @@ public final class Operations {
                 .name("connections.update_monitor")
                 .body(body)
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}")
                 .build(), UpdateMonitorResponse.class);
     }
 
@@ -1467,6 +1529,7 @@ public final class Operations {
                 .name("events.update_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -1483,6 +1546,7 @@ public final class Operations {
                 .name("events.update_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}")
                 .build(), Endpoint.class);
     }
 
@@ -1499,6 +1563,7 @@ public final class Operations {
                 .name("agents.create_enrollment")
                 .body(body)
                 .scopes("agents:write")
+                .template("/v1/accounts/orgs/{org_id}/agents/enrollments")
                 .build(), CreateEnrollmentResponse.class);
     }
 
@@ -1515,6 +1580,7 @@ public final class Operations {
                 .name("agents.create_enrollment")
                 .body(body)
                 .scopes("agents:write")
+                .template("/v1/accounts/orgs/{org_id}/agents/enrollments")
                 .build(), CreateEnrollmentResponse.class);
     }
 
@@ -1532,6 +1598,8 @@ public final class Operations {
                 .name("agents.run_check")
                 .body(body)
                 .scopes("agents:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}/checks")
                 .build(), RunCheckResponse.class);
     }
 
@@ -1549,6 +1617,8 @@ public final class Operations {
                 .name("agents.run_check")
                 .body(body)
                 .scopes("agents:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}/checks")
                 .build(), RunCheckResponse.class);
     }
 
@@ -1566,6 +1636,8 @@ public final class Operations {
                 .name("agents.revoke_agent")
                 .body(body)
                 .scopes("agents:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke")
                 .build(), RevokeAgentResponse.class);
     }
 
@@ -1583,6 +1655,8 @@ public final class Operations {
                 .name("agents.revoke_agent")
                 .body(body)
                 .scopes("agents:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke")
                 .build(), RevokeAgentResponse.class);
     }
 
@@ -1599,6 +1673,8 @@ public final class Operations {
                 .name("connections.create_connection")
                 .body(body)
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections")
                 .build(), CreateConnectionResponse.class);
     }
 
@@ -1615,6 +1691,8 @@ public final class Operations {
                 .name("connections.create_connection")
                 .body(body)
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections")
                 .build(), CreateConnectionResponse.class);
     }
 
@@ -1633,6 +1711,8 @@ public final class Operations {
                 .name("connections.call_action")
                 .body(body)
                 .scopes("connections:use")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}")
                 .build(), CallActionResponse.class);
     }
 
@@ -1651,6 +1731,8 @@ public final class Operations {
                 .name("connections.call_action")
                 .body(body)
                 .scopes("connections:use")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}")
                 .build(), CallActionResponse.class);
     }
 
@@ -1668,6 +1750,8 @@ public final class Operations {
                 .name("connections.create_monitor")
                 .body(body)
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors")
                 .build(), CreateMonitorResponse.class);
     }
 
@@ -1685,6 +1769,8 @@ public final class Operations {
                 .name("connections.create_monitor")
                 .body(body)
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors")
                 .build(), CreateMonitorResponse.class);
     }
 
@@ -1700,6 +1786,8 @@ public final class Operations {
         return client.request(Operation.builder(Method.POST, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId) + "/test")
                 .name("connections.test_connection")
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/test")
                 .build(), TestConnectionResponse.class);
     }
 
@@ -1715,6 +1803,8 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.POST, "/v1/accounts/orgs/" + Codegen.pathSegment(orgId) + "/connections/" + Codegen.pathSegment(connectionId) + "/test")
                 .name("connections.test_connection")
                 .scopes("connections:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/test")
                 .build(), TestConnectionResponse.class);
     }
 
@@ -1731,6 +1821,8 @@ public final class Operations {
                 .name("accounts.add_domain")
                 .body(body)
                 .scopes("domains:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/domains")
                 .build(), AddDomainResponse.class);
     }
 
@@ -1747,6 +1839,8 @@ public final class Operations {
                 .name("accounts.add_domain")
                 .body(body)
                 .scopes("domains:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/domains")
                 .build(), AddDomainResponse.class);
     }
 
@@ -1764,6 +1858,8 @@ public final class Operations {
                 .name("accounts.check_domain")
                 .body(body)
                 .scopes("domains:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}/check")
                 .build(), CheckDomainResponse.class);
     }
 
@@ -1781,6 +1877,8 @@ public final class Operations {
                 .name("accounts.check_domain")
                 .body(body)
                 .scopes("domains:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}/check")
                 .build(), CheckDomainResponse.class);
     }
 
@@ -1798,6 +1896,8 @@ public final class Operations {
                 .name("accounts.confirm_domain")
                 .body(body)
                 .scopes("domains:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}/confirm")
                 .build(), ConfirmDomainResponse.class);
     }
 
@@ -1815,6 +1915,8 @@ public final class Operations {
                 .name("accounts.confirm_domain")
                 .body(body)
                 .scopes("domains:write")
+                .idempotencyKey(true)
+                .template("/v1/accounts/orgs/{org_id}/domains/{domain}/confirm")
                 .build(), ConfirmDomainResponse.class);
     }
 
@@ -1831,6 +1933,8 @@ public final class Operations {
                 .name("connections.call_tool")
                 .body(body)
                 .scopes("connections:use")
+                .idempotencyKey(true)
+                .template("/v1/connections/tools/{name}")
                 .build(), CallToolResponse.class);
     }
 
@@ -1847,6 +1951,8 @@ public final class Operations {
                 .name("connections.call_tool")
                 .body(body)
                 .scopes("connections:use")
+                .idempotencyKey(true)
+                .template("/v1/connections/tools/{name}")
                 .build(), CallToolResponse.class);
     }
 
@@ -1861,6 +1967,8 @@ public final class Operations {
         return client.request(Operation.builder(Method.POST, "/v1/webhooks/deliveries/" + Codegen.pathSegment(deliveryId) + "/retry")
                 .name("events.retry_delivery")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/deliveries/{delivery_id}/retry")
                 .build(), RetryDeliveryResponse.class);
     }
 
@@ -1875,6 +1983,8 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.POST, "/v1/webhooks/deliveries/" + Codegen.pathSegment(deliveryId) + "/retry")
                 .name("events.retry_delivery")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/deliveries/{delivery_id}/retry")
                 .build(), RetryDeliveryResponse.class);
     }
 
@@ -1890,6 +2000,7 @@ public final class Operations {
                 .name("events.create_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateEndpointResponse.class);
     }
 
@@ -1905,6 +2016,7 @@ public final class Operations {
                 .name("events.create_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateEndpointResponse.class);
     }
 
@@ -1921,6 +2033,7 @@ public final class Operations {
                 .name("events.recover_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}/recover")
                 .build(), RecoverEndpointResponse.class);
     }
 
@@ -1937,6 +2050,7 @@ public final class Operations {
                 .name("events.recover_endpoint")
                 .body(body)
                 .scopes("webhooks:write")
+                .template("/v1/webhooks/endpoints/{endpoint_id}/recover")
                 .build(), RecoverEndpointResponse.class);
     }
 
@@ -1951,6 +2065,8 @@ public final class Operations {
         return client.request(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/rotate")
                 .name("events.rotate_secret")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/rotate")
                 .build(), RotateSecretResponse.class);
     }
 
@@ -1965,6 +2081,8 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/rotate")
                 .name("events.rotate_secret")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/rotate")
                 .build(), RotateSecretResponse.class);
     }
 
@@ -1979,6 +2097,8 @@ public final class Operations {
         return client.request(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/test")
                 .name("events.send_test")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/test")
                 .build(), SendTestResponse.class);
     }
 
@@ -1993,6 +2113,8 @@ public final class Operations {
         return client.requestAsync(Operation.builder(Method.POST, "/v1/webhooks/endpoints/" + Codegen.pathSegment(endpointId) + "/test")
                 .name("events.send_test")
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
+                .template("/v1/webhooks/endpoints/{endpoint_id}/test")
                 .build(), SendTestResponse.class);
     }
 
@@ -2008,6 +2130,7 @@ public final class Operations {
                 .name("events.create_inbox")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateInboxResponse.class);
     }
 
@@ -2023,6 +2146,7 @@ public final class Operations {
                 .name("events.create_inbox")
                 .body(body)
                 .scopes("webhooks:write")
+                .idempotencyKey(true)
                 .build(), CreateInboxResponse.class);
     }
 }

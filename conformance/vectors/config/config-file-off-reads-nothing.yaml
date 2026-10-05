@@ -1,7 +1,6 @@
 name: config-file-off-reads-nothing
 kind: config
 summary: INORBIT_CONFIG_FILE=off ignores a file at the default location.
-pending: [java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off" }
   home: true

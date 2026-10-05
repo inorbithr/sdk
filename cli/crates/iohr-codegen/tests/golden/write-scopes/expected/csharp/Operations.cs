@@ -50,6 +50,7 @@ namespace InOrbit.Generated
             where TProfile : IDeleteEndpoint
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.delete_endpoint", global::InOrbit.Sdk.Method.Delete, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}");
             return events.Client.RequestAsync<DeleteEndpointResponse>(operation, cancellationToken);
         }
 
@@ -63,6 +64,7 @@ namespace InOrbit.Generated
             where TProfile : IDeleteInbox
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.delete_inbox", global::InOrbit.Sdk.Method.Delete, $"/v1/webhooks/inboxes/{(global::InOrbit.Sdk.Codegen.PathSegment(inboxId))}", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/inboxes/{inbox_id}");
             return events.Client.RequestAsync<DeleteInboxResponse>(operation, cancellationToken);
         }
 
@@ -77,6 +79,7 @@ namespace InOrbit.Generated
             where TProfile : IUpdateEndpoint
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.update_endpoint", global::InOrbit.Sdk.Method.Patch, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}");
             operation = global::InOrbit.Sdk.Codegen.WithJson(operation, body);
             return events.Client.RequestAsync<Endpoint>(operation, cancellationToken);
         }
@@ -91,6 +94,8 @@ namespace InOrbit.Generated
             where TProfile : IRetryDelivery
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.retry_delivery", global::InOrbit.Sdk.Method.Post, $"/v1/webhooks/deliveries/{(global::InOrbit.Sdk.Codegen.PathSegment(deliveryId))}/retry", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/deliveries/{delivery_id}/retry");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             return events.Client.RequestAsync<RetryDeliveryResponse>(operation, cancellationToken);
         }
 
@@ -104,6 +109,8 @@ namespace InOrbit.Generated
             where TProfile : ICreateEndpoint
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.create_endpoint", global::InOrbit.Sdk.Method.Post, "/v1/webhooks/endpoints", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             operation = global::InOrbit.Sdk.Codegen.WithJson(operation, body);
             return events.Client.RequestAsync<CreateEndpointResponse>(operation, cancellationToken);
         }
@@ -118,6 +125,8 @@ namespace InOrbit.Generated
             where TProfile : IRotateSecret
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.rotate_secret", global::InOrbit.Sdk.Method.Post, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}/rotate", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}/rotate");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             return events.Client.RequestAsync<RotateSecretResponse>(operation, cancellationToken);
         }
 
@@ -131,6 +140,8 @@ namespace InOrbit.Generated
             where TProfile : ISendTest
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.send_test", global::InOrbit.Sdk.Method.Post, $"/v1/webhooks/endpoints/{(global::InOrbit.Sdk.Codegen.PathSegment(endpointId))}/test", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/endpoints/{endpoint_id}/test");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             return events.Client.RequestAsync<SendTestResponse>(operation, cancellationToken);
         }
 
@@ -144,6 +155,8 @@ namespace InOrbit.Generated
             where TProfile : ICreateInbox
         {
             var operation = global::InOrbit.Sdk.Codegen.Operation("events.create_inbox", global::InOrbit.Sdk.Method.Post, "/v1/webhooks/inboxes", ["webhooks:write"]);
+            operation = global::InOrbit.Sdk.Codegen.WithTemplate(operation, "/v1/webhooks/inboxes");
+            operation = global::InOrbit.Sdk.Codegen.WithIdempotencyKey(operation);
             operation = global::InOrbit.Sdk.Codegen.WithJson(operation, body);
             return events.Client.RequestAsync<CreateInboxResponse>(operation, cancellationToken);
         }

@@ -26,6 +26,11 @@ on:
         description: "An existing TypeScript release tag to publish to npm and JSR, e.g. typescript/v0.1.0"
         required: false
         type: string
+      typescript_npm_staged:
+        description: "With typescript_tag: the version is already staged on npm; skip staging, do the SBOM, attestation, release files and JSR"
+        required: false
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -184,6 +189,8 @@ jobs:
         with:
           install_args: "node pnpm cyclonedx"
       - working-directory: typescript
+        env:
+          NPM_STAGED: ${{ github.event_name == 'workflow_dispatch' && inputs.typescript_npm_staged }}
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
@@ -194,7 +201,7 @@ jobs:
           # maintainer approves it with 2FA (docs/releasing.md). Needs npm 11.15 or newer;
           # Node 24 bundles it.
           npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && $2 >= 15)) }' || { echo "npm too old for staged publishing" >&2; exit 1; }
-          npm stage publish
+          if [ "$NPM_STAGED" = true ]; then echo "already staged on npm; not staging again"; else npm stage publish; fi
       - run: mise run ts:sbom && mise run sbom:validate
       - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:

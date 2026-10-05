@@ -1,7 +1,6 @@
 name: per-call-middleware-runs-once-per-call
 area: middleware
 summary: A per-call middleware runs once for a call that takes two attempts; a per-retry middleware runs twice.
-pending: [java, csharp]
 notes: M6, docs/config.md sections 7.1 and 7.3.
 client:
   pipeline: { add: [{ name: call-probe, stage: per_call }, { name: attempt-probe, stage: per_retry }] }

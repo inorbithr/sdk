@@ -74,6 +74,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
 | `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
+| `iohr sdk add [rust\|typescript\|python\|go] [--version V] [--dry-run]` | Add the published SDK to the project here with the package manager it already uses; the language comes from the project's files when left out (below) |
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
@@ -109,6 +110,44 @@ iohr auth token --profile work --format json
 alone on one line. The refresh token never leaves the credential store. Exit codes are the
 usual ones: 3 when there is no such profile, no credential, or the session has ended
 (`iohr login` again), 1 when the sign-in service cannot be reached.
+
+## Add the SDK to a project
+
+```sh
+iohr sdk add                 # the language and package manager from the project's files
+iohr sdk add go --version 0.2.1
+iohr sdk add --dry-run       # print the command, run nothing
+```
+
+The language comes from the nearest project file between the current directory and the
+repository root: `Cargo.toml`, `package.json` or `deno.json`, `pyproject.toml`,
+`requirements.txt` or a Python lock file, `go.mod`. When one directory holds several,
+name the language (`ts` and `js` stand for `typescript`, `py` for `python`). The package
+manager is the one the project already uses:
+
+| Project | Command |
+|---|---|
+| Rust | `cargo add inorbithr` |
+| `pnpm-lock.yaml`, `yarn.lock`, `bun.lock` | `pnpm add`, `yarn add`, `bun add @inorbithr/sdk` |
+| `deno.json` without `package.json` | `deno add jsr:@inorbithr/sdk` |
+| other JavaScript and TypeScript | `npm install @inorbithr/sdk` (or the `packageManager` field's) |
+| `uv.lock`, `poetry.lock`, `pdm.lock` | `uv add`, `poetry add`, `pdm add inorbithr` |
+| other Python, in an active virtualenv | `<venv>/bin/python -m pip install inorbithr` |
+| Go | `go get github.com/inorbithr/sdk/go@latest` |
+
+Lock files are looked for up to the repository root, so a workspace member uses its
+workspace's manager. Without a virtualenv and a uv, poetry or pdm lock, `iohr` installs
+nothing into a system Python and prints the uv and venv commands instead. `--version`
+installs that release (`inorbithr@0.2.1`, `inorbithr==0.2.1`, `@v0.2.1`); without it the
+manager picks the newest and records it as it always does. C# and Java are not on NuGet
+and Maven Central yet and are refused with a pointer to the source.
+
+`iohr` prints the command, then runs it as one program with its arguments (no shell,
+never sudo) in the project directory; the exit code is the package manager's. Only the
+package manager contacts a registry. After it succeeds, `iohr` shows a first call in that
+language and points at `iohr sdk config`. With `--json`, the manager's output goes to
+stderr and stdout holds one JSON object: `lang`, `manager`, `dir`, `command` (the argument
+vector), `dry_run`.
 
 ## What will my service see?
 
@@ -262,9 +301,10 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
   the Sigstore bundles checked at install and a record of the checks.
 - `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr`, and to the extension registry
   only in `iohr ext install`, `upgrade` and `sync` (ADR 0012). No telemetry, no update
-  check.
+  check. `iohr sdk add` runs your project's package manager, which reaches its own
+  registry (SR-31).
 
-The rules are SR-10 to SR-28 in [docs/security/requirements.md](../docs/security/requirements.md);
+The rules are SR-10 to SR-31 in [docs/security/requirements.md](../docs/security/requirements.md);
 the layout is [ADR 0009](../docs/adr/0009-the-command-line.md).
 
 ## Dependencies

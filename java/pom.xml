@@ -32,6 +32,7 @@
     <maven.compiler.release>17</maven.compiler.release>
     <jackson.version>2.22.3</jackson.version>
     <junit.version>6.1.3</junit.version>
+    <opentelemetry.version>1.66.0</opentelemetry.version>
     <!-- The conformance driver runs only with -Pconformance (mise run conformance:java). -->
     <excluded.groups>conformance</excluded.groups>
     <included.groups />
@@ -44,6 +45,13 @@
         <groupId>com.fasterxml.jackson</groupId>
         <artifactId>jackson-bom</artifactId>
         <version>${jackson.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-bom</artifactId>
+        <version>${opentelemetry.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
@@ -63,9 +71,38 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>
+    <!--
+      The config file's TOML (docs/config.md section 4.2, ADR 0015). Jackson's own module: its
+      only dependency is jackson-databind, which is here already, so it adds one jar and no
+      new maintainer.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-toml</artifactId>
+    </dependency>
+    <!--
+      OpenTelemetry (docs/config.md section 7.10) is optional: the SDK uses it only when the
+      application has opentelemetry-api on its class path, and never pulls it in itself.
+    -->
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-api</artifactId>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Test only: the tracing case's in-memory exporter. -->
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk-testing</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -197,7 +234,7 @@
       <id>conformance</id>
       <properties>
         <excluded.groups />
-        <included.groups>conformance</included.groups>
+        <included.groups>conformance,vectors</included.groups>
       </properties>
     </profile>
   </profiles>

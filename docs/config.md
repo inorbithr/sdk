@@ -7,10 +7,8 @@ setups for common environments are in [recipes.md](recipes.md). Where this page 
 `design.md` disagree on configuration, this page wins and `design.md` is corrected in the
 same pull request.
 
-Status: designed 2026-10-04, milestone M6 in [roadmap.md](roadmap.md). Rust and TypeScript implement
-all of it; the other four implement section 2 of `design.md` only,
-explicit options and `from_env`, until each lands it. The conformance cases and vectors are
-written now and marked `pending` until each runtime passes them.
+Status: designed 2026-10-04, milestone M6 in [roadmap.md](roadmap.md). All six runtimes
+implement all of it, and every conformance case and vector passes in each.
 
 Words used here:
 
@@ -526,8 +524,8 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
   that call; it never extends `total_timeout`.
 - A retry whose delay would pass `total_timeout` is not made: the call ends with the
   last error.
-- In M6 the attempt timeout covers the body in every language. Today Java's covers only
-  the headers.
+- In M6 the attempt timeout covers the body in every language (Java's covered only the
+  headers before M6).
 
 ### 6.2 Proxies
 
@@ -840,7 +838,7 @@ OpenTelemetry is optional and never a hard dependency of the core package
 | TypeScript | `@opentelemetry/api` as an optional peer dependency, used when installed |
 | Python | extra `inorbithr[otel]` (`opentelemetry-api`), used when importable |
 | Go | module `github.com/inorbithr/sdk/go/otel`: `inorbitotel.Pipeline()` switches on both middlewares and the metrics |
-| Java | artifact `hr.inorbit:inorbit-sdk-otel` (`opentelemetry-api`) |
+| Java | `opentelemetry-api` as an optional Maven dependency, used when the application has it on its class path (`tracerProvider`, `meterProvider` in code) |
 | C# | built in: `ActivitySource` and `Meter` named `InOrbit.Sdk` (no package; inert until a listener subscribes) |
 
 The tracer and meter come from the global providers unless code passes
@@ -901,10 +899,10 @@ the per-call slot. [recipes.md](recipes.md) shows how.
 | user middleware | yes; it must not read the body | the upgrade only, where the runtime sees it |
 | `timeout` | until the headers; then `stream_idle_timeout` | until the upgrade answers |
 
-The socket upgrade goes through the pipeline in Rust, Go and Java. TypeScript's
-`WebSocket`, Python's `websockets` and .NET's `ClientWebSocket` cannot pass a request
-through a pipeline. There the built-ins set their headers directly, user middleware does
-not see the upgrade, and `design.md` section 7 lists the exception. In every runtime the
+The socket upgrade goes through the pipeline in Rust and Go. TypeScript's
+`WebSocket`, Python's `websockets`, Java's `java.net.http.WebSocket` and .NET's
+`ClientWebSocket` cannot pass a request through a pipeline. There the built-ins set their
+headers directly, user middleware does not see the upgrade, and `design.md` section 7 lists the exception. In every runtime the
 upgrade sends `x-request-id` in the `iohr-` form; today TypeScript and C# send none.
 
 ### 7.13 The middleware contract
@@ -951,7 +949,7 @@ Dependencies M6 adds, each with its reason (SR-20):
 | TypeScript | `smol-toml` (no dependencies of its own) | none | `@opentelemetry/api` (optional peer) |
 | Python | `tomllib` (standard library, 3.11+) | `logging` (standard library) | `opentelemetry-api` (extra) |
 | Go | `github.com/BurntSushi/toml` (no dependencies of its own) | `log/slog` (standard library) | submodule |
-| Java | `jackson-dataformat-toml` (Jackson is already a dependency) | `System.Logger` (JDK) | separate artifact |
+| Java | `jackson-dataformat-toml` (Jackson is already a dependency) | `System.Logger` (JDK) | optional dependency |
 | C# | `Tomlyn` (no dependencies of its own) | `Microsoft.Extensions.Logging.Abstractions` | `System.Diagnostics` (in the runtime) |
 
 ## 9. Conformance

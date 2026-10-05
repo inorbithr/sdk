@@ -1,45 +1,52 @@
 package hr.inorbit.sdk;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import hr.inorbit.sdk.auth.CliToken;
 import hr.inorbit.sdk.auth.ClientCredentials;
+import hr.inorbit.sdk.auth.Observable;
 import hr.inorbit.sdk.auth.StaticToken;
-import hr.inorbit.sdk.auth.Token;
+import hr.inorbit.sdk.auth.TokenFile;
 import hr.inorbit.sdk.auth.TokenProvider;
 import hr.inorbit.sdk.codegen.Codegen;
 import hr.inorbit.sdk.errors.ApiException;
 import hr.inorbit.sdk.errors.ConfigException;
-import hr.inorbit.sdk.errors.ConnectionException;
 import hr.inorbit.sdk.errors.DecodeException;
 import hr.inorbit.sdk.errors.InOrbitException;
-import hr.inorbit.sdk.errors.TimeoutException;
-import hr.inorbit.sdk.errors.TooLargeException;
+import hr.inorbit.sdk.middleware.Headers;
+import hr.inorbit.sdk.middleware.Middleware;
+import hr.inorbit.sdk.middleware.Pipeline;
+import hr.inorbit.sdk.middleware.Request;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
+import java.nio.ByteBuffer;
+import java.nio.file.Path;
+import java.security.KeyStore;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Flow;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 /**
  * A client for one credential: configuration, and the one request path every operation goes
- * through, with the token and retry rules of design.md sections 3 to 6. Safe to share between
- * threads; it holds no per-call state.
+ * through, a pipeline of named middlewares (docs/config.md section 7). Safe to share between
+ * threads.
  *
  * <pre>{@code
- * Client client = Client.fromEnv(); // INORBIT_TOKEN, or INORBIT_KEY_ID + _KEY_SECRET + _SCOPES
+ * Client client = Client.load(); // code, INORBIT_*, the iohr config file, then the iohr login
  * Public api = new Public(client);
  * Me me = api.me().value();
  * }</pre>
@@ -58,44 +65,50 @@ public final class Client {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final byte[] EMPTY_OBJECT = {(byte) '{', (byte) '}'};
 
-    private final URI base;
-    private final TokenProvider provider;
-    private final Duration timeout;
-    private final int maxRetries;
-    private final String userAgent;
-    private final List<Hook> hooks;
-    private final HttpClient http;
-    private final Executor executor;
-    private final StreamTransport streams;
-    private final Duration streamIdleTimeout;
-    private SocketHub hub;
+    /** What every view of one client shares. */
+    private static final class Core {
+        final Engine engine;
+        final TokenProvider provider;
+        final List<Middleware> middlewares;
+        final ResolvedConfig resolved;
+        final Executor executor;
+        final StreamTransport streams;
+        final boolean logsCalls;
+        final boolean hooksCalls;
+        SocketHub hub;
 
-    private Client(
-            URI base,
-            TokenProvider provider,
-            Duration timeout,
-            int maxRetries,
-            String userAgent,
-            List<Hook> hooks,
-            HttpClient http,
-            Executor executor,
-            StreamTransport streams,
-            Duration streamIdleTimeout) {
-        this.base = base;
-        this.provider = provider;
-        this.timeout = timeout;
-        this.maxRetries = maxRetries;
-        this.userAgent = userAgent;
-        this.hooks = hooks;
-        this.http = http;
-        this.executor = executor;
-        this.streams = streams;
-        this.streamIdleTimeout = streamIdleTimeout;
+        Core(
+                Engine engine,
+                TokenProvider provider,
+                List<Middleware> middlewares,
+                ResolvedConfig resolved,
+                Executor executor,
+                StreamTransport streams,
+                boolean logsCalls,
+                boolean hooksCalls) {
+            this.engine = engine;
+            this.provider = provider;
+            this.middlewares = middlewares;
+            this.resolved = resolved;
+            this.executor = executor;
+            this.streams = streams;
+            this.logsCalls = logsCalls;
+            this.hooksCalls = hooksCalls;
+        }
+    }
+
+    private final Core core;
+    private final CallOptions options;
+
+    private Client(Core core, CallOptions options) {
+        this.core = core;
+        this.options = options;
     }
 
     /**
      * A builder. Give {@link Builder#token}, or {@link Builder#key} with {@link Builder#scopes}, or
-     * {@link Builder#tokenProvider}.
+     * {@link Builder#tokenProvider}, then {@link Builder#build}; or end with {@link Builder#load}
+     * to read the environment and the config file too.
      *
      * @return the builder
      */
@@ -104,8 +117,22 @@ public final class Client {
     }
 
     /**
+     * A client from the environment, the {@code iohr} config file and login, and the defaults
+     * (docs/config.md): each setting takes the first source that sets it, {@code INORBIT_*}, then
+     * the config file's profile and {@code [sdk]} tables, then the default; credentials come from
+     * the first source of the chain that has any. Nothing is contacted until the first call.
+     *
+     * @return the client
+     * @throws ConfigException every problem found, each with its setting and source
+     */
+    public static Client load() {
+        return builder().load();
+    }
+
+    /**
      * A client from the environment: {@code INORBIT_TOKEN}, or {@code INORBIT_KEY_ID}, {@code
-     * INORBIT_KEY_SECRET} and {@code INORBIT_SCOPES}.
+     * INORBIT_KEY_SECRET} and {@code INORBIT_SCOPES}. {@link #load()} reads more, and is the
+     * recommended way.
      *
      * @return the client
      * @throws ConfigException naming the variables to set when no credential is there
@@ -119,7 +146,7 @@ public final class Client {
      * INORBIT_<PROFILE>_KEY_ID}, {@code _KEY_SECRET} and {@code _SCOPES}, and nothing else. {@code
      * INORBIT_BASE_URL} and {@code INORBIT_TOKEN_URL} apply to every profile.
      *
-     * @param profile the profile as its variables carry it ({@code ACME_CI}); empty for none
+     * @param profile the profile ({@code acme-ci} or {@code ACME_CI}); empty for none
      * @return the client
      * @throws ConfigException naming the variables to set when no credential is there
      */
@@ -128,7 +155,7 @@ public final class Client {
     }
 
     static Client fromEnv(Map<String, String> env, String profile) {
-        String prefix = profile == null || profile.isEmpty() ? "INORBIT_" : "INORBIT_" + profile + "_";
+        String prefix = profile == null || profile.isEmpty() ? "INORBIT_" : "INORBIT_" + Config.envName(profile) + "_";
         Builder b = builder();
         value(env, prefix + "BASE_URL").or(() -> value(env, "INORBIT_BASE_URL")).ifPresent(b::baseUrl);
         value(env, prefix + "TOKEN_URL")
@@ -166,27 +193,67 @@ public final class Client {
      * @return the origin
      */
     public URI baseUrl() {
-        return base;
+        return core.engine.base;
     }
 
     /**
-     * The same client with another limit for each attempt; the credential is shared.
+     * The effective configuration and where each value came from ({@code describe()}).
+     *
+     * @return the configuration
+     */
+    public ResolvedConfig config() {
+        return core.resolved;
+    }
+
+    /**
+     * The latest rate-limit snapshot any call of this client saw (docs/config.md section 7.8).
+     *
+     * @return the snapshot, if any answer carried one
+     */
+    public Optional<RateLimit> rateLimit() {
+        return Optional.ofNullable(core.engine.latest());
+    }
+
+    /**
+     * The credential this client sends.
+     *
+     * @return the token provider
+     */
+    public TokenProvider credential() {
+        return core.provider;
+    }
+
+    /**
+     * The same client with another limit for each attempt, which also caps each call's total;
+     * the credential and everything else are shared.
      *
      * @param timeout how long one attempt may take
      * @return the client
      */
     public Client withTimeout(Duration timeout) {
-        return new Client(
-                base,
-                provider,
-                positive(timeout),
-                maxRetries,
-                userAgent,
-                hooks,
-                http,
-                executor,
-                streams,
-                streamIdleTimeout);
+        CallOptions.Builder b = CallOptions.builder().timeout(positive(timeout));
+        if (options.idempotencyKey() != null) {
+            b.idempotencyKey(options.idempotencyKey());
+        }
+        if (options.traceparent() != null) {
+            b.traceparent(options.traceparent());
+        }
+        return new Client(core, b.build());
+    }
+
+    /**
+     * The same client, its calls made with {@code options}: a per-call timeout, the {@code
+     * Idempotency-Key} to send, the caller's {@code traceparent}. Everything else is shared.
+     *
+     * <pre>{@code
+     * Public api = new Public(client.withOptions(CallOptions.builder().idempotencyKey("order-42").build()));
+     * }</pre>
+     *
+     * @param options the options
+     * @return the client
+     */
+    public Client withOptions(CallOptions options) {
+        return new Client(core, Objects.requireNonNull(options, "options"));
     }
 
     /**
@@ -206,7 +273,7 @@ public final class Client {
             T value = Json.MAPPER.readValue(body.length == 0 ? EMPTY_OBJECT : body, type);
             return new Response<>(value, raw);
         } catch (IOException e) {
-            throw new DecodeException(describe(e), raw, e);
+            throw new DecodeException(Engine.describe(e), raw, e);
         }
     }
 
@@ -219,7 +286,7 @@ public final class Client {
      * @return the typed answer and the raw one, when they arrive
      */
     public <T> CompletableFuture<Response<T>> requestAsync(Operation op, Class<T> type) {
-        return CompletableFuture.supplyAsync(() -> request(op, type), executor);
+        return CompletableFuture.supplyAsync(() -> request(op, type), core.executor);
     }
 
     /**
@@ -231,42 +298,14 @@ public final class Client {
      * @throws InOrbitException for connection, timeout, token and size failures
      */
     public RawResponse send(Operation op) {
-        URI url = url(op);
-        byte[] body = body(op);
-        String id = Retry.requestId();
-        int retries = 0;
-        boolean refreshed = false;
-        for (int number = 1; ; number++) {
-            Hook.Attempt attempt = new Hook.Attempt(op.name(), op.method(), op.path(), number, id);
-            Outcome outcome;
-            try {
-                outcome = attempt(op, url, body, attempt);
-            } catch (InOrbitException e) {
-                failed(attempt, e);
-                throw e;
-            }
-            if (outcome instanceof Outcome.Done done) {
-                return done.raw();
-            }
-            if (outcome instanceof Outcome.Unauthorized && !refreshed) {
-                provider.invalidate();
-                refreshed = true;
-                continue;
-            }
-            if (outcome instanceof Outcome.Again again && op.retrySafe() && retries < maxRetries) {
-                Retry.sleep(again.delay().orElseGet(() -> Retry.backoff(again.retry())), base.getHost());
-                retries++;
-                continue;
-            }
-            InOrbitException error;
-            if (outcome instanceof Outcome.Again a) {
-                error = a.error() != null ? a.error() : ApiException.of(a.raw());
-            } else {
-                error = ApiException.of(((Outcome.Unauthorized) outcome).raw());
-            }
-            failed(attempt, error);
-            throw error;
+        Request req = prepare(op, false);
+        hr.inorbit.sdk.middleware.Response resp;
+        try {
+            resp = run(req);
+        } catch (InOrbitException e) {
+            throw failed(req, e);
         }
+        return finish(req, resp);
     }
 
     /**
@@ -276,14 +315,14 @@ public final class Client {
      * @return the answer, when it arrives
      */
     public CompletableFuture<RawResponse> sendAsync(Operation op) {
-        return CompletableFuture.supplyAsync(() -> send(op), executor);
+        return CompletableFuture.supplyAsync(() -> send(op), core.executor);
     }
 
     /**
      * Opens a stream operation and reads its events as {@code type} (design.md section 7): over
-     * server-sent events, or as a call on the client's one {@code /v1/ws} socket when the client
-     * was built with {@link StreamTransport#SOCKET} and the operation names its RPC. The stream
-     * opens on the first step of the iteration, with the retry and token rules of {@link #send}.
+     * server-sent events through the pipeline, or as a call on the client's one {@code /v1/ws}
+     * socket when the client was built with {@link StreamTransport#SOCKET} and the operation names
+     * its RPC. The stream opens on the first step of the iteration.
      *
      * @param op the call
      * @param type the model of one event
@@ -291,138 +330,83 @@ public final class Client {
      * @return the events; close it to stop early
      */
     public <T> EventStream<T> stream(Operation op, Class<T> type) {
-        if (streams == StreamTransport.SOCKET && op.rpc() != null && !op.rpc().isEmpty()) {
+        if (core.streams == StreamTransport.SOCKET
+                && op.rpc() != null
+                && !op.rpc().isEmpty()) {
             return new EventStream<>(hub().call(op, type));
         }
-        return new EventStream<>(new SseSource<>(this, op, type, streamIdleTimeout));
+        return new EventStream<>(new SseSource<>(this, op, type, core.engine.idle));
     }
 
     /** The client's one socket, made when the first stream asks for it. */
-    private synchronized SocketHub hub() {
-        if (hub == null) {
-            hub = new SocketHub(this);
+    private SocketHub hub() {
+        synchronized (core) {
+            if (core.hub == null) {
+                core.hub = new SocketHub(this);
+            }
+            return core.hub;
         }
-        return hub;
     }
 
-    /** A stream's response as it opened, with the ids its errors name. */
-    record Opened(
-            HttpResponse<java.util.concurrent.Flow.Publisher<List<java.nio.ByteBuffer>>> response,
-            String requestId,
-            int attempts) {}
+    /** A stream's body as it opened, with the ids its errors name, and what to run at its end. */
+    record Opened(Flow.Publisher<List<ByteBuffer>> body, String requestId, int attempts, Runnable onEnd) {}
 
-    /** The server-sent events request for {@code op}, retried like {@link #send}. */
+    /** The server-sent events request for {@code op}, through the pipeline. */
     Opened openSse(Operation op) {
-        URI url = url(op);
-        String id = Retry.requestId();
-        int retries = 0;
-        boolean refreshed = false;
-        for (int number = 1; ; number++) {
-            Hook.Attempt attempt = new Hook.Attempt(op.name(), op.method(), op.path(), number, id);
-            Token token = provider.token();
-            HttpRequest req = HttpRequest.newBuilder(url)
-                    .timeout(timeout)
-                    .header("authorization", "Bearer " + token.access())
-                    .header("accept", "text/event-stream")
-                    .header("user-agent", userAgent)
-                    .header("x-request-id", id)
-                    .GET()
-                    .build();
-            for (Hook h : hooks) {
-                h.onRequest(attempt);
-            }
-            HttpResponse<java.util.concurrent.Flow.Publisher<List<java.nio.ByteBuffer>>> resp;
-            InOrbitException failure = null;
-            RawResponse raw = null;
-            try {
-                resp = http.send(req, HttpResponse.BodyHandlers.ofPublisher());
-                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                    return new Opened(resp, id, number);
-                }
-                raw = new RawResponse(resp.statusCode(), resp.headers(), drain(resp.body()), id, number);
-                for (Hook h : hooks) {
-                    h.onResponse(attempt, raw);
-                }
-            } catch (HttpTimeoutException e) {
-                failure = new TimeoutException(base.getHost(), timeout.toSeconds(), e);
-            } catch (IOException e) {
-                failure = new ConnectionException(base.getHost(), describe(e), e);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ConnectionException(base.getHost(), "interrupted", e);
-            }
-            if (raw != null && raw.status() == 401 && !refreshed) {
-                provider.invalidate();
-                refreshed = true;
-                continue;
-            }
-            boolean again = failure != null || (raw != null && Retry.retryableStatus(raw.status()));
-            if (again && retries < maxRetries) {
-                Optional<Duration> wait = raw != null ? Retry.retryAfter(raw.headers()) : Optional.empty();
-                Retry.sleep(wait.orElseGet(() -> Retry.backoff(attempt.number() - 1)), base.getHost());
-                retries++;
-                continue;
-            }
-            InOrbitException error = failure != null ? failure : ApiException.of(raw);
-            failed(attempt, error);
-            throw error;
-        }
-    }
-
-    /** An error answer's body, at most {@link #MAX_BODY}. */
-    private static byte[] drain(java.util.concurrent.Flow.Publisher<List<java.nio.ByteBuffer>> body)
-            throws IOException, InterruptedException {
-        java.util.concurrent.CompletableFuture<byte[]> bytes = new java.util.concurrent.CompletableFuture<>();
-        HttpResponse.BodySubscriber<byte[]> sub = HttpResponse.BodySubscribers.ofByteArray();
-        body.subscribe(sub);
-        sub.getBody().whenComplete((b, e) -> {
-            if (e != null) {
-                bytes.completeExceptionally(e);
-            } else {
-                bytes.complete(b);
-            }
-        });
+        Request req = prepare(op, true);
+        hr.inorbit.sdk.middleware.Response resp;
         try {
-            byte[] b = bytes.get();
-            if (b.length > MAX_BODY) {
-                throw new TooLargeException();
-            }
-            return b;
-        } catch (java.util.concurrent.ExecutionException e) {
-            throw new IOException(describe(e.getCause()), e.getCause());
+            resp = run(req);
+        } catch (InOrbitException e) {
+            throw failed(req, e);
         }
+        RawResponse raw = finish(req, resp);
+        Call c = Call.of(req);
+        Runnable end = () -> {
+            List<Runnable> todo;
+            synchronized (c.onClose) {
+                todo = new ArrayList<>(c.onClose);
+                c.onClose.clear();
+            }
+            todo.forEach(Runnable::run);
+        };
+        return new Opened(resp.stream(), raw.requestId(), raw.attempts(), end);
     }
 
     // Package-private views the socket uses.
 
     TokenProvider provider() {
-        return provider;
+        return core.provider;
     }
 
     HttpClient http() {
-        return http;
+        return core.engine.http;
+    }
+
+    Engine engine() {
+        return core.engine;
     }
 
     int maxRetries() {
-        return maxRetries;
+        return core.engine.maxRetries;
     }
 
     Duration streamIdleTimeout() {
-        return streamIdleTimeout;
+        return core.engine.idle;
     }
 
     String userAgent() {
-        return userAgent;
+        return core.engine.userAgent;
     }
 
     Duration timeout() {
-        return timeout;
+        return options.timeout() != null ? options.timeout() : core.engine.timeout;
     }
 
-    private void failed(Hook.Attempt attempt, InOrbitException e) {
-        for (Hook h : hooks) {
-            h.onError(attempt, e);
-        }
+    // --- one call --------------------------------------------------------------------------
+
+    private hr.inorbit.sdk.middleware.Response run(Request req) {
+        return new Engine.Link(core.middlewares, 0, core.engine::send, req.info()).proceed(req);
     }
 
     private URI url(Operation op) {
@@ -430,7 +414,7 @@ public final class Client {
         if (!p.startsWith("/") || p.startsWith("//") || p.contains("?") || p.contains("#")) {
             throw new ConfigException("the path \"" + p + "\" is not usable: it starts with one / and has no query");
         }
-        StringBuilder s = new StringBuilder(base.toString()).append(p);
+        StringBuilder s = new StringBuilder(core.engine.base.toString()).append(p);
         char sep = '?';
         for (Map.Entry<String, String> q : op.query()) {
             s.append(sep).append(Codegen.pathSegment(q.getKey())).append('=').append(Codegen.pathSegment(q.getValue()));
@@ -450,82 +434,125 @@ public final class Client {
         }
     }
 
-    /** What one attempt came to. */
-    private sealed interface Outcome {
-        /** A 2xx answer. */
-        record Done(RawResponse raw) implements Outcome {}
-
-        /** A 401. */
-        record Unauthorized(RawResponse raw) implements Outcome {}
-
-        /** A retryable answer or failure; {@code raw} or {@code error} says which. */
-        record Again(Optional<Duration> delay, int retry, RawResponse raw, InOrbitException error) implements Outcome {}
+    private Request prepare(Operation op, boolean stream) {
+        if (options.idempotencyKey() != null && !op.takesIdempotencyKey()) {
+            throw new ConfigException(op.name() + " does not take an idempotency key: the API would ignore it, "
+                    + "so repeating the call would not be safe");
+        }
+        URI url = url(op);
+        String template = op.template() != null ? op.template() : (!op.name().equals(op.path()) ? op.path() : null);
+        Call call = new Call(op, template, options.timeout(), options.traceparent(), options.idempotencyKey());
+        Headers headers = new Headers().set("accept", stream ? "text/event-stream" : "application/json");
+        byte[] body = body(op);
+        if (body != null) {
+            headers.set("content-type", "application/json");
+        }
+        Call.Info info = new Call.Info(
+                call,
+                op.name(),
+                op.retrySafe(),
+                null,
+                Retry.requestId(),
+                0,
+                Long.MIN_VALUE,
+                stream,
+                core.engine.profile);
+        return new Request(op.method().name(), url, headers, body, info);
     }
 
-    private Outcome attempt(Operation op, URI url, byte[] body, Hook.Attempt attempt) {
-        Token token = provider.token();
-        HttpRequest.Builder req = HttpRequest.newBuilder(url)
-                .timeout(timeout)
-                .header("authorization", "Bearer " + token.access())
-                .header("accept", "application/json")
-                .header("user-agent", userAgent)
-                .header("x-request-id", attempt.requestId());
-        if (body == null) {
-            req.method(op.method().name(), HttpRequest.BodyPublishers.noBody());
-        } else {
-            req.header("content-type", "application/json")
-                    .method(op.method().name(), HttpRequest.BodyPublishers.ofByteArray(body));
+    private RawResponse finish(Request req, hr.inorbit.sdk.middleware.Response resp) {
+        Call c = Call.of(req);
+        RawResponse raw = new RawResponse(
+                resp.status(),
+                resp.headers(),
+                resp.body() == null ? new byte[0] : resp.body(),
+                req.info().requestId(),
+                Math.max(c.attempts, 1),
+                c.idempotencyKey,
+                c.rateLimit);
+        if (resp.status() < 200 || resp.status() >= 300) {
+            Engine.discard(resp);
+            throw failed(req, ApiException.of(raw));
         }
-        for (Hook h : hooks) {
-            h.onRequest(attempt);
-        }
-        int retry = attempt.number() - 1;
-        HttpResponse<InputStream> resp;
-        byte[] bytes;
-        try {
-            resp = http.send(req.build(), HttpResponse.BodyHandlers.ofInputStream());
-            long length = resp.headers().firstValueAsLong("content-length").orElse(0);
-            if (length > MAX_BODY) {
-                resp.body().close();
-                throw new TooLargeException();
-            }
-            try (InputStream in = resp.body()) {
-                bytes = in.readNBytes(MAX_BODY + 1);
-            }
-        } catch (HttpTimeoutException e) {
-            return new Outcome.Again(
-                    Optional.empty(), retry, null, new TimeoutException(base.getHost(), timeout.toSeconds(), e));
-        } catch (IOException e) {
-            return new Outcome.Again(
-                    Optional.empty(), retry, null, new ConnectionException(base.getHost(), describe(e), e));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ConnectionException(base.getHost(), "interrupted", e);
-        }
-        if (bytes.length > MAX_BODY) {
-            throw new TooLargeException();
-        }
-        RawResponse raw =
-                new RawResponse(resp.statusCode(), resp.headers(), bytes, attempt.requestId(), attempt.number());
-        for (Hook h : hooks) {
-            h.onResponse(attempt, raw);
-        }
-        int status = raw.status();
-        if (status == 401) {
-            return new Outcome.Unauthorized(raw);
-        }
-        if (Retry.retryableStatus(status)) {
-            return new Outcome.Again(Retry.retryAfter(raw.headers()), retry, raw, null);
-        }
-        if (status >= 200 && status < 300) {
-            return new Outcome.Done(raw);
-        }
-        throw ApiException.of(raw);
+        logCall(req, resp.status(), null);
+        return raw;
     }
 
-    private static String describe(Throwable e) {
-        String m = e.getMessage();
-        return m == null || m.isEmpty() ? e.getClass().getSimpleName() : m;
+    private InOrbitException failed(Request req, InOrbitException error) {
+        Call c = Call.of(req);
+        error.attach(req.info().requestId(), c.idempotencyKey);
+        Engine e = core.engine;
+        if (core.hooksCalls && !e.hooks.isEmpty()) {
+            Hook.Attempt a = c.lastAttempt != null
+                    ? c.lastAttempt
+                    : new Hook.Attempt(
+                            req.info().operation(),
+                            c.op.method(),
+                            c.op.path(),
+                            Math.max(c.attempts, 1),
+                            req.info().requestId(),
+                            c.idempotencyKey,
+                            "per_call");
+            for (Hook h : e.hooks) {
+                h.onError(a, error);
+            }
+        }
+        Integer status = error instanceof ApiException api ? api.status() : null;
+        logCall(req, status, error);
+        if (core.logsCalls) {
+            e.log.emit(
+                    "error",
+                    "call_failed",
+                    Engine.fields(
+                            "operation", req.info().operation(),
+                            "error_kind", error.kind(),
+                            "error_code",
+                                    error instanceof ApiException api
+                                            ? api.code().slug()
+                                            : null,
+                            "status", status,
+                            "request_id", req.info().requestId()));
+        }
+        return error;
+    }
+
+    private void logCall(Request req, Integer status, InOrbitException error) {
+        Call c = Call.of(req);
+        Engine e = core.engine;
+        double seconds = (System.nanoTime() - c.started) / 1e9;
+        e.telemetry.record(
+                "call",
+                seconds,
+                Engine.fields(
+                        "inorbit.operation",
+                        req.info().operation(),
+                        "error.type",
+                        error == null ? null : Engine.errorType(error)));
+        if (!core.logsCalls) {
+            return;
+        }
+        e.log.emit(
+                "info",
+                "call",
+                Engine.fields(
+                        "operation",
+                        req.info().operation(),
+                        "status",
+                        status,
+                        "error_kind",
+                        error == null ? null : error.kind(),
+                        "error_code",
+                        error instanceof ApiException api ? api.code().slug() : null,
+                        "attempts",
+                        Math.max(c.attempts, 1),
+                        "duration_ms",
+                        Math.round(seconds * 1000),
+                        "request_id",
+                        req.info().requestId(),
+                        "server_request_id",
+                        error instanceof ApiException api
+                                ? api.raw().serverRequestId().orElse(null)
+                                : c.serverRequestId));
     }
 
     private static Duration positive(Duration d) {
@@ -538,29 +565,64 @@ public final class Client {
     /** Never a credential. */
     @Override
     public String toString() {
-        return "Client[" + base + ", " + provider + "]";
+        return "Client[" + core.engine.base + ", " + core.provider + "]";
     }
 
-    /** Builds a {@link Client}. */
+    /** {@code inorbithr-sdk-java/<v> java/<v> <os>/<arch>[ <suffix>]}, normalised (section 7.6). */
+    static String userAgent(String suffix) {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        String osName = os.startsWith("linux")
+                ? (System.getProperty("java.vendor", "")
+                                .toLowerCase(Locale.ROOT)
+                                .contains("android")
+                        ? "android"
+                        : "linux")
+                : os.startsWith("mac") || os.startsWith("darwin")
+                        ? "macos"
+                        : os.startsWith("windows") ? "windows" : os.startsWith("freebsd") ? "freebsd" : "other";
+        String arch = switch (System.getProperty("os.arch", "").toLowerCase(Locale.ROOT)) {
+            case "amd64", "x86_64" -> "x86_64";
+            case "aarch64", "arm64" -> "aarch64";
+            case "x86", "i386", "i486", "i586", "i686" -> "x86";
+            case "arm", "arm32" -> "arm";
+            case "riscv64" -> "riscv64";
+            default -> "other";
+        };
+        String version = System.getProperty("java.version", "unknown").replace(' ', '-');
+        return "inorbithr-sdk-java/" + SDK_VERSION + " java/" + version + " " + osName + "/" + arch
+                + (suffix == null || suffix.isEmpty() ? "" : " " + suffix);
+    }
+
+    /** Builds a {@link Client}: {@link #build()} from these options alone, {@link #load()} reading more. */
     public static final class Builder {
 
-        private String token;
-        private String keyId;
-        private String keySecret;
-        private List<String> scopes = List.of();
+        /** Settings set in code, by catalogue name. */
+        private final Map<String, Object> code = new LinkedHashMap<>();
+
         private TokenProvider tokenProvider;
-        private String baseUrl = DEFAULT_BASE_URL;
-        private String tokenUrl = ClientCredentials.DEFAULT_TOKEN_URL;
-        private Duration timeout = Duration.ofSeconds(30);
-        private int maxRetries = 2;
-        private String userAgentSuffix = "";
         private final List<Hook> hooks = new ArrayList<>();
         private HttpClient httpClient;
         private Executor executor;
-        private StreamTransport streams = StreamTransport.SSE;
-        private Duration streamIdleTimeout = Duration.ofSeconds(45);
+        private Consumer<Pipeline> pipeline;
+        private System.Logger logger;
+        private UnaryOperator<Map<String, Object>> redact;
+        private Object tracerProvider;
+        private Object meterProvider;
+        private Integer retryBudgetCapacity;
+        private KeyStore clientKeyStore;
+        private char[] clientKeyStorePassword;
+        private String profileType;
 
         private Builder() {}
+
+        private Builder put(String name, Object value) {
+            if (value == null) {
+                code.remove(name);
+            } else {
+                code.put(name, value);
+            }
+            return this;
+        }
 
         /**
          * How streams open: {@link StreamTransport#SSE} (default) or every stream over one
@@ -570,8 +632,8 @@ public final class Client {
          * @return this builder
          */
         public Builder streams(StreamTransport streams) {
-            this.streams = Objects.requireNonNull(streams, "streams");
-            return this;
+            return put(
+                    "streams", Objects.requireNonNull(streams, "streams") == StreamTransport.SOCKET ? "socket" : "sse");
         }
 
         /**
@@ -582,8 +644,7 @@ public final class Client {
          * @return this builder
          */
         public Builder streamIdleTimeout(Duration idle) {
-            this.streamIdleTimeout = idle;
-            return this;
+            return put("stream_idle_timeout", idle);
         }
 
         /**
@@ -593,8 +654,17 @@ public final class Client {
          * @return this builder
          */
         public Builder token(String token) {
-            this.token = token;
-            return this;
+            return put("token", token == null || token.isEmpty() ? null : token);
+        }
+
+        /**
+         * A file holding a bearer token, read again when it changes (a mounted Secret).
+         *
+         * @param tokenFile the file
+         * @return this builder
+         */
+        public Builder tokenFile(Path tokenFile) {
+            return put("token_file", tokenFile == null ? null : tokenFile.toString());
         }
 
         /**
@@ -605,9 +675,22 @@ public final class Client {
          * @return this builder
          */
         public Builder key(String keyId, String keySecret) {
-            this.keyId = keyId;
-            this.keySecret = keySecret;
-            return this;
+            put("key_id", keyId);
+            code.remove("key_secret_file");
+            return put("key_secret", keySecret);
+        }
+
+        /**
+         * An API key whose secret is a file, read before every token exchange (rotation).
+         *
+         * @param keyId the key's id
+         * @param keySecretFile the file holding the secret
+         * @return this builder
+         */
+        public Builder key(String keyId, Path keySecretFile) {
+            put("key_id", keyId);
+            code.remove("key_secret");
+            return put("key_secret_file", keySecretFile == null ? null : keySecretFile.toString());
         }
 
         /**
@@ -617,8 +700,7 @@ public final class Client {
          * @return this builder
          */
         public Builder scopes(List<String> scopes) {
-            this.scopes = List.copyOf(scopes);
-            return this;
+            return put("scopes", List.copyOf(scopes));
         }
 
         /**
@@ -639,8 +721,7 @@ public final class Client {
          * @return this builder
          */
         public Builder baseUrl(String baseUrl) {
-            this.baseUrl = baseUrl;
-            return this;
+            return put("base_url", baseUrl);
         }
 
         /**
@@ -650,19 +731,37 @@ public final class Client {
          * @return this builder
          */
         public Builder tokenUrl(String tokenUrl) {
-            this.tokenUrl = tokenUrl;
-            return this;
+            return put("token_url", tokenUrl);
         }
 
         /**
-         * How long each attempt may take (default 30 s).
+         * How long each attempt may take, the answer's body included (default 30 s).
          *
          * @param timeout the limit
          * @return this builder
          */
         public Builder timeout(Duration timeout) {
-            this.timeout = timeout;
-            return this;
+            return put("timeout", timeout);
+        }
+
+        /**
+         * DNS, TCP and TLS per new connection (default 10 s).
+         *
+         * @param timeout the limit
+         * @return this builder
+         */
+        public Builder connectTimeout(Duration timeout) {
+            return put("connect_timeout", timeout);
+        }
+
+        /**
+         * One call, every attempt and every wait included (default 120 s).
+         *
+         * @param timeout the limit
+         * @return this builder
+         */
+        public Builder totalTimeout(Duration timeout) {
+            return put("total_timeout", timeout);
         }
 
         /**
@@ -672,19 +771,327 @@ public final class Client {
          * @return this builder
          */
         public Builder maxRetries(int maxRetries) {
-            this.maxRetries = maxRetries;
+            return put("max_retries", maxRetries);
+        }
+
+        /**
+         * The exponential backoff's base (default 500 ms), full jitter.
+         *
+         * @param delay the base
+         * @return this builder
+         */
+        public Builder retryBaseDelay(Duration delay) {
+            return put("retry_base_delay", delay);
+        }
+
+        /**
+         * The backoff's cap (default 8 s).
+         *
+         * @param delay the cap
+         * @return this builder
+         */
+        public Builder retryMaxDelay(Duration delay) {
+            return put("retry_max_delay", delay);
+        }
+
+        /**
+         * The longest {@code Retry-After} waited for (default 60 s); a longer one ends the call.
+         *
+         * @param max the limit
+         * @return this builder
+         */
+        public Builder retryAfterMax(Duration max) {
+            return put("retry_after_max", max);
+        }
+
+        /**
+         * The per-client retry quota (default on, section 7.4).
+         *
+         * @param on whether retries draw from the quota
+         * @return this builder
+         */
+        public Builder retryBudget(boolean on) {
+            return put("retry_budget", on);
+        }
+
+        /**
+         * The retry quota's capacity (default 500), for tests.
+         *
+         * @param capacity the capacity
+         * @return this builder
+         */
+        public Builder retryBudgetCapacity(int capacity) {
+            this.retryBudgetCapacity = capacity;
             return this;
         }
 
         /**
-         * Appended to the user agent.
+         * An {@code http://} proxy URL (user-info is sent as Basic {@code Proxy-Authorization}),
+         * or {@code off}.
+         *
+         * @param proxy the proxy
+         * @return this builder
+         */
+        public Builder proxy(String proxy) {
+            return put("proxy", proxy);
+        }
+
+        /**
+         * Hosts reached directly (the grammar of docs/config.md section 6.2).
+         *
+         * @param noProxy the entries
+         * @return this builder
+         */
+        public Builder noProxy(List<String> noProxy) {
+            return put("no_proxy", List.copyOf(noProxy));
+        }
+
+        /**
+         * PEM certificates added to the system's trust store.
+         *
+         * @param caBundle the file
+         * @return this builder
+         */
+        public Builder caBundle(Path caBundle) {
+            return put("ca_bundle", caBundle == null ? null : caBundle.toString());
+        }
+
+        /**
+         * {@code false} trusts {@link #caBundle} only, for a private gateway.
+         *
+         * @param on whether the system's trust store is used
+         * @return this builder
+         */
+        public Builder systemTrust(boolean on) {
+            return put("system_trust", on);
+        }
+
+        /**
+         * A PEM client certificate chain and its PKCS#8 key, for mTLS.
+         *
+         * @param cert the certificate chain
+         * @param key the private key
+         * @return this builder
+         */
+        public Builder clientCertificate(Path cert, Path key) {
+            put("client_cert", cert == null ? null : cert.toString());
+            return put("client_key", key == null ? null : key.toString());
+        }
+
+        /**
+         * The password of an encrypted PKCS#8 client key.
+         *
+         * @param password the password
+         * @return this builder
+         */
+        public Builder clientKeyPassword(String password) {
+            return put("client_key_password", password);
+        }
+
+        /**
+         * A client certificate and key from a {@link KeyStore} (PKCS#12, or a hardware store), for
+         * mTLS.
+         *
+         * @param store the store
+         * @param password the key's password
+         * @return this builder
+         */
+        public Builder clientCertificate(KeyStore store, char[] password) {
+            this.clientKeyStore = store;
+            this.clientKeyStorePassword = password == null ? null : password.clone();
+            return this;
+        }
+
+        /**
+         * Base64 SHA-256 hashes of public keys to pin, at least two (the current and a backup).
+         *
+         * @param pins the pins
+         * @return this builder
+         */
+        public Builder pinnedKeys(List<String> pins) {
+            return put("pinned_keys", List.copyOf(pins));
+        }
+
+        /**
+         * The log level: {@code off} (default), {@code error}, {@code warn}, {@code info}, {@code
+         * debug}.
+         *
+         * @param level the level
+         * @return this builder
+         */
+        public Builder log(String level) {
+            return put("log", level);
+        }
+
+        /**
+         * Log allowlisted header values at {@code debug}.
+         *
+         * @param on whether headers are logged
+         * @return this builder
+         */
+        public Builder logHeaders(boolean on) {
+            return put("log_headers", on);
+        }
+
+        /**
+         * Header names added to the logging allowlist; the never-logged ones stay out.
+         *
+         * @param names the headers
+         * @return this builder
+         */
+        public Builder logAllowHeaders(List<String> names) {
+            return put("log_allow_headers", List.copyOf(names));
+        }
+
+        /**
+         * Where records go (default {@code System.getLogger("hr.inorbit.sdk")}). Each record is
+         * logged with format {@code "{0}"} and one parameter, the record as a {@link Map}.
+         *
+         * @param logger the logger
+         * @return this builder
+         */
+        public Builder logger(System.Logger logger) {
+            this.logger = logger;
+            return this;
+        }
+
+        /**
+         * Sees every record last and returns it changed, or {@code null} to drop it (SR-14).
+         *
+         * @param redact the function
+         * @return this builder
+         */
+        public Builder redact(UnaryOperator<Map<String, Object>> redact) {
+            this.redact = redact;
+            return this;
+        }
+
+        /**
+         * Spans through OpenTelemetry (default on when {@code opentelemetry-api} is present).
+         *
+         * @param on whether spans are made
+         * @return this builder
+         */
+        public Builder tracing(boolean on) {
+            return put("tracing", on);
+        }
+
+        /**
+         * Metrics through OpenTelemetry (default as {@link #tracing}).
+         *
+         * @param on whether metrics are recorded
+         * @return this builder
+         */
+        public Builder metrics(boolean on) {
+            return put("metrics", on);
+        }
+
+        /**
+         * The OpenTelemetry tracer provider (default the global one).
+         *
+         * @param provider the provider
+         * @return this builder
+         */
+        public Builder tracerProvider(io.opentelemetry.api.trace.TracerProvider provider) {
+            this.tracerProvider = provider;
+            return this;
+        }
+
+        /**
+         * The OpenTelemetry meter provider (default the global one).
+         *
+         * @param provider the provider
+         * @return this builder
+         */
+        public Builder meterProvider(io.opentelemetry.api.metrics.MeterProvider provider) {
+            this.meterProvider = provider;
+            return this;
+        }
+
+        /**
+         * {@code observe} (default), {@code wait} or {@code off} (section 7.8).
+         *
+         * @param mode the mode
+         * @return this builder
+         */
+        public Builder rateLimit(String mode) {
+            return put("rate_limit", mode);
+        }
+
+        /**
+         * Edits the middleware pipeline: {@code p -> p.addPerRetry(m).remove("rate_limit")}.
+         *
+         * @param edit the edit
+         * @return this builder
+         */
+        public Builder pipeline(Consumer<Pipeline> edit) {
+            this.pipeline = edit;
+            return this;
+        }
+
+        /**
+         * The config file profile, for {@link #load()} (otherwise {@code INORBIT_PROFILE}, then
+         * the file's {@code default}).
+         *
+         * @param profile the profile's name
+         * @return this builder
+         */
+        public Builder profile(String profile) {
+            return put("profile", profile);
+        }
+
+        /**
+         * For a generated surface: resolve as the typed profile {@code name} (its own table and
+         * {@code INORBIT_<NAME>_*} variables). Used by the generated {@code load()}.
+         *
+         * @param name the profile's name ({@code acme-ci})
+         * @return this builder
+         */
+        public Builder profileType(String name) {
+            this.profileType = name;
+            return this;
+        }
+
+        /**
+         * The config file {@link #load()} reads, or {@code off} for none.
+         *
+         * @param path the file
+         * @return this builder
+         */
+        public Builder configFile(String path) {
+            return put("config_file", path);
+        }
+
+        /**
+         * The credential sources {@link #load()} may use: {@code env}, {@code workload}, {@code
+         * file}, {@code cli}. Code is always allowed.
+         *
+         * @param sources the sources
+         * @return this builder
+         */
+        public Builder credentialSources(List<String> sources) {
+            return put("credential_sources", List.copyOf(sources));
+        }
+
+        /**
+         * The command line the {@code cli} credential source runs (default {@code iohr} on {@code
+         * PATH}).
+         *
+         * @param path the program
+         * @return this builder
+         */
+        public Builder cliPath(String path) {
+            return put("cli_path", path);
+        }
+
+        /**
+         * Appended to the user agent: product tokens, at most 128 characters.
          *
          * @param suffix the suffix
          * @return this builder
          */
         public Builder userAgentSuffix(String suffix) {
-            this.userAgentSuffix = Objects.requireNonNullElse(suffix, "");
-            return this;
+            return put("user_agent_suffix", suffix == null || suffix.isEmpty() ? null : suffix);
         }
 
         /**
@@ -699,7 +1106,8 @@ public final class Client {
         }
 
         /**
-         * The HTTP client to use (default one that follows no redirects).
+         * The HTTP client to use (default one that follows no redirects). Proxy, trust,
+         * certificate and connect timeout settings then belong to it.
          *
          * @param httpClient the client
          * @return this builder
@@ -721,61 +1129,223 @@ public final class Client {
         }
 
         /**
-         * The client.
+         * The client, from these options alone: no environment, no config file.
          *
          * @return the client
          * @throws ConfigException when no credential is given, a key has no scopes, or a URL is not
          *     https (plain http only to this machine)
          */
         public Client build() {
-            URI base = checkUrl("the base URL", baseUrl, true);
-            URI tokenEndpoint = checkUrl("the token URL", tokenUrl, false);
-            if (maxRetries < 0) {
+            String base = (String) code.getOrDefault("base_url", DEFAULT_BASE_URL);
+            checkUrl("the base URL", base, true);
+            checkUrl(
+                    "the token URL",
+                    (String) code.getOrDefault("token_url", ClientCredentials.DEFAULT_TOKEN_URL),
+                    false);
+            if (code.get("max_retries") instanceof Integer n && n < 0) {
                 throw new ConfigException("max retries must not be negative");
             }
-            HttpClient http = httpClient != null
-                    ? httpClient
-                    : HttpClient.newBuilder()
-                            .followRedirects(HttpClient.Redirect.NEVER)
-                            .connectTimeout(CONNECT_TIMEOUT)
-                            .version(
-                                    "http".equals(base.getScheme())
-                                            ? HttpClient.Version.HTTP_1_1
-                                            : HttpClient.Version.HTTP_2)
-                            .build();
-            TokenProvider provider;
-            if (tokenProvider != null) {
-                provider = tokenProvider;
-            } else if (token != null && !token.isEmpty()) {
-                provider = new StaticToken(token);
-            } else if (keyId != null && keySecret != null) {
-                if (scopes.isEmpty()) {
+            for (String d : List.of("timeout", "stream_idle_timeout")) {
+                if (code.containsKey(d)) {
+                    positive((Duration) code.get(d));
+                }
+            }
+            if (tokenProvider == null && !code.containsKey("token")) {
+                boolean key = code.containsKey("key_id")
+                        && (code.containsKey("key_secret") || code.containsKey("key_secret_file"));
+                if (key && !(code.get("scopes") instanceof List<?> l && !l.isEmpty())) {
                     throw new ConfigException(
                             "no scopes: set INORBIT_SCOPES (space-separated, such as \"identity:read account:read\")");
                 }
-                provider = new ClientCredentials(keyId, keySecret, scopes, tokenEndpoint, http);
-            } else {
-                throw new ConfigException(
-                        "no credentials: set INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET");
+                if (!key && !code.containsKey("token_file")) {
+                    throw new ConfigException(
+                            "no credentials: set INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET");
+                }
             }
-            String ua = "inorbithr-sdk-java/" + SDK_VERSION + " java/" + System.getProperty("java.version", "unknown")
-                    + " "
-                    + System.getProperty("os.name", "unknown")
-                            .toLowerCase(Locale.ROOT)
-                            .replace(' ', '-')
-                    + "/" + System.getProperty("os.arch", "unknown")
-                    + (userAgentSuffix.isEmpty() ? "" : " " + userAgentSuffix);
-            return new Client(
+            Map<String, Object> c = codeMap();
+            c.put("config_file", "off");
+            LoadOptions none = LoadOptions.builder().env(Map.of()).home("").build();
+            Config.Resolution res = Config.resolve(c, none, null, p -> false, null);
+            boolean ownTransport = Set.of(
+                                    "connect_timeout",
+                                    "proxy",
+                                    "no_proxy",
+                                    "ca_bundle",
+                                    "system_trust",
+                                    "client_cert",
+                                    "client_key",
+                                    "pinned_keys")
+                            .stream()
+                            .anyMatch(code::containsKey)
+                    || clientKeyStore != null;
+            return setup(res, ownTransport, false);
+        }
+
+        /**
+         * A client from these options, the environment, the config file and the {@code iohr}
+         * login (docs/config.md): each setting takes the first source that sets it.
+         *
+         * @return the client
+         * @throws ConfigException every problem found, each with its setting and source
+         */
+        public Client load() {
+            return load(null);
+        }
+
+        /**
+         * {@link #load()} reading {@code options} instead of the process's environment, OS and
+         * directories.
+         *
+         * @param options what to read
+         * @return the client
+         * @throws ConfigException every problem found, each with its setting and source
+         */
+        public Client load(LoadOptions options) {
+            if (profileType != null && code.containsKey("profile")) {
+                throw new ConfigException("a typed profile is its own profile; leave profile out");
+            }
+            Config.Resolution res = Config.resolve(codeMap(), options, profileType, null, null);
+            String base = (String) res.values().get("base_url");
+            checkUrl("the base URL", base, true);
+            return setup(res, true, true);
+        }
+
+        private Map<String, Object> codeMap() {
+            Map<String, Object> c = new LinkedHashMap<>(code);
+            if (tokenProvider != null) {
+                c.put("token_provider", tokenProvider);
+            }
+            if (httpClient != null) {
+                c.put("http_client", httpClient);
+            }
+            return c;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Client setup(Config.Resolution res, boolean ownTransport, boolean loaded) {
+            Map<String, Object> v = res.values();
+            URI base = checkUrl("the base URL", (String) v.get("base_url"), true);
+            URI tokenUrl = checkUrl("the token URL", (String) v.get("token_url"), false);
+            String ua = userAgent((String) v.get("user_agent_suffix"));
+            String proxySource =
+                    res.doc().path("settings").path("proxy").path("source").asText("");
+            NoProxy proxy = httpClient != null ? null : NoProxy.of(v, proxySource);
+            if (proxy != null
+                    && proxy.proxy() != null
+                    && !"http".equals(proxy.proxy().getScheme())) {
+                throw new ConfigException("proxy: Java's HTTP client reaches a proxy over plain http:// only; "
+                        + "use an http:// proxy URL, or configure your own HttpClient");
+            }
+            HttpClient http;
+            if (httpClient != null) {
+                http = httpClient;
+            } else if (ownTransport) {
+                http = Transport.build(
+                        base,
+                        new Transport.Net(
+                                (Duration) v.getOrDefault("connect_timeout", CONNECT_TIMEOUT),
+                                proxy,
+                                (String) v.get("ca_bundle"),
+                                (Boolean) v.getOrDefault("system_trust", Boolean.TRUE),
+                                (String) v.get("client_cert"),
+                                (String) v.get("client_key"),
+                                (String) v.get("client_key_password"),
+                                clientKeyStore,
+                                clientKeyStorePassword,
+                                (List<String>) v.get("pinned_keys")));
+            } else {
+                http = HttpClient.newBuilder()
+                        .followRedirects(HttpClient.Redirect.NEVER)
+                        .connectTimeout(CONNECT_TIMEOUT)
+                        .version(
+                                "http".equals(base.getScheme())
+                                        ? HttpClient.Version.HTTP_1_1
+                                        : HttpClient.Version.HTTP_2)
+                        .build();
+                proxy = null;
+            }
+            Config.Credential cred = res.credential();
+            TokenProvider provider = switch (cred.kind) {
+                case "custom" -> (TokenProvider) cred.provider;
+                case "static_token" -> new StaticToken(cred.token);
+                case "token_file" -> new TokenFile(Path.of(cred.tokenFile));
+                case "cli" -> new CliToken(cred.profile, cred.cliPath);
+                default ->
+                    new ClientCredentials(
+                            cred.keyId,
+                            cred.keySecret,
+                            cred.keySecretFile == null ? null : Path.of(cred.keySecretFile),
+                            cred.scopes,
+                            tokenUrl,
+                            http,
+                            ua);
+            };
+            String profile = (String) v.get("profile");
+            SdkLog log = new SdkLog(
+                    (String) v.getOrDefault("log", "off"),
+                    logger,
+                    (Boolean) v.getOrDefault("log_headers", Boolean.FALSE),
+                    (List<String>) v.getOrDefault("log_allow_headers", List.of()),
+                    redact,
+                    profile);
+            Telemetry telemetry =
+                    Telemetry.of((Boolean) v.get("tracing"), (Boolean) v.get("metrics"), tracerProvider, meterProvider);
+            long maxRetries = (Long) v.get("max_retries");
+            Engine engine = new Engine(
                     base,
-                    provider,
-                    positive(timeout),
-                    maxRetries,
                     ua,
-                    List.copyOf(hooks),
+                    (Duration) v.get("timeout"),
+                    (Duration) v.get("total_timeout"),
+                    (Duration) v.get("stream_idle_timeout"),
+                    (int) Math.min(maxRetries, Integer.MAX_VALUE),
+                    (Duration) v.get("retry_base_delay"),
+                    (Duration) v.get("retry_max_delay"),
+                    (Duration) v.get("retry_after_max"),
+                    (String) v.get("rate_limit"),
+                    new RetryBudget(retryBudgetCapacity != null ? retryBudgetCapacity : RetryBudget.CAPACITY, (Boolean)
+                            v.get("retry_budget")),
+                    log,
+                    telemetry,
+                    hooks,
+                    profile,
+                    cred.source,
                     http,
+                    proxy,
+                    loaded);
+            if (provider instanceof Observable o) {
+                o.listen((event, value) -> {
+                    if (event.equals("token_exchange")) {
+                        telemetry.record(
+                                "exchanges",
+                                1,
+                                Engine.fields("inorbit.credential.source", cred.source, "error.type", value));
+                    } else {
+                        log.emit("warn", event, Engine.fields("reason", value));
+                    }
+                });
+            }
+            Pipeline p = engine.builtins(provider);
+            if (pipeline != null) {
+                pipeline.accept(p);
+            }
+            List<Middleware> ms = p.middlewares();
+            boolean logsCalls = ms.stream()
+                    .anyMatch(m -> m instanceof Engine.Builtin b && b.name().equals("logging"));
+            boolean hooksCalls = ms.stream()
+                    .anyMatch(m -> m instanceof Engine.Builtin b && b.name().equals("hooks"));
+            com.fasterxml.jackson.databind.node.ObjectNode doc = res.doc();
+            com.fasterxml.jackson.databind.node.ArrayNode names = doc.putArray("pipeline");
+            p.names().forEach(names::add);
+            Core core = new Core(
+                    engine,
+                    provider,
+                    ms,
+                    new ResolvedConfig(doc),
                     executor != null ? executor : Pool.EXECUTOR,
-                    streams,
-                    positive(streamIdleTimeout));
+                    "socket".equals(v.get("streams")) ? StreamTransport.SOCKET : StreamTransport.SSE,
+                    logsCalls,
+                    hooksCalls);
+            return new Client(core, CallOptions.NONE);
         }
 
         private static URI checkUrl(String what, String raw, boolean originOnly) {
