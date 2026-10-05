@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.1.0-alpha.10](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.9...iohr/v0.1.0-alpha.10) (2026-10-05)
+
+
+### Features
+
+* **cli:** iohr sdk add installs the SDK with the project's package manager ([#144](https://github.com/inorbithr/sdk/issues/144)) ([9473dfe](https://github.com/inorbithr/sdk/commit/9473dfeea44bf1bc9a8e0ad2b91f3d23a8d59699))
+* **cli:** iohr sdk config resolves through the Rust SDK's loader, and the Rust target emits the idempotency-key mark and the path template ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **cli:** the C# target emits the path template and the idempotency-key mark ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **conformance:** replay vectors prints the vectors as JSON for drivers without a YAML reader ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **csharp:** calls have a total timeout of 120 s by default (TotalTimeout), every attempt and wait included ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** Client.Load with one precedence (code, environment, the iohr config file, defaults), Describe() and ConfigException problems ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** proxy, CA bundle, mTLS, pinning and connect timeout on SocketsHttpHandler, or a caller's HttpClient or handler ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** the credential chain (env, token and key secret files, the iohr login) with CachedToken, TokenFile, CliToken, ChainedCredential and DefaultCredential ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** the named middleware pipeline with its built-ins, Middleware.FromHandler, ILogger logging, ActivitySource and Meter, rate limits and the retry budget ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **go:** calls have a total timeout of 120 s by default (WithTotalTimeout), every attempt and wait included ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **go:** inorbit.Load with one precedence (code, environment, the iohr config file, defaults), Describe and ConfigError problems ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **go:** OpenTelemetry spans and metrics in the optional module github.com/inorbithr/sdk/go/otel ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **go:** proxy, CA bundle, mTLS, pinning and connect timeout through the SDK's own http.Transport, or a caller's client or RoundTripper ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **go:** the credential chain (env, token and key secret files, the iohr login) with CachedToken, TokenFile, CliToken, ChainedCredential and DefaultCredential ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **go:** the named middleware pipeline over http.RoundTripper with its built-ins, log/slog logging, rate limits and the retry budget ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **go:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([1564943](https://github.com/inorbithr/sdk/commit/1564943e2e4a7daa4f7ad7475e8742590f8f8682))
+* **java:** calls have a total timeout of 120 s by default, and the attempt timeout covers the body ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** Client.load with one precedence (code, environment, the iohr config file, defaults), describe() and ConfigException problems ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** proxy, CA bundle, mTLS, pinning and connect timeout through the SDK's own ProxySelector and SSLContext ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** the credential chain (env, token and key secret files, the iohr login) with TokenFile, CliToken, CachedToken, ChainedCredential and DefaultCredential ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** the named middleware pipeline with its built-ins, System.Logger logging, optional OpenTelemetry, rate limits and the retry budget ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **py:** calls have a 120 s total deadline by default (total_timeout) ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+* **py:** load, the credential chain, the middleware pipeline, transport settings, logging and OpenTelemetry (M6) ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+* **py:** writes that take Idempotency-Key are retried, with one key per call ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+* **rust:** calls have a total timeout of 120 s by default (total_timeout), and a Retry-After longer than retry_after_max ends the call ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** Client::load with one precedence (code, environment, the iohr config file, defaults), describe() and ConfigError problems ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** proxy, CA bundle, mTLS, pinning and connect timeout through the SDK's own rules, or a caller's reqwest::Client ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** the credential chain (env, token and key secret files, the iohr login) with TokenFile, CliToken, CachedToken, ChainedCredential and DefaultCredential ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** the named middleware pipeline with its built-ins, tracing logging, OpenTelemetry behind the otel feature, rate limits and the retry budget ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **ts:** calls have a total timeout of 120 s by default (totalTimeout), every attempt and wait included ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** Client.load with one precedence (code, environment, the iohr config file, defaults), describe() and ConfigError problems ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** proxy, CA bundle, mTLS, pinning and connect timeout through a node:https transport, or a caller's fetch or dispatcher ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** the credential chain (env, token and key secret files, the iohr login) with CachedToken, TokenFile, CliToken, ChainedCredential and DefaultCredential ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** the named middleware pipeline with its built-ins, logging, OpenTelemetry, rate limits and the retry budget ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+
+
+### Bug fixes
+
+* **conformance:** the replay server hands back action options and rewrite ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **py:** the attempt timeout covers the body; the socket sends an iohr- request id and uses the proxy; the token exchange sends the SDK's user agent; from_env normalises profile names ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+* **rust:** the socket task ends when the client is dropped ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+
+
+### Dependencies
+
+* **rust:** tokio-tungstenite 0.30, pkcs8 0.11 and fresh lockfiles ([#135](https://github.com/inorbithr/sdk/issues/135)) ([d13b761](https://github.com/inorbithr/sdk/commit/d13b761ad7b96924c1d14bea08ecd3cd3517aace))
+
 ## [0.1.0-alpha.9](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.8...iohr/v0.1.0-alpha.9) (2026-10-05)
 
 
