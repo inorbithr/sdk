@@ -52,7 +52,7 @@ passing, README showing `load` first):
       every M6 case and vector passes; `tower` adapter and `native-tls` not built
 - [x] TypeScript (`Client.load`, the node:https transport for proxy, CA and mTLS,
       `@opentelemetry/api` as an optional peer; every case and vector passing)
-- [x] Python (`Client.load` and `AsyncClient.load`, truststore for the system's trust store,
+- [x] Python (#125: `Client.load` and `AsyncClient.load`, truststore for the system's trust store,
       `inorbithr[otel]`; every case and vector passing in both clients)
 - [ ] Go (`go/otel` submodule)
 - [ ] Java (`inorbit-sdk-otel` artifact)
