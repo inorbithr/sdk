@@ -1,7 +1,7 @@
 name: rate-limit-headers-are-read
 area: retries
 summary: The edge's X-RateLimit headers become the result's rate-limit snapshot.
-pending: [go, rust, ts, py, java, csharp]
+pending: [go, rust, py, java, csharp]
 notes: M6, docs/config.md section 7.8. Envoy's draft-03 headers; Reset is seconds.
 action: { op: me }
 exchanges:

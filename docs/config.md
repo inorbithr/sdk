@@ -607,7 +607,7 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 | Language | Type |
 |---|---|
 | Rust | `reqwest::Client` |
-| TypeScript | `fetch` function (an `undici` dispatcher is passed through the caller's own `fetch`) |
+| TypeScript | `fetch` function, or an `undici` `dispatcher` passed to every `fetch` and to the socket |
 | Python | `httpx.Client` / `httpx.AsyncClient` |
 | Go | `*http.Client` (copied; its `Transport` is the innermost `RoundTripper`) |
 | Java | `java.net.http.HttpClient` |

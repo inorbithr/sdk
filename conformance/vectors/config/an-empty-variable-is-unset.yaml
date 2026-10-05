@@ -1,7 +1,7 @@
 name: an-empty-variable-is-unset
 kind: config
 summary: An environment variable set to the empty string counts as unset.
-pending: [go, rust, ts, py, java, csharp]
+pending: [go, rust, py, java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_TIMEOUT: "", INORBIT_CONFIG_FILE: "off" }
 expect:

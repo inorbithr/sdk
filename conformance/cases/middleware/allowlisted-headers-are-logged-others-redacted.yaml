@@ -1,7 +1,7 @@
 name: allowlisted-headers-are-logged-others-redacted
 area: middleware
 summary: With header logging on, an allowlisted response header is logged with its value and any other by name with REDACTED.
-pending: [go, rust, ts, py, java, csharp]
+pending: [go, rust, py, java, csharp]
 notes: M6, docs/config.md section 7.9.
 client:
   log: debug

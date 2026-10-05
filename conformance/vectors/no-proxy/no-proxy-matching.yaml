@@ -1,7 +1,7 @@
 name: no-proxy-matching
 kind: no-proxy
 summary: Which proxy, if any, each URL goes through, for the variables and no_proxy forms of docs/config.md section 6.2.
-pending: [go, rust, ts, py, java, csharp]
+pending: [go, rust, py, java, csharp]
 notes: The expectation is the proxy URL used, or null for a direct connection.
 checks:
   - { summary: a domain matches itself, env: { HTTPS_PROXY: "http://proxy.example:3128", NO_PROXY: example.com }, url: "https://example.com/v1/me", expect: null }

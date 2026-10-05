@@ -697,7 +697,7 @@ run = """
 found=0
 [ -d examples/go ] && { found=1; (cd examples/go && go vet ./...) || exit 1; }
 [ -d examples/rust ] && { found=1; (cd examples/rust && cargo check --all-targets) || exit 1; }
-[ -d examples/typescript ] && { found=1; (cd examples/typescript && pnpm install --frozen-lockfile && pnpm exec tsc --noEmit) || exit 1; }
+[ -d examples/typescript ] && { found=1; (cd typescript && pnpm install --frozen-lockfile) && (cd examples/typescript && pnpm install --frozen-lockfile && pnpm exec tsc --noEmit) || exit 1; }
 [ -d examples/python ] && { found=1; (cd examples/python && uv run pyright) || exit 1; }
 [ -d examples/csharp ] && { found=1; (cd examples/csharp/Whoami && dotnet build -warnaserror -nologo -v q) || exit 1; }
 [ -d examples/java ] && { found=1; (cd java && mvn -B -q -DskipTests -Dspotless.check.skip=true package dependency:build-classpath -Dmdep.includeScope=compile -Dmdep.outputFile=target/classpath.txt) && javac --release 17 -Xlint:all -Werror -d java/target/examples -cp "java/target/classes:$(cat java/target/classpath.txt)" $(find examples/java -name "*.java") || exit 1; }

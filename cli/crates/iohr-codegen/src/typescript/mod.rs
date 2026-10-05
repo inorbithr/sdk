@@ -484,6 +484,7 @@ fn operation_function(op: &Op, needs: &BTreeSet<String>, uses_shapes: &mut bool)
         format!("name: \"{}\"", op.hook_name),
         format!("method: \"{}\"", method(op.method)),
         format!("path: `{path}`"),
+        format!("template: \"{}\"", op.path),
     ];
     if !op.query.is_empty() {
         let q: Vec<String> = op
@@ -512,6 +513,9 @@ fn operation_function(op: &Op, needs: &BTreeSet<String>, uses_shapes: &mut bool)
     fields.push(format!("scopes: [{}]", scopes.join(", ")));
     if op.idempotent_override {
         fields.push("idempotent: true".into());
+    }
+    if op.idempotency_key {
+        fields.push("idempotencyKey: true".into());
     }
     if op.stream {
         // The socket's call names the RPC and carries the parameters as one body
@@ -582,7 +586,7 @@ fn render_profiles(surface: &context::Surface, all_models: &[Model], runtime: &s
         ""
     };
     let mut out = format!(
-        "import {{ type CallOptions, Client, {codegen}type Response }} from \"{runtime}\";\n"
+        "import {{ type CallOptions, Client, {codegen}type LoadClientOptions, type Response }} from \"{runtime}\";\n"
     );
     if !models.is_empty() {
         let list: Vec<String> = models.iter().map(|m| format!("type {m}")).collect();
@@ -673,6 +677,22 @@ fn profile_class(
         out,
         "\n  /** The profile with its credential from the environment. */\n  static fromEnv(): {class} {{\n    return new {class}(Client.fromEnv({env_arg}));\n  }}\n"
     );
+    // `load` (docs/config.md section 1): the public profile resolves as the public client;
+    // a named one as its typed profile, which neither code nor INORBIT_PROFILE can point
+    // elsewhere.
+    if p.is_public {
+        let _ = write!(
+            out,
+            "\n  /** The profile configured from code, the environment, the config file and the `iohr` login (`Client.load`). */\n  static load(options: LoadClientOptions = {{}}): {class} {{\n    return new {class}(Client.load(options));\n  }}\n"
+        );
+    } else {
+        let _ = write!(
+            out,
+            "\n  /** The profile configured from code, `INORBIT_{e}_*` (then `INORBIT_*` for settings), `[profiles.{name}]` and the `iohr` login (`Client.load`). */\n  static load(options: Omit<LoadClientOptions, \"profile\" | \"profileType\"> = {{}}): {class} {{\n    return new {class}(Client.load({{ ...options, profileType: \"{name}\" }}));\n  }}\n",
+            e = p.env,
+            name = p.name
+        );
+    }
     for op in surface.flat.iter().filter(|o| o.profiles.contains(&p.name)) {
         out.push_str(&profile_method(op, all_models, models, params));
     }

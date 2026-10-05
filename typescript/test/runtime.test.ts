@@ -11,7 +11,7 @@ import {
   RawResponse,
   StaticToken,
 } from "../src/index.js";
-import { backoffMs, retryAfterMs } from "../src/retry.js";
+import { backoffMs, retryAfter, retryAfterMs } from "../src/retry.js";
 import { parseTimestamp } from "../src/timestamp.js";
 
 function raw(status: number, body: string, headers: Record<string, string> = {}): RawResponse {
@@ -155,6 +155,9 @@ describe("retry", () => {
     assert.equal(retryAfterMs(new Headers({ "retry-after": "3" })), 3000);
     assert.equal(retryAfterMs(new Headers({ "retry-after": "900" })), 60_000);
     assert.equal(retryAfterMs(new Headers({ "retry-after": "Wed, 21 Oct" })), undefined);
+    const soon = new Date(Date.now() + 5_000).toUTCString();
+    const wait = retryAfter(new Headers({ "retry-after": soon }));
+    assert.ok(wait !== undefined && wait > 3_000 && wait <= 5_000, String(wait));
     for (let i = 0; i < 10; i++) {
       assert.ok(backoffMs(i) <= 8000);
     }

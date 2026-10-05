@@ -1,7 +1,7 @@
 name: a-typed-profile-ignores-inorbit-profile
 kind: config
 summary: INORBIT_PROFILE cannot point a typed profile at another table.
-pending: [go, rust, ts, py, java, csharp]
+pending: [go, rust, py, java, csharp]
 input:
   profile_type: acme-ci
   env: { INORBIT_ACME_CI_TOKEN: t, INORBIT_PROFILE: other }

@@ -5,6 +5,8 @@
  * @module
  */
 
+import type { RateLimit } from "./ratelimit.js";
+
 /** The platform's error codes (`spec/problem.json`), with the HTTP status of each. */
 export const CODES: Readonly<Record<KnownCode, number>> = {
   bad_request: 400,
@@ -77,6 +79,12 @@ export class RawResponse {
   readonly serverRequestId: string | undefined;
   /** How many attempts the call took. */
   readonly attempts: number;
+  /** The `Idempotency-Key` the call was sent with, on an operation that takes one. */
+  readonly idempotencyKey: string | undefined;
+  /** Whether the API answered a repeat of an earlier call with the same key (`Idempotency-Replayed: true`). */
+  readonly idempotencyReplayed: boolean;
+  /** What the answer said about the rate limit, unless `rateLimit` is `"off"`. */
+  readonly rateLimit: RateLimit | undefined;
 
   /** An answer read off the wire. */
   constructor(init: {
@@ -85,6 +93,8 @@ export class RawResponse {
     body: Uint8Array;
     requestId: string;
     attempts: number;
+    idempotencyKey?: string | undefined;
+    rateLimit?: RateLimit | undefined;
   }) {
     this.status = init.status;
     this.headers = init.headers;
@@ -92,6 +102,9 @@ export class RawResponse {
     this.requestId = init.requestId;
     this.serverRequestId = init.headers.get("x-request-id") ?? undefined;
     this.attempts = init.attempts;
+    this.idempotencyKey = init.idempotencyKey;
+    this.idempotencyReplayed = init.headers.get("idempotency-replayed")?.trim() === "true";
+    this.rateLimit = init.rateLimit;
   }
 
   /** The body as text. */
@@ -113,6 +126,10 @@ export class RawResponse {
 export class InOrbitError extends Error {
   /** A stable kind: `api`, `connection`, `timeout`, `auth`, `config`, `too_large`, `decode`. */
   readonly kind: string;
+  /** The `x-request-id` the failed call was sent with, when it got that far. */
+  requestId: string | undefined;
+  /** The `Idempotency-Key` the failed call was sent with: repeat the call with it to stay safe. */
+  idempotencyKey: string | undefined;
 
   /** An error of `kind` with `message`. */
   constructor(kind: string, message: string, options?: ErrorOptions) {
@@ -255,9 +272,14 @@ export class TimeoutError extends InOrbitError {
   /** The host that did not answer. */
   readonly host: string;
 
-  /** `host` did not answer within `seconds`. */
-  constructor(host: string, seconds: number) {
-    super("timeout", `${host} did not answer within ${seconds} s`);
+  /** `host` did not answer within `seconds`; `waiting` names what the call waited for instead. */
+  constructor(host: string, seconds: number, waiting?: string) {
+    super(
+      "timeout",
+      waiting === undefined
+        ? `${host} did not answer within ${seconds} s`
+        : `the call to ${host} ran out of its ${seconds} s while waiting for ${waiting}`,
+    );
     this.name = "TimeoutError";
     this.host = host;
   }
@@ -276,12 +298,44 @@ export class AuthError extends InOrbitError {
   }
 }
 
+/** One problem a {@link ConfigError} found: the setting, where its value came from, what to do. */
+export interface ConfigProblem {
+  /** The setting, by its catalogue name (`timeout`), or `credential` when none was found. */
+  readonly setting: string;
+  /** Where the value came from (`env INORBIT_TIMEOUT`, `file <path> [sdk]`, `code`), or empty. */
+  readonly source: string;
+  /** What is wrong and what to do; never a secret's value. */
+  readonly message: string;
+}
+
 /** The client was configured in a way it cannot work with. */
 export class ConfigError extends InOrbitError {
+  /** Every problem found, in the catalogue's order; empty for an error of one message. */
+  readonly problems: readonly ConfigProblem[];
+
   /** A configuration problem. */
-  constructor(message: string) {
+  constructor(message: string, problems: readonly ConfigProblem[] = []) {
     super("config", message);
     this.name = "ConfigError";
+    this.problems = problems;
+  }
+
+  /** The error for `problems`, its message listing each (config.md section 2.5). */
+  static of(problems: readonly ConfigProblem[]): ConfigError {
+    const only = problems[0];
+    if (problems.length === 1 && only !== undefined && only.setting === "credential") {
+      return new ConfigError(only.message, problems);
+    }
+    const n = problems.length;
+    const lines = problems.map((p) => {
+      const [first, ...rest] = p.message.split("\n");
+      const from = p.source === "" ? "" : ` (from ${p.source})`;
+      return [`  ${p.setting}: ${first ?? ""}${from}`, ...rest.map((l) => `    ${l}`)].join("\n");
+    });
+    return new ConfigError(
+      `configuration is invalid (${n} problem${n === 1 ? "" : "s"}):\n${lines.join("\n")}`,
+      problems,
+    );
   }
 }
 
