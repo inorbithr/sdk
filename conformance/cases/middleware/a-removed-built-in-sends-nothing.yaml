@@ -1,7 +1,7 @@
 name: a-removed-built-in-sends-nothing
 area: middleware
 summary: Removing request_id from the pipeline leaves the x-request-id header out.
-pending: [go, rust, ts, py, java, csharp]
+pending: [go, rust, py, java, csharp]
 notes: M6, docs/config.md section 7.3.
 client:
   pipeline: { remove: [request_id] }
