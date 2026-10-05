@@ -161,7 +161,9 @@ npm audit signatures
 [tasks."ts:sbom"]
 dir = "typescript"
 shell = "bash -e -o pipefail -c"
-run = "[ -f package.json ] || exit 0; mkdir -p ../dist/sbom; npm sbom --sbom-format cyclonedx --omit dev > ../dist/sbom/typescript.cdx.json"
+# pnpm, not npm: npm sbom reads a pnpm node_modules as linked packages and fails on
+# their dev dependencies (smol-toml, 2026-10-05).
+run = "[ -f package.json ] || exit 0; mkdir -p ../dist/sbom; pnpm sbom --sbom-format cyclonedx --prod > ../dist/sbom/typescript.cdx.json"
 
 [tasks."py:audit"]
 dir = "python"

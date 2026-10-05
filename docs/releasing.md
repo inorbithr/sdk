@@ -181,3 +181,6 @@ publisher and approval environment: Actions, `release`, "Run workflow", with
 `typescript/v0.1.0`), one per run. Python publishes the release's attached, attested
 files; TypeScript rebuilds from the tag and stages on npm, where a maintainer approves it
 with 2FA. release-please does not run on a manual run, so nothing new is tagged.
+When the version is already staged on npm and a later step failed (the SBOM, the
+attestation, the release files or JSR), add `typescript_npm_staged`: the run builds and
+packs the same tag again but does not stage it a second time.
