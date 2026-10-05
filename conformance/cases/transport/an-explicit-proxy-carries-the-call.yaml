@@ -1,7 +1,7 @@
 name: an-explicit-proxy-carries-the-call
 area: transport
 summary: An explicit proxy carries both the token exchange and the call, through CONNECT.
-pending: [go, java, csharp]
+pending: [java, csharp]
 notes: M6, docs/config.md section 6.2; replay features 2 and 4. An explicit proxy applies to loopback.
 client: { transport: proxy }
 action: { op: me }

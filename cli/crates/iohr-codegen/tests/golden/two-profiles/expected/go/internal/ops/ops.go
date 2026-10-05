@@ -15,31 +15,31 @@ import (
 
 // DeleteEndpoint calls DELETE /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/DeleteEndpoint` on the `events` backend.
 func DeleteEndpoint(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.DeleteEndpointResponse], error) {
-	op := inorbit.Operation{Name: "events.delete_endpoint", Method: "DELETE", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.delete_endpoint", Method: "DELETE", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Template: "/v1/webhooks/endpoints/{endpoint_id}", Scopes: []string{"webhooks:write"}}
 	return inorbit.Call[models.DeleteEndpointResponse](ctx, c, op)
 }
 
 // DeleteInbox calls DELETE /v1/webhooks/inboxes/{inbox_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/DeleteInbox` on the `events` backend.
 func DeleteInbox(ctx context.Context, c *inorbit.Client, inboxID string) (*inorbit.Response[models.DeleteInboxResponse], error) {
-	op := inorbit.Operation{Name: "events.delete_inbox", Method: "DELETE", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID), Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.delete_inbox", Method: "DELETE", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID), Template: "/v1/webhooks/inboxes/{inbox_id}", Scopes: []string{"webhooks:write"}}
 	return inorbit.Call[models.DeleteInboxResponse](ctx, c, op)
 }
 
 // GetMe calls GET /v1/accounts/me; needs scope account:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetMe` on the `accounts` backend.
 func GetMe(ctx context.Context, c *inorbit.Client) (*inorbit.Response[models.GetMeResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_me", Method: "GET", Path: "/v1/accounts/me", Scopes: []string{"account:read"}}
+	op := inorbit.Operation{Name: "accounts.get_me", Method: "GET", Path: "/v1/accounts/me", Template: "/v1/accounts/me", Scopes: []string{"account:read"}}
 	return inorbit.Call[models.GetMeResponse](ctx, c, op)
 }
 
 // GetUnits calls GET /v1/accounts/orgs/{org_id}/units; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetUnits` on the `accounts` backend.
 func GetUnits(ctx context.Context, c *inorbit.Client, orgID string) (*inorbit.Response[models.GetUnitsResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_units", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/units", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.get_units", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/units", Template: "/v1/accounts/orgs/{org_id}/units", Scopes: []string{"usage:read"}}
 	return inorbit.Call[models.GetUnitsResponse](ctx, c, op)
 }
 
 // GetUsage calls GET /v1/accounts/orgs/{org_id}/usage; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetUsage` on the `accounts` backend.
 func GetUsage(ctx context.Context, c *inorbit.Client, orgID string, params *models.AccountsGetUsageParams) (*inorbit.Response[models.GetUsageResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_usage", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/usage", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.get_usage", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/usage", Template: "/v1/accounts/orgs/{org_id}/usage", Scopes: []string{"usage:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.From != nil {
@@ -55,7 +55,7 @@ func GetUsage(ctx context.Context, c *inorbit.Client, orgID string, params *mode
 
 // ListUnitCategories calls GET /v1/accounts/units/categories; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/ListUnitCategories` on the `accounts` backend.
 func ListUnitCategories(ctx context.Context, c *inorbit.Client, params *models.AccountsListUnitCategoriesParams) (*inorbit.Response[models.ListUnitCategoriesResponse], error) {
-	op := inorbit.Operation{Name: "accounts.list_unit_categories", Method: "GET", Path: "/v1/accounts/units/categories", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.list_unit_categories", Method: "GET", Path: "/v1/accounts/units/categories", Template: "/v1/accounts/units/categories", Scopes: []string{"usage:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -71,7 +71,7 @@ func ListUnitCategories(ctx context.Context, c *inorbit.Client, params *models.A
 
 // StreamEvents calls GET /v1/events/events; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend.
 func StreamEvents(ctx context.Context, c *inorbit.Client, params *models.EventsStreamEventsParams) iter.Seq2[*models.StreamEventsResponse, error] {
-	op := inorbit.Operation{Name: "events.stream_events", Method: "GET", Path: "/v1/events/events", Scopes: []string{"events:read"}}
+	op := inorbit.Operation{Name: "events.stream_events", Method: "GET", Path: "/v1/events/events", Template: "/v1/events/events", Scopes: []string{"events:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Types != nil {
@@ -98,7 +98,7 @@ func StreamEvents(ctx context.Context, c *inorbit.Client, params *models.EventsS
 
 // ListEventTypes calls GET /v1/events/types; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend.
 func ListEventTypes(ctx context.Context, c *inorbit.Client, params *models.EventsListEventTypesParams) (*inorbit.Response[models.ListEventTypesResponse], error) {
-	op := inorbit.Operation{Name: "events.list_event_types", Method: "GET", Path: "/v1/events/types", Scopes: []string{"events:read"}}
+	op := inorbit.Operation{Name: "events.list_event_types", Method: "GET", Path: "/v1/events/types", Template: "/v1/events/types", Scopes: []string{"events:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -114,13 +114,13 @@ func ListEventTypes(ctx context.Context, c *inorbit.Client, params *models.Event
 
 // Me calls GET /v1/me; needs scope identity:read. A key needs scope `identity:read`.
 func Me(ctx context.Context, c *inorbit.Client) (*inorbit.Response[models.Me], error) {
-	op := inorbit.Operation{Name: "me", Method: "GET", Path: "/v1/me", Scopes: []string{"identity:read"}}
+	op := inorbit.Operation{Name: "me", Method: "GET", Path: "/v1/me", Template: "/v1/me", Scopes: []string{"identity:read"}}
 	return inorbit.Call[models.Me](ctx, c, op)
 }
 
 // ListDigests calls GET /v1/radar/digests; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/ListDigests` on the `radar` backend.
 func ListDigests(ctx context.Context, c *inorbit.Client, params *models.RadarListDigestsParams) (*inorbit.Response[models.ListDigestsResponse], error) {
-	op := inorbit.Operation{Name: "radar.list_digests", Method: "GET", Path: "/v1/radar/digests", Scopes: []string{"radar:read"}}
+	op := inorbit.Operation{Name: "radar.list_digests", Method: "GET", Path: "/v1/radar/digests", Template: "/v1/radar/digests", Scopes: []string{"radar:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Language != nil {
@@ -151,13 +151,13 @@ func ListDigests(ctx context.Context, c *inorbit.Client, params *models.RadarLis
 
 // GetDigest calls GET /v1/radar/digests/{id}; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/GetDigest` on the `radar` backend.
 func GetDigest(ctx context.Context, c *inorbit.Client, id string) (*inorbit.Response[models.GetDigestResponse], error) {
-	op := inorbit.Operation{Name: "radar.get_digest", Method: "GET", Path: "/v1/radar/digests/" + codegen.PathSegment(id), Scopes: []string{"radar:read"}}
+	op := inorbit.Operation{Name: "radar.get_digest", Method: "GET", Path: "/v1/radar/digests/" + codegen.PathSegment(id), Template: "/v1/radar/digests/{id}", Scopes: []string{"radar:read"}}
 	return inorbit.Call[models.GetDigestResponse](ctx, c, op)
 }
 
 // ListItems calls GET /v1/radar/items; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/ListItems` on the `radar` backend.
 func ListItems(ctx context.Context, c *inorbit.Client, params *models.RadarListItemsParams) (*inorbit.Response[models.ListItemsResponse], error) {
-	op := inorbit.Operation{Name: "radar.list_items", Method: "GET", Path: "/v1/radar/items", Scopes: []string{"radar:read"}}
+	op := inorbit.Operation{Name: "radar.list_items", Method: "GET", Path: "/v1/radar/items", Template: "/v1/radar/items", Scopes: []string{"radar:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Language != nil {
@@ -179,7 +179,7 @@ func ListItems(ctx context.Context, c *inorbit.Client, params *models.RadarListI
 
 // ListEndpoints calls GET /v1/webhooks/endpoints; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListEndpoints` on the `events` backend.
 func ListEndpoints(ctx context.Context, c *inorbit.Client, params *models.EventsListEndpointsParams) (*inorbit.Response[models.ListEndpointsResponse], error) {
-	op := inorbit.Operation{Name: "events.list_endpoints", Method: "GET", Path: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_endpoints", Method: "GET", Path: "/v1/webhooks/endpoints", Template: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.AccountID != nil {
@@ -198,13 +198,13 @@ func ListEndpoints(ctx context.Context, c *inorbit.Client, params *models.Events
 
 // GetEndpoint calls GET /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/GetEndpoint` on the `events` backend.
 func GetEndpoint(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.Endpoint], error) {
-	op := inorbit.Operation{Name: "events.get_endpoint", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.get_endpoint", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Template: "/v1/webhooks/endpoints/{endpoint_id}", Scopes: []string{"webhooks:read"}}
 	return inorbit.Call[models.Endpoint](ctx, c, op)
 }
 
 // ListDeliveries calls GET /v1/webhooks/endpoints/{endpoint_id}/deliveries; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListDeliveries` on the `events` backend.
 func ListDeliveries(ctx context.Context, c *inorbit.Client, endpointID string, params *models.EventsListDeliveriesParams) (*inorbit.Response[models.ListDeliveriesResponse], error) {
-	op := inorbit.Operation{Name: "events.list_deliveries", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/deliveries", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_deliveries", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/deliveries", Template: "/v1/webhooks/endpoints/{endpoint_id}/deliveries", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Status != nil {
@@ -223,7 +223,7 @@ func ListDeliveries(ctx context.Context, c *inorbit.Client, endpointID string, p
 
 // ListInboxes calls GET /v1/webhooks/inboxes; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend.
 func ListInboxes(ctx context.Context, c *inorbit.Client, params *models.EventsListInboxesParams) (*inorbit.Response[models.ListInboxesResponse], error) {
-	op := inorbit.Operation{Name: "events.list_inboxes", Method: "GET", Path: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_inboxes", Method: "GET", Path: "/v1/webhooks/inboxes", Template: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.AccountID != nil {
@@ -242,7 +242,7 @@ func ListInboxes(ctx context.Context, c *inorbit.Client, params *models.EventsLi
 
 // ListInboxRequests calls GET /v1/webhooks/inboxes/{inbox_id}/requests; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListInboxRequests` on the `events` backend.
 func ListInboxRequests(ctx context.Context, c *inorbit.Client, inboxID string, params *models.EventsListInboxRequestsParams) (*inorbit.Response[models.ListInboxRequestsResponse], error) {
-	op := inorbit.Operation{Name: "events.list_inbox_requests", Method: "GET", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID) + "/requests", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_inbox_requests", Method: "GET", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID) + "/requests", Template: "/v1/webhooks/inboxes/{inbox_id}/requests", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -258,39 +258,44 @@ func ListInboxRequests(ctx context.Context, c *inorbit.Client, inboxID string, p
 
 // UpdateEndpoint calls PATCH /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/UpdateEndpoint` on the `events` backend.
 func UpdateEndpoint(ctx context.Context, c *inorbit.Client, endpointID string, body models.UpdateEndpointRequest) (*inorbit.Response[models.Endpoint], error) {
-	op := inorbit.Operation{Name: "events.update_endpoint", Method: "PATCH", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.update_endpoint", Method: "PATCH", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Template: "/v1/webhooks/endpoints/{endpoint_id}", Scopes: []string{"webhooks:write"}}
 	op.Body = body
 	return inorbit.Call[models.Endpoint](ctx, c, op)
 }
 
 // RetryDelivery calls POST /v1/webhooks/deliveries/{delivery_id}/retry; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/RetryDelivery` on the `events` backend.
 func RetryDelivery(ctx context.Context, c *inorbit.Client, deliveryID string) (*inorbit.Response[models.RetryDeliveryResponse], error) {
-	op := inorbit.Operation{Name: "events.retry_delivery", Method: "POST", Path: "/v1/webhooks/deliveries/" + codegen.PathSegment(deliveryID) + "/retry", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.retry_delivery", Method: "POST", Path: "/v1/webhooks/deliveries/" + codegen.PathSegment(deliveryID) + "/retry", Template: "/v1/webhooks/deliveries/{delivery_id}/retry", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	return inorbit.Call[models.RetryDeliveryResponse](ctx, c, op)
 }
 
 // CreateEndpoint calls POST /v1/webhooks/endpoints; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend.
 func CreateEndpoint(ctx context.Context, c *inorbit.Client, body models.CreateEndpointRequest) (*inorbit.Response[models.CreateEndpointResponse], error) {
-	op := inorbit.Operation{Name: "events.create_endpoint", Method: "POST", Path: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.create_endpoint", Method: "POST", Path: "/v1/webhooks/endpoints", Template: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CreateEndpointResponse](ctx, c, op)
 }
 
 // RotateSecret calls POST /v1/webhooks/endpoints/{endpoint_id}/rotate; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/RotateSecret` on the `events` backend.
 func RotateSecret(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.RotateSecretResponse], error) {
-	op := inorbit.Operation{Name: "events.rotate_secret", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/rotate", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.rotate_secret", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/rotate", Template: "/v1/webhooks/endpoints/{endpoint_id}/rotate", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	return inorbit.Call[models.RotateSecretResponse](ctx, c, op)
 }
 
 // SendTest calls POST /v1/webhooks/endpoints/{endpoint_id}/test; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/SendTest` on the `events` backend.
 func SendTest(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.SendTestResponse], error) {
-	op := inorbit.Operation{Name: "events.send_test", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/test", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.send_test", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/test", Template: "/v1/webhooks/endpoints/{endpoint_id}/test", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	return inorbit.Call[models.SendTestResponse](ctx, c, op)
 }
 
 // CreateInbox calls POST /v1/webhooks/inboxes; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend.
 func CreateInbox(ctx context.Context, c *inorbit.Client, body models.CreateInboxRequest) (*inorbit.Response[models.CreateInboxResponse], error) {
-	op := inorbit.Operation{Name: "events.create_inbox", Method: "POST", Path: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.create_inbox", Method: "POST", Path: "/v1/webhooks/inboxes", Template: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CreateInboxResponse](ctx, c, op)
 }

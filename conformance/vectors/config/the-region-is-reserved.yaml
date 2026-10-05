@@ -1,7 +1,7 @@
 name: the-region-is-reserved
 kind: config
 summary: Setting region is an error until the API offers regions; nothing falls back.
-pending: [go, java, csharp]
+pending: [java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off", INORBIT_REGION: eu }
 expect:

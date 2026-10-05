@@ -43,7 +43,7 @@ wins. The names in each language:
 | Rust | `Client::<P>::load()?` | `Client::<P>::builder().timeout(..).load()?` |
 | TypeScript | `Client.load()` | `Client.load({ timeout: 5_000 })` |
 | Python | `Client.load()`, `AsyncClient.load()` | `Client.load(timeout=5.0)` |
-| Go | `inorbit.Load()` | `inorbit.Load(inorbit.WithTimeout(5 * time.Second))` |
+| Go | `inorbit.Load(ctx)` | `inorbit.Load(ctx, inorbit.WithTimeout(5 * time.Second))` |
 | Java | `Client.load()` | `Client.builder().timeout(Duration.ofSeconds(5)).load()` |
 | C# | `Client.Load()`, `Client.Load<TProfile>()` | `Client.Load(new ClientOptions { Timeout = TimeSpan.FromSeconds(5) })` |
 
@@ -608,7 +608,7 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
 | Rust | `reqwest::Client` |
 | TypeScript | `fetch` function, or an `undici` `dispatcher` passed to every `fetch` and to the socket |
 | Python | `httpx.Client` / `httpx.AsyncClient` |
-| Go | `*http.Client` (copied; its `Transport` is the innermost `RoundTripper`) |
+| Go | `*http.Client` (copied, redirects off; it sends each attempt after the pipeline), or an `http.RoundTripper` (`WithTransport`) |
 | Java | `java.net.http.HttpClient` |
 | C# | `HttpClient` or an `HttpMessageHandler` (`SocketsHttpHandler`) |
 
@@ -839,7 +839,7 @@ OpenTelemetry is optional and never a hard dependency of the core package
 | Rust | feature `otel` (`opentelemetry` API crate) |
 | TypeScript | `@opentelemetry/api` as an optional peer dependency, used when installed |
 | Python | extra `inorbithr[otel]` (`opentelemetry-api`), used when importable |
-| Go | module `github.com/inorbithr/sdk/go/otel`: `inorbitotel.Pipeline()` registers both middlewares |
+| Go | module `github.com/inorbithr/sdk/go/otel`: `inorbitotel.Pipeline()` switches on both middlewares and the metrics |
 | Java | artifact `hr.inorbit:inorbit-sdk-otel` (`opentelemetry-api`) |
 | C# | built in: `ActivitySource` and `Meter` named `InOrbit.Sdk` (no package; inert until a listener subscribes) |
 
@@ -934,7 +934,7 @@ implementers; the doc comments in each runtime are the reference.
 | Rust | `trait Middleware: Send + Sync + 'static { fn name(&self) -> &'static str; fn handle<'a>(&'a self, req: Request, next: Next<'a>) -> BoxFuture<'a, Result<Response, Error>>; }` with `next.run(req).await`. Own trait (no `tower` dependency); a `tower` adapter can follow behind a feature | `Client::builder().pipeline(\|p\| p.add_per_retry(Probe).remove("rate_limit")).load()?` |
 | TypeScript | `interface Middleware { readonly name: string; handle(req: SdkRequest, next: (req: SdkRequest) => Promise<SdkResponse>): Promise<SdkResponse> }` | `Client.load({ pipeline: (p) => p.addPerRetry(probe).remove("rate_limit") })` |
 | Python | `class Middleware(Protocol): name: str; def __call__(self, request: Request, call_next: Callable[[Request], Response]) -> Response`; `AsyncMiddleware` with `async def __call__` for `AsyncClient` | `Client.load(pipeline=lambda p: p.add_per_retry(Probe()).remove("rate_limit"))` |
-| Go | `type Middleware struct { Name string; Wrap func(next http.RoundTripper) http.RoundTripper }`; `inorbit.CallInfoFrom(req.Context())` gives `info`. Existing `RoundTripper` wrappers (for example `otelhttp.NewTransport`) fit as is | `inorbit.Load(inorbit.WithPipeline(func(p *inorbit.Pipeline) { p.AddPerRetry(probe); p.Remove("rate_limit") }))` |
+| Go | `type Middleware struct { Name string; Wrap func(next http.RoundTripper) http.RoundTripper }`; `inorbit.CallInfoFrom(req.Context())` gives `info`. Existing `RoundTripper` wrappers (for example `otelhttp.NewTransport`) fit as is | `inorbit.Load(ctx, inorbit.WithPipeline(func(p *inorbit.Pipeline) { p.AddPerRetry(probe); p.Remove("rate_limit") }))` |
 | Java | `interface Middleware { String name(); Response handle(Request request, Chain chain) throws InOrbitException; }` with `chain.proceed(request)` and `chain.info()` (OkHttp's interceptor shape) | `Client.builder().pipeline(p -> p.addPerRetry(probe).remove("rate_limit")).load()` |
 | C# | `abstract class Middleware { public abstract string Name { get; } public abstract ValueTask<SdkResponse> SendAsync(SdkRequest request, MiddlewareNext next, CancellationToken cancellationToken); }`, plus `Middleware.FromHandler(name, DelegatingHandler)` so Polly and other `DelegatingHandler`s can sit at either slot | `Client.Load(new ClientOptions { Pipeline = p => p.AddPerRetry(new Probe()).Remove("rate_limit") })` |
 

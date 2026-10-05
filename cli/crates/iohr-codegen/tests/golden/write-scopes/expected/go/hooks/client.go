@@ -12,8 +12,8 @@ import (
 	"github.com/inorbithr/sdk/go/codegen"
 )
 
-// The surface was generated for the runtime's contract 3: a runtime with another contract fails to build here, so run iohr sdk generate again.
-const _ = codegen.V3
+// The surface was generated for the runtime's contract 4: a runtime with another contract fails to build here, so run iohr sdk generate again.
+const _ = codegen.V4
 
 // Profile is the profile's name.
 const Profile = "hooks"
@@ -31,6 +31,15 @@ func New(c *inorbit.Client) *Client {
 // FromEnv returns the profile's surface with its credential from the environment; opts apply after it.
 func FromEnv(opts ...inorbit.Option) (*Client, error) {
 	c, err := inorbit.FromEnv("HOOKS", opts...)
+	if err != nil {
+		return nil, err
+	}
+	return New(c), nil
+}
+
+// Load returns the profile's surface configured from code, INORBIT_HOOKS_* (then INORBIT_* for settings), [profiles.hooks] and the iohr login (inorbit.Load).
+func Load(ctx context.Context, opts ...inorbit.Option) (*Client, error) {
+	c, err := inorbit.Load(ctx, append([]inorbit.Option{inorbit.WithProfileType("hooks")}, opts...)...)
 	if err != nil {
 		return nil, err
 	}

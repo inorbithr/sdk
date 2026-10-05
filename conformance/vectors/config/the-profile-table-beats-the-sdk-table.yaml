@@ -1,7 +1,7 @@
 name: the-profile-table-beats-the-sdk-table
 kind: config
 summary: The file's default profile is chosen; its table wins over the sdk table, which still fills the rest.
-pending: [go, java, csharp]
+pending: [java, csharp]
 input:
   env: { INORBIT_TOKEN: t }
   config_file: |

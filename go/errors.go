@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -184,6 +185,18 @@ type RawResponse struct {
 
 	// Attempts is how many attempts the call took.
 	Attempts int
+
+	// IdempotencyKey is the Idempotency-Key the call was sent with, on an operation that
+	// takes one: repeat the call with it to stay safe.
+	IdempotencyKey string
+
+	// IdempotencyReplayed reports that the API answered a repeat of an earlier call with
+	// the same key (Idempotency-Replayed: true).
+	IdempotencyReplayed bool
+
+	// RateLimit is what the answer said about the rate limit; nil when it said nothing or
+	// the rate_limit setting is off.
+	RateLimit *RateLimit
 }
 
 // String describes the answer without its body or headers.
@@ -287,7 +300,7 @@ func (e *APIError) RetryAfter() (seconds int64, ok bool) {
 		}
 	}
 	if e.Raw != nil {
-		if d, ok := retryAfter(e.Raw.Header); ok {
+		if d, ok := retryAfter(e.Raw.Header, time.Now()); ok {
 			return int64(d.Seconds()), true
 		}
 	}
@@ -302,6 +315,13 @@ type ConnectionError struct {
 
 	// Err is the cause.
 	Err error
+
+	// RequestID is the x-request-id the failed call was sent with, when it got that far.
+	RequestID string
+
+	// IdempotencyKey is the Idempotency-Key the failed call was sent with: repeat the
+	// call with it to stay safe.
+	IdempotencyKey string
 }
 
 func (e *ConnectionError) Error() string {
@@ -311,16 +331,34 @@ func (e *ConnectionError) Error() string {
 // Unwrap returns the cause.
 func (e *ConnectionError) Unwrap() error { return e.Err }
 
-// TimeoutError is an attempt that ran out of time.
+// TimeoutError is an attempt, or a whole call, that ran out of time.
 type TimeoutError struct {
 	// Host is the host that did not answer.
 	Host string
 
 	// Seconds is the limit that ran out.
 	Seconds int
+
+	// Waiting names what the call was waiting for when its time ran out, such as "the
+	// rate-limit window to reset"; empty when it waited for the API's answer.
+	Waiting string
+
+	// RequestID is the x-request-id the failed call was sent with, when it got that far.
+	RequestID string
+
+	// IdempotencyKey is the Idempotency-Key the failed call was sent with: repeat the
+	// call with it to stay safe.
+	IdempotencyKey string
+
+	// total marks the call's total timeout (or the caller's deadline), which no retry
+	// can outlast, as opposed to one attempt's.
+	total bool
 }
 
 func (e *TimeoutError) Error() string {
+	if e.Waiting != "" {
+		return fmt.Sprintf("the call to %s ran out of its %d s while waiting for %s", e.Host, e.Seconds, e.Waiting)
+	}
 	return fmt.Sprintf("%s did not answer within %d s", e.Host, e.Seconds)
 }
 
@@ -342,13 +380,65 @@ func (e *AuthError) Error() string { return e.Message }
 // Unwrap returns the cause.
 func (e *AuthError) Unwrap() error { return e.Err }
 
+// ConfigProblem is one problem a ConfigError found (docs/config.md section 2.5).
+type ConfigProblem struct {
+	// Setting is the setting, by its catalogue name (timeout), or credential when no
+	// credential was found.
+	Setting string `json:"setting"`
+
+	// Source is where the value came from: code, env INORBIT_TIMEOUT, file <path> [sdk];
+	// empty when no source applies.
+	Source string `json:"source"`
+
+	// Message says what is wrong and what to do; it never holds a secret's value.
+	Message string `json:"message"`
+}
+
 // ConfigError is a client configured in a way it cannot work with.
 type ConfigError struct {
 	// Message says what to change.
 	Message string
+
+	// problems is behind a pointer so ConfigError stays comparable.
+	problems *[]ConfigProblem
 }
 
 func (e *ConfigError) Error() string { return e.Message }
+
+// Problems lists every problem Load found, in the settings catalogue's order, each with
+// its setting and source; empty for an error of one message.
+func (e *ConfigError) Problems() []ConfigProblem {
+	if e.problems == nil {
+		return nil
+	}
+	return append([]ConfigProblem(nil), *e.problems...)
+}
+
+// configErrorOf is the error for problems, its message listing each.
+func configErrorOf(problems []ConfigProblem) *ConfigError {
+	if len(problems) == 1 && problems[0].Setting == "credential" {
+		return &ConfigError{Message: problems[0].Message, problems: &problems}
+	}
+	var b strings.Builder
+	n := len(problems)
+	plural := "s"
+	if n == 1 {
+		plural = ""
+	}
+	fmt.Fprintf(&b, "configuration is invalid (%d problem%s):", n, plural)
+	for _, p := range problems {
+		lines := strings.Split(p.Message, "\n")
+		from := ""
+		if p.Source != "" {
+			from = " (from " + p.Source + ")"
+		}
+		fmt.Fprintf(&b, "\n  %s: %s%s", p.Setting, lines[0], from)
+		for _, l := range lines[1:] {
+			b.WriteString("\n    " + l)
+		}
+	}
+	return &ConfigError{Message: b.String(), problems: &problems}
+}
 
 // TooLargeError is an answer larger than 16 MiB, or a stream's event larger than 1 MiB.
 type TooLargeError struct {

@@ -19,9 +19,12 @@ not build. The models are shared in one package.
 
 ## Commands
 
-- `mise run go:check`: `gofmt -l`, `go vet`, `golangci-lint run`, `go test -race ./...`
+- `mise run go:check`: `gofmt -l`, `go vet`, `golangci-lint run`, `go test -race ./...`,
+  for this module and the `otel` one
 - `mise run go:fmt`, `mise run go:gen` (`iohr sdk generate` into `public/`)
-- `mise run conformance:go`: the driver in `internal/conformance/`
+- `mise run conformance:go`: the vectors (`vectors_test.go`) and the driver in
+  `internal/conformance/`, which builds M6 clients with `Load` and an injected
+  environment, and stops the replay server with SIGTERM so it removes its certificates
 - The generator's Go target lives in `cli/crates/iohr-codegen/src/go/`; golden files
   under `tests/golden/*/expected/go/`; `IOHR_TEST_COMPILE=go mise run cli:compile-test`
   builds a generated surface against this module and proves the wrong profile does not.
@@ -32,7 +35,13 @@ not build. The models are shared in one package.
 ```
 go/
   go.mod                 module github.com/inorbithr/sdk/go
-  client.go              Client, NewClient, functional options, the one request path
+  client.go              Client, NewClient, Load, FromEnv, the one request path
+  options.go             the functional options, one per setting of docs/config.md section 3
+  settings.go            resolution: the catalogue, precedence, the config file, the credential chain, Describe
+  pipeline.go, builtins.go  Middleware, Pipeline, CallInfo; the built-in middlewares and the transport after them
+  transport.go, proxy.go the http.Transport Load builds: proxy and no_proxy, CA bundle, mTLS, pinning
+  credentials.go         CachedToken, TokenFile, CliToken, ChainedCredential, DefaultCredential
+  logging.go, telemetry.go, ratelimit.go  log/slog records, the Tracer and Meter interfaces, rate-limit snapshots
   auth.go                TokenProvider, client credentials (single flight), static token
   errors.go              APIError, Code, Detail; errors.As targets
   retry.go, hooks.go, int64.go
@@ -40,14 +49,22 @@ go/
   socket.go, ws.go       the /v1/ws socket: one per client, reconnect and re-issue; a small RFC 6455 client
   codegen/               what generated surfaces import (Version, PathSegment, Pages)
   slog.go                SlogHook: log/slog records per attempt, nothing a call carries
+  vectors_test.go        conformance/vectors/ as unit tests (read through `replay vectors`)
+  otel/                  module github.com/inorbithr/sdk/go/otel: inorbitotel.Pipeline over OpenTelemetry
   public/                written by iohr; never edit
   internal/              transport details, the conformance driver
 ```
 
 ## Rules
 
-- Standard library only at run time (`net/http`, `encoding/json`). A third-party import
-  in the main module needs an ADR.
+- The standard library at run time (`net/http`, `encoding/json`, `log/slog`), plus
+  `github.com/BurntSushi/toml` for the config file (ADR 0015). Any other third-party
+  import in the main module needs an ADR; OpenTelemetry lives in the `otel` module, which
+  `mise run go:check` checks too.
+- Configuration follows docs/config.md: every setting is an `Option` that writes the
+  catalogue name into `config.code`, so `Load` knows it came from code. `NewClient`
+  keeps its old checks and messages, and Go's default transport when no transport
+  setting is given.
 - `ctx context.Context` is the first argument of every call that does I/O; honour its
   deadline over the retry budget.
 - Options are functional (`inorbit.WithBaseURL(...)`); `Client` is safe for concurrent

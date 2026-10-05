@@ -1,7 +1,7 @@
 name: an-empty-retry-budget-stops-retrying
 area: retries
 summary: With a retry budget of 10, the first retry after a 503 spends it and the second is not made.
-pending: [go, java, csharp]
+pending: [java, csharp]
 notes: M6, docs/config.md section 7.4. A retry after a 503 without Retry-After costs 10.
 client: { max_retries: 2, retry_budget_capacity: 10 }
 action: { op: me }

@@ -1,7 +1,7 @@
 name: rate-limit-wait-holds-the-next-call
 area: retries
 summary: In wait mode, an answer that says nothing remains holds the next call until the window resets.
-pending: [go, java, csharp]
+pending: [java, csharp]
 notes: M6, docs/config.md section 7.8.
 client: { rate_limit: wait }
 action: { op: me, repeat: 2 }

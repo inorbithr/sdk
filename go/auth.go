@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -73,46 +74,73 @@ func (*StaticToken) String() string { return "StaticToken(" + redacted + ")" }
 func (s *StaticToken) GoString() string { return s.String() }
 
 // ClientCredentials exchanges an API key for 15-minute tokens (OAuth client
-// credentials), caches the token, refreshes it when less than a fifth of its life is
-// left or after a 401, and makes one exchange however many calls wait for it.
+// credentials), caches the token by CachedToken's rules (refreshed when less than a fifth
+// of its life is left or after a 401, one exchange however many calls wait for it, the
+// valid token kept when a refresh fails), and reads a secret file before every exchange,
+// so a rotated secret is used at the next one.
 type ClientCredentials struct {
-	keyID    string
-	secret   string
-	scopes   []string
-	tokenURL string
-	http     *http.Client
-
-	mu      sync.Mutex
-	cache   *cachedToken
-	pending *exchange
+	keyID      string
+	secret     string
+	secretFile string
+	scopes     []string
+	tokenURL   string
+	http       *http.Client
+	userAgent  string
+	cache      *CachedToken
 }
 
-type cachedToken struct {
-	access   string
-	issued   time.Time
-	lifetime time.Duration
-}
+// ClientCredentialsConfig configures NewClientCredentialsWith.
+type ClientCredentialsConfig struct {
+	// KeyID is the key's id (ak_...).
+	KeyID string
 
-type exchange struct {
-	done  chan struct{}
-	token *cachedToken
-	err   error
+	// KeySecret is the key's secret; leave it empty to read KeySecretFile instead.
+	KeySecret string
+
+	// KeySecretFile is a file holding the secret, read before every token exchange.
+	KeySecretFile string
+
+	// Scopes is what to ask for, a subset of the key's.
+	Scopes []string
+
+	// TokenURL is the token endpoint; empty for DefaultTokenURL.
+	TokenURL string
+
+	// HTTPClient sends the exchange; nil for a client of its own.
+	HTTPClient *http.Client
+
+	// UserAgent is sent with the exchange; empty for the SDK's.
+	UserAgent string
 }
 
 // NewClientCredentials returns a provider for one key. scopes is what to ask for, a
 // subset of the key's; tokenURL empty means DefaultTokenURL; httpClient nil means a
 // client of its own.
 func NewClientCredentials(keyID, keySecret string, scopes []string, tokenURL string, httpClient *http.Client) *ClientCredentials {
-	if tokenURL == "" {
-		tokenURL = DefaultTokenURL
+	return NewClientCredentialsWith(ClientCredentialsConfig{
+		KeyID: keyID, KeySecret: keySecret, Scopes: scopes, TokenURL: tokenURL, HTTPClient: httpClient,
+	})
+}
+
+// NewClientCredentialsWith returns a provider for the key cfg describes, its secret given
+// or read from a file before every exchange.
+func NewClientCredentialsWith(cfg ClientCredentialsConfig) *ClientCredentials {
+	if cfg.TokenURL == "" {
+		cfg.TokenURL = DefaultTokenURL
 	}
-	if httpClient == nil {
-		httpClient = &http.Client{CheckRedirect: noRedirects}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{CheckRedirect: noRedirects}
 	}
-	return &ClientCredentials{
-		keyID: keyID, secret: keySecret, scopes: append([]string(nil), scopes...),
-		tokenURL: tokenURL, http: httpClient,
+	if cfg.UserAgent == "" {
+		cfg.UserAgent = userAgent("")
 	}
+	c := &ClientCredentials{
+		keyID: cfg.KeyID, secret: cfg.KeySecret, secretFile: cfg.KeySecretFile,
+		scopes: append([]string(nil), cfg.Scopes...), tokenURL: cfg.TokenURL, http: cfg.HTTPClient,
+		userAgent: cfg.UserAgent,
+	}
+	c.cache = NewCachedToken(tokenFunc(c.exchange))
+	return c
 }
 
 // KeyID is the key this provider exchanges.
@@ -129,48 +157,37 @@ func (c *ClientCredentials) GoString() string { return c.String() }
 // Token returns a cached token while four fifths of its life are left, else a fresh
 // one; concurrent callers share one exchange.
 func (c *ClientCredentials) Token(ctx context.Context) (Token, error) {
-	c.mu.Lock()
-	if t := c.cache; t != nil && time.Since(t.issued) < t.lifetime*4/5 {
-		c.mu.Unlock()
-		return Token{Access: t.access, ExpiresAt: t.issued.Add(t.lifetime)}, nil
-	}
-	ex := c.pending
-	if ex == nil {
-		ex = &exchange{done: make(chan struct{})}
-		c.pending = ex
-		go func() {
-			// The exchange outlives a caller that gives up: the others still wait for it.
-			t, err := c.exchange(context.WithoutCancel(ctx))
-			c.mu.Lock()
-			ex.token, ex.err = t, err
-			if err == nil {
-				c.cache = t
-			}
-			c.pending = nil
-			c.mu.Unlock()
-			close(ex.done)
-		}()
-	}
-	c.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		return Token{}, ctx.Err()
-	case <-ex.done:
-	}
-	if ex.err != nil {
-		return Token{}, ex.err
-	}
-	return Token{Access: ex.token.access, ExpiresAt: ex.token.issued.Add(ex.token.lifetime)}, nil
+	return c.cache.Token(ctx)
 }
 
 // Invalidate drops the cached token, so the next call exchanges again.
-func (c *ClientCredentials) Invalidate() {
-	c.mu.Lock()
-	c.cache = nil
-	c.mu.Unlock()
+func (c *ClientCredentials) Invalidate() { c.cache.Invalidate() }
+
+// tokenFunc is a function that is a TokenProvider.
+type tokenFunc func(ctx context.Context) (Token, error)
+
+func (f tokenFunc) Token(ctx context.Context) (Token, error) { return f(ctx) }
+
+func (c *ClientCredentials) readSecret() (string, error) {
+	if c.secretFile == "" {
+		return c.secret, nil
+	}
+	data, err := os.ReadFile(c.secretFile)
+	if err != nil {
+		return "", &AuthError{Message: "cannot read the key secret file " + c.secretFile + ": " + describeFileError(err), Err: err}
+	}
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		return "", &AuthError{Message: "the key secret file " + c.secretFile + " is empty"}
+	}
+	return s, nil
 }
 
-func (c *ClientCredentials) exchange(ctx context.Context) (*cachedToken, error) {
+func (c *ClientCredentials) exchange(ctx context.Context) (Token, error) {
+	secret, err := c.readSecret()
+	if err != nil {
+		return Token{}, err
+	}
 	form := url.Values{
 		"grant_type": {"client_credentials"},
 		"audience":   {Audience},
@@ -181,36 +198,37 @@ func (c *ClientCredentials) exchange(ctx context.Context) (*cachedToken, error) 
 		req, err := http.NewRequestWithContext(actx, http.MethodPost, c.tokenURL, strings.NewReader(form))
 		if err != nil {
 			cancel()
-			return nil, &AuthError{Message: "the token endpoint is not usable: " + err.Error(), Err: err}
+			return Token{}, &AuthError{Message: "the token endpoint is not usable: " + err.Error(), Err: err}
 		}
-		req.SetBasicAuth(url.QueryEscape(c.keyID), url.QueryEscape(c.secret))
+		req.SetBasicAuth(url.QueryEscape(c.keyID), url.QueryEscape(secret))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("User-Agent", c.userAgent)
 		resp, err := c.http.Do(req)
 		if err != nil {
 			cancel()
 			if attempt < tokenRetries {
 				if serr := sleep(ctx, backoff(attempt)); serr != nil {
-					return nil, &AuthError{Message: "the token endpoint: " + serr.Error(), Err: serr}
+					return Token{}, &AuthError{Message: "the token endpoint: " + serr.Error(), Err: serr}
 				}
 				continue
 			}
-			return nil, &AuthError{Message: "the token endpoint: " + describe(err), Err: err}
+			return Token{}, &AuthError{Message: "the token endpoint: " + describe(err), Err: err}
 		}
 		body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 		_ = resp.Body.Close()
 		cancel()
 		if retryableStatus(resp.StatusCode) && attempt < tokenRetries {
-			wait, ok := retryAfter(resp.Header)
+			wait, ok := retryAfter(resp.Header, time.Now())
 			if !ok {
 				wait = backoff(attempt)
 			}
-			if serr := sleep(ctx, wait); serr != nil {
-				return nil, &AuthError{Message: "the token endpoint: " + serr.Error(), Err: serr}
+			if serr := sleep(ctx, min(wait, retryAfterCap)); serr != nil {
+				return Token{}, &AuthError{Message: "the token endpoint: " + serr.Error(), Err: serr}
 			}
 			continue
 		}
 		if rerr != nil {
-			return nil, &AuthError{Message: "the token endpoint: " + describe(rerr), Err: rerr}
+			return Token{}, &AuthError{Message: "the token endpoint: " + describe(rerr), Err: rerr}
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			var refusal struct {
@@ -226,7 +244,7 @@ func (c *ClientCredentials) exchange(ctx context.Context) (*cachedToken, error) 
 			if refusal.Description != "" {
 				desc = " (" + refusal.Description + ")"
 			}
-			return nil, &AuthError{
+			return Token{}, &AuthError{
 				Message:    fmt.Sprintf("the token exchange for key %s failed: %s%s", c.keyID, code, desc),
 				OAuthError: code,
 			}
@@ -236,13 +254,13 @@ func (c *ClientCredentials) exchange(ctx context.Context) (*cachedToken, error) 
 			ExpiresIn   float64 `json:"expires_in"`
 		}
 		if err := json.Unmarshal(body, &answer); err != nil || answer.AccessToken == "" {
-			return nil, &AuthError{Message: "the token endpoint: the token answer could not be read"}
+			return Token{}, &AuthError{Message: "the token endpoint: the token answer could not be read"}
 		}
 		lifetime := 900 * time.Second
 		if answer.ExpiresIn > 0 {
 			lifetime = time.Duration(answer.ExpiresIn * float64(time.Second))
 		}
-		return &cachedToken{access: answer.AccessToken, issued: time.Now(), lifetime: lifetime}, nil
+		return Token{Access: answer.AccessToken, ExpiresAt: time.Now().Add(lifetime)}, nil
 	}
 }
 
@@ -256,3 +274,18 @@ func describe(err error) string {
 }
 
 func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// describeFileError is a file failure in words, without repeating the path.
+func describeFileError(err error) string {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "it does not exist"
+	case errors.Is(err, fs.ErrPermission):
+		return "permission denied"
+	}
+	var perr *fs.PathError
+	if errors.As(err, &perr) {
+		return perr.Err.Error()
+	}
+	return err.Error()
+}

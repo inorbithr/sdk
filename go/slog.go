@@ -8,9 +8,13 @@ import (
 	"time"
 )
 
-// SlogHook returns a Hook that logs every call to logger: one Debug record per answer
-// (operation, method, status, attempt, duration, request ids) and one Warn record when
-// a call fails for good (operation, method, attempt, error).
+// SlogHook returns a Hook that logs every call to logger. It stays, and WithLog with
+// WithLogger replaces it: records with the fields every runtime shares (docs/config.md
+// section 7.9), headers from an allowlist, and a redact step.
+//
+// The hook logs one Debug record per answer (operation, method, status, attempt,
+// duration, request ids) and one Warn record when a call fails for good (operation,
+// method, attempt, error).
 //
 // It never logs what could carry a secret or someone's data: no bound path (an id is
 // data), no query value, no header, no body, no token. A raw call made with Send, which

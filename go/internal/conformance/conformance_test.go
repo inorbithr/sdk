@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -38,15 +39,49 @@ type testCase struct {
 		Repeat     int            `json:"repeat"`
 		Concurrent int            `json:"concurrent"`
 		Take       int            `json:"take"`
+		Options    struct {
+			IdempotencyKey string `json:"idempotency_key"`
+			Traceparent    string `json:"traceparent"`
+			TimeoutMS      int    `json:"timeout_ms"`
+		} `json:"options"`
+		Rewrite *struct {
+			After int               `json:"after"`
+			Files map[string]string `json:"files"`
+		} `json:"rewrite"`
 	} `json:"action"`
 	Client struct {
-		MaxRetries *int     `json:"max_retries"`
-		TimeoutMS  int      `json:"timeout_ms"`
-		KeyID      string   `json:"key_id"`
-		KeySecret  string   `json:"key_secret"`
-		Scopes     []string `json:"scopes"`
-		Streams    string   `json:"streams"`
-		IdleMS     int      `json:"stream_idle_timeout_ms"`
+		MaxRetries        *int              `json:"max_retries"`
+		TimeoutMS         int               `json:"timeout_ms"`
+		KeyID             string            `json:"key_id"`
+		KeySecret         string            `json:"key_secret"`
+		Scopes            []string          `json:"scopes"`
+		Streams           string            `json:"streams"`
+		IdleMS            int               `json:"stream_idle_timeout_ms"`
+		Load              bool              `json:"load"`
+		Env               map[string]string `json:"env"`
+		ConfigFile        *string           `json:"config_file"`
+		Files             map[string]string `json:"files"`
+		Profile           string            `json:"profile"`
+		CredentialSources []string          `json:"credential_sources"`
+		CLI               bool              `json:"cli"`
+		Pipeline          *struct {
+			Add []struct {
+				Name   string `json:"name"`
+				Stage  string `json:"stage"`
+				Before string `json:"before"`
+				After  string `json:"after"`
+			} `json:"add"`
+			Remove []string `json:"remove"`
+		} `json:"pipeline"`
+		Log                 string   `json:"log"`
+		LogHeaders          *bool    `json:"log_headers"`
+		LogAllowHeaders     []string `json:"log_allow_headers"`
+		RateLimit           string   `json:"rate_limit"`
+		TotalTimeoutMS      int      `json:"total_timeout_ms"`
+		RetryBudgetCapacity int      `json:"retry_budget_capacity"`
+		Tracing             *bool    `json:"tracing"`
+		Transport           string   `json:"transport"`
+		NoProxy             string   `json:"no_proxy"`
 	} `json:"client"`
 	Expect struct {
 		OK    any   `json:"ok"`
@@ -60,7 +95,34 @@ type testCase struct {
 		} `json:"error"`
 		Attempts       *int `json:"attempts"`
 		TokenExchanges *int `json:"token_exchanges"`
+		Probes         map[string]struct {
+			Count *int                `json:"count"`
+			Seen  []map[string]string `json:"seen"`
+		} `json:"probes"`
+		Logs *struct {
+			Contains []map[string]any `json:"contains"`
+			Excludes []string         `json:"excludes"`
+		} `json:"logs"`
+		Spans []struct {
+			Name       string         `json:"name"`
+			Kind       string         `json:"kind"`
+			Attributes map[string]any `json:"attributes"`
+		} `json:"spans"`
+		RateLimit      json.RawMessage `json:"rate_limit"`
+		IdempotencyKey string          `json:"idempotency_key"`
+		Config         map[string]any  `json:"config"`
 	} `json:"expect"`
+}
+
+// loaded is a /_case answer: the case and where the replay's listeners and files are.
+type loaded struct {
+	Case           testCase `json:"case"`
+	BaseURL        string   `json:"base_url"`
+	HTTPURL        string   `json:"http_url"`
+	ProxyURL       string   `json:"proxy_url"`
+	CAFile         string   `json:"ca_file"`
+	ClientCertFile string   `json:"client_cert_file"`
+	ClientKeyFile  string   `json:"client_key_file"`
 }
 
 type verdict struct {
@@ -94,7 +156,7 @@ func startReplay(t *testing.T) string {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	t.Cleanup(func() { stopReplay(cmd) })
 	lines := make(chan string, 1)
 	go func() {
 		s := bufio.NewScanner(out)
@@ -115,6 +177,23 @@ func startReplay(t *testing.T) string {
 		t.Fatal("the replay server did not announce itself within 10 s")
 	}
 	return ""
+}
+
+// stopReplay asks the server to stop with SIGTERM, so it removes its certificate
+// directory, and kills it only when it does not stop within 5 s (or on Windows, which
+// has no SIGTERM).
+func stopReplay(cmd *exec.Cmd) {
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		_ = cmd.Process.Kill()
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
 }
 
 func getJSON(t *testing.T, method, url string, body any, into any) int {
@@ -249,6 +328,14 @@ func kind(err error) string {
 	case errors.As(err, &g):
 		return "config"
 	}
+	var l *inorbit.TooLargeError
+	var d *inorbit.DecodeError
+	switch {
+	case errors.As(err, &l):
+		return "too_large"
+	case errors.As(err, &d):
+		return "decode"
+	}
 	return "other"
 }
 
@@ -292,11 +379,10 @@ func TestEveryCasePasses(t *testing.T) {
 		t.Fatal("no cases listed")
 	}
 	var failed []string
+	passed := 0
 	for _, name := range list.Cases {
-		var loaded struct {
-			Case testCase `json:"case"`
-		}
-		status := getJSON(t, "POST", url+"/_case", map[string]string{"name": name}, &loaded)
+		var l loaded
+		status := getJSON(t, "POST", url+"/_case", map[string]string{"name": name}, &l)
 		if status == http.StatusNotImplemented {
 			t.Logf("skip %s: not implemented by the replay server yet", name)
 			continue
@@ -304,35 +390,23 @@ func TestEveryCasePasses(t *testing.T) {
 		if status >= 300 {
 			t.Fatalf("%s: loading answered %d", name, status)
 		}
-		c := loaded.Case
+		c := l.Case
 		if contains(c.Pending, "go") {
 			t.Logf("skip %s: pending for go", name)
 			continue
 		}
-		opts := []inorbit.Option{
-			inorbit.WithBaseURL(url), inorbit.WithTokenURL(url + "/oauth2/token"),
-			inorbit.WithKey(or(c.Client.KeyID, "ak_test"), or(c.Client.KeySecret, "s3cr3t")),
-			inorbit.WithScopes(orSlice(c.Client.Scopes, []string{"identity:read"})...),
-		}
-		if c.Client.MaxRetries != nil {
-			opts = append(opts, inorbit.WithMaxRetries(*c.Client.MaxRetries))
-		}
-		if c.Client.TimeoutMS > 0 {
-			opts = append(opts, inorbit.WithTimeout(time.Duration(c.Client.TimeoutMS)*time.Millisecond))
-		}
-		if c.Client.Streams != "" {
-			opts = append(opts, inorbit.WithStreams(inorbit.Streams(c.Client.Streams)))
-		}
-		if c.Client.IdleMS > 0 {
-			opts = append(opts, inorbit.WithStreamIdleTimeout(time.Duration(c.Client.IdleMS)*time.Millisecond))
-		}
-		client, err := inorbit.NewClient(opts...)
+		b, err := build(t, l)
 		if err != nil {
-			t.Fatalf("%s: %v", name, err)
+			failed = append(failed, name+":\n  building the client: "+err.Error())
+			continue
 		}
-		api := public.New(client)
+		api := public.New(b.client)
+		ctx := inorbit.WithCallOptions(context.Background(), inorbit.CallOptions{
+			IdempotencyKey: c.Action.Options.IdempotencyKey, Traceparent: c.Action.Options.Traceparent,
+			Timeout: time.Duration(c.Action.Options.TimeoutMS) * time.Millisecond,
+		})
 		if c.Area == "sse" || c.Area == "socket" {
-			items, err := stream(context.Background(), api, c.Action.Op, c.Action.Args, c.Action.Take)
+			items, err := stream(ctx, api, c.Action.Op, c.Action.Args, c.Action.Take)
 			// The socket's close and the server's verdict settle a moment after the stream.
 			time.Sleep(50 * time.Millisecond)
 			var v verdict
@@ -350,6 +424,7 @@ func TestEveryCasePasses(t *testing.T) {
 				problems = append(problems, "want an error, the stream ended cleanly")
 			}
 			if len(problems) == 0 {
+				passed++
 				t.Logf("pass %s", name)
 			} else {
 				failed = append(failed, name+":\n  "+strings.Join(problems, "\n  "))
@@ -362,7 +437,7 @@ func TestEveryCasePasses(t *testing.T) {
 		}
 		var results []result
 		run := func() result {
-			raw, err := call(context.Background(), api, c.Action.Op, c.Action.Args)
+			raw, err := call(ctx, api, c.Action.Op, c.Action.Args)
 			return result{raw, err}
 		}
 		if c.Action.Concurrent > 0 {
@@ -373,8 +448,15 @@ func TestEveryCasePasses(t *testing.T) {
 			}
 			wg.Wait()
 		} else {
-			for range max(c.Action.Repeat, 1) {
+			for i := range max(c.Action.Repeat, 1) {
 				results = append(results, run())
+				if rw := c.Action.Rewrite; rw != nil && i+1 == rw.After {
+					for file, content := range rw.Files {
+						if err := os.WriteFile(filepath.Join(b.dir, filepath.FromSlash(file)), []byte(content), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
 			}
 		}
 		var v verdict
@@ -396,12 +478,19 @@ func TestEveryCasePasses(t *testing.T) {
 				problems = append(problems, "want ok, got "+r.err.Error())
 			}
 		}
+		var last *inorbit.RawResponse
+		if n := len(results); n > 0 {
+			last = results[n-1].raw
+		}
+		problems = append(problems, checkM6(c, b, last)...)
 		if len(problems) == 0 {
+			passed++
 			t.Logf("pass %s", name)
 		} else {
 			failed = append(failed, name+":\n  "+strings.Join(problems, "\n  "))
 		}
 	}
+	t.Logf("conformance: %d passed, %d failed", passed, len(failed))
 	if len(failed) > 0 {
 		t.Fatal(strings.Join(failed, "\n"))
 	}

@@ -139,10 +139,6 @@ func (m *socketMgr) leave(call *sockCall) {
 // connectLocked opens the socket, with the retry rules of a GET, and starts its reader.
 func (m *socketMgr) connectLocked(ctx context.Context, op Operation) error {
 	c := m.c
-	u, err := c.url(Operation{Path: wsPath})
-	if err != nil {
-		return err
-	}
 	key, accept := wsKey()
 	h := http.Header{}
 	h.Set("Connection", "Upgrade")
@@ -150,7 +146,7 @@ func (m *socketMgr) connectLocked(ctx context.Context, op Operation) error {
 	h.Set("Sec-WebSocket-Version", "13")
 	h.Set("Sec-WebSocket-Key", key)
 	// The socket outlives the caller that opened it: only the caller's values travel.
-	resp, cancel, err := c.open(context.WithoutCancel(ctx), Operation{Name: op.Name, Path: wsPath}, u, h,
+	resp, err := c.open(context.WithoutCancel(ctx), Operation{Name: op.Name, Path: wsPath}, h,
 		func(status int) bool { return status == http.StatusSwitchingProtocols })
 	if err != nil {
 		return err
@@ -158,9 +154,9 @@ func (m *socketMgr) connectLocked(ctx context.Context, op Operation) error {
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
 	if !ok || resp.Header.Get("Sec-WebSocket-Accept") != accept {
 		_ = resp.Body.Close()
-		cancel()
 		return &ConnectionError{Host: c.base.Host, Err: errors.New("the socket upgrade was not a WebSocket")}
 	}
+	cancel := func() { _ = rwc.Close() }
 	m.gen++
 	m.conn = newWSConn(rwc, cancel)
 	go m.read(m.conn, m.gen)
@@ -301,7 +297,12 @@ func (m *socketMgr) lost(gen int, cause error) {
 			return
 		}
 		m.mu.Unlock()
-		time.Sleep(backoff(attempt))
+		// Reconnects draw from the client's retry budget, as retries do.
+		if !m.c.budget.take(10) {
+			m.mu.Lock()
+			break
+		}
+		time.Sleep(backoffWith(attempt, m.c.retryBase, m.c.retryMax))
 		m.mu.Lock()
 		// A stream that started meanwhile may have connected already.
 		if len(m.calls) == 0 || m.conn != nil {

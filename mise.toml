@@ -131,7 +131,7 @@ dir = "go"
 shell = "bash -e -o pipefail -c"
 # Built by the Go that runs it: a govulncheck built by another toolchain (a cache shared
 # across CI matrix cells) refuses to load packages for a newer one. Same pinned version.
-run = "[ -f go.mod ] || { echo 'go:audit: no module yet, skipping'; exit 0; }; go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./..."
+run = "[ -f go.mod ] || { echo 'go:audit: no module yet, skipping'; exit 0; }; go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... && (cd otel && go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...)"
 
 [tasks."go:sbom"]
 dir = "go"
@@ -217,6 +217,8 @@ test -z "$(gofmt -l .)" || { gofmt -l .; echo "go: run 'mise run go:fmt'" >&2; e
 go vet ./...
 golangci-lint run
 go test -race ./...
+# The optional OpenTelemetry module (go/otel) is a module of its own.
+(cd otel && go vet ./... && golangci-lint run && go test -race ./...)
 """
 
 [tasks."go:fmt"]
@@ -672,7 +674,7 @@ run = "uv run --with pyyaml --with jsonschema python tools/validate-cases.py"
 [tasks."conformance:go"]
 shell = "bash -e -o pipefail -c"
 depends = ["conformance:server:build"]
-run = "[ -e conformance/server ] && [ -f go/go.mod ] || { echo 'conformance:go: skipping (no server or no module yet)'; exit 0; }; cd go && IOHR_TEST_REQUIRE_REPLAY=1 go test -count=1 ./internal/conformance/..."
+run = "[ -e conformance/server ] && [ -f go/go.mod ] || { echo 'conformance:go: skipping (no server or no module yet)'; exit 0; }; cd go && IOHR_TEST_REQUIRE_REPLAY=1 go test -count=1 -run TestConformanceVectors . && IOHR_TEST_REQUIRE_REPLAY=1 go test -count=1 ./internal/conformance/..."
 
 [tasks."conformance:rust"]
 shell = "bash -e -o pipefail -c"

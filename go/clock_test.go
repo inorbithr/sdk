@@ -102,7 +102,7 @@ func TestRetryAfterIsWaitedExactly(t *testing.T) {
 	})
 }
 
-func TestRetryAfterIsCappedAtAMinute(t *testing.T) {
+func TestARetryAfterOverTheMaximumEndsTheCall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeAPI{expiresIn: 900, api: func(n int, _ *http.Request) *http.Response {
 			if n == 1 {
@@ -111,11 +111,35 @@ func TestRetryAfterIsCappedAtAMinute(t *testing.T) {
 			return answer(200, `{}`)
 		}}
 		start := time.Now()
+		err := get(t.Context(), f.client(t))
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.Status != 503 {
+			t.Fatalf("got %v, want the 503", err)
+		}
+		if took := time.Since(start); took != 0 {
+			t.Fatalf("waited %v, want no wait past retry_after_max", took)
+		}
+		if f.calls.Load() != 1 {
+			t.Fatalf("attempts %d, want 1", f.calls.Load())
+		}
+	})
+}
+
+func TestARetryAfterDateIsWaitedUntil(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeAPI{expiresIn: 900, api: func(n int, _ *http.Request) *http.Response {
+			if n == 1 {
+				return answer(429, "", "Retry-After", time.Now().Add(5*time.Second).UTC().Format(http.TimeFormat))
+			}
+			return answer(200, `{}`)
+		}}
+		start := time.Now()
 		if err := get(t.Context(), f.client(t)); err != nil {
 			t.Fatal(err)
 		}
-		if took := time.Since(start); took != time.Minute {
-			t.Fatalf("waited %v, want the 1m cap", took)
+		// An HTTP date has whole seconds: the wait is at most 5 s.
+		if took := time.Since(start); took <= 4*time.Second || took > 5*time.Second {
+			t.Fatalf("waited %v, want up to the date, 5 s away", took)
 		}
 	})
 }

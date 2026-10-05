@@ -95,6 +95,10 @@ prints the token for any profile, `expires_at` 15 minutes ahead in UTC. It carri
 its expiry. For the profile `missing` it prints one line on standard error and exits 1;
 a call without `--profile` or with a format other than `json` exits 2.
 
+For a driver without a YAML reader, `replay vectors conformance/vectors` prints every
+vector as one JSON document, `{"vectors": [...]}` in path order (the Go driver reads
+them this way).
+
 A driver then:
 
 1. `GET /_cases` lists every case as `area/name`, so a driver needs no YAML reader.
