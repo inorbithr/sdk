@@ -205,7 +205,7 @@ Every client and every `load` result can describe itself, the SDK's equivalent o
   HTTP client makes meaningless (section 6.6), scopes a `cli` or token credential does not
   use.
 - The command line prints the same document with `iohr sdk config [--profile NAME]
-  [--for TYPE]` (iohr 0.1.0-alpha.8 and later), so "what will my service see" has a
+  [--for TYPE]` (iohr 0.1.0-alpha.9 and later), so "what will my service see" has a
   one-line answer. `--profile` stands for `profile` in code (source `code`), `--for`
   resolves for a typed profile, and `IOHR_PROFILE` is not read. A configuration `load`
   would refuse exits 1 with the `ConfigError`'s text on stderr. Until the Rust runtime
@@ -1035,12 +1035,13 @@ language's driver runs every vector as a unit test next to its conformance drive
 1. `cli/`: keep unknown keys and the `[sdk]` table when rewriting `config.toml`
    (`toml_edit`, which also keeps comments), add `iohr auth token` and
    `iohr sdk config`, and fix `IOHR_TOKEN` being ignored once a default profile exists.
-   Done in iohr 0.1.0-alpha.8.
+   Done: `iohr auth token`, the shared file and the `IOHR_TOKEN` fix in iohr
+   0.1.0-alpha.8, `iohr sdk config` in 0.1.0-alpha.9.
 2. The replay server features of section 9.1; `tools/validate-cases.py` validates
-   vectors.
+   vectors. Done.
 3. The generator marks operations that take `Idempotency-Key`. `a-write-is-not-retried`
    moves to an operation without the header (`events.update_endpoint`), and every driver
-   learns that operation.
+   learns that operation. Done; each target emits the mark with its runtime's field.
 4. Rust: settings, `load`, `describe`, the credential chain, the pipeline, then
    transport (proxy, trust, mTLS), then logging and the `otel` feature.
 5. TypeScript, Python, Go, Java, C#, in that order, each lifting `pending` as it passes.

@@ -32,15 +32,16 @@ calls have a 120 s total timeout by default (ADR 0015, "What it ships as").
 
 Shared work first, in this order:
 
-- [ ] `cli/`: keep unknown keys and the `[sdk]` table when rewriting `config.toml`
+- [x] `cli/`: keep unknown keys and the `[sdk]` table when rewriting `config.toml`
       (`toml_edit`); `iohr auth token --profile P --format json`; `iohr sdk config`;
-      `IOHR_TOKEN` honoured when a default profile exists (today it is ignored, though
-      the README and ADR 0009 say it wins)
-- [ ] Replay server: header matchers (`*`, `$name`, `~regex`), `headers_absent`, TLS,
-      mTLS and CONNECT proxy listeners, the fake `iohr` (config.md section 9.1)
-- [ ] Generator: mark operations that take `Idempotency-Key`; move
+      `IOHR_TOKEN` honoured when a default profile exists (#109, #110; iohr
+      0.1.0-alpha.8 and 0.1.0-alpha.9)
+- [x] Replay server: header matchers (`*`, `$name`, `~regex`), `headers_absent`, TLS,
+      mTLS and CONNECT proxy listeners, the fake `iohr` (config.md section 9.1; #113)
+- [x] Generator: mark operations that take `Idempotency-Key` (`context::Op.idempotency_key`,
+      #111; each target emits it with its runtime's field); move
       `a-write-is-not-retried` to `events.update_endpoint` and teach every driver that
-      operation
+      operation (#113)
 - [ ] Drivers: run `conformance/vectors/` as unit tests in each language
 
 Per language (each box: settings and `load`, `describe`, the credential chain, the
