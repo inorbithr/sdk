@@ -22,7 +22,9 @@ dotnet = "10.0.401"
 
 golangci-lint = "2.14.0"
 "go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen" = "2.8.0"
-"go:golang.org/x/exp/cmd/gorelease" = "latest"
+# x/exp has no tags: "latest" is its newest commit, which mise refuses while younger than
+# its minimum release age (2026-10-05), so the pseudo-version is pinned.
+"go:golang.org/x/exp/cmd/gorelease" = "0.0.0-20260908205506-85c1c2202aba"
 "go:github.com/oasdiff/oasdiff" = "1.33.0"
 # Cargo tools install as prebuilt binaries through cargo-binstall, not from source.
 cargo-binstall = "1.25.1"
