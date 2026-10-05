@@ -103,7 +103,9 @@ public sealed class Vectors
         }
 
         var load = new LoadOptions { Environment = env, Os = os, Home = home, NoHome = home is null, WorkingDirectory = dir };
-        string Sub(string s) => s.Replace("{file}", file, StringComparison.Ordinal).Replace("{dir}", dir, StringComparison.Ordinal);
+        // The expectation is JSON text: a Windows path goes in escaped, or its \ starts an escape.
+        static string Esc(string path) => JsonSerializer.Serialize(path)[1..^1];
+        string Sub(string s) => s.Replace("{file}", Esc(file), StringComparison.Ordinal).Replace("{dir}", Esc(dir), StringComparison.Ordinal);
         var want = JsonNode.Parse(Sub((v["expect"] ?? new JsonObject()).ToJsonString()))!.AsObject();
         JsonObject? doc = null;
         ConfigException? error = null;
