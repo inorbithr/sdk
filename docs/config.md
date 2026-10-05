@@ -7,8 +7,8 @@ setups for common environments are in [recipes.md](recipes.md). Where this page 
 `design.md` disagree on configuration, this page wins and `design.md` is corrected in the
 same pull request.
 
-Status: designed 2026-10-04, milestone M6 in [roadmap.md](roadmap.md). Rust, TypeScript, Python and C#
-implement all of it; Go and Java implement section 2 of `design.md` only,
+Status: designed 2026-10-04, milestone M6 in [roadmap.md](roadmap.md). Rust, TypeScript, Python, Go and C#
+implement all of it; Java implements section 2 of `design.md` only,
 explicit options and `from_env`, until each lands it. The conformance cases and vectors are
 written now and marked `pending` until each runtime passes them.
 

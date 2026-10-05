@@ -101,8 +101,24 @@ public sealed class Driver(ITestOutputHelper output)
         }
         finally
         {
-            replay.Kill(entireProcessTree: true);
+            Stop(replay);
         }
+    }
+
+    /// <summary>Stops the server with SIGTERM, so it removes its certificate directory; SIGKILL only if it lingers.</summary>
+    private static void Stop(Process replay)
+    {
+        if (!OperatingSystem.IsWindows() && !replay.HasExited)
+        {
+            using var term = Process.Start(new ProcessStartInfo("kill") { ArgumentList = { "-TERM", replay.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) }, UseShellExecute = false });
+            term?.WaitForExit(5000);
+            if (replay.WaitForExit(5000))
+            {
+                return;
+            }
+        }
+
+        replay.Kill(entireProcessTree: true);
     }
 
     private static string Substitute(string text, string replay, string dir) => text.Replace("{replay}", replay, StringComparison.Ordinal).Replace("{dir}", dir, StringComparison.Ordinal);
