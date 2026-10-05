@@ -212,6 +212,8 @@ struct Verdict {
 struct Replay {
     child: Child,
     url: String,
+    /// The server's certificate directory, removed with it whatever happens.
+    _pki: tempfile::TempDir,
 }
 
 impl Drop for Replay {
@@ -264,7 +266,13 @@ async fn start_replay() -> Option<Replay> {
         eprintln!("{note}; skipping");
         return None;
     }
+    let pki = tempfile::Builder::new()
+        .prefix("replay-pki-rust-")
+        .tempdir()
+        .expect("a temporary directory");
     let mut child = Command::new(bin)
+        .arg("--dir")
+        .arg(pki.path())
         .arg("--addr")
         .arg("127.0.0.1:0")
         .arg("--cases")
@@ -287,7 +295,11 @@ async fn start_replay() -> Option<Replay> {
         .trim()
         .to_owned();
     tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
-    Some(Replay { child, url })
+    Some(Replay {
+        child,
+        url,
+        _pki: pki,
+    })
 }
 
 fn control() -> reqwest::Client {
