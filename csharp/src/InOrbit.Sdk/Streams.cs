@@ -497,7 +497,7 @@ internal sealed class SocketHub(Transport transport) : IDisposable
 
                     var wait = error is ApiException api && api.RetryAfterSeconds() is { } s ? TimeSpan.FromSeconds(Math.Min(s, 60)) : Retry.Backoff(failures);
                     failures++;
-                    await Task.Delay(wait, stop).ConfigureAwait(false);
+                    await Retry.SleepAsync(wait, stop).ConfigureAwait(false);
                     continue;
                 }
 

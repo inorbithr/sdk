@@ -1,4 +1,7 @@
 using System;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -76,6 +79,22 @@ internal static class Retry
 #pragma warning disable CA5394
         return TimeSpan.FromMilliseconds(Math.Floor(Random.Shared.NextDouble() * (ceiling + 1)));
 #pragma warning restore CA5394
+    }
+
+    /// <summary>Waits at least <paramref name="wait"/>: a timer may fire a millisecond early, and a server measures <c>Retry-After</c> to the millisecond.</summary>
+    internal static async Task SleepAsync(TimeSpan wait, CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var left = wait;
+        while (left > TimeSpan.Zero)
+        {
+            await Task.Delay(left, cancellationToken).ConfigureAwait(false);
+            left = wait - Stopwatch.GetElapsedTime(started);
+            if (left > TimeSpan.Zero && left < TimeSpan.FromMilliseconds(1))
+            {
+                left = TimeSpan.FromMilliseconds(1);
+            }
+        }
     }
 
     /// <summary><c>iohr-&lt;16 hex&gt;</c>, the id each call is sent with.</summary>

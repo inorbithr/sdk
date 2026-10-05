@@ -490,7 +490,7 @@ internal static class BuiltIns
             }
 
             resp?.Release();
-            await Task.Delay(wait, ct).ConfigureAwait(false);
+            await Retry.SleepAsync(wait, ct).ConfigureAwait(false);
             retries++;
         }
     }
@@ -516,7 +516,7 @@ internal static class BuiltIns
                 }
 
                 ctx.Log.Emit(LogLevel.Warning, ("event", "rate_limit_wait"), ("attempt", Math.Max(1, req.Info.Attempt)), ("reason", "rate_limit"), ("delay_ms", (long)wait.TotalMilliseconds), ("request_id", req.Info.RequestId));
-                await Task.Delay(wait, ct).ConfigureAwait(false);
+                await Retry.SleepAsync(wait, ct).ConfigureAwait(false);
             }
         }
 

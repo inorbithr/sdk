@@ -251,7 +251,7 @@ public sealed class ClientCredentials : ITokenProvider, IDisposable
                 var status = (int)response.StatusCode;
                 if (Retry.RetryableStatus(status) && attempt < TokenRetries)
                 {
-                    await Task.Delay(Retry.RetryAfter(response.Headers.RetryAfter) ?? Retry.Backoff(attempt), cancellationToken).ConfigureAwait(false);
+                    await Retry.SleepAsync(Retry.RetryAfter(response.Headers.RetryAfter) ?? Retry.Backoff(attempt), cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
