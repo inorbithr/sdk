@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.2](https://github.com/inorbithr/sdk/compare/typescript/v0.2.1...typescript/v0.2.2) (2026-10-05)
+
+
+### Features
+
+* **conformance:** replay matchers, TLS, mTLS and proxy listeners, fake iohr (M6) ([#113](https://github.com/inorbithr/sdk/issues/113)) ([fe098b6](https://github.com/inorbithr/sdk/commit/fe098b64bbfec4980ec7d1f3f2efe925873498b1))
+* **ts:** calls have a total timeout of 120 s by default (totalTimeout), every attempt and wait included ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** Client.load with one precedence (code, environment, the iohr config file, defaults), describe() and ConfigError problems ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** proxy, CA bundle, mTLS, pinning and connect timeout through a node:https transport, or a caller's fetch or dispatcher ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** the credential chain (env, token and key secret files, the iohr login) with CachedToken, TokenFile, CliToken, ChainedCredential and DefaultCredential ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** the named middleware pipeline with its built-ins, logging, OpenTelemetry, rate limits and the retry budget ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+* **ts:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+
+
+### Bug fixes
+
+* **conformance:** the replay server hands back action options and rewrite ([1fe4d5a](https://github.com/inorbithr/sdk/commit/1fe4d5ad42675a7ed1efa63334bc8bfa768a282f))
+
 ## [0.2.1](https://github.com/inorbithr/sdk/compare/typescript/v0.2.0...typescript/v0.2.1) (2026-10-04)
 
 

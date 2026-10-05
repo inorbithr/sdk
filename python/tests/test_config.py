@@ -428,7 +428,7 @@ def test_a_token_file_is_read_again_when_refused(tmp_path: Path) -> None:
     tf.invalidate()
     with pytest.raises(AuthError, match="cannot read the token file"):
         tf.token()
-    assert "tok" not in repr(tf).replace(str(f), "")
+    assert "tok" not in repr(tf).replace(repr(str(f)), "")  # repr doubles a Windows \\
     assert asyncio.run(AsyncTokenFile(tmp_path / "missing").invalidate()) is None
 
 
