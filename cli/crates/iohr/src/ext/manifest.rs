@@ -16,12 +16,16 @@ const MAX_DESCRIPTION: usize = 500;
 pub const RESERVED: &[&str] = &[
     "accounts",
     "api",
+    "auth",
     "completion",
     "config",
+    "connections",
+    "connectors",
     "domains",
     "ext",
     "help",
     "iohr",
+    "lab",
     "login",
     "logout",
     "openapi",
@@ -193,7 +197,30 @@ pub(crate) fn printable(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Manifest, check_name};
+    use clap::CommandFactory as _;
+
+    use super::{Manifest, RESERVED, check_name};
+
+    /// Every built-in command, and each of its aliases, is reserved: read from the clap
+    /// tree so a new command cannot be shadowed by an extension of the same name.
+    #[test]
+    fn every_built_in_command_is_reserved() {
+        let cli = crate::cli::Cli::command();
+        let mut names = vec!["help".to_owned()];
+        for sub in cli.get_subcommands() {
+            names.push(sub.get_name().to_owned());
+            names.extend(sub.get_all_aliases().map(str::to_owned));
+        }
+        for name in &names {
+            assert!(
+                RESERVED.contains(&name.as_str()),
+                "`iohr {name}` is a built-in command missing from RESERVED"
+            );
+        }
+        let mut sorted = RESERVED.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(sorted, RESERVED, "keep RESERVED sorted");
+    }
 
     fn manifest(v: &serde_json::Value) -> Result<Manifest, String> {
         Manifest::parse(v.to_string().as_bytes()).map_err(|e| e.0)

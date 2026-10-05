@@ -98,6 +98,17 @@ extension process it runs (ADR 0012).
 | I | `iohr` reports installs or checks for updates | SR-25: the registry is contacted only by `ext install`, `upgrade`, `sync`; no telemetry |
 | R | A team cannot show which extension code ran | SR-28: `iohr-ext.lock` with digest and signer, committed; `ext list` and `verify` |
 
+### `iohr sdk add`
+
+Boundary: `iohr` to the package manager it runs in the person's project (SR-31).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| E | The command runs something else, or with more rights, than the person asked for | One program with an argument vector, no shell, never sudo; the exact command printed first; `--dry-run` |
+| T | A program named like the manager is planted in the project directory | The program is looked up only in absolute `PATH` entries |
+| T | A version argument smuggles an option or a different package | Package names are fixed; a version is digits, letters, `.`, `-`, `+` only, starting with a digit |
+| E | pip installs into the system Python | pip only through the active virtualenv's python; otherwise refused with the uv and venv commands |
+
 ### Network path
 
 | STRIDE | Threat | Mitigation |
