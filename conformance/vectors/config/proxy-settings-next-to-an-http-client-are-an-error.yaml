@@ -1,7 +1,7 @@
 name: proxy-settings-next-to-an-http-client-are-an-error
 kind: config
 summary: A proxy set in code next to a caller-supplied HTTP client is an error, because the client's own settings would silently win.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 input:
   code: { http_client: custom, proxy: "http://proxy.example:3128" }
   env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off" }

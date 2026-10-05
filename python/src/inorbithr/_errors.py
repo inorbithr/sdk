@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast
 
 import httpx
 from pydantic import BeforeValidator
+
+if TYPE_CHECKING:
+    from inorbithr._ratelimit import RateLimit
 
 #: The platform's error codes (`spec/problem.json`), with the HTTP status of each.
 CODES: dict[str, int] = {
@@ -189,6 +192,16 @@ class RawResponse:
     """The `x-request-id` this SDK sent."""
     attempts: int
     """How many attempts the call took."""
+    idempotency_key: str | None = None
+    """The `Idempotency-Key` the call sent, generated or yours; `None` when it sent none."""
+    rate_limit: RateLimit | None = None
+    """What the answer's rate-limit headers said, when it sent any."""
+
+    @property
+    def idempotency_replayed(self) -> bool:
+        """Whether the API answered from a call made earlier with the same key."""
+        value: str = self.headers.get("idempotency-replayed", "")
+        return value.strip().lower() == "true"
 
     @property
     def server_request_id(self) -> str | None:
@@ -213,11 +226,20 @@ class InOrbitError(Exception):
 
     kind: str
     """A stable kind: `api`, `connection`, `timeout`, `auth`, `config`, `too_large`, `decode`."""
+    request_id: str | None
+    """The `x-request-id` the failed call sent; `None` before a call started."""
+    server_request_id: str | None
+    """The request id the API answered with, if an answer came."""
+    idempotency_key: str | None
+    """The `Idempotency-Key` the call sent; reuse it to repeat the call safely."""
 
     def __init__(self, kind: str, message: str) -> None:
         """An error of `kind` with `message`."""
         super().__init__(message)
         self.kind = kind
+        self.request_id = None
+        self.server_request_id = None
+        self.idempotency_key = None
 
     @property
     def message(self) -> str:
@@ -284,6 +306,14 @@ class ApiError(InOrbitError):
         self.problem = message
         self.details = tuple(details)
         self.raw = raw
+        self.request_id = raw.request_id
+        self.server_request_id = server_id
+        self.idempotency_key = raw.idempotency_key
+
+    @property
+    def rate_limit(self) -> RateLimit | None:
+        """What the answer's rate-limit headers said, when it sent any."""
+        return self.raw.rate_limit
 
     def retry_after_seconds(self) -> int | None:
         """Seconds the API asked to wait, from a `retry` detail or `Retry-After`."""
@@ -330,12 +360,28 @@ class AuthError(InOrbitError):
         self.error = error
 
 
+@dataclass(frozen=True)
+class ConfigProblem:
+    """One thing wrong with a configuration: the setting, where its value came from, why."""
+
+    setting: str
+    """The catalogue name (`timeout`), or `credential` when no source had any."""
+    source: str
+    """Where the value came from: `code`, `env INORBIT_TIMEOUT`, `file <path> [sdk]`, or empty."""
+    message: str
+    """What is wrong and what to do. Never a secret's value."""
+
+
 class ConfigError(InOrbitError):
     """The client was configured in a way it cannot work with."""
 
-    def __init__(self, message: str) -> None:
-        """A configuration problem."""
+    problems: tuple[ConfigProblem, ...]
+    """Every problem `load` found, in catalogue order; empty for a single plain message."""
+
+    def __init__(self, message: str, problems: tuple[ConfigProblem, ...] = ()) -> None:
+        """A configuration problem, or the problems `load` found."""
         super().__init__("config", message)
+        self.problems = problems
 
 
 class TooLargeError(InOrbitError):

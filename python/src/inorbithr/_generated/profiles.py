@@ -7,12 +7,18 @@ from collections.abc import (
     AsyncIterator,
     Iterator,
 )
-from typing import ClassVar
+from typing import (
+    ClassVar,
+    Unpack,
+)
 
 from ..runtime import (
     AsyncClient,
+    AsyncClientOptions,
     AsyncStream,
     Client,
+    ClientOptions,
+    LoadOptions,
     Response,
     Stream,
     codegen,
@@ -148,6 +154,11 @@ class Public:
         """The profile with its credential from the environment."""
         return cls(Client.from_env())
 
+    @classmethod
+    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[ClientOptions]) -> Public:
+        """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
+        return cls(Client.load(load_options=load_options, **options))
+
     def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
         return self.client.request(
@@ -280,28 +291,31 @@ class PublicAccounts:
 
         return codegen.pages(fetch)
 
-    def add_domain(self, org_id: str, body: AddDomainRequest, *, timeout: float | None = None) -> Response[AddDomainResponse]:
+    def add_domain(self, org_id: str, body: AddDomainRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[AddDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/AddDomain` on the `accounts` backend."""
         return self._client.request(
             _ops.add_domain(org_id, body),
             AddDomainResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def check_domain(self, org_id: str, domain: str, body: CheckDomainRequest, *, timeout: float | None = None) -> Response[CheckDomainResponse]:
+    def check_domain(self, org_id: str, domain: str, body: CheckDomainRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CheckDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains/{domain}/check`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/CheckDomain` on the `accounts` backend."""
         return self._client.request(
             _ops.check_domain(org_id, domain, body),
             CheckDomainResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def confirm_domain(self, org_id: str, domain: str, body: ConfirmDomainRequest, *, timeout: float | None = None) -> Response[ConfirmDomainResponse]:
+    def confirm_domain(self, org_id: str, domain: str, body: ConfirmDomainRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[ConfirmDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains/{domain}/confirm`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/ConfirmDomain` on the `accounts` backend."""
         return self._client.request(
             _ops.confirm_domain(org_id, domain, body),
             ConfirmDomainResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -353,20 +367,22 @@ class PublicAgents:
             timeout=timeout,
         )
 
-    def run_check(self, org_id: str, agent_id: str, body: RunCheckRequest, *, timeout: float | None = None) -> Response[RunCheckResponse]:
+    def run_check(self, org_id: str, agent_id: str, body: RunCheckRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RunCheckResponse]:
         """`POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/checks`; needs scope `agents:write`. Transcoded from `/iohr.agents.v1.AgentsService/RunCheck` on the `agents` backend."""
         return self._client.request(
             _ops.run_check(org_id, agent_id, body),
             RunCheckResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def revoke_agent(self, org_id: str, agent_id: str, body: RevokeAgentRequest, *, timeout: float | None = None) -> Response[RevokeAgentResponse]:
+    def revoke_agent(self, org_id: str, agent_id: str, body: RevokeAgentRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RevokeAgentResponse]:
         """`POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke`; needs scope `agents:write`. Transcoded from `/iohr.agents.v1.AgentsService/RevokeAgent` on the `agents` backend."""
         return self._client.request(
             _ops.revoke_agent(org_id, agent_id, body),
             RevokeAgentResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -552,52 +568,58 @@ class PublicConnections:
             timeout=timeout,
         )
 
-    def update_monitor(self, org_id: str, monitor_id: str, body: UpdateMonitorRequest, *, timeout: float | None = None) -> Response[UpdateMonitorResponse]:
+    def update_monitor(self, org_id: str, monitor_id: str, body: UpdateMonitorRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[UpdateMonitorResponse]:
         """`PATCH /v1/accounts/orgs/{org_id}/monitors/{monitor_id}`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateMonitor` on the `connections` backend."""
         return self._client.request(
             _ops.update_monitor(org_id, monitor_id, body),
             UpdateMonitorResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def create_connection(self, org_id: str, body: CreateConnectionRequest, *, timeout: float | None = None) -> Response[CreateConnectionResponse]:
+    def create_connection(self, org_id: str, body: CreateConnectionRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateConnectionResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/CreateConnection` on the `connections` backend."""
         return self._client.request(
             _ops.create_connection(org_id, body),
             CreateConnectionResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def call_action(self, org_id: str, connection_id: str, action: str, body: CallActionRequest, *, timeout: float | None = None) -> Response[CallActionResponse]:
+    def call_action(self, org_id: str, connection_id: str, action: str, body: CallActionRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CallActionResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}`; needs scope `connections:use`. Transcoded from `/iohr.connections.v1.ConnectionsService/CallAction` on the `connections` backend."""
         return self._client.request(
             _ops.call_action(org_id, connection_id, action, body),
             CallActionResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def create_monitor(self, org_id: str, connection_id: str, body: CreateMonitorRequest, *, timeout: float | None = None) -> Response[CreateMonitorResponse]:
+    def create_monitor(self, org_id: str, connection_id: str, body: CreateMonitorRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateMonitorResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/CreateMonitor` on the `connections` backend."""
         return self._client.request(
             _ops.create_monitor(org_id, connection_id, body),
             CreateMonitorResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def test_connection(self, org_id: str, connection_id: str, *, timeout: float | None = None) -> Response[TestConnectionResponse]:
+    def test_connection(self, org_id: str, connection_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[TestConnectionResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/test`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/TestConnection` on the `connections` backend."""
         return self._client.request(
             _ops.test_connection(org_id, connection_id),
             TestConnectionResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def call_tool(self, name: str, body: CallToolRequest, *, timeout: float | None = None) -> Response[CallToolResponse]:
+    def call_tool(self, name: str, body: CallToolRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CallToolResponse]:
         """`POST /v1/connections/tools/{name}`; needs scope `connections:use`. Transcoded from `/iohr.connections.v1.ConnectionsService/CallTool` on the `connections` backend."""
         return self._client.request(
             _ops.call_tool(name, body),
             CallToolResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -762,20 +784,22 @@ class PublicEvents:
             timeout=timeout,
         )
 
-    def retry_delivery(self, delivery_id: str, *, timeout: float | None = None) -> Response[RetryDeliveryResponse]:
+    def retry_delivery(self, delivery_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RetryDeliveryResponse]:
         """`POST /v1/webhooks/deliveries/{delivery_id}/retry`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RetryDelivery` on the `events` backend."""
         return self._client.request(
             _ops.retry_delivery(delivery_id),
             RetryDeliveryResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None) -> Response[CreateEndpointResponse]:
+    def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateEndpointResponse]:
         """`POST /v1/webhooks/endpoints`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend."""
         return self._client.request(
             _ops.create_endpoint(body),
             CreateEndpointResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
     def recover_endpoint(self, endpoint_id: str, body: RecoverEndpointRequest, *, timeout: float | None = None) -> Response[RecoverEndpointResponse]:
@@ -786,28 +810,31 @@ class PublicEvents:
             timeout=timeout,
         )
 
-    def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None) -> Response[RotateSecretResponse]:
+    def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RotateSecretResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/rotate`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RotateSecret` on the `events` backend."""
         return self._client.request(
             _ops.rotate_secret(endpoint_id),
             RotateSecretResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def send_test(self, endpoint_id: str, *, timeout: float | None = None) -> Response[SendTestResponse]:
+    def send_test(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[SendTestResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/test`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/SendTest` on the `events` backend."""
         return self._client.request(
             _ops.send_test(endpoint_id),
             SendTestResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None) -> Response[CreateInboxResponse]:
+    def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateInboxResponse]:
         """`POST /v1/webhooks/inboxes`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend."""
         return self._client.request(
             _ops.create_inbox(body),
             CreateInboxResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -890,6 +917,11 @@ class AsyncPublic:
     def from_env(cls) -> AsyncPublic:
         """The profile with its credential from the environment."""
         return cls(AsyncClient.from_env())
+
+    @classmethod
+    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[AsyncClientOptions]) -> AsyncPublic:
+        """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
+        return cls(AsyncClient.load(load_options=load_options, **options))
 
     async def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
@@ -1023,28 +1055,31 @@ class AsyncPublicAccounts:
 
         return codegen.apages(fetch)
 
-    async def add_domain(self, org_id: str, body: AddDomainRequest, *, timeout: float | None = None) -> Response[AddDomainResponse]:
+    async def add_domain(self, org_id: str, body: AddDomainRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[AddDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/AddDomain` on the `accounts` backend."""
         return await self._client.request(
             _ops.add_domain(org_id, body),
             AddDomainResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def check_domain(self, org_id: str, domain: str, body: CheckDomainRequest, *, timeout: float | None = None) -> Response[CheckDomainResponse]:
+    async def check_domain(self, org_id: str, domain: str, body: CheckDomainRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CheckDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains/{domain}/check`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/CheckDomain` on the `accounts` backend."""
         return await self._client.request(
             _ops.check_domain(org_id, domain, body),
             CheckDomainResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def confirm_domain(self, org_id: str, domain: str, body: ConfirmDomainRequest, *, timeout: float | None = None) -> Response[ConfirmDomainResponse]:
+    async def confirm_domain(self, org_id: str, domain: str, body: ConfirmDomainRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[ConfirmDomainResponse]:
         """`POST /v1/accounts/orgs/{org_id}/domains/{domain}/confirm`; needs scope `domains:write`. Transcoded from `/iohr.accounts.v1.AccountsService/ConfirmDomain` on the `accounts` backend."""
         return await self._client.request(
             _ops.confirm_domain(org_id, domain, body),
             ConfirmDomainResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -1096,20 +1131,22 @@ class AsyncPublicAgents:
             timeout=timeout,
         )
 
-    async def run_check(self, org_id: str, agent_id: str, body: RunCheckRequest, *, timeout: float | None = None) -> Response[RunCheckResponse]:
+    async def run_check(self, org_id: str, agent_id: str, body: RunCheckRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RunCheckResponse]:
         """`POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/checks`; needs scope `agents:write`. Transcoded from `/iohr.agents.v1.AgentsService/RunCheck` on the `agents` backend."""
         return await self._client.request(
             _ops.run_check(org_id, agent_id, body),
             RunCheckResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def revoke_agent(self, org_id: str, agent_id: str, body: RevokeAgentRequest, *, timeout: float | None = None) -> Response[RevokeAgentResponse]:
+    async def revoke_agent(self, org_id: str, agent_id: str, body: RevokeAgentRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RevokeAgentResponse]:
         """`POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke`; needs scope `agents:write`. Transcoded from `/iohr.agents.v1.AgentsService/RevokeAgent` on the `agents` backend."""
         return await self._client.request(
             _ops.revoke_agent(org_id, agent_id, body),
             RevokeAgentResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -1295,52 +1332,58 @@ class AsyncPublicConnections:
             timeout=timeout,
         )
 
-    async def update_monitor(self, org_id: str, monitor_id: str, body: UpdateMonitorRequest, *, timeout: float | None = None) -> Response[UpdateMonitorResponse]:
+    async def update_monitor(self, org_id: str, monitor_id: str, body: UpdateMonitorRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[UpdateMonitorResponse]:
         """`PATCH /v1/accounts/orgs/{org_id}/monitors/{monitor_id}`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateMonitor` on the `connections` backend."""
         return await self._client.request(
             _ops.update_monitor(org_id, monitor_id, body),
             UpdateMonitorResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def create_connection(self, org_id: str, body: CreateConnectionRequest, *, timeout: float | None = None) -> Response[CreateConnectionResponse]:
+    async def create_connection(self, org_id: str, body: CreateConnectionRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateConnectionResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/CreateConnection` on the `connections` backend."""
         return await self._client.request(
             _ops.create_connection(org_id, body),
             CreateConnectionResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def call_action(self, org_id: str, connection_id: str, action: str, body: CallActionRequest, *, timeout: float | None = None) -> Response[CallActionResponse]:
+    async def call_action(self, org_id: str, connection_id: str, action: str, body: CallActionRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CallActionResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}`; needs scope `connections:use`. Transcoded from `/iohr.connections.v1.ConnectionsService/CallAction` on the `connections` backend."""
         return await self._client.request(
             _ops.call_action(org_id, connection_id, action, body),
             CallActionResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def create_monitor(self, org_id: str, connection_id: str, body: CreateMonitorRequest, *, timeout: float | None = None) -> Response[CreateMonitorResponse]:
+    async def create_monitor(self, org_id: str, connection_id: str, body: CreateMonitorRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateMonitorResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/CreateMonitor` on the `connections` backend."""
         return await self._client.request(
             _ops.create_monitor(org_id, connection_id, body),
             CreateMonitorResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def test_connection(self, org_id: str, connection_id: str, *, timeout: float | None = None) -> Response[TestConnectionResponse]:
+    async def test_connection(self, org_id: str, connection_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[TestConnectionResponse]:
         """`POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/test`; needs scope `connections:write`. Transcoded from `/iohr.connections.v1.ConnectionsService/TestConnection` on the `connections` backend."""
         return await self._client.request(
             _ops.test_connection(org_id, connection_id),
             TestConnectionResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def call_tool(self, name: str, body: CallToolRequest, *, timeout: float | None = None) -> Response[CallToolResponse]:
+    async def call_tool(self, name: str, body: CallToolRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CallToolResponse]:
         """`POST /v1/connections/tools/{name}`; needs scope `connections:use`. Transcoded from `/iohr.connections.v1.ConnectionsService/CallTool` on the `connections` backend."""
         return await self._client.request(
             _ops.call_tool(name, body),
             CallToolResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -1505,20 +1548,22 @@ class AsyncPublicEvents:
             timeout=timeout,
         )
 
-    async def retry_delivery(self, delivery_id: str, *, timeout: float | None = None) -> Response[RetryDeliveryResponse]:
+    async def retry_delivery(self, delivery_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RetryDeliveryResponse]:
         """`POST /v1/webhooks/deliveries/{delivery_id}/retry`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RetryDelivery` on the `events` backend."""
         return await self._client.request(
             _ops.retry_delivery(delivery_id),
             RetryDeliveryResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None) -> Response[CreateEndpointResponse]:
+    async def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateEndpointResponse]:
         """`POST /v1/webhooks/endpoints`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend."""
         return await self._client.request(
             _ops.create_endpoint(body),
             CreateEndpointResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
     async def recover_endpoint(self, endpoint_id: str, body: RecoverEndpointRequest, *, timeout: float | None = None) -> Response[RecoverEndpointResponse]:
@@ -1529,28 +1574,31 @@ class AsyncPublicEvents:
             timeout=timeout,
         )
 
-    async def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None) -> Response[RotateSecretResponse]:
+    async def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RotateSecretResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/rotate`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RotateSecret` on the `events` backend."""
         return await self._client.request(
             _ops.rotate_secret(endpoint_id),
             RotateSecretResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def send_test(self, endpoint_id: str, *, timeout: float | None = None) -> Response[SendTestResponse]:
+    async def send_test(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[SendTestResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/test`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/SendTest` on the `events` backend."""
         return await self._client.request(
             _ops.send_test(endpoint_id),
             SendTestResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None) -> Response[CreateInboxResponse]:
+    async def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateInboxResponse]:
         """`POST /v1/webhooks/inboxes`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend."""
         return await self._client.request(
             _ops.create_inbox(body),
             CreateInboxResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 

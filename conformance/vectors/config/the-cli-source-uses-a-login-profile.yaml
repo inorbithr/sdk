@@ -1,7 +1,7 @@
 name: the-cli-source-uses-a-login-profile
 kind: config
 summary: With iohr present and a profile it made, the chain ends at the cli source; scopes are listed as ignored.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 input:
   cli: present
   env: { INORBIT_SCOPES: identity:read }

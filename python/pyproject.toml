@@ -7,10 +7,17 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "InOrbit d.o.o." }]
 requires-python = ">=3.11"
-# The runtime's only dependencies (python/AGENTS.md): an HTTP client, the models, and a
+# The runtime's only dependencies (python/AGENTS.md): an HTTP client, the models, a
 # WebSocket client for streams over /v1/ws (httpx has none; websockets has sync and asyncio
-# clients and no dependencies of its own).
-dependencies = ["httpx>=0.28,<1", "pydantic>=2.10,<3", "websockets>=14,<17"]
+# clients, no dependencies of its own, and takes a proxy since 15), and truststore, which
+# verifies against the operating system's trust store (docs/config.md section 6.3; pip's
+# own verifier, no dependencies).
+dependencies = [
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "truststore>=0.10,<1",
+  "websockets>=15,<17",
+]
 keywords = ["inorbit", "api", "sdk", "client"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -28,8 +35,23 @@ Source = "https://github.com/inorbithr/sdk/tree/main/python"
 Issues = "https://github.com/inorbithr/sdk/issues"
 Changelog = "https://github.com/inorbithr/sdk/blob/main/python/CHANGELOG.md"
 
+[project.optional-dependencies]
+# Spans and metrics through the application's own OpenTelemetry setup (docs/config.md
+# section 7.10); the API package only, never an SDK or an exporter.
+otel = ["opentelemetry-api>=1.27,<2"]
+
 [dependency-groups]
-dev = ["mypy>=1.15", "pyright>=1.1.400", "pytest>=8.3", "ruff>=0.11", "griffe>=1.5"]
+dev = [
+  "mypy>=1.15",
+  "pyright>=1.1.400",
+  "pytest>=8.3",
+  "ruff>=0.11",
+  "griffe>=1.5",
+  # The conformance vectors are YAML; the spans case needs an in-memory exporter.
+  "pyyaml>=6.0",
+  "types-pyyaml>=6.0",
+  "opentelemetry-sdk>=1.27,<2",
+]
 
 [build-system]
 requires = ["uv_build>=0.7,<0.13"]

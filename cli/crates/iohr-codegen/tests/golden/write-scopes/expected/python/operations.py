@@ -22,6 +22,7 @@ def delete_endpoint(endpoint_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         scopes=("webhooks:write",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -32,6 +33,7 @@ def delete_inbox(inbox_id: str) -> Operation:
         method="DELETE",
         path=f"/v1/webhooks/inboxes/{codegen.path_segment(inbox_id)}",
         scopes=("webhooks:write",),
+        template="/v1/webhooks/inboxes/{inbox_id}",
     )
 
 
@@ -43,6 +45,7 @@ def update_endpoint(endpoint_id: str, body: UpdateEndpointRequest) -> Operation:
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}",
         body=body,
         scopes=("webhooks:write",),
+        template="/v1/webhooks/endpoints/{endpoint_id}",
     )
 
 
@@ -53,6 +56,8 @@ def retry_delivery(delivery_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/deliveries/{codegen.path_segment(delivery_id)}/retry",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/deliveries/{delivery_id}/retry",
     )
 
 
@@ -64,6 +69,7 @@ def create_endpoint(body: CreateEndpointRequest) -> Operation:
         path="/v1/webhooks/endpoints",
         body=body,
         scopes=("webhooks:write",),
+        idempotency_key=True,
     )
 
 
@@ -74,6 +80,8 @@ def rotate_secret(endpoint_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/rotate",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/endpoints/{endpoint_id}/rotate",
     )
 
 
@@ -84,6 +92,8 @@ def send_test(endpoint_id: str) -> Operation:
         method="POST",
         path=f"/v1/webhooks/endpoints/{codegen.path_segment(endpoint_id)}/test",
         scopes=("webhooks:write",),
+        idempotency_key=True,
+        template="/v1/webhooks/endpoints/{endpoint_id}/test",
     )
 
 
@@ -95,4 +105,5 @@ def create_inbox(body: CreateInboxRequest) -> Operation:
         path="/v1/webhooks/inboxes",
         body=body,
         scopes=("webhooks:write",),
+        idempotency_key=True,
     )

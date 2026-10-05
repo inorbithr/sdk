@@ -7,12 +7,18 @@ from collections.abc import (
     AsyncIterator,
     Iterator,
 )
-from typing import ClassVar
+from typing import (
+    ClassVar,
+    Unpack,
+)
 
 from inorbithr.runtime import (
     AsyncClient,
+    AsyncClientOptions,
     AsyncStream,
     Client,
+    ClientOptions,
+    LoadOptions,
     Response,
     Stream,
     codegen,
@@ -78,6 +84,11 @@ class AcmeCi:
     def from_env(cls) -> AcmeCi:
         """The profile with its credential from the environment."""
         return cls(Client.from_env("ACME_CI"))
+
+    @classmethod
+    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[ClientOptions]) -> AcmeCi:
+        """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
+        return cls(Client.load(load_options=load_options, profile_type="acme-ci", **options))
 
     def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
@@ -265,44 +276,49 @@ class AcmeCiEvents:
             timeout=timeout,
         )
 
-    def retry_delivery(self, delivery_id: str, *, timeout: float | None = None) -> Response[RetryDeliveryResponse]:
+    def retry_delivery(self, delivery_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RetryDeliveryResponse]:
         """`POST /v1/webhooks/deliveries/{delivery_id}/retry`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RetryDelivery` on the `events` backend."""
         return self._client.request(
             _ops.retry_delivery(delivery_id),
             RetryDeliveryResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None) -> Response[CreateEndpointResponse]:
+    def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateEndpointResponse]:
         """`POST /v1/webhooks/endpoints`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend."""
         return self._client.request(
             _ops.create_endpoint(body),
             CreateEndpointResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None) -> Response[RotateSecretResponse]:
+    def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RotateSecretResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/rotate`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RotateSecret` on the `events` backend."""
         return self._client.request(
             _ops.rotate_secret(endpoint_id),
             RotateSecretResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def send_test(self, endpoint_id: str, *, timeout: float | None = None) -> Response[SendTestResponse]:
+    def send_test(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[SendTestResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/test`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/SendTest` on the `events` backend."""
         return self._client.request(
             _ops.send_test(endpoint_id),
             SendTestResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None) -> Response[CreateInboxResponse]:
+    def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateInboxResponse]:
         """`POST /v1/webhooks/inboxes`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend."""
         return self._client.request(
             _ops.create_inbox(body),
             CreateInboxResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -379,6 +395,11 @@ class AsyncAcmeCi:
     def from_env(cls) -> AsyncAcmeCi:
         """The profile with its credential from the environment."""
         return cls(AsyncClient.from_env("ACME_CI"))
+
+    @classmethod
+    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[AsyncClientOptions]) -> AsyncAcmeCi:
+        """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
+        return cls(AsyncClient.load(load_options=load_options, profile_type="acme-ci", **options))
 
     async def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
@@ -566,44 +587,49 @@ class AsyncAcmeCiEvents:
             timeout=timeout,
         )
 
-    async def retry_delivery(self, delivery_id: str, *, timeout: float | None = None) -> Response[RetryDeliveryResponse]:
+    async def retry_delivery(self, delivery_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RetryDeliveryResponse]:
         """`POST /v1/webhooks/deliveries/{delivery_id}/retry`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RetryDelivery` on the `events` backend."""
         return await self._client.request(
             _ops.retry_delivery(delivery_id),
             RetryDeliveryResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None) -> Response[CreateEndpointResponse]:
+    async def create_endpoint(self, body: CreateEndpointRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateEndpointResponse]:
         """`POST /v1/webhooks/endpoints`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend."""
         return await self._client.request(
             _ops.create_endpoint(body),
             CreateEndpointResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None) -> Response[RotateSecretResponse]:
+    async def rotate_secret(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[RotateSecretResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/rotate`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/RotateSecret` on the `events` backend."""
         return await self._client.request(
             _ops.rotate_secret(endpoint_id),
             RotateSecretResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def send_test(self, endpoint_id: str, *, timeout: float | None = None) -> Response[SendTestResponse]:
+    async def send_test(self, endpoint_id: str, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[SendTestResponse]:
         """`POST /v1/webhooks/endpoints/{endpoint_id}/test`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/SendTest` on the `events` backend."""
         return await self._client.request(
             _ops.send_test(endpoint_id),
             SendTestResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
-    async def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None) -> Response[CreateInboxResponse]:
+    async def create_inbox(self, body: CreateInboxRequest, *, timeout: float | None = None, idempotency_key: str | None = None) -> Response[CreateInboxResponse]:
         """`POST /v1/webhooks/inboxes`; needs scope `webhooks:write`. Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend."""
         return await self._client.request(
             _ops.create_inbox(body),
             CreateInboxResponse,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -674,6 +700,11 @@ class Personal:
     def from_env(cls) -> Personal:
         """The profile with its credential from the environment."""
         return cls(Client.from_env("PERSONAL"))
+
+    @classmethod
+    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[ClientOptions]) -> Personal:
+        """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
+        return cls(Client.load(load_options=load_options, profile_type="personal", **options))
 
     def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
@@ -751,6 +782,11 @@ class AsyncPersonal:
     def from_env(cls) -> AsyncPersonal:
         """The profile with its credential from the environment."""
         return cls(AsyncClient.from_env("PERSONAL"))
+
+    @classmethod
+    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[AsyncClientOptions]) -> AsyncPersonal:
+        """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
+        return cls(AsyncClient.load(load_options=load_options, profile_type="personal", **options))
 
     async def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""

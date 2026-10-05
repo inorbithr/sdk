@@ -41,10 +41,21 @@ from inorbithr._errors import (
     RawResponse,
     TooLargeError,
 )
-from inorbithr._retry import backoff, retry_after, retryable_status
+from inorbithr._retry import (
+    COST_OTHER,
+    COST_THROTTLED,
+    RetryBudget,
+    backoff,
+    request_id,
+    retry_after,
+    retryable_status,
+)
 
 if TYPE_CHECKING:
+    import ssl
+
     from inorbithr._auth import AsyncTokenProvider, TokenProvider
+    from inorbithr._transport import ProxyRule
 
 T = TypeVar("T")
 
@@ -321,6 +332,29 @@ class SocketSettings:
     timeout: float
     idle: float
     max_retries: int
+    tls_context: ssl.SSLContext | None = None
+    """The client's TLS context; `None` for the library's default."""
+    rule: ProxyRule | None = None
+    """The client's proxy rule; `None` lets the library read the environment, as before."""
+    budget: RetryBudget | None = None
+    """The client's retry budget, which reconnects draw from."""
+
+    def proxy(self) -> str | Literal[True] | None:
+        """The proxy for the upgrade, by the client's rule."""
+        if self.rule is None:
+            return True
+        return self.rule.proxy_for(socket_url(self.base).replace("ws", "http", 1))
+
+    def tls(self) -> ssl.SSLContext | None:
+        """The TLS context for a `wss://` upgrade."""
+        return self.tls_context if self.base.startswith("https") else None
+
+    def draw(self, status: int | None, throttled: bool) -> bool:
+        """Whether the budget pays for a retry of the upgrade."""
+        if self.budget is None:
+            return True
+        cost = COST_THROTTLED if status == 429 or (status == 503 and throttled) else COST_OTHER
+        return self.budget.draw(cost)
 
 
 def _upgrade_error(e: InvalidStatus, request_id: str, number: int) -> RawResponse:
@@ -423,7 +457,7 @@ class SyncSocket:
 
     def _connect(self) -> SyncConnection:
         s = self._s
-        rid = f"socket-{time.monotonic_ns()}"
+        rid = request_id()
         retries, refreshed, number = 0, False, 0
         while True:
             number += 1
@@ -434,6 +468,8 @@ class SyncSocket:
                         "authorization": f"Bearer {self._provider.token().access}",
                         "x-request-id": rid,
                     },
+                    ssl=s.tls(),
+                    proxy=s.proxy(),
                     user_agent_header=s.user_agent,
                     compression=None,
                     open_timeout=s.timeout,
@@ -448,14 +484,18 @@ class SyncSocket:
                     self._provider.invalidate()
                     refreshed = True
                     continue
-                if retryable_status(raw.status) and retries < s.max_retries:
-                    wait = retry_after(raw.headers)
+                wait = retry_after(raw.headers)
+                if (
+                    retryable_status(raw.status)
+                    and retries < s.max_retries
+                    and s.draw(raw.status, wait is not None)
+                ):
                     time.sleep(wait if wait is not None else backoff(retries))
                     retries += 1
                     continue
                 raise ApiError(raw) from None
             except (OSError, InvalidHandshake, TimeoutError) as e:
-                if retries < s.max_retries:
+                if retries < s.max_retries and s.draw(None, False):
                     time.sleep(backoff(retries))
                     retries += 1
                     continue
@@ -600,7 +640,7 @@ class AsyncSocket:
 
     async def _connect(self) -> AsyncConnection:
         s = self._s
-        rid = f"socket-{time.monotonic_ns()}"
+        rid = request_id()
         retries, refreshed, number = 0, False, 0
         while True:
             number += 1
@@ -611,6 +651,8 @@ class AsyncSocket:
                         "authorization": f"Bearer {(await self._provider.token()).access}",
                         "x-request-id": rid,
                     },
+                    ssl=s.tls(),
+                    proxy=s.proxy(),
                     user_agent_header=s.user_agent,
                     compression=None,
                     open_timeout=s.timeout,
@@ -625,14 +667,18 @@ class AsyncSocket:
                     await self._provider.invalidate()
                     refreshed = True
                     continue
-                if retryable_status(raw.status) and retries < s.max_retries:
-                    wait = retry_after(raw.headers)
+                wait = retry_after(raw.headers)
+                if (
+                    retryable_status(raw.status)
+                    and retries < s.max_retries
+                    and s.draw(raw.status, wait is not None)
+                ):
                     await asyncio.sleep(wait if wait is not None else backoff(retries))
                     retries += 1
                     continue
                 raise ApiError(raw) from None
             except (OSError, InvalidHandshake, TimeoutError) as e:
-                if retries < s.max_retries:
+                if retries < s.max_retries and s.draw(None, False):
                     await asyncio.sleep(backoff(retries))
                     retries += 1
                     continue

@@ -1,7 +1,7 @@
 name: plain-http-only-on-loopback
 kind: config
 summary: An http base URL is refused unless the host is loopback.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "off", INORBIT_BASE_URL: "http://api.example.com" }
 expect:

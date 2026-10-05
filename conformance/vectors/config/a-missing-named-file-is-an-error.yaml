@@ -1,7 +1,7 @@
 name: a-missing-named-file-is-an-error
 kind: config
 summary: A config file named by INORBIT_CONFIG_FILE that does not exist fails the load.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_CONFIG_FILE: "{dir}/missing.toml" }
 expect:

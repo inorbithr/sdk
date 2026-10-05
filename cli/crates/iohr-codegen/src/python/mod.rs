@@ -556,6 +556,15 @@ fn render_operations(surface: &context::Surface, runtime: &str) -> String {
         if op.idempotent_override {
             body.push_str("        idempotent=True,\n");
         }
+        if op.idempotency_key {
+            // The runtime sends one key on every attempt and may retry the write
+            // (docs/config.md section 7.5).
+            body.push_str("        idempotency_key=True,\n");
+        }
+        if !op.path_params.is_empty() {
+            // The template names the attempt's span without the identifiers.
+            let _ = writeln!(body, "        template={},", py_string(&op.path));
+        }
         if op.stream {
             // A stream's call on the socket names its RPC and takes its path parameters
             // as fields, unencoded (design.md section 7).
@@ -629,8 +638,16 @@ fn render_profiles(surface: &context::Surface, models: &[Model], runtime: &str) 
     );
     let mut typing: Vec<String> = uses.typing.iter().map(|t| (*t).to_owned()).collect();
     typing.push("ClassVar".into());
+    typing.push("Unpack".into());
     let mut runtime_names: BTreeSet<String> = uses.runtime.clone();
-    for n in ["AsyncClient", "Client", "Response"] {
+    for n in [
+        "AsyncClient",
+        "AsyncClientOptions",
+        "Client",
+        "ClientOptions",
+        "LoadOptions",
+        "Response",
+    ] {
         runtime_names.insert(n.into());
     }
     out.push_str(&imports(
@@ -715,6 +732,21 @@ fn profile_class(
         out,
         "\n    @classmethod\n    def from_env(cls) -> {class}:\n        \"\"\"The profile with its credential from the environment.\"\"\"\n        return cls({client}.from_env({env_arg}))\n"
     );
+    // `load` reads code, the environment, the config file and the `iohr` login
+    // (docs/config.md section 1); a named profile resolves as its own typed profile.
+    let options = match form {
+        Form::Sync => "ClientOptions",
+        Form::Async => "AsyncClientOptions",
+    };
+    let typed = if p.is_public {
+        String::new()
+    } else {
+        format!("profile_type={}, ", py_string(&p.name))
+    };
+    let _ = write!(
+        out,
+        "\n    @classmethod\n    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[{options}]) -> {class}:\n        \"\"\"The profile with its settings and credential from code, the environment, the config file and the `iohr` login.\"\"\"\n        return cls({client}.load(load_options=load_options, {typed}**options))\n"
+    );
     for op in surface.flat.iter().filter(|o| o.profiles.contains(&p.name)) {
         out.push_str(&profile_method(op, models, "self.client", form, uses));
     }
@@ -751,10 +783,18 @@ fn profile_method(op: &Op, models: &[Model], client: &str, form: Form, uses: &mu
         Form::Sync => ("def", ""),
         Form::Async => ("async def", "await "),
     };
+    // An operation that takes `Idempotency-Key` lets the caller choose the key
+    // (docs/config.md section 7.5); the runtime generates one otherwise.
+    let mut signature = params.clone();
+    let mut key = "";
+    if op.idempotency_key {
+        signature.push("idempotency_key: str | None = None".into());
+        key = "            idempotency_key=idempotency_key,\n";
+    }
     let mut out = format!(
-        "\n    {def} {}(self, {}) -> Response[{response}]:\n        \"\"\"{}\"\"\"\n        return {call}{client}.request(\n            _ops.{}({}),\n            {response},\n            timeout=timeout,\n        )\n",
+        "\n    {def} {}(self, {}) -> Response[{response}]:\n        \"\"\"{}\"\"\"\n        return {call}{client}.request(\n            _ops.{}({}),\n            {response},\n            timeout=timeout,\n{key}        )\n",
         naming.method_name(&op.name),
-        params.join(", "),
+        signature.join(", "),
         op_doc(op),
         builder_name(op),
         call_arguments(op).join(", ")

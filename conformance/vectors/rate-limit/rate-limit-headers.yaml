@@ -1,7 +1,7 @@
 name: rate-limit-headers
 kind: rate-limit
 summary: The snapshot read from the edge's X-RateLimit headers and the IETF RateLimit fields.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 notes: docs/config.md section 7.8. Header names compare without case. reset_ms and window_ms are milliseconds.
 checks:
   - summary: Envoy draft-03 headers

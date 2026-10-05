@@ -1,14 +1,14 @@
 name: the-callers-idempotency-key-is-sent
 area: retries
 summary: An idempotency key passed with the call is sent as is, and a replayed answer is reported as replayed.
-pending: [go, py, java, csharp]
+pending: [go, java, csharp]
 notes: M6, docs/config.md section 7.5.
 action: { op: events.create_endpoint, args: { account_id: acc_1, url: "https://example.com/hook", event_types: [radar.digest.published] }, options: { idempotency_key: order-42 } }
 exchanges:
   - request: { method: POST, path: /oauth2/token }
     response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
   - request: { method: POST, path: /v1/webhooks/endpoints, headers: { idempotency-key: order-42 } }
-    response: { status: 200, headers: { idempotency-replayed: "true" }, json: { endpoint: { id: we_1, url: "https://example.com/hook", event_types: [radar.digest.published] } } }
+    response: { status: 200, headers: { idempotency-replayed: "true" }, json: { secret: whsec_1, endpoint: { id: we_1, url: "https://example.com/hook", description: "", event_types: [radar.digest.published], enabled: true, disabled_reason: "", created_at: "2026-10-04T08:00:00Z", secret_rotated_at: "", last_delivery_at: "", last_delivery_status: "", succeeded_24h: 0, failed_24h: 0 } } }
 expect:
   ok: { endpoint: { id: we_1 } }
   idempotency_key: order-42
