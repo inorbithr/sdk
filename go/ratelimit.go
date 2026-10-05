@@ -93,7 +93,6 @@ func digits(v string) (int64, bool) {
 	return n, err == nil
 }
 
-
 // ParseRateLimit reads the rate-limit snapshot h carries: the IETF draft 11 RateLimit
 // and RateLimit-Policy fields, which win when both are sent, or Envoy's X-RateLimit-*
 // headers (Reset in seconds). It returns nil when h carries none, or a malformed one.
