@@ -4,7 +4,7 @@
   "typescript": "0.2.2",
   "python": "0.2.2",
   "csharp": "0.2.2",
-  "java": "0.2.1",
+  "java": "0.2.2",
   "cli": "0.1.0-alpha.10",
   "go/otel": "0.2.2"
 }

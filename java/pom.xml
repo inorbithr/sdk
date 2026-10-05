@@ -6,7 +6,7 @@
 
   <groupId>hr.inorbit</groupId>
   <artifactId>inorbit-sdk</artifactId>
-  <version>0.2.1</version> <!-- x-release-please-version -->
+  <version>0.2.2</version> <!-- x-release-please-version -->
   <packaging>jar</packaging>
 
   <name>InOrbit SDK</name>
