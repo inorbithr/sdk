@@ -72,6 +72,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
+| `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
 | `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
@@ -108,6 +109,26 @@ iohr auth token --profile work --format json
 alone on one line. The refresh token never leaves the credential store. Exit codes are the
 usual ones: 3 when there is no such profile, no credential, or the session has ended
 (`iohr login` again), 1 when the sign-in service cannot be reached.
+
+## What will my service see?
+
+`iohr sdk config` resolves the SDK configuration the way `load` does in every SDK
+([docs/config.md](../docs/config.md) sections 2 to 5) and prints the same JSON as the
+SDKs' `describe()`: the profile and where it was chosen, the config file, every setting
+with its value and source, the credential chain with each source tried, the pipeline,
+and what was read but ignored (unknown keys, scopes a token does not use).
+
+```sh
+INORBIT_TIMEOUT=5s iohr sdk config --profile ci
+```
+
+It reads `INORBIT_*`, the standard proxy variables and the config file, contacts no
+host and prints no secret: a key secret, a token and a proxy password show as
+`<redacted>`. `--profile NAME` is the client's `profile` option; `IOHR_PROFILE` is the
+command line's switch and is not read, as the SDKs do not read it. `--for TYPE` resolves
+for a generated profile type (`Client<AcmeCi>` is `--for acme-ci`) instead of the
+public client. A configuration `load` would refuse exits 1 with every problem on
+stderr, each with the setting and where its value came from.
 
 ## An SDK for your account
 

@@ -50,6 +50,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sdk(SdkCommand::Generate(args)) => sdk::generate(g, &env, &args, out).await,
         Command::Sdk(SdkCommand::Check(args)) => sdk::check(g, &env, &args, out).await,
         Command::Sdk(SdkCommand::Examples(args)) => sdk::examples(&args, out),
+        Command::Sdk(SdkCommand::Config(args)) => sdk::config(g, &args),
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,

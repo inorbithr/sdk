@@ -10,7 +10,7 @@ use iohr_openapi::Api;
 use serde_json::Value;
 
 use crate::Env;
-use crate::cli::{Global, SdkCheck, SdkExamples, SdkGenerate};
+use crate::cli::{Global, SdkCheck, SdkConfig, SdkExamples, SdkGenerate};
 use crate::context::{Ctx, Session, session_for};
 use crate::error::Error;
 use crate::lock::Lock;
@@ -293,4 +293,45 @@ pub(crate) fn lock_path(out: &Path) -> PathBuf {
 
 fn short(hash: &str) -> &str {
     hash.get(..19).unwrap_or(hash)
+}
+
+/// `iohr sdk config`: what a client built with `load` would see on this machine, as
+/// `describe()` prints it. A configuration `load` would refuse is exit 1 with every
+/// problem on stderr.
+pub(crate) fn config(g: &Global, args: &SdkConfig) -> Result<(), Error> {
+    use crate::sdk_config::{Inputs, Os, program_found, resolve};
+    let env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    let mut code = serde_json::Map::new();
+    // `--profile` given on the command line stands for `profile` in code; the same
+    // value from `IOHR_PROFILE` is the command line's switch, which the SDKs ignore.
+    let flagged = std::env::args_os()
+        .any(|a| a == "--profile" || a.to_string_lossy().starts_with("--profile="));
+    if let (true, Some(p)) = (flagged, &g.profile) {
+        code.insert("profile".into(), Value::String(p.to_string()));
+    }
+    let cwd = std::env::current_dir()
+        .map_err(|e| Error::Failed(format!("cannot read the working directory: {e}")))?;
+    let home = etcetera::home_dir()
+        .ok()
+        .map(|h| h.to_string_lossy().into_owned());
+    let path_env = env.clone();
+    let cli_found = move |program: &str| program_found(program, &path_env);
+    let read = |p: &str| std::fs::read(p).ok();
+    let inputs = Inputs {
+        env: &env,
+        os: Os::current(),
+        home,
+        cwd: cwd.to_string_lossy().into_owned(),
+        code,
+        profile_type: args.profile_type.as_ref().map(ToString::to_string),
+        cli_found: &cli_found,
+        read: &read,
+    };
+    match resolve(&inputs) {
+        Ok(described) => {
+            Out::print_json(&described);
+            Ok(())
+        }
+        Err(invalid) => Err(Error::Failed(invalid.to_string())),
+    }
 }

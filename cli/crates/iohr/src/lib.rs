@@ -17,6 +17,7 @@ mod error;
 mod lock;
 mod output;
 mod prompt;
+mod sdk_config;
 
 pub use args::refuse_secrets_in_args;
 pub use commands::run;

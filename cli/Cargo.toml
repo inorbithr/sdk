@@ -53,6 +53,7 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 windows-native-keyring-store = "1"
 zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
+serde_yaml_ng = "0.10"
 tempfile = "3"
 wiremock = "0.6"
 
