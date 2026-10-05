@@ -657,7 +657,6 @@ impl TokenFile {
         })?;
         Ok(c.token(Instant::now()))
     }
-
 }
 
 /// The developer's `iohr` login: a token from `iohr auth token --profile <name>

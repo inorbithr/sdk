@@ -28,7 +28,9 @@ pub(crate) fn retry_after(headers: &Headers) -> Option<Duration> {
         "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT",
     )
     .ok()?;
-    let at = time::PrimitiveDateTime::parse(v, &format).ok()?.assume_utc();
+    let at = time::PrimitiveDateTime::parse(v, &format)
+        .ok()?
+        .assume_utc();
     let left = at - time::OffsetDateTime::now_utc();
     Some(Duration::try_from(left).unwrap_or(Duration::ZERO))
 }

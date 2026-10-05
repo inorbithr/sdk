@@ -68,15 +68,19 @@ pub use auth::{
     AUDIENCE, CachedToken, ChainedCredential, CliToken, ClientCredentials, DEFAULT_TOKEN_URL,
     StaticToken, Token, TokenFile, TokenProvider,
 };
-pub use client::{Client, ClientBuilder, DEFAULT_BASE_URL, DefaultCredential, Method, Operation, Response};
+pub use client::{
+    Client, ClientBuilder, DEFAULT_BASE_URL, DefaultCredential, Method, Operation, Response,
+};
 pub use config::{LoadOptions, ResolvedConfig};
-pub use error::{ApiError, AuthError, Code, ConfigError, Detail, Error, Headers, Problem, RawResponse};
+pub use error::{
+    ApiError, AuthError, Code, ConfigError, Detail, Error, Headers, Problem, RawResponse,
+};
 pub use hooks::{Attempt, Hook};
-pub use middleware::{CallOptions, LogLevel, LogRecord, Middleware, Pipeline};
-pub use ratelimit::{RateLimit, RateLimitMode, RateLimitPolicy};
 pub use int64::Int64;
+pub use middleware::{CallOptions, LogLevel, LogRecord, Middleware, Pipeline};
 pub use pages::Pages;
 pub use profile::{Profile, Public};
+pub use ratelimit::{RateLimit, RateLimitMode, RateLimitPolicy};
 pub use secret::Secret;
 pub use stream::{EventStream, Streams};
 pub use timestamp::parse_timestamp;
@@ -85,9 +89,9 @@ pub use timestamp::parse_timestamp;
 /// builder and the error.
 pub mod prelude {
     pub use crate::client::{Client, Method, Operation, Response};
-    pub use crate::middleware::CallOptions;
     pub use crate::error::Error;
     pub use crate::int64::Int64;
+    pub use crate::middleware::CallOptions;
     pub use crate::profile::{Profile, Public};
     pub use crate::stream::EventStream;
 }

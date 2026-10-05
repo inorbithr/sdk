@@ -454,8 +454,7 @@ pub(crate) fn valid_profile(name: &str) -> bool {
     !b.is_empty()
         && b.len() <= 64
         && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
-        && b
-            .iter()
+        && b.iter()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
 }
 
@@ -1423,4 +1422,3 @@ pub(crate) fn program_found(program: &str, env: &BTreeMap<String, String>) -> bo
             .any(|ext| dir.join(format!("{program}{ext}")).is_file())
     })
 }
-

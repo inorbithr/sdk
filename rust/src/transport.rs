@@ -317,9 +317,10 @@ impl Transport {
         _host: &str,
         _io: Box<dyn Io>,
     ) -> impl std::future::Future<Output = Result<Box<dyn Io>, Error>> + Send {
-        std::future::ready(Err(
-            ConfigError::Http("TLS needs the `rustls` feature".into()).into()
-        ))
+        std::future::ready(Err(ConfigError::Http(
+            "TLS needs the `rustls` feature".into(),
+        )
+        .into()))
     }
 }
 

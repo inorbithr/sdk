@@ -61,8 +61,8 @@ use std::time::{Duration, Instant};
 
 use url::Url;
 
-pub use self::log::{LogLevel, LogRecord};
 pub(crate) use self::log::Logger;
+pub use self::log::{LogLevel, LogRecord};
 use crate::client::Method;
 use crate::error::{Error, Headers};
 use crate::transport::Transport;
@@ -78,7 +78,8 @@ pub trait Middleware: Send + Sync + 'static {
     /// Handles one request: change it, answer it without calling `next`, call
     /// `next.run(req)` once, or more than once. From the per-call stage, each call of
     /// `next` is a fresh attempt.
-    fn handle<'a>(&'a self, req: Request, next: Next<'a>) -> BoxFuture<'a, Result<Response, Error>>;
+    fn handle<'a>(&'a self, req: Request, next: Next<'a>)
+    -> BoxFuture<'a, Result<Response, Error>>;
 }
 
 /// Where a middleware sits: once per call, or on every attempt.
@@ -198,7 +199,10 @@ impl CallState {
 
 /// What a middleware may know about the call a request belongs to. Read only.
 #[derive(Clone)]
-#[allow(clippy::struct_excessive_bools, reason = "what the call is, flag by flag")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "what the call is, flag by flag"
+)]
 pub struct CallInfo {
     pub(crate) operation: &'static str,
     pub(crate) method: Method,
@@ -513,8 +517,9 @@ impl Pipeline {
     fn insert_at(&mut self, at: usize, m: impl Middleware) {
         let name = m.name();
         if self.find(name).is_some() {
-            self.errors
-                .push(format!("a middleware named {name:?} is already in the pipeline"));
+            self.errors.push(format!(
+                "a middleware named {name:?} is already in the pipeline"
+            ));
             return;
         }
         self.entries.insert(

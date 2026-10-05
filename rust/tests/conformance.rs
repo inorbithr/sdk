@@ -353,7 +353,11 @@ impl Middleware for Probe {
         self.name
     }
 
-    fn handle<'a>(&'a self, req: Request, next: Next<'a>) -> BoxFuture<'a, Result<Response, Error>> {
+    fn handle<'a>(
+        &'a self,
+        req: Request,
+        next: Next<'a>,
+    ) -> BoxFuture<'a, Result<Response, Error>> {
         self.seen
             .lock()
             .unwrap()
@@ -383,7 +387,8 @@ impl Scratch {
     }
 
     fn sub(&self, s: &str) -> String {
-        s.replace("{replay}", &self.replay).replace("{dir}", &self.path())
+        s.replace("{replay}", &self.replay)
+            .replace("{dir}", &self.path())
     }
 
     fn write(&self, files: &BTreeMap<String, String>) {
@@ -395,7 +400,12 @@ impl Scratch {
     }
 }
 
-fn build_client(loaded: &Loaded, url: &str, scratch: &Scratch, captured: &mut Captured) -> Client<Public> {
+fn build_client(
+    loaded: &Loaded,
+    url: &str,
+    scratch: &Scratch,
+    captured: &mut Captured,
+) -> Client<Public> {
     let options = &loaded.case.client;
     let base = loaded.base_url.clone().unwrap_or_else(|| url.to_owned());
     scratch.write(&options.files);
@@ -496,7 +506,12 @@ fn build_client(loaded: &Loaded, url: &str, scratch: &Scratch, captured: &mut Ca
         _ => {}
     }
     if let Some(n) = &options.no_proxy {
-        b = b.no_proxy(n.split(',').map(str::trim).filter(|x| !x.is_empty()).map(str::to_owned));
+        b = b.no_proxy(
+            n.split(',')
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .map(str::to_owned),
+        );
     }
     if let Some(edit) = &options.pipeline {
         let seen = Arc::clone(&captured.probes);
@@ -851,7 +866,10 @@ fn check_m6(
             if let Some(n) = want.count
                 && n != got.len()
             {
-                problems.push(format!("probe {name}: want {n} requests, got {}", got.len()));
+                problems.push(format!(
+                    "probe {name}: want {n} requests, got {}",
+                    got.len()
+                ));
             }
             for (i, headers) in want.seen.iter().enumerate() {
                 let Some(have) = got.get(i) else {
@@ -860,7 +878,10 @@ fn check_m6(
                 };
                 for (k, v) in headers {
                     if !header_matches(v, have.get(k), &mut captures) {
-                        problems.push(format!("probe {name}: request {i} header {k}: want {v}, got {:?}", have.get(k)));
+                        problems.push(format!(
+                            "probe {name}: request {i} header {k}: want {v}, got {:?}",
+                            have.get(k)
+                        ));
                     }
                 }
             }
@@ -905,14 +926,21 @@ fn check_m6(
                     problems.push(format!("span {}: want kind {k}, got {kind}", w.name));
                 }
                 for (k, v) in &w.attributes {
-                    let have = got.attributes.iter().find(|kv| kv.key.as_str() == k).map(|kv| match &kv.value {
-                        opentelemetry::Value::I64(n) => json!(n),
-                        opentelemetry::Value::Bool(b) => json!(b),
-                        opentelemetry::Value::F64(f) => json!(f),
-                        other => json!(other.as_str()),
-                    });
+                    let have = got
+                        .attributes
+                        .iter()
+                        .find(|kv| kv.key.as_str() == k)
+                        .map(|kv| match &kv.value {
+                            opentelemetry::Value::I64(n) => json!(n),
+                            opentelemetry::Value::Bool(b) => json!(b),
+                            opentelemetry::Value::F64(f) => json!(f),
+                            other => json!(other.as_str()),
+                        });
                     if have.as_ref() != Some(v) {
-                        problems.push(format!("span {}: attribute {k} want {v}, got {have:?}", w.name));
+                        problems.push(format!(
+                            "span {}: attribute {k} want {v}, got {have:?}",
+                            w.name
+                        ));
                     }
                 }
             }
@@ -1056,4 +1084,389 @@ where
         out.push(h.await.expect("a call task finishes"));
     }
     out
+}
+
+// The vectors (`conformance/vectors/`, docs/config.md section 9.2): pure functions, no
+// server, through the crate's public `config` functions and `load` with injected inputs.
+
+/// The typed profile the vectors name.
+struct AcmeCi;
+
+impl Profile for AcmeCi {
+    const NAME: &'static str = "acme-ci";
+}
+
+fn vectors(kind: &str) -> Vec<(PathBuf, Value)> {
+    let dir = repo_root().join("conformance/vectors").join(kind);
+    let mut out: Vec<(PathBuf, Value)> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
+        .map(|p| {
+            let text = std::fs::read_to_string(&p).unwrap();
+            let v: Value = serde_yaml_ng::from_str(&text).unwrap();
+            (p, v)
+        })
+        .filter(|(_, v)| {
+            !v["pending"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|l| l == "rust"))
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    assert!(!out.is_empty(), "no vectors in {}", dir.display());
+    out
+}
+
+fn os_of(v: &Value) -> Os {
+    match v.as_str() {
+        Some("macos") => Os::Macos,
+        Some("windows") => Os::Windows,
+        _ => Os::Linux,
+    }
+}
+
+fn env_of(v: &Value, dir: &str) -> BTreeMap<String, String> {
+    v.as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        v.as_str().unwrap_or_default().replace("{dir}", dir),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `expected` is a subset of `actual`; paths compare after `\` becomes `/`.
+fn vsubset(expected: &Value, actual: &Value, at: &str) -> Result<(), String> {
+    match (expected, actual) {
+        (Value::Object(e), Value::Object(a)) => {
+            for (k, ev) in e {
+                let av = a
+                    .get(k)
+                    .ok_or_else(|| format!("{at}.{k}: missing in {actual}"))?;
+                vsubset(ev, av, &format!("{at}.{k}"))?;
+            }
+            Ok(())
+        }
+        (Value::Array(e), Value::Array(a)) => {
+            if e.len() != a.len() {
+                return Err(format!("{at}: expected {expected}, got {actual}"));
+            }
+            for (i, (ev, av)) in e.iter().zip(a).enumerate() {
+                vsubset(ev, av, &format!("{at}[{i}]"))?;
+            }
+            Ok(())
+        }
+        (e, a) if e == a => Ok(()),
+        (Value::String(e), Value::String(a)) if e.replace('\\', "/") == a.replace('\\', "/") => {
+            Ok(())
+        }
+        (e, a) => Err(format!("{at}: expected {e}, got {a}")),
+    }
+}
+
+fn substitute(v: &Value, dir: &str, file: &str) -> Value {
+    match v {
+        Value::String(s) => Value::String(s.replace("{file}", file).replace("{dir}", dir)),
+        Value::Array(a) => Value::Array(a.iter().map(|x| substitute(x, dir, file)).collect()),
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .map(|(k, x)| (k.clone(), substitute(x, dir, file)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Code options by catalogue name, onto a builder.
+fn with_code<P: Profile>(
+    mut b: ClientBuilder<P>,
+    code: &serde_json::Map<String, Value>,
+) -> ClientBuilder<P> {
+    for (k, v) in code {
+        let text = v.as_str().unwrap_or_default();
+        let dur = || inorbithr::config::parse_duration(text).expect("a duration in code");
+        b = match k.as_str() {
+            "timeout" => b.timeout(dur()),
+            "connect_timeout" => b.connect_timeout(dur()),
+            "total_timeout" => b.total_timeout(dur()),
+            "proxy" => b.proxy(text),
+            "config_file" => b.config_file(text),
+            "profile" => b.profile(text),
+            "http_client" => b.http_client(reqwest::Client::new()),
+            "max_retries" => b.max_retries(u32::try_from(v.as_u64().unwrap()).unwrap()),
+            other => panic!("a vector sets {other} in code, which this driver does not know"),
+        };
+    }
+    b
+}
+
+fn load_for<P: Profile>(
+    code: &serde_json::Map<String, Value>,
+    options: LoadOptions,
+    cli: Option<&Path>,
+) -> Result<Value, Error> {
+    let mut b = with_code(Client::<P>::builder(), code).load_options(options);
+    if let Some(c) = cli {
+        b = b.cli_path(c);
+    }
+    b.load().map(|c| c.config().describe())
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_config_vector(path: &Path, v: &Value) -> Result<(), String> {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().to_str().unwrap().to_owned();
+    let input = v.get("input").cloned().unwrap_or_else(|| json!({}));
+    let os = os_of(&input["os"]);
+    let env = env_of(&input["env"], &dir);
+    let home_flag = input["home"].as_bool().unwrap_or(false);
+    let home = home_flag.then(|| format!("{dir}/home"));
+    if let Some(h) = &home {
+        std::fs::create_dir_all(h).unwrap();
+    }
+    if let Some(files) = input["files"].as_object() {
+        for (name, content) in files {
+            let p = tmp.path().join(name);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, content.as_str().unwrap_or_default()).unwrap();
+        }
+    }
+    let mut code = input["code"].as_object().cloned().unwrap_or_default();
+    let mut file = format!("{dir}/config.toml");
+    let options = |env: &BTreeMap<String, String>| {
+        LoadOptions::new()
+            .env(env.clone())
+            .os(os)
+            .home(home.clone())
+            .cwd(&dir)
+    };
+    if let Some(text) = input["config_file"].as_str() {
+        if home_flag {
+            // Where the file would be read from, INORBIT_CONFIG_FILE aside: `off` still
+            // finds a file there and must not read it.
+            let mut located = env.clone();
+            located.remove("INORBIT_CONFIG_FILE");
+            let p = inorbithr::config::config_file_path(&options(&located), None)
+                .ok_or("the vector writes a file at a default location that does not exist")?;
+            std::fs::create_dir_all(Path::new(&p).parent().unwrap()).unwrap();
+            std::fs::write(&p, text).unwrap();
+            file = p;
+        } else {
+            std::fs::write(&file, text).unwrap();
+            code.insert("config_file".into(), json!(file));
+        }
+    }
+    // `present`: any program that exists stands for `iohr`; it is never run here.
+    let cli = (input["cli"].as_str() == Some("present")).then(replay_bin_or_self);
+    let got = match input["profile_type"].as_str() {
+        Some("acme-ci") => load_for::<AcmeCi>(&code, options(&env), cli.as_deref()),
+        Some(other) => panic!("a vector names a typed profile this driver lacks: {other}"),
+        None => load_for::<Public>(&code, options(&env), cli.as_deref()),
+    };
+    let expect = substitute(&v["expect"], &dir, &file);
+    let name = path.file_name().unwrap().to_string_lossy();
+    let shown = match &got {
+        Ok(d) => d.to_string(),
+        Err(e) => format!("{e} {e:?}"),
+    };
+    if let Some(ex) = expect["excludes"].as_array() {
+        for x in ex {
+            let x = x.as_str().unwrap_or_default();
+            if shown.contains(x) {
+                return Err(format!("{name}: {x:?} appears in {shown}"));
+            }
+        }
+    }
+    if let Some(err) = expect.get("error") {
+        let e = match got {
+            Ok(d) => return Err(format!("{name}: expected an error, got {d}")),
+            Err(e) => e,
+        };
+        let text = e.to_string();
+        let problems = match &e {
+            Error::Config(ConfigError::Invalid { problems }) => problems.clone(),
+            other => {
+                return Err(format!(
+                    "{name}: expected ConfigError::Invalid, got {other:?}"
+                ));
+            }
+        };
+        if let Some(want) = err["problems"].as_array() {
+            if want.len() != problems.len() {
+                return Err(format!(
+                    "{name}: expected {} problems, got {problems:?}",
+                    want.len()
+                ));
+            }
+            for (w, have) in want.iter().zip(&problems) {
+                if let Some(s) = w["setting"].as_str()
+                    && s != have.setting
+                {
+                    return Err(format!("{name}: setting {s} != {have:?}"));
+                }
+                if let Some(s) = w["source"].as_str()
+                    && s != have.source
+                {
+                    return Err(format!("{name}: source {s:?} != {have:?}"));
+                }
+                if let Some(s) = w["message_contains"].as_str()
+                    && !have.message.contains(s)
+                {
+                    return Err(format!("{name}: message lacks {s:?}: {have:?}"));
+                }
+            }
+        }
+        if let Some(parts) = err["message_contains"].as_array() {
+            for p in parts {
+                let p = p.as_str().unwrap_or_default();
+                if !text.contains(p) {
+                    return Err(format!("{name}: error lacks {p:?}:\n{text}"));
+                }
+            }
+        }
+        return Ok(());
+    }
+    let d = got.map_err(|e| format!("{name}: unexpected error:\n{e}"))?;
+    for key in ["profile", "settings", "credential", "pipeline"] {
+        if let Some(want) = expect.get(key) {
+            vsubset(want, &d[key], &format!("{name}: {key}"))?;
+        }
+    }
+    if let Some(want) = expect.get("config_file") {
+        let have = d["config_file"].as_str().map(|s| s.replace('\\', "/"));
+        let want = want.as_str().map(|s| s.replace('\\', "/"));
+        if want != have {
+            return Err(format!("{name}: config_file {want:?} != {have:?}"));
+        }
+    }
+    if let Some(absent) = expect["settings_absent"].as_array() {
+        for a in absent {
+            let a = a.as_str().unwrap_or_default();
+            if d["settings"].get(a).is_some() {
+                return Err(format!("{name}: {a} should not be in settings"));
+            }
+        }
+    }
+    if let Some(want) = expect["ignored"].as_array() {
+        let have = d["ignored"].as_array().cloned().unwrap_or_default();
+        for w in want {
+            if !have.iter().any(|h| vsubset(w, h, "").is_ok()) {
+                return Err(format!("{name}: ignored lacks {w}: {have:?}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A program that exists, to stand for an installed `iohr`.
+fn replay_bin_or_self() -> PathBuf {
+    let replay = replay_bin();
+    if replay.is_file() {
+        replay
+    } else {
+        std::env::current_exe().unwrap()
+    }
+}
+
+#[test]
+fn config_vectors() {
+    let failures: Vec<String> = vectors("config")
+        .iter()
+        .filter_map(|(p, v)| run_config_vector(p, v).err())
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+#[test]
+fn config_path_vectors() {
+    for (_, v) in vectors("config-path") {
+        for c in v["checks"].as_array().unwrap() {
+            let options = LoadOptions::new()
+                .env(env_of(&c["env"], ""))
+                .os(os_of(&c["os"]))
+                .home(c["home"].as_str());
+            let got =
+                inorbithr::config::config_file_path(&options, c["code"]["config_file"].as_str());
+            assert_eq!(got.as_deref(), c["expect"].as_str(), "{}", c["summary"]);
+        }
+    }
+}
+
+#[test]
+fn duration_vectors() {
+    for (_, v) in vectors("durations") {
+        for c in v["checks"].as_array().unwrap() {
+            let got = inorbithr::config::parse_duration(c["value"].as_str().unwrap())
+                .map(|d| u64::try_from(d.as_millis()).unwrap());
+            assert_eq!(got, c["expect"].as_u64(), "{}", c["value"]);
+        }
+    }
+}
+
+#[test]
+fn no_proxy_vectors() {
+    for (_, v) in vectors("no-proxy") {
+        for c in v["checks"].as_array().unwrap() {
+            let options = LoadOptions::new().env(env_of(&c["env"], ""));
+            let got = inorbithr::config::proxy_for(
+                c["url"].as_str().unwrap(),
+                &options,
+                c["code"]["proxy"].as_str(),
+                None,
+            );
+            match (&c["expect"], got) {
+                (Value::Object(o), Err(ConfigError::Invalid { .. })) if o.contains_key("error") => {
+                }
+                (want, Ok(got)) => assert_eq!(want.as_str(), got.as_deref(), "{}", c["summary"]),
+                (want, Err(e)) => panic!("{}: want {want}, got {e}", c["summary"]),
+            }
+        }
+    }
+}
+
+#[test]
+fn rate_limit_vectors() {
+    for (_, v) in vectors("rate-limit") {
+        for c in v["checks"].as_array().unwrap() {
+            let headers = Headers::new(
+                c["headers"]
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_owned())),
+            );
+            let got = inorbithr::RateLimit::from_headers(&headers)
+                .map_or(Value::Null, |s| serde_json::to_value(s).unwrap());
+            assert_eq!(c["expect"], got, "{}", c["summary"]);
+        }
+    }
+}
+
+#[test]
+fn the_error_lists_every_problem_and_never_a_secret() {
+    let options = LoadOptions::new().env([
+        ("INORBIT_TOKEN", "t"),
+        ("INORBIT_TIMEOUT", "30"),
+        ("INORBIT_CLIENT_KEY_PASSWORD", "pw-never-shown"),
+        ("INORBIT_CONFIG_FILE", "off"),
+        ("INORBIT_LOG", "loud"),
+    ]);
+    let e = Client::<Public>::builder()
+        .load_options(options)
+        .load()
+        .unwrap_err();
+    let text = e.to_string();
+    assert!(
+        text.starts_with("configuration is invalid (2 problems):"),
+        "{text}"
+    );
+    assert!(text.contains("timeout: \"30\" is not a duration; write it with a unit, such as 30s (from env INORBIT_TIMEOUT)"), "{text}");
+    assert!(text.contains("log: \"loud\""), "{text}");
+    assert!(!text.contains("pw-never-shown"));
 }

@@ -40,7 +40,10 @@ use crate::secret::Secret;
 /// # let _ = options;
 /// ```
 #[derive(Clone, Default)]
-#[allow(clippy::option_option, reason = "unset (the process's), or set to no home directory")]
+#[allow(
+    clippy::option_option,
+    reason = "unset (the process's), or set to no home directory"
+)]
 pub struct LoadOptions {
     env: Option<BTreeMap<String, String>>,
     os: Option<Os>,
@@ -52,7 +55,10 @@ pub struct LoadOptions {
 impl fmt::Debug for LoadOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LoadOptions")
-            .field("env", &self.env.as_ref().map(|e| e.keys().collect::<Vec<_>>()))
+            .field(
+                "env",
+                &self.env.as_ref().map(|e| e.keys().collect::<Vec<_>>()),
+            )
             .field("os", &self.os)
             .field("home", &self.home)
             .field("cwd", &self.cwd)
@@ -73,11 +79,7 @@ impl LoadOptions {
         mut self,
         env: impl IntoIterator<Item = (K, V)>,
     ) -> Self {
-        self.env = Some(
-            env.into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
-        );
+        self.env = Some(env.into_iter().map(|(k, v)| (k.into(), v.into())).collect());
         self
     }
 
@@ -121,7 +123,8 @@ impl LoadOptions {
 
     pub(crate) fn cwd_dir(&self) -> String {
         self.cwd.clone().unwrap_or_else(|| {
-            std::env::current_dir().map_or_else(|_| ".".to_owned(), |p| p.to_string_lossy().into_owned())
+            std::env::current_dir()
+                .map_or_else(|_| ".".to_owned(), |p| p.to_string_lossy().into_owned())
         })
     }
 }
@@ -291,24 +294,27 @@ pub fn proxy_for(
             .unwrap_or_default()
     };
     let proxy = proxy.filter(|p| p != "off");
-    let rules = ProxyRules::new(proxy.as_deref(), explicit, &no_proxy).map_err(
-        |(which, message)| ConfigError::Invalid {
-            problems: vec![crate::error::Problem {
-                setting: which.to_owned(),
-                source: if which == "proxy" {
-                    proxy_source.clone()
-                } else {
-                    no_proxy_source.clone()
-                },
-                message,
-            }],
-        },
-    )?;
+    let rules =
+        ProxyRules::new(proxy.as_deref(), explicit, &no_proxy).map_err(|(which, message)| {
+            ConfigError::Invalid {
+                problems: vec![crate::error::Problem {
+                    setting: which.to_owned(),
+                    source: if which == "proxy" {
+                        proxy_source.clone()
+                    } else {
+                        no_proxy_source.clone()
+                    },
+                    message,
+                }],
+            }
+        })?;
     let url = url::Url::parse(url).map_err(|e| ConfigError::InvalidUrl {
         what: "url",
         reason: e.to_string(),
     })?;
-    Ok(rules.proxy_for(&url).map(|u| u.to_string().trim_end_matches('/').to_owned()))
+    Ok(rules
+        .proxy_for(&url)
+        .map(|u| u.to_string().trim_end_matches('/').to_owned()))
 }
 
 /// The typed settings a client runs with, from the description and the secrets.
@@ -350,7 +356,8 @@ impl Settings {
     #[cfg(feature = "rustls")]
     pub(crate) fn plain_tls() -> Self {
         let empty = ResolvedConfig::new(serde_json::json!({ "settings": {} }));
-        let mut s = Self::from_resolved(&empty, &BTreeMap::new()).unwrap_or_else(|_| unreachable!());
+        let mut s =
+            Self::from_resolved(&empty, &BTreeMap::new()).unwrap_or_else(|_| unreachable!());
         s.proxy = ProxyRules::default();
         s
     }
@@ -437,9 +444,7 @@ impl Settings {
             client_key: text("client_key"),
             client_key_password: secrets.get("client_key_password").cloned(),
             pinned_keys: list("pinned_keys"),
-            log: text("log")
-                .and_then(|l| l.parse().ok())
-                .unwrap_or_default(),
+            log: text("log").and_then(|l| l.parse().ok()).unwrap_or_default(),
             log_headers: flag("log_headers", false),
             log_allow_headers: list("log_allow_headers"),
             tracing: flag("tracing", otel),

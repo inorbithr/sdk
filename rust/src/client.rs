@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 use url::Url;
 
 use crate::auth::{
-    ClientCredentials, CliToken, DEFAULT_TOKEN_URL, DynProvider, StaticToken, TokenFile,
+    CliToken, ClientCredentials, DEFAULT_TOKEN_URL, DynProvider, StaticToken, TokenFile,
     TokenProvider,
 };
 use crate::config::{LoadOptions, ResolvedConfig, Settings, show_duration};

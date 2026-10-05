@@ -35,7 +35,9 @@ pub enum Error {
     },
     /// In `rate_limit = "wait"` mode, the rate-limit window resets after the call's
     /// total timeout, so the call ends instead of waiting (`docs/config.md` section 7.8).
-    #[error("{host}: waiting for the rate-limit window to reset would pass the call's total timeout of {secs} s")]
+    #[error(
+        "{host}: waiting for the rate-limit window to reset would pass the call's total timeout of {secs} s"
+    )]
     RateLimitWait {
         /// The host that was called.
         host: String,
@@ -221,7 +223,8 @@ impl Headers {
 
     /// Adds a value for `name`, keeping the ones it had.
     pub fn append(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.0.push((name.into().to_ascii_lowercase(), value.into()));
+        self.0
+            .push((name.into().to_ascii_lowercase(), value.into()));
     }
 
     /// Removes every value of `name`.
