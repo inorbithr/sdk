@@ -696,6 +696,7 @@ def _leaf_pin(url: str, ca_file: str) -> str:
 
     u = httpx.URL(url)
     ctx = ssl.create_default_context(cafile=ca_file)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     with (
         socket.create_connection((u.host, u.port or 443)) as raw,
         ctx.wrap_socket(raw, server_hostname=u.host) as tls,
