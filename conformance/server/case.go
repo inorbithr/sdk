@@ -35,6 +35,10 @@ type Action struct {
 	Repeat     int    `yaml:"repeat" json:"repeat,omitempty"`
 	Concurrent int    `yaml:"concurrent" json:"concurrent,omitempty"`
 	Take       int    `yaml:"take" json:"take,omitempty"`
+	// Options (per-call options) and Rewrite (files rewritten between calls) are the
+	// driver's; they are handed back with the loaded case.
+	Options any `yaml:"options" json:"options,omitempty"`
+	Rewrite any `yaml:"rewrite" json:"rewrite,omitempty"`
 }
 
 // Exchange is one request the SDK must make and the answer it gets.
