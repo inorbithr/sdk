@@ -153,7 +153,7 @@ export function redactedUrl(url: URL): string {
   const u = new URL(url.href);
   const names = [...new Set([...u.searchParams.keys()])];
   u.search = names.map((n) => `${encodeURIComponent(n)}=REDACTED`).join("&");
-  return u.href.replace(/=REDACTED/g, "=REDACTED");
+  return u.href;
 }
 
 /** The span context OpenTelemetry hands out. */

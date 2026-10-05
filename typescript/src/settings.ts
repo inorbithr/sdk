@@ -208,6 +208,15 @@ function isLoopbackHost(host: string): boolean {
   return h === "localhost" || h === "::1" || /^127\.\d+\.\d+\.\d+$/.test(h);
 }
 
+/** `dir` without the path separators it ends with. */
+function trimSeparators(dir: string): string {
+  let end = dir.length;
+  while (end > 0 && (dir[end - 1] === "/" || dir[end - 1] === "\\")) {
+    end--;
+  }
+  return dir.slice(0, end);
+}
+
 /** Path rules for one OS: absolute, join, parent. */
 class Paths {
   constructor(readonly os: Os) {}
@@ -227,7 +236,7 @@ class Paths {
   }
 
   join(dir: string, rest: string): string {
-    return `${dir.replace(/[/\\]+$/, "")}${this.sep}${rest}`;
+    return `${trimSeparators(dir)}${this.sep}${rest}`;
   }
 
   parent(path: string): string {
@@ -471,9 +480,7 @@ function programFound(program: string, env: Readonly<Record<string, string | und
   return path
     .split(windows ? ";" : ":")
     .filter((d) => d !== "")
-    .some((dir) =>
-      exts.some((ext) => isFile(`${dir.replace(/[/\\]+$/, "")}${sep}${program}${ext}`)),
-    );
+    .some((dir) => exts.some((ext) => isFile(`${trimSeparators(dir)}${sep}${program}${ext}`)));
 }
 
 /** Resolves a configuration, or throws a {@link ConfigError} listing every problem. */
