@@ -23,6 +23,9 @@ A dev container (`.devcontainer/`) does the same for VS Code and Codespaces.
 - **Same names everywhere**, adjusted to each language's style, as described in
   [docs/design.md](docs/design.md).
 - **Small dependency sets.** Each language's `AGENTS.md` lists what it may depend on.
+- **Dependencies stay on their latest versions**, majors included, except the type
+  packages and toolchains that set a minimum runtime. Dependabot groups the updates and
+  merges patch and minor ones itself; see [Dependencies](docs/releasing.md#dependencies).
 
 ## Commits and pull requests
 

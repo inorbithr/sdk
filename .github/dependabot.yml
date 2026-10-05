@@ -1,59 +1,90 @@
-# Weekly, grouped, and never a version younger than the cooldown: a compromised release
-# usually surfaces within days (ADR 0005).
+# Every dependency stays on its latest version, majors included (docs/releasing.md,
+# Dependencies). Updates arrive grouped: one pull request per ecosystem for patch and
+# minor, which merges itself once `ci-ok` passes (dependabot-automerge.yml), and one for
+# majors, where a maintainer adapts the code in the same pull request. Never a version
+# younger than the cooldown: a compromised release usually surfaces within days
+# (ADR 0005). Security updates ignore the schedule and the cooldown.
+#
+# The only `ignore` rules are minimum runtimes: a type package or toolchain that defines
+# the oldest runtime a published library supports stays at that minimum (ADR 0006).
+# Raising one is a breaking change made by hand, never by Dependabot.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly, day: monday }
+    schedule: { interval: daily }
     cooldown: { default-days: 7 }
-    groups: { actions: { patterns: ["*"] } }
+    groups:
+      actions: { patterns: ["*"], update-types: [minor, patch] }
+      actions-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "ci", include: scope }
 
   - package-ecosystem: gomod
-    directory: /go
+    directories: [/go, /examples/go]
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
-    groups: { go: { patterns: ["*"] } }
+    groups:
+      go: { patterns: ["*"], update-types: [minor, patch] }
+      go-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(go)" }
 
   - package-ecosystem: gomod
     directory: /conformance/server
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
-    groups: { conformance: { patterns: ["*"] } }
+    groups:
+      conformance: { patterns: ["*"], update-types: [minor, patch] }
+      conformance-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(conformance)" }
 
+  # The command line and the examples build against rust/ by path, so their lockfiles move
+  # with it in the same pull request.
   - package-ecosystem: cargo
-    directory: /rust
+    directories: [/rust, /cli, /cli/fuzz, /examples/rust]
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
-    groups: { rust: { patterns: ["*"] } }
+    groups:
+      rust: { patterns: ["*"], update-types: [minor, patch] }
+      rust-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(rust)" }
 
   - package-ecosystem: npm
-    directory: /typescript
+    directories: [/typescript, /examples/typescript]
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
-    groups: { ts: { patterns: ["*"] } }
+    groups:
+      ts: { patterns: ["*"], update-types: [minor, patch] }
+      ts-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(ts)" }
+    ignore:
+      # Minimum runtime: @types/node follows the oldest Node the package supports
+      # (`engines`, Node 22, ADR 0006). Newer types would let code use APIs Node 22 lacks.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: uv
-    directory: /python
+    directories: [/python, /examples/python]
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
-    groups: { py: { patterns: ["*"] } }
+    groups:
+      py: { patterns: ["*"], update-types: [minor, patch] }
+      py-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(py)" }
 
   - package-ecosystem: maven
     directory: /java
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
-    groups: { java: { patterns: ["*"] } }
+    groups:
+      java: { patterns: ["*"], update-types: [minor, patch] }
+      java-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(java)" }
 
   - package-ecosystem: nuget
-    directory: /csharp
+    directories: [/csharp, /examples/csharp]
     schedule: { interval: weekly, day: monday }
     cooldown: { default-days: 7 }
-    groups: { csharp: { patterns: ["*"] } }
+    groups:
+      csharp: { patterns: ["*"], update-types: [minor, patch] }
+      csharp-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(csharp)" }
