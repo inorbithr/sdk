@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2](https://github.com/inorbithr/sdk/compare/java/v0.2.1...java/v0.2.2) (2026-10-05)
+
+
+### Features
+
+* **conformance:** replay matchers, TLS, mTLS and proxy listeners, fake iohr (M6) ([#113](https://github.com/inorbithr/sdk/issues/113)) ([fe098b6](https://github.com/inorbithr/sdk/commit/fe098b64bbfec4980ec7d1f3f2efe925873498b1))
+* **java:** calls have a total timeout of 120 s by default, and the attempt timeout covers the body ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** Client.load with one precedence (code, environment, the iohr config file, defaults), describe() and ConfigException problems ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** proxy, CA bundle, mTLS, pinning and connect timeout through the SDK's own ProxySelector and SSLContext ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** the credential chain (env, token and key secret files, the iohr login) with TokenFile, CliToken, CachedToken, ChainedCredential and DefaultCredential ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** the named middleware pipeline with its built-ins, System.Logger logging, optional OpenTelemetry, rate limits and the retry budget ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+* **java:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([27e9ff8](https://github.com/inorbithr/sdk/commit/27e9ff8c914fbc33f17e794d4440b0adec037fec))
+
 ## [0.2.1](https://github.com/inorbithr/sdk/compare/java/v0.2.0...java/v0.2.1) (2026-10-04)
 
 
