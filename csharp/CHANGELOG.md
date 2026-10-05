@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.2](https://github.com/inorbithr/sdk/compare/csharp/v0.2.1...csharp/v0.2.2) (2026-10-05)
+
+
+### Features
+
+* **cli:** the C# target emits the path template and the idempotency-key mark ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **conformance:** replay matchers, TLS, mTLS and proxy listeners, fake iohr (M6) ([#113](https://github.com/inorbithr/sdk/issues/113)) ([fe098b6](https://github.com/inorbithr/sdk/commit/fe098b64bbfec4980ec7d1f3f2efe925873498b1))
+* **csharp:** calls have a total timeout of 120 s by default (TotalTimeout), every attempt and wait included ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** Client.Load with one precedence (code, environment, the iohr config file, defaults), Describe() and ConfigException problems ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** proxy, CA bundle, mTLS, pinning and connect timeout on SocketsHttpHandler, or a caller's HttpClient or handler ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** the credential chain (env, token and key secret files, the iohr login) with CachedToken, TokenFile, CliToken, ChainedCredential and DefaultCredential ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** the named middleware pipeline with its built-ins, Middleware.FromHandler, ILogger logging, ActivitySource and Meter, rate limits and the retry budget ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+* **csharp:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([4b3299c](https://github.com/inorbithr/sdk/commit/4b3299cec13358be44e850d96c0384bd34f63d58))
+
+
+### Dependencies
+
+* **csharp:** Logging.Abstractions 10, xUnit v3 and the test SDK 18 ([#141](https://github.com/inorbithr/sdk/issues/141)) ([89efb8d](https://github.com/inorbithr/sdk/commit/89efb8db590d95ca5c1c4857d27d388b002435d2))
+
 ## [0.2.1](https://github.com/inorbithr/sdk/compare/csharp/v0.2.0...csharp/v0.2.1) (2026-10-04)
 
 

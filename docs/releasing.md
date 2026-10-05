@@ -34,6 +34,7 @@ The repository went public on 2026-10-01. These items waited for that.
 | Package | Tag | Publish job | Environment |
 |---|---|---|---|
 | Go | `go/vX.Y.Z` | warms `proxy.golang.org`, attests the source archive | `release-go` |
+| Go OpenTelemetry | `go/otel/vX.Y.Z` | none: release-please tags it, and the module proxy fetches the tag on first request. It requires `go/vX.Y.Z`, so merge its release PR after the `go` one is tagged | none |
 | Rust | `rust/vX.Y.Z` | `cargo publish` via `crates-io-auth-action` | `release-crates` |
 | TypeScript | `typescript/vX.Y.Z` | `npm stage publish` (provenance automatic), then a maintainer approves it; `jsr publish` | `release-npm` |
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
@@ -181,3 +182,6 @@ publisher and approval environment: Actions, `release`, "Run workflow", with
 `typescript/v0.1.0`), one per run. Python publishes the release's attached, attested
 files; TypeScript rebuilds from the tag and stages on npm, where a maintainer approves it
 with 2FA. release-please does not run on a manual run, so nothing new is tagged.
+When the version is already staged on npm and a later step failed (the SBOM, the
+attestation, the release files or JSR), add `typescript_npm_staged`: the run builds and
+packs the same tag again but does not stage it a second time.

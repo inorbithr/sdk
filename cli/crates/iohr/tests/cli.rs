@@ -651,6 +651,15 @@ async fn verbose_output_never_shows_the_token() {
         "{args:?} leaked the token"
     );
     assert!(!all.contains("request id"), "{args:?} made a call");
+    let args = ["sdk", "add", "rust", "--dry-run", "--verbose"];
+    let o = r.with_token(&t, &args);
+    assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+    let all = text(&o);
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER"),
+        "{args:?} leaked the token"
+    );
+    assert!(!all.contains("request id"), "{args:?} made a call");
 }
 
 const LAB_DOC: &str = "---\ntitle: A decision\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe site is www.example.com.\n\n## Status log\n\n- 2026-10-03: opened.\n";
@@ -2195,4 +2204,135 @@ fn sdk_config_describes_what_a_client_would_see() {
         err.contains("region") && err.contains("max_retries"),
         "{err}"
     );
+}
+
+/// `iohr sdk add` in a project directory, with only `extra` in the environment besides
+/// what a process needs; no package manager is ever reached.
+fn sdk_add(dir: &Path, args: &[&str], extra: &[(&str, &std::ffi::OsStr)]) -> Output {
+    let config = dir.join(".iohr-config");
+    Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .arg("sdk")
+        .arg("add")
+        .args(args)
+        .current_dir(dir)
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", &config)
+        .envs(extra.iter().map(|(k, v)| (*k, *v)))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// A repository root with `files` in it.
+fn project(files: &[&str]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".git")).unwrap();
+    for f in files {
+        std::fs::write(dir.path().join(f), "").unwrap();
+    }
+    dir
+}
+
+/// `--dry-run` prints the command the project's files choose and runs nothing; `--json`
+/// gives the argument vector.
+#[test]
+fn sdk_add_dry_run_prints_the_command() {
+    for (files, want) in [
+        (&["Cargo.toml"][..], "cargo add inorbithr"),
+        (
+            &["package.json", "pnpm-lock.yaml"][..],
+            "pnpm add @inorbithr/sdk",
+        ),
+        (&["package.json"][..], "npm install @inorbithr/sdk"),
+        (&["deno.json"][..], "deno add jsr:@inorbithr/sdk"),
+        (&["pyproject.toml", "uv.lock"][..], "uv add inorbithr"),
+        (&["go.mod"][..], "go get github.com/inorbithr/sdk/go@latest"),
+    ] {
+        let p = project(files);
+        let o = sdk_add(p.path(), &["--dry-run"], &[]);
+        assert_eq!(code(&o), 0, "{files:?}: {}", text(&o));
+        assert_eq!(
+            String::from_utf8_lossy(&o.stdout),
+            format!("{want}\n"),
+            "{files:?}"
+        );
+    }
+    let p = project(&["go.mod"]);
+    let o = sdk_add(
+        p.path(),
+        &["go", "--version", "0.2.1", "--dry-run", "--json"],
+        &[],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        v["command"],
+        serde_json::json!(["go", "get", "github.com/inorbithr/sdk/go@v0.2.1"])
+    );
+    assert_eq!(v["dry_run"], true);
+    assert_eq!(v["lang"], "go");
+}
+
+/// What cannot be chosen is a usage error (2) naming what to do; C# and Java are 1.
+#[test]
+fn sdk_add_refuses_what_it_cannot_choose() {
+    let p = project(&["Cargo.toml", "go.mod"]);
+    let o = sdk_add(p.path(), &["--dry-run"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("`iohr sdk add go`"), "{}", text(&o));
+    let p = project(&["requirements.txt"]);
+    let o = sdk_add(p.path(), &["--dry-run"], &[]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("uv add inorbithr"), "{}", text(&o));
+    let o = sdk_add(p.path(), &["java", "--dry-run"], &[]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("not published"), "{}", text(&o));
+}
+
+/// A real run, with a stand-in for the virtualenv's python: the arguments arrive as
+/// given, the command runs in the project, and its exit code is iohr's.
+#[cfg(unix)]
+#[test]
+fn sdk_add_runs_the_program_and_passes_its_exit_code_on() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let p = project(&["requirements.txt"]);
+    let venv = p.path().join("venv");
+    std::fs::create_dir_all(venv.join("bin")).unwrap();
+    let python = venv.join("bin/python");
+    std::fs::write(
+        &python,
+        "#!/bin/sh\nprintf '%s|' \"$@\" > args.txt\nexit \"${FAKE_EXIT:-0}\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let o = sdk_add(
+        p.path(),
+        &["--version", "0.2.1"],
+        &[("VIRTUAL_ENV", venv.as_os_str())],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(
+        std::fs::read_to_string(p.path().join("args.txt")).unwrap(),
+        "-m|pip|install|inorbithr==0.2.1|"
+    );
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("Running `"), "{err}");
+    assert!(err.contains("api = Public.load()"), "{err}");
+    assert!(err.contains("iohr sdk config"), "{err}");
+    assert!(err.contains("requirements.txt"), "{err}");
+    let o = sdk_add(
+        p.path(),
+        &[],
+        &[
+            ("VIRTUAL_ENV", venv.as_os_str()),
+            ("FAKE_EXIT", std::ffi::OsStr::new("3")),
+        ],
+    );
+    assert_eq!(code(&o), 3, "{}", text(&o));
+    // --json: stdout is the answer alone.
+    let o = sdk_add(p.path(), &["--json"], &[("VIRTUAL_ENV", venv.as_os_str())]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["manager"], "pip");
 }
