@@ -17,12 +17,13 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::{self, Message, client::IntoClientRequest as _};
+use tokio_tungstenite::tungstenite::Message;
 use url::Url;
 
-use crate::auth::DynProvider;
-use crate::error::{ApiError, ConfigError, Error, Headers, RawResponse};
-use crate::retry::{backoff, request_id, retry_after, retryable_status};
+use crate::error::{ApiError, Error, RawResponse};
+use crate::middleware::builtins::Shared;
+use crate::middleware::{Body, Engine};
+use crate::retry::{BACKOFF_BASE, BACKOFF_CAP, backoff};
 use crate::stream::{EventStream, Guard, Item, QUEUE, envelope_error};
 
 /// The socket's path.
@@ -30,15 +31,16 @@ const PATH: &str = "/v1/ws";
 /// The largest frame the client sends, as the platform's `x-iohr-limits`.
 const MAX_SEND: usize = 256 * 1024;
 
-/// What the socket task needs from its client.
+/// What the socket task needs from its client: the upgrade goes through the client's
+/// pipeline (`docs/config.md` section 7.12).
 pub(crate) struct Ctx {
     pub(crate) base: Url,
     pub(crate) host: String,
-    pub(crate) provider: Arc<dyn DynProvider>,
+    pub(crate) engine: Arc<Engine>,
+    pub(crate) shared: Arc<Shared>,
+    pub(crate) profile: &'static str,
     pub(crate) max_retries: u32,
     pub(crate) idle: Duration,
-    pub(crate) timeout: Duration,
-    pub(crate) user_agent: String,
 }
 
 enum Command {
@@ -64,6 +66,11 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
+    /// The client went away: once its streams end, the task finds no sender left.
+    pub(crate) fn close(&self) {
+        *self.lock() = None;
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<mpsc::UnboundedSender<Command>>> {
         self.tx
             .lock()
@@ -135,14 +142,18 @@ async fn run(ctx: Arc<Ctx>, hub: Arc<Hub>, mut commands: mpsc::UnboundedReceiver
         if let Some(w) = wait.take() {
             tokio::time::sleep(w).await;
         }
+        // Nothing left to serve: every stream was dropped while the socket was down.
+        if calls.values().all(|c| c.out.is_closed()) && commands.is_empty() {
+            calls.clear();
+            let mut slot = hub.lock();
+            if commands.is_empty() {
+                *slot = None;
+                return;
+            }
+        }
         let ws = match connect(&ctx).await {
             Ok(ws) => ws,
-            Err((error, retry)) => {
-                if retry.is_some() && failures < ctx.max_retries {
-                    wait = Some(retry.flatten().unwrap_or_else(|| backoff(failures)));
-                    failures += 1;
-                    continue;
-                }
+            Err(error) => {
                 let copy = clone_error(&error, &ctx.host);
                 fail(&hub, &mut calls, &mut commands, error, &|| {
                     clone_error(&copy, &ctx.host)
@@ -168,13 +179,16 @@ async fn run(ctx: Arc<Ctx>, hub: Arc<Hub>, mut commands: mpsc::UnboundedReceiver
         match ended {
             Ended::Idle | Ended::Over => return,
             Ended::Reconnect(after) => {
-                if failures >= ctx.max_retries.max(1) {
+                // A reconnect draws from the client's retry budget (section 7.4).
+                let cost = if after.is_some() { 5 } else { 10 };
+                let paid = ctx.shared.budget.as_ref().is_none_or(|b| b.take(cost));
+                if failures >= ctx.max_retries.max(1) || !paid {
                     fail(&hub, &mut calls, &mut commands, closed(&ctx.host), &|| {
                         closed(&ctx.host)
                     });
                     return;
                 }
-                wait = Some(after.unwrap_or_else(|| backoff(failures)));
+                wait = Some(after.unwrap_or_else(|| backoff(failures, BACKOFF_BASE, BACKOFF_CAP)));
                 failures += 1;
             }
         }
@@ -223,167 +237,35 @@ fn fail(
     }
 }
 
-trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
+pub(crate) trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 
-type Ws = WebSocketStream<Box<dyn Io>>;
+pub(crate) type Ws = WebSocketStream<Box<dyn Io>>;
 
-/// One connection: the error, and `Some(wait)` when another attempt may help.
-async fn connect(ctx: &Ctx) -> Result<Ws, (Error, Option<Option<Duration>>)> {
-    let mut refreshed = false;
-    loop {
-        match tokio::time::timeout(ctx.timeout, attempt(ctx)).await {
-            Err(_) => {
-                return Err((
-                    Error::Timeout {
-                        host: ctx.host.clone(),
-                        secs: ctx.timeout.as_secs(),
-                    },
-                    Some(None),
-                ));
-            }
-            Ok(Ok(ws)) => return Ok(ws),
-            Ok(Err(Upgrade::Unauthorized(raw))) => {
-                if refreshed {
-                    return Err((ApiError::parse(raw).into(), None));
-                }
-                ctx.provider.invalidate().await;
-                refreshed = true;
-            }
-            Ok(Err(Upgrade::Refused(raw))) => {
-                let wait = retry_after(&raw.headers);
-                let retry = retryable_status(raw.status).then_some(wait);
-                return Err((ApiError::parse(raw).into(), retry));
-            }
-            Ok(Err(Upgrade::Failed(e, retry))) => return Err((e, retry.then_some(None))),
+/// One connection, through the client's pipeline: its request id, user agent, token
+/// (one fresh one after a `401`), retries and timeouts apply to the upgrade.
+async fn connect(ctx: &Ctx) -> Result<Ws, Error> {
+    let req = crate::client::upgrade_request(&ctx.base, ctx.profile);
+    let state = std::sync::Arc::clone(&req.info.state);
+    let resp = ctx.engine.run(req).await?;
+    match resp.body {
+        Body::Socket(ws) => Ok(ws),
+        Body::Bytes(body) => {
+            let mut raw = RawResponse::part(
+                resp.status,
+                body,
+                state.request_id.get().cloned().unwrap_or_default(),
+            );
+            raw.server_request_id = resp.headers.get("x-request-id").map(str::to_owned);
+            raw.headers = resp.headers;
+            raw.attempts = state.attempts();
+            Err(ApiError::parse(raw).into())
         }
+        Body::Stream(_) => Err(Error::Connection {
+            host: ctx.host.clone(),
+            reason: "the upgrade was answered with a stream".into(),
+        }),
     }
-}
-
-enum Upgrade {
-    Unauthorized(RawResponse),
-    Refused(RawResponse),
-    Failed(Error, bool),
-}
-
-async fn attempt(ctx: &Ctx) -> Result<Ws, Upgrade> {
-    let token = ctx
-        .provider
-        .token()
-        .await
-        .map_err(|e| Upgrade::Failed(Error::Auth(e), false))?;
-    let mut url = ctx.base.clone();
-    let secure = url.scheme() == "https";
-    let _ = url.set_scheme(if secure { "wss" } else { "ws" });
-    url.set_path(PATH);
-    let host = url.host_str().unwrap_or_default().to_owned();
-    let port = url
-        .port_or_known_default()
-        .unwrap_or(if secure { 443 } else { 80 });
-    let id = request_id();
-    let config = |e: String| {
-        Upgrade::Failed(
-            ConfigError::InvalidUrl {
-                what: "base_url",
-                reason: e,
-            }
-            .into(),
-            false,
-        )
-    };
-    let mut request = url
-        .as_str()
-        .into_client_request()
-        .map_err(|e| config(e.to_string()))?;
-    let headers = request.headers_mut();
-    for (name, value) in [
-        ("authorization", format!("Bearer {}", token.expose())),
-        ("user-agent", ctx.user_agent.clone()),
-        ("x-request-id", id.clone()),
-    ] {
-        headers.insert(
-            name,
-            value
-                .parse()
-                .map_err(|_| config(format!("{name} is not a header value")))?,
-        );
-    }
-    let failed = |reason: String| {
-        Upgrade::Failed(
-            Error::Connection {
-                host: ctx.host.clone(),
-                reason,
-            },
-            true,
-        )
-    };
-    let tcp = tokio::net::TcpStream::connect((host.as_str(), port))
-        .await
-        .map_err(|e| failed(e.to_string()))?;
-    let _ = tcp.set_nodelay(true);
-    let io: Box<dyn Io> = if secure {
-        tls(&host, tcp).await.map_err(|e| match e {
-            Error::Config(c) => Upgrade::Failed(Error::Config(c), false),
-            other => failed(other.to_string()),
-        })?
-    } else {
-        Box::new(tcp)
-    };
-    let mut config = tungstenite::protocol::WebSocketConfig::default();
-    config.max_message_size = Some(crate::error::MAX_BODY);
-    config.max_frame_size = Some(crate::error::MAX_BODY);
-    match tokio_tungstenite::client_async_with_config(request, io, Some(config)).await {
-        Ok((ws, _)) => Ok(ws),
-        Err(tungstenite::Error::Http(resp)) => {
-            let status = resp.status().as_u16();
-            let headers = Headers::new(resp.headers().iter().map(|(k, v)| {
-                (
-                    k.as_str().to_owned(),
-                    v.to_str().unwrap_or_default().to_owned(),
-                )
-            }));
-            let body = resp.into_body().unwrap_or_default();
-            let mut raw = RawResponse::part(status, body, id);
-            raw.server_request_id = headers.get("x-request-id").map(str::to_owned);
-            raw.headers = headers;
-            Err(if status == 401 {
-                Upgrade::Unauthorized(raw)
-            } else {
-                Upgrade::Refused(raw)
-            })
-        }
-        Err(e) => Err(failed(e.to_string())),
-    }
-}
-
-#[cfg(feature = "rustls")]
-async fn tls(host: &str, tcp: tokio::net::TcpStream) -> Result<Box<dyn Io>, Error> {
-    use rustls_platform_verifier::BuilderVerifierExt as _;
-    let http = |e: String| -> Error { ConfigError::Http(e).into() };
-    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let mut config = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|e| http(e.to_string()))?
-        .with_platform_verifier()
-        .map_err(|e| http(e.to_string()))?
-        .with_no_client_auth();
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
-    let name = rustls::pki_types::ServerName::try_from(host.to_owned())
-        .map_err(|e| http(e.to_string()))?;
-    let stream = tokio_rustls::TlsConnector::from(Arc::new(config))
-        .connect(name, tcp)
-        .await
-        .map_err(|e| Error::Connection {
-            host: host.to_owned(),
-            reason: e.to_string(),
-        })?;
-    Ok(Box::new(stream))
-}
-
-#[cfg(not(feature = "rustls"))]
-#[allow(clippy::unused_async)] // the same signature as with rustls
-async fn tls(_host: &str, _tcp: tokio::net::TcpStream) -> Result<Box<dyn Io>, Error> {
-    Err(ConfigError::Http("TLS needs the `rustls` feature".into()).into())
 }
 
 /// A frame from the server.

@@ -350,6 +350,15 @@ pub(crate) struct Settings {
 }
 
 impl Settings {
+    /// Default trust and no client certificate: the TLS of a socket next to a caller's
+    /// own HTTP client.
+    pub(crate) fn plain_tls() -> Self {
+        let empty = ResolvedConfig::new(serde_json::json!({ "settings": {} }));
+        let mut s = Self::from_resolved(&empty, &BTreeMap::new()).unwrap_or_else(|_| unreachable!());
+        s.proxy = ProxyRules::default();
+        s
+    }
+
     /// Reads the typed settings from a resolved description. A value missing from it
     /// takes the catalogue's default.
     pub(crate) fn from_resolved(

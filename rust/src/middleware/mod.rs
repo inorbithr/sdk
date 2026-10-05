@@ -49,7 +49,7 @@
 //! own is yours to keep to that rule.
 
 pub(crate) mod builtins;
-mod log;
+pub(crate) mod log;
 
 use std::borrow::Cow;
 use std::fmt;
@@ -460,7 +460,7 @@ impl<'a> Next<'a> {
 }
 
 #[derive(Clone)]
-struct Entry {
+pub(crate) struct Entry {
     name: Cow<'static, str>,
     mw: Arc<dyn Middleware>,
 }
