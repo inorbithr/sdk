@@ -202,7 +202,11 @@ jobs:
           # Node 24 bundles it.
           npm --version | awk -F. '{ exit !($1 > 11 || ($1 == 11 && $2 >= 15)) }' || { echo "npm too old for staged publishing" >&2; exit 1; }
           if [ "$NPM_STAGED" = true ]; then echo "already staged on npm; not staging again"; else npm stage publish; fi
-      - run: mise run ts:sbom && mise run sbom:validate
+      # The same command as mise's ts:sbom, written here because the job checks out the tag:
+      # a manual run of an older tag would otherwise get that tag's (npm sbom) task.
+      - working-directory: typescript
+        run: mkdir -p ../dist/sbom && pnpm sbom --sbom-format cyclonedx --prod > ../dist/sbom/typescript.cdx.json
+      - run: mise run sbom:validate
       - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-path: dist/*.tgz
