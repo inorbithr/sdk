@@ -1,9 +1,9 @@
 {
-  "go": "0.2.1",
-  "rust": "0.2.1",
-  "typescript": "0.2.1",
-  "python": "0.2.1",
+  "go": "0.2.2",
+  "rust": "0.2.2",
+  "typescript": "0.2.2",
+  "python": "0.2.2",
   "csharp": "0.2.2",
   "java": "0.2.1",
-  "cli": "0.1.0-alpha.9"
+  "cli": "0.1.0-alpha.10"
 }

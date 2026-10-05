@@ -13,6 +13,7 @@ mod login;
 mod openapi;
 mod profile;
 mod sdk;
+mod sdk_add;
 mod token;
 mod whoami;
 
@@ -51,6 +52,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sdk(SdkCommand::Check(args)) => sdk::check(g, &env, &args, out).await,
         Command::Sdk(SdkCommand::Examples(args)) => sdk::examples(&args, out),
         Command::Sdk(SdkCommand::Config(args)) => sdk::config(g, &args),
+        Command::Sdk(SdkCommand::Add(args)) => sdk_add::add(&args, out),
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,

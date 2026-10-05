@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.2](https://github.com/inorbithr/sdk/compare/python/v0.2.1...python/v0.2.2) (2026-10-05)
+
+
+### Features
+
+* **conformance:** replay matchers, TLS, mTLS and proxy listeners, fake iohr (M6) ([#113](https://github.com/inorbithr/sdk/issues/113)) ([fe098b6](https://github.com/inorbithr/sdk/commit/fe098b64bbfec4980ec7d1f3f2efe925873498b1))
+* **py:** calls have a 120 s total deadline by default (total_timeout) ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+* **py:** load, the credential chain, the middleware pipeline, transport settings, logging and OpenTelemetry (M6) ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+* **py:** writes that take Idempotency-Key are retried, with one key per call ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+
+
+### Bug fixes
+
+* **py:** the attempt timeout covers the body; the socket sends an iohr- request id and uses the proxy; the token exchange sends the SDK's user agent; from_env normalises profile names ([3c8075d](https://github.com/inorbithr/sdk/commit/3c8075d922cd8341dd80815636d7936d56815cdd))
+
+
+### Dependencies
+
+* **py:** allow websockets 17 and lock 17.2 ([#138](https://github.com/inorbithr/sdk/issues/138)) ([614c9fd](https://github.com/inorbithr/sdk/commit/614c9fdf3e0e96f01997a17664927e7bc141a671))
+
 ## [0.2.1](https://github.com/inorbithr/sdk/compare/python/v0.2.0...python/v0.2.1) (2026-10-04)
 
 
