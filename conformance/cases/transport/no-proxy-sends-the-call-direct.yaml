@@ -1,7 +1,7 @@
 name: no-proxy-sends-the-call-direct
 area: transport
 summary: A host that no_proxy names is reached directly even when a proxy is set.
-pending: [java, csharp]
+pending: [java]
 notes: M6, docs/config.md section 6.2.
 client: { transport: proxy, no_proxy: "127.0.0.1" }
 action: { op: me }

@@ -58,7 +58,9 @@ passing, README showing `load` first):
       proxy, CA, mTLS and pinning, OpenTelemetry in the `go/otel` module; every case and
       vector passing)
 - [ ] Java (`inorbit-sdk-otel` artifact)
-- [ ] C#
+- [x] C# (`Client.Load`, the pipeline with `Middleware.FromHandler` for `DelegatingHandler`s,
+      proxy, CA and mTLS on `SocketsHttpHandler`, `ActivitySource` and `Meter` built in;
+      every case and vector passing)
 
 New runtime dependencies, each named with its reason in the pull request (SR-20):
 a TOML parser in every language but Python, `tracing` in Rust,

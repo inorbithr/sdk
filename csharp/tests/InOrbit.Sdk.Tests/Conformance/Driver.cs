@@ -6,8 +6,10 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using InOrbit.Sdk.Api;
+using Microsoft.Extensions.Logging;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -23,13 +25,13 @@ public sealed class Driver(ITestOutputHelper output)
 {
     private const string Self = "csharp";
 
+    private static string ReplayBin { get; } = Path.Combine(Support.Root, "conformance/server/bin/replay" + (OperatingSystem.IsWindows() ? ".exe" : string.Empty));
+
     [Fact]
     [Trait("Category", "Conformance")]
     public async Task Every_case_passes()
     {
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../.."));
-        var bin = Path.Combine(root, "conformance/server/bin/replay" + (OperatingSystem.IsWindows() ? ".exe" : string.Empty));
-        if (!File.Exists(bin))
+        if (!File.Exists(ReplayBin))
         {
             var note = "conformance: no replay server at conformance/server/bin/replay; run `mise run conformance:server:build`";
             Assert.True(Environment.GetEnvironmentVariable("IOHR_TEST_REQUIRE_REPLAY") is null, note);
@@ -37,9 +39,9 @@ public sealed class Driver(ITestOutputHelper output)
             return;
         }
 
-        using var replay = Process.Start(new ProcessStartInfo(bin)
+        using var replay = Process.Start(new ProcessStartInfo(ReplayBin)
         {
-            ArgumentList = { "--addr", "127.0.0.1:0", "--cases", Path.Combine(root, "conformance/cases") },
+            ArgumentList = { "--addr", "127.0.0.1:0", "--cases", Path.Combine(Support.Root, "conformance/cases") },
             RedirectStandardOutput = true,
             UseShellExecute = false,
         })!;
@@ -54,6 +56,7 @@ public sealed class Driver(ITestOutputHelper output)
                 .EnumerateArray().Select(c => c.GetString()!).ToList();
             Assert.NotEmpty(cases);
             var failed = new List<string>();
+            var passed = 0;
             foreach (var name in cases)
             {
                 using var loaded = await http.PostAsync("/_case", new StringContent(JsonSerializer.Serialize(new { name }), Encoding.UTF8, "application/json"));
@@ -64,18 +67,27 @@ public sealed class Driver(ITestOutputHelper output)
                 }
 
                 Assert.True(loaded.IsSuccessStatusCode, $"{name}: loading answered {(int)loaded.StatusCode}");
-                var c = JsonDocument.Parse(await loaded.Content.ReadAsStringAsync()).RootElement.GetProperty("case");
-                var area = c.GetProperty("area").GetString();
-                var pending = c.TryGetProperty("pending", out var p) && p.EnumerateArray().Any(x => x.GetString() == Self);
-                if (pending)
+                var answer = JsonNode.Parse(await loaded.Content.ReadAsStringAsync())!.AsObject();
+                var c = answer["case"]!.AsObject();
+                if (c["pending"] is JsonArray pending && pending.Any(x => x!.GetValue<string>() == Self))
                 {
                     output.WriteLine($"skip {name}: pending for {Self}");
                     continue;
                 }
 
-                var problems = await RunAsync(c, url, http);
+                List<string> problems;
+                try
+                {
+                    problems = await RunAsync(answer, c, http);
+                }
+                catch (InOrbitException e)
+                {
+                    problems = [$"building the client: {e.Message}"];
+                }
+
                 if (problems.Count == 0)
                 {
+                    passed++;
                     output.WriteLine($"pass {name}");
                 }
                 else
@@ -84,103 +96,387 @@ public sealed class Driver(ITestOutputHelper output)
                 }
             }
 
+            output.WriteLine($"conformance: {passed} passed, {failed.Count} failed");
             Assert.True(failed.Count == 0, string.Join("\n", failed));
         }
         finally
         {
-            replay.Kill(entireProcessTree: true);
+            Stop(replay);
         }
     }
 
-    private static async Task<List<string>> RunAsync(JsonElement c, string url, HttpClient http)
+    /// <summary>Stops the server with SIGTERM, so it removes its certificate directory; SIGKILL only if it lingers.</summary>
+    private static void Stop(Process replay)
     {
-        var o = c.TryGetProperty("client", out var co) ? co : default;
-        string? Str(JsonElement e, string n) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(n, out var v) ? v.GetString() : null;
-        int? Int(JsonElement e, string n) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(n, out var v) ? v.GetInt32() : null;
-        var scopes = o.ValueKind == JsonValueKind.Object && o.TryGetProperty("scopes", out var s)
-            ? s.EnumerateArray().Select(x => x.GetString()!).ToArray()
-            : ["identity:read"];
-        var timeout = Int(o, "timeout_ms");
-        var idle = Int(o, "stream_idle_timeout_ms");
-        using var client = new Client<PublicProfile>(new ClientOptions
+        if (!OperatingSystem.IsWindows() && !replay.HasExited)
         {
-            BaseUrl = new Uri(url),
-            TokenUrl = new Uri(url + "/oauth2/token"),
-            KeyId = Str(o, "key_id") ?? "ak_test",
-            KeySecret = Str(o, "key_secret") ?? "s3cr3t",
-            Scopes = scopes,
-            MaxRetries = Int(o, "max_retries") ?? 2,
-            Timeout = timeout is { } ms ? TimeSpan.FromMilliseconds(ms) : null,
-            Streams = Str(o, "streams") == "socket" ? StreamTransport.Socket : StreamTransport.Sse,
-            StreamIdleTimeout = idle is { } im ? TimeSpan.FromMilliseconds(im) : null,
-        });
-        var action = c.GetProperty("action");
-        var args = action.TryGetProperty("args", out var a) ? a : default;
-        var expect = c.GetProperty("expect");
-        if (action.GetProperty("op").GetString() == "events.stream_events")
-        {
-            return await StreamAsync(client, action, args, expect, http);
+            using var term = Process.Start(new ProcessStartInfo("kill") { ArgumentList = { "-TERM", replay.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) }, UseShellExecute = false });
+            term?.WaitForExit(5000);
+            if (replay.WaitForExit(5000))
+            {
+                return;
+            }
         }
 
-        var results = new List<object>();
-        async Task<object> Run()
+        replay.Kill(entireProcessTree: true);
+    }
+
+    private static string Substitute(string text, string replay, string dir) => text.Replace("{replay}", replay, StringComparison.Ordinal).Replace("{dir}", dir, StringComparison.Ordinal);
+
+    private static async Task<List<string>> RunAsync(JsonObject answer, JsonObject c, HttpClient http)
+    {
+        var o = c["client"] as JsonObject ?? [];
+        var baseUrl = answer["base_url"]!.GetValue<string>();
+        var dir = Directory.CreateTempSubdirectory("inorbit-case-").FullName;
+        try
+        {
+            using var built = Build(answer, o, baseUrl, dir);
+            var action = c["action"]!.AsObject();
+            var args = action["args"] as JsonObject ?? [];
+            var expect = c["expect"]!.AsObject();
+            if (action["op"]!.GetValue<string>() == "events.stream_events")
+            {
+                return await StreamAsync(built.Client, action, args, expect, http);
+            }
+
+            var client = built.Client;
+            if (action["options"] is JsonObject opts)
+            {
+                client = client.WithOptions(new CallOptions
+                {
+                    IdempotencyKey = opts["idempotency_key"]?.GetValue<string>(),
+                    Traceparent = opts["traceparent"]?.GetValue<string>(),
+                    Timeout = opts["timeout_ms"] is { } ms ? TimeSpan.FromMilliseconds(ms.GetValue<long>()) : null,
+                });
+            }
+
+            var results = new List<object>();
+            async Task<object> Run()
+            {
+                try
+                {
+                    return await CallAsync(client, action["op"]!.GetValue<string>(), args);
+                }
+                catch (InOrbitException e)
+                {
+                    return e;
+                }
+            }
+
+            using (built.Root?.Start())
+            {
+                if (action["concurrent"] is { } n)
+                {
+                    results.AddRange(await Task.WhenAll(Enumerable.Range(0, (int)n.GetValue<long>()).Select(_ => Run())));
+                }
+                else
+                {
+                    var repeat = action["repeat"] is { } r ? (int)r.GetValue<long>() : 1;
+                    var rewrite = action["rewrite"] as JsonObject;
+                    for (var i = 0; i < repeat; i++)
+                    {
+                        results.Add(await Run());
+                        if (rewrite is not null && i + 1 == rewrite["after"]!.GetValue<long>())
+                        {
+                            foreach (var (file, content) in rewrite["files"]!.AsObject())
+                            {
+                                await File.WriteAllTextAsync(Path.Combine(dir, file), content!.GetValue<string>());
+                            }
+                        }
+                    }
+                }
+            }
+
+            var problems = await VerdictAsync(http, expect);
+            var wantOk = expect["ok"];
+            var wantError = expect["error"] as JsonObject;
+            foreach (var result in results)
+            {
+                switch (result)
+                {
+                    case RawResponse raw when wantOk is not null:
+                        var body = raw.Text();
+                        if (Support.Subset(wantOk, JsonNode.Parse(body)) is { } p)
+                        {
+                            problems.Add($"ok: want a superset of {wantOk.ToJsonString()}, got {body} ({p})");
+                        }
+
+                        break;
+                    case RawResponse raw when wantError is not null:
+                        problems.Add($"want an error, got HTTP {raw.Status}");
+                        break;
+                    case InOrbitException e when wantError is not null:
+                        problems.AddRange(CheckError(e, wantError));
+                        break;
+                    case InOrbitException e when wantOk is not null:
+                        problems.Add($"want ok, got {e.Message}");
+                        break;
+                }
+            }
+
+            problems.AddRange(CheckM6(expect, built, results.LastOrDefault()));
+            return problems;
+        }
+        finally
         {
             try
             {
-                return await CallAsync(client, action.GetProperty("op").GetString()!, args);
+                Directory.Delete(dir, recursive: true);
             }
-            catch (InOrbitException e)
+            catch (IOException)
             {
-                return e;
+                // A file still held open on Windows: the temporary directory goes later.
             }
         }
+    }
 
-        if (action.TryGetProperty("concurrent", out var n))
+    /// <summary>The client a case describes, and what it records: probes, logs, spans.</summary>
+    private static Built Build(JsonObject answer, JsonObject o, string baseUrl, string dir)
+    {
+        string? Str(string n) => o[n]?.GetValue<string>();
+        long? Long(string n) => o[n]?.GetValue<long>();
+        foreach (var (name, content) in o["files"] as JsonObject ?? [])
         {
-            results.AddRange(await Task.WhenAll(Enumerable.Range(0, n.GetInt32()).Select(_ => Run())));
+            var p = Path.Combine(dir, name);
+            Directory.CreateDirectory(Path.GetDirectoryName(p)!);
+            File.WriteAllText(p, Substitute(content!.GetValue<string>(), baseUrl, dir));
+        }
+
+        var built = new Built();
+        var load = o["load"]?.GetValue<bool>() == true;
+        var transport = Str("transport");
+        var tracing = o["tracing"]?.GetValue<bool>();
+        var options = new ClientOptions
+        {
+            MaxRetries = Long("max_retries") is { } mr ? (int)mr : load ? null : 2,
+            Timeout = Long("timeout_ms") is { } ms ? TimeSpan.FromMilliseconds(ms) : null,
+            Streams = Str("streams") switch { "socket" => StreamTransport.Socket, "sse" => StreamTransport.Sse, _ => null },
+            StreamIdleTimeout = Long("stream_idle_timeout_ms") is { } im ? TimeSpan.FromMilliseconds(im) : null,
+            Log = Str("log") switch
+            {
+                null => null,
+                "debug" => LogLevel.Debug,
+                "info" => LogLevel.Information,
+                "warn" => LogLevel.Warning,
+                "error" => LogLevel.Error,
+                _ => LogLevel.None,
+            },
+            LoggerFactory = Str("log") is null ? null : built.Logs,
+            LogHeaders = o["log_headers"]?.GetValue<bool>(),
+            LogAllowHeaders = (o["log_allow_headers"] as JsonArray)?.Select(x => x!.GetValue<string>()).ToArray(),
+            RateLimit = Str("rate_limit") switch { "wait" => RateLimitMode.Wait, "off" => RateLimitMode.Off, "observe" => RateLimitMode.Observe, _ => null },
+            TotalTimeout = Long("total_timeout_ms") is { } tt ? TimeSpan.FromMilliseconds(tt) : null,
+            RetryBudgetCapacity = Long("retry_budget_capacity") is { } cap ? (int)cap : null,
+            Tracing = tracing,
+            CaBundle = transport is "https" or "proxy" or "mtls" ? answer["ca_file"]!.GetValue<string>() : null,
+            ClientCert = transport == "mtls" ? answer["client_cert_file"]!.GetValue<string>() : null,
+            ClientKey = transport == "mtls" ? answer["client_key_file"]!.GetValue<string>() : null,
+            Proxy = transport == "proxy" ? answer["proxy_url"]!.GetValue<string>() : null,
+            NoProxy = Str("no_proxy") is { } np ? np.Split(',') : null,
+            CredentialSources = (o["credential_sources"] as JsonArray)?.Select(x => x!.GetValue<string>()).ToArray(),
+            CliPath = o["cli"]?.GetValue<bool>() == true ? ReplayBin : null,
+            Pipeline = o["pipeline"] is JsonObject pipeline ? p => Edit(p, pipeline, built.Probes) : null,
+        };
+        if (tracing == true)
+        {
+            built.Listen();
+        }
+
+        if (load)
+        {
+            var env = (o["env"] as JsonObject ?? []).ToDictionary(kv => kv.Key, kv => Substitute(kv.Value!.GetValue<string>(), baseUrl, dir), StringComparer.Ordinal);
+            string? configFile = null;
+            if (Str("config_file") is { } text)
+            {
+                configFile = Path.Combine(dir, "config.toml");
+                File.WriteAllText(configFile, Substitute(text, baseUrl, dir));
+            }
+
+            built.Client = Client.Load(
+                options with { ConfigFile = configFile, Profile = Str("profile") },
+                new LoadOptions { Environment = env, NoHome = true, WorkingDirectory = dir });
         }
         else
         {
-            var repeat = action.TryGetProperty("repeat", out var r) ? r.GetInt32() : 1;
-            for (var i = 0; i < repeat; i++)
+            built.Client = new Client<PublicProfile>(options with
             {
-                results.Add(await Run());
+                BaseUrl = new Uri(baseUrl),
+                TokenUrl = new Uri(baseUrl + "/oauth2/token"),
+                KeyId = Str("key_id") ?? "ak_test",
+                KeySecret = Str("key_secret") ?? "s3cr3t",
+                Scopes = (o["scopes"] as JsonArray)?.Select(x => x!.GetValue<string>()).ToArray() ?? ["identity:read"],
+            });
+        }
+
+        return built;
+    }
+
+    /// <summary>Adds the case's probes and removes the built-ins it names.</summary>
+    private static void Edit(Pipeline p, JsonObject pipeline, Dictionary<string, List<Dictionary<string, string>>> probes)
+    {
+        foreach (var add in pipeline["add"] as JsonArray ?? [])
+        {
+            var name = add!["name"]!.GetValue<string>();
+            var seen = new List<Dictionary<string, string>>();
+            probes[name] = seen;
+            var probe = Middleware.Create(name, (req, next, ct) =>
+            {
+                lock (seen)
+                {
+                    seen.Add(new Dictionary<string, string>(req.Headers, StringComparer.OrdinalIgnoreCase));
+                }
+
+                return next(req, ct);
+            });
+            if (add["before"]?.GetValue<string>() is { } before)
+            {
+                p.InsertBefore(before, probe);
+            }
+            else if (add["after"]?.GetValue<string>() is { } after)
+            {
+                p.InsertAfter(after, probe);
+            }
+            else if (add["stage"]?.GetValue<string>() == "per_call")
+            {
+                p.AddPerCall(probe);
+            }
+            else
+            {
+                p.AddPerRetry(probe);
             }
         }
 
-        var problems = await VerdictAsync(http, expect);
-
-        var wantOk = expect.TryGetProperty("ok", out var ok) ? ok : (JsonElement?)null;
-        var wantError = expect.TryGetProperty("error", out var err) ? err : (JsonElement?)null;
-        foreach (var result in results)
+        foreach (var remove in pipeline["remove"] as JsonArray ?? [])
         {
-            switch (result)
-            {
-                case RawResponse raw when wantOk is { } w:
-                    var body = raw.Json();
-                    if (body is not { } got || !Subset(w, got))
-                    {
-                        problems.Add($"ok: want a superset of {w.GetRawText()}, got {raw.Text()}");
-                    }
+            p.Remove(remove!.GetValue<string>());
+        }
+    }
 
-                    break;
-                case RawResponse raw when wantError is not null:
-                    problems.Add($"want an error, got HTTP {raw.Status}");
-                    break;
-                case InOrbitException e when wantError is { } w:
-                    problems.AddRange(CheckError(e, w));
-                    break;
-                case InOrbitException e when wantOk is not null:
-                    problems.Add($"want ok, got {e.Message}");
-                    break;
+    /// <summary>What the M6 expectations add: probes, logs, spans, the rate limit, the key, the config.</summary>
+    private static List<string> CheckM6(JsonObject expect, Built built, object? last)
+    {
+        var problems = new List<string>();
+        foreach (var (name, want) in expect["probes"] as JsonObject ?? [])
+        {
+            var seen = built.Probes.TryGetValue(name, out var s) ? s : [];
+            if (want!["count"] is { } count && seen.Count != count.GetValue<long>())
+            {
+                problems.Add($"probe {name}: ran {seen.Count} times, want {count}");
             }
+
+            var captures = new Dictionary<string, string>(StringComparer.Ordinal);
+            var i = 0;
+            foreach (var headers in want["seen"] as JsonArray ?? [])
+            {
+                foreach (var (h, v) in headers!.AsObject())
+                {
+                    var got = i < seen.Count && seen[i].TryGetValue(h, out var g) ? g : null;
+                    if (!Support.Matches(v!.GetValue<string>(), got, captures))
+                    {
+                        problems.Add($"probe {name} request {i + 1}: {h} is {got ?? "absent"}, want {v}");
+                    }
+                }
+
+                i++;
+            }
+        }
+
+        if (expect["logs"] is JsonObject logs)
+        {
+            var records = built.Logs.Records;
+            var text = string.Join("\n", records.Select(r => r.ToJsonString()));
+            foreach (var w in logs["contains"] as JsonArray ?? [])
+            {
+                if (!records.Any(r => Support.Subset(w, r) is null))
+                {
+                    problems.Add($"logs: no record holds {w!.ToJsonString()}: {text}");
+                }
+            }
+
+            foreach (var x in logs["excludes"] as JsonArray ?? [])
+            {
+                if (text.Contains(x!.GetValue<string>(), StringComparison.Ordinal))
+                {
+                    problems.Add($"logs: {x} appears in {text}");
+                }
+            }
+        }
+
+        if (expect["spans"] is JsonArray spans)
+        {
+            var got = built.Spans();
+            if (got.Count != spans.Count)
+            {
+                problems.Add($"spans: want {spans.Count}, got {got.Count}: {string.Join("; ", got.Select(Describe))}");
+            }
+            else
+            {
+                for (var i = 0; i < spans.Count; i++)
+                {
+                    var w = spans[i]!.AsObject();
+                    var a = got[i];
+                    var kind = w["kind"]?.GetValue<string>() switch { "internal" => ActivityKind.Internal, "client" => ActivityKind.Client, _ => a.Kind };
+                    var attributes = new JsonObject(a.TagObjects.Select(t => KeyValuePair.Create(t.Key, t.Value is null ? null : JsonSerializer.SerializeToNode(t.Value, t.Value.GetType()))));
+                    if (a.DisplayName != w["name"]!.GetValue<string>() || a.Kind != kind || Support.Subset(w["attributes"] ?? new JsonObject(), attributes) is not null)
+                    {
+                        problems.Add($"span {i}: want {w.ToJsonString()}, got {Describe(a)}");
+                    }
+                }
+            }
+        }
+
+        var raw = last as RawResponse;
+        if (expect.ContainsKey("rate_limit"))
+        {
+            var r = raw?.RateLimit;
+            JsonObject? got = null;
+            if (r is not null)
+            {
+                got = [];
+                if (r.Limit is { } l)
+                {
+                    got["limit"] = l;
+                }
+
+                if (r.Remaining is { } rem)
+                {
+                    got["remaining"] = rem;
+                }
+
+                if (r.Reset is { } reset)
+                {
+                    got["reset_ms"] = (long)reset.TotalMilliseconds;
+                }
+            }
+
+            if (Support.Subset(expect["rate_limit"], got) is { } p)
+            {
+                problems.Add($"rate_limit: {p}");
+            }
+        }
+
+        if (expect["idempotency_key"]?.GetValue<string>() is { } key)
+        {
+            var k = raw?.IdempotencyKey;
+            if (key == "*" ? string.IsNullOrEmpty(k) : k != key)
+            {
+                problems.Add($"idempotency_key: want {key}, got {k ?? "none"}");
+            }
+        }
+
+        if (expect["config"] is JsonObject config && Support.Subset(config, built.Client.Config.Describe()) is { } cp)
+        {
+            problems.Add($"config: {cp} in {built.Client.Config}");
         }
 
         return problems;
     }
 
+    private static string Describe(Activity a) =>
+        $"{a.DisplayName} ({a.Kind}) {{{string.Join(", ", a.TagObjects.Select(t => $"{t.Key}={t.Value}"))}}}";
+
     /// <summary>The server's verdict and the counts the case expects.</summary>
-    private static async Task<List<string>> VerdictAsync(HttpClient http, JsonElement expect)
+    private static async Task<List<string>> VerdictAsync(HttpClient http, JsonObject expect)
     {
         var problems = new List<string>();
         JsonElement verdict = default;
@@ -203,9 +499,9 @@ public sealed class Driver(ITestOutputHelper output)
 
         foreach (var key in new[] { "attempts", "token_exchanges" })
         {
-            if (expect.TryGetProperty(key, out var want) && (!verdict.TryGetProperty(key, out var got) || got.GetInt32() != want.GetInt32()))
+            if (expect[key] is { } want && (!verdict.TryGetProperty(key, out var got) || got.GetInt64() != want.GetValue<long>()))
             {
-                problems.Add($"{key}: want {want.GetInt32()}, got {(verdict.TryGetProperty(key, out var g) ? g.GetRawText() : "none")}");
+                problems.Add($"{key}: want {want}, got {(verdict.TryGetProperty(key, out var g) ? g.GetRawText() : "none")}");
             }
         }
 
@@ -213,17 +509,17 @@ public sealed class Driver(ITestOutputHelper output)
     }
 
     /// <summary>A stream case: read the events (stopping after <c>take</c>), then compare the items and the error.</summary>
-    private static async Task<List<string>> StreamAsync(Client<PublicProfile> client, JsonElement action, JsonElement args, JsonElement expect, HttpClient http)
+    private static async Task<List<string>> StreamAsync(Client<PublicProfile> client, JsonObject action, JsonObject args, JsonObject expect, HttpClient http)
     {
-        var take = action.TryGetProperty("take", out var t) ? t.GetInt32() : int.MaxValue;
-        var types = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("types", out var ty) ? ty.GetString() : null;
-        var items = new List<JsonElement>();
+        var take = action["take"] is { } t ? t.GetValue<long>() : long.MaxValue;
+        var types = args["types"]?.GetValue<string>();
+        var items = new List<JsonNode?>();
         InOrbitException? error = null;
         try
         {
             await foreach (var ev in client.Events().StreamEventsAsync(types is null ? null : new EventsStreamEventsParams { Types = types }))
             {
-                items.Add(JsonSerializer.SerializeToElement(ev));
+                items.Add(JsonSerializer.SerializeToNode(ev));
                 if (items.Count >= take)
                 {
                     break;
@@ -236,25 +532,25 @@ public sealed class Driver(ITestOutputHelper output)
         }
 
         var problems = await VerdictAsync(http, expect);
-        if (expect.TryGetProperty("items", out var want))
+        if (expect["items"] is JsonArray want)
         {
-            if (want.GetArrayLength() != items.Count)
+            if (want.Count != items.Count)
             {
-                problems.Add($"items: want {want.GetArrayLength()}, got {items.Count}{(error is null ? string.Empty : $" then {error.Message}")}");
+                problems.Add($"items: want {want.Count}, got {items.Count}{(error is null ? string.Empty : $" then {error.Message}")}");
             }
             else
             {
-                foreach (var (w, g) in want.EnumerateArray().Zip(items))
+                for (var i = 0; i < want.Count; i++)
                 {
-                    if (!Subset(w, g))
+                    if (Support.Subset(want[i], items[i]) is { } p)
                     {
-                        problems.Add($"item: want a superset of {w.GetRawText()}, got {g.GetRawText()}");
+                        problems.Add($"item: want a superset of {want[i]!.ToJsonString()}, got {items[i]?.ToJsonString()} ({p})");
                     }
                 }
             }
         }
 
-        if (expect.TryGetProperty("error", out var we))
+        if (expect["error"] is JsonObject we)
         {
             if (error is null)
             {
@@ -274,10 +570,11 @@ public sealed class Driver(ITestOutputHelper output)
     }
 
     /// <summary>The case's action, through the generated public surface.</summary>
-    private static async Task<object> CallAsync(Client<PublicProfile> client, string op, JsonElement args)
+    private static async Task<object> CallAsync(Client<PublicProfile> client, string op, JsonObject args)
     {
-        string Arg(string n) => args.ValueKind == JsonValueKind.Object && args.TryGetProperty(n, out var v) ? v.GetString() ?? string.Empty : string.Empty;
-        string? Opt(string n) => args.ValueKind == JsonValueKind.Object && args.TryGetProperty(n, out var v) ? v.GetString() : null;
+        string Arg(string n) => args[n]?.GetValue<string>() ?? string.Empty;
+        string? Opt(string n) => args[n]?.GetValue<string>();
+        string[]? List(string n) => (args[n] as JsonArray)?.Select(x => x!.GetValue<string>()).ToArray();
         return op switch
         {
             "me" => (await client.MeAsync()).Raw,
@@ -289,23 +586,23 @@ public sealed class Driver(ITestOutputHelper output)
                 AccountId = Opt("account_id"),
                 Url = Opt("url"),
                 Description = Opt("description"),
-                EventTypes = args.TryGetProperty("event_types", out var types) ? types.EnumerateArray().Select(x => x.GetString()!).ToArray() : null,
+                EventTypes = List("event_types"),
             })).Raw,
             "events.update_endpoint" => (await client.Events().UpdateEndpointAsync(Arg("endpoint_id"), new UpdateEndpointRequest
             {
                 Url = Opt("url"),
                 Description = Opt("description"),
-                Enabled = args.TryGetProperty("enabled", out var enabled) ? enabled.GetBoolean() : null,
-                EventTypes = args.TryGetProperty("event_types", out var updated) ? updated.EnumerateArray().Select(x => x.GetString()!).ToArray() : null,
+                Enabled = args["enabled"]?.GetValue<bool>(),
+                EventTypes = List("event_types"),
             })).Raw,
             "events.delete_endpoint" => (await client.Events().DeleteEndpointAsync(Arg("endpoint_id"))).Raw,
             _ => throw new InvalidOperationException($"the conformance schema names an op this driver does not know: {op}"),
         };
     }
 
-    private static IEnumerable<string> CheckError(InOrbitException e, JsonElement want)
+    private static IEnumerable<string> CheckError(InOrbitException e, JsonObject want)
     {
-        string? Str(string n) => want.TryGetProperty(n, out var v) ? v.ToString() : null;
+        string? Str(string n) => want[n] is { } v ? (v.GetValueKind() == JsonValueKind.String ? v.GetValue<string>() : v.ToJsonString()) : null;
         if (Str("kind") is { } kind && e.Kind != kind)
         {
             yield return $"error kind: want {kind}, got {e.Kind} ({e.Message})";
@@ -318,12 +615,12 @@ public sealed class Driver(ITestOutputHelper output)
                 yield return $"error code: want {code}, got {api.Code}";
             }
 
-            if (want.TryGetProperty("status", out var st) && api.Status != st.GetInt32())
+            if (want["status"] is { } st && api.Status != st.GetValue<long>())
             {
-                yield return $"error status: want {st.GetInt32()}, got {api.Status}";
+                yield return $"error status: want {st}, got {api.Status}";
             }
         }
-        else if (Str("code") is not null || want.TryGetProperty("status", out _))
+        else if (Str("code") is not null || want.ContainsKey("status"))
         {
             yield return $"error: want an API error, got {e.Message}";
         }
@@ -339,13 +636,53 @@ public sealed class Driver(ITestOutputHelper output)
         }
     }
 
-    private static bool Subset(JsonElement want, JsonElement got) => want.ValueKind switch
+    /// <summary>One case's client and what it recorded.</summary>
+    private sealed class Built : IDisposable
     {
-        JsonValueKind.Object => got.ValueKind == JsonValueKind.Object &&
-            want.EnumerateObject().All(p => got.TryGetProperty(p.Name, out var g) && Subset(p.Value, g)),
-        JsonValueKind.Array => got.ValueKind == JsonValueKind.Array && want.GetArrayLength() == got.GetArrayLength() &&
-            want.EnumerateArray().Zip(got.EnumerateArray()).All(x => Subset(x.First, x.Second)),
-        _ => want.GetRawText() == got.GetRawText() ||
-            (want.ValueKind == JsonValueKind.String && got.ValueKind == JsonValueKind.String && want.GetString() == got.GetString()),
-    };
+        private readonly List<Activity> _spans = [];
+        private ActivityListener? _listener;
+
+        internal Client<PublicProfile> Client { get; set; } = null!;
+
+        internal CaptureLogs Logs { get; } = new();
+
+        internal Dictionary<string, List<Dictionary<string, string>>> Probes { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The case's own root activity, so its spans are told apart from other tests' (an in-memory exporter).</summary>
+        internal Activity? Root { get; private set; }
+
+        internal void Listen()
+        {
+            Root = new Activity("conformance").SetIdFormat(ActivityIdFormat.W3C);
+            _listener = new ActivityListener
+            {
+                ShouldListenTo = s => s.Name == "InOrbit.Sdk",
+                Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                ActivityStarted = a =>
+                {
+                    lock (_spans)
+                    {
+                        _spans.Add(a);
+                    }
+                },
+            };
+            ActivitySource.AddActivityListener(_listener);
+        }
+
+        /// <summary>This case's spans, in start order.</summary>
+        internal List<Activity> Spans()
+        {
+            var trace = Root?.TraceId.ToHexString();
+            lock (_spans)
+            {
+                return _spans.Where(a => a.TraceId.ToHexString() == trace).ToList();
+            }
+        }
+
+        public void Dispose()
+        {
+            Client?.Dispose();
+            _listener?.Dispose();
+        }
+    }
 }

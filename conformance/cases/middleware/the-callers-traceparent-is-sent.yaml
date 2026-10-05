@@ -1,7 +1,7 @@
 name: the-callers-traceparent-is-sent
 area: middleware
 summary: With tracing off, a traceparent passed with the call is sent unchanged.
-pending: [java, csharp]
+pending: [java]
 notes: M6, docs/config.md section 7.10.
 client: { tracing: false }
 action: { op: me, options: { traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0cb902b7-01 } }

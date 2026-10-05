@@ -1,7 +1,7 @@
 name: a-half-set-source-stops-the-chain
 kind: config
 summary: A key id without a secret in the environment is reported, even though the file has a usable token.
-pending: [java, csharp]
+pending: [java]
 input:
   env: { INORBIT_KEY_ID: ak_1, INORBIT_PROFILE: w }
   config_file: |

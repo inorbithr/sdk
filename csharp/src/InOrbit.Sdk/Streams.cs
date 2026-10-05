@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -23,11 +24,11 @@ internal sealed partial class Transport
     private readonly object _socketGate = new();
     private SocketHub? _socket;
 
-    internal IAsyncEnumerable<T> StreamAsync<T>(Operation op, CancellationToken cancellationToken)
+    internal IAsyncEnumerable<T> StreamAsync<T>(Operation op, CallOptions? call, CancellationToken cancellationToken)
     {
         if (_streams == StreamTransport.Sse)
         {
-            return SseAsync<T>(op, cancellationToken);
+            return SseAsync<T>(op, call, cancellationToken);
         }
 
         if (op.Rpc is null)
@@ -44,11 +45,11 @@ internal sealed partial class Transport
         return hub.StreamAsync<T>(op, cancellationToken);
     }
 
-    private async IAsyncEnumerable<T> SseAsync<T>(Operation op, [EnumeratorCancellation] CancellationToken cancellationToken)
+    private async IAsyncEnumerable<T> SseAsync<T>(Operation op, CallOptions? call, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var opened = await SendCoreAsync(op, stream: true, cancellationToken).ConfigureAwait(false);
-        using var response = opened.Response!;
-        var body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var resp = await CallAsync(op, call, stream: true, cancellationToken).ConfigureAwait(false);
+        var opened = BuiltIns.RawOf(resp);
+        var body = resp.Stream ?? System.IO.Stream.Null;
         await using (body.ConfigureAwait(false))
         {
             var reader = new SseReader(body, _idle, BaseUrl.Host);
@@ -56,12 +57,12 @@ internal sealed partial class Transport
             {
                 if (ev.Name == "error")
                 {
-                    throw StreamError(ev.Data, opened.Raw!);
+                    throw StreamError(ev.Data, opened);
                 }
 
                 if (ev.Name == "message")
                 {
-                    yield return Decode<T>(ev.Data, opened.Raw!);
+                    yield return Decode<T>(ev.Data, opened);
                 }
             }
         }
@@ -100,13 +101,17 @@ internal sealed partial class Transport
         }
     }
 
-    /// <summary>Opens <c>/v1/ws</c> with a fresh token: the socket, or why not.</summary>
+    /// <summary>
+    /// Opens <c>/v1/ws</c> with a fresh token: the socket, or why not. The upgrade goes through the client's
+    /// own handler (proxy, trust, mTLS) and carries the request id and user agent the built-ins would set;
+    /// a pipeline cannot see it (<c>ClientWebSocket</c> takes no pipeline, docs/config.md section 7.12).
+    /// </summary>
     internal async Task<(ClientWebSocket? Socket, int Status, InOrbitException? Error)> ConnectAsync(CancellationToken cancellationToken)
     {
         Token token;
         try
         {
-            token = await _provider.GetTokenAsync(cancellationToken).ConfigureAwait(false);
+            token = await Provider.GetTokenAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (InOrbitException e)
         {
@@ -122,17 +127,26 @@ internal sealed partial class Transport
         var ws = new ClientWebSocket();
         ws.Options.CollectHttpResponseDetails = true;
         ws.Options.SetRequestHeader("Authorization", "Bearer " + token.Access);
-        ws.Options.SetRequestHeader("User-Agent", _userAgent);
+        var requestId = Retry.RequestId();
+        foreach (var (name, value) in UpgradeHeaders())
+        {
+            ws.Options.SetRequestHeader(name, value);
+            if (name == "x-request-id")
+            {
+                requestId = value;
+            }
+        }
+
         ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
         SocketKeepAlive.Bound(ws.Options, _idle);
         using var timer = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timer.CancelAfter(_timeout);
+        timer.CancelAfter(Timeout);
         try
         {
-            await ws.ConnectAsync(uri, timer.Token).ConfigureAwait(false);
+            await ws.ConnectAsync(uri, Invoker, timer.Token).ConfigureAwait(false);
             return (ws, 101, null);
         }
-        catch (Exception e) when (e is WebSocketException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (Exception e) when (e is WebSocketException or HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
             var status = (int)ws.HttpStatusCode;
             var headers = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -147,24 +161,20 @@ internal sealed partial class Transport
             ws.Dispose();
             if (status == 401)
             {
-                await _provider.InvalidateAsync().ConfigureAwait(false);
-                return (null, 401, ApiException.From(new RawResponse(401, headers, [], Retry.RequestId(), 1)));
+                await Provider.InvalidateAsync().ConfigureAwait(false);
+                return (null, 401, ApiException.From(new RawResponse(401, headers, [], requestId, 1)));
             }
 
             if (status is >= 400 and < 600)
             {
-                return (null, status, ApiException.From(new RawResponse(status, headers, [], Retry.RequestId(), 1)));
+                return (null, status, ApiException.From(new RawResponse(status, headers, [], requestId, 1)));
             }
 
             return (null, 0, e is OperationCanceledException
-                ? new RequestTimeoutException(BaseUrl.Host, _timeout)
+                ? new RequestTimeoutException(BaseUrl.Host, Timeout)
                 : new ConnectionException(BaseUrl.Host, e.Message, e));
         }
     }
-
-    internal int MaxRetries => _maxRetries;
-
-    internal TimeSpan IdleTimeout => _idle;
 }
 
 /// <summary>Sets <c>KeepAliveTimeout</c> where the runtime has it (.NET 9 and later): pings unanswered that long close the socket.</summary>
@@ -479,7 +489,7 @@ internal sealed class SocketHub(Transport transport) : IDisposable
                     }
 
                     var retryable = status is 0 or 429 or 503 or 504 && error is not AuthException;
-                    if (!retryable || failures >= transport.MaxRetries)
+                    if (!retryable || failures >= transport.MaxRetries || !transport.TakeReconnect())
                     {
                         FailAll(error!);
                         return;
@@ -487,7 +497,7 @@ internal sealed class SocketHub(Transport transport) : IDisposable
 
                     var wait = error is ApiException api && api.RetryAfterSeconds() is { } s ? TimeSpan.FromSeconds(Math.Min(s, 60)) : Retry.Backoff(failures);
                     failures++;
-                    await Task.Delay(wait, stop).ConfigureAwait(false);
+                    await Retry.SleepAsync(wait, stop).ConfigureAwait(false);
                     continue;
                 }
 
@@ -522,7 +532,7 @@ internal sealed class SocketHub(Transport transport) : IDisposable
                 {
                     failures = 0;
                 }
-                else if (failures++ >= transport.MaxRetries)
+                else if (failures++ >= transport.MaxRetries || !transport.TakeReconnect())
                 {
                     FailAll(new ConnectionException(transport.BaseUrl.Host, "the socket kept closing"));
                     return;
