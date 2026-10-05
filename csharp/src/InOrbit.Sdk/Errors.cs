@@ -199,7 +199,7 @@ public sealed record UnknownDetail(JsonElement Value) : Detail;
 /// <summary>An HTTP answer as it came, for anything the typed result does not carry.</summary>
 public sealed class RawResponse
 {
-    internal RawResponse(int status, IReadOnlyDictionary<string, IReadOnlyList<string>> headers, byte[] body, string requestId, int attempts)
+    internal RawResponse(int status, IReadOnlyDictionary<string, IReadOnlyList<string>> headers, byte[] body, string requestId, int attempts, string? idempotencyKey = null, RateLimit? rateLimit = null)
     {
         Status = status;
         Headers = headers;
@@ -207,6 +207,9 @@ public sealed class RawResponse
         RequestId = requestId;
         ServerRequestId = Header("x-request-id");
         Attempts = attempts;
+        IdempotencyKey = idempotencyKey;
+        IdempotencyReplayed = string.Equals(Header("idempotency-replayed")?.Trim(), "true", StringComparison.Ordinal);
+        RateLimit = rateLimit;
     }
 
     /// <summary>The HTTP status.</summary>
@@ -226,6 +229,15 @@ public sealed class RawResponse
 
     /// <summary>How many attempts the call took.</summary>
     public int Attempts { get; }
+
+    /// <summary>The <c>Idempotency-Key</c> the call was sent with, on an operation that takes one.</summary>
+    public string? IdempotencyKey { get; }
+
+    /// <summary>Whether the API answered a repeat of an earlier call with the same key (<c>Idempotency-Replayed: true</c>).</summary>
+    public bool IdempotencyReplayed { get; }
+
+    /// <summary>What the answer said about the rate limit, unless <c>rate_limit</c> is <c>off</c> (docs/config.md section 7.8).</summary>
+    public RateLimit? RateLimit { get; }
 
     /// <summary>The first value of a header, or <see langword="null"/>.</summary>
     /// <param name="name">The header's name, any case.</param>
@@ -272,6 +284,12 @@ public abstract class InOrbitException : Exception
 
     /// <summary>A stable kind: <c>api</c>, <c>connection</c>, <c>timeout</c>, <c>auth</c>, <c>config</c>, <c>too_large</c>, <c>decode</c>.</summary>
     public string Kind { get; }
+
+    /// <summary>The <c>x-request-id</c> the failed call was sent with, when it got that far.</summary>
+    public string? RequestId { get; internal set; }
+
+    /// <summary>The <c>Idempotency-Key</c> the failed call was sent with: repeat the call with it (<see cref="CallOptions.IdempotencyKey"/>) to stay safe.</summary>
+    public string? IdempotencyKey { get; internal set; }
 }
 
 /// <summary>The API answered with the problem envelope, or a plain-text error from the gateway.</summary>
@@ -420,9 +438,37 @@ public sealed class AuthException : InOrbitException
 /// <summary>The client was configured in a way it cannot work with.</summary>
 public sealed class ConfigException : InOrbitException
 {
-    internal ConfigException(string message)
+    internal ConfigException(string message, IReadOnlyList<ConfigProblem>? problems = null)
         : base("config", message)
     {
+        Problems = problems ?? [];
+    }
+
+    /// <summary>Every problem found, in the catalogue's order (docs/config.md section 2.5); empty for an error of one message.</summary>
+    public IReadOnlyList<ConfigProblem> Problems { get; }
+
+    /// <summary>The error for <paramref name="problems"/>, its message listing each.</summary>
+    internal static ConfigException Of(IReadOnlyList<ConfigProblem> problems)
+    {
+        if (problems.Count == 1 && problems[0].Setting == "credential")
+        {
+            return new ConfigException(problems[0].Message, problems);
+        }
+
+        var text = new StringBuilder();
+        text.Append(CultureInfo.InvariantCulture, $"configuration is invalid ({problems.Count} problem{(problems.Count == 1 ? string.Empty : "s")}):");
+        foreach (var p in problems)
+        {
+            var lines = p.Message.Split('\n');
+            var from = p.Source.Length == 0 ? string.Empty : $" (from {p.Source})";
+            text.Append(CultureInfo.InvariantCulture, $"\n  {p.Setting}: {lines[0]}{from}");
+            foreach (var rest in lines.Skip(1))
+            {
+                text.Append("\n    ").Append(rest);
+            }
+        }
+
+        return new ConfigException(text.ToString(), problems);
     }
 }
 
