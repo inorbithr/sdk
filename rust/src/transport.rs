@@ -453,26 +453,127 @@ mod tls {
         } else {
             Arc::new(Pinned::new(verifier, &s.pinned_keys)?)
         };
-        let builder = rustls::ClientConfig::builder_with_provider(provider)
+        let builder = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
             .with_safe_default_protocol_versions()
             .map_err(|e| http(&e))?
             .dangerous()
             .with_custom_certificate_verifier(verifier);
         let mut config = match (&s.client_cert, &s.client_key) {
             (Some(cert), Some(key)) => {
-                let pem = read("client_cert", cert)?;
-                let chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&pem)
-                    .collect::<Result<_, _>>()
-                    .map_err(|e| problem("client_cert", format!("{cert} is not PEM: {e}")))?;
-                let key = private_key(key, s)?;
-                builder
-                    .with_client_auth_cert(chain, key)
-                    .map_err(|e| problem("client_key", e.to_string()))?
+                let resolver = Rotating::new(cert.clone(), key.clone(), s.clone(), provider)?;
+                builder.with_client_cert_resolver(Arc::new(resolver))
             }
             _ => builder.with_no_client_auth(),
         };
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Ok(config)
+    }
+
+    /// The client certificate and key, read again when either file's modification
+    /// time changes, checked at most once a minute (cert-manager rotation needs no
+    /// restart; `docs/config.md` section 6.4). A file that cannot be read keeps the
+    /// pair in use.
+    struct Rotating {
+        cert: String,
+        key: String,
+        settings: Settings,
+        provider: Arc<rustls::crypto::CryptoProvider>,
+        state: std::sync::Mutex<RotatingState>,
+    }
+
+    impl std::fmt::Debug for Rotating {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("Rotating")
+                .field("cert", &self.cert)
+                .field("key", &self.key)
+                .finish_non_exhaustive()
+        }
+    }
+
+    #[derive(Debug)]
+    struct RotatingState {
+        pair: Arc<rustls::sign::CertifiedKey>,
+        stamps: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
+        checked: std::time::Instant,
+    }
+
+    fn modified(path: &str) -> Option<std::time::SystemTime> {
+        std::fs::metadata(path).and_then(|m| m.modified()).ok()
+    }
+
+    impl Rotating {
+        fn new(
+            cert: String,
+            key: String,
+            settings: Settings,
+            provider: Arc<rustls::crypto::CryptoProvider>,
+        ) -> Result<Self, ConfigError> {
+            let pair = load_pair(&cert, &key, &settings, &provider)?;
+            let stamps = (modified(&cert), modified(&key));
+            Ok(Self {
+                cert,
+                key,
+                settings,
+                provider,
+                state: std::sync::Mutex::new(RotatingState {
+                    pair,
+                    stamps,
+                    checked: std::time::Instant::now(),
+                }),
+            })
+        }
+    }
+
+    fn load_pair(
+        cert: &str,
+        key: &str,
+        s: &Settings,
+        provider: &rustls::crypto::CryptoProvider,
+    ) -> Result<Arc<rustls::sign::CertifiedKey>, ConfigError> {
+        let pem = read("client_cert", cert)?;
+        let chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&pem)
+            .collect::<Result<_, _>>()
+            .map_err(|e| problem("client_cert", format!("{cert} is not PEM: {e}")))?;
+        if chain.is_empty() {
+            return Err(problem(
+                "client_cert",
+                format!("{cert} holds no certificate"),
+            ));
+        }
+        let signing = provider
+            .key_provider
+            .load_private_key(private_key(key, s)?)
+            .map_err(|e| problem("client_key", e.to_string()))?;
+        Ok(Arc::new(rustls::sign::CertifiedKey::new(chain, signing)))
+    }
+
+    impl rustls::client::ResolvesClientCert for Rotating {
+        fn resolve(
+            &self,
+            _root_hint_subjects: &[&[u8]],
+            _sigschemes: &[SignatureScheme],
+        ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+            let mut st = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if st.checked.elapsed() >= std::time::Duration::from_secs(60) {
+                st.checked = std::time::Instant::now();
+                let stamps = (modified(&self.cert), modified(&self.key));
+                if stamps != st.stamps
+                    && let Ok(pair) =
+                        load_pair(&self.cert, &self.key, &self.settings, &self.provider)
+                {
+                    st.pair = pair;
+                    st.stamps = stamps;
+                }
+            }
+            Some(Arc::clone(&st.pair))
+        }
+
+        fn has_certs(&self) -> bool {
+            true
+        }
     }
 
     fn private_key(path: &str, s: &Settings) -> Result<PrivateKeyDer<'static>, ConfigError> {

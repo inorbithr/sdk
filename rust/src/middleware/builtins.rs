@@ -37,7 +37,7 @@ pub(crate) struct Shared {
     #[cfg_attr(not(feature = "otel"), allow(dead_code))]
     pub(crate) metrics: bool,
     #[cfg(feature = "otel")]
-    pub(crate) otel: Option<crate::otel::Otel>,
+    pub(crate) otel: Option<Arc<crate::otel::Otel>>,
 }
 
 /// The retry budget: a token bucket per client (`docs/config.md` section 7.4).
@@ -556,9 +556,21 @@ impl Middleware for LoggingMw {
         if !log.enabled(LogLevel::Debug) {
             return next.run(req);
         }
+        // With tracing on, the attempt span's ids, from the `traceparent` it sent.
+        let ids = self
+            .0
+            .tracing
+            .then(|| req.headers.get("traceparent"))
+            .flatten()
+            .filter(|_| cfg!(feature = "otel"))
+            .and_then(|tp| {
+                let mut parts = tp.split('-');
+                let (_, trace, span) = (parts.next()?, parts.next()?, parts.next()?);
+                Some((trace.to_owned(), span.to_owned()))
+            });
         Box::pin(async move {
             let base = |event| {
-                LogRecord::new(LogLevel::Debug, event)
+                let mut r = LogRecord::new(LogLevel::Debug, event)
                     .with("operation", req.info.operation)
                     .with("method", req.method.to_string())
                     .with("path", req.url.path().to_owned())
@@ -566,7 +578,13 @@ impl Middleware for LoggingMw {
                     .with(
                         "request_id",
                         req.info.request_id.clone().unwrap_or_default(),
-                    )
+                    );
+                if let Some((trace, span)) = &ids {
+                    r = r
+                        .with("trace_id", trace.clone())
+                        .with("span_id", span.clone());
+                }
+                r
             };
             let mut rec = base("request");
             if log.headers {

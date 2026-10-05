@@ -19,6 +19,7 @@ pub(crate) struct Otel {
     request_duration: Histogram<f64>,
     call_duration: Histogram<f64>,
     retries: Counter<u64>,
+    exchanges: Counter<u64>,
 }
 
 /// The semantic conventions' buckets for `http.client.request.duration`, in seconds.
@@ -43,6 +44,10 @@ impl Otel {
             retries: meter
                 .u64_counter("inorbit.client.retries")
                 .with_unit("{retry}")
+                .build(),
+            exchanges: meter
+                .u64_counter("inorbit.client.token.exchanges")
+                .with_unit("{exchange}")
                 .build(),
         }
     }
@@ -198,6 +203,18 @@ impl Otel {
                 .record(started.elapsed().as_secs_f64(), &attributes);
         }
         result
+    }
+
+    /// One token exchange (or `iohr auth token` run) by the credential `source`.
+    pub(crate) fn exchanged(&self, source: &str, error: Option<&str>) {
+        let mut attributes = vec![KeyValue::new(
+            "inorbit.credential.source",
+            source.to_owned(),
+        )];
+        if let Some(e) = error {
+            attributes.push(KeyValue::new("error.type", e.to_owned()));
+        }
+        self.exchanges.add(1, &attributes);
     }
 
     pub(crate) fn retried(&self, operation: &'static str, reason: &str) {

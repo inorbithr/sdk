@@ -192,7 +192,12 @@ struct Cache {
     state: Mutex<CacheState>,
     gate: tokio::sync::Mutex<()>,
     logger: OnceLock<Logger>,
+    /// Told of every fetch: `None` when it worked, the error's kind when not (metrics).
+    exchanged: OnceLock<Exchanged>,
 }
+
+/// Observes token fetches, for the `inorbit.client.token.exchanges` counter.
+pub(crate) type Exchanged = Arc<dyn Fn(Option<&str>) + Send + Sync>;
 
 impl Cache {
     fn lock(&self) -> std::sync::MutexGuard<'_, CacheState> {
@@ -251,6 +256,9 @@ impl Cache {
                 "the token refresh stopped: {e}"
             )))
         });
+        if let Some(f) = self.exchanged.get() {
+            f(result.as_ref().err().map(|_| "auth"));
+        }
         let now = Instant::now();
         match result {
             Ok(c) => Ok(c.token(now)),
@@ -419,8 +427,11 @@ impl ClientCredentials {
         })
     }
 
-    pub(crate) fn attach(&self, logger: &Logger) {
+    pub(crate) fn attach(&self, logger: &Logger, exchanged: Option<Exchanged>) {
         let _ = self.cache.logger.set(logger.clone());
+        if let Some(f) = exchanged {
+            let _ = self.cache.exchanged.set(f);
+        }
     }
 
     /// The key id this provider exchanges.
@@ -689,8 +700,11 @@ impl CliToken {
         }
     }
 
-    pub(crate) fn attach(&self, logger: &Logger) {
+    pub(crate) fn attach(&self, logger: &Logger, exchanged: Option<Exchanged>) {
         let _ = self.cache.logger.set(logger.clone());
+        if let Some(f) = exchanged {
+            let _ = self.cache.exchanged.set(f);
+        }
     }
 }
 

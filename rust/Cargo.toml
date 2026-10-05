@@ -59,8 +59,8 @@ rustls-platform-verifier = { version = "0.7", optional = true }
 rustls-webpki = { version = "0.103", default-features = false, features = ["std"], optional = true }
 # The config file the command line shares (docs/config.md section 4.2).
 toml = { version = "1", default-features = false, features = ["parse", "std", "serde"] }
-# Pinned keys and JWT expiry; already a dependency of reqwest.
-base64 = "0.22"
+# Pinned keys, JWT expiry and proxy credentials; already a dependency of reqwest.
+base64 = "0.23"
 # Log records (feature `tracing`, on by default).
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 # Spans and metrics (feature `otel`): the API crate only.

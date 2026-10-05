@@ -1465,6 +1465,10 @@ impl<P: Profile> ClientBuilder<P> {
         self.finish(&options, code)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the client's parts, in the order they depend on each other"
+    )]
     fn finish(
         mut self,
         options: &LoadOptions,
@@ -1489,6 +1493,26 @@ impl<P: Profile> ClientBuilder<P> {
             redact: self.redact.take(),
             profile: config.profile().unwrap_or(P::NAME).to_owned(),
         };
+        #[cfg(feature = "otel")]
+        let otel = Arc::new(crate::otel::Otel::new(
+            self.tracer.take(),
+            self.meter.take(),
+        ));
+        let source = config.describe()["credential"]["source"]
+            .as_str()
+            .unwrap_or("code")
+            .to_owned();
+        #[cfg(feature = "otel")]
+        let exchanged: Option<crate::auth::Exchanged> = settings.metrics.then(|| {
+            let otel = Arc::clone(&otel);
+            let f: crate::auth::Exchanged = Arc::new(move |e| otel.exchanged(&source, e));
+            f
+        });
+        #[cfg(not(feature = "otel"))]
+        let exchanged: Option<crate::auth::Exchanged> = {
+            let _ = source;
+            None
+        };
         let (provider, static_token): (Arc<dyn DynProvider>, _) = match credential {
             Credential::Provider(p) => (p, None),
             Credential::Static(t, label) => (Arc::new(StaticToken::new(t)), label),
@@ -1499,13 +1523,13 @@ impl<P: Profile> ClientBuilder<P> {
                 }?
                 .token_url(token_url.clone())
                 .transport(transport.http.clone(), agent.clone());
-                p.attach(&logger);
+                p.attach(&logger, exchanged.clone());
                 (Arc::new(p), None)
             }
             Credential::File(path) => (Arc::new(TokenFile::new(path)), None),
             Credential::Cli { program, profile } => {
                 let p = CliToken::new(program, profile);
-                p.attach(&logger);
+                p.attach(&logger, exchanged);
                 (Arc::new(p), None)
             }
         };
@@ -1528,10 +1552,7 @@ impl<P: Profile> ClientBuilder<P> {
             tracing: settings.tracing,
             metrics: settings.metrics,
             #[cfg(feature = "otel")]
-            otel: Some(crate::otel::Otel::new(
-                self.tracer.take(),
-                self.meter.take(),
-            )),
+            otel: Some(otel),
         });
         let mut pipeline = Pipeline::new(builtins::defaults(&shared));
         for edit in std::mem::take(&mut self.pipeline) {
