@@ -63,7 +63,12 @@ impl Os {
         if self == Self::Windows { '\\' } else { '/' }
     }
 
+    /// Absolute by the OS's rule, or on the host this runs on (a vector for Linux run
+    /// on Windows hands in `C:\...` paths).
     fn is_absolute(self, p: &str) -> bool {
+        if std::path::Path::new(p).is_absolute() {
+            return true;
+        }
         match self {
             Self::Windows => {
                 let b = p.as_bytes();

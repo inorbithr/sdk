@@ -79,6 +79,10 @@ fn subset(expected: &Value, actual: &Value, at: &str) -> Result<(), String> {
             Ok(())
         }
         (e, a) if e == a => Ok(()),
+        // Paths compare after `\` becomes `/` (vector.schema.json).
+        (Value::String(e), Value::String(a)) if e.replace('\\', "/") == a.replace('\\', "/") => {
+            Ok(())
+        }
         (e, a) => Err(format!("{at}: expected {e}, got {a}")),
     }
 }
@@ -211,7 +215,7 @@ fn run_config_vector(path: &Path, v: &Value) -> Result<(), String> {
     }
     if let Some(want) = expect.get("config_file") {
         let have = d["config_file"].as_str().map(|s| s.replace('\\', "/"));
-        let want = want.as_str().map(str::to_owned);
+        let want = want.as_str().map(|s| s.replace('\\', "/"));
         if want != have {
             return Err(format!("{name}: config_file {want:?} != {have:?}"));
         }
