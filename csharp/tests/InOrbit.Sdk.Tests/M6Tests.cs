@@ -58,7 +58,7 @@ public class M6Tests
     public async Task A_caller_key_on_an_operation_without_the_mark_is_refused()
     {
         using var client = new Client<PublicProfile>(new ClientOptions { Token = "t", HttpMessageHandler = new Answer(_ => new HttpResponseMessage(HttpStatusCode.OK)) });
-        var e = await Assert.ThrowsAsync<ConfigException>(() => client.WithOptions(new CallOptions { IdempotencyKey = "k" }).MeAsync());
+        var e = await Assert.ThrowsAsync<ConfigException>(() => client.WithOptions(new CallOptions { IdempotencyKey = "k" }).MeAsync(TestContext.Current.CancellationToken));
         Assert.Contains("does not take an idempotency key", e.Message, StringComparison.Ordinal);
     }
 
@@ -76,7 +76,7 @@ public class M6Tests
             }),
             Pipeline = p => p.AddPerRetry(Middleware.FromHandler("team", new Team())),
         });
-        var me = await client.MeAsync();
+        var me = await client.MeAsync(TestContext.Current.CancellationToken);
         Assert.Equal("ak_1", me.Value.Subject);
         Assert.Equal(["payments"], seen);
     }
@@ -95,7 +95,7 @@ public class M6Tests
                 HttpMessageHandler = new Answer(_ => new HttpResponseMessage(++calls == 1 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.Unauthorized)),
             },
             new LoadOptions { Environment = new Dictionary<string, string> { ["INORBIT_TOKEN"] = "t" }, NoHome = true });
-        var e = await Assert.ThrowsAsync<AuthException>(() => client.MeAsync());
+        var e = await Assert.ThrowsAsync<AuthException>(() => client.MeAsync(TestContext.Current.CancellationToken));
         Assert.Contains("refused the token", e.Message, StringComparison.Ordinal);
         Assert.StartsWith("iohr-", e.RequestId, StringComparison.Ordinal);
         Assert.Equal(["503"], hook.Reasons);

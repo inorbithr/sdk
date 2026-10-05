@@ -11,7 +11,6 @@ using System.Threading.Tasks;
 using InOrbit.Sdk.Api;
 using Microsoft.Extensions.Logging;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace InOrbit.Sdk.Tests.Conformance;
 
@@ -47,19 +46,19 @@ public sealed class Driver(ITestOutputHelper output)
         })!;
         try
         {
-            var first = await replay.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)) ?? string.Empty;
+            var first = await replay.StandardOutput.ReadLineAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken) ?? string.Empty;
             const string prefix = "replay: listening on ";
             Assert.StartsWith(prefix, first, StringComparison.Ordinal);
             var url = first[prefix.Length..].Trim();
             using var http = new HttpClient { BaseAddress = new Uri(url) };
-            var cases = JsonDocument.Parse(await http.GetStringAsync("/_cases")).RootElement.GetProperty("cases")
+            var cases = JsonDocument.Parse(await http.GetStringAsync("/_cases", TestContext.Current.CancellationToken)).RootElement.GetProperty("cases")
                 .EnumerateArray().Select(c => c.GetString()!).ToList();
             Assert.NotEmpty(cases);
             var failed = new List<string>();
             var passed = 0;
             foreach (var name in cases)
             {
-                using var loaded = await http.PostAsync("/_case", new StringContent(JsonSerializer.Serialize(new { name }), Encoding.UTF8, "application/json"));
+                using var loaded = await http.PostAsync("/_case", new StringContent(JsonSerializer.Serialize(new { name }), Encoding.UTF8, "application/json"), TestContext.Current.CancellationToken);
                 if ((int)loaded.StatusCode == 501)
                 {
                     output.WriteLine($"skip {name}: not implemented by the replay server yet");
@@ -67,7 +66,7 @@ public sealed class Driver(ITestOutputHelper output)
                 }
 
                 Assert.True(loaded.IsSuccessStatusCode, $"{name}: loading answered {(int)loaded.StatusCode}");
-                var answer = JsonNode.Parse(await loaded.Content.ReadAsStringAsync())!.AsObject();
+                var answer = JsonNode.Parse(await loaded.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!.AsObject();
                 var c = answer["case"]!.AsObject();
                 if (c["pending"] is JsonArray pending && pending.Any(x => x!.GetValue<string>() == Self))
                 {
