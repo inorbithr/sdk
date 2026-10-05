@@ -41,20 +41,29 @@ csharp/
   InOrbit.Sdk.sln
   Directory.Build.props   Nullable enable, TreatWarningsAsErrors, LangVersion latest
   src/InOrbit.Sdk/
-    Client.cs             Client<P>, the builder, the one request path
-    Auth/, Errors/        ITokenProvider, client credentials (single flight); ApiException, Code, Detail
-    Hooks.cs, Profile.cs  IHook; IProfile and PublicProfile
-    Codegen.cs            what generated surfaces call (Version, PathSegment, Operation, WithQuery, WithJson, WithCall, enum and raw-JSON converters)
+    Client.cs             ClientOptions, CallOptions, Client<P> (Load, WithOptions, Config), DefaultCredential
+    Transport.cs          one client's machinery: the resolved settings, the HttpClient, the call through the pipeline
+    Settings.cs           docs/config.md sections 2 to 5: the catalogue, the config file, the credential chain, describe()
+    Pipeline.cs           Middleware, Pipeline, SdkRequest/SdkResponse, Middleware.FromHandler (DelegatingHandler)
+    Middleware.cs         the built-ins of config.md section 7.2, the retry budget, the transport step
+    Network.cs, Proxy.cs  SocketsHttpHandler: connect timeout, proxy and the no_proxy grammar, CA bundle, mTLS, pins
+    Telemetry.cs          LogRecord and the ILogger sink (by allowlist); ActivitySource and Meter "InOrbit.Sdk"
+    RateLimit.cs          the rate-limit snapshot from X-RateLimit-* and the IETF fields
+    Auth.cs, Errors.cs    ITokenProvider, ClientCredentials, CachedToken, TokenFile, CliToken, ChainedCredential; ApiException, Code, Detail, ConfigException.Problems
+    Hooks.cs, Profile.cs  IHook (OnRetry); IProfile and PublicProfile
+    Codegen.cs            what generated surfaces call (Version, PathSegment, Operation, WithTemplate, WithIdempotencyKey, WithQuery, WithJson, WithCall, enum and raw-JSON converters)
     Streams.cs            streams (design.md section 7): SseReader, the SSE path, SocketHub (one /v1/ws per client)
     Generated/            written by iohr; never edit
   tests/InOrbit.Sdk.Tests/
-    Conformance/          the driver for conformance/cases
+    Conformance/          the driver for conformance/cases and the vectors of conformance/vectors (Vectors.cs)
 ```
 
 ## Rules
 
-- Runtime dependencies: none beyond the framework (`HttpClient`, `System.Text.Json`,
-  `ClientWebSocket`, `System.Threading.Channels`).
+- Runtime dependencies (SR-20, docs/config.md section 8): `Tomlyn` for the config file and
+  `Microsoft.Extensions.Logging.Abstractions` for logging; everything else is the
+  framework (`HttpClient`, `System.Text.Json`, `ClientWebSocket`, `System.Diagnostics`
+  for spans and metrics). Tests add `YamlDotNet` to read `conformance/vectors`.
 - A stream operation is generated as `XxxAsync` returning `IAsyncEnumerable<T>` over
   `Client.StreamAsync`, with `Codegen.WithCall` naming its RPC and call body for the
   socket. `KeepAliveTimeout` is set by reflection because the library targets `net8.0`
@@ -66,8 +75,13 @@ csharp/
 - `int64` values are `long`, read from and written as decimal strings through
   `[JsonNumberHandling]` on the property (a type named `Int64` would clash with
   `System.Int64`); a message field the gateway left out is `null`.
-- Client construction: `new Client<TProfile>(ClientOptions)` or `Client.FromEnv<TProfile>()`
-  (statics live on the non-generic `Client`, CA1000).
+- Client construction: `Client.Load<TProfile>()` (docs/config.md: code, environment, config
+  file, defaults), `new Client<TProfile>(ClientOptions)` (code only) or
+  `Client.FromEnv<TProfile>()` (kept as it was); statics live on the non-generic `Client`
+  (CA1000). Per-call options are `client.WithOptions(CallOptions)`, a view sharing the
+  transport, so generated signatures never change.
+- Every timeout is a `CancellationToken` (`deadline`, `timeout`); a wait the server
+  measures uses `Retry.SleepAsync`, which never ends early.
 - Tests run on the newest runtime the SDK brings (`RollForward` Major); the library stays
   `net8.0`.
 - `ToString()` of credentials redacts the secret; a test asserts it.

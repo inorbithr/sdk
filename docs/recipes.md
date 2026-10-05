@@ -181,7 +181,8 @@ first call pays one token exchange.
 ## An existing OpenTelemetry setup
 
 Install the integration (Rust feature `otel`, `@opentelemetry/api`, `inorbithr[otel]`,
-`github.com/inorbithr/sdk/go/otel`, `inorbit-sdk-otel`; nothing for .NET). The SDK uses
+`github.com/inorbithr/sdk/go/otel`, `inorbit-sdk-otel`; nothing for .NET, where
+OpenTelemetry needs `AddSource("InOrbit.Sdk")` and `AddMeter("InOrbit.Sdk")`). The SDK uses
 the global tracer and meter providers your application already set up. Each call becomes
 an `INTERNAL` span named for the operation, with one `CLIENT` span per attempt, and
 `traceparent` is sent from the attempt span. The InOrbit gateway continues the trace on
