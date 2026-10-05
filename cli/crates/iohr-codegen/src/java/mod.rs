@@ -563,6 +563,15 @@ impl Gen {
         if op.idempotent_override {
             build.push_str("\n                .idempotent(true)");
         }
+        if op.idempotency_key {
+            // One key per call, sent on every attempt; the write may be retried
+            // (docs/config.md section 7.5).
+            build.push_str("\n                .idempotencyKey(true)");
+        }
+        if !op.path_params.is_empty() {
+            // The template names the attempt's span without the identifiers.
+            let _ = write!(build, "\n                .template({})", lit(&op.path));
+        }
         if op.stream {
             // The socket's call frame carries the parameters typed, by wire name.
             for p in &op.path_params {
@@ -735,6 +744,28 @@ impl Gen {
                     "@return the profile".to_owned(),
                     format!(
                         "@throws {}.errors.ConfigException naming the variables to set when no credential is there",
+                        self.runtime
+                    ),
+                ]
+            )
+        );
+        // `load` reads code, the environment, the config file and the `iohr` login
+        // (docs/config.md section 1); a named profile resolves as its own typed profile.
+        let load_call = if p.is_public {
+            format!("{client}.load()")
+        } else {
+            format!("{client}.builder().profileType({}).load()", lit(&p.name))
+        };
+        let _ = write!(
+            body,
+            "\n{}    public static {class} load() {{\n        return new {class}({load_call});\n    }}\n",
+            javadoc(
+                "    ",
+                "The profile from code, the environment, the <code>iohr</code> config file and login, and the defaults (docs/config.md).",
+                &[
+                    "@return the profile".to_owned(),
+                    format!(
+                        "@throws {}.errors.ConfigException listing every problem found, each with its setting and source",
                         self.runtime
                     ),
                 ]

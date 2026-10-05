@@ -1,7 +1,6 @@
 name: duration-syntax
 kind: durations
 summary: The one duration syntax for the environment and the config file, digits then ms, s, m or h.
-pending: [java]
 notes: docs/config.md section 2.4. The expectation is milliseconds, or error.
 checks:
   - { value: 500ms, expect: 500 }

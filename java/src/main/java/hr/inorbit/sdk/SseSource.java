@@ -47,6 +47,7 @@ final class SseSource<T> implements EventStream.Source<T> {
     private volatile boolean closed;
     private String requestId = "";
     private int attempts;
+    private Runnable onEnd = () -> {};
 
     SseSource(Client client, Operation op, Class<T> type, Duration idle) {
         this.client = client;
@@ -66,7 +67,8 @@ final class SseSource<T> implements EventStream.Source<T> {
             Client.Opened o = client.openSse(op);
             requestId = o.requestId();
             attempts = o.attempts();
-            o.response().body().subscribe(subscriber);
+            onEnd = o.onEnd();
+            o.body().subscribe(subscriber);
         }
         while (true) {
             String l = readLine();
@@ -256,5 +258,6 @@ final class SseSource<T> implements EventStream.Source<T> {
         }
         closed = true;
         subscriber.cancel();
+        onEnd.run();
     }
 }

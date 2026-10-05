@@ -1,6 +1,5 @@
 package hr.inorbit.sdk;
 
-import hr.inorbit.sdk.errors.ConnectionException;
 import java.net.http.HttpHeaders;
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -41,20 +40,39 @@ final class Retry {
         return Duration.ofMillis(ThreadLocalRandom.current().nextLong(ceiling + 1));
     }
 
+    /** Full jitter: a random wait up to {@code base} doubled per retry, at most {@code cap}. */
+    static Duration backoff(int retry, Duration base, Duration cap) {
+        long ceiling = Math.min(base.toMillis() << Math.min(retry, 20), cap.toMillis());
+        return Duration.ofMillis(ThreadLocalRandom.current().nextLong(Math.max(ceiling, 0) + 1));
+    }
+
+    /**
+     * The wait {@code Retry-After} asks for, as delay-seconds or an HTTP date (RFC 9110 section
+     * 10.2.3); not capped.
+     */
+    static Optional<Duration> retryAfterUncapped(HttpHeaders headers) {
+        Optional<String> raw = headers.firstValue("retry-after").map(String::strip);
+        if (raw.isEmpty() || raw.get().isEmpty()) {
+            return Optional.empty();
+        }
+        String v = raw.get();
+        if (v.matches("\\d{1,9}")) {
+            return Optional.of(Duration.ofSeconds(Long.parseLong(v)));
+        }
+        try {
+            java.time.ZonedDateTime when =
+                    java.time.ZonedDateTime.parse(v, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
+            Duration d = Duration.between(java.time.Instant.now(), when.toInstant());
+            return Optional.of(d.isNegative() ? Duration.ZERO : d);
+        } catch (java.time.format.DateTimeParseException e) {
+            return Optional.empty();
+        }
+    }
+
     /** {@code iohr-<16 hex>}, the id each call is sent with. */
     static String requestId() {
         byte[] bytes = new byte[8];
         IDS.nextBytes(bytes);
         return "iohr-" + HexFormat.of().formatHex(bytes);
-    }
-
-    /** Waits {@code d}; an interrupt ends the call as a connection failure, interrupt kept. */
-    static void sleep(Duration d, String host) {
-        try {
-            Thread.sleep(d.toMillis());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ConnectionException(host, "interrupted while waiting to retry", e);
-        }
     }
 }
