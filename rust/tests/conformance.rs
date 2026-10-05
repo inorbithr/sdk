@@ -1,4 +1,11 @@
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::print_stderr)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::print_stderr,
+    clippy::too_many_lines,
+    clippy::similar_names,
+    clippy::single_match_else
+)]
 
 //! The driver for `conformance/cases`: starts the replay server, loads every case,
 //! runs its action through the public API of this crate, and compares the result and
@@ -172,6 +179,7 @@ struct ExpectLogs {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(not(feature = "otel"), allow(dead_code))]
 struct ExpectSpan {
     name: String,
     kind: Option<String>,
@@ -485,8 +493,8 @@ fn build_client(
             captured.provider = Some(provider);
         }
     }
-    match options.transport.as_deref() {
-        Some("https" | "proxy" | "mtls") => {
+    if let Some("https" | "proxy" | "mtls") = options.transport.as_deref() {
+        {
             if options.ca_bundle != Some(false)
                 && let Some(ca) = &loaded.ca_file
             {
@@ -503,7 +511,6 @@ fn build_client(
                 b = b.proxy(p.as_str());
             }
         }
-        _ => {}
     }
     if let Some(n) = &options.no_proxy {
         b = b.no_proxy(
