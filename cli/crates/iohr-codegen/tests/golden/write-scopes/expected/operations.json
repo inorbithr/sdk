@@ -1,0 +1,50 @@
+[
+  {
+    "idempotency_key": false,
+    "line": "DELETE /v1/webhooks/endpoints/{endpoint_id}",
+    "operation": "events.delete_endpoint",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "DELETE /v1/webhooks/inboxes/{inbox_id}",
+    "operation": "events.delete_inbox",
+    "retry_safe": true
+  },
+  {
+    "idempotency_key": false,
+    "line": "PATCH /v1/webhooks/endpoints/{endpoint_id}",
+    "operation": "events.update_endpoint",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/deliveries/{delivery_id}/retry",
+    "operation": "events.retry_delivery",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/endpoints",
+    "operation": "events.create_endpoint",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/endpoints/{endpoint_id}/rotate",
+    "operation": "events.rotate_secret",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/endpoints/{endpoint_id}/test",
+    "operation": "events.send_test",
+    "retry_safe": false
+  },
+  {
+    "idempotency_key": true,
+    "line": "POST /v1/webhooks/inboxes",
+    "operation": "events.create_inbox",
+    "retry_safe": false
+  }
+]

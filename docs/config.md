@@ -722,8 +722,13 @@ The platform takes `Idempotency-Key` on every public create or trigger `POST` an
 what the first call did, with `Idempotency-Replayed: true`. The OpenAPI document lists
 the header on exactly those operations.
 
-- The generator marks an operation that declares the header (`idempotency_key: true` in
-  the shared model). The runtime reads the mark from `Operation`.
+- The generator marks an operation that declares the header, or says
+  `x-iohr-idempotency-key: true` (`idempotency_key: true` in the shared model and in
+  every target's context, `iohr-codegen` `context::Op`; the marks per fixture are in
+  `cli/crates/iohr-codegen/tests/golden/<case>/expected/operations.json`). Each target
+  passes it to the runtime's `Operation` the way it passes `idempotent` today, in the
+  same pull request that gives the runtime the field. The runtime reads the mark from
+  `Operation`.
 - On such an operation the call uses the caller's `idempotency_key` (a per-call option and
   a generated parameter), or generates a random UUID v4. It is generated once per call
   and sent unchanged on every attempt. It is generated even with `max_retries = 0`, so a

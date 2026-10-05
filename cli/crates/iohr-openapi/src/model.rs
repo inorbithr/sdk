@@ -187,6 +187,11 @@ pub struct Operation {
     pub profiles: BTreeSet<String>,
     /// Whether the generated method may be retried without a key.
     pub idempotent: bool,
+    /// Whether the operation takes an `Idempotency-Key` header (RFC 0033): the document
+    /// lists the header parameter, or says `x-iohr-idempotency-key: true`. Such a write
+    /// is retried with the same generated key on every attempt (`docs/config.md`
+    /// section 7.5).
+    pub idempotency_key: bool,
     /// The description, first paragraph.
     pub doc: String,
     /// The RPC's full name (`x-iohr-rpc`, `iohr.events.v1.EventsService/StreamEvents`):
@@ -402,6 +407,24 @@ fn same_shape(a: &Operation, b: &Operation) -> bool {
         && a.request_body == b.request_body
         && a.response == b.response
         && a.scopes == b.scopes
+        && a.idempotency_key == b.idempotency_key
+}
+
+/// Whether `op` takes an `Idempotency-Key` header: a header parameter of that name (any
+/// case), or the extension `x-iohr-idempotency-key: true`.
+fn takes_idempotency_key(op: &Value) -> bool {
+    op.get("x-iohr-idempotency-key") == Some(&Value::Bool(true))
+        || op
+            .get("parameters")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|p| {
+                p.get("in").and_then(Value::as_str) == Some("header")
+                    && p.get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|n| n.eq_ignore_ascii_case("idempotency-key"))
+            })
 }
 
 fn schema_name(node: &Value) -> Option<String> {
@@ -520,6 +543,7 @@ fn read_operation(method: Method, path: &str, op: &Value) -> Result<Operation, M
         scopes,
         profiles: BTreeSet::new(),
         idempotent: method.is_idempotent(),
+        idempotency_key: takes_idempotency_key(op),
         doc,
         rpc: op
             .get("x-iohr-rpc")
