@@ -1,7 +1,7 @@
 name: a-write-with-an-idempotency-key-is-retried
 area: retries
 summary: A POST whose operation takes Idempotency-Key gets a generated key, is retried after a 503, and sends the same key both times.
-pending: [go, rust, py, java, csharp]
+pending: [go, py, java, csharp]
 notes: M6, docs/config.md section 7.5 (RFC 0033). Lands with the move of a-write-is-not-retried to an operation without the header (config.md section 10, step 3).
 action: { op: events.create_endpoint, args: { account_id: acc_1, url: "https://example.com/hook", event_types: [radar.digest.published] } }
 exchanges:

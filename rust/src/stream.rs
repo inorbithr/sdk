@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
 
-use crate::error::{ApiError, Error, Headers, RawResponse};
+use crate::error::{ApiError, Error, RawResponse};
 
 /// Items a stream holds before its reader waits for the caller (design.md section 7).
 pub(crate) const QUEUE: usize = 64;
@@ -300,21 +300,6 @@ pub(crate) async fn read_sse(
             }
         }
     }
-}
-
-/// Headers of a stream that opened, for the hooks (the body is the stream).
-pub(crate) fn opened(resp: &reqwest::Response, request_id: &str, attempts: u32) -> RawResponse {
-    let headers = Headers::new(resp.headers().iter().map(|(k, v)| {
-        (
-            k.as_str().to_owned(),
-            v.to_str().unwrap_or_default().to_owned(),
-        )
-    }));
-    let mut raw = RawResponse::part(resp.status().as_u16(), Vec::new(), request_id.to_owned());
-    raw.server_request_id = headers.get("x-request-id").map(str::to_owned);
-    raw.headers = headers;
-    raw.attempts = attempts;
-    raw
 }
 
 #[cfg(test)]

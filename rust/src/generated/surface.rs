@@ -47,7 +47,8 @@ impl<P: Profile> Surface<P> for Client<P> {
         async move {
             let op = Operation::new(Method::Get, "/v1/me")
                 .named("me")
-                .scopes(&["identity:read"]);
+                .scopes(&["identity:read"])
+                .template("/v1/me");
             self.request(op).await
         }
     }
@@ -70,7 +71,8 @@ impl<P: ops::RemoveDomain> Accounts<'_, P> {
                 ),
             )
             .named("accounts.remove_domain")
-            .scopes(&["domains:write"]);
+            .scopes(&["domains:write"])
+            .template("/v1/accounts/orgs/{org_id}/domains/{domain}");
         self.0.request(op).await
     }
 }
@@ -79,7 +81,8 @@ impl<P: ops::GetMe> Accounts<'_, P> {
     pub async fn get_me(&self) -> Result<Response<GetMeResponse>, Error> {
         let op = Operation::new(Method::Get, "/v1/accounts/me")
             .named("accounts.get_me")
-            .scopes(&["account:read"]);
+            .scopes(&["account:read"])
+            .template("/v1/accounts/me");
         self.0.request(op).await
     }
 }
@@ -96,6 +99,7 @@ impl<P: ops::ListTeamEvents> Accounts<'_, P> {
             )
             .named("accounts.list_team_events")
             .scopes(&["account:audit"])
+            .template("/v1/accounts/orgs/{org_id}/audit")
             .query_opt("action", params.action.as_ref().map(ToString::to_string))
             .query_opt("actor", params.actor.as_ref().map(ToString::to_string))
             .query_opt("from", params.from.as_ref().map(ToString::to_string))
@@ -148,6 +152,7 @@ impl<P: ops::ListDomains> Accounts<'_, P> {
             )
             .named("accounts.list_domains")
             .scopes(&["domains:read"])
+            .template("/v1/accounts/orgs/{org_id}/domains")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -195,7 +200,8 @@ impl<P: ops::GetDomain> Accounts<'_, P> {
                 ),
             )
             .named("accounts.get_domain")
-            .scopes(&["domains:read"]);
+            .scopes(&["domains:read"])
+            .template("/v1/accounts/orgs/{org_id}/domains/{domain}");
         self.0.request(op).await
     }
 }
@@ -212,6 +218,7 @@ impl<P: ops::ListRequests> Accounts<'_, P> {
             )
             .named("accounts.list_requests")
             .scopes(&["usage:read"])
+            .template("/v1/accounts/orgs/{org_id}/requests")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt("page_token", params.page_token.as_ref().map(ToString::to_string))
             .query_opt("status", params.status.as_ref().map(ToString::to_string))
@@ -255,7 +262,8 @@ impl<P: ops::GetUnits> Accounts<'_, P> {
                 format!("/v1/accounts/orgs/{}/units", path_segment(org_id)),
             )
             .named("accounts.get_units")
-            .scopes(&["usage:read"]);
+            .scopes(&["usage:read"])
+            .template("/v1/accounts/orgs/{org_id}/units");
         self.0.request(op).await
     }
 }
@@ -272,6 +280,7 @@ impl<P: ops::GetUnitSeries> Accounts<'_, P> {
             )
             .named("accounts.get_unit_series")
             .scopes(&["usage:read"])
+            .template("/v1/accounts/orgs/{org_id}/units/series")
             .query_opt("from", params.from.as_ref().map(ToString::to_string))
             .query_opt("to", params.to.as_ref().map(ToString::to_string))
             .query_opt("by", params.by.as_ref().map(ToString::to_string));
@@ -291,6 +300,7 @@ impl<P: ops::GetUsage> Accounts<'_, P> {
             )
             .named("accounts.get_usage")
             .scopes(&["usage:read"])
+            .template("/v1/accounts/orgs/{org_id}/usage")
             .query_opt("from", params.from.as_ref().map(ToString::to_string))
             .query_opt("to", params.to.as_ref().map(ToString::to_string));
         self.0.request(op).await
@@ -305,6 +315,7 @@ impl<P: ops::ListUnitCategories> Accounts<'_, P> {
         let op = Operation::new(Method::Get, "/v1/accounts/units/categories")
             .named("accounts.list_unit_categories")
             .scopes(&["usage:read"])
+            .template("/v1/accounts/units/categories")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -347,6 +358,8 @@ impl<P: ops::AddDomain> Accounts<'_, P> {
             )
             .named("accounts.add_domain")
             .scopes(&["domains:write"])
+            .template("/v1/accounts/orgs/{org_id}/domains")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -368,6 +381,8 @@ impl<P: ops::CheckDomain> Accounts<'_, P> {
             )
             .named("accounts.check_domain")
             .scopes(&["domains:write"])
+            .template("/v1/accounts/orgs/{org_id}/domains/{domain}/check")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -389,6 +404,8 @@ impl<P: ops::ConfirmDomain> Accounts<'_, P> {
             )
             .named("accounts.confirm_domain")
             .scopes(&["domains:write"])
+            .template("/v1/accounts/orgs/{org_id}/domains/{domain}/confirm")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -411,7 +428,8 @@ impl<P: ops::DeleteAgent> Agents<'_, P> {
                 ),
             )
             .named("agents.delete_agent")
-            .scopes(&["agents:write"]);
+            .scopes(&["agents:write"])
+            .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}");
         self.0.request(op).await
     }
 }
@@ -428,6 +446,7 @@ impl<P: ops::ListAgents> Agents<'_, P> {
             )
             .named("agents.list_agents")
             .scopes(&["agents:read"])
+            .template("/v1/accounts/orgs/{org_id}/agents")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -475,7 +494,8 @@ impl<P: ops::GetAgent> Agents<'_, P> {
                 ),
             )
             .named("agents.get_agent")
-            .scopes(&["agents:read"]);
+            .scopes(&["agents:read"])
+            .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}");
         self.0.request(op).await
     }
 }
@@ -492,6 +512,7 @@ impl<P: ops::CreateEnrollment> Agents<'_, P> {
             )
             .named("agents.create_enrollment")
             .scopes(&["agents:write"])
+            .template("/v1/accounts/orgs/{org_id}/agents/enrollments")
             .json(body)?;
         self.0.request(op).await
     }
@@ -513,6 +534,8 @@ impl<P: ops::RunCheck> Agents<'_, P> {
             )
             .named("agents.run_check")
             .scopes(&["agents:write"])
+            .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}/checks")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -534,6 +557,8 @@ impl<P: ops::RevokeAgent> Agents<'_, P> {
             )
             .named("agents.revoke_agent")
             .scopes(&["agents:write"])
+            .template("/v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -556,7 +581,8 @@ impl<P: ops::DeleteConnection> Connections<'_, P> {
                 ),
             )
             .named("connections.delete_connection")
-            .scopes(&["connections:write"]);
+            .scopes(&["connections:write"])
+            .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}");
         self.0.request(op).await
     }
 }
@@ -577,7 +603,10 @@ impl<P: ops::RevokeGrant> Connections<'_, P> {
                 ),
             )
             .named("connections.revoke_grant")
-            .scopes(&["connections:write"]);
+            .scopes(&["connections:write"])
+            .template(
+                "/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id}",
+            );
         self.0.request(op).await
     }
 }
@@ -596,7 +625,8 @@ impl<P: ops::DeleteMonitor> Connections<'_, P> {
                 ),
             )
             .named("connections.delete_monitor")
-            .scopes(&["connections:write"]);
+            .scopes(&["connections:write"])
+            .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}");
         self.0.request(op).await
     }
 }
@@ -613,6 +643,7 @@ impl<P: ops::ListConnections> Connections<'_, P> {
             )
             .named("connections.list_connections")
             .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/connections")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -663,7 +694,8 @@ impl<P: ops::GetConnection> Connections<'_, P> {
                 ),
             )
             .named("connections.get_connection")
-            .scopes(&["connections:read"]);
+            .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}");
         self.0.request(op).await
     }
 }
@@ -684,6 +716,7 @@ impl<P: ops::ListGrants> Connections<'_, P> {
             )
             .named("connections.list_grants")
             .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -739,6 +772,7 @@ impl<P: ops::ListHistory> Connections<'_, P> {
             )
             .named("connections.list_history")
             .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/history")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -790,6 +824,7 @@ impl<P: ops::ListMonitors> Connections<'_, P> {
             )
             .named("connections.list_monitors")
             .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/monitors")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt("page_token", params.page_token.as_ref().map(ToString::to_string))
             .query_opt(
@@ -839,7 +874,8 @@ impl<P: ops::GetMonitor> Connections<'_, P> {
                 ),
             )
             .named("connections.get_monitor")
-            .scopes(&["connections:read"]);
+            .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}");
         self.0.request(op).await
     }
 }
@@ -860,6 +896,7 @@ impl<P: ops::ListMonitorRuns> Connections<'_, P> {
             )
             .named("connections.list_monitor_runs")
             .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt("page_token", params.page_token.as_ref().map(ToString::to_string))
             .query_opt("from", params.from.as_ref().map(ToString::to_string));
@@ -911,7 +948,8 @@ impl<P: ops::GetMonitorSummary> Connections<'_, P> {
                 ),
             )
             .named("connections.get_monitor_summary")
-            .scopes(&["connections:read"]);
+            .scopes(&["connections:read"])
+            .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary");
         self.0.request(op).await
     }
 }
@@ -924,6 +962,7 @@ impl<P: ops::ListKinds> Connections<'_, P> {
         let op = Operation::new(Method::Get, "/v1/connections/kinds")
             .named("connections.list_kinds")
             .scopes(&["connections:read"])
+            .template("/v1/connections/kinds")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -962,6 +1001,7 @@ impl<P: ops::ListTools> Connections<'_, P> {
         let op = Operation::new(Method::Get, "/v1/connections/tools")
             .named("connections.list_tools")
             .scopes(&["connections:read"])
+            .template("/v1/connections/tools")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -1008,6 +1048,7 @@ impl<P: ops::UpdateConnection> Connections<'_, P> {
             )
             .named("connections.update_connection")
             .scopes(&["connections:write"])
+            .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}")
             .json(body)?;
         self.0.request(op).await
     }
@@ -1029,6 +1070,8 @@ impl<P: ops::UpdateMonitor> Connections<'_, P> {
             )
             .named("connections.update_monitor")
             .scopes(&["connections:write"])
+            .template("/v1/accounts/orgs/{org_id}/monitors/{monitor_id}")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -1046,6 +1089,8 @@ impl<P: ops::CreateConnection> Connections<'_, P> {
             )
             .named("connections.create_connection")
             .scopes(&["connections:write"])
+            .template("/v1/accounts/orgs/{org_id}/connections")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -1069,6 +1114,10 @@ impl<P: ops::CallAction> Connections<'_, P> {
             )
             .named("connections.call_action")
             .scopes(&["connections:use"])
+            .template(
+                "/v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}",
+            )
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -1090,6 +1139,8 @@ impl<P: ops::CreateMonitor> Connections<'_, P> {
             )
             .named("connections.create_monitor")
             .scopes(&["connections:write"])
+            .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -1109,7 +1160,9 @@ impl<P: ops::TestConnection> Connections<'_, P> {
                 ),
             )
             .named("connections.test_connection")
-            .scopes(&["connections:write"]);
+            .scopes(&["connections:write"])
+            .template("/v1/accounts/orgs/{org_id}/connections/{connection_id}/test")
+            .idempotency_key(true);
         self.0.request(op).await
     }
 }
@@ -1126,6 +1179,8 @@ impl<P: ops::CallTool> Connections<'_, P> {
             )
             .named("connections.call_tool")
             .scopes(&["connections:use"])
+            .template("/v1/connections/tools/{name}")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -1144,7 +1199,8 @@ impl<P: ops::DeleteEndpoint> Events<'_, P> {
                 format!("/v1/webhooks/endpoints/{}", path_segment(endpoint_id)),
             )
             .named("events.delete_endpoint")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}");
         self.0.request(op).await
     }
 }
@@ -1159,7 +1215,8 @@ impl<P: ops::DeleteInbox> Events<'_, P> {
                 format!("/v1/webhooks/inboxes/{}", path_segment(inbox_id)),
             )
             .named("events.delete_inbox")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/inboxes/{inbox_id}");
         self.0.request(op).await
     }
 }
@@ -1172,6 +1229,7 @@ impl<P: ops::StreamEvents> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/events/events")
             .named("events.stream_events")
             .scopes(&["events:read"])
+            .template("/v1/events/events")
             .query_opt("types", params.types.as_ref().map(ToString::to_string))
             .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
             .rpc("iohr.events.v1.EventsService/StreamEvents")
@@ -1189,6 +1247,7 @@ impl<P: ops::ListNotifications> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/events/notifications")
             .named("events.list_notifications")
             .scopes(&["events:read"])
+            .template("/v1/events/notifications")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt("page_token", params.page_token.as_ref().map(ToString::to_string))
             .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
@@ -1226,6 +1285,7 @@ impl<P: ops::GetEventStats> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/events/stats")
             .named("events.get_event_stats")
             .scopes(&["events:read"])
+            .template("/v1/events/stats")
             .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
             .query_opt("range", params.range.as_ref().map(ToString::to_string));
         self.0.request(op).await
@@ -1240,6 +1300,7 @@ impl<P: ops::ListEventTypes> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/events/types")
             .named("events.list_event_types")
             .scopes(&["events:read"])
+            .template("/v1/events/types")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -1278,6 +1339,7 @@ impl<P: ops::ListEndpoints> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/webhooks/endpoints")
             .named("events.list_endpoints")
             .scopes(&["webhooks:read"])
+            .template("/v1/webhooks/endpoints")
             .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
@@ -1319,7 +1381,8 @@ impl<P: ops::GetEndpoint> Events<'_, P> {
                 format!("/v1/webhooks/endpoints/{}", path_segment(endpoint_id)),
             )
             .named("events.get_endpoint")
-            .scopes(&["webhooks:read"]);
+            .scopes(&["webhooks:read"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}");
         self.0.request(op).await
     }
 }
@@ -1338,6 +1401,7 @@ impl<P: ops::ListDeliveries> Events<'_, P> {
             )
             .named("events.list_deliveries")
             .scopes(&["webhooks:read"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}/deliveries")
             .query_opt("status", params.status.as_ref().map(ToString::to_string))
             .query_opt("page_token", params.page_token.as_ref().map(ToString::to_string))
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string));
@@ -1380,6 +1444,7 @@ impl<P: ops::ListInboxes> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/webhooks/inboxes")
             .named("events.list_inboxes")
             .scopes(&["webhooks:read"])
+            .template("/v1/webhooks/inboxes")
             .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
@@ -1423,6 +1488,7 @@ impl<P: ops::ListInboxRequests> Events<'_, P> {
             )
             .named("events.list_inbox_requests")
             .scopes(&["webhooks:read"])
+            .template("/v1/webhooks/inboxes/{inbox_id}/requests")
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))
             .query_opt(
                 "page_token",
@@ -1467,6 +1533,7 @@ impl<P: ops::GetDeliveryStats> Events<'_, P> {
         let op = Operation::new(Method::Get, "/v1/webhooks/stats")
             .named("events.get_delivery_stats")
             .scopes(&["webhooks:read"])
+            .template("/v1/webhooks/stats")
             .query_opt("account_id", params.account_id.as_ref().map(ToString::to_string))
             .query_opt(
                 "endpoint_id",
@@ -1489,6 +1556,7 @@ impl<P: ops::UpdateEndpoint> Events<'_, P> {
             )
             .named("events.update_endpoint")
             .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}")
             .json(body)?;
         self.0.request(op).await
     }
@@ -1504,7 +1572,9 @@ impl<P: ops::RetryDelivery> Events<'_, P> {
                 format!("/v1/webhooks/deliveries/{}/retry", path_segment(delivery_id)),
             )
             .named("events.retry_delivery")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/deliveries/{delivery_id}/retry")
+            .idempotency_key(true);
         self.0.request(op).await
     }
 }
@@ -1517,6 +1587,8 @@ impl<P: ops::CreateEndpoint> Events<'_, P> {
         let op = Operation::new(Method::Post, "/v1/webhooks/endpoints")
             .named("events.create_endpoint")
             .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -1534,6 +1606,7 @@ impl<P: ops::RecoverEndpoint> Events<'_, P> {
             )
             .named("events.recover_endpoint")
             .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}/recover")
             .json(body)?;
         self.0.request(op).await
     }
@@ -1549,7 +1622,9 @@ impl<P: ops::RotateSecret> Events<'_, P> {
                 format!("/v1/webhooks/endpoints/{}/rotate", path_segment(endpoint_id)),
             )
             .named("events.rotate_secret")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}/rotate")
+            .idempotency_key(true);
         self.0.request(op).await
     }
 }
@@ -1564,7 +1639,9 @@ impl<P: ops::SendTest> Events<'_, P> {
                 format!("/v1/webhooks/endpoints/{}/test", path_segment(endpoint_id)),
             )
             .named("events.send_test")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}/test")
+            .idempotency_key(true);
         self.0.request(op).await
     }
 }
@@ -1577,6 +1654,8 @@ impl<P: ops::CreateInbox> Events<'_, P> {
         let op = Operation::new(Method::Post, "/v1/webhooks/inboxes")
             .named("events.create_inbox")
             .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/inboxes")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -1593,6 +1672,7 @@ impl<P: ops::ListDigests> Radar<'_, P> {
         let op = Operation::new(Method::Get, "/v1/radar/digests")
             .named("radar.list_digests")
             .scopes(&["radar:read"])
+            .template("/v1/radar/digests")
             .query_opt("language", params.language.as_ref().map(ToString::to_string))
             .query_opt("lang", params.lang.as_ref().map(ToString::to_string))
             .query_opt("limit", params.limit.as_ref().map(ToString::to_string))
@@ -1644,7 +1724,8 @@ impl<P: ops::GetDigest> Radar<'_, P> {
                 format!("/v1/radar/digests/{}", path_segment(id)),
             )
             .named("radar.get_digest")
-            .scopes(&["radar:read"]);
+            .scopes(&["radar:read"])
+            .template("/v1/radar/digests/{id}");
         self.0.request(op).await
     }
 }
@@ -1657,6 +1738,7 @@ impl<P: ops::ListItems> Radar<'_, P> {
         let op = Operation::new(Method::Get, "/v1/radar/items")
             .named("radar.list_items")
             .scopes(&["radar:read"])
+            .template("/v1/radar/items")
             .query_opt("language", params.language.as_ref().map(ToString::to_string))
             .query_opt("limit", params.limit.as_ref().map(ToString::to_string))
             .query_opt("page_size", params.page_size.as_ref().map(ToString::to_string))

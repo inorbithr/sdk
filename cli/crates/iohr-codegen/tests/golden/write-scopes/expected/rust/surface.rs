@@ -31,7 +31,8 @@ impl<P: ops::DeleteEndpoint> Events<'_, P> {
                 format!("/v1/webhooks/endpoints/{}", path_segment(endpoint_id)),
             )
             .named("events.delete_endpoint")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}");
         self.0.request(op).await
     }
 }
@@ -46,7 +47,8 @@ impl<P: ops::DeleteInbox> Events<'_, P> {
                 format!("/v1/webhooks/inboxes/{}", path_segment(inbox_id)),
             )
             .named("events.delete_inbox")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/inboxes/{inbox_id}");
         self.0.request(op).await
     }
 }
@@ -63,6 +65,7 @@ impl<P: ops::UpdateEndpoint> Events<'_, P> {
             )
             .named("events.update_endpoint")
             .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}")
             .json(body)?;
         self.0.request(op).await
     }
@@ -78,7 +81,9 @@ impl<P: ops::RetryDelivery> Events<'_, P> {
                 format!("/v1/webhooks/deliveries/{}/retry", path_segment(delivery_id)),
             )
             .named("events.retry_delivery")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/deliveries/{delivery_id}/retry")
+            .idempotency_key(true);
         self.0.request(op).await
     }
 }
@@ -91,6 +96,8 @@ impl<P: ops::CreateEndpoint> Events<'_, P> {
         let op = Operation::new(Method::Post, "/v1/webhooks/endpoints")
             .named("events.create_endpoint")
             .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }
@@ -106,7 +113,9 @@ impl<P: ops::RotateSecret> Events<'_, P> {
                 format!("/v1/webhooks/endpoints/{}/rotate", path_segment(endpoint_id)),
             )
             .named("events.rotate_secret")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}/rotate")
+            .idempotency_key(true);
         self.0.request(op).await
     }
 }
@@ -121,7 +130,9 @@ impl<P: ops::SendTest> Events<'_, P> {
                 format!("/v1/webhooks/endpoints/{}/test", path_segment(endpoint_id)),
             )
             .named("events.send_test")
-            .scopes(&["webhooks:write"]);
+            .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/endpoints/{endpoint_id}/test")
+            .idempotency_key(true);
         self.0.request(op).await
     }
 }
@@ -134,6 +145,8 @@ impl<P: ops::CreateInbox> Events<'_, P> {
         let op = Operation::new(Method::Post, "/v1/webhooks/inboxes")
             .named("events.create_inbox")
             .scopes(&["webhooks:write"])
+            .template("/v1/webhooks/inboxes")
+            .idempotency_key(true)
             .json(body)?;
         self.0.request(op).await
     }

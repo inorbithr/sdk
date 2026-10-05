@@ -21,8 +21,12 @@ use super::ops;
 Operation::new(Method::{{ op.method }}, {% if op.path_literal %}"{{ op.path_literal }}"{% else %}format!("{{ op.path_format }}"{% for a in op.path_args %}, path_segment({{ a }}){% endfor %}){% endif %})
     .named("{{ op.hook_name }}")
     .scopes(&[{% for s in op.scopes %}"{{ s }}", {% endfor %}])
+    .template("{{ op.template }}")
     {%- if op.idempotent %}
     .idempotent(true)
+    {%- endif %}
+    {%- if op.idempotency_key %}
+    .idempotency_key(true)
     {%- endif %}
     {%- for q in op.query %}
     {%- if q.is_vec %}

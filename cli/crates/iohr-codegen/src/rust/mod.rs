@@ -85,6 +85,10 @@ struct OpCtx {
     response_type: String,
     scopes: Vec<String>,
     idempotent: bool,
+    /// The operation takes `Idempotency-Key` (`docs/config.md` section 7.5).
+    idempotency_key: bool,
+    /// The path template, for span names (`/v1/webhooks/endpoints/{endpoint_id}`).
+    template: String,
     /// How the operation pages, when it does and takes no body (design.md §9).
     paging: Option<PagingCtx>,
     /// Whether the answer is a stream of events (design.md §7).
@@ -362,6 +366,8 @@ fn op_context(
             .unwrap_or_else(|| "::serde_json::Value".to_owned()),
         scopes: op.scopes.clone(),
         idempotent: op.idempotent_override,
+        idempotency_key: op.idempotency_key,
+        template: op.path.clone(),
         paging: if op.stream {
             None
         } else {

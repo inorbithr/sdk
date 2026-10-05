@@ -9,8 +9,9 @@
 //! use inorbithr::{Client, Method, Operation};
 //!
 //! # async fn run() -> Result<(), inorbithr::Error> {
-//! // INORBIT_KEY_ID, INORBIT_KEY_SECRET and INORBIT_SCOPES, or INORBIT_TOKEN.
-//! let client: Client = Client::from_env()?;
+//! // Code, then INORBIT_* variables, then the config file `iohr login` writes, then
+//! // the `iohr` login itself (docs/config.md).
+//! let client: Client = Client::load()?;
 //! let me: inorbithr::Response<serde_json::Value> =
 //!     client.request(Operation::new(Method::Get, "/v1/me")).await?;
 //! println!("{} ({} attempt)", me.value["subject"], me.raw.attempts);
@@ -24,7 +25,9 @@
 //! - exchanges an API key for a short-lived token, caches it and refreshes it, or uses
 //!   an API token as it is;
 //! - retries what is safe to retry (`429`, `503`, `504`, connection failures) with
-//!   `Retry-After` honoured, on idempotent calls only;
+//!   `Retry-After` honoured, on idempotent calls and writes with an idempotency key,
+//!   within a total timeout and a retry budget;
+//! - runs every call through a named [`middleware`] pipeline you can edit;
 //! - answers with one error family, [`Error`], carrying the API's error `code` and
 //!   `details`;
 //! - never prints a secret: [`Secret`] redacts and zeroes on drop.
@@ -33,17 +36,23 @@
 
 mod auth;
 mod client;
+pub mod config;
 pub mod error;
 mod generated;
 mod hooks;
 mod int64;
+pub mod middleware;
+#[cfg(feature = "otel")]
+mod otel;
 mod pages;
 mod profile;
+mod ratelimit;
 mod retry;
 mod secret;
 mod socket;
 mod stream;
 mod timestamp;
+mod transport;
 
 /// The public surface: every operation the public API offers, generated into this
 /// crate by `iohr sdk generate` from `spec/openapi.json` (ADR 0011). Import
@@ -55,13 +64,23 @@ pub mod public {
     pub use crate::generated::surface::*;
 }
 
-pub use auth::{AUDIENCE, ClientCredentials, DEFAULT_TOKEN_URL, StaticToken, Token, TokenProvider};
-pub use client::{Client, ClientBuilder, DEFAULT_BASE_URL, Method, Operation, Response};
-pub use error::{ApiError, AuthError, Code, ConfigError, Detail, Error, Headers, RawResponse};
+pub use auth::{
+    AUDIENCE, CachedToken, ChainedCredential, CliToken, ClientCredentials, DEFAULT_TOKEN_URL,
+    StaticToken, Token, TokenFile, TokenProvider,
+};
+pub use client::{
+    Client, ClientBuilder, DEFAULT_BASE_URL, DefaultCredential, Method, Operation, Response,
+};
+pub use config::{LoadOptions, ResolvedConfig};
+pub use error::{
+    ApiError, AuthError, Code, ConfigError, Detail, Error, Headers, Problem, RawResponse,
+};
 pub use hooks::{Attempt, Hook};
 pub use int64::Int64;
+pub use middleware::{CallOptions, LogLevel, LogRecord, Middleware, Pipeline};
 pub use pages::Pages;
 pub use profile::{Profile, Public};
+pub use ratelimit::{RateLimit, RateLimitMode, RateLimitPolicy};
 pub use secret::Secret;
 pub use stream::{EventStream, Streams};
 pub use timestamp::parse_timestamp;
@@ -72,6 +91,7 @@ pub mod prelude {
     pub use crate::client::{Client, Method, Operation, Response};
     pub use crate::error::Error;
     pub use crate::int64::Int64;
+    pub use crate::middleware::CallOptions;
     pub use crate::profile::{Profile, Public};
     pub use crate::stream::EventStream;
 }

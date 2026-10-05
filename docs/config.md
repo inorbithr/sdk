@@ -7,9 +7,9 @@ setups for common environments are in [recipes.md](recipes.md). Where this page 
 `design.md` disagree on configuration, this page wins and `design.md` is corrected in the
 same pull request.
 
-Status: designed 2026-10-04, milestone M6 in [roadmap.md](roadmap.md). Today the six
-runtimes implement section 2 of `design.md` only: explicit options and `from_env`.
-Everything below lands one language at a time. The conformance cases and vectors are
+Status: designed 2026-10-04, milestone M6 in [roadmap.md](roadmap.md). Rust and TypeScript implement
+all of it; the other four implement section 2 of `design.md` only,
+explicit options and `from_env`, until each lands it. The conformance cases and vectors are
 written now and marked `pending` until each runtime passes them.
 
 Words used here:
@@ -208,9 +208,8 @@ Every client and every `load` result can describe itself, the SDK's equivalent o
   [--for TYPE]` (iohr 0.1.0-alpha.9 and later), so "what will my service see" has a
   one-line answer. `--profile` stands for `profile` in code (source `code`), `--for`
   resolves for a typed profile, and `IOHR_PROFILE` is not read. A configuration `load`
-  would refuse exits 1 with the `ConfigError`'s text on stderr. Until the Rust runtime
-  has `load`, the command line resolves with its own implementation, held to the
-  `config`, `config-path` and `durations` vectors; it then calls the runtime.
+  would refuse exits 1 with the `ConfigError`'s text on stderr. The command line
+  resolves with the Rust runtime's own `inorbithr::config`, so the two cannot disagree.
 - When no source has credentials, the `ConfigError` holds one problem with the setting
   `credential` and an empty source, whose message is the chain's (section 5.1). When it
   is the only problem, the error's text is that message alone.

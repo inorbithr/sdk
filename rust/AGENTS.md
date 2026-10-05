@@ -29,14 +29,19 @@ rust/
     auth.rs         Token, TokenProvider, ClientCredentials (single flight), StaticToken
     error.rs        Error, ApiError, Code (17 + Unknown), Detail, AuthError, ConfigError
     retry.rs        the retry policy: Retry-After, full jitter
-    hooks.rs        Attempt, Hook
+    hooks.rs        Attempt, Hook (on_retry)
+    config/         load: the resolver (precedence, file, chain), LoadOptions, describe(), no_proxy
+    middleware/     Pipeline, Middleware, Request/Response/Next, the twelve built-ins, logging
+    transport.rs    the reqwest client and the /v1/ws upgrade: proxy, CONNECT, trust, mTLS, pins
+    ratelimit.rs    RateLimit snapshots from X-RateLimit-* and the IETF fields
+    otel.rs         spans and metrics (feature otel)
     profile.rs      Profile, Public, the INORBIT_<NAME>_ environment prefix
     stream.rs       EventStream<T>, Streams, the server-sent events parser and reader
     socket.rs       the /v1/ws socket task: one connection, calls by id, reconnect and re-issue
     secret.rs       Secret<T>: redacted, not Serialize, zeroed on drop
     int64.rs        Int64: a decimal string on the wire
     generated/      the public surface, written by `iohr sdk generate`; do not edit
-  tests/conformance.rs   the driver for conformance/cases
+  tests/conformance.rs   the driver for conformance/cases and conformance/vectors
 examples/rust/      programs CI compiles and the README quotes
 ```
 
@@ -48,7 +53,7 @@ examples/rust/      programs CI compiles and the README quotes
 - Dependencies: the table in `README.md`. Anything else needs a reason there and in
   the PR. No runtime type leaks into the public API beyond `tokio` futures being `Send`;
   headers are `Headers`, methods are `Method`.
-- Features: `default = ["rustls"]`. Every feature combination in `rust:features` must
+- Features: `default = ["rustls", "tracing"]`; `otel` and `encrypted-key` are opt-in. Every feature combination in `rust:features` must
   build; without `rustls` the client reaches loopback only.
 - Clippy pedantic on, warnings are errors; `unwrap`/`expect` only in tests and examples;
   `unsafe` forbidden (`#![forbid(unsafe_code)]`).

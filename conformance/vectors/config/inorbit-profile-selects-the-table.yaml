@@ -1,7 +1,7 @@
 name: inorbit-profile-selects-the-table
 kind: config
 summary: INORBIT_PROFILE wins over the file's default profile.
-pending: [go, rust, py, java, csharp]
+pending: [go, py, java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_PROFILE: b }
   config_file: |

@@ -1,7 +1,7 @@
 name: the-request-id-is-the-same-on-every-attempt
 area: middleware
 summary: The request id is made once per call and sent unchanged on the retry.
-pending: [go, rust, py, java, csharp]
+pending: [go, py, java, csharp]
 notes: M6, docs/config.md section 7.2 (request_id).
 action: { op: me }
 exchanges:

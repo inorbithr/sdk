@@ -1,11 +1,10 @@
-//! The SDKs' configuration resolution (`docs/config.md` sections 2 to 5), for
-//! `iohr sdk config`: what a client built with `load` would see, as `describe()` gives
-//! it. Pure: the environment, the OS, the home directory and the code options are
-//! inputs, so the conformance vectors (`conformance/vectors/config`) run against it.
+//! Configuration resolution (`docs/config.md` sections 2 to 5): what a client built
+//! with `load` sees, as `describe()` gives it. Pure: the environment, the OS, the home
+//! directory and the code options are inputs, so the conformance vectors
+//! (`conformance/vectors/config`) run against it, and `iohr sdk config` prints it.
 //!
-//! This resolves and validates; it never contacts a host and never reads a secret's
-//! value beyond checking it is set. When the Rust runtime gains `load` and
-//! `describe()` (M6), `iohr sdk config` calls it instead and this module goes.
+//! This resolves and validates; it never contacts a host. Secret values are kept apart
+//! from the description (which only ever says `<redacted>`), for the client to use.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -13,8 +12,10 @@ use std::fmt::Write as _;
 use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
+use crate::secret::Secret;
+
 /// The built-in pipeline, outermost first (`docs/config.md` section 7.2).
-pub(crate) const PIPELINE: [&str; 12] = [
+pub const PIPELINE: [&str; 12] = [
     "request_id",
     "user_agent",
     "idempotency_key",
@@ -39,17 +40,23 @@ const CLI_KEYS: [&str; 5] = ["kind", "account", "storage", "issuer", "client_id"
 
 const SOURCES: [&str; 4] = ["env", "workload", "file", "cli"];
 
-/// The operating system whose conventions apply.
+/// The operating system whose conventions apply to the config file's location and to
+/// paths (`docs/config.md` section 4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Os {
+#[non_exhaustive]
+pub enum Os {
+    /// Linux and other Unix systems.
     Linux,
+    /// macOS.
     Macos,
+    /// Windows.
     Windows,
 }
 
 impl Os {
-    /// The OS this binary runs on.
-    pub(crate) fn current() -> Self {
+    /// The OS this program runs on.
+    #[must_use]
+    pub fn current() -> Self {
         if cfg!(target_os = "macos") {
             Self::Macos
         } else if cfg!(windows) {
@@ -123,13 +130,7 @@ pub(crate) struct Inputs<'a> {
     pub(crate) read: &'a dyn Fn(&str) -> Option<Vec<u8>>,
 }
 
-/// One problem: the setting, where its value came from, what to do.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Problem {
-    pub(crate) setting: String,
-    pub(crate) source: String,
-    pub(crate) message: String,
-}
+use crate::error::Problem;
 
 /// `load` would fail: every problem, in catalogue order.
 #[derive(Debug)]
@@ -137,11 +138,23 @@ pub(crate) struct Invalid {
     pub(crate) problems: Vec<Problem>,
 }
 
-impl std::fmt::Display for Invalid {
+impl From<Invalid> for crate::error::ConfigError {
+    fn from(e: Invalid) -> Self {
+        Self::Invalid {
+            problems: e.problems,
+        }
+    }
+}
+
+/// The text of a `ConfigError` holding `problems` (`docs/config.md` section 2.5).
+pub(crate) struct ProblemsText<'a>(pub(crate) &'a [Problem]);
+
+impl std::fmt::Display for ProblemsText<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let n = self.problems.len();
+        let problems = self.0;
+        let n = problems.len();
         // No credentials and nothing else: the chain's own message (section 5.1).
-        if let [only] = self.problems.as_slice()
+        if let [only] = problems
             && only.setting == "credential"
         {
             return f.write_str(&only.message);
@@ -151,7 +164,7 @@ impl std::fmt::Display for Invalid {
             "configuration is invalid ({n} problem{}):",
             if n == 1 { "" } else { "s" }
         )?;
-        for (i, p) in self.problems.iter().enumerate() {
+        for (i, p) in problems.iter().enumerate() {
             let mut lines = p.message.lines();
             write!(f, "  {}: {}", p.setting, lines.next().unwrap_or_default())?;
             if !p.source.is_empty() {
@@ -328,6 +341,8 @@ struct Resolver<'a> {
     problems: Vec<Problem>,
     settings: Map<String, Value>,
     ignored: Vec<Value>,
+    /// Secret values by setting, never in `settings`.
+    secrets: BTreeMap<String, Secret<String>>,
 }
 
 /// Parses a duration: digits, then `ms`, `s`, `m` or `h`, greater than zero. The value
@@ -349,7 +364,7 @@ pub(crate) fn parse_duration(v: &str) -> Option<u64> {
     (ms > 0).then_some(ms)
 }
 
-fn show_duration(ms: u64) -> String {
+pub(crate) fn show_duration(ms: u64) -> String {
     if ms.is_multiple_of(1000) {
         format!("{}s", ms / 1000)
     } else {
@@ -357,7 +372,7 @@ fn show_duration(ms: u64) -> String {
     }
 }
 
-fn is_loopback(host: &str) -> bool {
+pub(crate) fn is_loopback(host: &str) -> bool {
     let h = host.trim_start_matches('[').trim_end_matches(']');
     h.eq_ignore_ascii_case("localhost")
         || h.parse::<std::net::IpAddr>()
@@ -365,7 +380,7 @@ fn is_loopback(host: &str) -> bool {
 }
 
 /// A URL with its user-info replaced by `<redacted>`.
-fn redact_userinfo(raw: &str) -> String {
+pub(crate) fn redact_userinfo(raw: &str) -> String {
     let Some((scheme, rest)) = raw.split_once("://") else {
         return raw.to_owned();
     };
@@ -423,20 +438,40 @@ pub(crate) fn config_path(
 }
 
 fn env_name(profile: &str) -> String {
-    crate::env_name(profile)
+    profile
+        .chars()
+        .map(|c| match c {
+            '-' => '_',
+            c => c.to_ascii_uppercase(),
+        })
+        .collect()
 }
 
-/// A profile name the command line would accept (section 2.3).
-fn valid_profile(name: &str) -> bool {
-    name.parse::<iohr_auth::ProfileName>().is_ok()
+/// A profile name the command line would accept (section 2.3): 1 to 64 characters from
+/// `a-z`, `0-9`, `_` and `-`, starting with a letter or digit.
+pub(crate) fn valid_profile(name: &str) -> bool {
+    let b = name.as_bytes();
+    !b.is_empty()
+        && b.len() <= 64
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
 }
 
-/// Resolves the configuration. `Ok` is the `describe()` document.
+/// What resolution produced: the `describe()` document and, apart from it, the secret
+/// values it names as `<redacted>` (`token`, `key_secret`, `client_key_password`, and a
+/// `proxy` URL with its user-info).
+pub(crate) struct Resolved {
+    pub(crate) describe: Value,
+    pub(crate) secrets: BTreeMap<String, Secret<String>>,
+}
+
+/// Resolves the configuration. `Ok` holds the `describe()` document.
 #[allow(
     clippy::too_many_lines,
     reason = "the file, the profile, then the layers in order"
 )]
-pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Value, Invalid> {
+pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Resolved, Invalid> {
     let mut problems = Vec::new();
     let var = |k: &str| inp.env.get(k).map(String::as_str).filter(|v| !v.is_empty());
 
@@ -578,6 +613,7 @@ pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Value, Invalid> {
         problems,
         settings: Map::new(),
         ignored: Vec::new(),
+        secrets: BTreeMap::new(),
     };
     r.check_file_keys();
     r.resolve_settings();
@@ -590,14 +626,18 @@ pub(crate) fn resolve(inp: &Inputs<'_>) -> Result<Value, Invalid> {
         return Err(Invalid { problems });
     }
     let credential = credential.unwrap_or(Value::Null);
-    Ok(json!({
-        "profile": profile.map_or(Value::Null, |(name, source)| json!({ "name": name, "source": source })),
-        "config_file": file_path,
-        "settings": r.settings,
-        "credential": credential,
-        "pipeline": PIPELINE,
-        "ignored": r.ignored,
-    }))
+    let secrets = std::mem::take(&mut r.secrets);
+    Ok(Resolved {
+        describe: json!({
+            "profile": profile.map_or(Value::Null, |(name, source)| json!({ "name": name, "source": source })),
+            "config_file": file_path,
+            "settings": r.settings,
+            "credential": credential,
+            "pipeline": PIPELINE,
+            "ignored": r.ignored,
+        }),
+        secrets,
+    })
 }
 
 impl Resolver<'_> {
@@ -741,6 +781,13 @@ impl Resolver<'_> {
             }
             match self.parse(s, &raw, &source) {
                 Ok(v) => {
+                    // The value itself, apart from the description, for the client.
+                    if let Raw::Env(text) | Raw::Code(Value::String(text)) = &raw
+                        && (s.ty == Ty::Secret || (s.ty == Ty::Proxy && has_userinfo(text)))
+                    {
+                        self.secrets
+                            .insert(s.name.into(), Secret::new(text.clone()));
+                    }
                     self.settings
                         .insert(s.name.into(), json!({ "value": v, "source": source }));
                 }
@@ -1045,7 +1092,8 @@ impl Resolver<'_> {
                     );
                     return None;
                 }
-                if let Some(_t) = token {
+                if let Some(t) = token {
+                    self.secrets.insert("token".into(), Secret::new(t));
                     self.show("token", json!(REDACTED), &src("TOKEN"));
                     used = Some(("env", "static_token"));
                 } else if let Some(f) = token_file {
@@ -1102,7 +1150,9 @@ impl Resolver<'_> {
                         return None;
                     }
                     self.show("key_id", json!(id), &src("KEY_ID"));
-                    if secret {
+                    if let Some(v) = self.var(&n("KEY_SECRET")).filter(|_| secret) {
+                        let v = Secret::new(v.to_owned());
+                        self.secrets.insert("key_secret".into(), v);
                         self.show("key_secret", json!(REDACTED), &src("KEY_SECRET"));
                     } else if let Some(f) = secret_file {
                         let path = self.path(&f, false).unwrap_or(f);
@@ -1317,7 +1367,7 @@ enum Raw {
 }
 
 /// Whether `e` fits the `no_proxy` grammar (section 6.2).
-fn no_proxy_entry(e: &str) -> bool {
+pub(crate) fn no_proxy_entry(e: &str) -> bool {
     if e == "*" {
         return true;
     }
@@ -1372,6 +1422,3 @@ pub(crate) fn program_found(program: &str, env: &BTreeMap<String, String>) -> bo
             .any(|ext| dir.join(format!("{program}{ext}")).is_file())
     })
 }
-
-#[cfg(test)]
-mod tests;
