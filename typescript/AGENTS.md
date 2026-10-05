@@ -37,8 +37,14 @@ typescript/
   tsconfig.json       strict, NodeNext, isolatedDeclarations
   src/
     index.ts          public exports only
-    client.ts         Client, the builder options, the one request path
-    auth.ts           TokenProvider, client credentials (single flight), static token
+    client.ts         Client, its options, load, fromEnv, ResolvedConfig, DefaultCredential
+    settings.ts       resolution (docs/config.md sections 2 to 5): the catalogue, the config
+                      file, the credential chain, describe()
+    pipeline.ts       Pipeline, Middleware, SdkRequest, SdkResponse (config.md section 7)
+    middleware.ts     the built-in middlewares, the retry budget, the fetch transport
+    transport.ts      the node:https transport: proxy, CA bundle, mTLS, pinning, connect timeout
+    proxy.ts, ratelimit.ts, telemetry.ts (logging, OpenTelemetry), platform.ts (Node built-ins)
+    auth.ts           TokenProvider, CachedToken, client credentials, token file, iohr login, chains
     errors.ts         InOrbitError tree, Code, Detail, RawResponse
     stream.ts         the server-sent events parser and the /v1/ws socket (design.md section 7)
     retry.ts, hooks.ts, int64.ts, version.ts
@@ -47,14 +53,21 @@ typescript/
     generated/        written by iohr; never edit (biome skips it; tsc checks it)
   test/
     conformance/      the driver for conformance/cases
+    vectors.test.ts   conformance/vectors as unit tests
 ```
 
 ## Rules
 
-- Zero runtime dependencies: global `fetch`, `AbortSignal`, `TextDecoder`. A dependency
-  needs an ADR.
-- No top-level await; no Node built-ins in `src/` (`node:` imports), so the same build
-  runs in browsers and Workers.
+- One runtime dependency, `smol-toml` (the config file, ADR 0015); otherwise global
+  `fetch`, `AbortSignal`, `TextDecoder`. `@opentelemetry/api` is an optional peer,
+  found with a dynamic import or passed as `opentelemetry`. Another dependency needs an
+  ADR; dev dependencies are `typescript`, `@types/node`, `yaml` (the vectors) and
+  `@opentelemetry/api` (the tracing case).
+- No top-level await; no `node:` imports in `src/`, so the same build runs in browsers
+  and Workers. Node's built-ins (files, `iohr`, `node:https` for proxy and TLS) are
+  reached through `process.getBuiltinModule` in `platform.ts`, typed by local interfaces.
+- `Client.load` is synchronous: it reads the environment and files at construction and
+  contacts no host. Explicit construction and `fromEnv` keep their behaviour and messages.
 - Built with `tsc` only, no bundler: `dist/` mirrors `src/`, with `.d.ts` files.
 - `int64` values are `bigint` in the public types (`Int64` reads a decimal string).
 - Errors are classes with a stable `name` and `code`; `instanceof` and `err.code` work.

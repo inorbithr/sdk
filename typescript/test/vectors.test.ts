@@ -5,13 +5,20 @@
  */
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { parse } from "yaml";
 
-import { ConfigError, loadConfig, type LoadClientOptions } from "../src/index.js";
+import { ConfigError, type LoadClientOptions, loadConfig } from "../src/index.js";
 import { parseNoProxy, proxyFor } from "../src/proxy.js";
 import { readRateLimit } from "../src/ratelimit.js";
 import { configPath, parseDuration, resolve as resolveSettings } from "../src/settings.js";
@@ -75,7 +82,9 @@ function subset(want: unknown, got: unknown, at: string): string | undefined {
   if (typeof want === "string" && typeof got === "string") {
     return slash(want) === slash(got) ? undefined : `${at}: want ${want}, got ${got}`;
   }
-  return want === got ? undefined : `${at}: want ${JSON.stringify(want)}, got ${JSON.stringify(got)}`;
+  return want === got
+    ? undefined
+    : `${at}: want ${JSON.stringify(want)}, got ${JSON.stringify(got)}`;
 }
 
 function substitute(v: unknown, dir: string, file: string): unknown {

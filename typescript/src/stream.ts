@@ -142,6 +142,8 @@ export interface SocketConfig {
   headers?(): Record<string, string>;
   /** Asks the retry budget for a reconnect; `false` gives up. */
   reconnect?(): boolean;
+  /** A caller's `undici` dispatcher (Node), so the socket goes the way `fetch` goes. */
+  readonly dispatcher?: unknown;
 }
 
 type WsLike = {
@@ -154,7 +156,10 @@ type WsLike = {
   ): void;
 };
 
-type WsConstructor = new (url: string, init: { headers: Record<string, string> }) => WsLike;
+type WsConstructor = new (
+  url: string,
+  init: { headers: Record<string, string>; dispatcher?: unknown },
+) => WsLike;
 
 const DONE = Symbol("done");
 
@@ -343,6 +348,7 @@ export class SocketHub {
       try {
         ws = new Ws(this.#config.url, {
           headers: { ...this.#config.headers?.(), authorization: `Bearer ${token}` },
+          ...(this.#config.dispatcher === undefined ? {} : { dispatcher: this.#config.dispatcher }),
         });
       } catch (e) {
         reject(new ConnectionError(this.#config.host, String(e), { cause: e }));

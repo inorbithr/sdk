@@ -136,7 +136,9 @@ export class Pipeline {
       throw new ConfigError("a middleware needs a name and a handle function");
     }
     if (this.#slots.some((s) => s.name === m.name)) {
-      throw new ConfigError(`the pipeline already has a middleware named ${JSON.stringify(m.name)}`);
+      throw new ConfigError(
+        `the pipeline already has a middleware named ${JSON.stringify(m.name)}`,
+      );
     }
     this.#slots.splice(at, 0, { name: m.name, middleware: m });
     return this;

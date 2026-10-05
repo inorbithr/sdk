@@ -17,7 +17,7 @@ import {
 import type { Attempt, Hook } from "./hooks.js";
 import type { Middleware, Next, SdkRequest, SdkResponse } from "./pipeline.js";
 import { type RateLimit, readRateLimit } from "./ratelimit.js";
-import { backoffMs, requestId, retryableStatus, retryAfter, sleep } from "./retry.js";
+import { backoffMs, requestId, retryAfter, retryableStatus, sleep } from "./retry.js";
 import {
   type Log,
   logPath,
@@ -470,7 +470,10 @@ async function retry(ctx: Context, req: SdkRequest, next: Next): Promise<SdkResp
       request_id: req.info.requestId,
     });
     void ctx.telemetry().then((t) =>
-      t?.retries?.add?.(1, { "inorbit.operation": req.info.operation, "inorbit.retry.reason": reason }),
+      t?.retries?.add?.(1, {
+        "inorbit.operation": req.info.operation,
+        "inorbit.retry.reason": reason,
+      }),
     );
     await resp?.stream?.cancel().catch(() => undefined);
     await sleep(wait, req.signal);
@@ -591,7 +594,8 @@ async function attemptTracing(ctx: Context, req: SdkRequest, next: Next): Promis
     return next(req);
   }
   const st = callState(req);
-  const port = req.url.port === "" ? (req.url.protocol === "http:" ? 80 : 443) : Number(req.url.port);
+  const port =
+    req.url.port === "" ? (req.url.protocol === "http:" ? 80 : 443) : Number(req.url.port);
   const common = {
     "http.request.method": req.method,
     "server.address": req.url.hostname.replace(/^\[|\]$/g, ""),
@@ -723,6 +727,12 @@ export function transport(
     if (bytes.length > MAX_BODY) {
       throw new TooLargeError();
     }
-    return { status: resp.status, headers: resp.headers, body: bytes, stream: undefined, request: req };
+    return {
+      status: resp.status,
+      headers: resp.headers,
+      body: bytes,
+      stream: undefined,
+      request: req,
+    };
   };
 }

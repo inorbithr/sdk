@@ -501,6 +501,7 @@ export class Client {
   readonly #idle: number;
   readonly #config: ResolvedConfig;
   readonly #profile: string | undefined;
+  readonly #dispatcher: unknown;
   #hub: SocketHub | undefined;
 
   /**
@@ -521,7 +522,6 @@ export class Client {
     const num = (k: string): number => v.get(k) as number;
     this.#profile = res.profile;
     this.#base = new URL(String(v.get("base_url")));
-    const tokenUrl = String(v.get("token_url"));
     const ts = {
       proxy: res.proxy,
       noProxy: parseNoProxy((v.get("no_proxy") as string[] | undefined) ?? []),
@@ -581,13 +581,12 @@ export class Client {
         });
       },
     };
-    const plan = res.credential;
     const provider = providerFor(res, options.tokenProvider, send, ua, cache);
     const capacity = options.retryBudgetCapacity ?? RETRY_BUDGET_CAPACITY;
     this.#ctx = {
       host: this.#base.host,
       provider,
-      staticToken: !explicit && plan.kind === "static_token",
+      staticToken: !explicit && res.credential.kind === "static_token",
       userAgent: ua,
       timeout: num("timeout"),
       totalTimeout: num("total_timeout"),
@@ -605,6 +604,7 @@ export class Client {
     const pipeline = new Pipeline(builtIns(this.#ctx));
     this.#pipeline = options.pipeline?.(pipeline) ?? pipeline;
     this.#send = transport(this.#base.host, send, options.dispatcher);
+    this.#dispatcher = options.dispatcher;
     this.#streams = (v.get("streams") as StreamTransport | undefined) ?? "sse";
     this.#idle = num("stream_idle_timeout");
     this.#config = new ResolvedConfig({
@@ -830,6 +830,7 @@ export class Client {
         ...(names.includes("user_agent") ? { "user-agent": ctx.userAgent } : {}),
       }),
       reconnect: () => ctx.budget?.take(10) ?? true,
+      dispatcher: this.#dispatcher,
     });
   }
 

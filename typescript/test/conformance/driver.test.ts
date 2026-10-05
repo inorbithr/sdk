@@ -319,7 +319,11 @@ function memoryTracer(): { provider: TracerProviderLike; spans: SpanRecord[] } {
     ): SpanLike {
       const parent = otel.trace.getSpan((context ?? otel.context.active()) as otel.Context);
       const traceId = parent?.spanContext().traceId ?? hex(16);
-      const record: SpanRecord = { name, kind: options.kind, attributes: { ...options.attributes } };
+      const record: SpanRecord = {
+        name,
+        kind: options.kind,
+        attributes: { ...options.attributes },
+      };
       spans.push(record);
       const sc = { traceId, spanId: hex(8), traceFlags: 1 };
       return {
@@ -372,7 +376,9 @@ function build(loaded: Loaded): Built {
     ...(o.stream_idle_timeout_ms === undefined
       ? {}
       : { streamIdleTimeout: o.stream_idle_timeout_ms }),
-    ...(o.log === undefined ? {} : { log: o.log, logger: { debug: keep, info: keep, warn: keep, error: keep } }),
+    ...(o.log === undefined
+      ? {}
+      : { log: o.log, logger: { debug: keep, info: keep, warn: keep, error: keep } }),
     ...(o.log_headers === undefined ? {} : { logHeaders: o.log_headers }),
     ...(o.log_allow_headers === undefined ? {} : { logAllowHeaders: o.log_allow_headers }),
     ...(o.rate_limit === undefined ? {} : { rateLimit: o.rate_limit }),
@@ -469,7 +475,9 @@ function checkM6(c: Case, built: Built, last: RawResponse | InOrbitError | undef
       for (const [h, v] of Object.entries(headers)) {
         const got = seen[i]?.get(h) ?? undefined;
         if (!matches(v, got, captures)) {
-          problems.push(`probe ${name} request ${i + 1}: ${h} is ${JSON.stringify(got)}, want ${v}`);
+          problems.push(
+            `probe ${name} request ${i + 1}: ${h} is ${JSON.stringify(got)}, want ${v}`,
+          );
         }
       }
     }
@@ -477,7 +485,9 @@ function checkM6(c: Case, built: Built, last: RawResponse | InOrbitError | undef
   if (want.logs !== undefined) {
     for (const w of want.logs.contains ?? []) {
       if (!built.records.some((r) => subset(w, r))) {
-        problems.push(`logs: no record holds ${JSON.stringify(w)}: ${JSON.stringify(built.records)}`);
+        problems.push(
+          `logs: no record holds ${JSON.stringify(w)}: ${JSON.stringify(built.records)}`,
+        );
       }
     }
     const text = JSON.stringify(built.records);
@@ -517,12 +527,15 @@ function checkM6(c: Case, built: Built, last: RawResponse | InOrbitError | undef
             ...(r.reset === undefined ? {} : { reset_ms: r.reset }),
           };
     if (want.rate_limit === null ? got !== null : !subset(want.rate_limit, got)) {
-      problems.push(`rate_limit: want ${JSON.stringify(want.rate_limit)}, got ${JSON.stringify(got)}`);
+      problems.push(
+        `rate_limit: want ${JSON.stringify(want.rate_limit)}, got ${JSON.stringify(got)}`,
+      );
     }
   }
   if (want.idempotency_key !== undefined) {
     const k = raw?.idempotencyKey;
-    const ok = want.idempotency_key === "*" ? k !== undefined && k !== "" : k === want.idempotency_key;
+    const ok =
+      want.idempotency_key === "*" ? k !== undefined && k !== "" : k === want.idempotency_key;
     if (!ok) {
       problems.push(`idempotency_key: want ${want.idempotency_key}, got ${k}`);
     }
@@ -591,9 +604,7 @@ test("every case passes", async () => {
             call(api, c.action).catch((e: InOrbitError) => e);
           const results: (RawResponse | InOrbitError)[] = [];
           if (c.action.concurrent !== undefined) {
-            results.push(
-              ...(await Promise.all(Array.from({ length: c.action.concurrent }, run))),
-            );
+            results.push(...(await Promise.all(Array.from({ length: c.action.concurrent }, run))));
           } else {
             for (let i = 0; i < (c.action.repeat ?? 1); i++) {
               results.push(await run());

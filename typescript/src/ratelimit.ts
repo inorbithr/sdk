@@ -64,7 +64,7 @@ function int(v: string | undefined): number | undefined {
   return v !== undefined && /^\d+$/.test(v) ? Number(v) : undefined;
 }
 
-function strip<T extends object>(o: { [K in keyof T]-?: T[K] | undefined }): T {
+function strip<T extends object>(o: Readonly<Record<keyof T, unknown>>): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 

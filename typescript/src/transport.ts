@@ -67,7 +67,9 @@ interface ClientRequest extends Emitter {
 }
 
 interface HttpModule {
-  Agent: new (options: Record<string, unknown>) => {
+  Agent: new (
+    options: Record<string, unknown>,
+  ) => {
     createConnection: unknown;
   };
   request(

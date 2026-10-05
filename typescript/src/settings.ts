@@ -17,7 +17,7 @@ import {
   type StatLike,
   workingDir,
 } from "./platform.js";
-import { parseNoProxyEntry, type ProxyChoice } from "./proxy.js";
+import { type ProxyChoice, parseNoProxyEntry } from "./proxy.js";
 
 /** The built-in pipeline, outermost first (config.md section 7.2). */
 export const BUILT_INS: readonly string[] = [
@@ -549,9 +549,7 @@ class Resolver {
     this.#fileDir = this.#filePath === null ? this.#cwd : this.#paths.parent(this.#filePath);
     this.#checkFileKeys();
     this.#resolveSettings();
-    const credential = explicit
-      ? this.#explicitCredential()
-      : this.#chain(profile?.name, table);
+    const credential = explicit ? this.#explicitCredential() : this.#chain(profile?.name, table);
     this.#crossChecks();
     if (this.#problems.length > 0) {
       const problems = [...this.#problems].sort((a, b) => order(a.setting) - order(b.setting));
@@ -578,6 +576,10 @@ class Resolver {
 
   #readFile(): TomlTable {
     const code = this.#in.code.get("config_file");
+    if (fs() === undefined) {
+      this.#noFs = true;
+      return {};
+    }
     const located = configPath(
       this.#os,
       this.#env,
@@ -585,10 +587,6 @@ class Resolver {
       typeof code === "string" ? code : undefined,
     );
     if (located === undefined) {
-      return {};
-    }
-    if (fs() === undefined) {
-      this.#noFs = true;
       return {};
     }
     const abs = this.#paths.isAbsolute(located.path)
@@ -670,7 +668,9 @@ class Resolver {
         const setting = CATALOGUE.find((x) => x.name === k);
         if (setting === undefined) {
           const reason =
-            k === "profile" || k === "config_file" ? "not read from the config file" : "unknown key";
+            k === "profile" || k === "config_file"
+              ? "not read from the config file"
+              : "unknown key";
           this.#ignored.push({ key: k, source: layer.label, reason });
         } else if (!setting.file) {
           const wayOut =
@@ -901,7 +901,9 @@ class Resolver {
           return [raw.value, raw.value];
         }
         throw new Error(
-          raw.from === "file" ? `must be a boolean, not ${tomlType(raw.value)}` : "must be a boolean",
+          raw.from === "file"
+            ? `must be a boolean, not ${tomlType(raw.value)}`
+            : "must be a boolean",
         );
       }
       case "scopes": {
@@ -949,9 +951,7 @@ class Resolver {
           throw new Error(`${JSON.stringify(v)} must not carry credentials or a fragment`);
         }
         if (setting.name === "base_url" && (u.pathname !== "/" || u.search !== "")) {
-          throw new Error(
-            `${JSON.stringify(v)} is an origin only, such as https://api.inorbit.hr`,
-          );
+          throw new Error(`${JSON.stringify(v)} is an origin only, such as https://api.inorbit.hr`);
         }
         return [v, v];
       }
@@ -990,7 +990,9 @@ class Resolver {
           throw new Error(`${JSON.stringify(shown)} is not an absolute URL`);
         }
         if (u.protocol !== "http:" && u.protocol !== "https:") {
-          throw new Error(`${JSON.stringify(shown)} must be an http:// or https:// proxy URL, or off`);
+          throw new Error(
+            `${JSON.stringify(shown)} must be an http:// or https:// proxy URL, or off`,
+          );
         }
         return [shown, v];
       }
@@ -1245,7 +1247,11 @@ class Resolver {
         const str = (k: string): string | undefined =>
           typeof table[k] === "string" ? (table[k] as string) : undefined;
         if (Object.hasOwn(table, "token_file") && Object.hasOwn(table, "key_id")) {
-          this.#problem("token_file", label, "token_file and key_id are both set; set one credential");
+          this.#problem(
+            "token_file",
+            label,
+            "token_file and key_id are both set; set one credential",
+          );
           return undefined;
         }
         if (str("token_file") !== undefined) {
