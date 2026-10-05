@@ -2,10 +2,12 @@ package inorbit_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -129,4 +131,61 @@ func ExampleStream() {
 		}
 		fmt.Println(ev.Type, ev.ID)
 	}
+}
+
+func ExampleLoad() {
+	// The environment, the iohr config file and the iohr login; code wins over both.
+	ctx := context.Background()
+	api, err := public.Load(ctx, inorbit.WithTimeout(5*time.Second))
+	if err != nil {
+		log.Fatal(err) // a ConfigError lists every problem, or every credential source tried
+	}
+	me, err := api.Me(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(me.Value.Subject)
+}
+
+func ExampleResolvedConfig_Describe() {
+	// What a client will use and where each value came from, secrets redacted.
+	cfg, err := inorbit.LoadConfig(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	doc, _ := json.MarshalIndent(cfg.Describe(), "", "  ")
+	fmt.Println(string(doc))
+}
+
+func ExampleWithPipeline() {
+	// A middleware wraps the rest of the pipeline; per retry, it sees every attempt.
+	team := inorbit.Middleware{Name: "team", Wrap: func(next http.RoundTripper) http.RoundTripper {
+		return inorbit.RoundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			r.Header.Set("X-Team", "payments")
+			return next.RoundTrip(r)
+		})
+	}}
+	_, err := inorbit.Load(context.Background(), inorbit.WithPipeline(func(p *inorbit.Pipeline) {
+		p.AddPerRetry(team)
+		p.Remove("rate_limit")
+	}))
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func ExampleWithCallOptions() {
+	// One key for the call, sent on every attempt; a repeat with it within 24 h answers
+	// what the first call did.
+	api, err := public.Load(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx := inorbit.WithCallOptions(context.Background(), inorbit.CallOptions{IdempotencyKey: "order-42"})
+	url := "https://example.com/hook"
+	created, err := api.Events().CreateEndpoint(ctx, models.CreateEndpointRequest{URL: &url})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(created.Raw.IdempotencyReplayed)
 }

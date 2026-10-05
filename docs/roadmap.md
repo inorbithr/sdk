@@ -54,7 +54,9 @@ passing, README showing `load` first):
       `@opentelemetry/api` as an optional peer; every case and vector passing)
 - [x] Python (#125: `Client.load` and `AsyncClient.load`, truststore for the system's trust store,
       `inorbithr[otel]`; every case and vector passing in both clients)
-- [ ] Go (`go/otel` submodule)
+- [x] Go (`inorbit.Load(ctx)`, RoundTripper middlewares, its own `http.Transport` for
+      proxy, CA, mTLS and pinning, OpenTelemetry in the `go/otel` module; every case and
+      vector passing)
 - [ ] Java (`inorbit-sdk-otel` artifact)
 - [ ] C#
 

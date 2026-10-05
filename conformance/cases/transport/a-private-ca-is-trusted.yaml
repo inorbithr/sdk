@@ -1,7 +1,7 @@
 name: a-private-ca-is-trusted
 area: transport
 summary: Over HTTPS with a private CA, the client trusts the server once ca_bundle names the CA.
-pending: [go, java, csharp]
+pending: [java, csharp]
 notes: M6, docs/config.md section 6.3; replay feature 2.
 client: { transport: https }
 action: { op: me }

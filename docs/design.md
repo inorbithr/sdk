@@ -38,7 +38,7 @@ One entry type per language, constructed once and shared across threads or tasks
 |---|---|---|---|---|---|---|
 | Type | `Client` | `Client`, `AsyncClient` | `inorbit.Client` | `hr.inorbit.sdk.Client` | `InOrbit.Sdk.Client<P>` | `inorbithr::Client<P>` |
 | Build | `new Client({...})` | `Client(...)` | `inorbit.NewClient(opts...)` | `Client.builder()...build()` | `new Client<P>(new ClientOptions {...})` | `Client::builder()...build()?` |
-| Load (M6) | `Client.load()` | `Client.load()` | `inorbit.Load()` | `Client.load()` | `Client.Load()` | `Client::load()?` |
+| Load (M6) | `Client.load()` | `Client.load()` | `inorbit.Load(ctx)` | `Client.load()` | `Client.Load()` | `Client::load()?` |
 | Per call | `{ signal, timeout }` options | keyword `timeout=` | `ctx context.Context` first | a sync call, a `CompletableFuture` beside it | `async`, `CancellationToken` last | `.await` |
 
 Configuration, same names everywhere (case adjusted). [config.md](config.md) is the full

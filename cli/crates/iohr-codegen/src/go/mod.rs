@@ -721,6 +721,33 @@ fn render_ops(ops: &[Op], layout: &Layout) -> String {
     )
 }
 
+/// The profile's `Load` (docs/config.md section 1): the public profile resolves as the
+/// public client; a named one as its typed profile, which neither code nor
+/// `INORBIT_PROFILE` can point elsewhere.
+fn load_function(p: &context::Profile) -> String {
+    let (doc, opts) = if p.is_public {
+        (
+            "Load returns the profile's surface configured from code, the environment, the config file and the iohr login (inorbit.Load)".to_owned(),
+            "opts...".to_owned(),
+        )
+    } else {
+        (
+            format!(
+                "Load returns the profile's surface configured from code, INORBIT_{e}_* (then INORBIT_* for settings), [profiles.{name}] and the iohr login (inorbit.Load)",
+                e = p.env,
+                name = p.name
+            ),
+            format!(
+                "append([]inorbit.Option{{inorbit.WithProfileType({name:?})}}, opts...)...",
+                name = p.name
+            ),
+        )
+    };
+    format!(
+        "// {doc}.\nfunc Load(ctx context.Context, opts ...inorbit.Option) (*Client, error) {{\n\tc, err := inorbit.Load(ctx, {opts})\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\treturn New(c), nil\n}}\n"
+    )
+}
+
 /// One operation as a function over the runtime's request path.
 fn operation_function(op: &Op, uses: &mut OpsUses) -> String {
     let name = function_name(op);
@@ -762,6 +789,7 @@ fn operation_function(op: &Op, uses: &mut OpsUses) -> String {
         format!("Name: {:?}", op.hook_name),
         format!("Method: {:?}", op.method.as_str()),
         format!("Path: {}", path.join(" + ")),
+        format!("Template: {:?}", op.path),
     ];
     if !scopes.is_empty() {
         fields.push(format!("Scopes: []string{{{}}}", scopes.join(", ")));
@@ -770,6 +798,9 @@ fn operation_function(op: &Op, uses: &mut OpsUses) -> String {
     let _ = writeln!(out, "\top := inorbit.Operation{{{}}}", fields.join(", "));
     if op.idempotent_override {
         out.push_str("\top.Idempotent = true\n");
+    }
+    if op.idempotency_key {
+        out.push_str("\top.IdempotencyKey = true\n");
     }
     if op.body.is_some() {
         out.push_str("\top.Body = body\n");
@@ -956,9 +987,10 @@ fn render_profile(
     } else {
         p.env.clone()
     };
+    let load = load_function(p);
     let _ = write!(
         body,
-        "// The surface was generated for the runtime's contract 3: a runtime with another contract fails to build here, so run iohr sdk generate again.\nconst _ = codegen.V3\n\n// Profile is the profile's name.\nconst Profile = {name:?}\n\n// Client calls the operations profile {name} may call.\ntype Client struct {{\n\tc *inorbit.Client\n}}\n\n// New returns the profile's surface on c, a client built for its credential.\nfunc New(c *inorbit.Client) *Client {{\n\treturn &Client{{c: c}}\n}}\n\n// FromEnv returns the profile's surface with its credential from the environment; opts apply after it.\nfunc FromEnv(opts ...inorbit.Option) (*Client, error) {{\n\tc, err := inorbit.FromEnv({env_arg:?}, opts...)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\treturn New(c), nil\n}}\n\n// Runtime returns the client underneath, for a raw call with Send.\nfunc (p *Client) Runtime() *inorbit.Client {{\n\treturn p.c\n}}\n",
+        "// The surface was generated for the runtime's contract 4: a runtime with another contract fails to build here, so run iohr sdk generate again.\nconst _ = codegen.V4\n\n// Profile is the profile's name.\nconst Profile = {name:?}\n\n// Client calls the operations profile {name} may call.\ntype Client struct {{\n\tc *inorbit.Client\n}}\n\n// New returns the profile's surface on c, a client built for its credential.\nfunc New(c *inorbit.Client) *Client {{\n\treturn &Client{{c: c}}\n}}\n\n// FromEnv returns the profile's surface with its credential from the environment; opts apply after it.\nfunc FromEnv(opts ...inorbit.Option) (*Client, error) {{\n\tc, err := inorbit.FromEnv({env_arg:?}, opts...)\n\tif err != nil {{\n\t\treturn nil, err\n\t}}\n\treturn New(c), nil\n}}\n\n{load}\n// Runtime returns the client underneath, for a raw call with Send.\nfunc (p *Client) Runtime() *inorbit.Client {{\n\treturn p.c\n}}\n",
         name = p.name
     );
     for op in &flat {
@@ -991,9 +1023,8 @@ fn render_profile(
         }
     }
     let mut imports = Imports::default();
-    if !flat.is_empty() || !handles.is_empty() {
-        imports.std("context");
-    }
+    // Load takes a context, so every profile imports it.
+    imports.std("context");
     if uses.json {
         imports.std("encoding/json");
     }

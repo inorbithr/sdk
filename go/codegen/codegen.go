@@ -11,7 +11,7 @@ import (
 )
 
 // Version is the surface contract this runtime implements.
-const Version = V3
+const Version = V4
 
 // V1 is what a surface generated for contract 1 refers to; a runtime with another
 // contract drops it, so such a surface fails to build with a message that names it.
@@ -22,6 +22,10 @@ const V2 = 2
 
 // V3 is contract 2 plus streams: inorbit.Stream, and an Operation's RPC and Fields.
 const V3 = 3
+
+// V4 is contract 3 plus configuration and middleware (docs/config.md): inorbit.Load and
+// WithProfileType, and an Operation's Template and IdempotencyKey.
+const V4 = 4
 
 // PathSegment percent-encodes value as one path segment: every byte but the RFC 3986
 // unreserved characters, so a slash or a space in an id never changes the route.

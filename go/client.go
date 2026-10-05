@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,6 +35,10 @@ type Operation struct {
 	// Path is the path, parameters bound and encoded.
 	Path string
 
+	// Template is the path before binding (/v1/radar/digests/{digest_id}), for span
+	// names and url.template; empty when not known.
+	Template string
+
 	// Query holds the query parameters.
 	Query url.Values
 
@@ -44,6 +50,11 @@ type Operation struct {
 
 	// Idempotent retries the call like an idempotent method although its method is not.
 	Idempotent bool
+
+	// IdempotencyKey marks an operation that takes an Idempotency-Key header (RFC 0033):
+	// the call sends one, the caller's or a generated one, the same on every attempt, and
+	// is retried like an idempotent method.
+	IdempotencyKey bool
 
 	// RPC is the RPC's full name (iohr.events.v1.EventsService/StreamEvents), which a
 	// stream over the socket calls; empty for the gateway's own routes.
@@ -62,161 +73,150 @@ func (op Operation) retrySafe() bool {
 	return op.Idempotent
 }
 
-// config is what the options set.
-type config struct {
-	token      string
-	keyID      string
-	keySecret  string
-	scopes     []string
-	provider   TokenProvider
-	baseURL    string
-	tokenURL   string
-	timeout    time.Duration
-	maxRetries int
-	uaSuffix   string
-	hooks      []Hook
-	http       *http.Client
-	streams    Streams
-	streamIdle time.Duration
-}
-
-// Option configures a Client.
-type Option func(*config)
-
-// WithToken authenticates with an API token (from the console or iohr token create).
-func WithToken(token string) Option { return func(c *config) { c.token = token } }
-
-// WithKey authenticates with an API key, exchanged for short-lived tokens; it needs
-// WithScopes.
-func WithKey(id, secret string) Option {
-	return func(c *config) { c.keyID, c.keySecret = id, secret }
-}
-
-// WithScopes sets the scopes to ask for with a key, a subset of the key's; there is no
-// default.
-func WithScopes(scopes ...string) Option {
-	return func(c *config) { c.scopes = append([]string(nil), scopes...) }
-}
-
-// WithTokenProvider authenticates with your own token source.
-func WithTokenProvider(p TokenProvider) Option { return func(c *config) { c.provider = p } }
-
-// WithBaseURL sets the API's origin (default https://api.inorbit.hr; plain HTTP only to
-// this machine).
-func WithBaseURL(u string) Option { return func(c *config) { c.baseURL = u } }
-
-// WithTokenURL sets the token endpoint a key is exchanged at.
-func WithTokenURL(u string) Option { return func(c *config) { c.tokenURL = u } }
-
-// WithTimeout sets how long each attempt may take (default 30 s).
-func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
-
-// WithMaxRetries sets the retries after the first attempt (default 2; 0 disables).
-func WithMaxRetries(n int) Option { return func(c *config) { c.maxRetries = n } }
-
-// WithUserAgentSuffix appends s to the user agent.
-func WithUserAgentSuffix(s string) Option { return func(c *config) { c.uaSuffix = s } }
-
-// WithHook adds an observer of every attempt.
-func WithHook(h Hook) Option { return func(c *config) { c.hooks = append(c.hooks, h) } }
-
-// WithHTTPClient sets the HTTP client: your transport, proxy and TLS settings. The SDK
-// does not follow redirects whatever the client's policy.
-func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.http = h } }
-
-// WithStreams sets how streams open: StreamsSSE (the default), a server-sent events
-// request each, or StreamsSocket, every stream of the client over one /v1/ws socket.
-func WithStreams(s Streams) Option { return func(c *config) { c.streams = s } }
-
-// WithStreamIdleTimeout sets how long a stream may be silent, not even a keep-alive,
-// before it fails with a TimeoutError or, on the socket, reconnects (default 45 s).
-func WithStreamIdleTimeout(d time.Duration) Option {
-	return func(c *config) { c.streamIdle = d }
-}
-
 // Client is a client for one credential. It is safe for concurrent use and holds no
 // per-call state.
 type Client struct {
-	base       *url.URL
-	provider   TokenProvider
-	timeout    time.Duration
-	maxRetries int
-	userAgent  string
-	hooks      []Hook
-	http       *http.Client
-	streams    Streams
-	streamIdle time.Duration
-	socket     *socketMgr
+	base          *url.URL
+	provider      TokenProvider
+	staticToken   bool // a refused static token from Load ends the call with an AuthError
+	timeout       time.Duration
+	totalTimeout  time.Duration
+	maxRetries    int
+	retryBase     time.Duration
+	retryMax      time.Duration
+	retryAfterMax time.Duration
+	budget        *retryBudget
+	rateLimit     RateLimitMode
+	userAgent     string
+	hooks         []Hook
+	http          *http.Client
+	streams       Streams
+	streamIdle    time.Duration
+	socket        *socketMgr
+	log           *logSink
+	tracer        Tracer
+	meter         Meter
+	tracing       bool
+	metrics       bool
+	profile       string
+	pipeline      *Pipeline
+	chain         http.RoundTripper
+	config        *ResolvedConfig
+
+	latestMu    sync.Mutex
+	latest      *RateLimit
+	latestReset time.Time
 }
 
-// NewClient returns a client configured by opts. It needs a credential: WithToken,
-// WithKey with WithScopes, or WithTokenProvider.
+// NewClient returns a client configured by opts and nothing else: no environment, no
+// file. It needs a credential: WithToken, WithKey with WithScopes, or WithTokenProvider.
+// Libraries and tests use it; applications use Load.
 func NewClient(opts ...Option) (*Client, error) {
-	cfg := config{
-		baseURL: DefaultBaseURL, tokenURL: DefaultTokenURL, timeout: 30 * time.Second, maxRetries: 2,
-		streams: StreamsSSE, streamIdle: defaultStreamIdle,
+	cfg := newConfig(opts)
+	if err := checkExplicit(cfg); err != nil {
+		return nil, err
 	}
-	for _, o := range opts {
-		o(&cfg)
-	}
-	base, err := checkURL("the base URL", cfg.baseURL, true)
+	res, err := resolve(cfg.input(true))
 	if err != nil {
 		return nil, err
 	}
-	tokenURL, err := checkURL("the token URL", cfg.tokenURL, false)
-	if err != nil {
-		return nil, err
-	}
-	hc := &http.Client{CheckRedirect: noRedirects}
-	if cfg.http != nil {
-		copied := *cfg.http
-		copied.CheckRedirect = noRedirects
-		hc = &copied
-	}
-	if cfg.streams != StreamsSSE && cfg.streams != StreamsSocket {
-		return nil, &ConfigError{Message: fmt.Sprintf("streams %q is not usable: sse or socket", cfg.streams)}
-	}
-	if cfg.streamIdle <= 0 {
-		return nil, &ConfigError{Message: "the stream idle timeout must be above zero"}
-	}
-	c := &Client{
-		base: base, timeout: cfg.timeout, maxRetries: max(cfg.maxRetries, 0),
-		userAgent: userAgent(cfg.uaSuffix), hooks: cfg.hooks, http: hc,
-		streams: cfg.streams, streamIdle: cfg.streamIdle,
-	}
-	c.socket = &socketMgr{c: c, calls: map[string]*sockCall{}}
-	switch {
-	case cfg.provider != nil:
-		c.provider = cfg.provider
-	case cfg.token != "":
-		c.provider = NewStaticToken(cfg.token)
-	case cfg.keyID != "" && cfg.keySecret != "":
-		if len(cfg.scopes) == 0 {
-			return nil, &ConfigError{Message: `no scopes: set INORBIT_SCOPES (space-separated, such as "identity:read account:read")`}
-		}
-		c.provider = NewClientCredentials(cfg.keyID, cfg.keySecret, cfg.scopes, tokenURL.String(), hc)
-	default:
-		return nil, &ConfigError{Message: "no credentials: set INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET"}
-	}
-	return c, nil
+	return build(cfg, res, true)
 }
+
+// checkExplicit holds NewClient to the checks and messages it always had.
+func checkExplicit(cfg *config) error {
+	str := func(k string) string { s, _ := cfg.code[k].(string); return s }
+	if u, ok := cfg.code["base_url"].(string); ok {
+		if _, err := checkURL("the base URL", u, true); err != nil {
+			return err
+		}
+	}
+	if u, ok := cfg.code["token_url"].(string); ok {
+		if _, err := checkURL("the token URL", u, false); err != nil {
+			return err
+		}
+	}
+	if s, ok := cfg.code["streams"].(string); ok && s != string(StreamsSSE) && s != string(StreamsSocket) {
+		return &ConfigError{Message: fmt.Sprintf("streams %q is not usable: sse or socket", s)}
+	}
+	if d, ok := cfg.code["stream_idle_timeout"].(time.Duration); ok && d <= 0 {
+		return &ConfigError{Message: "the stream idle timeout must be above zero"}
+	}
+	switch {
+	case cfg.provider != nil, str("token") != "", str("token_file") != "":
+	case str("key_id") != "" && (str("key_secret") != "" || str("key_secret_file") != ""):
+		if s, _ := cfg.code["scopes"].([]string); len(s) == 0 {
+			return &ConfigError{Message: `no scopes: set INORBIT_SCOPES (space-separated, such as "identity:read account:read")`}
+		}
+	default:
+		return &ConfigError{Message: "no credentials: set INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET"}
+	}
+	return nil
+}
+
+// Load returns a client configured from code (opts), the environment, the iohr config
+// file and the iohr login, each setting from the first that sets it (docs/config.md
+// section 2). It reads the environment and files now, and checks that iohr exists when
+// the credential chain reaches it; it contacts no host until the first call.
+//
+// A ConfigError lists every problem found, or every credential source tried.
+func Load(ctx context.Context, opts ...Option) (*Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cfg := newConfig(opts)
+	res, err := resolve(cfg.input(false))
+	if err != nil {
+		return nil, err
+	}
+	return build(cfg, res, false)
+}
+
+// LoadConfig resolves the configuration Load would, without building a client: what
+// iohr sdk config prints.
+func LoadConfig(ctx context.Context, opts ...Option) (*ResolvedConfig, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cfg := newConfig(opts)
+	res, err := resolve(cfg.input(false))
+	if err != nil {
+		return nil, err
+	}
+	p := &Pipeline{}
+	for _, name := range builtIns {
+		p.slots = append(p.slots, Middleware{Name: name, Wrap: passThrough})
+	}
+	for _, edit := range cfg.pipeline {
+		edit(p)
+	}
+	if p.err != nil {
+		return nil, p.err
+	}
+	res.description.Pipeline = p.Names()
+	return &ResolvedConfig{d: res.description}, nil
+}
+
+func passThrough(next http.RoundTripper) http.RoundTripper { return next }
+
+func getenv(k string) string { return os.Getenv(k) }
 
 // FromEnv returns a client from the environment. A named profile (its environment
 // name, such as ACME_CI) reads INORBIT_ACME_CI_TOKEN, or INORBIT_ACME_CI_KEY_ID,
 // _KEY_SECRET and _SCOPES, and nothing else; an empty profile reads the bare INORBIT_*
 // names. INORBIT_BASE_URL and INORBIT_TOKEN_URL apply to every profile. opts apply
-// after the environment.
+// after the environment. It is kept as it is; Load reads more and is the one to use.
 func FromEnv(profile string, opts ...Option) (*Client, error) {
 	prefix := "INORBIT_"
 	if profile != "" {
 		prefix = "INORBIT_" + profile + "_"
 	}
-	v := func(name string) string { return os.Getenv(prefix + name) }
+	v := func(name string) string { return getenv(prefix + name) }
 	shared := func(name string) string {
 		if s := v(name); s != "" {
 			return s
 		}
-		return os.Getenv("INORBIT_" + name)
+		return getenv("INORBIT_" + name)
 	}
 	var env []Option
 	if u := shared("BASE_URL"); u != "" {
@@ -240,10 +240,43 @@ func FromEnv(profile string, opts ...Option) (*Client, error) {
 	return NewClient(append(env, opts...)...)
 }
 
+// ResolvedConfig is what a client uses and where each value came from.
+type ResolvedConfig struct {
+	d Description
+}
+
+// Describe returns the configuration as docs/config.md section 2.6 documents it, secrets
+// redacted; encoding/json writes it in that form.
+func (r *ResolvedConfig) Describe() Description {
+	d := r.d
+	d.Settings = make(map[string]DescribedSetting, len(r.d.Settings))
+	for k, v := range r.d.Settings {
+		d.Settings[k] = v
+	}
+	d.Pipeline = append([]string(nil), r.d.Pipeline...)
+	d.Ignored = append([]IgnoredSetting{}, r.d.Ignored...)
+	return d
+}
+
+// MarshalJSON writes the Describe document.
+func (r *ResolvedConfig) MarshalJSON() ([]byte, error) { return json.Marshal(r.Describe()) }
+
 // BaseURL is the API's origin this client calls.
 func (c *Client) BaseURL() string { return c.base.String() }
 
-// Call calls op on c and reads its JSON answer into a T.
+// Config is what this client uses and where each value came from (Describe), secrets
+// redacted.
+func (c *Client) Config() *ResolvedConfig { return c.config }
+
+// RateLimit is the latest rate-limit snapshot any answer carried, or nil.
+func (c *Client) RateLimit() *RateLimit {
+	c.latestMu.Lock()
+	defer c.latestMu.Unlock()
+	return c.latest
+}
+
+// Call calls op on c and reads its JSON answer into a T. Per-call options travel in ctx
+// (WithCallOptions).
 func Call[T any](ctx context.Context, c *Client, op Operation) (*Response[T], error) {
 	raw, err := c.Send(ctx, op)
 	if err != nil {
@@ -258,71 +291,175 @@ func Call[T any](ctx context.Context, c *Client, op Operation) (*Response[T], er
 	return &Response[T]{Value: value, Raw: raw}, nil
 }
 
-// outcome is what one attempt came to.
-type outcome int
-
-const (
-	done outcome = iota
-	unauthorized
-	retry
-)
-
 // Send calls op and returns the answer as it came, a 2xx one only; anything else is an
 // error.
 func (c *Client) Send(ctx context.Context, op Operation) (*RawResponse, error) {
-	u, err := c.url(op)
+	started := time.Now()
+	resp, st, err := c.do(ctx, op, callKind{})
 	if err != nil {
 		return nil, err
+	}
+	raw := c.rawOf(resp, st)
+	if raw.Status >= 200 && raw.Status < 300 {
+		c.log.emit(ctx, LogInfo, "call", c.callAttrs(st, raw, nil, started)...)
+		return raw, nil
+	}
+	apiErr := newAPIError(raw)
+	c.failed(ctx, op, st, apiErr, started)
+	return nil, apiErr
+}
+
+// callKind says how a call's answer is read.
+type callKind struct {
+	stream bool
+	header http.Header
+	ok     func(int) bool // the statuses a stream accepts, its body left unread
+}
+
+// do runs op through the pipeline. A failure is reported to the hooks and the log here;
+// an answer comes back whatever its status, its body buffered, or the stream's when
+// kind accepts its status.
+func (c *Client) do(ctx context.Context, op Operation, kind callKind) (*http.Response, *callState, error) {
+	started := time.Now()
+	name := op.Name
+	if name == "" {
+		name = op.Path
+	}
+	opts := callOptionsFrom(ctx)
+	st := &callState{
+		info: CallInfo{
+			Operation: name, Template: op.Template, Idempotent: op.retrySafe(), Stream: kind.stream,
+			Profile: c.profile, Tracing: c.tracing, Metrics: c.metrics,
+		},
+		idempotencyOp: op.IdempotencyKey, callerKey: opts.IdempotencyKey,
+		timeout: opts.Timeout, traceparent: opts.Traceparent, streamOK: kind.ok,
+	}
+	if opts.IdempotencyKey != "" && !op.IdempotencyKey {
+		return nil, st, &ConfigError{Message: name + " does not take an idempotency key: the API would ignore it, so repeating the call would not be safe"}
+	}
+	u, err := c.url(op)
+	if err != nil {
+		return nil, st, err
 	}
 	var body []byte
 	if op.Body != nil {
 		body, err = json.Marshal(op.Body)
 		if err != nil {
-			return nil, &ConfigError{Message: "the body could not be written as JSON: " + err.Error()}
+			return nil, st, &ConfigError{Message: "the body could not be written as JSON: " + err.Error()}
 		}
 	}
-	id := requestID()
-	retries, refreshed := 0, false
-	name := op.Name
-	if name == "" {
-		name = op.Path
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
 	}
-	for number := 1; ; number++ {
-		a := Attempt{Operation: name, Method: op.Method, Path: op.Path, Number: number, RequestID: id}
-		raw, wait, kind, err := c.attempt(ctx, op.Method, u, body, a)
-		if kind == done && err == nil {
-			return raw, nil
+	req, err := http.NewRequestWithContext(withCall(ctx, st), op.Method, u.String(), reader)
+	if err != nil {
+		return nil, st, &ConfigError{Message: "the request could not be built: " + err.Error()}
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range kind.header {
+		req.Header[k] = v
+	}
+	if opts.Traceparent != "" {
+		req.Header.Set("Traceparent", opts.Traceparent)
+	}
+	resp, err := c.chain.RoundTrip(req)
+	if err != nil {
+		err = annotate(err, st)
+		c.failed(ctx, op, st, err, started)
+		return nil, st, err
+	}
+	return resp, st, nil
+}
+
+// annotate puts the call's request id and idempotency key on err.
+func annotate(err error, st *callState) error {
+	var ce *ConnectionError
+	var te *TimeoutError
+	switch {
+	case errors.As(err, &ce):
+		if ce.RequestID == "" {
+			ce.RequestID = st.info.RequestID
 		}
-		if kind == unauthorized && !refreshed {
-			if inv, ok := c.provider.(Invalidator); ok {
-				inv.Invalidate()
-			}
-			refreshed = true
-			continue
+		if ce.IdempotencyKey == "" {
+			ce.IdempotencyKey = st.info.IdempotencyKey
 		}
-		if kind == retry && op.retrySafe() && retries < c.maxRetries {
-			if wait < 0 {
-				wait = backoff(retries)
-			}
-			if serr := sleep(ctx, wait); serr != nil {
-				c.failed(a, serr)
-				return nil, serr
-			}
-			retries++
-			continue
+	case errors.As(err, &te):
+		if te.RequestID == "" {
+			te.RequestID = st.info.RequestID
 		}
-		if err == nil {
-			err = newAPIError(raw)
+		if te.IdempotencyKey == "" {
+			te.IdempotencyKey = st.info.IdempotencyKey
 		}
-		c.failed(a, err)
-		return nil, err
+	}
+	return err
+}
+
+// rawOf is the raw answer resp stands for, its body read.
+func (c *Client) rawOf(resp *http.Response, st *callState) *RawResponse {
+	var data []byte
+	if b, ok := resp.Body.(*bufferedBody); ok {
+		data = b.data
+	} else if resp.Body != nil {
+		data, _ = io.ReadAll(io.LimitReader(resp.Body, maxBody))
+		_ = resp.Body.Close()
+	}
+	return &RawResponse{
+		Status: resp.StatusCode, Header: resp.Header, Body: data, RequestID: st.info.RequestID,
+		ServerRequestID: resp.Header.Get("X-Request-Id"), Attempts: max(st.attempts, 1),
+		IdempotencyKey:      st.info.IdempotencyKey,
+		IdempotencyReplayed: strings.TrimSpace(resp.Header.Get("Idempotency-Replayed")) == "true",
+		RateLimit:           st.rateLimit,
 	}
 }
 
-func (c *Client) failed(a Attempt, err error) {
-	for _, h := range c.hooks {
-		h.OnError(a, err)
+func (c *Client) callAttrs(st *callState, raw *RawResponse, err error, started time.Time) []slog.Attr {
+	attrs := []slog.Attr{slog.String("operation", st.info.Operation)}
+	if raw != nil {
+		attrs = append(attrs, slog.Int("status", raw.Status))
 	}
+	if err != nil {
+		attrs = append(attrs, slog.String("error_kind", errorKind(err)))
+		if a, ok := asAPIError(err); ok {
+			attrs = append(attrs, slog.String("error_code", string(a.Code)), slog.Int("status", a.Status))
+			raw = a.Raw
+		}
+	}
+	attrs = append(attrs,
+		slog.Int("attempts", max(st.attempts, 1)),
+		slog.Int64("duration_ms", time.Since(started).Milliseconds()),
+		slog.String("request_id", st.info.RequestID),
+	)
+	if raw != nil && raw.ServerRequestID != "" {
+		attrs = append(attrs, slog.String("server_request_id", raw.ServerRequestID))
+	}
+	return attrs
+}
+
+// failed tells the hooks and the log that a call failed for good.
+func (c *Client) failed(ctx context.Context, op Operation, st *callState, err error, started time.Time) {
+	if c.pipeline.has("hooks") {
+		a := Attempt{
+			Operation: st.info.Operation, Method: op.Method, Path: op.Path, Number: max(st.attempts, 1),
+			RequestID: st.info.RequestID, IdempotencyKey: st.info.IdempotencyKey, Stage: StagePerRetry,
+		}
+		for _, h := range c.hooks {
+			h.OnError(a, err)
+		}
+	}
+	if !c.log.on(LogError) {
+		return
+	}
+	c.log.emit(ctx, LogInfo, "call", c.callAttrs(st, nil, err, started)...)
+	attrs := []slog.Attr{slog.String("operation", st.info.Operation), slog.String("error_kind", errorKind(err))}
+	if a, ok := asAPIError(err); ok {
+		attrs = append(attrs, slog.String("error_code", string(a.Code)), slog.Int("status", a.Status))
+	}
+	attrs = append(attrs, slog.String("request_id", st.info.RequestID))
+	c.log.emit(ctx, LogError, "call_failed", attrs...)
 }
 
 func (c *Client) url(op Operation) (*url.URL, error) {
@@ -341,82 +478,6 @@ func (c *Client) url(op Operation) (*url.URL, error) {
 		u.RawQuery = op.Query.Encode()
 	}
 	return &u, nil
-}
-
-// attempt sends one attempt. A wait below zero means no Retry-After was given.
-func (c *Client) attempt(ctx context.Context, method string, u *url.URL, body []byte, a Attempt) (*RawResponse, time.Duration, outcome, error) {
-	tok, err := c.provider.Token(ctx)
-	if err != nil {
-		var aerr *AuthError
-		if !errors.As(err, &aerr) {
-			err = &AuthError{Message: "the token provider failed: " + err.Error(), Err: err}
-		}
-		return nil, 0, done, err
-	}
-	actx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(actx, method, u.String(), reader)
-	if err != nil {
-		return nil, 0, done, &ConfigError{Message: "the request could not be built: " + err.Error()}
-	}
-	req.Header.Set("Authorization", "Bearer "+tok.Access)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("X-Request-Id", a.RequestID)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	for _, h := range c.hooks {
-		h.OnRequest(a)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, 0, done, ctx.Err()
-		}
-		if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
-			return nil, -1, retry, &TimeoutError{Host: c.base.Host, Seconds: int(c.timeout.Round(time.Second) / time.Second)}
-		}
-		return nil, -1, retry, &ConnectionError{Host: c.base.Host, Err: errors.New(describe(err))}
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.ContentLength > maxBody {
-		return nil, 0, done, &TooLargeError{}
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, 0, done, ctx.Err()
-		}
-		return nil, -1, retry, &ConnectionError{Host: c.base.Host, Err: errors.New(describe(err))}
-	}
-	if len(data) > maxBody {
-		return nil, 0, done, &TooLargeError{}
-	}
-	raw := &RawResponse{
-		Status: resp.StatusCode, Header: resp.Header, Body: data, RequestID: a.RequestID,
-		ServerRequestID: resp.Header.Get("X-Request-Id"), Attempts: a.Number,
-	}
-	for _, h := range c.hooks {
-		h.OnResponse(a, raw)
-	}
-	switch {
-	case raw.Status == http.StatusUnauthorized:
-		return raw, 0, unauthorized, nil
-	case retryableStatus(raw.Status):
-		wait, ok := retryAfter(raw.Header)
-		if !ok {
-			wait = -1
-		}
-		return raw, wait, retry, nil
-	case raw.Status >= 200 && raw.Status < 300:
-		return raw, 0, done, nil
-	}
-	return raw, 0, done, newAPIError(raw)
 }
 
 func isTimeout(err error) bool {
@@ -446,11 +507,37 @@ func checkURL(what, raw string, originOnly bool) (*url.URL, error) {
 	return u, nil
 }
 
+// userAgent is inorbithr-sdk-go/<version> go/<version> <os>/<arch>[ <suffix>], in the
+// vocabulary every runtime shares (docs/config.md section 7.6).
 func userAgent(suffix string) string {
 	ua := fmt.Sprintf("inorbithr-sdk-go/%s go/%s %s/%s", SDKVersion,
-		strings.TrimPrefix(runtime.Version(), "go"), runtime.GOOS, runtime.GOARCH)
+		strings.TrimPrefix(runtime.Version(), "go"), uaOS(runtime.GOOS), uaArch(runtime.GOARCH))
 	if suffix != "" {
 		ua += " " + suffix
 	}
 	return ua
+}
+
+func uaOS(goos string) string {
+	switch goos {
+	case "linux", "windows", "freebsd", "android", "ios":
+		return goos
+	case "darwin":
+		return "macos"
+	}
+	return "other"
+}
+
+func uaArch(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	case "386":
+		return "x86"
+	case "arm", "riscv64":
+		return goarch
+	}
+	return "other"
 }

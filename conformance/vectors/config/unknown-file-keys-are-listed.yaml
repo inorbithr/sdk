@@ -1,7 +1,7 @@
 name: unknown-file-keys-are-listed
 kind: config
 summary: Keys the SDK does not know are ignored and listed; the command line's own keys are not.
-pending: [go, java, csharp]
+pending: [java, csharp]
 input:
   env: { INORBIT_TOKEN: t, INORBIT_PROFILE: work }
   config_file: |

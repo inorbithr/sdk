@@ -1,7 +1,7 @@
 name: code-beats-env-beats-file
 kind: config
 summary: Each setting takes the first source that sets it, code then environment then the file.
-pending: [go, java, csharp]
+pending: [java, csharp]
 input:
   code: { timeout: 5s }
   env: { INORBIT_TOKEN: t, INORBIT_TIMEOUT: 10s, INORBIT_MAX_RETRIES: "4" }

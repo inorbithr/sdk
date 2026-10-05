@@ -15,55 +15,55 @@ import (
 
 // DeleteAgent calls DELETE /v1/accounts/orgs/{org_id}/agents/{agent_id}; needs scope agents:write. Transcoded from `/iohr.agents.v1.AgentsService/DeleteAgent` on the `agents` backend.
 func DeleteAgent(ctx context.Context, c *inorbit.Client, orgID string, agentID string) (*inorbit.Response[models.DeleteAgentResponse], error) {
-	op := inorbit.Operation{Name: "agents.delete_agent", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID), Scopes: []string{"agents:write"}}
+	op := inorbit.Operation{Name: "agents.delete_agent", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID), Template: "/v1/accounts/orgs/{org_id}/agents/{agent_id}", Scopes: []string{"agents:write"}}
 	return inorbit.Call[models.DeleteAgentResponse](ctx, c, op)
 }
 
 // DeleteConnection calls DELETE /v1/accounts/orgs/{org_id}/connections/{connection_id}; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/DeleteConnection` on the `connections` backend.
 func DeleteConnection(ctx context.Context, c *inorbit.Client, orgID string, connectionID string) (*inorbit.Response[models.DeleteConnectionResponse], error) {
-	op := inorbit.Operation{Name: "connections.delete_connection", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID), Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.delete_connection", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID), Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}", Scopes: []string{"connections:write"}}
 	return inorbit.Call[models.DeleteConnectionResponse](ctx, c, op)
 }
 
 // RevokeGrant calls DELETE /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id}; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/RevokeGrant` on the `connections` backend.
 func RevokeGrant(ctx context.Context, c *inorbit.Client, orgID string, connectionID string, grantID string) (*inorbit.Response[models.RevokeGrantResponse], error) {
-	op := inorbit.Operation{Name: "connections.revoke_grant", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/grants/" + codegen.PathSegment(grantID), Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.revoke_grant", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/grants/" + codegen.PathSegment(grantID), Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id}", Scopes: []string{"connections:write"}}
 	return inorbit.Call[models.RevokeGrantResponse](ctx, c, op)
 }
 
 // RemoveDomain calls DELETE /v1/accounts/orgs/{org_id}/domains/{domain}; needs scope domains:write. Transcoded from `/iohr.accounts.v1.AccountsService/RemoveDomain` on the `accounts` backend.
 func RemoveDomain(ctx context.Context, c *inorbit.Client, orgID string, domain string) (*inorbit.Response[models.RemoveDomainResponse], error) {
-	op := inorbit.Operation{Name: "accounts.remove_domain", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain), Scopes: []string{"domains:write"}}
+	op := inorbit.Operation{Name: "accounts.remove_domain", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain), Template: "/v1/accounts/orgs/{org_id}/domains/{domain}", Scopes: []string{"domains:write"}}
 	return inorbit.Call[models.RemoveDomainResponse](ctx, c, op)
 }
 
 // DeleteMonitor calls DELETE /v1/accounts/orgs/{org_id}/monitors/{monitor_id}; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/DeleteMonitor` on the `connections` backend.
 func DeleteMonitor(ctx context.Context, c *inorbit.Client, orgID string, monitorID string) (*inorbit.Response[models.DeleteMonitorResponse], error) {
-	op := inorbit.Operation{Name: "connections.delete_monitor", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID), Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.delete_monitor", Method: "DELETE", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID), Template: "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}", Scopes: []string{"connections:write"}}
 	return inorbit.Call[models.DeleteMonitorResponse](ctx, c, op)
 }
 
 // DeleteEndpoint calls DELETE /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/DeleteEndpoint` on the `events` backend.
 func DeleteEndpoint(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.DeleteEndpointResponse], error) {
-	op := inorbit.Operation{Name: "events.delete_endpoint", Method: "DELETE", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.delete_endpoint", Method: "DELETE", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Template: "/v1/webhooks/endpoints/{endpoint_id}", Scopes: []string{"webhooks:write"}}
 	return inorbit.Call[models.DeleteEndpointResponse](ctx, c, op)
 }
 
 // DeleteInbox calls DELETE /v1/webhooks/inboxes/{inbox_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/DeleteInbox` on the `events` backend.
 func DeleteInbox(ctx context.Context, c *inorbit.Client, inboxID string) (*inorbit.Response[models.DeleteInboxResponse], error) {
-	op := inorbit.Operation{Name: "events.delete_inbox", Method: "DELETE", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID), Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.delete_inbox", Method: "DELETE", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID), Template: "/v1/webhooks/inboxes/{inbox_id}", Scopes: []string{"webhooks:write"}}
 	return inorbit.Call[models.DeleteInboxResponse](ctx, c, op)
 }
 
 // GetMe calls GET /v1/accounts/me; needs scope account:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetMe` on the `accounts` backend.
 func GetMe(ctx context.Context, c *inorbit.Client) (*inorbit.Response[models.GetMeResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_me", Method: "GET", Path: "/v1/accounts/me", Scopes: []string{"account:read"}}
+	op := inorbit.Operation{Name: "accounts.get_me", Method: "GET", Path: "/v1/accounts/me", Template: "/v1/accounts/me", Scopes: []string{"account:read"}}
 	return inorbit.Call[models.GetMeResponse](ctx, c, op)
 }
 
 // ListAgents calls GET /v1/accounts/orgs/{org_id}/agents; needs scope agents:read. Transcoded from `/iohr.agents.v1.AgentsService/ListAgents` on the `agents` backend.
 func ListAgents(ctx context.Context, c *inorbit.Client, orgID string, params *models.AgentsListAgentsParams) (*inorbit.Response[models.ListAgentsResponse], error) {
-	op := inorbit.Operation{Name: "agents.list_agents", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents", Scopes: []string{"agents:read"}}
+	op := inorbit.Operation{Name: "agents.list_agents", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents", Template: "/v1/accounts/orgs/{org_id}/agents", Scopes: []string{"agents:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -79,13 +79,13 @@ func ListAgents(ctx context.Context, c *inorbit.Client, orgID string, params *mo
 
 // GetAgent calls GET /v1/accounts/orgs/{org_id}/agents/{agent_id}; needs scope agents:read. Transcoded from `/iohr.agents.v1.AgentsService/GetAgent` on the `agents` backend.
 func GetAgent(ctx context.Context, c *inorbit.Client, orgID string, agentID string) (*inorbit.Response[models.GetAgentResponse], error) {
-	op := inorbit.Operation{Name: "agents.get_agent", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID), Scopes: []string{"agents:read"}}
+	op := inorbit.Operation{Name: "agents.get_agent", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID), Template: "/v1/accounts/orgs/{org_id}/agents/{agent_id}", Scopes: []string{"agents:read"}}
 	return inorbit.Call[models.GetAgentResponse](ctx, c, op)
 }
 
 // ListTeamEvents calls GET /v1/accounts/orgs/{org_id}/audit; needs scope account:audit. Transcoded from `/iohr.accounts.v1.AccountsService/ListTeamEvents` on the `accounts` backend.
 func ListTeamEvents(ctx context.Context, c *inorbit.Client, orgID string, params *models.AccountsListTeamEventsParams) (*inorbit.Response[models.ListTeamEventsResponse], error) {
-	op := inorbit.Operation{Name: "accounts.list_team_events", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/audit", Scopes: []string{"account:audit"}}
+	op := inorbit.Operation{Name: "accounts.list_team_events", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/audit", Template: "/v1/accounts/orgs/{org_id}/audit", Scopes: []string{"account:audit"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Action != nil {
@@ -122,7 +122,7 @@ func ListTeamEvents(ctx context.Context, c *inorbit.Client, orgID string, params
 
 // ListConnections calls GET /v1/accounts/orgs/{org_id}/connections; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/ListConnections` on the `connections` backend.
 func ListConnections(ctx context.Context, c *inorbit.Client, orgID string, params *models.ConnectionsListConnectionsParams) (*inorbit.Response[models.ListConnectionsResponse], error) {
-	op := inorbit.Operation{Name: "connections.list_connections", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.list_connections", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections", Template: "/v1/accounts/orgs/{org_id}/connections", Scopes: []string{"connections:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -138,13 +138,13 @@ func ListConnections(ctx context.Context, c *inorbit.Client, orgID string, param
 
 // GetConnection calls GET /v1/accounts/orgs/{org_id}/connections/{connection_id}; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/GetConnection` on the `connections` backend.
 func GetConnection(ctx context.Context, c *inorbit.Client, orgID string, connectionID string) (*inorbit.Response[models.GetConnectionResponse], error) {
-	op := inorbit.Operation{Name: "connections.get_connection", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID), Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.get_connection", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID), Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}", Scopes: []string{"connections:read"}}
 	return inorbit.Call[models.GetConnectionResponse](ctx, c, op)
 }
 
 // ListGrants calls GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/ListGrants` on the `connections` backend.
 func ListGrants(ctx context.Context, c *inorbit.Client, orgID string, connectionID string, params *models.ConnectionsListGrantsParams) (*inorbit.Response[models.ListGrantsResponse], error) {
-	op := inorbit.Operation{Name: "connections.list_grants", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/grants", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.list_grants", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/grants", Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}/grants", Scopes: []string{"connections:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -160,7 +160,7 @@ func ListGrants(ctx context.Context, c *inorbit.Client, orgID string, connection
 
 // ListHistory calls GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/ListHistory` on the `connections` backend.
 func ListHistory(ctx context.Context, c *inorbit.Client, orgID string, connectionID string, params *models.ConnectionsListHistoryParams) (*inorbit.Response[models.ListHistoryResponse], error) {
-	op := inorbit.Operation{Name: "connections.list_history", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/history", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.list_history", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/history", Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}/history", Scopes: []string{"connections:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -176,7 +176,7 @@ func ListHistory(ctx context.Context, c *inorbit.Client, orgID string, connectio
 
 // ListDomains calls GET /v1/accounts/orgs/{org_id}/domains; needs scope domains:read. Transcoded from `/iohr.accounts.v1.AccountsService/ListDomains` on the `accounts` backend.
 func ListDomains(ctx context.Context, c *inorbit.Client, orgID string, params *models.AccountsListDomainsParams) (*inorbit.Response[models.ListDomainsResponse], error) {
-	op := inorbit.Operation{Name: "accounts.list_domains", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains", Scopes: []string{"domains:read"}}
+	op := inorbit.Operation{Name: "accounts.list_domains", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains", Template: "/v1/accounts/orgs/{org_id}/domains", Scopes: []string{"domains:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -192,13 +192,13 @@ func ListDomains(ctx context.Context, c *inorbit.Client, orgID string, params *m
 
 // GetDomain calls GET /v1/accounts/orgs/{org_id}/domains/{domain}; needs scope domains:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetDomain` on the `accounts` backend.
 func GetDomain(ctx context.Context, c *inorbit.Client, orgID string, domain string) (*inorbit.Response[models.GetDomainResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_domain", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain), Scopes: []string{"domains:read"}}
+	op := inorbit.Operation{Name: "accounts.get_domain", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain), Template: "/v1/accounts/orgs/{org_id}/domains/{domain}", Scopes: []string{"domains:read"}}
 	return inorbit.Call[models.GetDomainResponse](ctx, c, op)
 }
 
 // ListMonitors calls GET /v1/accounts/orgs/{org_id}/monitors; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitors` on the `connections` backend.
 func ListMonitors(ctx context.Context, c *inorbit.Client, orgID string, params *models.ConnectionsListMonitorsParams) (*inorbit.Response[models.ListMonitorsResponse], error) {
-	op := inorbit.Operation{Name: "connections.list_monitors", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.list_monitors", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors", Template: "/v1/accounts/orgs/{org_id}/monitors", Scopes: []string{"connections:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -220,13 +220,13 @@ func ListMonitors(ctx context.Context, c *inorbit.Client, orgID string, params *
 
 // GetMonitor calls GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitor` on the `connections` backend.
 func GetMonitor(ctx context.Context, c *inorbit.Client, orgID string, monitorID string) (*inorbit.Response[models.GetMonitorResponse], error) {
-	op := inorbit.Operation{Name: "connections.get_monitor", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID), Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.get_monitor", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID), Template: "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}", Scopes: []string{"connections:read"}}
 	return inorbit.Call[models.GetMonitorResponse](ctx, c, op)
 }
 
 // ListMonitorRuns calls GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitorRuns` on the `connections` backend.
 func ListMonitorRuns(ctx context.Context, c *inorbit.Client, orgID string, monitorID string, params *models.ConnectionsListMonitorRunsParams) (*inorbit.Response[models.ListMonitorRunsResponse], error) {
-	op := inorbit.Operation{Name: "connections.list_monitor_runs", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID) + "/runs", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.list_monitor_runs", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID) + "/runs", Template: "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs", Scopes: []string{"connections:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -245,13 +245,13 @@ func ListMonitorRuns(ctx context.Context, c *inorbit.Client, orgID string, monit
 
 // GetMonitorSummary calls GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitorSummary` on the `connections` backend.
 func GetMonitorSummary(ctx context.Context, c *inorbit.Client, orgID string, monitorID string) (*inorbit.Response[models.GetMonitorSummaryResponse], error) {
-	op := inorbit.Operation{Name: "connections.get_monitor_summary", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID) + "/summary", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.get_monitor_summary", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID) + "/summary", Template: "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary", Scopes: []string{"connections:read"}}
 	return inorbit.Call[models.GetMonitorSummaryResponse](ctx, c, op)
 }
 
 // ListRequests calls GET /v1/accounts/orgs/{org_id}/requests; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/ListRequests` on the `accounts` backend.
 func ListRequests(ctx context.Context, c *inorbit.Client, orgID string, params *models.AccountsListRequestsParams) (*inorbit.Response[models.ListRequestsResponse], error) {
-	op := inorbit.Operation{Name: "accounts.list_requests", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/requests", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.list_requests", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/requests", Template: "/v1/accounts/orgs/{org_id}/requests", Scopes: []string{"usage:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -276,13 +276,13 @@ func ListRequests(ctx context.Context, c *inorbit.Client, orgID string, params *
 
 // GetUnits calls GET /v1/accounts/orgs/{org_id}/units; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetUnits` on the `accounts` backend.
 func GetUnits(ctx context.Context, c *inorbit.Client, orgID string) (*inorbit.Response[models.GetUnitsResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_units", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/units", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.get_units", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/units", Template: "/v1/accounts/orgs/{org_id}/units", Scopes: []string{"usage:read"}}
 	return inorbit.Call[models.GetUnitsResponse](ctx, c, op)
 }
 
 // GetUnitSeries calls GET /v1/accounts/orgs/{org_id}/units/series; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetUnitSeries` on the `accounts` backend.
 func GetUnitSeries(ctx context.Context, c *inorbit.Client, orgID string, params *models.AccountsGetUnitSeriesParams) (*inorbit.Response[models.GetUnitSeriesResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_unit_series", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/units/series", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.get_unit_series", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/units/series", Template: "/v1/accounts/orgs/{org_id}/units/series", Scopes: []string{"usage:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.From != nil {
@@ -301,7 +301,7 @@ func GetUnitSeries(ctx context.Context, c *inorbit.Client, orgID string, params 
 
 // GetUsage calls GET /v1/accounts/orgs/{org_id}/usage; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/GetUsage` on the `accounts` backend.
 func GetUsage(ctx context.Context, c *inorbit.Client, orgID string, params *models.AccountsGetUsageParams) (*inorbit.Response[models.GetUsageResponse], error) {
-	op := inorbit.Operation{Name: "accounts.get_usage", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/usage", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.get_usage", Method: "GET", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/usage", Template: "/v1/accounts/orgs/{org_id}/usage", Scopes: []string{"usage:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.From != nil {
@@ -317,7 +317,7 @@ func GetUsage(ctx context.Context, c *inorbit.Client, orgID string, params *mode
 
 // ListUnitCategories calls GET /v1/accounts/units/categories; needs scope usage:read. Transcoded from `/iohr.accounts.v1.AccountsService/ListUnitCategories` on the `accounts` backend.
 func ListUnitCategories(ctx context.Context, c *inorbit.Client, params *models.AccountsListUnitCategoriesParams) (*inorbit.Response[models.ListUnitCategoriesResponse], error) {
-	op := inorbit.Operation{Name: "accounts.list_unit_categories", Method: "GET", Path: "/v1/accounts/units/categories", Scopes: []string{"usage:read"}}
+	op := inorbit.Operation{Name: "accounts.list_unit_categories", Method: "GET", Path: "/v1/accounts/units/categories", Template: "/v1/accounts/units/categories", Scopes: []string{"usage:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -333,7 +333,7 @@ func ListUnitCategories(ctx context.Context, c *inorbit.Client, params *models.A
 
 // ListKinds calls GET /v1/connections/kinds; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/ListKinds` on the `connections` backend.
 func ListKinds(ctx context.Context, c *inorbit.Client, params *models.ConnectionsListKindsParams) (*inorbit.Response[models.ListKindsResponse], error) {
-	op := inorbit.Operation{Name: "connections.list_kinds", Method: "GET", Path: "/v1/connections/kinds", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.list_kinds", Method: "GET", Path: "/v1/connections/kinds", Template: "/v1/connections/kinds", Scopes: []string{"connections:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -349,7 +349,7 @@ func ListKinds(ctx context.Context, c *inorbit.Client, params *models.Connection
 
 // ListTools calls GET /v1/connections/tools; needs scope connections:read. Transcoded from `/iohr.connections.v1.ConnectionsService/ListTools` on the `connections` backend.
 func ListTools(ctx context.Context, c *inorbit.Client, params *models.ConnectionsListToolsParams) (*inorbit.Response[models.ListToolsResponse], error) {
-	op := inorbit.Operation{Name: "connections.list_tools", Method: "GET", Path: "/v1/connections/tools", Scopes: []string{"connections:read"}}
+	op := inorbit.Operation{Name: "connections.list_tools", Method: "GET", Path: "/v1/connections/tools", Template: "/v1/connections/tools", Scopes: []string{"connections:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -365,7 +365,7 @@ func ListTools(ctx context.Context, c *inorbit.Client, params *models.Connection
 
 // StreamEvents calls GET /v1/events/events; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend.
 func StreamEvents(ctx context.Context, c *inorbit.Client, params *models.EventsStreamEventsParams) iter.Seq2[*models.StreamEventsResponse, error] {
-	op := inorbit.Operation{Name: "events.stream_events", Method: "GET", Path: "/v1/events/events", Scopes: []string{"events:read"}}
+	op := inorbit.Operation{Name: "events.stream_events", Method: "GET", Path: "/v1/events/events", Template: "/v1/events/events", Scopes: []string{"events:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Types != nil {
@@ -392,7 +392,7 @@ func StreamEvents(ctx context.Context, c *inorbit.Client, params *models.EventsS
 
 // ListNotifications calls GET /v1/events/notifications; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/ListNotifications` on the `events` backend.
 func ListNotifications(ctx context.Context, c *inorbit.Client, params *models.EventsListNotificationsParams) (*inorbit.Response[models.ListNotificationsResponse], error) {
-	op := inorbit.Operation{Name: "events.list_notifications", Method: "GET", Path: "/v1/events/notifications", Scopes: []string{"events:read"}}
+	op := inorbit.Operation{Name: "events.list_notifications", Method: "GET", Path: "/v1/events/notifications", Template: "/v1/events/notifications", Scopes: []string{"events:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -414,7 +414,7 @@ func ListNotifications(ctx context.Context, c *inorbit.Client, params *models.Ev
 
 // GetEventStats calls GET /v1/events/stats; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/GetEventStats` on the `events` backend.
 func GetEventStats(ctx context.Context, c *inorbit.Client, params *models.EventsGetEventStatsParams) (*inorbit.Response[models.GetEventStatsResponse], error) {
-	op := inorbit.Operation{Name: "events.get_event_stats", Method: "GET", Path: "/v1/events/stats", Scopes: []string{"events:read"}}
+	op := inorbit.Operation{Name: "events.get_event_stats", Method: "GET", Path: "/v1/events/stats", Template: "/v1/events/stats", Scopes: []string{"events:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.AccountID != nil {
@@ -430,7 +430,7 @@ func GetEventStats(ctx context.Context, c *inorbit.Client, params *models.Events
 
 // ListEventTypes calls GET /v1/events/types; needs scope events:read. Transcoded from `/iohr.events.v1.EventsService/ListEventTypes` on the `events` backend.
 func ListEventTypes(ctx context.Context, c *inorbit.Client, params *models.EventsListEventTypesParams) (*inorbit.Response[models.ListEventTypesResponse], error) {
-	op := inorbit.Operation{Name: "events.list_event_types", Method: "GET", Path: "/v1/events/types", Scopes: []string{"events:read"}}
+	op := inorbit.Operation{Name: "events.list_event_types", Method: "GET", Path: "/v1/events/types", Template: "/v1/events/types", Scopes: []string{"events:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -446,13 +446,13 @@ func ListEventTypes(ctx context.Context, c *inorbit.Client, params *models.Event
 
 // Me calls GET /v1/me; needs scope identity:read. A key needs scope `identity:read`.
 func Me(ctx context.Context, c *inorbit.Client) (*inorbit.Response[models.Me], error) {
-	op := inorbit.Operation{Name: "me", Method: "GET", Path: "/v1/me", Scopes: []string{"identity:read"}}
+	op := inorbit.Operation{Name: "me", Method: "GET", Path: "/v1/me", Template: "/v1/me", Scopes: []string{"identity:read"}}
 	return inorbit.Call[models.Me](ctx, c, op)
 }
 
 // ListDigests calls GET /v1/radar/digests; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/ListDigests` on the `radar` backend.
 func ListDigests(ctx context.Context, c *inorbit.Client, params *models.RadarListDigestsParams) (*inorbit.Response[models.ListDigestsResponse], error) {
-	op := inorbit.Operation{Name: "radar.list_digests", Method: "GET", Path: "/v1/radar/digests", Scopes: []string{"radar:read"}}
+	op := inorbit.Operation{Name: "radar.list_digests", Method: "GET", Path: "/v1/radar/digests", Template: "/v1/radar/digests", Scopes: []string{"radar:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Language != nil {
@@ -483,13 +483,13 @@ func ListDigests(ctx context.Context, c *inorbit.Client, params *models.RadarLis
 
 // GetDigest calls GET /v1/radar/digests/{id}; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/GetDigest` on the `radar` backend.
 func GetDigest(ctx context.Context, c *inorbit.Client, id string) (*inorbit.Response[models.GetDigestResponse], error) {
-	op := inorbit.Operation{Name: "radar.get_digest", Method: "GET", Path: "/v1/radar/digests/" + codegen.PathSegment(id), Scopes: []string{"radar:read"}}
+	op := inorbit.Operation{Name: "radar.get_digest", Method: "GET", Path: "/v1/radar/digests/" + codegen.PathSegment(id), Template: "/v1/radar/digests/{id}", Scopes: []string{"radar:read"}}
 	return inorbit.Call[models.GetDigestResponse](ctx, c, op)
 }
 
 // ListItems calls GET /v1/radar/items; needs scope radar:read. Transcoded from `/iohr.radar.v1.RadarService/ListItems` on the `radar` backend.
 func ListItems(ctx context.Context, c *inorbit.Client, params *models.RadarListItemsParams) (*inorbit.Response[models.ListItemsResponse], error) {
-	op := inorbit.Operation{Name: "radar.list_items", Method: "GET", Path: "/v1/radar/items", Scopes: []string{"radar:read"}}
+	op := inorbit.Operation{Name: "radar.list_items", Method: "GET", Path: "/v1/radar/items", Template: "/v1/radar/items", Scopes: []string{"radar:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Language != nil {
@@ -511,7 +511,7 @@ func ListItems(ctx context.Context, c *inorbit.Client, params *models.RadarListI
 
 // ListEndpoints calls GET /v1/webhooks/endpoints; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListEndpoints` on the `events` backend.
 func ListEndpoints(ctx context.Context, c *inorbit.Client, params *models.EventsListEndpointsParams) (*inorbit.Response[models.ListEndpointsResponse], error) {
-	op := inorbit.Operation{Name: "events.list_endpoints", Method: "GET", Path: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_endpoints", Method: "GET", Path: "/v1/webhooks/endpoints", Template: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.AccountID != nil {
@@ -530,13 +530,13 @@ func ListEndpoints(ctx context.Context, c *inorbit.Client, params *models.Events
 
 // GetEndpoint calls GET /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/GetEndpoint` on the `events` backend.
 func GetEndpoint(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.Endpoint], error) {
-	op := inorbit.Operation{Name: "events.get_endpoint", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.get_endpoint", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Template: "/v1/webhooks/endpoints/{endpoint_id}", Scopes: []string{"webhooks:read"}}
 	return inorbit.Call[models.Endpoint](ctx, c, op)
 }
 
 // ListDeliveries calls GET /v1/webhooks/endpoints/{endpoint_id}/deliveries; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListDeliveries` on the `events` backend.
 func ListDeliveries(ctx context.Context, c *inorbit.Client, endpointID string, params *models.EventsListDeliveriesParams) (*inorbit.Response[models.ListDeliveriesResponse], error) {
-	op := inorbit.Operation{Name: "events.list_deliveries", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/deliveries", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_deliveries", Method: "GET", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/deliveries", Template: "/v1/webhooks/endpoints/{endpoint_id}/deliveries", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.Status != nil {
@@ -555,7 +555,7 @@ func ListDeliveries(ctx context.Context, c *inorbit.Client, endpointID string, p
 
 // ListInboxes calls GET /v1/webhooks/inboxes; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListInboxes` on the `events` backend.
 func ListInboxes(ctx context.Context, c *inorbit.Client, params *models.EventsListInboxesParams) (*inorbit.Response[models.ListInboxesResponse], error) {
-	op := inorbit.Operation{Name: "events.list_inboxes", Method: "GET", Path: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_inboxes", Method: "GET", Path: "/v1/webhooks/inboxes", Template: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.AccountID != nil {
@@ -574,7 +574,7 @@ func ListInboxes(ctx context.Context, c *inorbit.Client, params *models.EventsLi
 
 // ListInboxRequests calls GET /v1/webhooks/inboxes/{inbox_id}/requests; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/ListInboxRequests` on the `events` backend.
 func ListInboxRequests(ctx context.Context, c *inorbit.Client, inboxID string, params *models.EventsListInboxRequestsParams) (*inorbit.Response[models.ListInboxRequestsResponse], error) {
-	op := inorbit.Operation{Name: "events.list_inbox_requests", Method: "GET", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID) + "/requests", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.list_inbox_requests", Method: "GET", Path: "/v1/webhooks/inboxes/" + codegen.PathSegment(inboxID) + "/requests", Template: "/v1/webhooks/inboxes/{inbox_id}/requests", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.PageSize != nil {
@@ -590,7 +590,7 @@ func ListInboxRequests(ctx context.Context, c *inorbit.Client, inboxID string, p
 
 // GetDeliveryStats calls GET /v1/webhooks/stats; needs scope webhooks:read. Transcoded from `/iohr.events.v1.EventsService/GetDeliveryStats` on the `events` backend.
 func GetDeliveryStats(ctx context.Context, c *inorbit.Client, params *models.EventsGetDeliveryStatsParams) (*inorbit.Response[models.GetDeliveryStatsResponse], error) {
-	op := inorbit.Operation{Name: "events.get_delivery_stats", Method: "GET", Path: "/v1/webhooks/stats", Scopes: []string{"webhooks:read"}}
+	op := inorbit.Operation{Name: "events.get_delivery_stats", Method: "GET", Path: "/v1/webhooks/stats", Template: "/v1/webhooks/stats", Scopes: []string{"webhooks:read"}}
 	if params != nil {
 		q := codegen.Query()
 		if params.AccountID != nil {
@@ -609,136 +609,152 @@ func GetDeliveryStats(ctx context.Context, c *inorbit.Client, params *models.Eve
 
 // UpdateConnection calls PATCH /v1/accounts/orgs/{org_id}/connections/{connection_id}; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateConnection` on the `connections` backend.
 func UpdateConnection(ctx context.Context, c *inorbit.Client, orgID string, connectionID string, body models.UpdateConnectionRequest) (*inorbit.Response[models.UpdateConnectionResponse], error) {
-	op := inorbit.Operation{Name: "connections.update_connection", Method: "PATCH", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID), Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.update_connection", Method: "PATCH", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID), Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}", Scopes: []string{"connections:write"}}
 	op.Body = body
 	return inorbit.Call[models.UpdateConnectionResponse](ctx, c, op)
 }
 
 // UpdateMonitor calls PATCH /v1/accounts/orgs/{org_id}/monitors/{monitor_id}; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/UpdateMonitor` on the `connections` backend.
 func UpdateMonitor(ctx context.Context, c *inorbit.Client, orgID string, monitorID string, body models.UpdateMonitorRequest) (*inorbit.Response[models.UpdateMonitorResponse], error) {
-	op := inorbit.Operation{Name: "connections.update_monitor", Method: "PATCH", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID), Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.update_monitor", Method: "PATCH", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/monitors/" + codegen.PathSegment(monitorID), Template: "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}", Scopes: []string{"connections:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.UpdateMonitorResponse](ctx, c, op)
 }
 
 // UpdateEndpoint calls PATCH /v1/webhooks/endpoints/{endpoint_id}; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/UpdateEndpoint` on the `events` backend.
 func UpdateEndpoint(ctx context.Context, c *inorbit.Client, endpointID string, body models.UpdateEndpointRequest) (*inorbit.Response[models.Endpoint], error) {
-	op := inorbit.Operation{Name: "events.update_endpoint", Method: "PATCH", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.update_endpoint", Method: "PATCH", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID), Template: "/v1/webhooks/endpoints/{endpoint_id}", Scopes: []string{"webhooks:write"}}
 	op.Body = body
 	return inorbit.Call[models.Endpoint](ctx, c, op)
 }
 
 // CreateEnrollment calls POST /v1/accounts/orgs/{org_id}/agents/enrollments; needs scope agents:write. Transcoded from `/iohr.agents.v1.AgentsService/CreateEnrollment` on the `agents` backend.
 func CreateEnrollment(ctx context.Context, c *inorbit.Client, orgID string, body models.CreateEnrollmentRequest) (*inorbit.Response[models.CreateEnrollmentResponse], error) {
-	op := inorbit.Operation{Name: "agents.create_enrollment", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/enrollments", Scopes: []string{"agents:write"}}
+	op := inorbit.Operation{Name: "agents.create_enrollment", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/enrollments", Template: "/v1/accounts/orgs/{org_id}/agents/enrollments", Scopes: []string{"agents:write"}}
 	op.Body = body
 	return inorbit.Call[models.CreateEnrollmentResponse](ctx, c, op)
 }
 
 // RunCheck calls POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/checks; needs scope agents:write. Transcoded from `/iohr.agents.v1.AgentsService/RunCheck` on the `agents` backend.
 func RunCheck(ctx context.Context, c *inorbit.Client, orgID string, agentID string, body models.RunCheckRequest) (*inorbit.Response[models.RunCheckResponse], error) {
-	op := inorbit.Operation{Name: "agents.run_check", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID) + "/checks", Scopes: []string{"agents:write"}}
+	op := inorbit.Operation{Name: "agents.run_check", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID) + "/checks", Template: "/v1/accounts/orgs/{org_id}/agents/{agent_id}/checks", Scopes: []string{"agents:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.RunCheckResponse](ctx, c, op)
 }
 
 // RevokeAgent calls POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke; needs scope agents:write. Transcoded from `/iohr.agents.v1.AgentsService/RevokeAgent` on the `agents` backend.
 func RevokeAgent(ctx context.Context, c *inorbit.Client, orgID string, agentID string, body models.RevokeAgentRequest) (*inorbit.Response[models.RevokeAgentResponse], error) {
-	op := inorbit.Operation{Name: "agents.revoke_agent", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID) + "/revoke", Scopes: []string{"agents:write"}}
+	op := inorbit.Operation{Name: "agents.revoke_agent", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/agents/" + codegen.PathSegment(agentID) + "/revoke", Template: "/v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke", Scopes: []string{"agents:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.RevokeAgentResponse](ctx, c, op)
 }
 
 // CreateConnection calls POST /v1/accounts/orgs/{org_id}/connections; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/CreateConnection` on the `connections` backend.
 func CreateConnection(ctx context.Context, c *inorbit.Client, orgID string, body models.CreateConnectionRequest) (*inorbit.Response[models.CreateConnectionResponse], error) {
-	op := inorbit.Operation{Name: "connections.create_connection", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections", Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.create_connection", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections", Template: "/v1/accounts/orgs/{org_id}/connections", Scopes: []string{"connections:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CreateConnectionResponse](ctx, c, op)
 }
 
 // CallAction calls POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}; needs scope connections:use. Transcoded from `/iohr.connections.v1.ConnectionsService/CallAction` on the `connections` backend.
 func CallAction(ctx context.Context, c *inorbit.Client, orgID string, connectionID string, action string, body models.CallActionRequest) (*inorbit.Response[models.CallActionResponse], error) {
-	op := inorbit.Operation{Name: "connections.call_action", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/actions/" + codegen.PathSegment(action), Scopes: []string{"connections:use"}}
+	op := inorbit.Operation{Name: "connections.call_action", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/actions/" + codegen.PathSegment(action), Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action}", Scopes: []string{"connections:use"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CallActionResponse](ctx, c, op)
 }
 
 // CreateMonitor calls POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/CreateMonitor` on the `connections` backend.
 func CreateMonitor(ctx context.Context, c *inorbit.Client, orgID string, connectionID string, body models.CreateMonitorRequest) (*inorbit.Response[models.CreateMonitorResponse], error) {
-	op := inorbit.Operation{Name: "connections.create_monitor", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/monitors", Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.create_monitor", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/monitors", Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors", Scopes: []string{"connections:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CreateMonitorResponse](ctx, c, op)
 }
 
 // TestConnection calls POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/test; needs scope connections:write. Transcoded from `/iohr.connections.v1.ConnectionsService/TestConnection` on the `connections` backend.
 func TestConnection(ctx context.Context, c *inorbit.Client, orgID string, connectionID string) (*inorbit.Response[models.TestConnectionResponse], error) {
-	op := inorbit.Operation{Name: "connections.test_connection", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/test", Scopes: []string{"connections:write"}}
+	op := inorbit.Operation{Name: "connections.test_connection", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/connections/" + codegen.PathSegment(connectionID) + "/test", Template: "/v1/accounts/orgs/{org_id}/connections/{connection_id}/test", Scopes: []string{"connections:write"}}
+	op.IdempotencyKey = true
 	return inorbit.Call[models.TestConnectionResponse](ctx, c, op)
 }
 
 // AddDomain calls POST /v1/accounts/orgs/{org_id}/domains; needs scope domains:write. Transcoded from `/iohr.accounts.v1.AccountsService/AddDomain` on the `accounts` backend.
 func AddDomain(ctx context.Context, c *inorbit.Client, orgID string, body models.AddDomainRequest) (*inorbit.Response[models.AddDomainResponse], error) {
-	op := inorbit.Operation{Name: "accounts.add_domain", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains", Scopes: []string{"domains:write"}}
+	op := inorbit.Operation{Name: "accounts.add_domain", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains", Template: "/v1/accounts/orgs/{org_id}/domains", Scopes: []string{"domains:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.AddDomainResponse](ctx, c, op)
 }
 
 // CheckDomain calls POST /v1/accounts/orgs/{org_id}/domains/{domain}/check; needs scope domains:write. Transcoded from `/iohr.accounts.v1.AccountsService/CheckDomain` on the `accounts` backend.
 func CheckDomain(ctx context.Context, c *inorbit.Client, orgID string, domain string, body models.CheckDomainRequest) (*inorbit.Response[models.CheckDomainResponse], error) {
-	op := inorbit.Operation{Name: "accounts.check_domain", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain) + "/check", Scopes: []string{"domains:write"}}
+	op := inorbit.Operation{Name: "accounts.check_domain", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain) + "/check", Template: "/v1/accounts/orgs/{org_id}/domains/{domain}/check", Scopes: []string{"domains:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CheckDomainResponse](ctx, c, op)
 }
 
 // ConfirmDomain calls POST /v1/accounts/orgs/{org_id}/domains/{domain}/confirm; needs scope domains:write. Transcoded from `/iohr.accounts.v1.AccountsService/ConfirmDomain` on the `accounts` backend.
 func ConfirmDomain(ctx context.Context, c *inorbit.Client, orgID string, domain string, body models.ConfirmDomainRequest) (*inorbit.Response[models.ConfirmDomainResponse], error) {
-	op := inorbit.Operation{Name: "accounts.confirm_domain", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain) + "/confirm", Scopes: []string{"domains:write"}}
+	op := inorbit.Operation{Name: "accounts.confirm_domain", Method: "POST", Path: "/v1/accounts/orgs/" + codegen.PathSegment(orgID) + "/domains/" + codegen.PathSegment(domain) + "/confirm", Template: "/v1/accounts/orgs/{org_id}/domains/{domain}/confirm", Scopes: []string{"domains:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.ConfirmDomainResponse](ctx, c, op)
 }
 
 // CallTool calls POST /v1/connections/tools/{name}; needs scope connections:use. Transcoded from `/iohr.connections.v1.ConnectionsService/CallTool` on the `connections` backend.
 func CallTool(ctx context.Context, c *inorbit.Client, name string, body models.CallToolRequest) (*inorbit.Response[models.CallToolResponse], error) {
-	op := inorbit.Operation{Name: "connections.call_tool", Method: "POST", Path: "/v1/connections/tools/" + codegen.PathSegment(name), Scopes: []string{"connections:use"}}
+	op := inorbit.Operation{Name: "connections.call_tool", Method: "POST", Path: "/v1/connections/tools/" + codegen.PathSegment(name), Template: "/v1/connections/tools/{name}", Scopes: []string{"connections:use"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CallToolResponse](ctx, c, op)
 }
 
 // RetryDelivery calls POST /v1/webhooks/deliveries/{delivery_id}/retry; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/RetryDelivery` on the `events` backend.
 func RetryDelivery(ctx context.Context, c *inorbit.Client, deliveryID string) (*inorbit.Response[models.RetryDeliveryResponse], error) {
-	op := inorbit.Operation{Name: "events.retry_delivery", Method: "POST", Path: "/v1/webhooks/deliveries/" + codegen.PathSegment(deliveryID) + "/retry", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.retry_delivery", Method: "POST", Path: "/v1/webhooks/deliveries/" + codegen.PathSegment(deliveryID) + "/retry", Template: "/v1/webhooks/deliveries/{delivery_id}/retry", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	return inorbit.Call[models.RetryDeliveryResponse](ctx, c, op)
 }
 
 // CreateEndpoint calls POST /v1/webhooks/endpoints; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/CreateEndpoint` on the `events` backend.
 func CreateEndpoint(ctx context.Context, c *inorbit.Client, body models.CreateEndpointRequest) (*inorbit.Response[models.CreateEndpointResponse], error) {
-	op := inorbit.Operation{Name: "events.create_endpoint", Method: "POST", Path: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.create_endpoint", Method: "POST", Path: "/v1/webhooks/endpoints", Template: "/v1/webhooks/endpoints", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CreateEndpointResponse](ctx, c, op)
 }
 
 // RecoverEndpoint calls POST /v1/webhooks/endpoints/{endpoint_id}/recover; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/RecoverEndpoint` on the `events` backend.
 func RecoverEndpoint(ctx context.Context, c *inorbit.Client, endpointID string, body models.RecoverEndpointRequest) (*inorbit.Response[models.RecoverEndpointResponse], error) {
-	op := inorbit.Operation{Name: "events.recover_endpoint", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/recover", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.recover_endpoint", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/recover", Template: "/v1/webhooks/endpoints/{endpoint_id}/recover", Scopes: []string{"webhooks:write"}}
 	op.Body = body
 	return inorbit.Call[models.RecoverEndpointResponse](ctx, c, op)
 }
 
 // RotateSecret calls POST /v1/webhooks/endpoints/{endpoint_id}/rotate; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/RotateSecret` on the `events` backend.
 func RotateSecret(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.RotateSecretResponse], error) {
-	op := inorbit.Operation{Name: "events.rotate_secret", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/rotate", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.rotate_secret", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/rotate", Template: "/v1/webhooks/endpoints/{endpoint_id}/rotate", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	return inorbit.Call[models.RotateSecretResponse](ctx, c, op)
 }
 
 // SendTest calls POST /v1/webhooks/endpoints/{endpoint_id}/test; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/SendTest` on the `events` backend.
 func SendTest(ctx context.Context, c *inorbit.Client, endpointID string) (*inorbit.Response[models.SendTestResponse], error) {
-	op := inorbit.Operation{Name: "events.send_test", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/test", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.send_test", Method: "POST", Path: "/v1/webhooks/endpoints/" + codegen.PathSegment(endpointID) + "/test", Template: "/v1/webhooks/endpoints/{endpoint_id}/test", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	return inorbit.Call[models.SendTestResponse](ctx, c, op)
 }
 
 // CreateInbox calls POST /v1/webhooks/inboxes; needs scope webhooks:write. Transcoded from `/iohr.events.v1.EventsService/CreateInbox` on the `events` backend.
 func CreateInbox(ctx context.Context, c *inorbit.Client, body models.CreateInboxRequest) (*inorbit.Response[models.CreateInboxResponse], error) {
-	op := inorbit.Operation{Name: "events.create_inbox", Method: "POST", Path: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:write"}}
+	op := inorbit.Operation{Name: "events.create_inbox", Method: "POST", Path: "/v1/webhooks/inboxes", Template: "/v1/webhooks/inboxes", Scopes: []string{"webhooks:write"}}
+	op.IdempotencyKey = true
 	op.Body = body
 	return inorbit.Call[models.CreateInboxResponse](ctx, c, op)
 }

@@ -17,7 +17,7 @@ const client = Client.load();                     // TypeScript
 client = Client.load()                            # Python
 ```
 ```go
-client, err := inorbit.Load()                     // Go
+client, err := inorbit.Load(ctx)                  // Go
 ```
 
 `iohr sdk config` (or `client.config().describe()`) prints what a client will use and where
@@ -191,7 +191,7 @@ a `traceparent` you pass per call is still sent.
 In Go, register the middlewares explicitly:
 
 ```go
-client, err := inorbit.Load(inorbitotel.Pipeline())
+client, err := inorbit.Load(ctx, inorbitotel.Pipeline())
 ```
 
 ## Strict logging for an audited environment

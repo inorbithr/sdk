@@ -9,7 +9,6 @@ import (
 	"io"
 	"iter"
 	"net/http"
-	"net/url"
 	"sync/atomic"
 	"time"
 )
@@ -27,10 +26,6 @@ const (
 )
 
 const (
-	// defaultStreamIdle is how long a stream may be silent; the server sends a keep-alive
-	// every 15 s.
-	defaultStreamIdle = 45 * time.Second
-
 	// maxEvent bounds one event's data, 1 MiB.
 	maxEvent = 1 << 20
 
@@ -78,20 +73,16 @@ func (c *Client) streamRaw(ctx context.Context, op Operation) iter.Seq2[[]byte, 
 // past the idle timeout ends it with an error, the end of the body without one.
 func (c *Client) sseStream(ctx context.Context, op Operation) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
-		u, err := c.url(op)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
 		h := http.Header{}
 		h.Set("Accept", "text/event-stream")
 		h.Set("Cache-Control", "no-cache")
-		resp, cancel, err := c.open(ctx, op, u, h, func(status int) bool { return status >= 200 && status < 300 })
+		sctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		resp, err := c.open(sctx, op, h, func(status int) bool { return status >= 200 && status < 300 })
 		if err != nil {
 			yield(nil, err)
 			return
 		}
-		defer cancel()
 		defer func() { _ = resp.Body.Close() }()
 		idle := newIdleReader(resp.Body, c.streamIdle, cancel)
 		defer idle.stop()
@@ -127,120 +118,24 @@ func (c *Client) sseStream(ctx context.Context, op Operation) iter.Seq2[[]byte, 
 	}
 }
 
-// open sends a GET for a stream, with the retry rules of any GET, and returns the
-// answer whose status ok accepts with its body unread. cancel ends the request; call it
-// when done with the stream.
-func (c *Client) open(ctx context.Context, op Operation, u *url.URL, h http.Header, ok func(int) bool) (*http.Response, context.CancelFunc, error) {
-	id := requestID()
-	retries, refreshed := 0, false
-	name := op.Name
-	if name == "" {
-		name = op.Path
-	}
-	for number := 1; ; number++ {
-		a := Attempt{Operation: name, Method: http.MethodGet, Path: op.Path, Number: number, RequestID: id}
-		resp, cancel, raw, wait, kind, err := c.openOnce(ctx, u, h, ok, a)
-		if kind == done && err == nil && resp != nil {
-			return resp, cancel, nil
-		}
-		if kind == unauthorized && !refreshed {
-			if inv, ok := c.provider.(Invalidator); ok {
-				inv.Invalidate()
-			}
-			refreshed = true
-			continue
-		}
-		if kind == retry && retries < c.maxRetries {
-			if wait < 0 {
-				wait = backoff(retries)
-			}
-			if serr := sleep(ctx, wait); serr != nil {
-				c.failed(a, serr)
-				return nil, nil, serr
-			}
-			retries++
-			continue
-		}
-		if err == nil {
-			err = newAPIError(raw)
-		}
-		c.failed(a, err)
-		return nil, nil, err
-	}
-}
-
-// openOnce sends one attempt. The answer's headers must come within the client's
-// timeout; the body is then the stream's and has no deadline.
-func (c *Client) openOnce(ctx context.Context, u *url.URL, h http.Header, ok func(int) bool, a Attempt) (*http.Response, context.CancelFunc, *RawResponse, time.Duration, outcome, error) {
-	tok, err := c.provider.Token(ctx)
+// open sends a GET for a stream through the pipeline, with the retry rules of any GET,
+// and returns the answer whose status ok accepts with its body unread. Closing the body
+// ends the request.
+func (c *Client) open(ctx context.Context, op Operation, h http.Header, ok func(int) bool) (*http.Response, error) {
+	started := time.Now()
+	op.Method = http.MethodGet
+	op.Body = nil
+	resp, st, err := c.do(ctx, op, callKind{stream: true, header: h, ok: ok})
 	if err != nil {
-		var aerr *AuthError
-		if !errors.As(err, &aerr) {
-			err = &AuthError{Message: "the token provider failed: " + err.Error(), Err: err}
-		}
-		return nil, nil, nil, 0, done, err
-	}
-	sctx, cancel := context.WithCancel(ctx)
-	var late atomic.Bool
-	timer := time.AfterFunc(c.timeout, func() { late.Store(true); cancel() })
-	req, err := http.NewRequestWithContext(sctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		timer.Stop()
-		cancel()
-		return nil, nil, nil, 0, done, &ConfigError{Message: "the request could not be built: " + err.Error()}
-	}
-	for k, v := range h {
-		req.Header[k] = v
-	}
-	req.Header.Set("Authorization", "Bearer "+tok.Access)
-	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("X-Request-Id", a.RequestID)
-	for _, hk := range c.hooks {
-		hk.OnRequest(a)
-	}
-	resp, err := c.http.Do(req)
-	timer.Stop()
-	if err != nil {
-		cancel()
-		if ctx.Err() != nil {
-			return nil, nil, nil, 0, done, ctx.Err()
-		}
-		if late.Load() || isTimeout(err) {
-			return nil, nil, nil, -1, retry, &TimeoutError{Host: c.base.Host, Seconds: int(c.timeout.Round(time.Second) / time.Second)}
-		}
-		return nil, nil, nil, -1, retry, &ConnectionError{Host: c.base.Host, Err: errors.New(describe(err))}
-	}
-	raw := &RawResponse{
-		Status: resp.StatusCode, Header: resp.Header, RequestID: a.RequestID,
-		ServerRequestID: resp.Header.Get("X-Request-Id"), Attempts: a.Number,
+		return nil, err
 	}
 	if ok(resp.StatusCode) {
-		for _, hk := range c.hooks {
-			hk.OnResponse(a, raw)
-		}
-		return resp, cancel, raw, 0, done, nil
+		return resp, nil
 	}
-	data, rerr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	_ = resp.Body.Close()
-	cancel()
-	if rerr != nil && ctx.Err() == nil {
-		return nil, nil, nil, -1, retry, &ConnectionError{Host: c.base.Host, Err: errors.New(describe(rerr))}
-	}
-	raw.Body = data
-	for _, hk := range c.hooks {
-		hk.OnResponse(a, raw)
-	}
-	switch {
-	case raw.Status == http.StatusUnauthorized:
-		return nil, nil, raw, 0, unauthorized, nil
-	case retryableStatus(raw.Status):
-		wait, has := retryAfter(raw.Header)
-		if !has {
-			wait = -1
-		}
-		return nil, nil, raw, wait, retry, nil
-	}
-	return nil, nil, raw, 0, done, newAPIError(raw)
+	raw := c.rawOf(resp, st)
+	apiErr := newAPIError(raw)
+	c.failed(ctx, op, st, apiErr, started)
+	return nil, apiErr
 }
 
 // streamProblem is the error an error event or an error frame carries: the envelope,

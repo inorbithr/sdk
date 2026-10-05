@@ -4,6 +4,7 @@
 //	replay [--addr 127.0.0.1:0] [--cases conformance/cases] [--dir DIR]
 //	       [--https-addr A] [--mtls-addr A] [--proxy-addr A]
 //	replay auth token --profile P --format json    (the fake iohr)
+//	replay vectors conformance/vectors              (every vector as JSON)
 //
 // The first line it prints is "replay: listening on http://HOST:PORT"; a driver reads
 // it, points base_url and token_url there, POSTs /_case, runs the case's action and
@@ -24,6 +25,9 @@ import (
 func main() {
 	if isIohr(os.Args[1:]) {
 		os.Exit(fakeIohr(os.Args[1:], time.Now(), os.Stdout, os.Stderr))
+	}
+	if isVectors(os.Args[1:]) {
+		os.Exit(dumpVectors(os.Args[1:], os.Stdout, os.Stderr))
 	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "replay:", err)
