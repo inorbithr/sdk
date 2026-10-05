@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.9](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.8...iohr/v0.1.0-alpha.9) (2026-10-05)
+
+
+### Features
+
+* **cli:** iohr sdk config prints the SDKs' effective configuration ([#110](https://github.com/inorbithr/sdk/issues/110)) ([e4a9d9c](https://github.com/inorbithr/sdk/commit/e4a9d9cef7652fc179f384074b3e42cb801d23a5))
+* **cli:** the generator marks operations that take Idempotency-Key ([#111](https://github.com/inorbithr/sdk/issues/111)) ([1390526](https://github.com/inorbithr/sdk/commit/1390526e579e4c213cebca9cff75ab1ed0a3a0fc))
+
+
+### Bug fixes
+
+* **cli:** sdk config's path rules and vector tests hold on Windows ([#120](https://github.com/inorbithr/sdk/issues/120)) ([c4fdefd](https://github.com/inorbithr/sdk/commit/c4fdefd2912ce8ac709805f55f7e7de82589d9e0))
+
 ## [0.1.0-alpha.8](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.7...iohr/v0.1.0-alpha.8) (2026-10-04)
 
 
