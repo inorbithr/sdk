@@ -560,6 +560,15 @@ fn build_client(loaded: &Loaded, url: &str, scratch: &Scratch, captured: &mut Ca
 /// The operations the cases name, called through the generated public surface
 /// (`inorbithr::public`), so a passing case proves the generated code.
 async fn call(client: &Client<Public>, action: &Action) -> Result<RawResponse, Error> {
+    // A case's answer holds the fields its behaviour needs, not every field the model
+    // requires: the raw answer is the result when only the typed decoding failed.
+    match call_typed(client, action).await {
+        Err(Error::Decode { raw, .. }) => Ok(*raw),
+        other => other,
+    }
+}
+
+async fn call_typed(client: &Client<Public>, action: &Action) -> Result<RawResponse, Error> {
     use inorbithr::public::{
         AccountsGetUsageParams, CreateEndpointRequest, Surface as _, UpdateEndpointRequest,
     };
