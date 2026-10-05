@@ -48,7 +48,8 @@ Per language (each box: settings and `load`, `describe`, the credential chain, t
 pipeline and its built-ins, transport, logging, tracing, every M6 case and vector
 passing, README showing `load` first):
 
-- [ ] Rust (first, as for every runtime; the command line uses it for `iohr sdk config`)
+- [x] Rust (first, as for every runtime; the command line uses it for `iohr sdk config`):
+      every M6 case and vector passes; `tower` adapter and `native-tls` not built
 - [x] TypeScript (`Client.load`, the node:https transport for proxy, CA and mTLS,
       `@opentelemetry/api` as an optional peer; every case and vector passing)
 - [ ] Python
