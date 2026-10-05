@@ -13,6 +13,7 @@ import {
   fs,
   homeDir,
   type Os,
+  proc,
   processEnv,
   type StatLike,
   workingDir,
@@ -440,12 +441,12 @@ function readable(path: string): boolean {
   }
 }
 
-/** Whether `program` can be run: a path to a file, or a name found on `PATH`. */
-function programFound(
-  program: string,
-  env: Readonly<Record<string, string | undefined>>,
-  os: Os,
-): boolean {
+/**
+ * Whether `program` can be run: a path to a file, or a name found on `PATH`. `PATH` is
+ * read with this machine's rules (separator, Windows extensions), whatever OS the
+ * resolution follows.
+ */
+function programFound(program: string, env: Readonly<Record<string, string | undefined>>): boolean {
   const f = fs();
   if (f === undefined) {
     return false;
@@ -460,16 +461,19 @@ function programFound(
   if (/[/\\]/.test(program)) {
     return isFile(program);
   }
+  const windows = proc()?.platform === "win32";
   const path = env.PATH ?? env.Path ?? "";
   if (path === "") {
     return false;
   }
-  const exts = os === "windows" ? ["", ".exe", ".cmd", ".bat"] : [""];
-  const paths = new Paths(os);
+  const exts = windows ? ["", ".exe", ".cmd", ".bat"] : [""];
+  const sep = windows ? "\\" : "/";
   return path
-    .split(os === "windows" ? ";" : ":")
+    .split(windows ? ";" : ":")
     .filter((d) => d !== "")
-    .some((dir) => exts.some((ext) => isFile(paths.join(dir, `${program}${ext}`))));
+    .some((dir) =>
+      exts.some((ext) => isFile(`${dir.replace(/[/\\]+$/, "")}${sep}${program}${ext}`)),
+    );
 }
 
 /** Resolves a configuration, or throws a {@link ConfigError} listing every problem. */
@@ -1309,7 +1313,7 @@ class Resolver {
         skip("cli", "skipped, no profile chosen");
       } else if (table === undefined || !Object.hasOwn(table, "kind")) {
         skip("cli", `profile ${profile} was not made by iohr login`);
-      } else if (!programFound(program, this.#env, this.#os)) {
+      } else if (!programFound(program, this.#env)) {
         skip("cli", program === "iohr" ? "iohr not found on PATH" : `iohr not found at ${program}`);
       } else {
         tried.push({ source: "cli", result: "used" });
