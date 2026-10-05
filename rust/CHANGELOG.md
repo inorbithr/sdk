@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.2](https://github.com/inorbithr/sdk/compare/rust/v0.2.1...rust/v0.2.2) (2026-10-05)
+
+
+### Features
+
+* **cli:** iohr sdk config resolves through the Rust SDK's loader, and the Rust target emits the idempotency-key mark and the path template ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **conformance:** replay matchers, TLS, mTLS and proxy listeners, fake iohr (M6) ([#113](https://github.com/inorbithr/sdk/issues/113)) ([fe098b6](https://github.com/inorbithr/sdk/commit/fe098b64bbfec4980ec7d1f3f2efe925873498b1))
+* **rust:** calls have a total timeout of 120 s by default (total_timeout), and a Retry-After longer than retry_after_max ends the call ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** Client::load with one precedence (code, environment, the iohr config file, defaults), describe() and ConfigError problems ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** proxy, CA bundle, mTLS, pinning and connect timeout through the SDK's own rules, or a caller's reqwest::Client ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** the credential chain (env, token and key secret files, the iohr login) with TokenFile, CliToken, CachedToken, ChainedCredential and DefaultCredential ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** the named middleware pipeline with its built-ins, tracing logging, OpenTelemetry behind the otel feature, rate limits and the retry budget ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+* **rust:** writes whose operation takes an Idempotency-Key are now retried, with one key per call sent on every attempt ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+
+
+### Bug fixes
+
+* **rust:** the socket task ends when the client is dropped ([10aeae0](https://github.com/inorbithr/sdk/commit/10aeae0e4ece4e6881e3604a74ed45391aaf5288))
+
+
+### Dependencies
+
+* **rust:** tokio-tungstenite 0.30, pkcs8 0.11 and fresh lockfiles ([#135](https://github.com/inorbithr/sdk/issues/135)) ([d13b761](https://github.com/inorbithr/sdk/commit/d13b761ad7b96924c1d14bea08ecd3cd3517aace))
+
 ## [0.2.1](https://github.com/inorbithr/sdk/compare/rust/v0.2.0...rust/v0.2.1) (2026-10-04)
 
 
