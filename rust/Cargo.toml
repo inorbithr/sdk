@@ -74,6 +74,8 @@ wiremock = "0.6"
 serde_yaml_ng = "0.10"
 tempfile = "3"
 opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "testing"] }
+opentelemetry = { version = "0.32", default-features = false, features = ["trace"] }
+regex = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

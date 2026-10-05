@@ -767,6 +767,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "pkcs8",
+ "regex",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",

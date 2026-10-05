@@ -1,7 +1,7 @@
 name: the-callers-idempotency-key-is-sent
 area: retries
 summary: An idempotency key passed with the call is sent as is, and a replayed answer is reported as replayed.
-pending: [go, rust, py, java, csharp]
+pending: [go, py, java, csharp]
 notes: M6, docs/config.md section 7.5.
 action: { op: events.create_endpoint, args: { account_id: acc_1, url: "https://example.com/hook", event_types: [radar.digest.published] }, options: { idempotency_key: order-42 } }
 exchanges:

@@ -1,7 +1,7 @@
 name: a-user-middleware-sees-the-request-id-and-the-token
 area: middleware
 summary: A per-retry middleware sees the finished request, its request id and Authorization header included, while the logs never carry the token.
-pending: [go, rust, py, java, csharp]
+pending: [go, py, java, csharp]
 notes: M6, docs/config.md sections 7.2, 7.9 and 7.13.
 client:
   pipeline: { add: [{ name: probe, stage: per_retry }] }

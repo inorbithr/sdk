@@ -299,37 +299,24 @@ fn short(hash: &str) -> &str {
 /// `describe()` prints it. A configuration `load` would refuse is exit 1 with every
 /// problem on stderr.
 pub(crate) fn config(g: &Global, args: &SdkConfig) -> Result<(), Error> {
-    use crate::sdk_config::{Inputs, Os, program_found, resolve};
-    let env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
-    let mut code = serde_json::Map::new();
+    // The runtime's own resolution (inorbithr::config), so the command line and a
+    // client built with `load` cannot disagree.
+    let mut profile = None;
     // `--profile` given on the command line stands for `profile` in code; the same
     // value from `IOHR_PROFILE` is the command line's switch, which the SDKs ignore.
     let flagged = std::env::args_os()
         .any(|a| a == "--profile" || a.to_string_lossy().starts_with("--profile="));
     if let (true, Some(p)) = (flagged, &g.profile) {
-        code.insert("profile".into(), Value::String(p.to_string()));
+        profile = Some(p.to_string());
     }
-    let cwd = std::env::current_dir()
-        .map_err(|e| Error::Failed(format!("cannot read the working directory: {e}")))?;
-    let home = etcetera::home_dir()
-        .ok()
-        .map(|h| h.to_string_lossy().into_owned());
-    let path_env = env.clone();
-    let cli_found = move |program: &str| program_found(program, &path_env);
-    let read = |p: &str| std::fs::read(p).ok();
-    let inputs = Inputs {
-        env: &env,
-        os: Os::current(),
-        home,
-        cwd: cwd.to_string_lossy().into_owned(),
-        code,
-        profile_type: args.profile_type.as_ref().map(ToString::to_string),
-        cli_found: &cli_found,
-        read: &read,
-    };
-    match resolve(&inputs) {
-        Ok(described) => {
-            Out::print_json(&described);
+    let mut options = inorbithr::config::LoadOptions::new();
+    if let Ok(h) = etcetera::home_dir() {
+        options = options.home(Some(h));
+    }
+    let profile_type = args.profile_type.as_ref().map(ToString::to_string);
+    match inorbithr::config::resolve_for(&options, profile.as_deref(), profile_type.as_deref()) {
+        Ok(resolved) => {
+            Out::print_json(&resolved.describe());
             Ok(())
         }
         Err(invalid) => Err(Error::Failed(invalid.to_string())),

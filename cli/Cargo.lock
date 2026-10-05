@@ -1354,12 +1354,14 @@ dependencies = [
 name = "inorbithr"
 version = "0.2.1"
 dependencies = [
+ "base64 0.22.1",
  "futures-core",
  "futures-util",
  "getrandom 0.4.3",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
+ "rustls-webpki",
  "serde",
  "serde_json",
  "thiserror",
@@ -1367,6 +1369,8 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "toml",
+ "tracing",
  "url",
  "zeroize",
 ]
