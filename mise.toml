@@ -10,24 +10,24 @@ cargo.binstall = true
 
 [tools]
 go = "1.27.1"
-rust = { version = "1.98.1", components = "rustfmt,clippy" }
-node = "24.21.0"
-pnpm = "12.8.2"
+rust = { version = "1.99.0", components = "rustfmt,clippy" }
+node = "26.10.0"
+pnpm = "12.9.1"
 python = "3.14"
-uv = "0.12.21"
+uv = "0.12.23"
 java = "temurin-17.0.20+8"
-maven = "3.9.16"
+maven = "3.10.0"
 # The .NET 10 LTS SDK builds the net8.0 library (ADR 0013); .NET 8 itself ends in 2026-11.
 dotnet = "10.0.401"
 
 golangci-lint = "2.14.0"
 "go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen" = "2.8.0"
 "go:golang.org/x/exp/cmd/gorelease" = "latest"
-"go:github.com/oasdiff/oasdiff" = "1.32.1"
+"go:github.com/oasdiff/oasdiff" = "1.33.0"
 # Cargo tools install as prebuilt binaries through cargo-binstall, not from source.
-cargo-binstall = "1.24.0"
+cargo-binstall = "1.25.1"
 "cargo:cargo-nextest" = "0.9.146"
-"cargo:cargo-semver-checks" = "0.50.0"
+"cargo:cargo-semver-checks" = "0.51.0"
 "cargo:cargo-hack" = "0.6.45"
 "cargo:cargo-fuzz" = "0.13.2"
 cargo-deny = "0.20.2"

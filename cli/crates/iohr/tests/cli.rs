@@ -2185,7 +2185,7 @@ fn sdk_config_describes_what_a_client_would_see() {
         &[("INORBIT_MAX_RETRIES", "two"), ("INORBIT_REGION", "eu")],
     );
     assert_eq!(code(&o), 1, "{}", text(&o));
-    assert!(o.stdout.is_empty());
+    assert_eq!(String::from_utf8_lossy(&o.stdout), "");
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(
         err.contains("configuration is invalid (2 problems)"),
