@@ -544,7 +544,8 @@ internal static class BuiltIns
         Activity? span = null;
         if (ctx.Tracing && Telemetry.Source.HasListeners())
         {
-            var parented = req.State.Traceparent is { } tp && ActivityContext.TryParse(tp, null, out var parent);
+            ActivityContext parent = default;
+            var parented = req.State.Traceparent is { } tp && ActivityContext.TryParse(tp, null, out parent);
             span = parented
                 ? Telemetry.Source.StartActivity(req.Info.Operation, ActivityKind.Internal, parent)
                 : Telemetry.Source.StartActivity(req.Info.Operation, ActivityKind.Internal);
