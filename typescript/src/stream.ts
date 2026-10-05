@@ -138,6 +138,10 @@ export interface SocketConfig {
   invalidate(): Promise<void>;
   /** Reconnects after a failure, at most this many in a row. */
   readonly maxRetries: number;
+  /** Headers each upgrade sends besides the token: the request id and the user agent. */
+  headers?(): Record<string, string>;
+  /** Asks the retry budget for a reconnect; `false` gives up. */
+  reconnect?(): boolean;
 }
 
 type WsLike = {
@@ -319,7 +323,7 @@ export class SocketHub {
           await this.#config.invalidate();
           continue;
         }
-        if (attempt >= this.#config.maxRetries) {
+        if (attempt >= this.#config.maxRetries || this.#config.reconnect?.() === false) {
           throw e;
         }
         await sleep(backoffMs(attempt));
@@ -337,7 +341,9 @@ export class SocketHub {
     return new Promise((resolve, reject) => {
       let ws: WsLike;
       try {
-        ws = new Ws(this.#config.url, { headers: { authorization: `Bearer ${token}` } });
+        ws = new Ws(this.#config.url, {
+          headers: { ...this.#config.headers?.(), authorization: `Bearer ${token}` },
+        });
       } catch (e) {
         reject(new ConnectionError(this.#config.host, String(e), { cause: e }));
         return;
@@ -430,7 +436,7 @@ export class SocketHub {
     if (pending.length === 0) {
       return;
     }
-    if (this.#retries > this.#config.maxRetries) {
+    if (this.#retries > this.#config.maxRetries || this.#config.reconnect?.() === false) {
       const error = new ConnectionError(this.#config.host, "the socket closed and did not reopen");
       for (const call of pending) {
         call.fail(error);

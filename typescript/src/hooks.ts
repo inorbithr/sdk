@@ -12,9 +12,13 @@ export interface Attempt {
   readonly number: number;
   /** The `x-request-id` sent. */
   readonly requestId: string;
+  /** The `Idempotency-Key` sent, on an operation that takes one. */
+  readonly idempotencyKey?: string | undefined;
+  /** The pipeline stage the hooks ran in (`per_retry` from the built-in `hooks`). */
+  readonly stage?: "per_call" | "per_retry";
 }
 
-/** Observes calls: logging, metrics, tracing. Every method is optional. */
+/** Observes calls: logging, metrics, tracing. Every method is optional. A hook that must change a request is a middleware. */
 export interface Hook {
   /** Before an attempt is sent. */
   onRequest?(attempt: Attempt): void;
@@ -22,4 +26,6 @@ export interface Hook {
   onResponse?(attempt: Attempt, response: RawResponse): void;
   /** When the call fails for good. */
   onError?(attempt: Attempt, error: InOrbitError): void;
+  /** Before the wait of each retry: why (`503`, `connection`, `timeout`) and how long, in milliseconds. */
+  onRetry?(attempt: Attempt, reason: string, delay: number): void;
 }
