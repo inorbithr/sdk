@@ -25,12 +25,21 @@ pub enum Error {
         /// What went wrong, from the HTTP stack, without the URL.
         reason: String,
     },
-    /// No answer within the per-attempt timeout.
+    /// No answer within the per-attempt timeout, or the call's total timeout passed.
     #[error("{host} did not answer within {secs} s")]
     Timeout {
         /// The host that was called.
         host: String,
         /// The timeout in seconds.
+        secs: u64,
+    },
+    /// In `rate_limit = "wait"` mode, the rate-limit window resets after the call's
+    /// total timeout, so the call ends instead of waiting (`docs/config.md` section 7.8).
+    #[error("{host}: waiting for the rate-limit window to reset would pass the call's total timeout of {secs} s")]
+    RateLimitWait {
+        /// The host that was called.
+        host: String,
+        /// The total timeout in seconds.
         secs: u64,
     },
     /// The token exchange failed.
@@ -98,6 +107,14 @@ pub struct RawResponse {
     pub server_request_id: Option<String>,
     /// How many attempts the call took.
     pub attempts: u32,
+    /// The idempotency key the call sent, when its operation takes one
+    /// (`docs/config.md` section 7.5).
+    pub idempotency_key: Option<String>,
+    /// Whether the API answered a repeat of an earlier call with the same key
+    /// (`Idempotency-Replayed: true`).
+    pub idempotency_replayed: bool,
+    /// The rate-limit snapshot the answer's headers carried (`docs/config.md` section 7.8).
+    pub rate_limit: Option<crate::ratelimit::RateLimit>,
 }
 
 /// `Debug` shows the body's size, not the body: an answer may hold data a log must not
@@ -126,6 +143,9 @@ impl RawResponse {
             request_id: String::new(),
             server_request_id: None,
             attempts: 1,
+            idempotency_key: None,
+            idempotency_replayed: false,
+            rate_limit: None,
         }
     }
 
@@ -138,6 +158,9 @@ impl RawResponse {
             request_id,
             server_request_id: None,
             attempts: 1,
+            idempotency_key: None,
+            idempotency_replayed: false,
+            rate_limit: None,
         }
     }
 
@@ -187,6 +210,29 @@ impl Headers {
     /// Every header, in the order received.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.0.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+
+    /// Sets `name` to `value`, replacing every value it had.
+    pub fn insert(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        let name = name.into().to_ascii_lowercase();
+        self.0.retain(|(k, _)| *k != name);
+        self.0.push((name, value.into()));
+    }
+
+    /// Adds a value for `name`, keeping the ones it had.
+    pub fn append(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.0.push((name.into().to_ascii_lowercase(), value.into()));
+    }
+
+    /// Removes every value of `name`.
+    pub fn remove(&mut self, name: &str) {
+        self.0.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
+    }
+
+    /// Whether `name` is present.
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
+        self.get(name).is_some()
     }
 }
 
@@ -526,6 +572,30 @@ pub enum AuthError {
     /// A caller's token provider failed.
     #[error("the token provider failed: {0}")]
     Provider(String),
+    /// The API refused a token that cannot be refreshed: a static token
+    /// (`INORBIT_TOKEN`), or a token file that has not changed.
+    #[error("the API refused the {what}; {remedy}")]
+    Refused {
+        /// What was refused (`token from INORBIT_TOKEN`, `token in /run/secrets/t`).
+        what: String,
+        /// How to get a new one.
+        remedy: String,
+    },
+    /// A credential file (`token_file`, `key_secret_file`) could not be read.
+    #[error("cannot read the credential file {path}: {reason}")]
+    File {
+        /// The file.
+        path: String,
+        /// Why.
+        reason: String,
+    },
+    /// The `iohr` command line could not produce a token (`iohr auth token`).
+    #[error("iohr auth token failed: {message}")]
+    Cli {
+        /// The first line `iohr` wrote to standard error (at most 200 characters), or
+        /// what went wrong running it.
+        message: String,
+    },
 }
 
 fn description_suffix(description: &str) -> String {
@@ -565,6 +635,34 @@ pub enum ConfigError {
     /// The HTTP stack could not start.
     #[error("cannot start the HTTP client: {0}")]
     Http(String),
+    /// The configuration `load` (or a setting given in code) resolved to is invalid:
+    /// every problem found, in catalogue order (`docs/config.md` section 2.5).
+    #[error("{}", crate::config::ProblemsText(.problems))]
+    Invalid {
+        /// The problems: setting, source and message each.
+        problems: Vec<Problem>,
+    },
+    /// The pipeline was edited in a way that cannot work (`docs/config.md` section 7.3).
+    #[error("the pipeline: {0}")]
+    Pipeline(String),
+    /// An option given with one call cannot be used for it (an idempotency key on an
+    /// operation that takes none, `docs/config.md` section 7.5).
+    #[error("{0}")]
+    Call(String),
+}
+
+/// One problem with a configuration: the setting, where its value came from, and what
+/// to do. A message never holds a secret's value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Problem {
+    /// The setting (`timeout`), or `credential` when no source has credentials.
+    pub setting: String,
+    /// Where the value came from: `code`, `env INORBIT_TIMEOUT`, `file <path> [sdk]`,
+    /// `default`, or empty for `credential`.
+    pub source: String,
+    /// What is wrong and what to do.
+    pub message: String,
 }
 
 fn gateway_message(status: u16) -> &'static str {
@@ -597,6 +695,9 @@ mod tests {
             request_id: "iohr-1".into(),
             server_request_id: Some("r1".into()),
             attempts: 1,
+            idempotency_key: None,
+            idempotency_replayed: false,
+            rate_limit: None,
         }
     }
 
