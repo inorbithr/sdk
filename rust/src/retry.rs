@@ -24,7 +24,7 @@ pub(crate) fn retry_after(headers: &Headers) -> Option<Duration> {
     if let Ok(secs) = v.parse::<u64>() {
         return Some(Duration::from_secs(secs));
     }
-    let format = time::format_description::parse(
+    let format = time::format_description::parse_borrowed::<2>(
         "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT",
     )
     .ok()?;
@@ -68,7 +68,7 @@ mod tests {
         let h = Headers::new([("retry-after".to_owned(), "3".to_owned())]);
         assert_eq!(retry_after(&h), Some(Duration::from_secs(3)));
         let h = Headers::new([("retry-after".to_owned(), "900".to_owned())]);
-        assert_eq!(retry_after(&h), Some(Duration::from_secs(900)));
+        assert_eq!(retry_after(&h), Some(Duration::from_mins(15)));
         let h = Headers::new([("retry-after".to_owned(), "Wed, 21 Oct".to_owned())]);
         assert_eq!(retry_after(&h), None);
         let past = Headers::new([(

@@ -617,7 +617,22 @@ impl TokenFile {
 }
 
 impl TokenProvider for TokenFile {
-    async fn token(&self) -> Result<Token, AuthError> {
+    fn token(&self) -> impl Future<Output = Result<Token, AuthError>> + Send {
+        std::future::ready(self.current())
+    }
+
+    fn invalidate(&self) -> impl Future<Output = ()> + Send {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stale = true;
+        std::future::ready(())
+    }
+}
+
+impl TokenFile {
+    /// The token: read, or re-read when due.
+    fn current(&self) -> Result<Token, AuthError> {
         let mut s = self
             .state
             .lock()
@@ -643,12 +658,6 @@ impl TokenProvider for TokenFile {
         Ok(c.token(Instant::now()))
     }
 
-    async fn invalidate(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .stale = true;
-    }
 }
 
 /// The developer's `iohr` login: a token from `iohr auth token --profile <name>

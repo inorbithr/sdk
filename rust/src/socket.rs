@@ -26,8 +26,6 @@ use crate::middleware::{Body, Engine};
 use crate::retry::{BACKOFF_BASE, BACKOFF_CAP, backoff};
 use crate::stream::{EventStream, Guard, Item, QUEUE, envelope_error};
 
-/// The socket's path.
-const PATH: &str = "/v1/ws";
 /// The largest frame the client sends, as the platform's `x-iohr-limits`.
 const MAX_SEND: usize = 256 * 1024;
 

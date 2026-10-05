@@ -40,6 +40,7 @@ use crate::secret::Secret;
 /// # let _ = options;
 /// ```
 #[derive(Clone, Default)]
+#[allow(clippy::option_option, reason = "unset (the process's), or set to no home directory")]
 pub struct LoadOptions {
     env: Option<BTreeMap<String, String>>,
     os: Option<Os>,
@@ -120,9 +121,7 @@ impl LoadOptions {
 
     pub(crate) fn cwd_dir(&self) -> String {
         self.cwd.clone().unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| ".".to_owned())
+            std::env::current_dir().map_or_else(|_| ".".to_owned(), |p| p.to_string_lossy().into_owned())
         })
     }
 }
@@ -166,12 +165,6 @@ impl ResolvedConfig {
 
     pub(crate) fn set_pipeline(&mut self, names: Vec<String>) {
         self.describe["pipeline"] = Value::from(names);
-    }
-
-    pub(crate) fn push_ignored(&mut self, entry: Value) {
-        if let Some(a) = self.describe["ignored"].as_array_mut() {
-            a.push(entry);
-        }
     }
 
     /// The settings table of the description.
@@ -320,6 +313,8 @@ pub fn proxy_for(
 
 /// The typed settings a client runs with, from the description and the secrets.
 #[derive(Clone)]
+#[allow(clippy::struct_excessive_bools, reason = "the catalogue's booleans")]
+#[cfg_attr(not(feature = "rustls"), allow(dead_code))]
 pub(crate) struct Settings {
     pub(crate) base_url: String,
     pub(crate) token_url: String,
@@ -352,6 +347,7 @@ pub(crate) struct Settings {
 impl Settings {
     /// Default trust and no client certificate: the TLS of a socket next to a caller's
     /// own HTTP client.
+    #[cfg(feature = "rustls")]
     pub(crate) fn plain_tls() -> Self {
         let empty = ResolvedConfig::new(serde_json::json!({ "settings": {} }));
         let mut s = Self::from_resolved(&empty, &BTreeMap::new()).unwrap_or_else(|_| unreachable!());

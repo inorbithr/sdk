@@ -32,7 +32,9 @@ pub(crate) struct Shared {
     pub(crate) retry_max_delay: Duration,
     pub(crate) retry_after_max: Duration,
     pub(crate) rate_limit: RateLimitMode,
+    #[cfg_attr(not(feature = "otel"), allow(dead_code))]
     pub(crate) tracing: bool,
+    #[cfg_attr(not(feature = "otel"), allow(dead_code))]
     pub(crate) metrics: bool,
     #[cfg(feature = "otel")]
     pub(crate) otel: Option<crate::otel::Otel>,
@@ -98,10 +100,10 @@ pub(crate) fn raw_view(req: &Request, resp: &Response) -> RawResponse {
         req.info.request_id.clone().unwrap_or_default(),
     );
     raw.server_request_id = resp.headers.get("x-request-id").map(str::to_owned);
-    raw.headers = resp.headers.clone();
+    raw.headers.clone_from(&resp.headers);
     raw.attempts = req.info.attempt;
-    raw.idempotency_key = req.info.idempotency_key.clone();
-    raw.rate_limit = resp.rate_limit.clone();
+    raw.idempotency_key.clone_from(&req.info.idempotency_key);
+    raw.rate_limit.clone_from(&resp.rate_limit);
     raw
 }
 
@@ -168,7 +170,11 @@ pub(crate) fn uuid_v4() -> String {
     let _ = getrandom::fill(&mut b);
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let h: String = b.iter().fold(String::new(), |mut h, x| {
+        use std::fmt::Write as _;
+        let _ = write!(h, "{x:02x}");
+        h
+    });
     format!(
         "{}-{}-{}-{}-{}",
         &h[..8],
@@ -212,6 +218,7 @@ impl Middleware for IdempotencyKeyMw {
 
 // 4. call_tracing
 
+#[cfg_attr(not(feature = "otel"), allow(dead_code))]
 pub(crate) struct CallTracingMw(pub(crate) Arc<Shared>);
 
 impl Middleware for CallTracingMw {
@@ -505,6 +512,7 @@ impl Middleware for RateLimitMw {
 
 // 9. attempt_tracing
 
+#[cfg_attr(not(feature = "otel"), allow(dead_code))]
 pub(crate) struct AttemptTracingMw(pub(crate) Arc<Shared>);
 
 impl Middleware for AttemptTracingMw {
@@ -617,12 +625,16 @@ impl Middleware for HooksMw {
         Box::pin(async move {
             let hooks = &self.0.hooks;
             let attempt = attempt_of(&req);
-            hooks.iter().for_each(|h| h.on_request(&attempt));
+            for h in hooks {
+                h.on_request(&attempt);
+            }
             let view = req.clone();
             let result = next.run(req).await;
             if let Ok(resp) = &result {
                 let raw = raw_view(&view, resp);
-                hooks.iter().for_each(|h| h.on_response(&attempt, &raw));
+                for h in hooks {
+                    h.on_response(&attempt, &raw);
+                }
             }
             result
         })

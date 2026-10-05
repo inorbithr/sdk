@@ -3,6 +3,7 @@
 //! store plus `ca_bundle`, or the bundle alone), a client certificate and pinned keys;
 //! and the `/v1/ws` upgrade over the same proxy and TLS settings.
 
+#[cfg(feature = "rustls")]
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use crate::auth::transport_reason;
 use crate::config::{ProxyRules, Settings};
 use crate::error::{ConfigError, Error, Headers, MAX_BODY};
 use crate::middleware::{Body, Request, Response};
-use crate::socket::{Io, Ws};
+use crate::socket::Io;
 
 /// Sends requests: the innermost step of every pipeline.
 pub(crate) struct Transport {
@@ -40,9 +41,10 @@ impl Transport {
         } else {
             tls::config(settings)?
         });
-        let (http, is_caller) = match caller {
-            Some(c) => (c, true),
-            None => {
+        let (http, is_caller) = if let Some(c) = caller {
+            (c, true)
+        } else {
+            {
                 let mut b = reqwest::Client::builder()
                     .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(settings.connect_timeout)
@@ -185,9 +187,10 @@ impl Transport {
             }
         }
         let connect = async {
-            let io: Box<dyn Io> = match self.proxy.proxy_for(&url) {
-                Some(proxy) => self.tunnel(&proxy, &host, port).await?,
-                None => {
+            let io: Box<dyn Io> = if let Some(proxy) = self.proxy.proxy_for(&url) {
+                self.tunnel(&proxy, &host, port).await?
+            } else {
+                {
                     let tcp = tokio::net::TcpStream::connect((bare.as_str(), port))
                         .await
                         .map_err(|e| failed(e.to_string()))?;
@@ -233,6 +236,7 @@ impl Transport {
     /// `Proxy-Authorization` from the proxy URL's user-info.
     async fn tunnel(&self, proxy: &Url, host: &str, port: u16) -> Result<Box<dyn Io>, Error> {
         use base64::Engine as _;
+        use std::fmt::Write as _;
         let ph = proxy
             .host_str()
             .unwrap_or_default()
@@ -261,7 +265,7 @@ impl Transport {
                 decode(proxy.password().unwrap_or_default())
             );
             let encoded = base64::engine::general_purpose::STANDARD.encode(pair.as_bytes());
-            head.push_str(&format!("Proxy-Authorization: Basic {encoded}\r\n"));
+            let _ = write!(head, "Proxy-Authorization: Basic {encoded}\r\n");
         }
         head.push_str("\r\n");
         io.write_all(head.as_bytes())
@@ -307,9 +311,15 @@ impl Transport {
     }
 
     #[cfg(not(feature = "rustls"))]
-    #[allow(clippy::unused_async, reason = "the same signature as with rustls")]
-    async fn tls_over(&self, _host: &str, _io: Box<dyn Io>) -> Result<Box<dyn Io>, Error> {
-        Err(ConfigError::Http("TLS needs the `rustls` feature".into()).into())
+    #[allow(clippy::unused_self, reason = "the same signature as with rustls")]
+    fn tls_over(
+        &self,
+        _host: &str,
+        _io: Box<dyn Io>,
+    ) -> impl std::future::Future<Output = Result<Box<dyn Io>, Error>> + Send {
+        std::future::ready(Err(
+            ConfigError::Http("TLS needs the `rustls` feature".into()).into()
+        ))
     }
 }
 
@@ -319,7 +329,7 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%'
-            && i + 2 < b.len() + 0
+            && i + 2 < b.len()
             && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
         {
             out.push(v);
@@ -563,7 +573,7 @@ mod tls {
             let cert = webpki::EndEntityCert::try_from(end_entity)
                 .map_err(|e| rustls::Error::General(e.to_string()))?;
             let hash = sha256(cert.subject_public_key_info().as_ref());
-            if self.pins.iter().any(|p| *p == hash) {
+            if self.pins.contains(&hash) {
                 Ok(ok)
             } else {
                 Err(rustls::Error::General(

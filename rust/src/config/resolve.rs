@@ -130,7 +130,7 @@ pub(crate) struct Inputs<'a> {
     pub(crate) read: &'a dyn Fn(&str) -> Option<Vec<u8>>,
 }
 
-pub use crate::error::Problem;
+use crate::error::Problem;
 
 /// `load` would fail: every problem, in catalogue order.
 #[derive(Debug)]

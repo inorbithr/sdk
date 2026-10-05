@@ -198,10 +198,12 @@ impl CallState {
 
 /// What a middleware may know about the call a request belongs to. Read only.
 #[derive(Clone)]
+#[allow(clippy::struct_excessive_bools, reason = "what the call is, flag by flag")]
 pub struct CallInfo {
     pub(crate) operation: &'static str,
     pub(crate) method: Method,
     pub(crate) path: String,
+    #[cfg_attr(not(feature = "otel"), allow(dead_code))]
     pub(crate) template: Option<&'static str>,
     pub(crate) idempotent: bool,
     pub(crate) takes_key: bool,
@@ -445,6 +447,7 @@ impl fmt::Debug for Next<'_> {
 
 impl<'a> Next<'a> {
     /// Sends `req` through the rest of the pipeline and the transport.
+    #[must_use = "the future does nothing until awaited"]
     pub fn run(self, req: Request) -> BoxFuture<'a, Result<Response, Error>> {
         match self.rest.split_first() {
             Some((first, rest)) => first.mw.handle(
@@ -598,6 +601,7 @@ impl Pipeline {
         self
     }
 
+    #[must_use]
     pub(crate) fn has(&self, name: &str) -> bool {
         self.find(name).is_some()
     }

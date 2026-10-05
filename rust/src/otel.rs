@@ -79,6 +79,7 @@ impl Otel {
         result
     }
 
+    #[allow(clippy::too_many_lines, reason = "the conventions' attributes, one by one")]
     /// `attempt_tracing`: one `CLIENT` span per attempt, a child of the call's, whose
     /// context goes out as `traceparent`; and the attempt's duration.
     pub(crate) async fn attempt(
