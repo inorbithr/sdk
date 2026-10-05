@@ -119,9 +119,12 @@ internal sealed class ClientContext
 
     internal bool Metrics { get; init; }
 
-    /// <summary>The latest rate-limit snapshot, and when its window resets.</summary>
-    internal (RateLimit Snapshot, DateTimeOffset? ResetAt)? Latest { get; set; }
+    /// <summary>The latest rate-limit snapshot, and when its window resets; one reference, so concurrent calls never see half of it.</summary>
+    internal RateLimitWindow? Latest { get; set; }
 }
+
+/// <summary>A rate-limit snapshot and when its window resets.</summary>
+internal sealed record RateLimitWindow(RateLimit Snapshot, DateTimeOffset? ResetAt);
 
 /// <summary>The built-in middlewares of docs/config.md section 7.2 and the transport after them.</summary>
 internal static class BuiltIns
@@ -526,7 +529,7 @@ internal static class BuiltIns
             return resp;
         }
 
-        ctx.Latest = (snapshot, snapshot.Reset is { } r ? DateTimeOffset.UtcNow + r : null);
+        ctx.Latest = new RateLimitWindow(snapshot, snapshot.Reset is { } r ? DateTimeOffset.UtcNow + r : null);
         return resp with { RateLimit = snapshot };
     }
 
