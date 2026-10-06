@@ -6,13 +6,15 @@ Maven Central (`hr.inorbit`, namespace verified) is planned and has not happened
 Until then, build it from this repository (`mise run java:check`, or `mvn -f java install`
 to put it in your local Maven repository) and depend on it as it will be published:
 
+<!-- x-release-please-start-version -->
 ```xml
 <dependency>
   <groupId>hr.inorbit</groupId>
   <artifactId>inorbit-sdk</artifactId>
-  <version>0.2.0</version>
+  <version>0.2.2</version>
 </dependency>
 ```
+<!-- x-release-please-end -->
 
 ## First call
 
