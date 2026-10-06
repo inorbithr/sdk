@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/inorbithr/sdk/compare/go/v0.2.2...go/v0.2.3) (2026-10-06)
+
+
+### Documentation
+
+* bring every README to what is released and on main ([#155](https://github.com/inorbithr/sdk/issues/155)) ([637daeb](https://github.com/inorbithr/sdk/commit/637daeb6a1b40d014773b227e218502b17a40806))
+
 ## [0.2.2](https://github.com/inorbithr/sdk/compare/go/v0.2.1...go/v0.2.2) (2026-10-05)
 
 
