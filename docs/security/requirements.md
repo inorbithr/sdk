@@ -231,6 +231,32 @@ exactly a lock's entries and refuses another digest, version or signer. Only
 - Verify: integration tests for install with `--lock`, sync and a signer mismatch.
 - Refs: SSDF PS.3; CRA I.2(c).
 
+**SR-32. Privileges are shown and confirmed before install.** An extension's manifest
+may name the Linux capabilities its system service holds (`privileges`, platform RFC
+0061): at most 16, each one the kernel defines, none twice; absent means none. `iohr`
+grants none of them, since it runs as the person; the service gets them from its own
+package or unit. `iohr ext install` shows each privilege in plain words and installs a
+privileged extension only after the person types `yes` at a terminal or passes `--yes`;
+without a terminal and without `--yes` it refuses and installs nothing. `iohr ext
+upgrade` names privileges the new release adds and asks again under the same rules.
+`iohr-ext.lock` records the confirmed privileges (format version 2 once an entry has
+any, so an `iohr` from before this requirement refuses the file instead of ignoring
+them); `iohr ext sync` refuses an artifact that declares a privilege its lock entry
+does not record, and treats the privileges a lock records as confirmed by whoever
+committed it. `iohr <name>` and `iohr ext verify` refuse an installed version whose
+privileges the machine's lock does not record. `iohr ext list` and `verify` show them,
+and `--json` includes them.
+- Why: an extension that controls a privileged service (eBPF capture holds `CAP_BPF`,
+  `CAP_PERFMON`, `CAP_NET_ADMIN`) changes what the machine exposes; a person and a
+  security team must see that before it is installed, and a pipeline must not take on a
+  new privilege silently.
+- Verify: unit tests for the manifest rules, the lock format and the confirmation
+  (typed `yes`, any other answer, `--yes`, no terminal); integration tests for the
+  refusal without `--yes`, the JSON output of install, list and verify, an upgrade that
+  adds a privilege, a sync whose artifact declares more than its lock, and a run whose
+  privileges were never confirmed.
+- Refs: CRA I.2(d), I.2(j); least privilege.
+
 **SR-31. `iohr sdk add` runs the project's package manager and nothing else.** It
 chooses the manager from the project's own files (a lock file, `packageManager`, an
 active virtualenv), prints the exact command, and runs that one program with an argument

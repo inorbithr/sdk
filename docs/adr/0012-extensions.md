@@ -75,6 +75,12 @@ What a bank or a regulated company asks of such a mechanism:
 7. **Install shows the scopes** an extension may ask for, and `upgrade` names any new
    ones, the way a phone shows an app's permissions. Only InOrbit publishes extensions
    for now (RFC 0028).
+8. **Privileges (amended 2026-10-06, platform RFC 0061, SR-32).** The config may carry
+   `privileges`, the Linux capabilities the extension's system service holds (known
+   kernel names, at most 16, none twice; absent means none). `iohr` grants none of them.
+   Install shows them in plain words and needs a typed `yes` or `--yes`; `upgrade` asks
+   again for added ones; the lock records them (format version 2 when any entry has
+   them) and `sync` refuses an artifact that declares more than its entry.
 
 ## Consequences
 

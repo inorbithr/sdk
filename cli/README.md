@@ -81,7 +81,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
-| `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install, verify and pin them; `iohr <name> ...` runs one |
+| `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install, verify and pin them; one that declares privileges for its system service asks first unless `--yes`; `iohr <name> ...` runs one |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter, status logs, redaction on public documents; offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
@@ -272,6 +272,26 @@ and the API scopes it may ask for. What is installed is pinned in `iohr-ext.lock
 installs exactly that elsewhere. Nothing updates by itself: `iohr ext upgrade` does,
 when you run it.
 
+An extension that controls a system service, such as eBPF traffic capture, declares
+the Linux capabilities that service holds in its manifest (`privileges`). `iohr` grants
+none of them: it runs as you, and the service gets them from its own package or unit.
+Install shows each one in plain words and asks you to type `yes`; in a pipeline, pass
+`--yes`, and without a terminal and without `--yes` nothing is installed:
+
+```text
+capture 0.1.0 declares privileges: its system service holds these Linux capabilities.
+  CAP_BPF        load eBPF programs into the kernel
+  CAP_PERFMON    observe performance and kernel state (perf events, tracing)
+  CAP_NET_ADMIN  configure the network: interfaces, routes, firewall, traffic control
+iohr runs as you and grants none of them; the service gets them from its own package or unit.
+Type yes to confirm these privileges and install it:
+```
+
+`iohr ext upgrade` names privileges a new release adds and asks again. `iohr ext list`
+and `verify` show them (`--json` too), and `iohr-ext.lock` records what was confirmed:
+`iohr ext sync` refuses an extension whose privileges grew beyond its lock entry
+(SR-32).
+
 A running extension never sees your refresh token or the credential store. It asks
 `iohr` for an access token over a private socket (`IOHR_EXT_TOKEN_SOCKET`, mode 0600),
 only for scopes its manifest declares; `IOHR_EXT_API` is the API's address. Until the
@@ -304,7 +324,7 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
   check. `iohr sdk add` runs your project's package manager, which reaches its own
   registry (SR-31).
 
-The rules are SR-10 to SR-31 in [docs/security/requirements.md](../docs/security/requirements.md);
+The rules are SR-10 to SR-32 in [docs/security/requirements.md](../docs/security/requirements.md);
 the layout is [ADR 0009](../docs/adr/0009-the-command-line.md).
 
 ## Dependencies

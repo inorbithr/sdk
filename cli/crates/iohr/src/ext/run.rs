@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::OnceCell;
 
-use super::install::{Store, check_program};
+use super::install::{Store, check_confirmed, check_program};
 use super::socket::{Ctx, MintError, Minted, Minter, handle};
 use crate::Env;
 use crate::cli::Global;
@@ -67,7 +67,7 @@ pub(crate) async fn run(
     name: &str,
     args: &[OsString],
 ) -> Result<u8, Error> {
-    let Some((_, record, dir)) = store
+    let Some((entry, record, dir)) = store
         .installed(name)
         .map_err(|e| Error::Failed(e.to_string()))?
     else {
@@ -77,6 +77,7 @@ pub(crate) async fn run(
         )));
     };
     let program = check_program(&record, &dir).map_err(|e| Error::Failed(e.to_string()))?;
+    check_confirmed(&entry, &record).map_err(|e| Error::Failed(e.to_string()))?;
     let base = api_origin(&global.base_url)?;
     let ctx = Arc::new(Ctx {
         minter: ProfileMinter {
