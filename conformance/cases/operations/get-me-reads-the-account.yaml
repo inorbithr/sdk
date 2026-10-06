@@ -16,7 +16,7 @@ exchanges:
         email_verified: true
         stub: false
         teams: []
-        account: { id: acc_1, kind: personal, slug: ana, name: Ana, plan: free, status: active, role: owner, created_at: "2026-10-01T00:00:00Z", erase_after: "" }
+        account: { id: acc_1, kind: personal, slug: ana, name: Ana, plan: free, status: active, role: owner, created_at: "2026-10-01T00:00:00Z", erase_after: "", probe: false }
 expect:
   ok: { email: ana@example.com, account: { plan: free } }
   attempts: 1

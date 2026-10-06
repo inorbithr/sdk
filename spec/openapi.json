@@ -22,6 +22,9 @@
           "plan": {
             "type": "string"
           },
+          "probe": {
+            "type": "boolean"
+          },
           "role": {
             "type": "string"
           },
@@ -41,7 +44,8 @@
           "status",
           "role",
           "created_at",
-          "erase_after"
+          "erase_after",
+          "probe"
         ],
         "type": "object"
       },
@@ -149,6 +153,39 @@
         ],
         "type": "object"
       },
+      "AddCommentRequest": {
+        "description": "`iohr.rfcs.v1.AddCommentRequest`",
+        "properties": {
+          "anchor": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Quote"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AddCommentResponse": {
+        "description": "`iohr.rfcs.v1.AddCommentResponse`",
+        "properties": {
+          "comment": {
+            "$ref": "#/components/schemas/Comment"
+          }
+        },
+        "type": "object"
+      },
       "AddDomainRequest": {
         "description": "`iohr.accounts.v1.AddDomainRequest`",
         "properties": {
@@ -181,6 +218,12 @@
           },
           "arch": {
             "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "checks": {
             "$ref": "#/components/schemas/AgentChecks"
@@ -243,7 +286,8 @@
           "policy_hash",
           "enrolled_at",
           "last_seen_at",
-          "revoked_at"
+          "revoked_at",
+          "capabilities"
         ],
         "type": "object"
       },
@@ -272,6 +316,51 @@
           "accepted",
           "rejected",
           "reconciled_at"
+        ],
+        "type": "object"
+      },
+      "AuthMode": {
+        "description": "`iohr.connections.v1.AuthMode`",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectorField"
+            },
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "needs_app": {
+            "type": "boolean"
+          },
+          "optional_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "refresh": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "label",
+          "fields",
+          "scopes",
+          "optional_scopes",
+          "needs_app",
+          "refresh"
         ],
         "type": "object"
       },
@@ -407,6 +496,12 @@
           "error_class": {
             "type": "string"
           },
+          "invariants": {
+            "items": {
+              "$ref": "#/components/schemas/Invariant"
+            },
+            "type": "array"
+          },
           "latency_ms": {
             "format": "int32",
             "type": "integer"
@@ -427,7 +522,8 @@
           "latency_ms",
           "status_code",
           "error_class",
-          "tls_expires_at"
+          "tls_expires_at",
+          "invariants"
         ],
         "type": "object"
       },
@@ -462,6 +558,60 @@
         "required": [
           "status",
           "resolvers"
+        ],
+        "type": "object"
+      },
+      "ClientSetup": {
+        "description": "`iohr.connections.v1.ClientSetup`",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "mcp_url": {
+            "type": "string"
+          },
+          "snippets": {
+            "items": {
+              "$ref": "#/components/schemas/ClientSnippet"
+            },
+            "type": "array"
+          },
+          "suggested_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mcp_url",
+          "description",
+          "suggested_scopes",
+          "snippets"
+        ],
+        "type": "object"
+      },
+      "ClientSnippet": {
+        "description": "`iohr.connections.v1.ClientSnippet`",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "path",
+          "language",
+          "text"
         ],
         "type": "object"
       },
@@ -509,6 +659,92 @@
           "unsupported_media_type": 415
         }
       },
+      "Comment": {
+        "description": "`iohr.rfcs.v1.Comment`",
+        "properties": {
+          "anchor": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "comment_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Quote"
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "resolved_at": {
+            "type": "string"
+          },
+          "resolved_by": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "comment_id",
+          "document_id",
+          "version",
+          "anchor",
+          "parent_id",
+          "author",
+          "body",
+          "resolved",
+          "resolved_by",
+          "resolved_at",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CompleteConnectRequest": {
+        "description": "`iohr.connections.v1.CompleteConnectRequest`",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CompleteConnectResponse": {
+        "description": "`iohr.connections.v1.CompleteConnectResponse`",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          }
+        },
+        "type": "object"
+      },
       "ConfirmDomainRequest": {
         "description": "`iohr.accounts.v1.ConfirmDomainRequest`",
         "properties": {
@@ -536,11 +772,17 @@
           "account_id": {
             "type": "string"
           },
+          "auth_mode": {
+            "type": "string"
+          },
           "config": {
             "additionalProperties": {
               "type": "string"
             },
             "type": "object"
+          },
+          "connector": {
+            "type": "string"
           },
           "created_at": {
             "type": "string"
@@ -554,6 +796,9 @@
           "executor": {
             "$ref": "#/components/schemas/Executor"
           },
+          "external_id": {
+            "type": "string"
+          },
           "grants": {
             "format": "int32",
             "type": "integer"
@@ -562,6 +807,9 @@
             "type": "string"
           },
           "kind": {
+            "type": "string"
+          },
+          "label": {
             "type": "string"
           },
           "last_test_at": {
@@ -576,14 +824,32 @@
           "name": {
             "type": "string"
           },
+          "owner": {
+            "type": "string"
+          },
           "receive_url": {
             "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "status": {
             "type": "string"
           },
+          "token_expires_at": {
+            "type": "string"
+          },
           "updated_at": {
             "type": "string"
+          },
+          "used_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -600,7 +866,207 @@
           "receive_url",
           "grants",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "connector",
+          "auth_mode",
+          "label",
+          "used_by",
+          "owner",
+          "scopes",
+          "token_expires_at",
+          "external_id"
+        ],
+        "type": "object"
+      },
+      "Connector": {
+        "description": "`iohr.connections.v1.Connector`",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectorAction"
+            },
+            "type": "array"
+          },
+          "ai": {
+            "type": "boolean"
+          },
+          "auth_modes": {
+            "items": {
+              "$ref": "#/components/schemas/AuthMode"
+            },
+            "type": "array"
+          },
+          "category": {
+            "type": "string"
+          },
+          "config_fields": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectorField"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "docs": {
+            "type": "string"
+          },
+          "hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "redirect_url": {
+            "type": "string"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/ClientSetup"
+          },
+          "status": {
+            "type": "string"
+          },
+          "triggers": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectorTrigger"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category",
+          "description",
+          "docs",
+          "icon",
+          "auth_modes",
+          "config_fields",
+          "actions",
+          "triggers",
+          "status",
+          "hosts",
+          "kind",
+          "ai",
+          "redirect_url"
+        ],
+        "type": "object"
+      },
+      "ConnectorAction": {
+        "description": "`iohr.connections.v1.ConnectorAction`",
+        "properties": {
+          "auth_modes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "class": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectorField"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "class",
+          "params",
+          "model",
+          "auth_modes"
+        ],
+        "type": "object"
+      },
+      "ConnectorField": {
+        "description": "`iohr.connections.v1.ConnectorField`",
+        "properties": {
+          "after_consent": {
+            "type": "boolean"
+          },
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {
+            "type": "string"
+          },
+          "help": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "max": {
+            "format": "int64",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "secret",
+          "help",
+          "required",
+          "choices",
+          "default",
+          "type",
+          "max",
+          "after_consent"
+        ],
+        "type": "object"
+      },
+      "ConnectorTrigger": {
+        "description": "`iohr.connections.v1.ConnectorTrigger`",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title"
         ],
         "type": "object"
       },
@@ -619,7 +1085,16 @@
       "CreateConnectionRequest": {
         "description": "`iohr.connections.v1.CreateConnectionRequest`",
         "properties": {
+          "auth_mode": {
+            "type": "string"
+          },
           "config": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "credentials": {
             "additionalProperties": {
               "type": "string"
             },
@@ -661,6 +1136,86 @@
         },
         "required": [
           "webhook_secret"
+        ],
+        "type": "object"
+      },
+      "CreateDiagramRequest": {
+        "description": "`iohr.rfcs.v1.CreateDiagramRequest`",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CreateDiagramResponse": {
+        "description": "`iohr.rfcs.v1.CreateDiagramResponse`",
+        "properties": {
+          "diagram": {
+            "$ref": "#/components/schemas/Diagram"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
+      "CreateDocumentRequest": {
+        "description": "`iohr.rfcs.v1.CreateDocumentRequest`",
+        "properties": {
+          "child_index": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CreateDocumentResponse": {
+        "description": "`iohr.rfcs.v1.CreateDocumentResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "findings"
         ],
         "type": "object"
       },
@@ -797,6 +1352,33 @@
         },
         "type": "object"
       },
+      "CreateSpaceRequest": {
+        "description": "`iohr.rfcs.v1.CreateSpaceRequest`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CreateSpaceResponse": {
+        "description": "`iohr.rfcs.v1.CreateSpaceResponse`",
+        "properties": {
+          "space": {
+            "$ref": "#/components/schemas/Space"
+          }
+        },
+        "type": "object"
+      },
       "Credential": {
         "description": "`iohr.connections.v1.Credential`",
         "properties": {
@@ -826,6 +1408,9 @@
           "key": {
             "type": "string"
           },
+          "notify": {
+            "type": "boolean"
+          },
           "refuse_by": {
             "type": "string"
           },
@@ -843,7 +1428,8 @@
           "surface",
           "refuse_by",
           "key",
-          "service"
+          "service",
+          "notify"
         ],
         "type": "object"
       },
@@ -903,6 +1489,10 @@
         "description": "`iohr.connections.v1.DeleteConnectionResponse`",
         "type": "object"
       },
+      "DeleteDiagramResponse": {
+        "description": "`iohr.rfcs.v1.DeleteDiagramResponse`",
+        "type": "object"
+      },
       "DeleteEndpointResponse": {
         "description": "`iohr.events.v1.DeleteEndpointResponse`",
         "type": "object"
@@ -913,6 +1503,14 @@
       },
       "DeleteMonitorResponse": {
         "description": "`iohr.connections.v1.DeleteMonitorResponse`",
+        "type": "object"
+      },
+      "DeleteRecordingResponse": {
+        "description": "`iohr.trails.v1.DeleteRecordingResponse`",
+        "type": "object"
+      },
+      "DeleteSpaceResponse": {
+        "description": "`iohr.rfcs.v1.DeleteSpaceResponse`",
         "type": "object"
       },
       "Delivery": {
@@ -1145,6 +1743,48 @@
           }
         ]
       },
+      "Diagram": {
+        "description": "`iohr.rfcs.v1.Diagram`",
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "current_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "diagram_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nodes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "diagram_id",
+          "space_id",
+          "name",
+          "current_version",
+          "nodes",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "Digest": {
         "description": "`iohr.radar.v1.Digest`",
         "properties": {
@@ -1234,6 +1874,114 @@
           "published_at",
           "origin",
           "checked"
+        ],
+        "type": "object"
+      },
+      "Document": {
+        "description": "`iohr.rfcs.v1.Document`",
+        "properties": {
+          "access": {
+            "type": "string"
+          },
+          "child_index": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "children": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "current_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "display_number": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "headline_note": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "measures_id": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "parent_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "superseded_by": {
+            "type": "string"
+          },
+          "supersedes_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "space_id",
+          "kind",
+          "number",
+          "slug",
+          "title",
+          "status",
+          "public",
+          "summary",
+          "current_version",
+          "superseded_by",
+          "path",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "parent_id",
+          "child_index",
+          "display_number",
+          "children",
+          "headline",
+          "headline_note",
+          "supersedes_id",
+          "measures_id",
+          "access"
         ],
         "type": "object"
       },
@@ -1481,6 +2229,41 @@
         },
         "type": "object"
       },
+      "ExportFile": {
+        "description": "`iohr.rfcs.v1.ExportFile`",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
+      "ExportSpaceResponse": {
+        "description": "`iohr.rfcs.v1.ExportSpaceResponse`",
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFile"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "files",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "Field": {
         "description": "`iohr.connections.v1.Field`",
         "properties": {
@@ -1526,6 +2309,27 @@
         ],
         "type": "object"
       },
+      "Finding": {
+        "description": "`iohr.rfcs.v1.Finding`",
+        "properties": {
+          "line": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "line",
+          "rule",
+          "message"
+        ],
+        "type": "object"
+      },
       "GetAgentResponse": {
         "description": "`iohr.agents.v1.GetAgentResponse`",
         "properties": {
@@ -1535,11 +2339,43 @@
         },
         "type": "object"
       },
+      "GetConnectSessionResponse": {
+        "description": "`iohr.connections.v1.GetConnectSessionResponse`",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          },
+          "error": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "error",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "GetConnectionResponse": {
         "description": "`iohr.connections.v1.GetConnectionResponse`",
         "properties": {
           "connection": {
             "$ref": "#/components/schemas/Connection"
+          }
+        },
+        "type": "object"
+      },
+      "GetConnectorResponse": {
+        "description": "`iohr.connections.v1.GetConnectorResponse`",
+        "properties": {
+          "connector": {
+            "$ref": "#/components/schemas/Connector"
           }
         },
         "type": "object"
@@ -1606,6 +2442,26 @@
         ],
         "type": "object"
       },
+      "GetDiagramResponse": {
+        "description": "`iohr.rfcs.v1.GetDiagramResponse`",
+        "properties": {
+          "diagram": {
+            "$ref": "#/components/schemas/Diagram"
+          },
+          "model": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "model"
+        ],
+        "type": "object"
+      },
       "GetDigestResponse": {
         "description": "`iohr.radar.v1.GetDigestResponse`",
         "properties": {
@@ -1615,6 +2471,89 @@
         },
         "type": "object"
       },
+      "GetDocumentResponse": {
+        "description": "`iohr.rfcs.v1.GetDocumentResponse`",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array"
+          },
+          "measured_by": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "measures": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "mentioned_in": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "parent": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "saved_at": {
+            "type": "string"
+          },
+          "successors": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "supersedes": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "text",
+          "findings",
+          "author",
+          "message",
+          "saved_at",
+          "children",
+          "mentions",
+          "mentioned_in",
+          "successors",
+          "measured_by"
+        ],
+        "type": "object"
+      },
       "GetDomainResponse": {
         "description": "`iohr.accounts.v1.GetDomainResponse`",
         "properties": {
@@ -1622,6 +2561,40 @@
             "$ref": "#/components/schemas/Domain"
           }
         },
+        "type": "object"
+      },
+      "GetEntitlementsResponse": {
+        "description": "`iohr.accounts.v1.GetEntitlementsResponse`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "granted_by": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "plan",
+          "features",
+          "extensions",
+          "granted_by"
+        ],
         "type": "object"
       },
       "GetEventStatsResponse": {
@@ -1697,6 +2670,67 @@
         },
         "type": "object"
       },
+      "GetMonitorSeriesResponse": {
+        "description": "`iohr.connections.v1.GetMonitorSeriesResponse`",
+        "properties": {
+          "bucket_secs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorBucket"
+            },
+            "type": "array"
+          },
+          "failed": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorFailureClass"
+            },
+            "type": "array"
+          },
+          "from": {
+            "type": "string"
+          },
+          "p50": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p99": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "runs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "to": {
+            "type": "string"
+          },
+          "uptime": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "bucket_secs",
+          "buckets",
+          "runs",
+          "failed",
+          "failures"
+        ],
+        "type": "object"
+      },
       "GetMonitorSummaryResponse": {
         "description": "`iohr.connections.v1.GetMonitorSummaryResponse`",
         "properties": {
@@ -1724,6 +2758,128 @@
           "health",
           "since"
         ],
+        "type": "object"
+      },
+      "GetPublicDiagramResponse": {
+        "description": "`iohr.rfcs.v1.GetPublicDiagramResponse`",
+        "properties": {
+          "diagram": {
+            "$ref": "#/components/schemas/Diagram"
+          },
+          "model": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "model"
+        ],
+        "type": "object"
+      },
+      "GetPublicDocumentResponse": {
+        "description": "`iohr.rfcs.v1.GetPublicDocumentResponse`",
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "measured_by": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "measures": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "mentioned_in": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "parent": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "saved_at": {
+            "type": "string"
+          },
+          "space": {
+            "$ref": "#/components/schemas/SpaceRef"
+          },
+          "successors": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "supersedes": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "text",
+          "message",
+          "saved_at",
+          "children",
+          "mentions",
+          "mentioned_in",
+          "successors",
+          "measured_by"
+        ],
+        "type": "object"
+      },
+      "GetRecordingResponse": {
+        "description": "`iohr.trails.v1.GetRecordingResponse`",
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/Recording"
+          }
+        },
+        "type": "object"
+      },
+      "GetSettingsResponse": {
+        "description": "`iohr.rfcs.v1.GetSettingsResponse`",
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/Settings"
+          }
+        },
+        "type": "object"
+      },
+      "GetSpaceResponse": {
+        "description": "`iohr.rfcs.v1.GetSpaceResponse`",
+        "properties": {
+          "space": {
+            "$ref": "#/components/schemas/Space"
+          }
+        },
         "type": "object"
       },
       "GetUnitSeriesResponse": {
@@ -1954,6 +3110,30 @@
         ],
         "type": "object"
       },
+      "Invariant": {
+        "description": "`iohr.agents.v1.Invariant`",
+        "properties": {
+          "expected": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "path",
+          "expected"
+        ],
+        "type": "object"
+      },
       "Item": {
         "description": "`iohr.radar.v1.Item`",
         "properties": {
@@ -2154,6 +3334,25 @@
         },
         "type": "object"
       },
+      "ListAccountHistoryResponse": {
+        "description": "`iohr.connections.v1.ListAccountHistoryResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "uses": {
+            "items": {
+              "$ref": "#/components/schemas/Use"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "uses",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListAgentsResponse": {
         "description": "`iohr.agents.v1.ListAgentsResponse`",
         "properties": {
@@ -2169,6 +3368,25 @@
         },
         "required": [
           "agents",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListCommentsResponse": {
+        "description": "`iohr.rfcs.v1.ListCommentsResponse`",
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/Comment"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "comments",
           "next_page_token"
         ],
         "type": "object"
@@ -2192,6 +3410,25 @@
         ],
         "type": "object"
       },
+      "ListConnectorsResponse": {
+        "description": "`iohr.connections.v1.ListConnectorsResponse`",
+        "properties": {
+          "connectors": {
+            "items": {
+              "$ref": "#/components/schemas/Connector"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connectors",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListDeliveriesResponse": {
         "description": "`iohr.events.v1.ListDeliveriesResponse`",
         "properties": {
@@ -2211,6 +3448,25 @@
         ],
         "type": "object"
       },
+      "ListDiagramsResponse": {
+        "description": "`iohr.rfcs.v1.ListDiagramsResponse`",
+        "properties": {
+          "diagrams": {
+            "items": {
+              "$ref": "#/components/schemas/Diagram"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "diagrams",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListDigestsResponse": {
         "description": "`iohr.radar.v1.ListDigestsResponse`",
         "properties": {
@@ -2226,6 +3482,25 @@
         },
         "required": [
           "digests",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListDocumentsResponse": {
+        "description": "`iohr.rfcs.v1.ListDocumentsResponse`",
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "documents",
           "next_page_token"
         ],
         "type": "object"
@@ -2471,6 +3746,51 @@
         ],
         "type": "object"
       },
+      "ListPublicDocumentsResponse": {
+        "description": "`iohr.rfcs.v1.ListPublicDocumentsResponse`",
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          },
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceRef"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents",
+          "next_page_token",
+          "spaces"
+        ],
+        "type": "object"
+      },
+      "ListRecordingsResponse": {
+        "description": "`iohr.trails.v1.ListRecordingsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "recordings": {
+            "items": {
+              "$ref": "#/components/schemas/Recording"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "recordings",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListRequestsResponse": {
         "description": "`iohr.accounts.v1.ListRequestsResponse`",
         "properties": {
@@ -2490,6 +3810,73 @@
         ],
         "type": "object"
       },
+      "ListReviewQueueResponse": {
+        "description": "`iohr.rfcs.v1.ListReviewQueueResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "reviews",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListReviewsResponse": {
+        "description": "`iohr.rfcs.v1.ListReviewsResponse`",
+        "properties": {
+          "approvals": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "approvals_required": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "next_page_token": {
+            "type": "string"
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "reviews",
+          "next_page_token",
+          "approvals",
+          "approvals_required"
+        ],
+        "type": "object"
+      },
+      "ListSpacesResponse": {
+        "description": "`iohr.rfcs.v1.ListSpacesResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/Space"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "spaces",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListTeamEventsResponse": {
         "description": "`iohr.accounts.v1.ListTeamEventsResponse`",
         "properties": {
@@ -2505,6 +3892,25 @@
         },
         "required": [
           "events",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListTimelineResponse": {
+        "description": "`iohr.rfcs.v1.ListTimelineResponse`",
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entries",
           "next_page_token"
         ],
         "type": "object"
@@ -2559,6 +3965,25 @@
         },
         "type": "object"
       },
+      "ListVersionsResponse": {
+        "description": "`iohr.rfcs.v1.ListVersionsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/Version"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "Me": {
         "description": "`GET /v1/me` body.",
         "properties": {
@@ -2579,11 +4004,11 @@
           "key": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Key",
                 "description": "Key and parent key, when minted."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -2684,6 +4109,10 @@
           "rfc": {
             "type": "string"
           },
+          "slo_target": {
+            "format": "double",
+            "type": "number"
+          },
           "state": {
             "type": "string"
           }
@@ -2703,6 +4132,79 @@
           "managed_by",
           "agent_id",
           "rfc"
+        ],
+        "type": "object"
+      },
+      "MonitorBucket": {
+        "description": "`iohr.connections.v1.MonitorBucket`",
+        "properties": {
+          "failed": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p50": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p95": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "p99": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "passed": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "runs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seen": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "start": {
+            "type": "string"
+          },
+          "uptime": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "runs",
+          "seen",
+          "passed",
+          "failed"
+        ],
+        "type": "object"
+      },
+      "MonitorFailureClass": {
+        "description": "`iohr.connections.v1.MonitorFailureClass`",
+        "properties": {
+          "count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "error_class": {
+            "type": "string"
+          },
+          "last_at": {
+            "type": "string"
+          },
+          "last_run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error_class",
+          "count",
+          "last_at",
+          "last_run_id"
         ],
         "type": "object"
       },
@@ -2732,6 +4234,12 @@
           "error_class": {
             "type": "string"
           },
+          "failure": {
+            "type": "string"
+          },
+          "invariant": {
+            "type": "string"
+          },
           "latency_ms": {
             "format": "int32",
             "type": "integer"
@@ -2755,7 +4263,9 @@
           "at",
           "status",
           "ok",
-          "latency_ms"
+          "latency_ms",
+          "invariant",
+          "failure"
         ],
         "type": "object"
       },
@@ -2788,6 +4298,21 @@
           "data",
           "read"
         ],
+        "type": "object"
+      },
+      "Pattern": {
+        "description": "`iohr.rfcs.v1.Pattern`",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "re": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "Plan": {
@@ -2855,6 +4380,98 @@
         ],
         "type": "object"
       },
+      "Quote": {
+        "description": "`iohr.rfcs.v1.Quote`",
+        "properties": {
+          "exact": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "start": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "suffix": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Recording": {
+        "description": "`iohr.trails.v1.Recording`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "client": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "dropped": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "event_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Struct"
+            },
+            "type": "array"
+          },
+          "pages": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "recording_id": {
+            "type": "string"
+          },
+          "rejected": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "site": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recording_id",
+          "account_id",
+          "site",
+          "client",
+          "started_at",
+          "created_at",
+          "dropped",
+          "event_count",
+          "created_by",
+          "rejected",
+          "events",
+          "bytes",
+          "pages",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
       "RecoverEndpointRequest": {
         "description": "`iohr.events.v1.RecoverEndpointRequest`",
         "properties": {
@@ -2887,6 +4504,30 @@
           "created",
           "truncated"
         ],
+        "type": "object"
+      },
+      "Redaction": {
+        "description": "`iohr.rfcs.v1.Redaction`",
+        "properties": {
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "patterns": {
+            "items": {
+              "$ref": "#/components/schemas/Pattern"
+            },
+            "type": "array"
+          },
+          "words": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "Refusal": {
@@ -2966,6 +4607,66 @@
         ],
         "type": "object"
       },
+      "RequestReviewRequest": {
+        "description": "`iohr.rfcs.v1.RequestReviewRequest`",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "reviewers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RequestReviewResponse": {
+        "description": "`iohr.rfcs.v1.RequestReviewResponse`",
+        "properties": {
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/Review"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "reviews"
+        ],
+        "type": "object"
+      },
+      "ResolveCommentRequest": {
+        "description": "`iohr.rfcs.v1.ResolveCommentRequest`",
+        "properties": {
+          "comment_id": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ResolveCommentResponse": {
+        "description": "`iohr.rfcs.v1.ResolveCommentResponse`",
+        "properties": {
+          "comment": {
+            "$ref": "#/components/schemas/Comment"
+          }
+        },
+        "type": "object"
+      },
       "ResolverAnswer": {
         "description": "`iohr.accounts.v1.ResolverAnswer`",
         "properties": {
@@ -3001,6 +4702,72 @@
             "$ref": "#/components/schemas/Delivery"
           }
         },
+        "type": "object"
+      },
+      "Review": {
+        "description": "`iohr.rfcs.v1.Review`",
+        "properties": {
+          "decided_at": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "display_number": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "requested_at": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "space_name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "review_id",
+          "document_id",
+          "space_id",
+          "reviewer",
+          "requested_by",
+          "decision",
+          "version",
+          "requested_at",
+          "decided_at",
+          "title",
+          "kind",
+          "number",
+          "space_name",
+          "display_number"
+        ],
         "type": "object"
       },
       "RevokeAgentRequest": {
@@ -3085,6 +4852,92 @@
         },
         "type": "object"
       },
+      "SaveDiagramRequest": {
+        "description": "`iohr.rfcs.v1.SaveDiagramRequest`",
+        "properties": {
+          "base_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "diagram_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SaveDiagramResponse": {
+        "description": "`iohr.rfcs.v1.SaveDiagramResponse`",
+        "properties": {
+          "diagram": {
+            "$ref": "#/components/schemas/Diagram"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "SaveDocumentRequest": {
+        "description": "`iohr.rfcs.v1.SaveDocumentRequest`",
+        "properties": {
+          "base_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SaveDocumentResponse": {
+        "description": "`iohr.rfcs.v1.SaveDocumentResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "findings"
+        ],
+        "type": "object"
+      },
       "SendTestResponse": {
         "description": "`iohr.events.v1.SendTestResponse`",
         "properties": {
@@ -3092,6 +4945,205 @@
             "$ref": "#/components/schemas/Delivery"
           }
         },
+        "type": "object"
+      },
+      "SetAccessRequest": {
+        "description": "`iohr.rfcs.v1.SetAccessRequest`",
+        "properties": {
+          "access": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SetAccessResponse": {
+        "description": "`iohr.rfcs.v1.SetAccessResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          }
+        },
+        "type": "object"
+      },
+      "SetStatusRequest": {
+        "description": "`iohr.rfcs.v1.SetStatusRequest`",
+        "properties": {
+          "base_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "successor_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SetStatusResponse": {
+        "description": "`iohr.rfcs.v1.SetStatusResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          }
+        },
+        "type": "object"
+      },
+      "Settings": {
+        "description": "`iohr.rfcs.v1.Settings`",
+        "properties": {
+          "approvals_required": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "redaction": {
+            "$ref": "#/components/schemas/Redaction"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvals_required",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "Space": {
+        "description": "`iohr.rfcs.v1.Space`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "awaiting_review": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "documents": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "open": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "account_id",
+          "slug",
+          "name",
+          "description",
+          "created_at",
+          "updated_at",
+          "documents",
+          "open",
+          "awaiting_review"
+        ],
+        "type": "object"
+      },
+      "SpaceRef": {
+        "description": "`iohr.rfcs.v1.SpaceRef`",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "space_id",
+          "slug",
+          "name"
+        ],
+        "type": "object"
+      },
+      "StartConnectRequest": {
+        "description": "`iohr.connections.v1.StartConnectRequest`",
+        "properties": {
+          "auth_mode": {
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "connector": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "StartConnectResponse": {
+        "description": "`iohr.connections.v1.StartConnectResponse`",
+        "properties": {
+          "authorize_url": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorize_url",
+          "expires_at",
+          "session_id"
+        ],
         "type": "object"
       },
       "StreamEventsResponse": {
@@ -3133,6 +5185,34 @@
               "$ref": "#/components/schemas/Value"
             },
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "SubmitReviewRequest": {
+        "description": "`iohr.rfcs.v1.SubmitReviewRequest`",
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SubmitReviewResponse": {
+        "description": "`iohr.rfcs.v1.SubmitReviewResponse`",
+        "properties": {
+          "review": {
+            "$ref": "#/components/schemas/Review"
           }
         },
         "type": "object"
@@ -3203,6 +5283,42 @@
             "$ref": "#/components/schemas/ActionResult"
           }
         },
+        "type": "object"
+      },
+      "TimelineEntry": {
+        "description": "`iohr.rfcs.v1.TimelineEntry`",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "display_number": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "kind",
+          "display_number",
+          "title",
+          "status",
+          "date",
+          "text"
+        ],
         "type": "object"
       },
       "ToolInfo": {
@@ -3419,6 +5535,9 @@
       "UpdateConnectionRequest": {
         "description": "`iohr.connections.v1.UpdateConnectionRequest`",
         "properties": {
+          "auth_mode": {
+            "type": "string"
+          },
           "config": {
             "additionalProperties": {
               "type": "string"
@@ -3427,6 +5546,12 @@
           },
           "connection_id": {
             "type": "string"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
           },
           "description": {
             "type": "string"
@@ -3465,6 +5590,30 @@
         "required": [
           "webhook_secret"
         ],
+        "type": "object"
+      },
+      "UpdateDiagramRequest": {
+        "description": "`iohr.rfcs.v1.UpdateDiagramRequest`",
+        "properties": {
+          "diagram_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateDiagramResponse": {
+        "description": "`iohr.rfcs.v1.UpdateDiagramResponse`",
+        "properties": {
+          "diagram": {
+            "$ref": "#/components/schemas/Diagram"
+          }
+        },
         "type": "object"
       },
       "UpdateEndpointRequest": {
@@ -3517,6 +5666,10 @@
           "rfc": {
             "type": "string"
           },
+          "slo_target": {
+            "format": "double",
+            "type": "number"
+          },
           "state": {
             "type": "string"
           }
@@ -3530,6 +5683,99 @@
             "$ref": "#/components/schemas/Monitor"
           }
         },
+        "type": "object"
+      },
+      "UpdateSettingsRequest": {
+        "description": "`iohr.rfcs.v1.UpdateSettingsRequest`",
+        "properties": {
+          "approvals_required": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "redaction": {
+            "$ref": "#/components/schemas/Redaction"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateSettingsResponse": {
+        "description": "`iohr.rfcs.v1.UpdateSettingsResponse`",
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/Settings"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateSpaceRequest": {
+        "description": "`iohr.rfcs.v1.UpdateSpaceRequest`",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "set_description": {
+            "type": "boolean"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateSpaceResponse": {
+        "description": "`iohr.rfcs.v1.UpdateSpaceResponse`",
+        "properties": {
+          "space": {
+            "$ref": "#/components/schemas/Space"
+          }
+        },
+        "type": "object"
+      },
+      "UploadRecordingRequest": {
+        "description": "`iohr.trails.v1.UploadRecordingRequest`",
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "dropped": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Struct"
+            },
+            "type": "array"
+          },
+          "site": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UploadRecordingResponse": {
+        "description": "`iohr.trails.v1.UploadRecordingResponse`",
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/Recording"
+          },
+          "rejected": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rejected"
+        ],
         "type": "object"
       },
       "Uptime": {
@@ -3590,6 +5836,9 @@
           "caller_kind": {
             "type": "string"
           },
+          "connection_id": {
+            "type": "string"
+          },
           "error_class": {
             "type": "string"
           },
@@ -3602,7 +5851,15 @@
           "id": {
             "type": "string"
           },
+          "input_tokens": {
+            "format": "int32",
+            "type": "integer"
+          },
           "latency_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "output_tokens": {
             "format": "int32",
             "type": "integer"
           },
@@ -3625,7 +5882,10 @@
           "error_class",
           "status_code",
           "latency_ms",
-          "at"
+          "at",
+          "connection_id",
+          "input_tokens",
+          "output_tokens"
         ],
         "type": "object"
       },
@@ -3657,6 +5917,36 @@
           }
         },
         "type": "object"
+      },
+      "Version": {
+        "description": "`iohr.rfcs.v1.Version`",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "saved_at": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "author",
+          "message",
+          "saved_at",
+          "bytes"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -3676,7 +5966,7 @@
     "title": "InOrbit API",
     "version": "0.1.0",
     "x-iohr-cut": {
-      "hash": "sha256:6339411bc907ba74eb8778f783884753485f7c3aa5107d2a4793c162b231e31a",
+      "hash": "sha256:d6be1c32c41acf4777c36663421c961872afdec9b7de181069a7560b73e77472",
       "plan": "public",
       "scopes": []
     }
@@ -4172,6 +6462,7 @@
             }
           },
           {
+            "deprecated": true,
             "in": "query",
             "name": "limit",
             "required": false,
@@ -4371,6 +6662,279 @@
         "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/CreateConnection",
         "x-iohr-scopes": [
           "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/connect": {
+      "post": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/StartConnect` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.StartConnect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartConnectRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.StartConnectRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartConnectResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.StartConnectResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/StartConnect",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/StartConnect",
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/connect/complete": {
+      "post": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/CompleteConnect` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.CompleteConnect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteConnectRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.CompleteConnectRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteConnectResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.CompleteConnectResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/CompleteConnect",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/CompleteConnect",
+        "x-iohr-scopes": [
+          "connections:write"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/connect/{session_id}": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/GetConnectSession` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.GetConnectSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetConnectSessionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.GetConnectSessionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/GetConnectSession",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/GetConnectSession",
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/connections/history": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListAccountHistory` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListAccountHistory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "connection_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "consumer",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAccountHistoryResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListAccountHistoryResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListAccountHistory",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "uses",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListAccountHistory",
+        "x-iohr-scopes": [
+          "connections:read"
         ]
       }
     },
@@ -5393,6 +7957,53 @@
         ]
       }
     },
+    "/v1/accounts/orgs/{org_id}/entitlements": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/GetEntitlements` on the `accounts` backend.\n\nA key needs scope `account:read`.",
+        "operationId": "AccountsService.GetEntitlements",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetEntitlementsResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.GetEntitlementsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/GetEntitlements",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetEntitlements",
+        "x-iohr-scopes": [
+          "account:read"
+        ]
+      }
+    },
     "/v1/accounts/orgs/{org_id}/monitors": {
       "get": {
         "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitors` on the `connections` backend.\n\nA key needs scope `connections:read`.",
@@ -5707,6 +8318,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5743,6 +8362,86 @@
         },
         "x-iohr-public": true,
         "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListMonitorRuns",
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/monitors/{monitor_id}/series": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitorSeries` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.GetMonitorSeries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "monitor_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket_secs",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMonitorSeriesResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.GetMonitorSeriesResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/GetMonitorSeries",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/GetMonitorSeries",
         "x-iohr-scopes": [
           "connections:read"
         ]
@@ -6333,6 +9032,115 @@
         ]
       }
     },
+    "/v1/connectors": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListConnectors` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.ListConnectors",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListConnectorsResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.ListConnectorsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/ListConnectors",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-list": {
+          "items": "connectors",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListConnectors",
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
+    "/v1/connectors/{connector_id}": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/GetConnector` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.GetConnector",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetConnectorResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.GetConnectorResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/GetConnector",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/GetConnector",
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      }
+    },
     "/v1/events/events": {
       "get": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend.\n\nA key needs scope `events:read`.",
@@ -6641,6 +9449,7 @@
             }
           },
           {
+            "deprecated": true,
             "in": "query",
             "name": "limit",
             "required": false,
@@ -6784,6 +9593,7 @@
             }
           },
           {
+            "deprecated": true,
             "in": "query",
             "name": "limit",
             "required": false,
@@ -6846,6 +9656,2457 @@
         "x-iohr-rpc": "iohr.radar.v1.RadarService/ListItems",
         "x-iohr-scopes": [
           "radar:read"
+        ]
+      }
+    },
+    "/v1/rfcs/public/documents": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListPublicDocuments` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListPublicDocuments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "space",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPublicDocumentsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListPublicDocumentsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListPublicDocuments",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "documents",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListPublicDocuments",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/rfcs/public/spaces/{space}/diagrams/{diagram_id}": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetPublicDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.GetPublicDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPublicDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.GetPublicDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/GetPublicDiagram",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetPublicDiagram",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/rfcs/public/spaces/{space}/{kind}/{number}": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetPublicDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.GetPublicDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPublicDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.GetPublicDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/GetPublicDocument",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetPublicDocument",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/rfcs/reviews": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListReviewQueue` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListReviewQueue",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReviewQueueResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListReviewQueueResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListReviewQueue",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "reviews",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListReviewQueue",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListSpaces` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListSpaces",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSpacesResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListSpacesResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListSpaces",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "spaces",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListSpaces",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/CreateSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.CreateSpace",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.CreateSpaceRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.CreateSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/CreateSpace",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/CreateSpace",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/DeleteSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.DeleteSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.DeleteSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/DeleteSpace",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/DeleteSpace",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.GetSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.GetSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/GetSpace",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetSpace",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "patch": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/UpdateSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.UpdateSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSpaceRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.UpdateSpaceRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.UpdateSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/UpdateSpace",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/UpdateSpace",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/diagrams": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListDiagrams` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListDiagrams",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDiagramsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListDiagramsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListDiagrams",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "diagrams",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListDiagrams",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/CreateDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.CreateDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDiagramRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.CreateDiagramRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.CreateDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/CreateDiagram",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/CreateDiagram",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/diagrams/{diagram_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/DeleteDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.DeleteDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.DeleteDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/DeleteDiagram",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/DeleteDiagram",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.GetDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.GetDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/GetDiagram",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetDiagram",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "patch": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/UpdateDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.UpdateDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDiagramRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.UpdateDiagramRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.UpdateDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/UpdateDiagram",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/UpdateDiagram",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/diagrams/{diagram_id}/versions": {
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SaveDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.SaveDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDiagramRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.SaveDiagramRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.SaveDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/SaveDiagram",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SaveDiagram",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListDocuments` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListDocuments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDocumentsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListDocumentsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListDocuments",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "documents",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListDocuments",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/CreateDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.CreateDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.CreateDocumentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.CreateDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/CreateDocument",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/CreateDocument",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.GetDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.GetDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/GetDocument",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetDocument",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/access": {
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SetAccess` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.SetAccess",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAccessRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.SetAccessRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetAccessResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.SetAccessResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/SetAccess",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SetAccess",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/comments": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListComments` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListComments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCommentsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListCommentsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListComments",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "comments",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListComments",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/AddComment` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.AddComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCommentRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.AddCommentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddCommentResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.AddCommentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/AddComment",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/AddComment",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/comments/{comment_id}/resolve": {
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ResolveComment` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.ResolveComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveCommentRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.ResolveCommentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveCommentResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ResolveCommentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ResolveComment",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ResolveComment",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/review": {
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SubmitReview` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.SubmitReview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitReviewRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.SubmitReviewRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitReviewResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.SubmitReviewResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/SubmitReview",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SubmitReview",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/reviews": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListReviews` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListReviews",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReviewsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListReviewsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListReviews",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "reviews",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListReviews",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/RequestReview` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.RequestReview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestReviewRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.RequestReviewRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestReviewResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.RequestReviewResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/RequestReview",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/RequestReview",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/status": {
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SetStatus` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.SetStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStatusRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.SetStatusRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetStatusResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.SetStatusResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/SetStatus",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SetStatus",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/timeline": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListTimeline` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTimelineResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListTimelineResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListTimeline",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "entries",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListTimeline",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/versions": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListVersions` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListVersionsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListVersionsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListVersions",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "versions",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListVersions",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SaveDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.SaveDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDocumentRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.SaveDocumentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.SaveDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/SaveDocument",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SaveDocument",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/export": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ExportSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ExportSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ExportSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ExportSpace",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ExportSpace",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/settings": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetSettings` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.GetSettings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSettingsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.GetSettingsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/GetSettings",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetSettings",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      },
+      "put": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/UpdateSettings` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
+        "operationId": "RfcsService.UpdateSettings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingsRequest"
+              }
+            }
+          },
+          "description": "`iohr.rfcs.v1.UpdateSettingsRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSettingsResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.UpdateSettingsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/UpdateSettings",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/UpdateSettings",
+        "x-iohr-scopes": [
+          "rfc:write"
+        ]
+      }
+    },
+    "/v1/rfcs/spaces/{space_id}/timeline": {
+      "get": {
+        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListTimeline` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
+        "operationId": "RfcsService.ListTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTimelineResponse"
+                }
+              }
+            },
+            "description": "`iohr.rfcs.v1.ListTimelineResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.rfcs.v1.RfcsService/ListTimeline",
+        "tags": [
+          "rfcs"
+        ],
+        "x-iohr-list": {
+          "items": "entries",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListTimeline",
+        "x-iohr-scopes": [
+          "rfc:read"
+        ]
+      }
+    },
+    "/v1/trails/recordings": {
+      "get": {
+        "description": "Transcoded from `/iohr.trails.v1.TrailsService/ListRecordings` on the `trails` backend.\n\nA key needs scope `trail:read`.",
+        "operationId": "TrailsService.ListRecordings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRecordingsResponse"
+                }
+              }
+            },
+            "description": "`iohr.trails.v1.ListRecordingsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.trails.v1.TrailsService/ListRecordings",
+        "tags": [
+          "trails"
+        ],
+        "x-iohr-list": {
+          "items": "recordings",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.trails.v1.TrailsService/ListRecordings",
+        "x-iohr-scopes": [
+          "trail:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.trails.v1.TrailsService/UploadRecording` on the `trails` backend.\n\nA key needs scope `trail:write`.",
+        "operationId": "TrailsService.UploadRecording",
+        "parameters": [
+          {
+            "description": "Makes a retry safe: a repeat with the same key and the same body within a day answers what the first call did (with `Idempotency-Replayed: true`) instead of running again; the same key with another body is `422 unprocessable`. 1 to 255 visible characters; a UUID is a good one.",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRecordingRequest"
+              }
+            }
+          },
+          "description": "`iohr.trails.v1.UploadRecordingRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadRecordingResponse"
+                }
+              }
+            },
+            "description": "`iohr.trails.v1.UploadRecordingResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.trails.v1.TrailsService/UploadRecording",
+        "tags": [
+          "trails"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.trails.v1.TrailsService/UploadRecording",
+        "x-iohr-scopes": [
+          "trail:write"
+        ]
+      }
+    },
+    "/v1/trails/recordings/{recording_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.trails.v1.TrailsService/DeleteRecording` on the `trails` backend.\n\nA key needs scope `trail:write`.",
+        "operationId": "TrailsService.DeleteRecording",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recording_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRecordingResponse"
+                }
+              }
+            },
+            "description": "`iohr.trails.v1.DeleteRecordingResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.trails.v1.TrailsService/DeleteRecording",
+        "tags": [
+          "trails"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.trails.v1.TrailsService/DeleteRecording",
+        "x-iohr-scopes": [
+          "trail:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.trails.v1.TrailsService/GetRecording` on the `trails` backend.\n\nA key needs scope `trail:read`.",
+        "operationId": "TrailsService.GetRecording",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recording_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetRecordingResponse"
+                }
+              }
+            },
+            "description": "`iohr.trails.v1.GetRecordingResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.trails.v1.TrailsService/GetRecording",
+        "tags": [
+          "trails"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.trails.v1.TrailsService/GetRecording",
+        "x-iohr-scopes": [
+          "trail:read"
         ]
       }
     },
