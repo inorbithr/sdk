@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.11](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.10...iohr/v0.1.0-alpha.11) (2026-10-06)
+
+
+### Features
+
+* **cli:** classified spans and review keys in iohr lab check ([#153](https://github.com/inorbithr/sdk/issues/153)) ([a8bacc7](https://github.com/inorbithr/sdk/commit/a8bacc7b35c60a477af4751ed692e3dd8d024949))
+* **cli:** extensions declare privileges, confirmed before install ([#151](https://github.com/inorbithr/sdk/issues/151)) ([fdf0784](https://github.com/inorbithr/sdk/commit/fdf07841bb537a3af13921028c7ab541bb5aff9a))
+
+
+### Documentation
+
+* bring every README to what is released and on main ([#155](https://github.com/inorbithr/sdk/issues/155)) ([637daeb](https://github.com/inorbithr/sdk/commit/637daeb6a1b40d014773b227e218502b17a40806))
+
 ## [0.1.0-alpha.10](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.9...iohr/v0.1.0-alpha.10) (2026-10-05)
 
 
