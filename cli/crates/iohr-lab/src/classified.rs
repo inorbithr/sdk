@@ -19,7 +19,11 @@
 //! diff's lines still match the source.
 //!
 //! Never fail open: a malformed, nested, stray or unclosed marker is a problem, and
-//! [`cut`] returns an error rather than guess where a span ends. Offsets are in bytes;
+//! [`cut`] returns an error rather than guess where a span ends. A line ends at `\n`,
+//! with or without a `\r` before it: a CRLF document is read as an LF one, and an
+//! opening fence with anything after `classified` that is not
+//! `level=LEVEL reason="REASON"` (a stray `\r` included) is a problem, never an
+//! ordinary fence. Offsets are in bytes;
 //! lengths that the grammar limits (a reason, a needle) count UTF-16 code units, as
 //! JavaScript does, so both implementations draw the line in the same place.
 
@@ -169,8 +173,6 @@ impl std::error::Error for ClassifiedError {}
 
 /// JavaScript's `\s`: its white space and line terminators, `U+FEFF` in, `U+0085` out.
 const WS: &str = r"[\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]";
-/// JavaScript's `.`: anything but a line terminator.
-const DOT: &str = r"[^\n\r\x{2028}\x{2029}]";
 
 #[allow(clippy::expect_used)]
 fn re(pattern: &str) -> Regex {
@@ -181,23 +183,23 @@ fn re(pattern: &str) -> Regex {
 static MARKER_LIKE: LazyLock<Regex> =
     LazyLock::new(|| re(&format!(r"\[\[{WS}*/?{WS}*(?i-u:classified)")));
 static OPEN: LazyLock<Regex> =
-    LazyLock::new(|| re(r#"^\[\[classified:([a-z]+) reason="([^"\n]*)"\]\]"#));
+    LazyLock::new(|| re(r#"^\[\[classified:([a-z]+) reason="([^"\n\r]*)"\]\]"#));
 const CLOSE: &str = "[[/classified]]";
 /// A block's opening fence: up to three spaces, three or more backticks, `classified`.
 static BLOCK_OPEN: LazyLock<Regex> = LazyLock::new(|| {
     re(&format!(
-        r"^( {{0,3}})(`{{3,}}){WS}*(?i-u:classified)(?-u:\b)({DOT}*)$"
+        r"^( {{0,3}})(`{{3,}}){WS}*(?i-u:classified)(?-u:\b)([^\n]*)$"
     ))
 });
 static BLOCK_ATTRS: LazyLock<Regex> = LazyLock::new(|| {
     re(&format!(
-        r#"^{WS}+level=([a-z]+){WS}+reason="([^"\n]*)"{WS}*$"#
+        r#"^{WS}+level=([a-z]+){WS}+reason="([^"\n\r]*)"{WS}*$"#
     ))
 });
 static TILDE_OPEN: LazyLock<Regex> =
     LazyLock::new(|| re(&format!(r"^ {{0,3}}~{{3,}}{WS}*(?i-u:classified)(?-u:\b)")));
 static BLOCK_CLOSE: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"^ {{0,3}}(`{{3,}}){WS}*$")));
-static BLANK_LINE: LazyLock<Regex> = LazyLock::new(|| re(r"\n[ \t]*\n"));
+static BLANK_LINE: LazyLock<Regex> = LazyLock::new(|| re(r"\n[ \t]*\r?\n"));
 
 /// The longest reason, in UTF-16 code units.
 pub const MAX_REASON: usize = 160;
@@ -291,10 +293,13 @@ pub fn parse_classified(text: &str) -> Classified {
     let mut problems = Vec::new();
     let mut open: Option<Open> = None;
     let mut offset = 0usize;
-    for (i, raw) in text.split('\n').enumerate() {
+    for (i, full) in text.split('\n').enumerate() {
         let line_no = i + 1;
         let line_start = offset;
-        offset += raw.len() + 1;
+        offset += full.len() + 1;
+        // `\r\n` and a lone trailing `\r` end a line too: the grammar reads the line
+        // without it, and a span never takes it (it stays after what replaces it).
+        let raw = full.strip_suffix('\r').unwrap_or(full);
 
         if let Some(Open::Block {
             level,
@@ -311,7 +316,10 @@ pub fn parse_classified(text: &str) -> Classified {
                 .and_then(|c| c.get(1))
                 .is_some_and(|m| m.len() >= *fence);
             if closes {
-                let body_end = (*body_start).max(line_start.saturating_sub(1));
+                let mut body_end = (*body_start).max(line_start.saturating_sub(1));
+                if body_end > *body_start && text.as_bytes().get(body_end - 1) == Some(&b'\r') {
+                    body_end -= 1;
+                }
                 let original = text.get(*body_start..body_end).unwrap_or_default();
                 if line_start <= *body_start || js_trim(original).is_empty() {
                     problem(&mut problems, *line, "a classified block is empty");
@@ -677,12 +685,57 @@ mod tests {
     }
 
     #[test]
-    fn a_crlf_opening_line_is_read_as_javascript_reads_it() {
-        let text = "```classified level=team reason=\"r\"\r\nbody\r\n```\r\n";
-        // The opening line ends in \r: like JavaScript's `.`, it is no block opening,
-        // so nothing is a span and nothing is a problem either.
-        let parsed = parse_classified(text);
-        assert!(parsed.spans.is_empty() && parsed.problems.is_empty());
+    fn a_crlf_document_is_cut_like_an_lf_one() {
+        let lf = [
+            format!("a {} b", inline("partner", SECRET, "the port")),
+            block(
+                "team",
+                &format!("{SECRET}-x\nsecond {SECRET}-y"),
+                "the table",
+                "```",
+            ),
+            format!(
+                "x {} y",
+                inline("internal", &format!("{SECRET}-m\ncontinued"), "r")
+            ),
+            "end".to_owned(),
+        ]
+        .join("\n\n");
+        let crlf = lf.replace('\n', "\r\n");
+        let parsed = parse_classified(&crlf);
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.spans.len(), 3);
+        let out = cut(&crlf, AccessLevel::Public).unwrap();
+        assert!(!out.contains(SECRET), "{out:?}");
+        assert_eq!(out.split('\n').count(), crlf.split('\n').count());
+        assert_eq!(
+            out.replace('\r', ""),
+            cut(&lf, AccessLevel::Public).unwrap().replace('\r', "")
+        );
+        let shown = cut(&crlf, AccessLevel::Internal).unwrap();
+        assert!(shown.contains(&format!("{SECRET}-x")));
+    }
+
+    #[test]
+    fn a_stray_carriage_return_never_makes_an_ordinary_fence() {
+        for text in [
+            format!("```classified level=team reason=\"a\rb\"\n{SECRET}\n```"),
+            format!("[[classified:team reason=\"a\rb\"]]{SECRET}[[/classified]]"),
+            format!("```classified level=team reason=\"r\"\r\n{SECRET}\r\n"),
+        ] {
+            assert!(
+                !parse_classified(&text).problems.is_empty(),
+                "no problem in {text:?}"
+            );
+            assert!(cut(&text, AccessLevel::Public).is_err());
+        }
+        // A `\r` where white space may stand is white space: still a block, and cut.
+        for text in [
+            format!("```classified level=team reason=\"r\"\r\r\n{SECRET}\r\n```"),
+            format!("```classified level=team\r reason=\"r\"\n{SECRET}\n```"),
+        ] {
+            assert!(!cut(&text, AccessLevel::Public).unwrap().contains(SECRET));
+        }
     }
 
     #[test]

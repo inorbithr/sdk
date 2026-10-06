@@ -68,6 +68,14 @@ const cases: Record<string, string> = {
   "more: unknown block level": block("secret"),
   "more: block attributes in the wrong order": '```classified reason="r" level=team\nx\n```',
   "more: whitespace-only block": '```classified level=team reason="r"\n  \n```',
+  // A line ends at \n with or without a \r before it (CRLF read as LF; never an ordinary fence).
+  "crlf: inline": `the balancer answers on ${inline("partner")} behind the edge\r\nnext line\r\n`,
+  "crlf: block": `before\r\n${block("team").replace(/\n/g, "\r\n")}\r\nafter`,
+  "crlf: unclosed block": `before\r\n${block("team").replace(/\n```$/, "").replace(/\n/g, "\r\n")}\r\n`,
+  "crlf: multi-line inline": `a ${inline("partner", `${SECRET}\r\ncontinued`)} b\r\n`,
+  "crlf: inline across a blank line": `[[classified:partner reason="r"]]a\r\n\r\nb[[/classified]]`,
+  "crlf: a lone trailing carriage return": `${block("internal", SECRET, "r").replace(/\n/g, "\r\n")}\r`,
+  "crlf: a carriage return inside a block reason": block("team", SECRET, "a\rb").replace(/\n/g, "\r\n"),
 };
 
 const out: any = {
