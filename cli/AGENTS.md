@@ -35,7 +35,10 @@ cli/
                       hashed (the cut hash) and modelled as operations per profile
   crates/iohr-lab/    `iohr lab check`: the lab document checks and redaction rules, the
                       generic rules embedded from spec/lab/rules.json, held to the site's
-                      findings by spec/lab/conformance.json (never edit either by hand)
+                      findings by spec/lab/conformance.json (never edit either by hand);
+                      classified spans and `cut` (src/classified.rs) mirror the platform's
+                      ui/shared/lab/classified.ts, held to it by tests/classified.json,
+                      which that TypeScript writes (tests/classified.gen.ts; never by hand)
   crates/iohr-codegen/ one Target per language; rust/ renders models (typify) and the
                       surface (minijinja templates in src/rust/templates/)
   fuzz/               cargo-fuzz targets; excluded from the workspace

@@ -1,0 +1,893 @@
+{
+  "note": "Cases for classified spans, produced by running the platform's TypeScript (ui/shared/lab/classified.ts and check.ts at core commit b70ece3d, RFC 0065 ladder) over inputs mirroring ui/www/tool/classified.test.ts and a few more. `cut` holds, per clearance, the cut text or null when cut refuses (problems); `problems` the problem lines; `spans` each span's kind, level and lines. `documents` hold check findings by rule and line, checked with spec/lab/rules.json and the conformance bundle's config. To move into the platform's docs/lab/conformance and arrive through spec:sync.",
+  "cases": {
+    "inline": {
+      "text": "the balancer answers on [[classified:partner reason=\"the internal port\"]]zq-canary-7731[[/classified]] behind the edge",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": "the balancer answers on [REDACTED: the internal port] behind the edge",
+        "preview": "the balancer answers on [REDACTED: the internal port] behind the edge",
+        "partner": "the balancer answers on zq-canary-7731 behind the edge",
+        "team": "the balancer answers on zq-canary-7731 behind the edge",
+        "internal": "the balancer answers on zq-canary-7731 behind the edge"
+      }
+    },
+    "admin alias": {
+      "text": "[[classified:admin reason=\"the internal port\"]]zq-canary-7731[[/classified]]",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "internal",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": "[REDACTED: the internal port]",
+        "preview": "[REDACTED: the internal port]",
+        "partner": "[REDACTED: the internal port]",
+        "team": "[REDACTED: the internal port]",
+        "internal": "zq-canary-7731"
+      }
+    },
+    "block": {
+      "text": "before\n```classified level=team reason=\"the routing table\"\nzq-canary-7731\nsecond line\n```\nafter",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "team",
+          "line": 2,
+          "end_line": 5
+        }
+      ],
+      "cut": {
+        "public": "before\n```redacted\nthe routing table\n\n```\nafter",
+        "preview": "before\n```redacted\nthe routing table\n\n```\nafter",
+        "partner": "before\n```redacted\nthe routing table\n\n```\nafter",
+        "team": "before\n\nzq-canary-7731\nsecond line\n\nafter",
+        "internal": "before\n\nzq-canary-7731\nsecond line\n\nafter"
+      }
+    },
+    "indented four-backtick block holding a fence": {
+      "text": "- item\n  ````classified level=internal reason=\"the command\"\n  ```sh\n  run zq-canary-7731\n  ```\n  ````",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 2,
+          "end_line": 6
+        }
+      ],
+      "cut": {
+        "public": "- item\n  ```redacted\n  the command\n\n\n  ```",
+        "preview": "- item\n  ```redacted\n  the command\n\n\n  ```",
+        "partner": "- item\n  ```redacted\n  the command\n\n\n  ```",
+        "team": "- item\n  ```redacted\n  the command\n\n\n  ```",
+        "internal": "- item\n\n  ```sh\n  run zq-canary-7731\n  ```\n"
+      }
+    },
+    "multi-line inline": {
+      "text": "a [[classified:partner reason=\"the internal port\"]]zq-canary-7731\ncontinued[[/classified]] b",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 2
+        }
+      ],
+      "cut": {
+        "public": "a [REDACTED: the internal port]\n b",
+        "preview": "a [REDACTED: the internal port]\n b",
+        "partner": "a zq-canary-7731\ncontinued b",
+        "team": "a zq-canary-7731\ncontinued b",
+        "internal": "a zq-canary-7731\ncontinued b"
+      }
+    },
+    "adjacent spans": {
+      "text": "[[classified:partner reason=\"the internal port\"]]aaaa1[[/classified]][[classified:internal reason=\"two\"]]bbbb2[[/classified]] and [[classified:preview reason=\"three\"]]cccc3[[/classified]]",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 1
+        },
+        {
+          "kind": "inline",
+          "level": "internal",
+          "line": 1,
+          "end_line": 1
+        },
+        {
+          "kind": "inline",
+          "level": "preview",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": "[REDACTED: the internal port][REDACTED: two] and [REDACTED: three]",
+        "preview": "[REDACTED: the internal port][REDACTED: two] and cccc3",
+        "partner": "aaaa1[REDACTED: two] and cccc3",
+        "team": "aaaa1[REDACTED: two] and cccc3",
+        "internal": "aaaa1bbbb2 and cccc3"
+      }
+    },
+    "every shape": {
+      "text": "[[classified:preview reason=\"the internal port\"]]zq-canary-7731[[/classified]]\n\n[[classified:partner reason=\"the internal port\"]]zq-canary-7731-b[[/classified]]\n\n[[classified:team reason=\"the internal port\"]]x zq-canary-7731-c\ny[[/classified]]\n\n```classified level=internal reason=\"the routing table\"\nzq-canary-7731\nsecond line\n```\n\n```classified level=admin reason=\"the routing table\"\nzq-canary-7731-d\n```",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "preview",
+          "line": 1,
+          "end_line": 1
+        },
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 3,
+          "end_line": 3
+        },
+        {
+          "kind": "inline",
+          "level": "team",
+          "line": 5,
+          "end_line": 6
+        },
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 8,
+          "end_line": 11
+        },
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 13,
+          "end_line": 15
+        }
+      ],
+      "cut": {
+        "public": "[REDACTED: the internal port]\n\n[REDACTED: the internal port]\n\n[REDACTED: the internal port]\n\n\n```redacted\nthe routing table\n\n```\n\n```redacted\nthe routing table\n```",
+        "preview": "zq-canary-7731\n\n[REDACTED: the internal port]\n\n[REDACTED: the internal port]\n\n\n```redacted\nthe routing table\n\n```\n\n```redacted\nthe routing table\n```",
+        "partner": "zq-canary-7731\n\nzq-canary-7731-b\n\n[REDACTED: the internal port]\n\n\n```redacted\nthe routing table\n\n```\n\n```redacted\nthe routing table\n```",
+        "team": "zq-canary-7731\n\nzq-canary-7731-b\n\nx zq-canary-7731-c\ny\n\n```redacted\nthe routing table\n\n```\n\n```redacted\nthe routing table\n```",
+        "internal": "zq-canary-7731\n\nzq-canary-7731-b\n\nx zq-canary-7731-c\ny\n\n\nzq-canary-7731\nsecond line\n\n\n\nzq-canary-7731-d\n"
+      }
+    },
+    "markers in a code fence are read too": {
+      "text": "```md\n[[classified:team reason=\"the internal port\"]]zq-canary-7731[[/classified]]\n```",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "team",
+          "line": 2,
+          "end_line": 2
+        }
+      ],
+      "cut": {
+        "public": "```md\n[REDACTED: the internal port]\n```",
+        "preview": "```md\n[REDACTED: the internal port]\n```",
+        "partner": "```md\n[REDACTED: the internal port]\n```",
+        "team": "```md\nzq-canary-7731\n```",
+        "internal": "```md\nzq-canary-7731\n```"
+      }
+    },
+    "uppercase block keyword": {
+      "text": "```Classified level=team reason=\"r\"\nx\n```",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "team",
+          "line": 1,
+          "end_line": 3
+        }
+      ],
+      "cut": {
+        "public": "```redacted\nr\n```",
+        "preview": "```redacted\nr\n```",
+        "partner": "```redacted\nr\n```",
+        "team": "\nx\n",
+        "internal": "\nx\n"
+      }
+    },
+    "reason of 160": {
+      "text": "[[classified:team reason=\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\"]]zq-canary-7731[[/classified]]",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "team",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": "[REDACTED: rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr]",
+        "preview": "[REDACTED: rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr]",
+        "partner": "[REDACTED: rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr]",
+        "team": "zq-canary-7731",
+        "internal": "zq-canary-7731"
+      }
+    },
+    "no markers": {
+      "text": "plain [REDACTED: an old marker]\n```redacted\nwhy\n```\n",
+      "problems": [],
+      "spans": [],
+      "cut": {
+        "public": "plain [REDACTED: an old marker]\n```redacted\nwhy\n```\n",
+        "preview": "plain [REDACTED: an old marker]\n```redacted\nwhy\n```\n",
+        "partner": "plain [REDACTED: an old marker]\n```redacted\nwhy\n```\n",
+        "team": "plain [REDACTED: an old marker]\n```redacted\nwhy\n```\n",
+        "internal": "plain [REDACTED: an old marker]\n```redacted\nwhy\n```\n"
+      }
+    },
+    "empty text": {
+      "text": "",
+      "problems": [],
+      "spans": [],
+      "cut": {
+        "public": "",
+        "preview": "",
+        "partner": "",
+        "team": "",
+        "internal": ""
+      }
+    },
+    "unclosed inline": {
+      "text": "a [[classified:partner reason=\"r\"]]zq-canary-7731",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "unclosed block": {
+      "text": "```classified level=partner reason=\"the routing table\"\nzq-canary-7731\nsecond line",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "nested inline": {
+      "text": "[[classified:partner reason=\"r\"]]a [[classified:internal reason=\"the internal port\"]]zq-canary-7731[[/classified]] b[[/classified]]",
+      "problems": [
+        1,
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "inline inside a block": {
+      "text": "```classified level=partner reason=\"r\"\n[[classified:internal reason=\"the internal port\"]]zq-canary-7731[[/classified]]\n```",
+      "problems": [
+        2
+      ],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "partner",
+          "line": 1,
+          "end_line": 3
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "stray close": {
+      "text": "text[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "unknown level": {
+      "text": "[[classified:secret reason=\"r\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "internal",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "public is no span level": {
+      "text": "[[classified:public reason=\"r\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "internal",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "no reason": {
+      "text": "[[classified:partner]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1,
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "empty reason": {
+      "text": "[[classified:partner reason=\"\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "] in a reason": {
+      "text": "[[classified:partner reason=\"a ] b\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "spelling": {
+      "text": "[[Classified:partner reason=\"r\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1,
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "spacing": {
+      "text": "[[ classified:partner reason=\"r\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1,
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "empty span": {
+      "text": "[[classified:partner reason=\"r\"]][[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "across a paragraph": {
+      "text": "[[classified:partner reason=\"r\"]]a\n\nb[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "block without a reason": {
+      "text": "```classified level=partner\nx\n```",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 1,
+          "end_line": 3
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "tildes": {
+      "text": "~~~classified level=partner reason=\"r\"\nx\n~~~",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "empty block": {
+      "text": "```classified level=partner reason=\"r\"\n```",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "unclosed never leaks what follows": {
+      "text": "ok [[classified:partner reason=\"r\"]]zq-canary-7731\n\nmore",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a quote in a reason": {
+      "text": "[[classified:partner reason=\"a \" b\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1,
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a backtick in a reason": {
+      "text": "[[classified:partner reason=\"a ` b\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a reason of 161": {
+      "text": "[[classified:team reason=\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "team",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a blank reason": {
+      "text": "[[classified:team reason=\"   \"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "team",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: an uppercase level": {
+      "text": "[[classified:PARTNER reason=\"the internal port\"]]zq-canary-7731[[/classified]]",
+      "problems": [
+        1,
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a block inside a block": {
+      "text": "```classified level=team reason=\"the routing table\"\n```classified level=internal reason=\"x\"\ninner\n```\n```",
+      "problems": [
+        2
+      ],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "team",
+          "line": 1,
+          "end_line": 4
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a block inside an inline span": {
+      "text": "[[classified:team reason=\"r\"]]a\n```classified level=internal reason=\"the routing table\"\nzq-canary-7731\nsecond line\n```\nb[[/classified]]",
+      "problems": [
+        2
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "team",
+          "line": 1,
+          "end_line": 6
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a tilde block inside a block": {
+      "text": "```classified level=team reason=\"the routing table\"\n~~~classified level=team reason=\"r\"\n```",
+      "problems": [
+        2
+      ],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "team",
+          "line": 1,
+          "end_line": 3
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: a shorter fence does not close": {
+      "text": "````classified level=team reason=\"r\"\nbody\n```\nstill body\n````",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "team",
+          "line": 1,
+          "end_line": 5
+        }
+      ],
+      "cut": {
+        "public": "```redacted\nr\n\n\n```",
+        "preview": "```redacted\nr\n\n\n```",
+        "partner": "```redacted\nr\n\n\n```",
+        "team": "\nbody\n```\nstill body\n",
+        "internal": "\nbody\n```\nstill body\n"
+      }
+    },
+    "more: stray close after a close": {
+      "text": "[[classified:team reason=\"the internal port\"]]zq-canary-7731[[/classified]][[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "team",
+          "line": 1,
+          "end_line": 1
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: unknown block level": {
+      "text": "```classified level=secret reason=\"the routing table\"\nzq-canary-7731\nsecond line\n```",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 1,
+          "end_line": 4
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: block attributes in the wrong order": {
+      "text": "```classified reason=\"r\" level=team\nx\n```",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 1,
+          "end_line": 3
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "more: whitespace-only block": {
+      "text": "```classified level=team reason=\"r\"\n  \n```",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    }
+  },
+  "documents": {
+    "rfcs/0001-withheld-text-is-exempt.md": {
+      "text": "---\ntitle: A classified document\nstatus: open\ndate: 2026-10-06\npublic: true\nlab: core\nsummary: One sentence.\nreviewed: 2026-10-06\nreviewer: the owner\n---\n\n## Problem\n\nThe primary is [[classified:internal reason=\"the internal port\"]]db-primary at 10.0.0.12:5432[[/classified]] today.\n\n```classified level=team reason=\"the routing table\"\ndeploy/ on api.example.com\nVaultPath\n```\n\nAfter the block, db-primary is named in the open.\n",
+      "expected": [
+        {
+          "line": 21,
+          "rule": "denylist"
+        }
+      ]
+    },
+    "rfcs/0002-a-reason-is-scanned.md": {
+      "text": "---\ntitle: A classified document\nstatus: open\ndate: 2026-10-06\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe host is [[classified:partner reason=\"the name api.example.com\"]]x[[/classified]].\n\n```classified level=team reason=\"the db-primary table\"\nx\n```\n",
+      "expected": [
+        {
+          "line": 12,
+          "rule": "domain"
+        },
+        {
+          "line": 15,
+          "rule": "denylist"
+        }
+      ]
+    },
+    "rfcs/0003-a-bad-marker-reads-the-text-as-it-is.md": {
+      "text": "---\ntitle: A classified document\nstatus: open\ndate: 2026-10-06\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe primary is [[classified:secret reason=\"r\"]]db-primary[[/classified]].\n",
+      "expected": [
+        {
+          "line": 12,
+          "rule": "classified"
+        },
+        {
+          "line": 12,
+          "rule": "denylist"
+        }
+      ]
+    },
+    "rfcs/0004-front-matter-carries-no-span.md": {
+      "text": "---\ntitle: A classified document\nstatus: open\ndate: 2026-10-06\npublic: true\nlab: core\nsummary: One sentence.\nheadline: [[classified:partner reason=\"the internal port\"]]x[[/classified]]\n---\n\n## Problem\n\nPlain.\n",
+      "expected": [
+        {
+          "line": 8,
+          "rule": "classified"
+        }
+      ]
+    },
+    "rfcs/0005-reviewed-must-be-a-date.md": {
+      "text": "---\ntitle: A classified document\nstatus: open\ndate: 2026-10-06\npublic: true\nlab: core\nsummary: One sentence.\nreviewer: someone\nreviewed: yesterday\n---\n\n## Problem\n\nPlain.\n",
+      "expected": [
+        {
+          "line": 9,
+          "rule": "reviewed"
+        }
+      ]
+    },
+    "rfcs/0006-a-draft-is-checked-for-markers.md": {
+      "text": "---\ntitle: A classified document\nstatus: open\ndate: 2026-10-06\npublic: false\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\n~~~classified level=team reason=\"r\"\ndb-primary\n~~~\n\n[[classified:team reason=\"the internal port\"]][[/classified]]\n",
+      "expected": [
+        {
+          "line": 12,
+          "rule": "classified"
+        },
+        {
+          "line": 16,
+          "rule": "classified"
+        }
+      ]
+    },
+    "rfcs/0007-lines-after-a-withheld-block.md": {
+      "text": "---\ntitle: A classified document\nstatus: open\ndate: 2026-10-06\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\n```classified level=team reason=\"the routing table\"\na\nb\nc\nd\n```\n\nThen db-primary, on its own line.\n\n## Status log\n\n- 2026-10-06: opened.\n- not a date\n",
+      "expected": [
+        {
+          "line": 24,
+          "rule": "status-log"
+        },
+        {
+          "line": 19,
+          "rule": "denylist"
+        }
+      ]
+    }
+  }
+}

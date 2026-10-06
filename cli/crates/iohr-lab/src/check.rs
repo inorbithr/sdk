@@ -1,5 +1,6 @@
 //! The document checks: file name, front matter, status log, duplicate numbers, and
-//! redaction on public documents. The rule ids and the messages are the site's own.
+//! redaction on public documents read as an uncleared reader sees them (classified spans
+//! cut), and the classified markers themselves on every document. The rule ids and the messages are the site's own.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -7,7 +8,8 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
 
-use crate::redaction::Redaction;
+use crate::classified::{AccessLevel, cut, parse_classified};
+use crate::redaction::{Hit, Redaction};
 
 /// What a document is, by the folder it sits in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +61,17 @@ impl Finding {
 }
 
 const REQUIRED: [&str; 6] = ["title", "status", "date", "public", "summary", "lab"];
-const OPTIONAL: [&str; 5] = ["supersedes", "rfc", "headline", "headline_note", "audience"];
+const OPTIONAL: [&str; 7] = [
+    "supersedes",
+    "rfc",
+    "headline",
+    "headline_note",
+    "audience",
+    // The pre-publication review (the platform's docs/lab/review-checklist.md): the
+    // day it was done and who did it.
+    "reviewed",
+    "reviewer",
+];
 
 #[allow(clippy::expect_used)]
 fn re(pattern: &str) -> Regex {
@@ -109,7 +121,7 @@ pub fn check_document(name: &str, text: &str, kind: Kind, redaction: &Redaction)
         ));
         return out;
     }
-    let Some((front, close)) = front_matter(&lines, &mut out) else {
+    let Some((front, close, key_lines)) = front_matter(&lines, &mut out) else {
         return out;
     };
     let i = close;
@@ -155,36 +167,75 @@ pub fn check_document(name: &str, text: &str, kind: Kind, redaction: &Redaction)
             format!("`lab` must be one of {}", labs.join(", ")),
         ));
     }
+    if text_of("reviewed").is_some_and(|d| !DATE.is_match(d)) {
+        out.push(Finding::new(
+            key_lines.get("reviewed").copied(),
+            "reviewed",
+            "`reviewed` must be YYYY-MM-DD",
+        ));
+    }
     status_log(body, body_start, &mut out);
 
-    // Redaction, for public documents only: front matter values and the body.
-    if front.get("public") == Some(&Value::Bool(true)) {
-        let front_lines = &lines[..body_start - 1];
-        for h in redaction.scan(front_lines) {
+    // Classified spans, on every document: a marker that does not parse is a finding,
+    // never a guess, and the front matter carries none (it is read before anything is
+    // cut).
+    let classified = parse_classified(text);
+    for p in &classified.problems {
+        out.push(Finding::new(Some(p.line), "classified", p.message.clone()));
+    }
+    for s in &classified.spans {
+        if s.line < body_start {
             out.push(Finding::new(
-                Some(h.line),
-                &h.rule,
-                format!("\"{}\" ({})", h.text, h.why),
+                Some(s.line),
+                "classified",
+                "the front matter carries no classified span",
             ));
         }
-        for h in redaction.scan(body) {
-            out.push(Finding::new(
-                Some(h.line + body_start - 1),
-                &h.rule,
-                format!("\"{}\" ({})", h.text, h.why),
-            ));
+    }
+
+    // Redaction, for public documents only (a draft is read by its own people): front
+    // matter values and the body, as a reader without clearance sees them. What a
+    // classified span withholds is not checked; its reason is. A cut keeps the line
+    // count, so the lines are the source's. When the markers do not parse, the text
+    // is read as it is.
+    if front.get("public") == Some(&Value::Bool(true)) {
+        let seen = if classified.problems.is_empty() {
+            cut(text, AccessLevel::Public).unwrap_or_else(|_| text.to_owned())
+        } else {
+            text.to_owned()
+        };
+        let seen: Vec<&str> = seen.split('\n').collect();
+        let split = (body_start - 1).min(seen.len());
+        for h in redaction.scan(&seen[..split]) {
+            out.push(hit(&h, 0));
+        }
+        for h in redaction.scan(&seen[split..]) {
+            out.push(hit(&h, body_start - 1));
         }
     }
     out
 }
 
-/// The `key: value` lines between the two `---`: the values, and the index of the
-/// closing line; `None` when it never closes.
+/// A redaction hit as a finding, its line moved by `shift`. A strict rule's hit has no
+/// text and says only why.
+fn hit(h: &Hit, shift: usize) -> Finding {
+    let message = if h.text.is_empty() {
+        format!("({})", h.why)
+    } else {
+        format!("\"{}\" ({})", h.text, h.why)
+    };
+    Finding::new(Some(h.line + shift), &h.rule, message)
+}
+
+/// The `key: value` lines between the two `---`: the values, the index of the closing
+/// line, and the line (from 1) each key first appears on; `None` when it never closes.
+#[allow(clippy::type_complexity)]
 fn front_matter(
     lines: &[&str],
     out: &mut Vec<Finding>,
-) -> Option<(BTreeMap<String, Value>, usize)> {
+) -> Option<(BTreeMap<String, Value>, usize, BTreeMap<String, usize>)> {
     let mut front: BTreeMap<String, Value> = BTreeMap::new();
+    let mut key_lines: BTreeMap<String, usize> = BTreeMap::new();
     let mut i = 1;
     while i < lines.len() {
         let line = lines[i];
@@ -218,6 +269,7 @@ fn front_matter(
             v => Value::Text(v.to_owned()),
         };
         front.insert(key.to_owned(), value);
+        key_lines.entry(key.to_owned()).or_insert(i + 1);
         i += 1;
     }
     if i >= lines.len() {
@@ -228,7 +280,7 @@ fn front_matter(
         ));
         return None;
     }
-    Some((front, i))
+    Some((front, i, key_lines))
 }
 
 /// The `## Status log` bullets: each starts `- YYYY-MM-DD:`, its text may run on over

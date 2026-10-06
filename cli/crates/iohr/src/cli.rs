@@ -163,6 +163,11 @@ pub struct LabCheck {
     /// `docs/lab/redaction.json` when it exists, otherwise the generic rules alone.
     #[arg(long)]
     pub config: Option<PathBuf>,
+    /// Strict rules to add, in the rules file shape (`{"rules": [...]}`), such as the
+    /// platform's `docs/lab/strict.json`. Checked on public documents like the others;
+    /// a hit says the rule and why, never what matched. Not read unless named.
+    #[arg(long, value_name = "FILE")]
+    pub strict: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]

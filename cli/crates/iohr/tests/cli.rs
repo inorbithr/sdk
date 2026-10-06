@@ -725,6 +725,64 @@ fn lab_check_says_what_to_fix() {
     assert_eq!(code(&o), 2, "{}", text(&o));
 }
 
+/// Classified spans and the review keys: withheld text is exempt from the rules, a
+/// malformed marker is a finding, `reviewed`/`reviewer` are known keys, and `--strict`
+/// adds rules whose hits never print what matched.
+#[test]
+fn lab_check_reads_classified_spans_and_strict_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let rfcs = dir.path().join("rfcs");
+    std::fs::create_dir_all(&rfcs).unwrap();
+    let reviewed = LAB_DOC.replace(
+        "summary: One sentence.\n",
+        "summary: One sentence.\nreviewed: 2026-10-06\nreviewer: the owner\n",
+    );
+    std::fs::write(
+        rfcs.join("0001-a.md"),
+        reviewed.replace(
+            "The site is www.example.com.",
+            "The primary answers on [[classified:internal reason=\"the port\"]]10.0.0.7:5432[[/classified]].",
+        ),
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_iohr"))
+            .args(args)
+            .current_dir(dir.path())
+            .env_clear()
+            .envs(kept_env())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let o = run(&["lab", "check", "rfcs"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
+    std::fs::write(
+        rfcs.join("0002-b.md"),
+        LAB_DOC.replace(
+            "The site is www.example.com.",
+            "Stray [[/classified]] and Wibble 2.1 in the open.",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("strict.json"),
+        r#"{"note": "test", "rules": [{"id": "product-version", "re": "\\bWibble \\d+\\.\\d+", "why": "a product with its version"}]}"#,
+    )
+    .unwrap();
+    let o = run(&["lab", "check", "rfcs", "--strict", "strict.json"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    let all = text(&o);
+    assert!(all.contains("0002-b.md:12 [classified]"), "{all}");
+    assert!(all.contains("0002-b.md:12 [product-version]"), "{all}");
+    assert!(
+        !all.contains("Wibble"),
+        "a strict hit printed what matched: {all}"
+    );
+    assert!(!all.contains("0001-a.md"), "{all}");
+}
+
 /// A provider at the mock server's own address, for a person's sign-in.
 async fn mock_provider(server: &MockServer) {
     let uri = server.uri();
