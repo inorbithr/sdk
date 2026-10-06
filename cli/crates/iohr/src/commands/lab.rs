@@ -5,7 +5,9 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use iohr_lab::{Config, Finding, GENERIC_RULES, Kind, Redaction, check_document, check_folder};
+use iohr_lab::{
+    Config, Finding, GENERIC_RULES, Kind, Redaction, check_document, check_folder, parse_rules,
+};
 use serde::Serialize;
 
 use crate::cli::LabCheck;
@@ -31,8 +33,15 @@ struct Located {
 /// a document has a problem (exit code 1), after printing every one.
 pub(crate) fn check(args: &LabCheck, out: Out) -> Result<(), Error> {
     let config = read_config(args.config.as_deref())?;
-    let redaction = Redaction::new(GENERIC_RULES, &config)
+    let mut redaction = Redaction::new(GENERIC_RULES, &config)
         .map_err(|e| Error::Usage(format!("the lab config: {e}")))?;
+    if let Some(path) = &args.strict {
+        let rules = parse_rules(&read(path)?)
+            .map_err(|e| Error::Usage(format!("{}: not a rules file: {e}", path.display())))?;
+        redaction = redaction
+            .with_strict(&rules)
+            .map_err(|e| Error::Usage(format!("{}: {e}", path.display())))?;
+    }
 
     let paths: Vec<PathBuf> = if args.paths.is_empty() {
         let found: Vec<PathBuf> = DEFAULT_FOLDERS

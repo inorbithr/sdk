@@ -83,7 +83,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
 | `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install, verify and pin them; one that declares privileges for its system service asks first unless `--yes`; `iohr <name> ...` runs one |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
-| `iohr lab check [PATH...] [--config FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter, status logs, redaction on public documents; offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
+| `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json` and `--verbose`.
