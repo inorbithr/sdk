@@ -1,5 +1,5 @@
 {
-  "note": "Cases for classified spans, produced by running the platform's TypeScript (ui/shared/lab/classified.ts and check.ts at core commit b70ece3d, RFC 0065 ladder) over inputs mirroring ui/www/tool/classified.test.ts and a few more. `cut` holds, per clearance, the cut text or null when cut refuses (problems); `problems` the problem lines; `spans` each span's kind, level and lines. `documents` hold check findings by rule and line, checked with spec/lab/rules.json and the conformance bundle's config. To move into the platform's docs/lab/conformance and arrive through spec:sync. The `crlf:` cases (a line ends at \\n with or without a \\r before it; a \\r inside a reason is a problem) were written from iohr-lab while core's TypeScript gets the same fix; regenerate once it has landed, and they must come out the same.",
+  "note": "Cases for classified spans, produced by running the platform's TypeScript (ui/shared/lab/classified.ts and check.ts at core commit 2e490130, inorbithr/core#409, RFC 0065 ladder) over inputs mirroring ui/www/tool/classified.test.ts and a few more. `cut` holds, per clearance, the cut text or null when cut refuses (problems); `problems` the problem lines; `spans` each span's kind, level and lines. `documents` hold check findings by rule and line, checked with spec/lab/rules.json and the conformance bundle's config. To move into the platform's docs/lab/conformance and arrive through spec:sync.",
   "cases": {
     "inline": {
       "text": "the balancer answers on [[classified:partner reason=\"the internal port\"]]zq-canary-7731[[/classified]] behind the edge",
@@ -808,130 +808,130 @@
         "internal": null
       }
     },
-    "crlf: a carriage return inside a block reason": {
-      "cut": {
-        "internal": null,
-        "partner": null,
-        "preview": null,
-        "public": null,
-        "team": null
-      },
-      "problems": [
-        1
-      ],
-      "spans": [
-        {
-          "end_line": 3,
-          "kind": "block",
-          "level": "internal",
-          "line": 1
-        }
-      ],
-      "text": "```classified level=team reason=\"a\rb\"\r\nzq-canary-7731\r\n```"
-    },
-    "crlf: a lone trailing carriage return": {
-      "cut": {
-        "internal": "\nzq-canary-7731\n\r",
-        "partner": "```redacted\nr\n```\r",
-        "preview": "```redacted\nr\n```\r",
-        "public": "```redacted\nr\n```\r",
-        "team": "```redacted\nr\n```\r"
-      },
+    "crlf: inline": {
+      "text": "the balancer answers on [[classified:partner reason=\"the internal port\"]]zq-canary-7731[[/classified]] behind the edge\r\nnext line\r\n",
       "problems": [],
       "spans": [
         {
-          "end_line": 3,
-          "kind": "block",
-          "level": "internal",
-          "line": 1
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 1
         }
       ],
-      "text": "```classified level=internal reason=\"r\"\r\nzq-canary-7731\r\n```\r"
+      "cut": {
+        "public": "the balancer answers on [REDACTED: the internal port] behind the edge\r\nnext line\r\n",
+        "preview": "the balancer answers on [REDACTED: the internal port] behind the edge\r\nnext line\r\n",
+        "partner": "the balancer answers on zq-canary-7731 behind the edge\r\nnext line\r\n",
+        "team": "the balancer answers on zq-canary-7731 behind the edge\r\nnext line\r\n",
+        "internal": "the balancer answers on zq-canary-7731 behind the edge\r\nnext line\r\n"
+      }
     },
     "crlf: block": {
-      "cut": {
-        "internal": "before\r\n\nzq-canary-7731\r\nsecond line\n\r\nafter",
-        "partner": "before\r\n```redacted\nthe routing table\n\n```\r\nafter",
-        "preview": "before\r\n```redacted\nthe routing table\n\n```\r\nafter",
-        "public": "before\r\n```redacted\nthe routing table\n\n```\r\nafter",
-        "team": "before\r\n\nzq-canary-7731\r\nsecond line\n\r\nafter"
-      },
+      "text": "before\r\n```classified level=team reason=\"the routing table\"\r\nzq-canary-7731\r\nsecond line\r\n```\r\nafter",
       "problems": [],
       "spans": [
         {
-          "end_line": 5,
           "kind": "block",
           "level": "team",
-          "line": 2
+          "line": 2,
+          "end_line": 5
         }
       ],
-      "text": "before\r\n```classified level=team reason=\"the routing table\"\r\nzq-canary-7731\r\nsecond line\r\n```\r\nafter"
-    },
-    "crlf: inline": {
       "cut": {
-        "internal": "the balancer answers on zq-canary-7731 behind the edge\r\nnext line\r\n",
-        "partner": "the balancer answers on zq-canary-7731 behind the edge\r\nnext line\r\n",
-        "preview": "the balancer answers on [REDACTED: the internal port] behind the edge\r\nnext line\r\n",
-        "public": "the balancer answers on [REDACTED: the internal port] behind the edge\r\nnext line\r\n",
-        "team": "the balancer answers on zq-canary-7731 behind the edge\r\nnext line\r\n"
-      },
-      "problems": [],
-      "spans": [
-        {
-          "end_line": 1,
-          "kind": "inline",
-          "level": "partner",
-          "line": 1
-        }
-      ],
-      "text": "the balancer answers on [[classified:partner reason=\"the internal port\"]]zq-canary-7731[[/classified]] behind the edge\r\nnext line\r\n"
-    },
-    "crlf: inline across a blank line": {
-      "cut": {
-        "internal": null,
-        "partner": null,
-        "preview": null,
-        "public": null,
-        "team": null
-      },
-      "problems": [
-        1
-      ],
-      "spans": [],
-      "text": "[[classified:partner reason=\"r\"]]a\r\n\r\nb[[/classified]]"
-    },
-    "crlf: multi-line inline": {
-      "cut": {
-        "internal": "a zq-canary-7731\r\ncontinued b\r\n",
-        "partner": "a zq-canary-7731\r\ncontinued b\r\n",
-        "preview": "a [REDACTED: the internal port]\n b\r\n",
-        "public": "a [REDACTED: the internal port]\n b\r\n",
-        "team": "a zq-canary-7731\r\ncontinued b\r\n"
-      },
-      "problems": [],
-      "spans": [
-        {
-          "end_line": 2,
-          "kind": "inline",
-          "level": "partner",
-          "line": 1
-        }
-      ],
-      "text": "a [[classified:partner reason=\"the internal port\"]]zq-canary-7731\r\ncontinued[[/classified]] b\r\n"
+        "public": "before\r\n```redacted\nthe routing table\n\n```\r\nafter",
+        "preview": "before\r\n```redacted\nthe routing table\n\n```\r\nafter",
+        "partner": "before\r\n```redacted\nthe routing table\n\n```\r\nafter",
+        "team": "before\r\n\nzq-canary-7731\r\nsecond line\n\r\nafter",
+        "internal": "before\r\n\nzq-canary-7731\r\nsecond line\n\r\nafter"
+      }
     },
     "crlf: unclosed block": {
-      "cut": {
-        "internal": null,
-        "partner": null,
-        "preview": null,
-        "public": null,
-        "team": null
-      },
+      "text": "before\r\n```classified level=team reason=\"the routing table\"\r\nzq-canary-7731\r\nsecond line\r\n",
       "problems": [
         2
       ],
       "spans": [],
-      "text": "before\r\n```classified level=team reason=\"the routing table\"\r\nzq-canary-7731\r\nsecond line\r\n"
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "crlf: multi-line inline": {
+      "text": "a [[classified:partner reason=\"the internal port\"]]zq-canary-7731\r\ncontinued[[/classified]] b\r\n",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "inline",
+          "level": "partner",
+          "line": 1,
+          "end_line": 2
+        }
+      ],
+      "cut": {
+        "public": "a [REDACTED: the internal port]\n b\r\n",
+        "preview": "a [REDACTED: the internal port]\n b\r\n",
+        "partner": "a zq-canary-7731\r\ncontinued b\r\n",
+        "team": "a zq-canary-7731\r\ncontinued b\r\n",
+        "internal": "a zq-canary-7731\r\ncontinued b\r\n"
+      }
+    },
+    "crlf: inline across a blank line": {
+      "text": "[[classified:partner reason=\"r\"]]a\r\n\r\nb[[/classified]]",
+      "problems": [
+        1
+      ],
+      "spans": [],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
+    },
+    "crlf: a lone trailing carriage return": {
+      "text": "```classified level=internal reason=\"r\"\r\nzq-canary-7731\r\n```\r",
+      "problems": [],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 1,
+          "end_line": 3
+        }
+      ],
+      "cut": {
+        "public": "```redacted\nr\n```\r",
+        "preview": "```redacted\nr\n```\r",
+        "partner": "```redacted\nr\n```\r",
+        "team": "```redacted\nr\n```\r",
+        "internal": "\nzq-canary-7731\n\r"
+      }
+    },
+    "crlf: a carriage return inside a block reason": {
+      "text": "```classified level=team reason=\"a\rb\"\r\nzq-canary-7731\r\n```",
+      "problems": [
+        1
+      ],
+      "spans": [
+        {
+          "kind": "block",
+          "level": "internal",
+          "line": 1,
+          "end_line": 4
+        }
+      ],
+      "cut": {
+        "public": null,
+        "preview": null,
+        "partner": null,
+        "team": null,
+        "internal": null
+      }
     }
   },
   "documents": {

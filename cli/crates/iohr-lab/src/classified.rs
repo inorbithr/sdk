@@ -20,10 +20,8 @@
 //!
 //! Never fail open: a malformed, nested, stray or unclosed marker is a problem, and
 //! [`cut`] returns an error rather than guess where a span ends. A line ends at `\n`,
-//! with or without a `\r` before it: a CRLF document is read as an LF one, and an
-//! opening fence with anything after `classified` that is not
-//! `level=LEVEL reason="REASON"` (a stray `\r` included) is a problem, never an
-//! ordinary fence. Offsets are in bytes;
+//! `\r\n` or a lone `\r`, as `CommonMark` reads it, so a renderer never sees a fence
+//! this parse did not; the text keeps its own line endings. Offsets are in bytes;
 //! lengths that the grammar limits (a reason, a needle) count UTF-16 code units, as
 //! JavaScript does, so both implementations draw the line in the same place.
 
@@ -199,7 +197,6 @@ static BLOCK_ATTRS: LazyLock<Regex> = LazyLock::new(|| {
 static TILDE_OPEN: LazyLock<Regex> =
     LazyLock::new(|| re(&format!(r"^ {{0,3}}~{{3,}}{WS}*(?i-u:classified)(?-u:\b)")));
 static BLOCK_CLOSE: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"^ {{0,3}}(`{{3,}}){WS}*$")));
-static BLANK_LINE: LazyLock<Regex> = LazyLock::new(|| re(r"\n[ \t]*\r?\n"));
 
 /// The longest reason, in UTF-16 code units.
 pub const MAX_REASON: usize = 160;
@@ -292,14 +289,13 @@ pub fn parse_classified(text: &str) -> Classified {
     let mut spans = Vec::new();
     let mut problems = Vec::new();
     let mut open: Option<Open> = None;
-    let mut offset = 0usize;
-    for (i, full) in text.split('\n').enumerate() {
+    let mut prev_ending = 0usize;
+    for (i, (line_start, raw, ending)) in lines(text).into_iter().enumerate() {
         let line_no = i + 1;
-        let line_start = offset;
-        offset += full.len() + 1;
-        // `\r\n` and a lone trailing `\r` end a line too: the grammar reads the line
-        // without it, and a span never takes it (it stays after what replaces it).
-        let raw = full.strip_suffix('\r').unwrap_or(full);
+        // Where the next line starts: a block's body, when this line opens one.
+        let offset = line_start + raw.len() + ending;
+        let before = prev_ending;
+        prev_ending = ending;
 
         if let Some(Open::Block {
             level,
@@ -316,10 +312,8 @@ pub fn parse_classified(text: &str) -> Classified {
                 .and_then(|c| c.get(1))
                 .is_some_and(|m| m.len() >= *fence);
             if closes {
-                let mut body_end = (*body_start).max(line_start.saturating_sub(1));
-                if body_end > *body_start && text.as_bytes().get(body_end - 1) == Some(&b'\r') {
-                    body_end -= 1;
-                }
+                // The body ends before the line ending that precedes the closing fence.
+                let body_end = (*body_start).max(line_start.saturating_sub(before));
                 let original = text.get(*body_start..body_end).unwrap_or_default();
                 if line_start <= *body_start || js_trim(original).is_empty() {
                     problem(&mut problems, *line, "a classified block is empty");
@@ -454,7 +448,7 @@ pub fn parse_classified(text: &str) -> Classified {
                         let original = &text[*body_start..line_start + at];
                         if js_trim(original).is_empty() {
                             problem(&mut problems, *line, "a classified span is empty");
-                        } else if BLANK_LINE.is_match(original) {
+                        } else if crosses_blank_line(original) {
                             problem(
                                 &mut problems,
                                 *line,
@@ -499,8 +493,49 @@ pub fn parse_classified(text: &str) -> Classified {
     Classified { spans, problems }
 }
 
+/// The lines of `text`: where each starts, its text without the ending, and the
+/// ending's length (`\n` or a lone `\r` 1, `\r\n` 2, the last line 0).
+fn lines(text: &str) -> Vec<(usize, &str, usize)> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => {
+                out.push((start, &text[start..i], 1));
+                i += 1;
+                start = i;
+            }
+            b'\r' => {
+                let ending = if bytes.get(i + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
+                out.push((start, &text[start..i], ending));
+                i += ending;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    out.push((start, &text[start..], 0));
+    out
+}
+
+/// How many line endings `s` holds (`\r\n` is one).
 fn newlines(s: &str) -> usize {
-    s.bytes().filter(|b| *b == b'\n').count()
+    lines(s).len() - 1
+}
+
+/// Whether a line between two line endings of `s` is blank (spaces and tabs only).
+fn crosses_blank_line(s: &str) -> bool {
+    let all = lines(s);
+    all.len() > 2
+        && all[1..all.len() - 1]
+            .iter()
+            .any(|(_, l, _)| l.bytes().all(|b| b == b' ' || b == b'\t'))
 }
 
 /// The default for a withheld span: the `[REDACTED: reason]` marker inline, a
@@ -701,6 +736,13 @@ mod tests {
             "end".to_owned(),
         ]
         .join("\n\n");
+        for ending in ["\r\n", "\r"] {
+            let other = lf.replace('\n', ending);
+            let out = cut(&other, AccessLevel::Public).unwrap();
+            assert!(!out.contains(SECRET), "{out:?}");
+            assert_eq!(newlines(&out), newlines(&other));
+            assert_eq!(parse_classified(&other).spans.len(), 3);
+        }
         let crlf = lf.replace('\n', "\r\n");
         let parsed = parse_classified(&crlf);
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
@@ -722,6 +764,7 @@ mod tests {
             format!("```classified level=team reason=\"a\rb\"\n{SECRET}\n```"),
             format!("[[classified:team reason=\"a\rb\"]]{SECRET}[[/classified]]"),
             format!("```classified level=team reason=\"r\"\r\n{SECRET}\r\n"),
+            format!("```classified level=team\r reason=\"r\"\n{SECRET}\n```"),
         ] {
             assert!(
                 !parse_classified(&text).problems.is_empty(),
@@ -729,13 +772,9 @@ mod tests {
             );
             assert!(cut(&text, AccessLevel::Public).is_err());
         }
-        // A `\r` where white space may stand is white space: still a block, and cut.
-        for text in [
-            format!("```classified level=team reason=\"r\"\r\r\n{SECRET}\r\n```"),
-            format!("```classified level=team\r reason=\"r\"\n{SECRET}\n```"),
-        ] {
-            assert!(!cut(&text, AccessLevel::Public).unwrap().contains(SECRET));
-        }
+        // A second `\r` ends an empty line, the body's first: still a block, and cut.
+        let text = format!("```classified level=team reason=\"r\"\r\r\n{SECRET}\r\n```");
+        assert!(!cut(&text, AccessLevel::Public).unwrap().contains(SECRET));
     }
 
     #[test]

@@ -79,7 +79,7 @@ const cases: Record<string, string> = {
 };
 
 const out: any = {
-  note: "Cases for classified spans, produced by running the platform's TypeScript (ui/shared/lab/classified.ts and check.ts at core commit b70ece3d, RFC 0065 ladder) over inputs mirroring ui/www/tool/classified.test.ts and a few more. `cut` holds, per clearance, the cut text or null when cut refuses (problems); `problems` the problem lines; `spans` each span's kind, level and lines. `documents` hold check findings by rule and line, checked with spec/lab/rules.json and the conformance bundle's config. To move into the platform's docs/lab/conformance and arrive through spec:sync.",
+  note: "Cases for classified spans, produced by running the platform's TypeScript (ui/shared/lab/classified.ts and check.ts at core commit 2e490130, inorbithr/core#409, RFC 0065 ladder) over inputs mirroring ui/www/tool/classified.test.ts and a few more. `cut` holds, per clearance, the cut text or null when cut refuses (problems); `problems` the problem lines; `spans` each span's kind, level and lines. `documents` hold check findings by rule and line, checked with spec/lab/rules.json and the conformance bundle's config. To move into the platform's docs/lab/conformance and arrive through spec:sync.",
   cases: {},
   documents: {},
 };
