@@ -15,6 +15,7 @@ import hr.inorbit.sdk.StreamTransport;
 import hr.inorbit.sdk.errors.ApiException;
 import hr.inorbit.sdk.errors.InOrbitException;
 import hr.inorbit.sdk.generated.AccountsGetUsageParams;
+import hr.inorbit.sdk.generated.CreateDocumentRequest;
 import hr.inorbit.sdk.generated.CreateEndpointRequest;
 import hr.inorbit.sdk.generated.EventsStreamEventsParams;
 import hr.inorbit.sdk.generated.Public;
@@ -714,6 +715,16 @@ class ConformanceTest {
             }
             case "events.delete_endpoint" ->
                 api.events().deleteEndpoint(args.path("endpoint_id").asText()).raw();
+            case "rfcs.create_document" ->
+                api.rfcs()
+                        .createDocument(
+                                args.path("space_id").asText(),
+                                CreateDocumentRequest.builder()
+                                        .kind(text(args, "kind"))
+                                        .title(text(args, "title"))
+                                        .summary(text(args, "summary"))
+                                        .build())
+                        .raw();
             default ->
                 throw new IllegalArgumentException("the conformance schema names an op this driver does not know: "
                         + action.path("op").asText());
