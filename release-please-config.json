@@ -69,7 +69,7 @@
       "release-type": "simple",
       "component": "java",
       "package-name": "hr.inorbit:inorbit-sdk",
-      "extra-files": ["pom.xml", "src/main/java/hr/inorbit/sdk/Client.java"]
+      "extra-files": ["pom.xml", "src/main/java/hr/inorbit/sdk/Client.java", "README.md"]
     },
     "cli": {
       "release-type": "simple",

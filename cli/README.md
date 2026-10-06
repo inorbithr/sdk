@@ -1,6 +1,8 @@
 # iohr, the InOrbit command line
 
-Pre-release (0.x): commands and output can still change between versions.
+Pre-release (0.x): commands and output can still change between versions. This page
+describes `main`; a change merged after the latest pre-release ships with the next one
+([CHANGELOG.md](CHANGELOG.md), [releases](https://github.com/inorbithr/sdk/releases?q=iohr)).
 
 ```sh
 brew install inorbithr/tap/iohr                                   # macOS, Linux
@@ -8,8 +10,10 @@ curl -fsSL https://packages.inorbit.hr/install.sh | sh            # Linux, macOS
 powershell -c "irm https://packages.inorbit.hr/install.ps1 | iex" # Windows
 ```
 
-Debian and Ubuntu (a signed APT repository), winget and every other way are on
-[docs.inorbit.hr/docs/command-line](https://docs.inorbit.hr/docs/command-line/). The
+Debian and Ubuntu (a signed APT repository) and every other way are on
+[docs.inorbit.hr/docs/command-line](https://docs.inorbit.hr/docs/command-line/). winget
+is not one yet: its manifests are built with every release and submitted with the first
+stable one ([releasing](../docs/releasing.md)). The
 installers ([install.sh](install/install.sh), [install.ps1](install/install.ps1)) are short
 enough to read first: each downloads the archive for your machine from the GitHub release,
 refuses it unless its SHA-256 matches the release's `SHA256SUMS` (and, with the GitHub CLI
@@ -61,23 +65,23 @@ iohr api GET /v1/webhooks/endpoints --all
 
 | Command | What it does |
 |---|---|
-| `iohr login [--web \| --device]` | Sign in and add a profile |
+| `iohr login [--web \| --device] [--insecure-storage]` | Sign in and add a profile; `--insecure-storage` keeps the token in a 0600 file on a machine without a credential store |
 | `iohr login --with-token` | Read an API token from stdin and add a profile |
 | `iohr logout` | Forget the profile and its credential on this machine |
 | `iohr profile list \| use \| show` | The profiles here; the default one |
 | `iohr whoami` | Subject, account, plan, scopes and expiry of the active profile |
 | `iohr auth token [--format text\|json]` | The profile's access token on stdout, refreshed first when less than a minute is left; for programs, such as the SDKs, that call with your login (below) |
 | `iohr accounts list` | The accounts the credential can see |
-| `iohr token create \| list \| revoke` | API tokens for an account (a signed-in person only) |
-| `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
+| `iohr token create --name N --scope S,... [--days 30] \| list [--status S] [--query Q] \| revoke ID` | API tokens for an account (a signed-in person only) |
+| `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`, `-i` the status and request id before the body; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
-| `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline |
+| `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline, `--package` names the surface's package or namespace (Go, Java, C#), `--runtime` the runtime's name in your project, `--force` replaces a non-empty directory |
 | `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
-| `iohr sdk check [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
+| `iohr sdk check [--lock FILE] [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
 | `iohr sdk add [rust\|typescript\|python\|go] [--version V] [--dry-run]` | Add the published SDK to the project here with the package manager it already uses; the language comes from the project's files when left out (below) |
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
-| `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s |
+| `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s for up to `--timeout` seconds (600) |
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |

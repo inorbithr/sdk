@@ -19,18 +19,24 @@ The repository holds two things: the `iohr` command line, released as a pre-rele
 and six client libraries. Each library is a hand-written runtime plus an API surface that
 `iohr sdk generate` writes, cut to what your credentials may call
 ([ADR 0011](docs/adr/0011-runtime-and-surface.md)). The libraries pass the shared conformance
-suite, streams included (server-sent events or one `/v1/ws` socket, [design.md](docs/design.md) section 7). Rust, TypeScript, Python and Go are released; the C# and Java registry releases
-(NuGet, Maven Central) come later; both carry the same version and are ready to publish. Status on 2026-10-05 (iohr 0.1.0-alpha.5 generates all six):
+suite, streams included (server-sent events or one `/v1/ws` socket, [design.md](docs/design.md)
+section 7). Rust, TypeScript, Python and Go are on their registries. C# and Java are not
+on NuGet or Maven Central yet: build them from source until their registry releases
+([roadmap](docs/roadmap.md), M4b).
 
-| Part | Package | Status |
+The versions below are read live from each registry, or from the repository's release
+tags where there is no registry release, so the table does not go stale between releases:
+
+| Part | Package | Latest release |
 |---|---|---|
-| Command line | `iohr` (APT, Homebrew, installers) | **0.1.0-alpha.9, pre-release** |
-| Rust | [`inorbithr`](https://crates.io/crates/inorbithr), Rust 1.94 | **0.2.1** on crates.io |
-| TypeScript | [`@inorbithr/sdk`](https://www.npmjs.com/package/@inorbithr/sdk), Node 22.12, Bun, Deno, browsers | **0.2.1** on npm and JSR |
-| Go | [`github.com/inorbithr/sdk/go`](https://pkg.go.dev/github.com/inorbithr/sdk/go), Go 1.26 | **0.2.1** |
-| Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | **0.2.1** on PyPI |
-| C# | `InOrbit.Sdk`, .NET 8 | 0.2.1, built from source; NuGet release planned |
-| Java | `hr.inorbit:inorbit-sdk`, Java 17 | 0.2.1, built from source; Maven Central release planned |
+| Command line | `iohr` (APT, Homebrew, installers, [GitHub releases](https://github.com/inorbithr/sdk/releases?q=iohr)) | [![iohr pre-release](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=iohr%2F*&include_prereleases&label=iohr)](https://github.com/inorbithr/sdk/releases?q=iohr), pre-release |
+| Rust | [`inorbithr`](https://crates.io/crates/inorbithr), Rust 1.94 | [![crates.io](https://img.shields.io/crates/v/inorbithr?label=crates.io)](https://crates.io/crates/inorbithr) |
+| TypeScript | [`@inorbithr/sdk`](https://www.npmjs.com/package/@inorbithr/sdk), Node 22.12, Bun, Deno, browsers | [![npm](https://img.shields.io/npm/v/%40inorbithr%2Fsdk?label=npm)](https://www.npmjs.com/package/@inorbithr/sdk) [![JSR](https://img.shields.io/jsr/v/%40inorbithr/sdk?label=JSR)](https://jsr.io/@inorbithr/sdk) |
+| Go | [`github.com/inorbithr/sdk/go`](https://pkg.go.dev/github.com/inorbithr/sdk/go), Go 1.26 | [![Go module tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=go%2Fv*&label=module)](https://pkg.go.dev/github.com/inorbithr/sdk/go) |
+| Go, OpenTelemetry | [`github.com/inorbithr/sdk/go/otel`](https://pkg.go.dev/github.com/inorbithr/sdk/go/otel), an optional module for spans and metrics | [![Go module tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=go%2Fotel%2Fv*&label=module)](https://pkg.go.dev/github.com/inorbithr/sdk/go/otel) |
+| Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | [![PyPI](https://img.shields.io/pypi/v/inorbithr?label=PyPI)](https://pypi.org/project/inorbithr/) |
+| C# | `InOrbit.Sdk`, .NET 8 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=csharp%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=csharp), built from source; not on NuGet yet |
+| Java | `hr.inorbit:inorbit-sdk`, Java 17 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=java%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=java), built from source; not on Maven Central yet |
 
 The contract the libraries are built against is synced from the platform into
 [`spec/`](spec/), and the replay server in
@@ -63,16 +69,19 @@ iohr whoami
 iohr api GET /v1/me
 ```
 
-`iohr` keeps several accounts as profiles, creates and revokes API tokens, connects an
-account's apps (`iohr connectors`, `iohr connections`: a key or a browser sign-in), and talks
-only to `api.inorbit.hr` and `auth.inorbit.hr`, with no telemetry. Releases before 1.0
-are pre-releases. Every release carries checksums, an SBOM and build provenance you can
+`iohr` keeps several accounts as profiles, creates and revokes API tokens, proves
+domains, connects an account's apps (`iohr connectors`, `iohr connections`: a key or a
+browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`), and
+checks Lab documents (`iohr lab check`). It talks to `api.inorbit.hr` and
+`auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
+`sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry and no update
+check. Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
 check with `gh attestation verify`. [cli/README.md](cli/README.md) has every command.
 
 ## Add a library to your project
 
 ```sh
-iohr sdk add        # cargo add, npm/pnpm/yarn/bun/deno add, uv/poetry/pdm add or go get, from your project's files
+iohr sdk add        # cargo add, npm install, pnpm/yarn/bun/deno add, uv/poetry/pdm add, pip or go get, from your project's files
 ```
 
 The command is printed, then run by your project's own package manager

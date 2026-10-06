@@ -115,11 +115,11 @@ belongs at the per-call slot (`AddPerCall`). See
   body, a query value, a token or a cookie. Headers appear only with `log_headers`,
   values only from the allowlist. `WithRedact` sees every record last. `SlogHook` stays
   and is superseded by it.
-- OpenTelemetry is the optional module `github.com/inorbithr/sdk/go/otel`, so this one
-  keeps its single dependency: `inorbit.Load(ctx, inorbitotel.Pipeline())` makes each
-  call an `INTERNAL` span with one `CLIENT` span per attempt, following the HTTP client
-  conventions, sends `traceparent` from the attempt, and records the duration, retry and
-  token exchange metrics. `INORBIT_TRACING=false` turns spans off; a `traceparent` you
+- OpenTelemetry is the optional module `github.com/inorbithr/sdk/go/otel` (`go get
+  github.com/inorbithr/sdk/go/otel@latest`), so this one keeps its single dependency:
+  `inorbit.Load(ctx, inorbitotel.Pipeline())` makes each call an `INTERNAL` span with one
+  `CLIENT` span per attempt, following the HTTP client conventions, sends `traceparent`
+  from the attempt, and records the duration, retry and token exchange metrics. `INORBIT_TRACING=false` turns spans off; a `traceparent` you
   pass per call is then sent as is.
 - A paged list also has an iterator, `All<Operation>`, returning `iter.Seq2[T, error]`;
   it follows the page tokens and fetches nothing more once the loop breaks:

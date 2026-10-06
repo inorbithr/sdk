@@ -1,7 +1,7 @@
 # InOrbit SDK
 
 Client libraries for the InOrbit public API (`https://api.inorbit.hr`) in Go, Rust,
-TypeScript and Python, in one repository. This file is the shared brief for every coding
+TypeScript, Python, Java and C#, and the `iohr` command line, in one repository. This file is the shared brief for every coding
 agent and for people. Language-specific rules live in each language directory's own
 `AGENTS.md` / `CLAUDE.md`.
 
@@ -39,7 +39,7 @@ once, then:
   rules). Run it before a push and before saying a change is done.
 - `mise run ci`: every check in every language; before a release, or when in doubt.
 - `mise run <lang>:check`: format check, lint, type check and unit tests for one
-  language (`go`, `rust`, `ts`, `py`).
+  language (`go`, `rust`, `ts`, `py`, `java`, `csharp`), or `cli:check` for the command line.
 - `mise run <lang>:fmt`: format one language in place.
 - `mise run gen`: regenerate every `generated/` directory from `spec/`. CI fails if the
   result differs from what is committed.

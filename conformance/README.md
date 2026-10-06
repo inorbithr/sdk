@@ -173,11 +173,12 @@ string generated from the regex for `~`), leaves out `headers_absent`, and sends
 request through the listener the case's `client.transport` and the request's `via` and
 `client_cert` call for, so every case, the pending ones included, plays to a pass.
 
-## Configuration and middleware cases (M6, pending)
+## Configuration and middleware cases (M6)
 
 The cases under `credentials`, `middleware`, `transport` and the M6 cases in `retries`
-use schema fields no runtime supports yet. Every one is `pending` for all six languages
-until a runtime passes it. The replay server supports what they need from it
+use the configuration schema fields below. All six runtimes pass every one of them (each
+runtime's 0.2.2, 2026-10-05), and no case is `pending`. The replay server supports what
+they need from it
 (`docs/config.md` section 9.1): the header matchers, `headers_absent`, `via` and
 `client_cert`, the TLS, mTLS and proxy listeners, their locations in the `/_case`
 answer, and the fake `iohr`; its self-test plays all of them to a pass.
