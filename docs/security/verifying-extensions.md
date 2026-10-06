@@ -2,7 +2,7 @@
 
 What `iohr ext install` checks before an extension is used, how to run the same checks
 by hand, and how a company serves extensions from its own mirror. The decision is
-[ADR 0012](../adr/0012-extensions.md); the requirements are SR-25 to SR-28 in
+[ADR 0012](../adr/0012-extensions.md); the requirements are SR-25 to SR-28 and SR-32 in
 [requirements.md](requirements.md).
 
 ## What is published
@@ -13,7 +13,9 @@ Each extension version is an OCI image index at
 `windows/arm64`). Each manifest has:
 
 - a config blob, media type `application/vnd.inorbit.iohr.extension.config.v1+json`:
-  `name`, `version`, `entrypoint`, `scopes`, `description`;
+  `name`, `version`, `entrypoint`, `scopes`, `description` and, for an extension that
+  controls a system service, `privileges`: the Linux capabilities that service holds,
+  such as `["CAP_BPF", "CAP_PERFMON", "CAP_NET_ADMIN"]`;
 - one layer, `application/vnd.inorbit.iohr.extension.layer.v1.tar+gzip`, holding the
   program at `entrypoint`.
 
@@ -43,11 +45,18 @@ In this order, and nothing is written to disk until all of them pass:
    The Sigstore trusted root is built into `iohr`; nothing is fetched to check it.
    Alternatively, a signature by a key in `ext.trusted_keys` passes (see below).
 3. The config: the name and version are the ones asked for, the entrypoint is a
-   relative path without `..`, every scope is `resource:action`.
+   relative path without `..`, every scope is `resource:action`, every privilege is a
+   capability the kernel defines (at most 16, none twice).
 4. The layer matches its digest and size; only the entrypoint is taken from it, and
    only as a regular file.
 
-`iohr ext list` shows what is installed with its digest and signer.
+Then, for an extension that declares privileges, the confirmation (SR-32): each
+privilege is shown in plain words, and the extension is installed only after you type
+`yes` or pass `--yes`. `iohr` never grants a privilege; the service's own package or
+unit does. The lock records what you confirmed, and `iohr ext sync` refuses an artifact
+that declares more.
+
+`iohr ext list` shows what is installed with its digest, privileges and signer.
 `iohr ext verify` repeats checks 2 and the program's hash offline, from the bundles kept
 at install. Every run of an extension re-hashes the program first.
 

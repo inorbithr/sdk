@@ -11,6 +11,103 @@ pub const LAYER_MEDIA_TYPE: &str = "application/vnd.inorbit.iohr.extension.layer
 pub const MAX_MANIFEST: usize = 64 * 1024;
 const MAX_SCOPES: usize = 64;
 const MAX_DESCRIPTION: usize = 500;
+/// The most privileges an extension may declare.
+pub const MAX_PRIVILEGES: usize = 16;
+
+/// Every Linux capability the kernel defines (`include/uapi/linux/capability.h`, 0 to
+/// `CAP_LAST_CAP`, Linux 5.9 and later), each with what it lets a program do, in the
+/// words `iohr ext install` shows. An extension may declare only these.
+pub const CAPABILITIES: &[(&str, &str)] = &[
+    ("CAP_CHOWN", "change the owner of any file"),
+    (
+        "CAP_DAC_OVERRIDE",
+        "read, write and run any file, whatever its permissions",
+    ),
+    (
+        "CAP_DAC_READ_SEARCH",
+        "read any file and list any directory",
+    ),
+    (
+        "CAP_FOWNER",
+        "act as the owner of any file (permissions, times)",
+    ),
+    (
+        "CAP_FSETID",
+        "keep set-user-ID and set-group-ID bits on files it changes",
+    ),
+    ("CAP_KILL", "send signals to any process"),
+    ("CAP_SETGID", "switch to any group"),
+    ("CAP_SETUID", "switch to any user, including root"),
+    (
+        "CAP_SETPCAP",
+        "give or drop capabilities of its own processes",
+    ),
+    (
+        "CAP_LINUX_IMMUTABLE",
+        "make files immutable or append-only, and undo it",
+    ),
+    ("CAP_NET_BIND_SERVICE", "listen on ports below 1024"),
+    (
+        "CAP_NET_BROADCAST",
+        "send broadcast and listen to multicast",
+    ),
+    (
+        "CAP_NET_ADMIN",
+        "configure the network: interfaces, routes, firewall, traffic control",
+    ),
+    ("CAP_NET_RAW", "open raw sockets and capture packets"),
+    ("CAP_IPC_LOCK", "lock memory so it is never swapped out"),
+    (
+        "CAP_IPC_OWNER",
+        "use any shared memory, semaphore or message queue",
+    ),
+    ("CAP_SYS_MODULE", "load and unload kernel modules"),
+    (
+        "CAP_SYS_RAWIO",
+        "read and write devices and I/O ports directly",
+    ),
+    ("CAP_SYS_CHROOT", "change its root directory"),
+    (
+        "CAP_SYS_PTRACE",
+        "inspect and control any process, and read its memory",
+    ),
+    ("CAP_SYS_PACCT", "turn process accounting on and off"),
+    (
+        "CAP_SYS_ADMIN",
+        "administer the system: mounts, namespaces and much more; close to root",
+    ),
+    ("CAP_SYS_BOOT", "reboot the machine or load a new kernel"),
+    ("CAP_SYS_NICE", "raise the priority of any process"),
+    (
+        "CAP_SYS_RESOURCE",
+        "go past resource limits and disk quotas",
+    ),
+    ("CAP_SYS_TIME", "set the system clock"),
+    ("CAP_SYS_TTY_CONFIG", "reconfigure terminals"),
+    ("CAP_MKNOD", "create device files"),
+    ("CAP_LEASE", "take leases on any file"),
+    ("CAP_AUDIT_WRITE", "write to the kernel audit log"),
+    ("CAP_AUDIT_CONTROL", "change kernel auditing and its rules"),
+    ("CAP_SETFCAP", "give capabilities to program files"),
+    (
+        "CAP_MAC_OVERRIDE",
+        "bypass mandatory access control (Smack)",
+    ),
+    (
+        "CAP_MAC_ADMIN",
+        "change mandatory access control (Smack) settings",
+    ),
+    ("CAP_SYSLOG", "read and clear the kernel log"),
+    ("CAP_WAKE_ALARM", "set alarms that wake the system"),
+    ("CAP_BLOCK_SUSPEND", "keep the system from suspending"),
+    ("CAP_AUDIT_READ", "read the kernel audit log"),
+    (
+        "CAP_PERFMON",
+        "observe performance and kernel state (perf events, tracing)",
+    ),
+    ("CAP_BPF", "load eBPF programs into the kernel"),
+    ("CAP_CHECKPOINT_RESTORE", "checkpoint and restore processes"),
+];
 
 /// Top-level commands of `iohr` itself, which no extension may take.
 pub const RESERVED: &[&str] = &[
@@ -36,7 +133,8 @@ pub const RESERVED: &[&str] = &[
 ];
 
 /// What an extension says about itself: who it is, what to run, which scopes it may ask
-/// for. Read from the registry before anything is installed, and shown to the person.
+/// for, which privileges its system service holds. Read from the registry before
+/// anything is installed, and shown to the person.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Manifest {
@@ -52,6 +150,12 @@ pub struct Manifest {
     /// One line about what it does.
     #[serde(default)]
     pub description: String,
+    /// The Linux capabilities its system service holds (RFC 0061), such as `CAP_BPF`.
+    /// `iohr` grants none of them: it runs as the person. The field tells the person
+    /// what the service holds, and installing asks them to confirm it (SR-32). Absent
+    /// means none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub privileges: Vec<String>,
 }
 
 /// Why a manifest or a name was refused.
@@ -98,8 +202,44 @@ impl Manifest {
                 "an extension's description is one line of at most {MAX_DESCRIPTION} characters"
             )));
         }
-        Ok(())
+        check_privileges(&self.privileges)
     }
+}
+
+/// Checks a list of privileges: at most [`MAX_PRIVILEGES`], each a capability the
+/// kernel defines ([`CAPABILITIES`]), none twice.
+///
+/// # Errors
+///
+/// [`ManifestError`] naming the rule.
+pub fn check_privileges(privileges: &[String]) -> Result<(), ManifestError> {
+    if privileges.len() > MAX_PRIVILEGES {
+        return Err(ManifestError(format!(
+            "an extension declares at most {MAX_PRIVILEGES} privileges"
+        )));
+    }
+    for (i, p) in privileges.iter().enumerate() {
+        if privilege(p).is_none() {
+            return Err(ManifestError(format!(
+                "`{}` is not a Linux capability such as CAP_NET_ADMIN",
+                printable(p)
+            )));
+        }
+        if privileges[..i].contains(p) {
+            return Err(ManifestError(format!("{p} is declared twice")));
+        }
+    }
+    Ok(())
+}
+
+/// What a capability lets a program do, in plain words; `None` for a name the kernel
+/// does not define.
+#[must_use]
+pub fn privilege(name: &str) -> Option<&'static str> {
+    CAPABILITIES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, words)| *words)
 }
 
 /// Checks an extension name: 1 to 32 lower-case letters, digits and `-`, starting with
@@ -199,7 +339,7 @@ pub(crate) fn printable(s: &str) -> String {
 mod tests {
     use clap::CommandFactory as _;
 
-    use super::{Manifest, RESERVED, check_name};
+    use super::{CAPABILITIES, Manifest, RESERVED, check_name, privilege};
 
     /// Every built-in command, and each of its aliases, is reserved: read from the clap
     /// tree so a new command cannot be shadowed by an extension of the same name.
@@ -261,6 +401,70 @@ mod tests {
         }
         assert!(manifest(&base).is_ok());
         assert!(Manifest::parse(&vec![b' '; 70 * 1024]).is_err());
+    }
+
+    #[test]
+    fn privileges_are_known_capabilities_at_most_16_never_twice() {
+        let base =
+            serde_json::json!({"name": "capture", "version": "1.0.0", "entrypoint": "capture"});
+        // Absent is none, and an older manifest keeps its exact shape when written back.
+        let m = manifest(&base).unwrap();
+        assert_eq!(m.privileges, [] as [String; 0]);
+        assert!(
+            !serde_json::to_string(&m).unwrap().contains("privileges"),
+            "an empty list is not written"
+        );
+
+        let mut v = base.clone();
+        v["privileges"] = serde_json::json!(["CAP_BPF", "CAP_PERFMON", "CAP_NET_ADMIN"]);
+        let m = manifest(&v).unwrap();
+        assert_eq!(m.privileges, ["CAP_BPF", "CAP_PERFMON", "CAP_NET_ADMIN"]);
+        let all: Vec<&str> = CAPABILITIES.iter().take(16).map(|(n, _)| *n).collect();
+        v["privileges"] = serde_json::json!(all);
+        assert!(manifest(&v).is_ok());
+
+        for bad in [
+            serde_json::json!(["CAP_BPF", "CAP_BPF"]),
+            serde_json::json!(["cap_bpf"]),
+            serde_json::json!(["BPF"]),
+            serde_json::json!(["CAP_EVERYTHING"]),
+            serde_json::json!(["CAP_BPF\u{1b}[31m"]),
+            serde_json::json!([""]),
+            serde_json::json!("CAP_BPF"),
+            serde_json::json!(
+                CAPABILITIES
+                    .iter()
+                    .take(17)
+                    .map(|(n, _)| *n)
+                    .collect::<Vec<_>>()
+            ),
+        ] {
+            let mut v = base.clone();
+            v["privileges"] = bad.clone();
+            assert!(manifest(&v).is_err(), "privileges = {bad}");
+        }
+    }
+
+    /// The table is the kernel's list: 41 names (0 to `CAP_LAST_CAP` = 40, Linux 5.9 and
+    /// later), each once, each with words to show.
+    #[test]
+    fn the_capability_table_is_the_kernels() {
+        assert_eq!(CAPABILITIES.len(), 41);
+        for (i, (name, words)) in CAPABILITIES.iter().enumerate() {
+            assert!(name.starts_with("CAP_"), "{name}");
+            assert!(!words.is_empty() && !words.ends_with('.'), "{name}");
+            assert!(
+                CAPABILITIES[..i].iter().all(|(n, _)| n != name),
+                "{name} twice"
+            );
+        }
+        assert_eq!(CAPABILITIES[0].0, "CAP_CHOWN");
+        assert_eq!(CAPABILITIES[40].0, "CAP_CHECKPOINT_RESTORE");
+        assert_eq!(
+            privilege("CAP_BPF"),
+            Some("load eBPF programs into the kernel")
+        );
+        assert_eq!(privilege("CAP_ALL"), None);
     }
 
     #[test]

@@ -319,6 +319,7 @@ impl Store {
             &f.manifest.version,
             &f.index,
             f.verified.signer.lock_name(),
+            f.manifest.privileges.clone(),
         );
         create_private_dir(&self.root)?;
         let tmp = self
@@ -418,6 +419,7 @@ impl Store {
             .installed(name)?
             .ok_or_else(|| ExtError::Usage(format!("{name} is not installed")))?;
         check_program(&record, &dir)?;
+        check_confirmed(&entry, &record)?;
         let mut bundles = Vec::new();
         for (file, digest) in &record.bundles {
             let path = dir.join("bundles").join(file);
@@ -457,6 +459,27 @@ pub fn check_program(record: &Record, dir: &Path) -> Result<PathBuf, ExtError> {
         ))));
     }
     Ok(path)
+}
+
+/// Refuses an installed version that declares a privilege the lock does not record as
+/// confirmed (SR-32): `iohr` runs nothing whose privileges the person has not seen.
+///
+/// # Errors
+///
+/// [`ExtError::Trust`] naming the privileges.
+pub fn check_confirmed(entry: &Entry, record: &Record) -> Result<(), ExtError> {
+    let missing = entry.unconfirmed(&record.manifest.privileges);
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(ExtError::Trust(trust::TrustError(format!(
+            "{} declares privileges that were never confirmed ({}): run `iohr ext install {}` \
+             again to see and confirm them",
+            record.manifest.name,
+            missing.join(", "),
+            record.manifest.name
+        ))))
+    }
 }
 
 fn now() -> String {

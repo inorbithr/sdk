@@ -97,6 +97,11 @@ extension process it runs (ADR 0012).
 | I | The registry credential leaks through output | It is a `Redacted` value, sent as a sensitive header to the registry and its token service only, never printed by `--verbose` (test) |
 | I | `iohr` reports installs or checks for updates | SR-25: the registry is contacted only by `ext install`, `upgrade`, `sync`; no telemetry |
 | R | A team cannot show which extension code ran | SR-28: `iohr-ext.lock` with digest and signer, committed; `ext list` and `verify` |
+| E | An extension's system service holds kernel privileges the person never saw | SR-32: install shows each privilege in plain words and needs a typed `yes` or `--yes`; without a terminal it refuses; `iohr` itself grants none |
+| E | A new release quietly adds a privilege | SR-32: `upgrade` names the added ones and asks again; `sync` refuses an artifact that declares more than its lock entry records |
+| T | A manifest names a made-up or misleading capability, or hides one among many | SR-32: only names the kernel defines, at most 16, none twice; control characters refused |
+| E | An `iohr` from before privileges installs a privileged extension from a team lock without showing them | SR-32: a lock with privileges is format version 2, which older versions refuse |
+| T | The machine's lock is edited so a privilege looks never declared | SR-32: `iohr <name>` and `ext verify` refuse a version whose recorded manifest declares privileges the lock does not hold |
 
 ### `iohr sdk add`
 

@@ -59,12 +59,26 @@ struct Artifact {
 
 impl Artifact {
     fn new(name: &str, version: &str, scopes: &[&str], program: &[u8]) -> Self {
-        let config = serde_json::json!({
+        Self::privileged(name, version, scopes, &[], program)
+    }
+
+    /// An artifact whose manifest declares `privileges` (left out when empty, as an
+    /// older manifest has none).
+    fn privileged(
+        name: &str,
+        version: &str,
+        scopes: &[&str],
+        privileges: &[&str],
+        program: &[u8],
+    ) -> Self {
+        let mut config = serde_json::json!({
             "name": name, "version": version, "entrypoint": "bin/prog",
             "scopes": scopes, "description": "a test extension"
-        })
-        .to_string()
-        .into_bytes();
+        });
+        if !privileges.is_empty() {
+            config["privileges"] = serde_json::json!(privileges);
+        }
+        let config = config.to_string().into_bytes();
         let layer = tar_gz(&[("README", b'0', b"hi"), ("bin/prog", b'0', program)]);
         let manifest = serde_json::json!({
             "schemaVersion": 2,
@@ -361,6 +375,191 @@ async fn install_verifies_pins_and_lists() {
         "{}",
         text(&o)
     );
+}
+
+fn stdout_json(o: &Output) -> serde_json::Value {
+    serde_json::from_slice(&o.stdout).unwrap_or_else(|e| panic!("{e}: {}", text(o)))
+}
+
+/// Publishes `capture` 0.1.0 (`CAP_BPF`, `CAP_PERFMON`) and 0.2.0 (`CAP_NET_ADMIN`
+/// added); returns 0.2.0.
+async fn publish_capture(b: &Box_, key: &KeyPair) -> Artifact {
+    let a1 = Artifact::privileged(
+        "capture",
+        "0.1.0",
+        &["agents:read"],
+        &["CAP_BPF", "CAP_PERFMON"],
+        b"v1",
+    );
+    let a2 = Artifact::privileged(
+        "capture",
+        "0.2.0",
+        &["agents:read"],
+        &["CAP_BPF", "CAP_PERFMON", "CAP_NET_ADMIN"],
+        b"v2",
+    );
+    publish(&b.server, "capture", "0.1.0", &a1, Some(key)).await;
+    publish(&b.server, "capture", "0.2.0", &a2, Some(key)).await;
+    tags(&b.server, "capture", &["0.1.0", "0.2.0"]).await;
+    a2
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn privileges_are_confirmed_shown_and_pinned() {
+    let b = Box_::new().await;
+    let key = KeyPair::generate_ecdsa_p256().unwrap();
+    b.trust(&key);
+    let a2 = publish_capture(&b, &key).await;
+
+    // No terminal and no --yes: the privileges are shown in plain words, nothing installed.
+    let o = b.run(&["ext", "install", "capture@0.1.0", "--lock", "team.lock"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    for want in [
+        "declares privileges",
+        "CAP_BPF      load eBPF programs into the kernel",
+        "iohr runs as you and grants none of them",
+        "confirm them at a terminal, or pass --yes; nothing was installed",
+    ] {
+        assert!(text(&o).contains(want), "{want}: {}", text(&o));
+    }
+    nothing_installed(&b);
+    assert!(!b.dir.path().join("team.lock").exists());
+
+    // --yes confirms; the JSON result and both locks carry the privileges.
+    let o = b.run(&[
+        "ext",
+        "install",
+        "capture@0.1.0",
+        "--lock",
+        "team.lock",
+        "--yes",
+        "--json",
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(
+        stdout_json(&o)["privileges"],
+        serde_json::json!(["CAP_BPF", "CAP_PERFMON"])
+    );
+    for lock in [
+        b.dir.path().join("team.lock"),
+        b.data().join("iohr-ext.lock"),
+    ] {
+        let lock = std::fs::read_to_string(lock).unwrap();
+        assert!(lock.contains("version = 2\n"), "{lock}");
+        assert!(
+            lock.contains("privileges = [\n    \"CAP_BPF\",\n    \"CAP_PERFMON\",\n]"),
+            "{lock}"
+        );
+    }
+
+    // list and verify show them, as a column and in JSON.
+    let o = b.run(&["ext", "list"]);
+    assert!(
+        text(&o).contains("PRIVILEGES") && text(&o).contains("CAP_BPF CAP_PERFMON"),
+        "{}",
+        text(&o)
+    );
+    let o = b.run(&["ext", "list", "--json"]);
+    assert_eq!(
+        stdout_json(&o)[0]["privileges"],
+        serde_json::json!(["CAP_BPF", "CAP_PERFMON"])
+    );
+    let o = b.run(&["ext", "verify", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(
+        stdout_json(&o)[0]["privileges"],
+        serde_json::json!(["CAP_BPF", "CAP_PERFMON"])
+    );
+
+    // A release with a new privilege asks again: refused without a terminal or --yes.
+    let o = b.run(&["ext", "upgrade", "capture"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(
+        text(&o).contains("declares new privileges (CAP_NET_ADMIN)"),
+        "{}",
+        text(&o)
+    );
+    let o = b.run(&["ext", "list", "--json"]);
+    assert_eq!(stdout_json(&o)[0]["version"], "0.1.0");
+    let o = b.run(&["ext", "upgrade", "capture", "--yes"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("new privileges CAP_NET_ADMIN"),
+        "{}",
+        text(&o)
+    );
+
+    // sync refuses a pinned extension whose privileges grew beyond what the lock records.
+    assert_eq!(code(&b.run(&["ext", "remove", "capture"])), 0);
+    let grown = format!(
+        "version = 2\n\n[[extension]]\nname = \"capture\"\nversion = \"0.2.0\"\ndigest = \"{}\"\n\
+         signer = \"{}\"\nprivileges = [\"CAP_BPF\", \"CAP_PERFMON\"]\n",
+        a2.index_digest(),
+        signer(&b)
+    );
+    std::fs::write(b.dir.path().join("grown.lock"), grown).unwrap();
+    let o = b.run(&["ext", "sync", "--lock", "grown.lock"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains("does not record (CAP_NET_ADMIN): not installed"),
+        "{}",
+        text(&o)
+    );
+    nothing_installed(&b);
+
+    // The team's lock, which records what was confirmed, installs without asking.
+    let o = b.run(&["ext", "sync", "--lock", "team.lock"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("holds CAP_BPF, CAP_PERFMON (confirmed in team.lock)"),
+        "{}",
+        text(&o)
+    );
+}
+
+/// The signer the team lock recorded, read back from it.
+fn signer(b: &Box_) -> String {
+    let lock = std::fs::read_to_string(b.dir.path().join("team.lock")).unwrap();
+    lock.lines()
+        .find_map(|l| l.strip_prefix("signer = \""))
+        .and_then(|l| l.strip_suffix('"'))
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn privileges_never_confirmed_do_not_run() {
+    let b = Box_::new().await;
+    let key = KeyPair::generate_ecdsa_p256().unwrap();
+    b.trust(&key);
+    let a = Artifact::privileged(
+        "capture",
+        "1.0.0",
+        &[],
+        &["CAP_BPF"],
+        b"#!/bin/sh\nexit 0\n",
+    );
+    publish(&b.server, "capture", "1.0.0", &a, Some(&key)).await;
+    let o = b.run(&["ext", "install", "capture@1.0.0", "--yes"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    // The machine's lock no longer records the confirmation (as if edited by hand).
+    let path = b.data().join("iohr-ext.lock");
+    let lock = std::fs::read_to_string(&path).unwrap();
+    let edited = lock
+        .replace("version = 2", "version = 1")
+        .replace("privileges = [\"CAP_BPF\"]\n", "");
+    assert_ne!(lock, edited);
+    std::fs::write(&path, edited).unwrap();
+    let o = b.run(&["capture"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains("declares privileges that were never confirmed (CAP_BPF)"),
+        "{}",
+        text(&o)
+    );
+    let o = b.run(&["ext", "verify", "capture"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("never confirmed"), "{}", text(&o));
 }
 
 #[tokio::test(flavor = "multi_thread")]

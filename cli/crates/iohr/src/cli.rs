@@ -474,22 +474,30 @@ impl UseStatus {
 #[derive(Debug, Subcommand)]
 pub enum ExtCommand {
     /// Fetch an extension, verify its signature, provenance and digest, and install it.
+    /// One that declares privileges for its system service asks first unless --yes.
     Install {
         /// NAME, NAME@VERSION or NAME@sha256:DIGEST (default: the newest release).
         extension: String,
         /// Also pin it in this lock file, for `iohr ext sync` elsewhere.
         #[arg(long, value_name = "FILE")]
         lock: Option<PathBuf>,
+        /// Confirm the privileges it declares without asking (needed without a terminal).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// The installed extensions.
     List,
-    /// Install the newest release of one extension, or of every installed one.
+    /// Install the newest release of one extension, or of every installed one. A release
+    /// that declares new privileges asks first unless --yes.
     Upgrade {
         /// The extension (default: all).
         name: Option<String>,
         /// Also pin the result in this lock file.
         #[arg(long, value_name = "FILE")]
         lock: Option<PathBuf>,
+        /// Confirm new privileges without asking (needed without a terminal).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Remove an extension from this machine.
     Remove {

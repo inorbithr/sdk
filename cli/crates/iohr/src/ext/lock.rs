@@ -9,12 +9,17 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::manifest::{check_name, check_version};
+use super::manifest::{check_name, check_privileges, check_version};
 use super::oci::Digest;
 
 /// The file name.
 pub const FILE: &str = "iohr-ext.lock";
+/// The lock format without privileges, which every `iohr` with extensions reads.
 const VERSION: u32 = 1;
+/// The lock format once an entry names privileges (SR-32). An `iohr` from before
+/// privileges refuses it instead of installing a privileged extension without showing
+/// them.
+const VERSION_PRIVILEGES: u32 = 2;
 const MAX_LOCK: u64 = 1024 * 1024;
 
 /// One pinned extension.
@@ -29,18 +34,40 @@ pub struct Entry {
     pub digest: String,
     /// Who signed it: the release workflow (without the tag) or `key:sha256:...`.
     pub signer: String,
+    /// The privileges the person confirmed for its system service (SR-32). `sync`
+    /// refuses an artifact that declares any other.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub privileges: Vec<String>,
 }
 
 impl Entry {
     /// An entry.
     #[must_use]
-    pub fn new(name: &str, version: &str, digest: &Digest, signer: String) -> Self {
+    pub fn new(
+        name: &str,
+        version: &str,
+        digest: &Digest,
+        signer: String,
+        privileges: Vec<String>,
+    ) -> Self {
         Self {
             name: name.to_owned(),
             version: version.to_owned(),
             digest: digest.as_str().to_owned(),
             signer,
+            privileges,
         }
+    }
+
+    /// The privileges in `declared` that this entry does not hold: what an artifact asks
+    /// for beyond what was confirmed.
+    #[must_use]
+    pub fn unconfirmed<'a>(&self, declared: &'a [String]) -> Vec<&'a str> {
+        declared
+            .iter()
+            .filter(|p| !self.privileges.contains(p))
+            .map(String::as_str)
+            .collect()
     }
 }
 
@@ -72,7 +99,7 @@ impl Lock {
     pub fn parse(text: &str) -> Result<Self, LockError> {
         let w: Wire = toml::from_str(text)
             .map_err(|e| LockError(format!("not a valid {FILE}: {}", e.message())))?;
-        if w.version != VERSION {
+        if w.version != VERSION && w.version != VERSION_PRIVILEGES {
             return Err(LockError(format!(
                 "{FILE} version {} is from a newer iohr; update iohr",
                 w.version
@@ -86,6 +113,8 @@ impl Lock {
             if e.signer.is_empty() {
                 return Err(LockError(format!("{FILE}: {} names no signer", e.name)));
             }
+            check_privileges(&e.privileges)
+                .map_err(|m| LockError(format!("{FILE}: {}: {m}", e.name)))?;
             if entries.insert(e.name.clone(), e).is_some() {
                 return Err(LockError(format!("{FILE} lists an extension twice")));
             }
@@ -96,8 +125,13 @@ impl Lock {
     /// The file's text: sorted by name, so it diffs well.
     #[must_use]
     pub fn render(&self) -> String {
+        let privileged = self.entries.values().any(|e| !e.privileges.is_empty());
         let w = Wire {
-            version: VERSION,
+            version: if privileged {
+                VERSION_PRIVILEGES
+            } else {
+                VERSION
+            },
             extensions: self.entries.values().cloned().collect(),
         };
         let body = toml::to_string_pretty(&w).unwrap_or_default();
@@ -160,19 +194,66 @@ mod tests {
             "0.1.0",
             &Digest::of(b"x"),
             "https://github.com/inorbithr/agent/.github/workflows/release.yml".into(),
+            Vec::new(),
         );
         lock.entries.insert("agent".into(), e);
         let text = lock.render();
         assert!(text.contains("[[extension]]"), "{text}");
+        // Without privileges the file is the one every earlier iohr wrote and reads.
+        assert!(text.contains("version = 1\n"), "{text}");
+        assert!(!text.contains("privileges"), "{text}");
         assert_eq!(Lock::parse(&text).unwrap(), lock);
 
         for bad in [
-            "version = 2",
+            "version = 3",
             "version = 1\n[[extension]]\nname = \"ext\"\nversion = \"1.0.0\"\ndigest = \"sha256:00\"\nsigner = \"s\"",
             "version = 1\n[[extension]]\nname = \"agent\"\nversion = \"1.0.0\"\ndigest = \"md5:00\"\nsigner = \"s\"",
         ] {
             assert!(Lock::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn privileges_are_recorded_checked_and_raise_the_format() {
+        let mut lock = Lock::default();
+        let e = Entry::new(
+            "capture",
+            "0.1.0",
+            &Digest::of(b"x"),
+            "key:sha256:00".into(),
+            vec!["CAP_BPF".into(), "CAP_PERFMON".into()],
+        );
+        assert_eq!(
+            e.unconfirmed(&["CAP_BPF".into(), "CAP_NET_ADMIN".into()]),
+            ["CAP_NET_ADMIN"]
+        );
+        assert_eq!(e.unconfirmed(&["CAP_PERFMON".into()]), [] as [&str; 0]);
+        lock.entries.insert("capture".into(), e);
+        let text = lock.render();
+        // An iohr from before privileges refuses this file rather than ignore them.
+        assert!(text.contains("version = 2\n"), "{text}");
+        assert!(
+            text.contains("privileges = [\n    \"CAP_BPF\",\n    \"CAP_PERFMON\",\n]"),
+            "{text}"
+        );
+        assert_eq!(Lock::parse(&text).unwrap(), lock);
+
+        let entry = |p: &str| {
+            format!(
+                "version = 2\n[[extension]]\nname = \"capture\"\nversion = \"1.0.0\"\n\
+                 digest = \"{}\"\nsigner = \"s\"\nprivileges = {p}\n",
+                Digest::of(b"x")
+            )
+        };
+        assert!(Lock::parse(&entry("[\"CAP_BPF\"]")).is_ok());
+        for bad in [
+            "[\"CAP_ROOT\"]",
+            "[\"CAP_BPF\", \"CAP_BPF\"]",
+            "\"CAP_BPF\"",
+        ] {
+            assert!(Lock::parse(&entry(bad)).is_err(), "{bad}");
+        }
+        assert!(Lock::parse("version = 3").is_err());
     }
 
     #[test]
