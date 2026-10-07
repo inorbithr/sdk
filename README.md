@@ -1,12 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset=".github/assets/logo-light.svg">
-    <img alt="InOrbit SDK logo: a terminal prompt with an amber cursor" src=".github/assets/logo-light.svg" width="88" height="88">
-  </picture>
-</p>
-
-<h1 align="center">sdk</h1>
+<p align="center"><img alt="sdk: a TypeScript client call in a code panel with tabs for Rust, TypeScript, Python, Go, Java and C#, and iohr sdk add in a terminal" src=".github/assets/social-preview.png" width="100%"></p>
 
 <p align="center">SDKs and developer tooling for the InOrbit platform.</p>
 
