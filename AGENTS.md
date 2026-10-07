@@ -1,7 +1,7 @@
 # InOrbit SDK
 
 Client libraries for the InOrbit public API (`https://api.inorbit.hr`) in Go, Rust,
-TypeScript, Python, Java and C#, and the `iohr` command line, in one repository. This file is the shared brief for every coding
+TypeScript, Python, Java, C# and Swift, and the `iohr` command line, in one repository. This file is the shared brief for every coding
 agent and for people. Language-specific rules live in each language directory's own
 `AGENTS.md` / `CLAUDE.md`.
 
@@ -11,7 +11,7 @@ agent and for people. Language-specific rules live in each language directory's 
 |---|---|
 | `spec/` | The contract, vendored from the platform: the public OpenAPI slice, the error envelope, the socket frames. Never hand-edited. |
 | `conformance/` | Language-neutral test cases (YAML) and the replay server every SDK is tested against. |
-| `typescript/`, `python/`, `go/`, `java/`, `csharp/`, `rust/` | One package each: a hand-written runtime and the public surface `iohr sdk generate` writes into it (ADR 0011). |
+| `typescript/`, `python/`, `go/`, `java/`, `csharp/`, `rust/`, `swift/` | One package each: a hand-written runtime and the public surface `iohr sdk generate` writes into it (ADR 0011). Swift's `Package.swift` sits at the root, where SwiftPM reads it (ADR 0016). |
 | `cli/` | The `iohr` command line: a Cargo workspace of its own (ADR 0009), with `cli/AGENTS.md`. |
 | `examples/<lang>/` | Small programs that compile in CI and are quoted by the READMEs. |
 | `docs/` | `design.md` (cross-language API rules), `adr/` (decisions), `releasing.md`, `style.md`. |
@@ -22,7 +22,7 @@ agent and for people. Language-specific rules live in each language directory's 
 1. **The platform defines the API; this repo follows it.** `spec/` is synced from the
    platform with `mise run spec:sync` and records the commit it came from in
    `spec/SOURCE`. A wrong spec is fixed upstream, then synced. Never patch `spec/` by hand.
-2. **`docs/design.md` defines how the SDKs look.** All six languages expose the same
+2. **`docs/design.md` defines how the SDKs look.** All seven languages expose the same
    concepts with the same names, adjusted only for each language's idiom
    (`get_me` / `GetMe` / `getMe`). A difference between languages is a bug unless
    `design.md` lists it.
@@ -39,7 +39,7 @@ once, then:
   rules). Run it before a push and before saying a change is done.
 - `mise run ci`: every check in every language; before a release, or when in doubt.
 - `mise run <lang>:check`: format check, lint, type check and unit tests for one
-  language (`go`, `rust`, `ts`, `py`, `java`, `csharp`), or `cli:check` for the command line.
+  language (`go`, `rust`, `ts`, `py`, `java`, `csharp`, `swift`), or `cli:check` for the command line.
 - `mise run <lang>:fmt`: format one language in place.
 - `mise run gen`: regenerate every `generated/` directory from `spec/`. CI fails if the
   result differs from what is committed.
@@ -86,7 +86,7 @@ A task for a language whose package does not exist yet prints a skip line and ex
 
 - [Conventional Commits](https://www.conventionalcommits.org) with the language as scope:
   `feat(go): ...`, `fix(py): ...`, `docs: ...`, `ci: ...`, `spec: ...`. Scopes:
-  `go`, `rust`, `ts`, `py`, `java`, `csharp`, `cli`, `spec`, `conformance`, `examples`,
+  `go`, `rust`, `ts`, `py`, `java`, `csharp`, `swift`, `cli`, `spec`, `conformance`, `examples`,
   `ci`, `docs`,
   `repo`.
   Release notes and version bumps are generated from these.

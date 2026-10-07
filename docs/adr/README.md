@@ -22,3 +22,4 @@ Format: Status, Context, Decision, Consequences, Sources. Keep each under a page
 | [0013](0013-java-and-csharp.md) | Java and C#: names, runtimes, the surface shape | accepted |
 | [0014](0014-what-ci-runs-where.md) | What CI runs where: Linux on merges, everything nightly and on releases | accepted |
 | [0015](0015-configuration-and-middleware.md) | Configuration, credentials and the middleware pipeline | accepted |
+| [0016](0016-swift.md) | Swift: the package at the repository root, a runtime ahead of its parity | proposed |

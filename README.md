@@ -5,16 +5,18 @@
 # InOrbit SDK
 
 The `iohr` command line and the official client libraries for the
-[InOrbit API](https://docs.inorbit.hr) in Rust, TypeScript, Go, Python, C# and Java.
+[InOrbit API](https://docs.inorbit.hr) in Rust, TypeScript, Go, Python, C#, Java and Swift.
 
 The repository holds two things: the `iohr` command line, released as a pre-release,
-and six client libraries. Each library is a hand-written runtime plus an API surface that
+and seven client libraries. Each library is a hand-written runtime plus an API surface that
 `iohr sdk generate` writes, cut to what your credentials may call
 ([ADR 0011](docs/adr/0011-runtime-and-surface.md)). The libraries pass the shared conformance
 suite, streams included (server-sent events or one `/v1/ws` socket, [design.md](docs/design.md)
 section 7). Rust, TypeScript, Python and Go are on their registries. C# and Java are not
 on NuGet or Maven Central yet: build them from source until their registry releases
-([roadmap](docs/roadmap.md), M4b).
+([roadmap](docs/roadmap.md), M4b). Swift is the newest: a SwiftPM package at this
+repository's root, not released yet, passing the conformance cases for authentication,
+errors, operations, retries and server-sent events ([swift/README.md](swift/README.md)).
 
 The versions below are read live from each registry, or from the repository's release
 tags where there is no registry release, so the table does not go stale between releases:
@@ -29,6 +31,7 @@ tags where there is no registry release, so the table does not go stale between 
 | Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | [![PyPI](https://img.shields.io/pypi/v/inorbithr?label=PyPI)](https://pypi.org/project/inorbithr/) |
 | C# | `InOrbit.Sdk`, .NET 8 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=csharp%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=csharp), built from source; not on NuGet yet |
 | Java | `hr.inorbit:inorbit-sdk`, Java 17 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=java%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=java), built from source; not on Maven Central yet |
+| Swift | SwiftPM `https://github.com/inorbithr/sdk`, product `InOrbit`; iOS 15, macOS 12, Linux | not released yet; depend on `main` ([swift/README.md](swift/README.md)) |
 
 The contract the libraries are built against is synced from the platform into
 [`spec/`](spec/), and the replay server in
@@ -84,11 +87,11 @@ The command is printed, then run by your project's own package manager
 
 ```sh
 iohr login
-iohr sdk generate --lang rust --for default --out src/iohr   # or typescript, go, python, csharp, java
+iohr sdk generate --lang rust --for default --out src/iohr   # or typescript, go, python, csharp, java, swift
 ```
 
 The generated code holds only the operations your profile's credential may call, so a call
-it may not make fails to compile (in TypeScript, Rust, Go, C#, Java; in Python, the type checker).
+it may not make fails to compile (in TypeScript, Rust, Go, C#, Java, Swift; in Python, the type checker).
 Commit it with the `iohr.lock` beside it and run `iohr sdk check` in CI: it fails, with a
 diff, when what the credential may call changes. The guide is at
 [docs.inorbit.hr/docs/sdk](https://docs.inorbit.hr/docs/sdk/).
@@ -113,7 +116,7 @@ See [docs/design.md](docs/design.md) for the library design.
 | [`cli/`](cli/) | The `iohr` command line, its release scripts and packaging |
 | [`spec/`](spec/) | The API contract, synced from the platform |
 | [`conformance/`](conformance/) | Shared behaviour cases and the replay server every SDK runs them against |
-| [`rust/`](rust/), [`typescript/`](typescript/), [`go/`](go/), [`python/`](python/), [`csharp/`](csharp/), [`java/`](java/) | One runtime per language, with its generated public surface |
+| [`rust/`](rust/), [`typescript/`](typescript/), [`go/`](go/), [`python/`](python/), [`csharp/`](csharp/), [`java/`](java/), [`swift/`](swift/) | One runtime per language, with its generated public surface; Swift's `Package.swift` is at the root |
 | [`examples/`](examples/) | Small programs that CI compiles |
 | [`docs/`](docs/) | Design, decisions (ADRs), releasing, style |
 

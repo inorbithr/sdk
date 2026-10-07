@@ -34,12 +34,12 @@ socket (`/v1/ws`), section 7; MCP is designed there but not shipped
 
 One entry type per language, constructed once and shared across threads or tasks.
 
-| | TypeScript | Python | Go | Java | C# | Rust |
-|---|---|---|---|---|---|---|
-| Type | `Client` | `Client`, `AsyncClient` | `inorbit.Client` | `hr.inorbit.sdk.Client` | `InOrbit.Sdk.Client<P>` | `inorbithr::Client<P>` |
-| Build | `new Client({...})` | `Client(...)` | `inorbit.NewClient(opts...)` | `Client.builder()...build()` | `new Client<P>(new ClientOptions {...})` | `Client::builder()...build()?` |
-| Load (M6) | `Client.load()` | `Client.load()` | `inorbit.Load(ctx)` | `Client.load()` | `Client.Load()` | `Client::load()?` |
-| Per call | `{ signal, timeout }` options | keyword `timeout=` | `ctx context.Context` first | a sync call, a `CompletableFuture` beside it | `async`, `CancellationToken` last | `.await` |
+| | TypeScript | Python | Go | Java | C# | Rust | Swift |
+|---|---|---|---|---|---|---|---|
+| Type | `Client` | `Client`, `AsyncClient` | `inorbit.Client` | `hr.inorbit.sdk.Client` | `InOrbit.Sdk.Client<P>` | `inorbithr::Client<P>` | `InOrbit.Client<P>` |
+| Build | `new Client({...})` | `Client(...)` | `inorbit.NewClient(opts...)` | `Client.builder()...build()` | `new Client<P>(new ClientOptions {...})` | `Client::builder()...build()?` | `try Client<P>(ClientOptions(...))`, `try Client<P>.fromEnv()` |
+| Load (M6) | `Client.load()` | `Client.load()` | `inorbit.Load(ctx)` | `Client.load()` | `Client.Load()` | `Client::load()?` | not yet (#172) |
+| Per call | `{ signal, timeout }` options | keyword `timeout=` | `ctx context.Context` first | a sync call, a `CompletableFuture` beside it | `async`, `CancellationToken` last | `.await` | `async throws`, `CallOptions` last, task cancellation |
 
 Configuration, same names everywhere (case adjusted). [config.md](config.md) is the full
 contract (ADR 0015): every setting's environment variable and config-file key, the
@@ -176,6 +176,7 @@ within seconds.
 | Go | `StreamEvents(ctx, params) iter.Seq2[*T, error]` | `for ev, err := range api.Events().StreamEvents(ctx, p)` |
 | Java | `streamEvents(params)` → `EventStream<T>`, an `Iterator<T>`, `Iterable<T>` and `AutoCloseable` | `try (var s = api.events().streamEvents(p)) { for (var ev : s) ... }` |
 | C# | `StreamEventsAsync(query, cancellationToken)` → `IAsyncEnumerable<T>` | `await foreach (var ev in client.Events().StreamEventsAsync())` |
+| Swift | `streamEvents(query, options:)` → `AsyncThrowingStream<T, any Error>`, opened on the first step | `for try await ev in client.events.streamEvents()` |
 
 The generator emits a stream method only for the profiles whose cut holds the
 operation, behind the same marker as every other method, so a profile without
@@ -280,6 +281,7 @@ idiom:
 | Rust | `all_<op>(&params)` → `inorbithr::Pages<'_, T>` | `while let Some(d) = pages.next().await` (or `.collect().await`) |
 | Java | `all<Op>(params)` → `Pages<T>`, an `Iterable<T>` with `stream()` | `for (Digest d : api.radar().allListDigests())` |
 | C# | `All<Op>Async(query, cancellationToken)` → `IAsyncEnumerable<T>` | `await foreach (var d in client.Radar().AllListDigestsAsync())` |
+| Swift | `all<Op>(query, options:)` → `AsyncThrowingStream<T, any Error>` | `for try await d in client.radar.allListDigests()` |
 
 An iterator follows the token until it is empty, fetches nothing more once the caller
 stops, stops at the first error (raising, throwing or yielding it as the language does),
@@ -368,6 +370,7 @@ language as far as its types reach (RFC 0020's table, ADR 0013):
 | Go | one package per profile wrapping the runtime's client |
 | Java | one class per profile with a handle per tag; records for the models |
 | C# | a marker interface per operation and extension methods constrained to it |
+| Swift | a marker protocol per operation and extensions constrained to it (`where P: AllowsListDigests`) |
 | Rust | a marker trait per operation bounding the method |
 
 Every target renders from the generator's shared model (`iohr-codegen` `ir` for the
@@ -390,7 +393,7 @@ only an answer carries lists as `required` exactly the fields the gateway always
 left out when unset and never required. A message a request carries marks nothing
 required. So a generated surface reads a required answer field as present and every
 other field as optional (`Option<T>` in Rust, `T | None` in Python, `?` in TypeScript,
-a pointer in Go, nullable in C#, `null` in Java), and every request field is optional:
+a pointer in Go, nullable in C#, `null` in Java, an optional in Swift), and every request field is optional:
 what is unset is left out of the body, and the platform reads it as its default. Go
 fills a pointer field with `inorbit.Ptr(v)`; a Rust request is built with
 `..Default::default()`.
@@ -400,7 +403,7 @@ ask). Models keep the string as sent; each runtime has one helper that reads a
 timestamp and maps `""` to no value: `inorbithr::parse_timestamp` (Rust, `None`),
 `parseTimestamp` (TypeScript, `undefined`), `parse_timestamp` (Python, `None`),
 `inorbit.ParseTimestamp` (Go, the zero `time.Time`), `Timestamps.Parse` (C#, `null`),
-`Timestamps.parse` (Java, an empty `Optional`).
+`Timestamps.parse` (Java, an empty `Optional`), `Timestamps.parse` (Swift, `nil`).
 
 **Streaming operations** (`text/event-stream`) are generated as stream methods
 (section 7), gated by profile like every other operation.

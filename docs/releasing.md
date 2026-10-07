@@ -40,6 +40,7 @@ The repository went public on 2026-10-01. These items waited for that.
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
 | C# | `csharp/vX.Y.Z` | none yet (M4b): release-please only versions it, the `.csproj` `Version` | none |
 | Java | `java/vX.Y.Z` | none yet (M4b): release-please only versions it, `pom.xml` and `Client.SDK_VERSION` | none |
+| Swift | `vX.Y.Z` (no component: SwiftPM reads bare semantic-version tags at the repository root, ADR 0016) | none: SwiftPM fetches the tag. release-please versions `Sources/InOrbit/Version.swift`; the first release PR proposes the first version from `0.0.0` | none |
 | Command line | `iohr/vX.Y.Z` | builds six targets (`cli-build.yml`), attests every file, attaches archives, `.deb`, `.msi`, SBOMs and `SHA256SUMS` to the release; then runs the installers against it and opens the formula PR on `inorbithr/homebrew-tap` (release App token limited to the tap) ([ADR 0010](adr/0010-releasing-the-command-line.md)) | `release-cli` |
 
 C# and Java follow every change and carry the same version as the other four, so their
