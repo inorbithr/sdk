@@ -112,6 +112,9 @@ pub enum Command {
     /// version, set its status, comment, link a pull request, ask for a review.
     #[command(subcommand)]
     Rfc(RfcCommand),
+    /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
+    #[command(subcommand)]
+    Browser(BrowserCommand),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -1085,4 +1088,19 @@ impl Lang {
             Self::Rust => Language::Rust,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BrowserCommand {
+    /// Open the console's install page in the default browser. It adds InOrbit Trails
+    /// from that browser's store (Chrome Web Store, Edge Add-ons, Firefox add-ons), or
+    /// shows the load-unpacked steps while that store has no listing yet.
+    Install(BrowserInstall),
+}
+
+#[derive(Debug, Args)]
+pub struct BrowserInstall {
+    /// Print the page's address instead of opening it (for a browser on another machine).
+    #[arg(long)]
+    pub print: bool,
 }

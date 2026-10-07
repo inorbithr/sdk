@@ -2,6 +2,7 @@
 
 mod accounts;
 mod auth;
+mod browser_ext;
 mod call;
 mod config;
 mod connections;
@@ -23,7 +24,8 @@ use clap::CommandFactory as _;
 
 use crate::Env;
 use crate::cli::{
-    AccountsCommand, AuthCommand, Cli, Command, LabCommand, OpenapiCommand, SdkCommand,
+    AccountsCommand, AuthCommand, BrowserCommand, Cli, Command, LabCommand, OpenapiCommand,
+    SdkCommand,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -62,6 +64,10 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Rfc(cmd) => rfc::run(g, &env, cmd, out).await,
+        Command::Browser(BrowserCommand::Install(args)) => {
+            browser_ext::install(g, &args, out);
+            Ok(())
+        }
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();
