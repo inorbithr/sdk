@@ -1317,6 +1317,9 @@
       "CreateMonitorRequest": {
         "description": "`iohr.connections.v1.CreateMonitorRequest`",
         "properties": {
+          "category": {
+            "type": "string"
+          },
           "connection_id": {
             "type": "string"
           },
@@ -1339,6 +1342,12 @@
           },
           "rfc": {
             "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
           }
         },
         "type": "object"
@@ -2171,6 +2180,25 @@
         ],
         "type": "object"
       },
+      "Evidence": {
+        "description": "`iohr.extensions.v1.Evidence`",
+        "properties": {
+          "record_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_ids",
+          "summary"
+        ],
+        "type": "object"
+      },
       "Example": {
         "description": "`iohr.radar.v1.Example`",
         "properties": {
@@ -2261,6 +2289,155 @@
         "required": [
           "files",
           "next_page_token"
+        ],
+        "type": "object"
+      },
+      "Extension": {
+        "description": "`iohr.extensions.v1.Extension`",
+        "properties": {
+          "coming": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "first_party": {
+            "type": "boolean"
+          },
+          "included_by": {
+            "type": "string"
+          },
+          "install": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/ExtensionsVersion"
+          },
+          "name": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "publisher_name": {
+            "type": "string"
+          },
+          "shared_with": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "signer": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "publisher",
+          "name",
+          "kind",
+          "description",
+          "visibility",
+          "source",
+          "coming",
+          "install",
+          "publisher_name",
+          "first_party",
+          "shared_with",
+          "included_by",
+          "signer",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ExtensionsListVersionsResponse": {
+        "description": "`iohr.extensions.v1.ListVersionsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ExtensionsVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ExtensionsVersion": {
+        "description": "`iohr.extensions.v1.Version`",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "entrypoint": {
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/Evidence"
+          },
+          "platforms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "privileges": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "signer": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "platforms",
+          "entrypoint",
+          "scopes",
+          "privileges",
+          "signer",
+          "description",
+          "published_at"
         ],
         "type": "object"
       },
@@ -2616,6 +2793,15 @@
         ],
         "type": "object"
       },
+      "GetExtensionResponse": {
+        "description": "`iohr.extensions.v1.GetExtensionResponse`",
+        "properties": {
+          "extension": {
+            "$ref": "#/components/schemas/Extension"
+          }
+        },
+        "type": "object"
+      },
       "GetMeResponse": {
         "description": "`iohr.accounts.v1.GetMeResponse`",
         "properties": {
@@ -2852,6 +3038,22 @@
           "mentioned_in",
           "successors",
           "measured_by"
+        ],
+        "type": "object"
+      },
+      "GetPublisherResponse": {
+        "description": "`iohr.extensions.v1.GetPublisherResponse`",
+        "properties": {
+          "listings": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "publisher": {
+            "$ref": "#/components/schemas/Publisher"
+          }
+        },
+        "required": [
+          "listings"
         ],
         "type": "object"
       },
@@ -3567,6 +3769,25 @@
         ],
         "type": "object"
       },
+      "ListExtensionsResponse": {
+        "description": "`iohr.extensions.v1.ListExtensionsResponse`",
+        "properties": {
+          "extensions": {
+            "items": {
+              "$ref": "#/components/schemas/Extension"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "extensions",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListGrantsResponse": {
         "description": "`iohr.connections.v1.ListGrantsResponse`",
         "properties": {
@@ -3965,25 +4186,6 @@
         },
         "type": "object"
       },
-      "ListVersionsResponse": {
-        "description": "`iohr.rfcs.v1.ListVersionsResponse`",
-        "properties": {
-          "next_page_token": {
-            "type": "string"
-          },
-          "versions": {
-            "items": {
-              "$ref": "#/components/schemas/Version"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "versions",
-          "next_page_token"
-        ],
-        "type": "object"
-      },
       "Me": {
         "description": "`GET /v1/me` body.",
         "properties": {
@@ -4062,6 +4264,9 @@
           "agent_id": {
             "type": "string"
           },
+          "category": {
+            "type": "string"
+          },
           "check": {
             "$ref": "#/components/schemas/DeclaredCheck"
           },
@@ -4115,6 +4320,12 @@
           },
           "state": {
             "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
           }
         },
         "required": [
@@ -4131,7 +4342,9 @@
           "created_at",
           "managed_by",
           "agent_id",
-          "rfc"
+          "rfc",
+          "category",
+          "tags"
         ],
         "type": "object"
       },
@@ -4269,6 +4482,18 @@
         ],
         "type": "object"
       },
+      "MonitorTags": {
+        "description": "`iohr.connections.v1.MonitorTags`",
+        "properties": {
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
       "Notification": {
         "description": "`iohr.events.v1.Notification`",
         "properties": {
@@ -4377,6 +4602,38 @@
           "error",
           "details",
           "request_id"
+        ],
+        "type": "object"
+      },
+      "Publisher": {
+        "description": "`iohr.extensions.v1.Publisher`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "first_party": {
+            "type": "boolean"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "account_id",
+          "display_name",
+          "domain",
+          "first_party",
+          "created_at"
         ],
         "type": "object"
       },
@@ -4798,6 +5055,55 @@
             "$ref": "#/components/schemas/Grant"
           }
         },
+        "type": "object"
+      },
+      "RfcsListVersionsResponse": {
+        "description": "`iohr.rfcs.v1.ListVersionsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/RfcsVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "RfcsVersion": {
+        "description": "`iohr.rfcs.v1.Version`",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "saved_at": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "author",
+          "message",
+          "saved_at",
+          "bytes"
+        ],
         "type": "object"
       },
       "RotateSecretResponse": {
@@ -5643,6 +5949,9 @@
       "UpdateMonitorRequest": {
         "description": "`iohr.connections.v1.UpdateMonitorRequest`",
         "properties": {
+          "category": {
+            "type": "string"
+          },
           "fail_after": {
             "format": "int32",
             "type": "integer"
@@ -5672,6 +5981,9 @@
           },
           "state": {
             "type": "string"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/MonitorTags"
           }
         },
         "type": "object"
@@ -5917,36 +6229,6 @@
           }
         },
         "type": "object"
-      },
-      "Version": {
-        "description": "`iohr.rfcs.v1.Version`",
-        "properties": {
-          "author": {
-            "type": "string"
-          },
-          "bytes": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "message": {
-            "type": "string"
-          },
-          "saved_at": {
-            "type": "string"
-          },
-          "version": {
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "version",
-          "author",
-          "message",
-          "saved_at",
-          "bytes"
-        ],
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -5966,7 +6248,7 @@
     "title": "InOrbit API",
     "version": "0.1.0",
     "x-iohr-cut": {
-      "hash": "sha256:d6be1c32c41acf4777c36663421c961872afdec9b7de181069a7560b73e77472",
+      "hash": "sha256:c28f3341887323529985e7a9f352f52afb4e5f7801726af57d56827a76e89dd9",
       "plan": "public",
       "scopes": []
     }
@@ -8049,6 +8331,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9388,6 +9687,296 @@
         "x-iohr-rpc": "iohr.events.v1.EventsService/ListEventTypes",
         "x-iohr-scopes": [
           "events:read"
+        ]
+      }
+    },
+    "/v1/extensions": {
+      "get": {
+        "description": "Transcoded from `/iohr.extensions.v1.ExtensionsService/ListExtensions` on the `extensions` backend.\n\nA key needs scope `extensions:read`.",
+        "operationId": "ExtensionsService.ListExtensions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListExtensionsResponse"
+                }
+              }
+            },
+            "description": "`iohr.extensions.v1.ListExtensionsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.extensions.v1.ExtensionsService/ListExtensions",
+        "tags": [
+          "extensions"
+        ],
+        "x-iohr-list": {
+          "items": "extensions",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.extensions.v1.ExtensionsService/ListExtensions",
+        "x-iohr-scopes": [
+          "extensions:read"
+        ]
+      }
+    },
+    "/v1/extensions/{publisher}": {
+      "get": {
+        "description": "Transcoded from `/iohr.extensions.v1.ExtensionsService/GetPublisher` on the `extensions` backend.\n\nA key needs scope `extensions:read`.",
+        "operationId": "ExtensionsService.GetPublisher",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publisher",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPublisherResponse"
+                }
+              }
+            },
+            "description": "`iohr.extensions.v1.GetPublisherResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.extensions.v1.ExtensionsService/GetPublisher",
+        "tags": [
+          "extensions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.extensions.v1.ExtensionsService/GetPublisher",
+        "x-iohr-scopes": [
+          "extensions:read"
+        ]
+      }
+    },
+    "/v1/extensions/{publisher}/{name}": {
+      "get": {
+        "description": "Transcoded from `/iohr.extensions.v1.ExtensionsService/GetExtension` on the `extensions` backend.\n\nA key needs scope `extensions:read`.",
+        "operationId": "ExtensionsService.GetExtension",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publisher",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetExtensionResponse"
+                }
+              }
+            },
+            "description": "`iohr.extensions.v1.GetExtensionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.extensions.v1.ExtensionsService/GetExtension",
+        "tags": [
+          "extensions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.extensions.v1.ExtensionsService/GetExtension",
+        "x-iohr-scopes": [
+          "extensions:read"
+        ]
+      }
+    },
+    "/v1/extensions/{publisher}/{name}/versions": {
+      "get": {
+        "description": "Transcoded from `/iohr.extensions.v1.ExtensionsService/ListVersions` on the `extensions` backend.\n\nA key needs scope `extensions:read`.",
+        "operationId": "ExtensionsService.ListVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publisher",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionsListVersionsResponse"
+                }
+              }
+            },
+            "description": "`iohr.extensions.v1.ListVersionsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.extensions.v1.ExtensionsService/ListVersions",
+        "tags": [
+          "extensions"
+        ],
+        "x-iohr-list": {
+          "items": "versions",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.extensions.v1.ExtensionsService/ListVersions",
+        "x-iohr-scopes": [
+          "extensions:read"
         ]
       }
     },
@@ -11539,7 +12128,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListVersionsResponse"
+                  "$ref": "#/components/schemas/RfcsListVersionsResponse"
                 }
               }
             },
