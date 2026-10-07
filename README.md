@@ -29,6 +29,7 @@ tags where there is no registry release, so the table does not go stale between 
 | Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | [![PyPI](https://img.shields.io/pypi/v/inorbithr?label=PyPI)](https://pypi.org/project/inorbithr/) |
 | C# | `InOrbit.Sdk`, .NET 8 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=csharp%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=csharp), built from source; not on NuGet yet |
 | Java | `hr.inorbit:inorbit-sdk`, Java 17 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=java%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=java), built from source; not on Maven Central yet |
+| Dart | `inorbit`, Dart 3.9 and Flutter: the contract and its checker so far, the client follows | not released; not on pub.dev yet ([`dart/`](dart/)) |
 
 The contract the libraries are built against is synced from the platform into
 [`spec/`](spec/), and the replay server in
@@ -114,6 +115,7 @@ See [docs/design.md](docs/design.md) for the library design.
 | [`spec/`](spec/) | The API contract, synced from the platform |
 | [`conformance/`](conformance/) | Shared behaviour cases and the replay server every SDK runs them against |
 | [`rust/`](rust/), [`typescript/`](typescript/), [`go/`](go/), [`python/`](python/), [`csharp/`](csharp/), [`java/`](java/) | One runtime per language, with its generated public surface |
+| [`dart/`](dart/) | The Dart runtime, started: the contract and the answer checker (platform RFC 0074.8) |
 | [`examples/`](examples/) | Small programs that CI compiles |
 | [`docs/`](docs/) | Design, decisions (ADRs), releasing, style |
 
