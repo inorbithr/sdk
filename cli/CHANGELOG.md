@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.12](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.11...iohr/v0.1.0-alpha.12) (2026-10-07)
+
+
+### Features
+
+* **cli:** iohr ext search, show and install PUBLISHER/NAME from the catalogue ([#168](https://github.com/inorbithr/sdk/issues/168)) ([79a4661](https://github.com/inorbithr/sdk/commit/79a466144af7d32ac256642ea2f5822fb7907402))
+* **cli:** iohr rfc, RFCs in the RFCs product ([#167](https://github.com/inorbithr/sdk/issues/167)) ([5da90ef](https://github.com/inorbithr/sdk/commit/5da90ef2322b7c37726fe24f2b1b22e79b679f20))
+
 ## [0.1.0-alpha.11](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.10...iohr/v0.1.0-alpha.11) (2026-10-06)
 
 

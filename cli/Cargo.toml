@@ -5,7 +5,7 @@ members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/ioh
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0-alpha.11"
+version = "0.1.0-alpha.12"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
@@ -31,6 +31,8 @@ keyring-core = "1"
 minijinja = "2"
 prettyplease = "0.3"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
+# Held at 0.8: typify's API takes schemars 0.8 types (`RootSchema`); see the `ignore` in
+# .github/dependabot.yml. Moves to 1.x with typify (oxidecomputer/typify#886).
 schemars = "0.8"
 semver = "1"
 sigstore-verify = { version = "0.14", default-features = false }

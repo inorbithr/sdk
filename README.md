@@ -1,12 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset=".github/assets/logo-light.svg">
-    <img alt="InOrbit SDK logo: a terminal prompt with an amber cursor" src=".github/assets/logo-light.svg" width="88" height="88">
-  </picture>
-</p>
-
-<h1 align="center">sdk</h1>
+<p align="center"><img alt="sdk: a TypeScript client call in a code panel with tabs for Rust, TypeScript, Python, Go, Java and C#, and iohr sdk add in a terminal" src=".github/assets/social-preview.png" width="100%"></p>
 
 <p align="center">SDKs and developer tooling for the InOrbit platform.</p>
 
@@ -37,6 +29,7 @@ tags where there is no registry release, so the table does not go stale between 
 | Python | [`inorbithr`](https://pypi.org/project/inorbithr/), Python 3.11 | [![PyPI](https://img.shields.io/pypi/v/inorbithr?label=PyPI)](https://pypi.org/project/inorbithr/) |
 | C# | `InOrbit.Sdk`, .NET 8 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=csharp%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=csharp), built from source; not on NuGet yet |
 | Java | `hr.inorbit:inorbit-sdk`, Java 17 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=java%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=java), built from source; not on Maven Central yet |
+| Dart | `inorbit`, Dart 3.9 and Flutter: the contract and its checker so far, the client follows | not released; not on pub.dev yet ([`dart/`](dart/)) |
 
 The contract the libraries are built against is synced from the platform into
 [`spec/`](spec/), and the replay server in
@@ -71,8 +64,9 @@ iohr api GET /v1/me
 
 `iohr` keeps several accounts as profiles, creates and revokes API tokens, proves
 domains, connects an account's apps (`iohr connectors`, `iohr connections`: a key or a
-browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`), and
-checks Lab documents (`iohr lab check`). It talks to `api.inorbit.hr` and
+browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`),
+checks Lab documents (`iohr lab check`) and keeps RFCs in the RFCs product (`iohr rfc`).
+It talks to `api.inorbit.hr` and
 `auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
 `sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry and no update
 check. Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
@@ -121,6 +115,7 @@ See [docs/design.md](docs/design.md) for the library design.
 | [`spec/`](spec/) | The API contract, synced from the platform |
 | [`conformance/`](conformance/) | Shared behaviour cases and the replay server every SDK runs them against |
 | [`rust/`](rust/), [`typescript/`](typescript/), [`go/`](go/), [`python/`](python/), [`csharp/`](csharp/), [`java/`](java/) | One runtime per language, with its generated public surface |
+| [`dart/`](dart/) | The Dart runtime, started: the contract and the answer checker (platform RFC 0074.8) |
 | [`examples/`](examples/) | Small programs that CI compiles |
 | [`docs/`](docs/) | Design, decisions (ADRs), releasing, style |
 

@@ -97,6 +97,10 @@ cli/
   only through `ext::socket` for its manifest's scopes; never pass it `IOHR_TOKEN*`, the
   store or a refresh token. `tests/ext.rs` runs a registry on loopback: add a case for
   every new refusal.
+- The catalogue (`commands::ext_catalogue`, RFC 0073) is read over the API host only.
+  `ext install PUBLISHER/NAME` fetches the digest the catalogue lists and then requires
+  `ext_catalogue::matches` (version, exact signer, listing identity, scopes, privileges)
+  after `ext::trust::verify`, never instead of it.
 - `iohr sdk add` (SR-31) decides in `commands::sdk_add::plan` from files alone, then runs
   one program with an argument vector: never a shell, sudo or a global pip, the program
   only from absolute `PATH` entries. Package names stay constants checked against the

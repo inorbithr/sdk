@@ -14,9 +14,9 @@ touched() { printf '%s\n' "${files[@]}" | grep -Eq "$1"; }
 
 # A change here regenerates or re-checks every language (ADR 0011).
 shared='^(spec/|conformance/|mise\.toml$|\.github/workflows/ci\.yml$|cli/crates/iohr-(openapi|codegen)/)'
-declare -A dir=([go]=go [rust]=rust [ts]=typescript [py]=python [java]=java [csharp]=csharp)
+declare -A dir=([go]=go [rust]=rust [ts]=typescript [py]=python [java]=java [csharp]=csharp [dart]=dart)
 langs=()
-for lang in go rust ts py java csharp; do
+for lang in go rust ts py java csharp dart; do
   if touched "$shared" || touched "^(${dir[$lang]}|examples/${dir[$lang]})/"; then
     langs+=("$lang")
   fi
@@ -26,7 +26,12 @@ tasks=(repo:check)
 touched '^spec/' && tasks+=(spec:lint)
 touched '^conformance/' && tasks+=(conformance:validate conformance:server:check)
 for lang in "${langs[@]}"; do
-  tasks+=("$lang:gen" "gen-diff:${dir[$lang]}" "$lang:check" "conformance:$lang")
+  if [ "$lang" = dart ]; then
+    # The Dart runtime holds the contract only so far: no surface, no conformance driver.
+    tasks+=("dart:gen" "gen-diff:dart" "dart:check")
+  else
+    tasks+=("$lang:gen" "gen-diff:${dir[$lang]}" "$lang:check" "conformance:$lang")
+  fi
 done
 touched '^(cli/|rust/|spec/|mise\.toml$|\.github/workflows/ci\.yml$)' && tasks+=(cli:check)
 touched '^examples/' && tasks+=(examples:check)
@@ -36,7 +41,7 @@ echo "ci:changed: ${tasks[*]}"
 [ "$dry" = 1 ] && exit 0
 
 # Build the command line once for every <lang>:gen instead of once per task.
-if [ "${#langs[@]}" -gt 0 ] && [ -z "${IOHR_BIN:-}" ]; then
+if printf '%s\n' "${langs[@]}" | grep -qv '^dart$' && [ -z "${IOHR_BIN:-}" ]; then
   cargo build -q --manifest-path cli/Cargo.toml -p iohr
   target=$(cargo metadata -q --format-version 1 --no-deps --manifest-path cli/Cargo.toml |
     python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')

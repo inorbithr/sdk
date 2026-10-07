@@ -85,9 +85,11 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
-| `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install, verify and pin them; one that declares privileges for its system service asks first unless `--yes`; `iohr <name> ...` runs one |
+| `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
+| `iohr ext install \| list \| upgrade \| remove \| verify \| sync` | Extensions: install (`NAME` from the registry, or `PUBLISHER/NAME` through the catalogue), verify and pin them; one that declares privileges for its system service asks first unless `--yes`; `iohr <name> ...` runs one |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
+| `iohr rfc list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs in the RFCs product (platform RFC 0065) through the SDK's `rfcs` operations: an RFC by its number (`0065`, a part `0065.1`) across the account's spaces (`--space` narrows), `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_RFC_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json` and `--verbose`.
@@ -264,9 +266,26 @@ An extension is a separate program that `iohr` installs from an OCI registry, ve
 pins and runs. The first is the InOrbit agent:
 
 ```sh
-iohr ext install agent                   # or agent@0.1.0
+iohr ext search agent                    # the catalogue: what you may install
+iohr ext show inorbit/agent              # publisher, signer, scopes, privileges, versions
+iohr ext install inorbit/agent           # or inorbit/agent@0.1.0, or just: agent
 iohr agent status                        # runs the installed program
 ```
+
+`iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
+API host (`extensions:read`, or a signed-in person); they never contact the registry. A
+private listing the account may not see is "not found", like one that does not exist.
+`iohr ext install PUBLISHER/NAME` asks the catalogue which version to install (the
+newest release, or `@VERSION`), its digest and its signer, then fetches that digest from
+the registry and runs every check below. The artifact must then be the one listed: the
+same version, signed by exactly the signer the catalogue names, which must be the
+listing's signing identity, with the same scopes and privileges. Any difference fails
+the install and nothing is written, and so does an installed extension of the same name
+from another signer (`iohr ext remove` it first). The catalogue never replaces the trust root: an
+artifact the root refuses is refused whatever the catalogue says. The short form
+`iohr ext install agent`, `upgrade` and `sync` read only the registry, as before. Another publisher's
+extension is not in InOrbit's registry, so it needs `ext.registry` set to the mirror it
+is published in.
 
 Before anything is used, `iohr` checks every digest, a signature and SLSA provenance
 from InOrbit's release workflow (Sigstore, offline against the root built into `iohr`)
@@ -323,8 +342,9 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 - Extensions: the platform's data directory (`~/.local/share/iohr/extensions` on
   Linux), owner-only, with the machine's `iohr-ext.lock` and, per version, the program,
   the Sigstore bundles checked at install and a record of the checks.
-- `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr`, and to the extension registry
-  only in `iohr ext install`, `upgrade` and `sync` (ADR 0012). No telemetry, no update
+- `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` (the extensions catalogue is
+  on the API host), and to the extension registry only in `iohr ext install`, `upgrade`
+  and `sync` (ADR 0012). No telemetry, no update
   check. `iohr sdk add` runs your project's package manager, which reaches its own
   registry (SR-31).
 

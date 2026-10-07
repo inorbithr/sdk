@@ -86,6 +86,12 @@
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr-codegen')].version" },
         { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name.value==='iohr-lab')].version" }
       ]
+    },
+    "dart": {
+      "release-type": "dart",
+      "component": "dart",
+      "package-name": "inorbit",
+      "extra-files": ["lib/src/version.dart"]
     }
   }
 }

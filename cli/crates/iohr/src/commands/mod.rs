@@ -8,10 +8,12 @@ mod connections;
 mod connectors;
 mod domains;
 mod ext;
+mod ext_catalogue;
 mod lab;
 mod login;
 mod openapi;
 mod profile;
+mod rfc;
 mod sdk;
 mod sdk_add;
 mod token;
@@ -59,6 +61,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
+        Command::Rfc(cmd) => rfc::run(g, &env, cmd, out).await,
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();

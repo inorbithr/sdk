@@ -207,6 +207,11 @@ impl Api {
         Ok(Self { client })
     }
 
+    /// The runtime's client, for the generated surface (`inorbithr::public`).
+    pub(crate) fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// `GET path` and read the JSON answer.
     pub(crate) async fn get<T: DeserializeOwned>(
         &self,
