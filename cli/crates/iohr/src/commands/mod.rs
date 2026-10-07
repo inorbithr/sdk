@@ -8,6 +8,7 @@ mod connections;
 mod connectors;
 mod domains;
 mod ext;
+mod ext_catalogue;
 mod lab;
 mod login;
 mod openapi;

@@ -81,6 +81,18 @@ What a bank or a regulated company asks of such a mechanism:
    Install shows them in plain words and needs a typed `yes` or `--yes`; `upgrade` asks
    again for added ones; the lock records them (format version 2 when any entry has
    them) and `sync` refuses an artifact that declares more than its entry.
+9. **The catalogue (amended 2026-10-07, platform RFC 0073 phase 1).** `iohr ext search`
+   and `iohr ext show PUBLISHER/NAME` read the platform's extensions catalogue
+   (`/v1/extensions`, `extensions:read`) on the API host, so SR-16 and SR-25 do not
+   change. `iohr ext install PUBLISHER/NAME[@VERSION]` takes the version, its index digest
+   and its signer from the catalogue, fetches that digest and verifies it as in point 3;
+   the artifact must then carry the version, the exact signer (also the listing's
+   identity, when the listing names one) and the scopes and privileges the catalogue
+   lists, or nothing is installed. An installed extension of the same name from another
+   signer is never replaced; it is removed first. The catalogue is a further condition,
+   never a replacement for the trust root. The bare `NAME` form, `upgrade` and `sync`
+   keep reading the registry alone. Another publisher's listing is installed only from
+   the registry `ext.registry` names, never from InOrbit's.
 
 ## Consequences
 

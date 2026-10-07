@@ -50,6 +50,14 @@ In this order, and nothing is written to disk until all of them pass:
 4. The layer matches its digest and size; only the entrypoint is taken from it, and
    only as a regular file.
 
+For `iohr ext install PUBLISHER/NAME`, the catalogue on the API host names the version,
+its index digest and its signer first, and the index is fetched by that digest. After
+checks 1 to 4 the artifact must match the listing: the same version, exactly the signer
+the catalogue names (which must be the listing's signing identity, a release workflow at
+any tag when the identity ends in `@refs/tags/`), and the same scopes and privileges.
+A mismatch fails the install. The catalogue adds a condition; it never lets through
+anything checks 1 to 4 refuse.
+
 Then, for an extension that declares privileges, the confirmation (SR-32): each
 privilege is shown in plain words, and the extension is installed only after you type
 `yes` or pass `--yes`. `iohr` never grants a privilege; the service's own package or

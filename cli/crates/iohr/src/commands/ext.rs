@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::Env;
 use crate::cli::{ExtCommand, Global};
+use crate::commands::ext_catalogue;
 use crate::context::Ctx;
 use crate::error::Error;
 use crate::ext::install::{ExtError, Fetched, Store, Want, fetch};
@@ -66,13 +67,17 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             lock,
             yes,
         } => {
-            let (name, want) = parse_spec(&extension)?;
             let (registry, policy) = setup(g, env)?;
-            let want = match want {
-                Some(w) => w,
-                None => Want::Version(newest(&registry, &name).await?),
+            let f = if extension.contains('/') {
+                from_catalogue(g, env, &store, &registry, &policy, &extension).await?
+            } else {
+                let (name, want) = parse_spec(&extension)?;
+                let want = match want {
+                    Some(w) => w,
+                    None => Want::Version(newest(&registry, &name).await?),
+                };
+                fetch(&registry, &policy, &name, &want).await?
             };
-            let f = fetch(&registry, &policy, &name, &want).await?;
             let declared: Vec<&str> = f.manifest.privileges.iter().map(String::as_str).collect();
             confirm_privileges(
                 &format!("{} {}", f.manifest.name, f.manifest.version),
@@ -85,6 +90,24 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             report(&f, &entry, out);
             Ok(())
         }
+        ExtCommand::Search {
+            query,
+            kind,
+            all,
+            page_size,
+        } => {
+            ext_catalogue::search(
+                g,
+                env,
+                query.as_deref(),
+                kind.as_deref(),
+                all,
+                page_size,
+                out,
+            )
+            .await
+        }
+        ExtCommand::Show { extension } => ext_catalogue::show(g, env, &extension, out).await,
         ExtCommand::List => list(&store, out),
         ExtCommand::Upgrade { name, lock, yes } => {
             upgrade(g, env, &store, name, lock.as_deref(), yes, out).await
@@ -109,6 +132,52 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
     }
 }
 
+/// `PUBLISHER/NAME[@VERSION|@sha256:DIGEST]`: the catalogue names the version, its
+/// digest and its signer; the artifact is fetched by that digest from the registry,
+/// verified exactly as the registry form is, and must then match what the catalogue
+/// listed (`ext_catalogue::matches`).
+async fn from_catalogue(
+    g: &Global,
+    env: &Env,
+    store: &Store,
+    registry: &Registry,
+    policy: &Policy,
+    spec: &str,
+) -> Result<Fetched, Error> {
+    let (listing, at) = match spec.split_once('@') {
+        Some((l, a)) => (l, Some(a)),
+        None => (spec, None),
+    };
+    let (publisher, name) = ext_catalogue::parse_listing(listing)?;
+    let at = ext_catalogue::parse_at(at)?;
+    if publisher != ext_catalogue::FIRST_PARTY && registry.source().display() == DEFAULT_REGISTRY {
+        return Err(Error::Usage(format!(
+            "{publisher}/{name} is not InOrbit's, and {DEFAULT_REGISTRY} holds only InOrbit's \
+             extensions: set ext.registry to the registry {publisher} publishes it in"
+        )));
+    }
+    let r = ext_catalogue::resolve(g, env, &publisher, &name, &at).await?;
+    Out::note(&format!(
+        "{publisher}/{name}: the catalogue lists {} at {}.",
+        r.version, r.digest
+    ));
+    let f = fetch(registry, policy, &name, &Want::Digest(r.digest.clone())).await?;
+    ext_catalogue::matches(&r, &f)?;
+    // The store keys extensions by name alone: one signed by someone else never
+    // replaces an installed one silently (another publisher's `agent`, say).
+    if let Some(installed) = store.lock()?.entries.get(&name) {
+        let incoming = f.verified.signer.lock_name();
+        if installed.signer != incoming {
+            return Err(Error::Failed(format!(
+                "{name} is installed from {}, and {publisher}/{name} is signed by {incoming}: \
+                 not installed. `iohr ext remove {name}` first to replace it.",
+                installed.signer
+            )));
+        }
+    }
+    Ok(f)
+}
+
 /// Asks the person a question and returns the answer.
 type Ask<'a> = dyn FnMut(&str) -> Result<String, Error> + 'a;
 
@@ -119,7 +188,7 @@ fn terminal() -> Option<impl FnMut(&str) -> Result<String, Error>> {
 }
 
 /// The privileges in plain words, one per line, for a note.
-fn privilege_lines(privileges: &[&str]) -> String {
+pub(super) fn privilege_lines(privileges: &[&str]) -> String {
     let w = privileges.iter().map(|p| p.len()).max().unwrap_or(0);
     privileges
         .iter()
