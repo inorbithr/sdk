@@ -1,6 +1,8 @@
 name: a-revoked-key-ends-the-stream
 area: socket
 summary: An id-less unauthenticated error frame (the key was revoked) ends every stream on the socket with that error; the client does not reconnect.
+pending: [swift]
+notes: Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 action: { op: events.stream_events, args: { types: key.created } }
 client: { scopes: [events:read], streams: socket }
 exchanges:

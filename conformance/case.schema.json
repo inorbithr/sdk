@@ -9,7 +9,7 @@
     "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
     "area": { "enum": ["auth", "errors", "retries", "operations", "sse", "socket", "credentials", "middleware", "transport"] },
     "summary": { "type": "string" },
-    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp"] }, "description": "Languages that do not pass yet; each needs an issue link in `notes`, or the milestone that lands it." },
+    "pending": { "type": "array", "items": { "enum": ["go", "rust", "ts", "py", "java", "csharp", "swift"] }, "description": "Languages that do not pass yet; each needs an issue link in `notes`, or the milestone that lands it." },
     "notes": { "type": "string" },
     "client": {
       "type": "object",

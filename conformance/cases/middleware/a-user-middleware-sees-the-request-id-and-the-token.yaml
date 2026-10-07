@@ -1,7 +1,8 @@
 name: a-user-middleware-sees-the-request-id-and-the-token
 area: middleware
 summary: A per-retry middleware sees the finished request, its request id and Authorization header included, while the logs never carry the token.
-notes: M6, docs/config.md sections 7.2, 7.9 and 7.13.
+pending: [swift]
+notes: M6, docs/config.md sections 7.2, 7.9 and 7.13. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 client:
   pipeline: { add: [{ name: probe, stage: per_retry }] }
   log: debug

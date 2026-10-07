@@ -1,6 +1,8 @@
 name: an-error-frame-is-the-error
 area: socket
 summary: An error frame for the call is the error envelope; the stream fails with its code and the status the code maps to.
+pending: [swift]
+notes: Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 action: { op: events.stream_events, args: { types: key.created } }
 client: { scopes: [events:read], streams: socket }
 exchanges:
