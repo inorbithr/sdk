@@ -382,3 +382,48 @@ fn the_csharp_examples_build() {
         .unwrap();
     check(Language::CSharp, &all, &out, "dotnet build");
 }
+
+#[test]
+fn the_swift_examples_build() {
+    if !compile_enabled(Language::Swift) {
+        eprintln!("compile test: set IOHR_TEST_COMPILE=swift to run it (CI does); skipping");
+        return;
+    }
+    let runtime = repo().canonicalize().unwrap();
+    let identity = runtime
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_lowercase();
+    let all = examples(Language::Swift);
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("Package.swift"),
+        format!(
+            "// swift-tools-version:5.9\nimport PackageDescription\n\nlet package = Package(\n    name: \"Check\",\n    platforms: [.macOS(.v12)],\n    dependencies: [.package(path: {:?})],\n    targets: [.target(name: \"Check\", dependencies: [.product(name: \"InOrbit\", package: \"{identity}\")], path: \"Sources/Check\")]\n)\n",
+            runtime.display().to_string()
+        ),
+    )
+    .unwrap();
+    let sources = root.join("Sources/Check");
+    std::fs::create_dir_all(&sources).unwrap();
+    for (i, (_, code)) in all.iter().enumerate() {
+        let (imports, body) = split(code, "import ");
+        let body: String = body.lines().fold(String::new(), |mut s, l| {
+            let _ = writeln!(s, "    {l}");
+            s
+        });
+        std::fs::write(
+            sources.join(format!("Ex{i}.swift")),
+            format!("{imports}\nfunc ex{i}() async throws {{\n{body}}}\n"),
+        )
+        .unwrap();
+    }
+    let out = Command::new("swift")
+        .args(["build", "--package-path"])
+        .arg(root)
+        .output()
+        .unwrap();
+    check(Language::Swift, &all, &out, "swift build");
+}

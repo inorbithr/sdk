@@ -24,6 +24,7 @@ pub mod java;
 mod language;
 pub mod python;
 pub mod rust;
+pub mod swift;
 mod target;
 pub mod typescript;
 
@@ -35,6 +36,7 @@ pub use java::JavaTarget;
 pub use language::{Language, Options, render};
 pub use python::PythonTarget;
 pub use rust::RustTarget;
+pub use swift::SwiftTarget;
 pub use target::{RenderError, Target};
 pub use typescript::TypeScriptTarget;
 
