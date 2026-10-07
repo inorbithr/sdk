@@ -71,8 +71,9 @@ iohr api GET /v1/me
 
 `iohr` keeps several accounts as profiles, creates and revokes API tokens, proves
 domains, connects an account's apps (`iohr connectors`, `iohr connections`: a key or a
-browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`), and
-checks Lab documents (`iohr lab check`). It talks to `api.inorbit.hr` and
+browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`),
+checks Lab documents (`iohr lab check`) and keeps RFCs in the RFCs product (`iohr rfc`).
+It talks to `api.inorbit.hr` and
 `auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
 `sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry and no update
 check. Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can

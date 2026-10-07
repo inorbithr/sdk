@@ -108,6 +108,10 @@ pub enum Command {
     /// Lab documents: RFCs and studies kept in your repository (RFC 0035).
     #[command(subcommand)]
     Lab(LabCommand),
+    /// RFCs in the RFCs product (RFC 0065): list and read them, create one, save a new
+    /// version, set its status, comment, link a pull request, ask for a review.
+    #[command(subcommand)]
+    Rfc(RfcCommand),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -168,6 +172,199 @@ pub struct LabCheck {
     /// a hit says the rule and why, never what matched. Not read unless named.
     #[arg(long, value_name = "FILE")]
     pub strict: Option<PathBuf>,
+}
+
+/// Where an RFC is looked for.
+#[derive(Debug, Clone, Args)]
+pub struct RfcWhere {
+    /// The space, by slug (`platform`) or id (`lab_...`). Default: every space of the
+    /// account; needed when two spaces hold the same number.
+    #[arg(long)]
+    pub space: Option<String>,
+    /// The account whose spaces to use. Default: the credential's own.
+    #[arg(long)]
+    pub account: Option<String>,
+}
+
+/// A pull request a comment is about.
+#[derive(Debug, Clone, Args)]
+pub struct PrLine {
+    /// The pull request: `repo#n` (an inorbithr repository), `owner/repo#n` or its
+    /// GitHub link.
+    #[arg(long)]
+    pub pr: Option<String>,
+    /// Its title.
+    #[arg(long, requires = "pr")]
+    pub title: Option<String>,
+    /// It was merged.
+    #[arg(long, requires = "pr", conflicts_with = "live")]
+    pub merged: bool,
+    /// The change is live: merged, rolled and serving.
+    #[arg(long, requires = "pr")]
+    pub live: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RfcCommand {
+    /// The RFCs of the account's spaces: number, space, status, access, title.
+    List {
+        #[command(flatten)]
+        at: RfcWhere,
+        /// Only RFCs with this status (`open`, `decided`, `superseded`).
+        #[arg(long)]
+        status: Option<String>,
+        /// Only RFCs whose title, slug or text contains this, any case.
+        #[arg(long)]
+        query: Option<String>,
+        /// Only yours: documents you own, write or build, or are asked to review.
+        #[arg(long)]
+        mine: bool,
+    },
+    /// One RFC: its number, status, version and, with `--text`, its text.
+    Show {
+        /// The RFC: its number (`0065`, a part `0065.1`) or its id (`ldoc_...`).
+        rfc: String,
+        #[command(flatten)]
+        at: RfcWhere,
+        /// Print the document's text after its details.
+        #[arg(long)]
+        text: bool,
+        /// With `--text`: only the text, as saved, so `> file.md` gives the file back.
+        #[arg(long, requires = "text")]
+        raw: bool,
+        /// An older version instead of the current one.
+        #[arg(long = "at-version", value_name = "N")]
+        at_version: Option<u32>,
+    },
+    /// A new RFC in a space: the space gives it the next number. With `--file`, the
+    /// file's text is saved as its next version straight away.
+    Create {
+        /// The space, by slug (`platform`) or id.
+        #[arg(long)]
+        space: String,
+        /// The account the space belongs to. Default: the credential's own.
+        #[arg(long)]
+        account: Option<String>,
+        /// The title, 1 to 200 characters.
+        #[arg(long)]
+        title: String,
+        /// A one-paragraph summary, at most 1000 characters.
+        #[arg(long)]
+        summary: Option<String>,
+        /// Make it a part of this RFC (`0065` makes `0065.N`).
+        #[arg(long)]
+        parent: Option<String>,
+        /// The whole document to save after creating it (`-` reads stdin).
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// What the saved version says changed (with `--file`).
+        #[arg(long, short, requires = "file")]
+        message: Option<String>,
+    },
+    /// Save a new version of an RFC from a file: the whole document, front matter and
+    /// all. Refused when someone saved since the version it was made from.
+    Save {
+        /// The RFC: its number or id.
+        rfc: String,
+        #[command(flatten)]
+        at: RfcWhere,
+        /// The whole document (`-` reads stdin), at most 512 KiB.
+        #[arg(long)]
+        file: PathBuf,
+        /// What changed, at most 500 characters.
+        #[arg(long, short)]
+        message: String,
+        /// The version the file was made from. Default: the current one.
+        #[arg(long)]
+        base: Option<u32>,
+    },
+    /// Set an RFC's status: `open`, `decided` or `superseded` (with `--successor`).
+    Status {
+        /// The RFC: its number or id.
+        rfc: String,
+        /// The new status.
+        status: String,
+        #[command(flatten)]
+        at: RfcWhere,
+        /// For `superseded`: the RFC that replaces it, in the same space.
+        #[arg(long)]
+        successor: Option<String>,
+    },
+    /// Comment on an RFC. With `--pr`, the comment starts with the pull request's line
+    /// (`owner/repo#n "title": open`, `merged` or `live`), so the RFC's thread reads as
+    /// the record of the work; the same line `mise run rfcs:comment` writes.
+    Comment {
+        /// The RFC: its number or id.
+        rfc: String,
+        /// The comment, 1 byte to 10 KiB with the pull request's line.
+        text: String,
+        #[command(flatten)]
+        at: RfcWhere,
+        #[command(flatten)]
+        pr: PrLine,
+        /// The heading the comment is on, by its id (`status-log`).
+        #[arg(long)]
+        anchor: Option<String>,
+    },
+    /// Record a pull request that implements an RFC, as a comment with its line alone:
+    /// `owner/repo#n "title": open` when it opens, then `merged`, then `live`.
+    LinkPr {
+        /// The RFC: its number or id.
+        rfc: String,
+        /// The pull request: `repo#n` (an inorbithr repository), `owner/repo#n` or its
+        /// GitHub link.
+        pr: String,
+        #[command(flatten)]
+        at: RfcWhere,
+        /// The pull request's title.
+        #[arg(long)]
+        title: Option<String>,
+        /// The pull request was merged.
+        #[arg(long, conflicts_with = "live")]
+        merged: bool,
+        /// The change is live: merged, rolled and serving.
+        #[arg(long)]
+        live: bool,
+    },
+    /// Create a diagram from a model file, or with its id save a new version of one. The
+    /// model is the RFCs product's diagram JSON (`version`, `nodes`, `edges`); embed it in
+    /// an RFC with a ```` ```diagram <id> ```` block.
+    Diagram {
+        /// The diagram to save a new version of (`ldia_...`); without it, a new diagram.
+        id: Option<String>,
+        #[command(flatten)]
+        at: RfcWhere,
+        /// The model, JSON (`-` reads stdin), at most 1 MiB.
+        #[arg(long)]
+        file: PathBuf,
+        /// Its name, 1 to 80 characters: needed for a new diagram; renames an existing one.
+        #[arg(long)]
+        name: Option<String>,
+        /// What changed (for a new version), at most 500 characters.
+        #[arg(long, short)]
+        message: Option<String>,
+    },
+    /// Ask for a review of an RFC's current version from members of its account who may
+    /// write (never yourself or the RFC's author).
+    Review {
+        /// The RFC: its number or id.
+        rfc: String,
+        #[command(flatten)]
+        at: RfcWhere,
+        /// A reviewer's subject; repeat, or separate with commas, for several.
+        /// `mise run rfcs:token` sets `IOHR_RFC_REVIEWER` to the account's owner.
+        #[arg(
+            long = "reviewer",
+            value_name = "SUBJECT",
+            env = "IOHR_RFC_REVIEWER",
+            value_delimiter = ',',
+            required = true
+        )]
+        reviewers: Vec<String>,
+        /// Why, or what to look at: added as a comment with the request.
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
