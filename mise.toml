@@ -19,6 +19,8 @@ java = "temurin-17.0.20+8"
 maven = "3.10.0"
 # The .NET 10 LTS SDK builds the net8.0 library (ADR 0013); .NET 8 itself ends in 2026-11.
 dotnet = "10.0.401"
+# Dart for the dart/ runtime (platform RFC 0074.8); the newest stable, as the app uses.
+dart = "3.13.5"
 
 golangci-lint = "2.14.0"
 "go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen" = "2.8.0"
@@ -54,7 +56,7 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "cli:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "dart:check", "cli:check", "conformance", "examples:check"]
 
 [tasks."ci:changed"]
 description = "What CI would run for your changes since origin/main, with CI's path rules; run it before a push (`-- --dry-run` prints the plan)"
@@ -62,22 +64,22 @@ run = "bash tools/ci-changed.sh"
 
 [tasks.check]
 description = "Format check, lint, types and unit tests for every language and the command line"
-depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "cli:check"]
+depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "dart:check", "cli:check"]
 
 [tasks.fmt]
 description = "Format every language and the command line in place"
-depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt", "java:fmt", "csharp:fmt", "cli:fmt"]
+depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt", "java:fmt", "csharp:fmt", "dart:fmt", "cli:fmt"]
 
 [tasks.gen]
 description = "Regenerate every generated/ directory from spec/"
-depends = ["go:gen", "rust:gen", "ts:gen", "py:gen", "java:gen", "csharp:gen"]
+depends = ["go:gen", "rust:gen", "ts:gen", "py:gen", "java:gen", "csharp:gen", "dart:gen"]
 
 [tasks."gen:check"]
 shell = "bash -e -o pipefail -c"
 description = "Fail if regenerating from spec/ changes any committed file"
 run = """
 mise run gen
-git diff --exit-code -- go rust typescript python java csharp || {
+git diff --exit-code -- go rust typescript python java csharp dart || {
   echo "generated code is stale: run 'mise run gen' and commit the result" >&2; exit 1; }
 """
 
@@ -601,6 +603,40 @@ run = """
 [ -f pom.xml ] && [ -f ../spec/openapi.json ] || { echo "java:gen: no project yet, skipping"; exit 0; }
 ../tools/iohr.sh sdk generate --lang java --from public=../spec/openapi.json --in-package --out src/main/java/hr/inorbit/sdk/generated --force
 """
+
+[tasks."dart:check"]
+shell = "bash -e -o pipefail -c"
+description = "Dart: dart format check, dart analyze (strict), unit tests"
+dir = "dart"
+run = """
+[ -f pubspec.yaml ] || { echo "dart: no package yet, skipping"; exit 0; }
+dart pub get
+dart format --output=none --set-exit-if-changed .
+dart analyze --fatal-infos
+dart test
+"""
+
+[tasks."dart:fmt"]
+shell = "bash -e -o pipefail -c"
+dir = "dart"
+run = "[ -f pubspec.yaml ] || exit 0; dart format ."
+
+[tasks."dart:gen"]
+shell = "bash -e -o pipefail -c"
+description = "Dart: regenerate the bundled contract (lib/src/generated/contract.g.dart) from spec/openapi.json"
+dir = "dart"
+run = """
+[ -f pubspec.yaml ] && [ -f ../spec/openapi.json ] || { echo "dart:gen: no package yet, skipping"; exit 0; }
+dart pub get >/dev/null
+dart run tool/gen_contract.dart --spec ../spec/openapi.json --out lib/src/generated/contract.g.dart
+dart format lib/src/generated >/dev/null
+"""
+
+[tasks."dart:live"]
+shell = "bash -e -o pipefail -c"
+description = "Dart: check the live API's answers against the contract (public ones; INORBIT_API_KEY adds the account's)"
+dir = "dart"
+run = "dart pub get >/dev/null && dart run tool/live_check.dart"
 
 [tasks."csharp:check"]
 shell = "bash -e -o pipefail -c"

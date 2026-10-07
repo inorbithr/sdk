@@ -46,12 +46,13 @@ jobs:
       py: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.py == 'true' }}
       java: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.java == 'true' }}
       csharp: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.csharp == 'true' }}
+      dart: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.dart == 'true' }}
       cli: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.cli == 'true' }}
       any: >-
         ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.go == 'true' ||
         steps.filter.outputs.rust == 'true' || steps.filter.outputs.ts == 'true' ||
         steps.filter.outputs.py == 'true' || steps.filter.outputs.java == 'true' ||
-        steps.filter.outputs.csharp == 'true' }}
+        steps.filter.outputs.csharp == 'true' || steps.filter.outputs.dart == 'true' }}
     steps:
       - id: full
         env:
@@ -104,6 +105,9 @@ jobs:
               - *shared
               - 'csharp/**'
               - 'examples/csharp/**'
+            dart:
+              - *shared
+              - 'dart/**'
             cli:
               - 'cli/**'
               - 'rust/**'
@@ -525,10 +529,29 @@ jobs:
 
   # The only required status check. Skipped jobs count as passing; failed or
   # cancelled ones do not.
+  # The Dart runtime holds the contract and its checker so far (platform RFC 0074.8);
+  # it joins the generated surface and the conformance suite in a later slice.
+  dart:
+    name: dart
+    needs: changes
+    if: needs.changes.outputs.dart == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          install_args: dart
+      - run: mise run dart:gen && git diff --exit-code -- dart
+      - run: mise run dart:check
+
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [repo, tools, go, rust, ts, py, java, csharp, cli, examples]
+    needs: [repo, tools, go, rust, ts, py, java, csharp, dart, cli, examples]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
