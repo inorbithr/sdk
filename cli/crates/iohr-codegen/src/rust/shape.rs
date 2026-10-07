@@ -130,10 +130,10 @@ fn defaulted_types(file: &syn::File) -> BTreeSet<String> {
                     .as_ref()
                     .is_some_and(|(p, _)| last_is(p, "Default")) =>
             {
-                if let Type::Path(p) = &*i.self_ty {
-                    if let Some(seg) = p.path.segments.last() {
-                        known.insert(seg.ident.to_string());
-                    }
+                if let Type::Path(p) = &*i.self_ty
+                    && let Some(seg) = p.path.segments.last()
+                {
+                    known.insert(seg.ident.to_string());
                 }
             }
             _ => {}
