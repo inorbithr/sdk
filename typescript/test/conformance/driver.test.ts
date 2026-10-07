@@ -230,6 +230,17 @@ function call(api: Public, action: Case["action"]): Promise<RawResponse> {
     }
     case "events.delete_endpoint":
       return api.events.deleteEndpoint(arg("endpoint_id") ?? "", options).then((r) => r.raw);
+    case "rfcs.create_document": {
+      const { space_id: _space, ...body } = args as {
+        space_id?: string;
+        kind?: string;
+        title?: string;
+        summary?: string;
+        template?: string;
+        parent_id?: string;
+      };
+      return api.rfcs.createDocument(arg("space_id") ?? "", body, options).then((r) => r.raw);
+    }
     default:
       throw new Error(`the conformance schema names an op this driver does not know: ${action.op}`);
   }
