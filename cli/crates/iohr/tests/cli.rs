@@ -621,6 +621,7 @@ async fn verbose_output_never_shows_the_token() {
         vec!["connections", "revoke-grant", "con_1", "gnt_1"],
         vec!["connections", "delete", "con_1", "--yes"],
     ];
+    // `iohr rfc` needs typed answers: `rfc_commands_never_show_the_token` runs it.
     for args in commands {
         let mut args = args.clone();
         args.push("--verbose");
@@ -2393,4 +2394,386 @@ fn sdk_add_runs_the_program_and_passes_its_exit_code_on() {
     assert_eq!(code(&o), 0, "{}", text(&o));
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(v["manager"], "pip");
+}
+
+// `iohr rfc` (platform RFC 0065): the RFCs API through the SDK's `rfcs` operations.
+
+const SPACE: &str = "lab_1";
+const RFC_ID: &str = "ldoc_65";
+
+fn rfc_space(id: &str, slug: &str) -> serde_json::Value {
+    serde_json::json!({
+        "space_id": id, "account_id": ACCOUNT, "slug": slug, "name": slug,
+        "description": "", "created_at": "2026-10-01T00:00:00Z",
+        "updated_at": "2026-10-07T00:00:00Z", "documents": 1, "open": 1, "awaiting_review": 0
+    })
+}
+
+fn rfc_doc(id: &str, number: i32, part: i32, version: i32, status: &str) -> serde_json::Value {
+    let display = if part == 0 {
+        format!("{number:04}")
+    } else {
+        format!("{number:04}.{part}")
+    };
+    serde_json::json!({
+        "document_id": id, "space_id": SPACE, "kind": "rfc", "number": number,
+        "slug": "rfcs-everywhere", "title": "RFCs everywhere", "status": status,
+        "public": false, "summary": "", "current_version": version, "superseded_by": "",
+        "path": format!("docs/rfcs/{display}-rfcs-everywhere.md"), "created_by": "ops:nevio",
+        "created_at": "2026-10-06T00:00:00Z", "updated_at": "2026-10-07T00:00:00Z",
+        "parent_id": "", "child_index": part, "display_number": display, "children": 0,
+        "headline": "", "headline_note": "", "supersedes_id": "", "measures_id": "",
+        "access": "team"
+    })
+}
+
+/// Every route `iohr rfc` calls, answering for one space holding RFC 0065 and its part
+/// 0065.1, with the bodies the commands must send.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one mock per route, each with its body"
+)]
+async fn mount_rfcs(server: &MockServer) {
+    let docs = format!("/v1/rfcs/spaces/{SPACE}/documents");
+    let one = format!("{docs}/{RFC_ID}");
+    Mock::given(method("GET"))
+        .and(path("/v1/rfcs/spaces"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "spaces": [rfc_space(SPACE, "platform")], "next_page_token": ""
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&docs))
+        .and(query_param("types", "rfc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "documents": [rfc_doc(RFC_ID, 65, 0, 4, "open"), rfc_doc("ldoc_651", 65, 1, 1, "open")],
+            "next_page_token": ""
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&one))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "document": rfc_doc(RFC_ID, 65, 0, 4, "open"), "text": "---\ntitle: RFCs everywhere\n---\n\nBody.\n",
+            "version": 4, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-07T00:00:00Z",
+            "findings": [], "children": [], "mentions": [], "mentioned_in": [],
+            "successors": [], "measured_by": []
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(&docs))
+        .and(body_json(serde_json::json!({
+            "space_id": SPACE, "kind": "rfc", "title": "Agents keep RFCs", "parent_id": RFC_ID
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "document": rfc_doc("ldoc_652", 65, 2, 1, "open"), "findings": [], "text": "template"
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{docs}/ldoc_652/versions")))
+        .and(body_json(serde_json::json!({
+            "space_id": SPACE, "document_id": "ldoc_652", "base_version": 1,
+            "text": "# new\n", "message": "First draft"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "document": rfc_doc("ldoc_652", 65, 2, 2, "open"), "findings": [], "version": 2
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{one}/versions")))
+        .and(body_json(serde_json::json!({
+            "space_id": SPACE, "document_id": RFC_ID, "base_version": 4,
+            "text": "# new\n", "message": "Status log: step 2"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "document": rfc_doc(RFC_ID, 65, 0, 5, "open"),
+            "findings": [{"rule": "ip-address", "line": 3, "message": "an IP address"}],
+            "version": 5
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{one}/status")))
+        .and(body_json(serde_json::json!({
+            "space_id": SPACE, "document_id": RFC_ID, "status": "superseded",
+            "successor_id": "ldoc_651", "base_version": 4
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "document": rfc_doc(RFC_ID, 65, 0, 4, "superseded")
+        })))
+        .mount(server)
+        .await;
+    for body in [
+        "inorbithr/core#512 \"feat(labs): an agent principal\": open",
+        "inorbithr/core#512: merged",
+        "inorbithr/sdk#161: live. verified as the agent",
+        "Review requested: the agent identity",
+        "Plain words.",
+    ] {
+        Mock::given(method("POST"))
+            .and(path(format!("{one}/comments")))
+            .and(body_json(serde_json::json!({
+                "space_id": SPACE, "document_id": RFC_ID, "body": body
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "comment": {"comment_id": "lcom_1", "document_id": RFC_ID, "anchor": "",
+                    "parent_id": "", "author": "iohr-rfcs-agent", "body": body, "version": 4,
+                    "resolved": false, "resolved_by": "", "resolved_at": "",
+                    "created_at": "2026-10-07T00:00:00Z"}
+            })))
+            .mount(server)
+            .await;
+    }
+    let diagram = serde_json::json!({
+        "diagram_id": "ldia_1", "space_id": SPACE, "name": "Identity", "current_version": 1,
+        "nodes": 1, "created_by": "iohr-rfcs-agent", "created_at": "2026-10-07T00:00:00Z",
+        "updated_at": "2026-10-07T00:00:00Z"
+    });
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/rfcs/spaces/{SPACE}/diagrams")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "diagrams": [diagram], "next_page_token": ""
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/rfcs/spaces/{SPACE}/diagrams")))
+        .and(body_json(serde_json::json!({
+            "space_id": SPACE, "name": "Identity", "model": RFC_MODEL
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "diagram": diagram, "model": RFC_MODEL
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/v1/rfcs/spaces/{SPACE}/diagrams/ldia_1/versions"
+        )))
+        .and(body_json(serde_json::json!({
+            "space_id": SPACE, "diagram_id": "ldia_1", "base_version": 1,
+            "model": RFC_MODEL, "message": "One node"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "diagram": diagram, "version": 2
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{one}/reviews")))
+        .and(body_json(serde_json::json!({
+            "space_id": SPACE, "document_id": RFC_ID, "reviewers": ["owner-subject"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "reviews": [{"review_id": "lrev_1", "document_id": RFC_ID, "space_id": SPACE,
+                "space_name": "Platform", "kind": "rfc", "number": 65, "display_number": "0065",
+                "title": "RFCs everywhere", "reviewer": "owner-subject",
+                "requested_by": "iohr-rfcs-agent", "version": 4, "decision": "",
+                "requested_at": "2026-10-07T00:00:00Z", "decided_at": ""}]
+        })))
+        .mount(server)
+        .await;
+}
+
+const RFC_MODEL: &str =
+    r#"{"version":1,"nodes":[{"id":"a","kind":"service","name":"A","x":0,"y":0}],"edges":[]}"#;
+
+/// The `iohr rfc` invocations the tests run; `file` holds `# new\n`, `model` a diagram.
+fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
+    vec![
+        vec![
+            "rfc", "diagram", "--space", "platform", "--name", "Identity", "--file", model,
+        ],
+        vec![
+            "rfc", "diagram", "ldia_1", "--file", model, "-m", "One node",
+        ],
+        vec!["rfc", "list"],
+        vec!["rfc", "show", "0065", "--text"],
+        vec![
+            "rfc",
+            "create",
+            "--space",
+            "platform",
+            "--title",
+            "Agents keep RFCs",
+            "--parent",
+            "0065",
+            "--file",
+            file,
+        ],
+        vec![
+            "rfc",
+            "save",
+            "0065",
+            "--file",
+            file,
+            "-m",
+            "Status log: step 2",
+        ],
+        vec![
+            "rfc",
+            "status",
+            "0065",
+            "superseded",
+            "--successor",
+            "0065.1",
+        ],
+        vec![
+            "rfc",
+            "link-pr",
+            "0065",
+            "core#512",
+            "--title",
+            "feat(labs): an agent principal",
+        ],
+        vec![
+            "rfc",
+            "link-pr",
+            "0065",
+            "https://github.com/inorbithr/core/pull/512",
+            "--merged",
+        ],
+        vec![
+            "rfc",
+            "comment",
+            "0065",
+            "verified as the agent",
+            "--pr",
+            "sdk#161",
+            "--live",
+        ],
+        vec!["rfc", "comment", "0065", "Plain words."],
+        vec![
+            "rfc",
+            "review",
+            "0065",
+            "--reviewer",
+            "owner-subject",
+            "--reason",
+            "the agent identity",
+        ],
+    ]
+}
+
+#[tokio::test]
+async fn rfc_commands_send_what_the_api_takes_and_print_it() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_rfcs(&server).await;
+    let file = dir.path().join("rfc.md");
+    std::fs::write(&file, "# new\n").unwrap();
+    let file = file.to_str().unwrap();
+    let model = dir.path().join("model.json");
+    std::fs::write(&model, RFC_MODEL).unwrap();
+    let model = model.to_str().unwrap();
+    let t = token(&["rfc:read", "rfc:write"]);
+    for args in rfc_commands(file, model) {
+        let o = r.with_token(&t, &args);
+        assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+    }
+
+    // Tables and pairs.
+    let o = r.with_token(&t, &["rfc", "list"]);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.starts_with("RFC "), "{out}");
+    assert!(out.contains("0065.1"), "{out}");
+    let o = r.with_token(&t, &["rfc", "show", "65", "--text", "--raw"]);
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout),
+        "---\ntitle: RFCs everywhere\n---\n\nBody.\n"
+    );
+    // A finding is named by rule and line on stderr.
+    let o = r.with_token(
+        &t,
+        &[
+            "rfc",
+            "save",
+            "0065",
+            "--file",
+            file,
+            "-m",
+            "Status log: step 2",
+        ],
+    );
+    assert!(String::from_utf8_lossy(&o.stderr).contains("ip-address (line 3)"));
+    // The reviewer may come from the environment, as `mise run rfcs:token` sets it.
+    let o = r
+        .cmd(&["rfc", "review", "0065", "--reason", "the agent identity"])
+        .env("IOHR_TOKEN", &t)
+        .env("IOHR_RFC_REVIEWER", "owner-subject")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
+    // --json everywhere.
+    for args in rfc_commands(file, model) {
+        let mut args = args.clone();
+        args.push("--json");
+        let o = r.with_token(&t, &args);
+        assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout)
+            .unwrap_or_else(|e| panic!("{args:?}: {e}: {}", text(&o)));
+        assert!(!v.is_null(), "{args:?}");
+    }
+    let o = r.with_token(&t, &["rfc", "list", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v[0]["space"], "platform");
+    assert_eq!(v[1]["display_number"], "0065.1");
+
+    // Usage errors exit 2.
+    for args in [
+        vec!["rfc", "show", "sixty-five"],
+        vec!["rfc", "show", "0065", "--space", "evm"],
+        vec!["rfc", "link-pr", "0065", "core"],
+        vec!["rfc", "review", "0065"],
+        vec![
+            "rfc", "diagram", "--space", "platform", "--name", "x", "--file", file,
+        ],
+        vec!["rfc", "comment", "0065", "x", "--live"],
+    ] {
+        let o = r.with_token(&t, &args);
+        assert_eq!(code(&o), 2, "{args:?}: {}", text(&o));
+    }
+}
+
+#[tokio::test]
+async fn rfc_commands_never_show_the_token() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_rfcs(&server).await;
+    let file = dir.path().join("rfc.md");
+    std::fs::write(&file, "# new\n").unwrap();
+    let file = file.to_str().unwrap();
+    let model = dir.path().join("model.json");
+    std::fs::write(&model, RFC_MODEL).unwrap();
+    let model = model.to_str().unwrap();
+    let t = token(&["rfc:read", "rfc:write"]);
+    for args in rfc_commands(file, model) {
+        let mut args = args.clone();
+        args.push("--verbose");
+        let o = r.with_token(&t, &args);
+        assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+        let all = text(&o);
+        assert!(
+            !all.contains("TOKENSIGNATUREMARKER"),
+            "{args:?} leaked the token"
+        );
+        assert!(
+            all.contains("request id"),
+            "{args:?} printed no verbose line"
+        );
+    }
 }
