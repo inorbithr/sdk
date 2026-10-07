@@ -16,6 +16,7 @@ clap.workspace = true
 heck.workspace = true
 minijinja.workspace = true
 prettyplease.workspace = true
+quote.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

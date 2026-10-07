@@ -2,7 +2,7 @@
 //! prettyplease formats them. Three schemas are not generated but mapped to the
 //! runtime's own types, which carry behaviour typify cannot express: `Code` keeps an
 //! unknown slug, `Detail` keeps an unknown variant, and `Int64` reads a decimal string
-//! or a number.
+//! or a number. [`super::shape`] then makes every model safe to grow.
 
 use serde_json::{Value, json};
 use typify::{TypeSpace, TypeSpaceImpl, TypeSpaceSettings};
@@ -52,10 +52,11 @@ pub(crate) fn render(
         .add_root_schema(root)
         .map_err(|e| RenderError::Models(e.to_string()))?;
     let stream = space.to_stream();
-    let file: syn::File = syn::parse2(stream).map_err(|e| RenderError::Syntax {
+    let mut file: syn::File = syn::parse2(stream).map_err(|e| RenderError::Syntax {
         file: "models.rs",
         reason: e.to_string(),
     })?;
+    super::shape::apply(&mut file);
     Ok(prettyplease::unparse(&file))
 }
 
