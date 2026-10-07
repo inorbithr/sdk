@@ -14,10 +14,12 @@ touched() { printf '%s\n' "${files[@]}" | grep -Eq "$1"; }
 
 # A change here regenerates or re-checks every language (ADR 0011).
 shared='^(spec/|conformance/|mise\.toml$|\.github/workflows/ci\.yml$|cli/crates/iohr-(openapi|codegen)/)'
-declare -A dir=([go]=go [rust]=rust [ts]=typescript [py]=python [java]=java [csharp]=csharp)
+declare -A dir=([go]=go [rust]=rust [ts]=typescript [py]=python [java]=java [csharp]=csharp [swift]=swift)
 langs=()
-for lang in go rust ts py java csharp; do
-  if touched "$shared" || touched "^(${dir[$lang]}|examples/${dir[$lang]})/"; then
+for lang in go rust ts py java csharp swift; do
+  extra=''
+  [ "$lang" = swift ] && extra='|^Package\.swift$'
+  if touched "$shared" || touched "^(${dir[$lang]}|examples/${dir[$lang]})/$extra"; then
     langs+=("$lang")
   fi
 done

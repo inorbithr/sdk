@@ -46,12 +46,13 @@ jobs:
       py: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.py == 'true' }}
       java: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.java == 'true' }}
       csharp: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.csharp == 'true' }}
+      swift: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.swift == 'true' }}
       cli: ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.cli == 'true' }}
       any: >-
         ${{ steps.full.outputs.full == 'true' || steps.filter.outputs.go == 'true' ||
         steps.filter.outputs.rust == 'true' || steps.filter.outputs.ts == 'true' ||
         steps.filter.outputs.py == 'true' || steps.filter.outputs.java == 'true' ||
-        steps.filter.outputs.csharp == 'true' }}
+        steps.filter.outputs.csharp == 'true' || steps.filter.outputs.swift == 'true' }}
     steps:
       - id: full
         env:
@@ -104,6 +105,10 @@ jobs:
               - *shared
               - 'csharp/**'
               - 'examples/csharp/**'
+            swift:
+              - *shared
+              - 'Package.swift'
+              - 'swift/**'
             cli:
               - 'cli/**'
               - 'rust/**'
@@ -461,6 +466,60 @@ jobs:
       - if: env.COMPILE_CELL == 'true'
         run: IOHR_TEST_COMPILE=csharp mise run cli:compile-test
 
+  swift:
+    name: swift (macos-latest)
+    needs: [changes, tools]
+    if: needs.changes.outputs.swift == 'true'
+    # Xcode's toolchain builds the package for Apple platforms; the Linux cell below proves
+    # FoundationNetworking. One macOS cell, as Swift's first platform is Apple's.
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          install_args: "rust go cargo-binstall cargo:cargo-nextest"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: cli
+      - run: mise run swift:gen && git diff --exit-code -- swift
+      - run: mise run swift:check
+      - run: xcodebuild -scheme InOrbit -destination 'generic/platform=iOS' -derivedDataPath .build/xcode build
+      - run: mise run conformance:swift
+      # A generated two-profile surface builds and the wrong profile does not.
+      - run: IOHR_TEST_COMPILE=swift mise run cli:compile-test
+
+  swift-linux:
+    name: swift (linux)
+    needs: [changes, tools]
+    if: needs.changes.outputs.swift == 'true'
+    runs-on: ubuntu-latest
+    container: swift:6.1@sha256:6e43114610e161e38ad41636ebcafd6940dc67dfab355eace3a0ca100b2263db
+    permissions:
+      contents: read
+    env:
+      IOHR_BIN: ${{ github.workspace }}/ci-tools/iohr
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tools-linux
+          path: ci-tools
+      - run: |
+          chmod +x ci-tools/iohr ci-tools/replay
+          mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
+      - run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          tools/iohr.sh sdk generate --lang swift --from public=spec/openapi.json --in-package --out swift/Sources/InOrbit/Generated --force
+          git diff --exit-code -- swift
+      - run: swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+      - run: IOHR_TEST_REQUIRE_REPLAY=1 swift test
+
   cli:
     name: cli ${{ matrix.rust }} (${{ matrix.os }})
     needs: changes
@@ -528,7 +587,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [repo, tools, go, rust, ts, py, java, csharp, cli, examples]
+    needs: [repo, tools, go, rust, ts, py, java, csharp, swift, swift-linux, cli, examples]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
