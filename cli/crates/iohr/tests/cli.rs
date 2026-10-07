@@ -620,6 +620,9 @@ async fn verbose_output_never_shows_the_token() {
         vec!["connections", "grants", "con_1"],
         vec!["connections", "revoke-grant", "con_1", "gnt_1"],
         vec!["connections", "delete", "con_1", "--yes"],
+        vec!["ext", "search", "agent", "--kind", "program"],
+        vec!["ext", "search", "--all"],
+        vec!["ext", "show", "inorbit/agent"],
     ];
     for args in commands {
         let mut args = args.clone();
@@ -636,6 +639,16 @@ async fn verbose_output_never_shows_the_token() {
             "{args:?} printed no verbose line"
         );
     }
+    // `ext install PUBLISHER/NAME` asks the catalogue with the credential first; this
+    // catalogue lists no released version, so it stops there (exit 1).
+    let args = ["ext", "install", "inorbit/agent", "--verbose"];
+    let o = r.with_token(&t, &args);
+    assert_eq!(code(&o), 1, "{args:?}: {}", text(&o));
+    let all = text(&o);
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER") && all.contains("request id"),
+        "{args:?}: {all}"
+    );
     // An offline command makes no call, so it prints no request line; it must not
     // print the token either.
     let lab = dir.path().join("lab/rfcs");

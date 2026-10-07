@@ -478,10 +478,36 @@ impl UseStatus {
 
 #[derive(Debug, Subcommand)]
 pub enum ExtCommand {
+    /// Search the extensions catalogue (RFC 0073): name, kind, publisher, latest
+    /// version and visibility. Reads the API only, never the registry.
+    Search {
+        /// Words to look for in the name, publisher and description.
+        query: Option<String>,
+        /// Only this kind: program, agent-plugin, web, connector or assistant-plugin.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Every match: follow the pages to the end.
+        #[arg(long, conflicts_with = "page_size")]
+        all: bool,
+        /// At most this many (the catalogue's default page is 50).
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=200))]
+        page_size: Option<u32>,
+    },
+    /// One extension in the catalogue: what it does, its publisher, signer, scopes,
+    /// privileges in plain words, evidence, versions and the line that installs it.
+    Show {
+        /// PUBLISHER/NAME, such as inorbit/agent.
+        extension: String,
+    },
     /// Fetch an extension, verify its signature, provenance and digest, and install it.
     /// One that declares privileges for its system service asks first unless --yes.
+    ///
+    /// PUBLISHER/NAME resolves the version through the catalogue first; the artifact
+    /// must then be the one the catalogue lists, signed by the signer it names, as well
+    /// as pass every check the trust root makes.
     Install {
-        /// NAME, NAME@VERSION or NAME@sha256:DIGEST (default: the newest release).
+        /// NAME, NAME@VERSION or NAME@sha256:DIGEST (default: the newest release) from
+        /// the registry, or PUBLISHER/NAME[@VERSION|@sha256:DIGEST] through the catalogue.
         extension: String,
         /// Also pin it in this lock file, for `iohr ext sync` elsewhere.
         #[arg(long, value_name = "FILE")]
