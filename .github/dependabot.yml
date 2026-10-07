@@ -5,9 +5,11 @@
 # younger than the cooldown: a compromised release usually surfaces within days
 # (ADR 0005). Security updates ignore the schedule and the cooldown.
 #
-# The only `ignore` rules are minimum runtimes: a type package or toolchain that defines
-# the oldest runtime a published library supports stays at that minimum (ADR 0006).
-# Raising one is a breaking change made by hand, never by Dependabot.
+# `ignore` rules are of two kinds only (docs/releasing.md, Dependencies). A minimum
+# runtime: a type package or toolchain that defines the oldest runtime a published
+# library supports stays at that minimum (ADR 0006); raising one is a breaking change made
+# by hand, never by Dependabot. And a crate whose major is fixed by another dependency's
+# public API, ignored only until that dependency moves; each says what lifts it.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -47,6 +49,12 @@ updates:
       rust: { patterns: ["*"], update-types: [minor, patch] }
       rust-major: { patterns: ["*"], update-types: [major] }
     commit-message: { prefix: "build(rust)" }
+    ignore:
+      # Fixed by typify's API: `TypeSpace::add_root_schema` takes a schemars 0.8
+      # `RootSchema` (typify 0.8.0 and 0.10.0-alpha.2 both require schemars ^0.8.22).
+      # Lift when typify moves to schemars 1 (oxidecomputer/typify#886).
+      - dependency-name: schemars
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directories: [/typescript, /examples/typescript]

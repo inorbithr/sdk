@@ -114,9 +114,15 @@ back.
   `@types/node` follows Node 22 (`engines`), `go` in `go.mod` stays 1.26, `rust-version`
   1.94, `requires-python` 3.11, Java `release` 17, C# `net8.0`. Raising one is a breaking
   change for users and is decided on its own, never as part of an update. `@types/node`
-  majors are the only `ignore` rule in `.github/dependabot.yml`; an update that would
-  raise another minimum (a crate needing a newer Rust, a module needing a newer Go) fails
-  the oldest-version CI cell and waits.
+  majors are the minimum-runtime `ignore` rule in `.github/dependabot.yml`; an update that
+  would raise another minimum (a crate needing a newer Rust, a module needing a newer Go)
+  fails the oldest-version CI cell and waits.
+- **A major fixed by another dependency's API waits for that dependency.** When our code
+  must hand a crate's types to another crate, the two majors move together, and no change
+  of ours can adapt to the newer one alone. Today that is `schemars` in `cli/`: typify's
+  `add_root_schema` takes a schemars 0.8 `RootSchema`, and typify (0.8.0, and the
+  0.10.0 alphas) still requires schemars 0.8 (oxidecomputer/typify#886). Its major is
+  ignored in `.github/dependabot.yml`, with a comment saying what lifts the rule.
 - **Dependabot** watches every manifest: Go, Rust (with `cli/` and the examples, so the
   lockfiles that build against `rust/` move together), npm, uv, Maven, NuGet and the
   workflows' actions. It groups updates into one pull request per ecosystem for patch
