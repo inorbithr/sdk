@@ -54,7 +54,7 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "cli:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "cli:check", "conformance", "examples:check"]
 
 [tasks."ci:changed"]
 description = "What CI would run for your changes since origin/main, with CI's path rules; run it before a push (`-- --dry-run` prints the plan)"
@@ -62,22 +62,22 @@ run = "bash tools/ci-changed.sh"
 
 [tasks.check]
 description = "Format check, lint, types and unit tests for every language and the command line"
-depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "cli:check"]
+depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "cli:check"]
 
 [tasks.fmt]
 description = "Format every language and the command line in place"
-depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt", "java:fmt", "csharp:fmt", "cli:fmt"]
+depends = ["go:fmt", "rust:fmt", "ts:fmt", "py:fmt", "java:fmt", "csharp:fmt", "swift:fmt", "cli:fmt"]
 
 [tasks.gen]
 description = "Regenerate every generated/ directory from spec/"
-depends = ["go:gen", "rust:gen", "ts:gen", "py:gen", "java:gen", "csharp:gen"]
+depends = ["go:gen", "rust:gen", "ts:gen", "py:gen", "java:gen", "csharp:gen", "swift:gen"]
 
 [tasks."gen:check"]
 shell = "bash -e -o pipefail -c"
 description = "Fail if regenerating from spec/ changes any committed file"
 run = """
 mise run gen
-git diff --exit-code -- go rust typescript python java csharp || {
+git diff --exit-code -- go rust typescript python java csharp swift || {
   echo "generated code is stale: run 'mise run gen' and commit the result" >&2; exit 1; }
 """
 
@@ -627,6 +627,34 @@ ls *.sln* >/dev/null 2>&1 && [ -f ../spec/openapi.json ] || { echo "csharp:gen: 
 ../tools/iohr.sh sdk generate --lang csharp --from public=../spec/openapi.json --in-package --out src/InOrbit.Sdk/Generated --force
 """
 
+[tasks."swift:check"]
+shell = "bash -e -o pipefail -c"
+description = "Swift: format lint, build with complete concurrency checking and warnings as errors, unit tests (a Swift 5.9+ toolchain on PATH; Xcode on macOS)"
+run = """
+command -v swift >/dev/null || { echo "swift:check: no swift toolchain on PATH, skipping"; exit 0; }
+swift format lint --strict --configuration swift/.swift-format swift/Sources/InOrbit/*.swift swift/Tests/InOrbitTests/*.swift
+swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+swift test --skip ConformanceTests
+"""
+
+[tasks."swift:fmt"]
+shell = "bash -e -o pipefail -c"
+run = "command -v swift >/dev/null || exit 0; swift format --in-place --configuration swift/.swift-format swift/Sources/InOrbit/*.swift swift/Tests/InOrbitTests/*.swift"
+
+[tasks."swift:gen"]
+shell = "bash -e -o pipefail -c"
+description = "Swift: regenerate the public surface in swift/Sources/InOrbit/Generated/ from spec/openapi.json with `iohr sdk generate` (ADR 0011)"
+run = """
+[ -f Package.swift ] && [ -f spec/openapi.json ] || { echo "swift:gen: no package yet, skipping"; exit 0; }
+tools/iohr.sh sdk generate --lang swift --from public=spec/openapi.json --in-package --out swift/Sources/InOrbit/Generated --force
+"""
+
+[tasks."conformance:swift"]
+shell = "bash -e -o pipefail -c"
+description = "Swift: run every conformance case against the replay server (built first)"
+depends = ["conformance:server:build"]
+run = "command -v swift >/dev/null && [ -f Package.swift ] || { echo 'conformance:swift: skipping (no toolchain or package)'; exit 0; }; IOHR_TEST_REQUIRE_REPLAY=1 swift test --filter ConformanceTests"
+
 [tasks."conformance:java"]
 shell = "bash -e -o pipefail -c"
 depends = ["conformance:server:build"]
@@ -639,7 +667,7 @@ run = "ls csharp/*.sln* >/dev/null 2>&1 || { echo 'conformance:csharp: skipping 
 
 [tasks.conformance]
 description = "Run the shared conformance cases in every language"
-depends = ["conformance:go", "conformance:rust", "conformance:ts", "conformance:py", "conformance:java", "conformance:csharp"]
+depends = ["conformance:go", "conformance:rust", "conformance:ts", "conformance:py", "conformance:java", "conformance:csharp", "conformance:swift"]
 
 [tasks."conformance:server"]
 shell = "bash -e -o pipefail -c"
@@ -707,5 +735,6 @@ found=0
 [ -d examples/python ] && { found=1; (cd examples/python && uv run pyright) || exit 1; }
 [ -d examples/csharp ] && { found=1; for d in examples/csharp/*/; do (cd "$d" && dotnet build -warnaserror -nologo -v q) || exit 1; done; }
 [ -d examples/java ] && { found=1; (cd java && mvn -B -q -DskipTests -Dspotless.check.skip=true package dependency:build-classpath -Dmdep.includeScope=compile -Dmdep.outputFile=target/classpath.txt) && javac --release 17 -Xlint:all -Werror -d java/target/examples -cp "java/target/classes:$(cat java/target/classpath.txt)" $(find examples/java -name "*.java") || exit 1; }
+[ -d examples/swift ] && command -v swift >/dev/null && { found=1; swift build --package-path examples/swift -Xswiftc -warnings-as-errors || exit 1; }
 [ "$found" = 1 ] || echo "examples: none yet, skipping"
 """

@@ -65,6 +65,13 @@
       "package-name": "InOrbit.Sdk",
       "extra-files": ["src/InOrbit.Sdk/InOrbit.Sdk.csproj"]
     },
+    "swift": {
+      "release-type": "simple",
+      "component": "swift",
+      "package-name": "InOrbit",
+      "include-component-in-tag": false,
+      "extra-files": ["Sources/InOrbit/Version.swift"]
+    },
     "java": {
       "release-type": "simple",
       "component": "java",
