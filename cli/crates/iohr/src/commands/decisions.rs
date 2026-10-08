@@ -1,6 +1,7 @@
-//! `iohr rfc`: RFCs in the RFCs product (platform RFC 0065), through the Rust SDK's
-//! `rfcs` operations. An RFC is named by its number (`0065`, a part `0065.1`) and found
-//! in the account's spaces; `--space` narrows the search when two spaces share a number.
+//! `iohr decisions`: RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065,
+//! core ADR 0056), through the Rust SDK's Decisions operations. A document is named by
+//! its number (`0065`, a part `0065.1`) and found in the account's spaces; `--space`
+//! narrows the search when two spaces share a number.
 
 // Request bodies are built from `Default` and then set field by field, never as struct
 // literals: the generated models become `#[non_exhaustive]` (sdk board, 0.3.0), where a
@@ -15,14 +16,21 @@ use std::path::Path;
 
 use inorbithr::public::{
     AddCommentRequest, CreateDiagramRequest, CreateDocumentRequest, Diagram, Document, Finding,
-    RequestReviewRequest, RfcsGetDocumentParams, RfcsListDiagramsParams, RfcsListDocumentsParams,
-    RfcsListSpacesParams, SaveDiagramRequest, SaveDocumentRequest, SetStatusRequest, Space,
+    RequestReviewRequest, SaveDiagramRequest, SaveDocumentRequest, SetStatusRequest, Space,
     Surface as _,
+};
+// The SDK's Decisions operations still carry the `rfcs` tag until the spec that names
+// them `decisions` (core ADR 0056) is synced. These lines and `decisions()` below are
+// the only places that change then: `Rfcs` -> `Decisions`, `.rfcs()` -> `.decisions()`.
+use inorbithr::public::{
+    Rfcs as DecisionsOps, RfcsGetDocumentParams as GetDocumentParams,
+    RfcsListDiagramsParams as ListDiagramsParams, RfcsListDocumentsParams as ListDocumentsParams,
+    RfcsListSpacesParams as ListSpacesParams,
 };
 use serde_json::{Value, json};
 
 use crate::Env;
-use crate::cli::{Global, RfcCommand, RfcWhere};
+use crate::cli::{DecisionsCommand, DecisionsWhere, Global};
 use crate::context::{Api, session};
 use crate::error::Error;
 use crate::output::Out;
@@ -37,24 +45,29 @@ const MAX_COMMENT: usize = 10 * 1024;
 const DEFAULT_OWNER: &str = "inorbithr";
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand, each a call")]
-pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Result<(), Error> {
+pub(crate) async fn run(
+    g: &Global,
+    env: &Env,
+    cmd: DecisionsCommand,
+    out: Out,
+) -> Result<(), Error> {
     let s = session(g, env).await?;
     let api = &s.api;
     match cmd {
-        RfcCommand::List {
+        DecisionsCommand::List {
             at,
             status,
             query,
             mine,
         } => list(api, &at, status, query, mine, out).await,
-        RfcCommand::Show {
+        DecisionsCommand::Show {
             rfc,
             at,
             text,
             raw,
             at_version,
         } => show(api, &Ref::parse(&rfc)?, &at, text, raw, at_version, out).await,
-        RfcCommand::Create {
+        DecisionsCommand::Create {
             space,
             kind,
             account,
@@ -64,7 +77,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             file,
             message,
         } => {
-            let at = RfcWhere {
+            let at = DecisionsWhere {
                 space: Some(space),
                 account,
                 kind: kind.clone(),
@@ -84,7 +97,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             )
             .await
         }
-        RfcCommand::Save {
+        DecisionsCommand::Save {
             rfc,
             at,
             file,
@@ -94,7 +107,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             let text = read_text(&file)?;
             save(api, &Ref::parse(&rfc)?, &at, text, &message, base, out).await
         }
-        RfcCommand::Status {
+        DecisionsCommand::Status {
             rfc,
             status,
             at,
@@ -111,7 +124,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             )
             .await
         }
-        RfcCommand::Comment {
+        DecisionsCommand::Comment {
             rfc,
             text,
             at,
@@ -129,7 +142,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             let body = comment_body(&text, line.as_deref());
             comment(api, &Ref::parse(&rfc)?, &at, body, anchor, out).await
         }
-        RfcCommand::LinkPr {
+        DecisionsCommand::LinkPr {
             rfc,
             pr,
             at,
@@ -140,7 +153,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             let body = pr_line(&pull_request(&pr)?, title.as_deref(), state(merged, live));
             comment(api, &Ref::parse(&rfc)?, &at, body, None, out).await
         }
-        RfcCommand::Diagram {
+        DecisionsCommand::Diagram {
             id,
             at,
             file,
@@ -150,7 +163,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             let model = read_model(&file)?;
             diagram(api, id.as_deref(), &at, model, name, message, out).await
         }
-        RfcCommand::Review {
+        DecisionsCommand::Review {
             rfc,
             at,
             reviewers,
@@ -330,7 +343,7 @@ pub(crate) fn state(merged: bool, live: bool) -> &'static str {
     }
 }
 
-/// A pull request's comment line, the same `mise run rfcs:comment` writes:
+/// A pull request's comment line, the same `mise run decisions:comment` writes:
 /// `owner/repo#n "title": open`, or `owner/repo#n: merged` without a title.
 pub(crate) fn pr_line(pr: &str, title: Option<&str>, state: &str) -> String {
     let title = title
@@ -411,13 +424,16 @@ fn read_model(path: &Path) -> Result<String, Error> {
     Ok(text)
 }
 
+/// The SDK's Decisions operations on the command's client.
+fn decisions(api: &Api) -> DecisionsOps<'_, inorbithr::Public> {
+    api.client().rfcs()
+}
+
 /// The spaces a command looks in: `--space` (slug or id) or every space of the account.
-async fn spaces(api: &Api, at: &RfcWhere) -> Result<Vec<Space>, Error> {
-    let mut params = RfcsListSpacesParams::default();
+async fn spaces(api: &Api, at: &DecisionsWhere) -> Result<Vec<Space>, Error> {
+    let mut params = ListSpacesParams::default();
     params.account_id.clone_from(&at.account);
-    let all = api
-        .client()
-        .rfcs()
+    let all = decisions(api)
         .all_list_spaces(&params)
         .collect()
         .await
@@ -431,7 +447,7 @@ async fn spaces(api: &Api, at: &RfcWhere) -> Result<Vec<Space>, Error> {
         .collect();
     if found.is_empty() {
         return Err(Error::Usage(format!(
-            "no space `{want}` in this account: `iohr rfc list` shows the spaces there are"
+            "no space `{want}` in this account: `iohr decisions list` shows the spaces there are"
         )));
     }
     Ok(found)
@@ -440,10 +456,9 @@ async fn spaces(api: &Api, at: &RfcWhere) -> Result<Vec<Space>, Error> {
 async fn documents(
     api: &Api,
     space: &Space,
-    params: &RfcsListDocumentsParams,
+    params: &ListDocumentsParams,
 ) -> Result<Vec<Document>, Error> {
-    api.client()
-        .rfcs()
+    decisions(api)
         .all_list_documents(&space.space_id, params)
         .collect()
         .await
@@ -452,7 +467,7 @@ async fn documents(
 
 /// The one document `r` names in the spaces `at` allows.
 /// The kind a command works on: the one the name said, else `--kind`.
-fn kind_of(r: &Ref, at: &RfcWhere) -> String {
+fn kind_of(r: &Ref, at: &DecisionsWhere) -> String {
     r.kind().unwrap_or(at.kind.as_str()).to_owned()
 }
 
@@ -461,9 +476,9 @@ fn types_of(kind: &str) -> Option<String> {
     (kind != "all").then(|| kind.to_owned())
 }
 
-async fn find(api: &Api, r: &Ref, at: &RfcWhere) -> Result<(Space, Document), Error> {
+async fn find(api: &Api, r: &Ref, at: &DecisionsWhere) -> Result<(Space, Document), Error> {
     let kind = kind_of(r, at);
-    let mut params = RfcsListDocumentsParams::default();
+    let mut params = ListDocumentsParams::default();
     params.types = types_of(&kind);
     let mut hits: Vec<(Space, Document)> = Vec::new();
     for space in spaces(api, at).await? {
@@ -496,17 +511,18 @@ async fn find(api: &Api, r: &Ref, at: &RfcWhere) -> Result<(Space, Document), Er
     }
 }
 
-/// A 403 or 404 from the RFCs API, said in the words of what to do.
+/// A 403 or 409 from the Decisions API, said in the words of what to do.
 fn scoped(e: inorbithr::Error) -> Error {
     match e.status() {
         Some(403) => Error::with_hint(
             e,
-            "Reading RFCs needs the rfc:read scope and writing rfc:write, and the account's \
-             member who may write; settings and access need its owner or an admin.",
+            "Reading decisions needs the decisions:read scope and writing decisions:write \
+             (`mise run decisions:token` makes a token with both), and the account's member \
+             who may write; settings and access need its owner or an admin.",
         ),
         Some(409) => Error::with_hint(
             e,
-            "Someone saved a newer version: `iohr rfc show <rfc> --text --raw` gives it; \
+            "Someone saved a newer version: `iohr decisions show <document> --text --raw` gives it; \
              merge your change into it and save again.",
         ),
         _ => e.into(),
@@ -541,13 +557,13 @@ fn note_findings(findings: &[Finding]) {
 
 async fn list(
     api: &Api,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     status: Option<String>,
     query: Option<String>,
     mine: bool,
     out: Out,
 ) -> Result<(), Error> {
-    let mut params = RfcsListDocumentsParams::default();
+    let mut params = ListDocumentsParams::default();
     params.types = types_of(&at.kind);
     params.status = status;
     params.query = query;
@@ -601,18 +617,16 @@ async fn list(
 async fn show(
     api: &Api,
     r: &Ref,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     text: bool,
     raw: bool,
     version: Option<u32>,
     out: Out,
 ) -> Result<(), Error> {
     let (space, d) = find(api, r, at).await?;
-    let mut params = RfcsGetDocumentParams::default();
+    let mut params = GetDocumentParams::default();
     params.version = version.map(|v| i32::try_from(v).unwrap_or(i32::MAX));
-    let got = api
-        .client()
-        .rfcs()
+    let got = decisions(api)
         .get_document(&space.space_id, &d.document_id, &params)
         .await
         .map_err(scoped)?
@@ -656,7 +670,7 @@ async fn show(
 )]
 async fn create(
     api: &Api,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     kind: &str,
     title: &str,
     summary: Option<String>,
@@ -673,7 +687,7 @@ async fn create(
     };
     let parent_id = match parent {
         Some(p) => {
-            let one = RfcWhere {
+            let one = DecisionsWhere {
                 space: Some(space.space_id.clone()),
                 account: at.account.clone(),
                 kind: kind.to_owned(),
@@ -688,16 +702,14 @@ async fn create(
     body.title = Some(title.to_owned());
     body.summary = summary;
     body.parent_id = parent_id;
-    let made = api
-        .client()
-        .rfcs()
+    let made = decisions(api)
         .create_document(&space.space_id, &body)
         .await
         .map_err(scoped)?
         .value;
     let doc = made
         .document
-        .ok_or_else(|| Error::Failed("the API made the RFC but did not return it".into()))?;
+        .ok_or_else(|| Error::Failed("the API made the document but did not return it".into()))?;
     let mut findings = made.findings;
     let mut current = doc.clone();
     if let Some(text) = text {
@@ -707,9 +719,7 @@ async fn create(
         save.base_version = Some(doc.current_version);
         save.text = Some(text);
         save.message = Some(message.unwrap_or_else(|| "First draft".to_owned()));
-        let saved = api
-            .client()
-            .rfcs()
+        let saved = decisions(api)
             .save_document(&space.space_id, &doc.document_id, &save)
             .await
             .map_err(scoped)?
@@ -741,7 +751,7 @@ async fn create(
 async fn save(
     api: &Api,
     r: &Ref,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     text: String,
     message: &str,
     base: Option<u32>,
@@ -755,9 +765,7 @@ async fn save(
         Some(base.map_or(d.current_version, |b| i32::try_from(b).unwrap_or(i32::MAX)));
     body.text = Some(text);
     body.message = Some(message.to_owned());
-    let saved = api
-        .client()
-        .rfcs()
+    let saved = decisions(api)
         .save_document(&space.space_id, &d.document_id, &body)
         .await
         .map_err(scoped)?
@@ -782,7 +790,7 @@ async fn save(
 async fn set_status(
     api: &Api,
     r: &Ref,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     status: &str,
     successor: Option<&Ref>,
     out: Out,
@@ -790,7 +798,7 @@ async fn set_status(
     let (space, d) = find(api, r, at).await?;
     let successor_id = match successor {
         Some(s) => {
-            let one = RfcWhere {
+            let one = DecisionsWhere {
                 space: Some(space.space_id.clone()),
                 account: at.account.clone(),
                 kind: at.kind.clone(),
@@ -805,9 +813,7 @@ async fn set_status(
     body.status = Some(status.trim().to_owned());
     body.successor_id = successor_id;
     body.base_version = Some(d.current_version);
-    let set = api
-        .client()
-        .rfcs()
+    let set = decisions(api)
         .set_status(&space.space_id, &d.document_id, &body)
         .await
         .map_err(scoped)?
@@ -828,7 +834,7 @@ async fn set_status(
 async fn comment(
     api: &Api,
     r: &Ref,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     body: String,
     anchor: Option<String>,
     out: Out,
@@ -861,9 +867,7 @@ async fn add_comment(
     req.document_id = Some(d.document_id.clone());
     req.body = Some(body);
     req.anchor = anchor;
-    let made = api
-        .client()
-        .rfcs()
+    let made = decisions(api)
         .add_comment(&space.space_id, &d.document_id, &req)
         .await
         .map_err(scoped)?
@@ -878,7 +882,7 @@ async fn add_comment(
 async fn diagram(
     api: &Api,
     id: Option<&str>,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     model: String,
     name: Option<String>,
     message: Option<String>,
@@ -894,10 +898,8 @@ async fn diagram(
         }
         let mut hit: Option<(Space, Diagram)> = None;
         for space in found {
-            let all = api
-                .client()
-                .rfcs()
-                .all_list_diagrams(&space.space_id, &RfcsListDiagramsParams::default())
+            let all = decisions(api)
+                .all_list_diagrams(&space.space_id, &ListDiagramsParams::default())
                 .collect()
                 .await
                 .map_err(scoped)?;
@@ -916,9 +918,7 @@ async fn diagram(
         body.model = Some(model);
         body.message = message;
         body.name = name;
-        let saved = api
-            .client()
-            .rfcs()
+        let saved = decisions(api)
             .save_diagram(&space.space_id, &current.diagram_id, &body)
             .await
             .map_err(scoped)?
@@ -936,9 +936,7 @@ async fn diagram(
         body.space_id = Some(space.space_id.clone());
         body.name = Some(name);
         body.model = Some(model);
-        let created = api
-            .client()
-            .rfcs()
+        let created = decisions(api)
             .create_diagram(&space.space_id, &body)
             .await
             .map_err(scoped)?
@@ -970,7 +968,7 @@ async fn diagram(
 async fn review(
     api: &Api,
     r: &Ref,
-    at: &RfcWhere,
+    at: &DecisionsWhere,
     reviewers: Vec<String>,
     reason: Option<String>,
     out: Out,
@@ -982,7 +980,7 @@ async fn review(
         .collect();
     if reviewers.is_empty() {
         return Err(Error::Usage(
-            "name a reviewer with --reviewer or IOHR_RFC_REVIEWER".into(),
+            "name a reviewer with --reviewer or IOHR_DECISIONS_REVIEWER".into(),
         ));
     }
     if let Some(reason) = reason.as_deref()
@@ -995,9 +993,7 @@ async fn review(
     req.space_id = Some(space.space_id.clone());
     req.document_id = Some(d.document_id.clone());
     req.reviewers = reviewers;
-    let asked = api
-        .client()
-        .rfcs()
+    let asked = decisions(api)
         .request_review(&space.space_id, &d.document_id, &req)
         .await
         .map_err(scoped)?
