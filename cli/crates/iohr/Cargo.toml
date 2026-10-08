@@ -57,7 +57,7 @@ workspace = true
 # musl binary with `cargo deb --no-build`. Paths are relative to this crate.
 [package.metadata.deb]
 name = "iohr"
-maintainer = "InOrbit d.o.o. <nevio@inorbit.hr>"
+maintainer = "InOrbit d.o.o. <reach@inorbit.hr>"
 copyright = "2026, InOrbit d.o.o."
 license-file = ["../../../LICENSE", "0"]
 extended-description = """\
