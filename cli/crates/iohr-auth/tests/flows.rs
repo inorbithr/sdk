@@ -100,7 +100,10 @@ async fn browser_sign_in_ignores_other_paths_and_checks_the_state() {
         .await;
 
     let provider = Provider::discover(&issuer, CLIENT).await.unwrap();
-    let auth = Authorization::<Browser>::start(provider).await.unwrap();
+    let auth = Authorization::<Browser>::start(provider)
+        .await
+        .unwrap()
+        .for_profile("work");
     let url = auth.url().clone();
     let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(q["code_challenge_method"], "S256");
@@ -130,10 +133,14 @@ async fn browser_sign_in_ignores_other_paths_and_checks_the_state() {
             .unwrap()
             .to_owned();
         assert!(csp.contains("default-src 'none'"));
+        assert_eq!(page.headers()["referrer-policy"], "no-referrer");
         page.text().await.unwrap()
     });
     let granted = auth.finish().await.unwrap();
-    assert!(browser.await.unwrap().contains("Signed in"));
+    let page = browser.await.unwrap();
+    assert!(page.contains("signed in"), "{page}");
+    assert!(page.contains("<dd>work</dd>") && page.contains("<dd>acc_1</dd>"));
+    assert!(!page.contains("the-code"));
     assert_eq!(granted.account(), Some("acc_1"));
 }
 
@@ -159,7 +166,8 @@ async fn a_callback_with_another_state_ends_the_sign_in() {
     });
     let e = auth.finish().await.unwrap_err();
     assert!(matches!(e, AuthError::StateMismatch), "{e}");
-    assert!(browser.await.unwrap().contains("did not finish"));
+    let page = browser.await.unwrap();
+    assert!(page.contains("did not match") && !page.contains("forged"));
     assert!(
         server
             .received_requests()

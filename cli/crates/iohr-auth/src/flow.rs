@@ -14,6 +14,7 @@ use crate::claims::AUDIENCE;
 use crate::error::AuthError;
 use crate::loopback::{Callback, Listener, SIGN_IN_WINDOW};
 use crate::oidc::{Provider, SCOPES, TokenError, Tokens};
+use crate::page::Page;
 use crate::pkce::{Pkce, constant_time_eq, random_token};
 use crate::secret::Redacted;
 
@@ -38,6 +39,7 @@ pub struct Browser {
     listener: Listener,
     pkce: Pkce,
     state: Redacted<String>,
+    profile: Option<String>,
 }
 
 /// Waiting for a person to approve a code on another device.
@@ -103,8 +105,16 @@ impl Authorization<Browser> {
                 listener,
                 pkce,
                 state,
+                profile: None,
             },
         })
+    }
+
+    /// Names the profile being signed in, for the page the browser lands on.
+    #[must_use]
+    pub fn for_profile(mut self, profile: impl Into<String>) -> Self {
+        self.state.profile = Some(profile.into());
+        self
     }
 
     /// The URL to open in the browser.
@@ -138,37 +148,73 @@ impl Authorization<Browser> {
                     listener,
                     pkce,
                     state,
+                    profile,
                     ..
                 },
         } = self;
         let redirect_uri = listener.redirect_uri().to_owned();
-        let expected = state.expose().clone();
-        let issuer = provider.issuer().to_owned();
-        let cb = listener
-            .accept_callback(window, |cb| verdict(cb, &expected, &issuer).is_ok())
-            .await
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::TimedOut {
-                    AuthError::TimedOut
-                } else {
-                    AuthError::Callback(e.to_string())
-                }
-            })?;
-        let code = verdict(&cb, state.expose(), provider.issuer())?;
-        let wire = provider
-            .token(&[
-                ("grant_type", "authorization_code"),
-                ("code", code.expose()),
-                ("redirect_uri", &redirect_uri),
-                ("client_id", provider.client_id()),
-                ("code_verifier", pkce.verifier.expose()),
-            ])
-            .await?;
-        let tokens = provider.tokens(wire, true, true)?;
+        let (cb, reply) = listener.accept_callback(window).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                AuthError::TimedOut
+            } else {
+                AuthError::Callback(e.to_string())
+            }
+        })?;
+        // The browser waits on its connection until the outcome is known, so its page
+        // says what really happened.
+        let code = match verdict(&cb, state.expose(), provider.issuer()) {
+            Ok(code) => code,
+            Err(e) => {
+                reply.send(failure_page(&e)).await;
+                return Err(e);
+            }
+        };
+        let exchanged = async {
+            let wire = provider
+                .token(&[
+                    ("grant_type", "authorization_code"),
+                    ("code", code.expose()),
+                    ("redirect_uri", &redirect_uri),
+                    ("client_id", provider.client_id()),
+                    ("code_verifier", pkce.verifier.expose()),
+                ])
+                .await?;
+            provider.tokens(wire, true, true)
+        }
+        .await;
+        let tokens = match exchanged {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                reply.send(failure_page(&e)).await;
+                return Err(e);
+            }
+        };
+        reply
+            .send(Page::SignedIn {
+                profile: profile.as_deref(),
+                account: tokens.claims.org.as_deref(),
+                plan: tokens.claims.plan.as_deref(),
+            })
+            .await;
         Ok(Authorization {
             provider,
             state: Granted { tokens },
         })
+    }
+}
+
+/// The page for a sign-in that failed: a fixed sentence per kind of failure, never
+/// text from the request or the sign-in service.
+fn failure_page(e: &AuthError) -> Page<'static> {
+    match e {
+        AuthError::Denied => Page::Denied,
+        AuthError::StateMismatch => Page::StateMismatch,
+        AuthError::IssuerMismatch => {
+            Page::Failed("The answer came from another sign-in service than the one configured.")
+        }
+        AuthError::OAuth { .. } => Page::Failed("The sign-in service refused the request."),
+        AuthError::Callback(_) => Page::Failed("The browser came back without a sign-in code."),
+        _ => Page::Failed("The sign-in code could not be exchanged for a session."),
     }
 }
 
