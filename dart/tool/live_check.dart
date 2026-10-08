@@ -60,9 +60,13 @@ Future<void> main(List<String> args) async {
     }
     found.addAll(check.mismatches);
   }
-  // The public RFC documents are the one family that answers without a key and has
+  // The public Decisions documents are the one family that answers without a key and has
   // identifiers in its path: follow the first few from the list.
-  final listed = await _getJson(client, '$base/v1/rfcs/public/documents', key);
+  final listed = await _getJson(
+    client,
+    '$base/v1/decisions/public/documents',
+    key,
+  );
   if (listed is Map) {
     final slugs = {
       for (final s in (listed['spaces'] as List? ?? const []))
@@ -71,7 +75,7 @@ Future<void> main(List<String> args) async {
     for (final d in (listed['documents'] as List? ?? const []).take(5)) {
       if (d is! Map) continue;
       final path =
-          '/v1/rfcs/public/spaces/${slugs[d['space_id']]}/${d['kind']}/${d['number']}';
+          '/v1/decisions/public/spaces/${slugs[d['space_id']]}/${d['kind']}/${d['number']}';
       final body = await _getJson(client, '$base$path', key);
       if (body == null) continue;
       checked++;

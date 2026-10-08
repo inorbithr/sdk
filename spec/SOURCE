@@ -1,11 +1,11 @@
-source: https://api.inorbit.hr/openapi.json
-sha256: b3c8317b563856fedfa1b6c8cfbec85ad88ad56a487a84e15280d9da8308af18
+source: /private/tmp/claude-501/-Users-nevio/2eb4edda-10df-49a0-8bf1-659bdfece5a7/scratchpad/da/spec/openapi.public.json
+sha256: f76dae7bacfd24cd725cebc26f6412f7f05223283c4ce770665f58a60c7a5c41
 api_version: 0.1.0
 openapi: 3.1.0
-operations: 111
-synced: 2026-10-07T02:24:24Z
+operations: 117
+synced: 2026-10-08T20:59:36Z
 commit: the platform does not publish it in the document yet (spec/README.md)
-lab_source: https://docs.inorbit.hr/lab
-lab_sha256: 394cd19d17699325b17666cb4f10cd178eefd6b610d11fdf5e38455d5c2d97c9
+lab_source: /private/tmp/claude-501/-Users-nevio/2eb4edda-10df-49a0-8bf1-659bdfece5a7/scratchpad/lab-main
+lab_sha256: c375ca051b2eaae8290014b6203ca290f7b0d920104f83633c50e4180cc82c0a
 frames_source: https://api.inorbit.hr/frames.json
 frames_sha256: fb9041e2d657bfda84054d0f74ae0ef0688bee1a0b106d2acfea6ed8f06fae6d

@@ -297,14 +297,14 @@ func call(ctx context.Context, api *public.Client, op string, args map[string]an
 	case "events.delete_endpoint":
 		r, err := api.Events().DeleteEndpoint(ctx, str(args, "endpoint_id"))
 		return rawOf(r, err)
-	case "rfcs.create_document":
+	case "decisions.create_document":
 		var body models.CreateDocumentRequest
 		b, _ := json.Marshal(args)
 		if err := json.Unmarshal(b, &body); err != nil {
 			return nil, err
 		}
 		body.SpaceID = nil // the path carries it
-		r, err := api.Rfcs().CreateDocument(ctx, str(args, "space_id"), body)
+		r, err := api.Decisions().CreateDocument(ctx, str(args, "space_id"), body)
 		return rawOf(r, err)
 	}
 	return nil, fmt.Errorf("the conformance schema names an op this driver does not know: %s", op)

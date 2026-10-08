@@ -2412,9 +2412,8 @@ fn sdk_add_runs_the_program_and_passes_its_exit_code_on() {
 // `iohr decisions` (platform RFC 0065, core ADR 0056): the Decisions API through the
 // SDK's Decisions operations.
 
-/// Where the Decisions API's routes start. The spec the SDK is generated from still names
-/// them `/v1/rfcs` until core ADR 0056's spec is synced.
-const DECISIONS: &str = "/v1/rfcs";
+/// Where the Decisions API's routes start (`/v1/rfcs` until core ADR 0056).
+const DECISIONS: &str = "/v1/decisions";
 
 const SPACE: &str = "lab_1";
 const RFC_ID: &str = "ldoc_65";
@@ -2441,7 +2440,8 @@ fn rfc_doc(id: &str, number: i32, part: i32, version: i32, status: &str) -> serd
         "created_at": "2026-10-06T00:00:00Z", "updated_at": "2026-10-07T00:00:00Z",
         "parent_id": "", "child_index": part, "display_number": display, "children": 0,
         "headline": "", "headline_note": "", "supersedes_id": "", "measures_id": "",
-        "access": "team"
+        "access": "team", "stage": "", "source": "", "outward": false, "decider": "",
+        "approved_by": "", "review_by": "", "review_overdue": false
     })
 }
 
@@ -2476,7 +2476,8 @@ async fn mount_decisions(server: &MockServer) {
             "document": rfc_doc(RFC_ID, 65, 0, 4, "open"), "text": "---\ntitle: RFCs everywhere\n---\n\nBody.\n",
             "version": 4, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-07T00:00:00Z",
             "findings": [], "children": [], "mentions": [], "mentioned_in": [],
-            "successors": [], "measured_by": []
+            "successors": [], "measured_by": [], "context": [], "context_for": [],
+            "diagrams": [], "implements": [], "implemented_by": []
         })))
         .mount(server)
         .await;
@@ -2549,7 +2550,8 @@ async fn mount_decisions(server: &MockServer) {
     let diagram = serde_json::json!({
         "diagram_id": "ldia_1", "space_id": SPACE, "name": "Identity", "current_version": 1,
         "nodes": 1, "created_by": "iohr-rfcs-agent", "created_at": "2026-10-07T00:00:00Z",
-        "updated_at": "2026-10-07T00:00:00Z"
+        "updated_at": "2026-10-07T00:00:00Z", "kind": "", "space_name": "Platform",
+        "svg_path": "", "element_kinds": [], "used_in_count": 0
     });
     Mock::given(method("GET"))
         .and(path(format!("{DECISIONS}/spaces/{SPACE}/diagrams")))
@@ -2913,7 +2915,8 @@ async fn decisions_kinds_name_prds_and_adrs() {
             "document": adr_shown, "text": "---\ntitle: Stale is not false\n---\n\nBody.\n",
             "version": 2, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-08T00:00:00Z",
             "findings": [], "children": [], "mentions": [], "mentioned_in": [],
-            "successors": [], "measured_by": []
+            "successors": [], "measured_by": [], "context": [], "context_for": [],
+            "diagrams": [], "implements": [], "implemented_by": []
         })))
         .mount(&server)
         .await;

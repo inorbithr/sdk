@@ -673,7 +673,7 @@ async fn call_typed(client: &Client<Public>, action: &Action) -> Result<RawRespo
             let id = arg("endpoint_id").unwrap_or_default();
             client.events().delete_endpoint(&id).await.map(|r| r.raw)
         }
-        "rfcs.create_document" => {
+        "decisions.create_document" => {
             let space = arg("space_id").unwrap_or_default();
             let mut fields = action.args.clone();
             fields.remove("space_id"); // the path carries it
@@ -681,7 +681,7 @@ async fn call_typed(client: &Client<Public>, action: &Action) -> Result<RawRespo
                 serde_json::from_value(Value::Object(fields.into_iter().collect()))
                     .expect("the case's args are a CreateDocumentRequest");
             client
-                .rfcs()
+                .decisions()
                 .create_document(&space, &body)
                 .await
                 .map(|r| r.raw)

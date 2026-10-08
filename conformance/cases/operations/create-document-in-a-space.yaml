@@ -1,13 +1,13 @@
 name: create-document-in-a-space
 area: operations
-summary: rfcs.create_document sends space_id in the path and the rest as the JSON body, without repeating space_id there, and a typed SDK reads the CreateDocumentResponse.
-action: { op: rfcs.create_document, args: { space_id: sp_1, kind: rfc, title: One request, summary: Trace ids join the witnesses. } }
+summary: decisions.create_document sends space_id in the path and the rest as the JSON body, without repeating space_id there, and a typed SDK reads the CreateDocumentResponse.
+action: { op: decisions.create_document, args: { space_id: sp_1, kind: rfc, title: One request, summary: Trace ids join the witnesses. } }
 exchanges:
   - request: { method: POST, path: /oauth2/token }
     response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
-  - request: { method: POST, path: /v1/rfcs/spaces/sp_1/documents, headers_absent: [idempotency-key], json: { kind: rfc, title: One request, summary: Trace ids join the witnesses. } }
+  - request: { method: POST, path: /v1/decisions/spaces/sp_1/documents, headers_absent: [idempotency-key], json: { kind: rfc, title: One request, summary: Trace ids join the witnesses. } }
     response: { status: 200, json: { text: "# One request\n", findings: [ { line: 1, rule: summary-length, message: the summary is short } ] } }
 expect:
   ok: { text: "# One request\n", findings: [ { line: 1, rule: summary-length } ] }
   attempts: 1
-notes: The first case for the rfcs group (spec synced 2026-10-06). The answer leaves out `document`, a message field with presence; every SDK reads it as no value (design.md section 12). The path carries space_id, so the driver leaves it out of the body.
+notes: The first case for the decisions group (the rfcs group until core ADR 0056, 2026-10-08). The answer leaves out `document`, a message field with presence; every SDK reads it as no value (design.md section 12). The path carries space_id, so the driver leaves it out of the body.

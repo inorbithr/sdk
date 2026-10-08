@@ -595,7 +595,7 @@ public sealed class Driver(ITestOutputHelper output)
                 EventTypes = List("event_types"),
             })).Raw,
             "events.delete_endpoint" => (await client.Events().DeleteEndpointAsync(Arg("endpoint_id"))).Raw,
-            "rfcs.create_document" => (await client.Rfcs().CreateDocumentAsync(Arg("space_id"), new CreateDocumentRequest
+            "decisions.create_document" => (await client.Decisions().CreateDocumentAsync(Arg("space_id"), new CreateDocumentRequest
             {
                 Kind = Opt("kind"),
                 Title = Opt("title"),
