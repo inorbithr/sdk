@@ -187,6 +187,11 @@ pub struct RfcWhere {
     /// The account whose spaces to use. Default: the credential's own.
     #[arg(long)]
     pub account: Option<String>,
+    /// The kind of document (RFC 0081): `rfc` (default), `prd`, `adr` or `study`; `all`
+    /// means every kind. A number names a document of this kind; `PRD 0001` or
+    /// `ADR 0003` in place of a number names its kind itself.
+    #[arg(long, default_value = "rfc", value_parser = ["rfc", "prd", "adr", "study", "all"])]
+    pub kind: String,
 }
 
 /// A pull request a comment is about.
@@ -213,7 +218,9 @@ pub enum RfcCommand {
     List {
         #[command(flatten)]
         at: RfcWhere,
-        /// Only RFCs with this status (`open`, `decided`, `superseded`).
+        /// Only documents with this status: an RFC's `draft`, `in_review`, `accepted`,
+        /// `rejected`, `superseded` or `withdrawn`; an ADR's `proposed`, `accepted`,
+        /// `rejected` or `superseded` (`open` and `decided` still read as before).
         #[arg(long)]
         status: Option<String>,
         /// Only RFCs whose title, slug or text contains this, any case.
@@ -239,12 +246,15 @@ pub enum RfcCommand {
         #[arg(long = "at-version", value_name = "N")]
         at_version: Option<u32>,
     },
-    /// A new RFC in a space: the space gives it the next number. With `--file`, the
-    /// file's text is saved as its next version straight away.
+    /// A new RFC, PRD or ADR in a space: the account gives it the next number of its
+    /// kind. With `--file`, the file's text is saved as its next version straight away.
     Create {
         /// The space, by slug (`platform`) or id.
         #[arg(long)]
         space: String,
+        /// The kind (RFC 0081): `rfc` (default), `prd` or `adr`.
+        #[arg(long, default_value = "rfc", value_parser = ["rfc", "prd", "adr"])]
+        kind: String,
         /// The account the space belongs to. Default: the credential's own.
         #[arg(long)]
         account: Option<String>,
@@ -281,7 +291,10 @@ pub enum RfcCommand {
         #[arg(long)]
         base: Option<u32>,
     },
-    /// Set an RFC's status: `open`, `decided` or `superseded` (with `--successor`).
+    /// Set a document's status in the words of its kind (RFC 0081): an RFC's `draft`,
+    /// `in_review`, `accepted`, `rejected`, `withdrawn` or `superseded` (with
+    /// `--successor`); a PRD's the same without `withdrawn`; an ADR's `proposed`,
+    /// `accepted`, `rejected` or `superseded`. `open` and `decided` still read as before.
     Status {
         /// The RFC: its number or id.
         rfc: String,

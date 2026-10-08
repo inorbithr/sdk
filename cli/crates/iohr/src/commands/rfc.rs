@@ -56,6 +56,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
         } => show(api, &Ref::parse(&rfc)?, &at, text, raw, at_version, out).await,
         RfcCommand::Create {
             space,
+            kind,
             account,
             title,
             summary,
@@ -66,12 +67,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
             let at = RfcWhere {
                 space: Some(space),
                 account,
+                kind: kind.clone(),
             };
             let parent = parent.as_deref().map(Ref::parse).transpose()?;
             let text = file.as_deref().map(read_text).transpose()?;
             create(
                 api,
                 &at,
+                &kind,
                 &title,
                 summary,
                 parent.as_ref(),
@@ -156,23 +159,52 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RfcCommand, out: Out) -> Res
     }
 }
 
-/// How an RFC is named on the command line.
+/// How a document is named on the command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Ref {
-    /// `0065` (part 0) or `0065.1` (part 1).
-    Number { number: u32, part: u32 },
+    /// `0065` (part 0) or `0065.1` (part 1), of `kind` when the name said one
+    /// (`PRD 0001`, `ADR 0003`); otherwise of the kind `--kind` names.
+    Number {
+        kind: Option<String>,
+        number: u32,
+        part: u32,
+    },
     /// `ldoc_...`.
     Id(String),
 }
 
+/// The kinds a number may be prefixed with, and how each is shown.
+const KINDS: [(&str, &str); 4] = [
+    ("rfc", "RFC"),
+    ("prd", "PRD"),
+    ("adr", "ADR"),
+    ("study", "study"),
+];
+
+/// How a kind is shown before a number: `RFC`, `PRD`, `ADR`, `study`.
+pub(crate) fn kind_label(kind: &str) -> &str {
+    KINDS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map_or(kind, |(_, l)| l)
+}
+
 impl Ref {
-    /// `0065`, `65`, `0065.1`, `RFC 0065` or a document id.
+    /// `0065`, `65`, `0065.1`, `RFC 0065`, `PRD 0001`, `ADR 0003` or a document id.
     pub(crate) fn parse(raw: &str) -> Result<Self, Error> {
         let t = raw.trim();
-        let t = t
-            .strip_prefix("RFC")
-            .or_else(|| t.strip_prefix("rfc"))
-            .map_or(t, str::trim_start);
+        let mut kind = None;
+        let mut t = t;
+        for (k, _) in KINDS {
+            if t.len() > k.len() && t[..k.len()].eq_ignore_ascii_case(k) {
+                let rest = t[k.len()..].trim_start_matches([' ', '-', ':']);
+                if rest.bytes().next().is_some_and(|b| b.is_ascii_digit()) {
+                    kind = Some(k.to_owned());
+                    t = rest;
+                }
+                break;
+            }
+        }
         if let Some(id) = t.strip_prefix("ldoc_") {
             if !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric()) {
                 return Ok(Self::Id(t.to_owned()));
@@ -186,20 +218,36 @@ impl Ref {
                 let number: u32 = n.parse().unwrap_or(0);
                 let part: u32 = p.parse().unwrap_or(0);
                 if number > 0 && part <= 99 {
-                    return Ok(Self::Number { number, part });
+                    return Ok(Self::Number { kind, number, part });
                 }
             }
         }
         Err(Error::Usage(format!(
-            "`{raw}` is not an RFC: give its number (0065, a part 0065.1) or its id (ldoc_...)"
+            "`{raw}` is not a document: give its number (0065, a part 0065.1, PRD 0001, \
+             ADR 0003) or its id (ldoc_...)"
         )))
     }
 
-    fn matches(&self, d: &Document) -> bool {
+    /// The kind the name itself said, if any.
+    pub(crate) fn kind(&self) -> Option<&str> {
+        match self {
+            Self::Number { kind, .. } => kind.as_deref(),
+            Self::Id(_) => None,
+        }
+    }
+
+    /// Whether `d` is this document; a number is of `kind` unless the name said its own
+    /// (`all` takes any kind).
+    fn matches(&self, d: &Document, kind: &str) -> bool {
         match self {
             Self::Id(id) => d.document_id == *id,
-            Self::Number { number, part } => {
-                d.kind == "rfc"
+            Self::Number {
+                kind: own,
+                number,
+                part,
+            } => {
+                let kind = own.as_deref().unwrap_or(kind);
+                (kind == "all" || d.kind == kind)
                     && u32::try_from(d.number).ok() == Some(*number)
                     && u32::try_from(d.child_index).ok() == Some(*part)
             }
@@ -211,8 +259,16 @@ impl std::fmt::Display for Ref {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Id(id) => f.write_str(id),
-            Self::Number { number, part: 0 } => write!(f, "{number:04}"),
-            Self::Number { number, part } => write!(f, "{number:04}.{part}"),
+            Self::Number { kind, number, part } => {
+                if let Some(k) = kind {
+                    write!(f, "{} ", kind_label(k))?;
+                }
+                if *part == 0 {
+                    write!(f, "{number:04}")
+                } else {
+                    write!(f, "{number:04}.{part}")
+                }
+            }
         }
     }
 }
@@ -395,29 +451,45 @@ async fn documents(
 }
 
 /// The one document `r` names in the spaces `at` allows.
+/// The kind a command works on: the one the name said, else `--kind`.
+fn kind_of(r: &Ref, at: &RfcWhere) -> String {
+    r.kind().unwrap_or(at.kind.as_str()).to_owned()
+}
+
+/// The `types` filter for a kind; `all` filters nothing.
+fn types_of(kind: &str) -> Option<String> {
+    (kind != "all").then(|| kind.to_owned())
+}
+
 async fn find(api: &Api, r: &Ref, at: &RfcWhere) -> Result<(Space, Document), Error> {
+    let kind = kind_of(r, at);
     let mut params = RfcsListDocumentsParams::default();
-    params.types = Some("rfc".to_owned());
+    params.types = types_of(&kind);
     let mut hits: Vec<(Space, Document)> = Vec::new();
     for space in spaces(api, at).await? {
         for d in documents(api, &space, &params).await? {
-            if r.matches(&d) {
+            if r.matches(&d, &kind) {
                 hits.push((space.clone(), d));
             }
         }
     }
+    let label = if kind == "all" {
+        "document"
+    } else {
+        kind_label(&kind)
+    };
     match hits.len() {
         0 => Err(Error::Usage(format!(
-            "no RFC {r} that this credential can read{}",
+            "no {label} {r} that this credential can read{}",
             at.space
                 .as_deref()
                 .map_or_else(String::new, |s| format!(" in space {s}"))
         ))),
         1 => Ok(hits.remove(0)),
         _ => Err(Error::Usage(format!(
-            "RFC {r} is in several spaces ({}): pass --space",
+            "{label} {r} matches several documents ({}): pass --space, or --kind",
             hits.iter()
-                .map(|(s, _)| s.slug.as_str())
+                .map(|(s, d)| format!("{} {} in {}", kind_label(&d.kind), number_of(d), s.slug))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))),
@@ -476,7 +548,7 @@ async fn list(
     out: Out,
 ) -> Result<(), Error> {
     let mut params = RfcsListDocumentsParams::default();
-    params.types = Some("rfc".to_owned());
+    params.types = types_of(&at.kind);
     params.status = status;
     params.query = query;
     params.mine = mine.then_some(true);
@@ -494,11 +566,16 @@ async fn list(
         Out::print_json(&v);
         return Ok(());
     }
+    let mixed = at.kind != "rfc";
     let table: Vec<Vec<String>> = rows
         .iter()
         .map(|(s, d)| {
             vec![
-                number_of(d),
+                if mixed {
+                    format!("{} {}", kind_label(&d.kind), number_of(d))
+                } else {
+                    number_of(d)
+                },
                 s.slug.clone(),
                 d.status.clone(),
                 d.access.clone(),
@@ -508,7 +585,14 @@ async fn list(
         })
         .collect();
     Out::table(
-        &["RFC", "SPACE", "STATUS", "ACCESS", "VERSION", "TITLE"],
+        &[
+            if mixed { "DOCUMENT" } else { "RFC" },
+            "SPACE",
+            "STATUS",
+            "ACCESS",
+            "VERSION",
+            "TITLE",
+        ],
         &table,
     );
     Ok(())
@@ -573,6 +657,7 @@ async fn show(
 async fn create(
     api: &Api,
     at: &RfcWhere,
+    kind: &str,
     title: &str,
     summary: Option<String>,
     parent: Option<&Ref>,
@@ -591,6 +676,7 @@ async fn create(
             let one = RfcWhere {
                 space: Some(space.space_id.clone()),
                 account: at.account.clone(),
+                kind: kind.to_owned(),
             };
             Some(find(api, p, &one).await?.1.document_id)
         }
@@ -598,7 +684,7 @@ async fn create(
     };
     let mut body = CreateDocumentRequest::default();
     body.space_id = Some(space.space_id.clone());
-    body.kind = Some("rfc".to_owned());
+    body.kind = Some(kind.to_owned());
     body.title = Some(title.to_owned());
     body.summary = summary;
     body.parent_id = parent_id;
@@ -707,6 +793,7 @@ async fn set_status(
             let one = RfcWhere {
                 space: Some(space.space_id.clone()),
                 account: at.account.clone(),
+                kind: at.kind.clone(),
             };
             Some(find(api, s, &one).await?.1.document_id)
         }
@@ -957,33 +1044,28 @@ mod tests {
 
     #[test]
     fn rfc_numbers_and_ids_parse() {
-        assert_eq!(
-            Ref::parse("0065").unwrap(),
-            Ref::Number {
-                number: 65,
-                part: 0
-            }
-        );
+        let number = |kind: Option<&str>, number, part| Ref::Number {
+            kind: kind.map(str::to_owned),
+            number,
+            part,
+        };
+        assert_eq!(Ref::parse("0065").unwrap(), number(None, 65, 0));
         assert_eq!(
             Ref::parse("RFC 0040.14").unwrap(),
-            Ref::Number {
-                number: 40,
-                part: 14
-            }
+            number(Some("rfc"), 40, 14)
         );
-        assert_eq!(
-            Ref::parse("65").unwrap(),
-            Ref::Number {
-                number: 65,
-                part: 0
-            }
-        );
+        assert_eq!(Ref::parse("65").unwrap(), number(None, 65, 0));
+        // RFC 0081: a name may say its kind.
+        assert_eq!(Ref::parse("PRD 0001").unwrap(), number(Some("prd"), 1, 0));
+        assert_eq!(Ref::parse("adr-0003").unwrap(), number(Some("adr"), 3, 0));
+        assert_eq!(Ref::parse("Adr:3").unwrap(), number(Some("adr"), 3, 0));
+        assert_eq!(Ref::parse("PRD 0001").unwrap().to_string(), "PRD 0001");
         assert_eq!(
             Ref::parse("ldoc_01ABC").unwrap(),
             Ref::Id("ldoc_01ABC".into())
         );
         for bad in [
-            "", "0", "0065.", "0065.100", "12345", "x65", "ldoc_", "ldoc_a/b",
+            "", "0", "0065.", "0065.100", "12345", "x65", "ldoc_", "ldoc_a/b", "ADRx", "PRD",
         ] {
             assert!(Ref::parse(bad).is_err(), "{bad}");
         }

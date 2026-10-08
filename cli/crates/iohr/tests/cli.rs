@@ -2790,3 +2790,91 @@ async fn rfc_commands_never_show_the_token() {
         );
     }
 }
+
+/// RFC 0081: a number names a document of `--kind` (default `rfc`); `PRD 0001` or
+/// `ADR 0003` names its kind itself; `--kind all` lists every kind, each labelled.
+#[tokio::test]
+async fn rfc_kinds_name_prds_and_adrs() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let docs = format!("/v1/rfcs/spaces/{SPACE}/documents");
+    let mut adr = rfc_doc("ldoc_adr3", 3, 0, 2, "accepted");
+    adr["kind"] = serde_json::json!("adr");
+    adr["title"] = serde_json::json!("Stale is not false");
+    adr["path"] = serde_json::json!("docs/adrs/0003-stale-is-not-false.md");
+    let adr_shown = adr.clone();
+    Mock::given(method("GET"))
+        .and(path("/v1/rfcs/spaces"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "spaces": [rfc_space(SPACE, "platform")], "next_page_token": ""
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&docs))
+        .and(query_param("types", "adr"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "documents": [adr.clone()], "next_page_token": ""
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&docs))
+        .and(query_param("types", "rfc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "documents": [rfc_doc(RFC_ID, 65, 0, 4, "draft")], "next_page_token": ""
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&docs))
+        .and(query_param_is_missing("types"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "documents": [rfc_doc(RFC_ID, 65, 0, 4, "draft"), adr], "next_page_token": ""
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{docs}/ldoc_adr3")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "document": adr_shown, "text": "---\ntitle: Stale is not false\n---\n\nBody.\n",
+            "version": 2, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-08T00:00:00Z",
+            "findings": [], "children": [], "mentions": [], "mentioned_in": [],
+            "successors": [], "measured_by": []
+        })))
+        .mount(&server)
+        .await;
+    let t = token(&["rfc:read", "rfc:write"]);
+
+    // The name says the kind.
+    let o = r.with_token(&t, &["--json", "rfc", "show", "ADR 0003"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["document"]["kind"], "adr");
+    assert_eq!(v["document"]["display_number"], "0003");
+    // So does --kind.
+    let o = r.with_token(&t, &["--json", "rfc", "show", "3", "--kind", "adr"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    // A bare number is an RFC, and there is no RFC 0003.
+    let o = r.with_token(&t, &["rfc", "show", "0003"]);
+    assert_ne!(code(&o), 0);
+    assert!(text(&o).contains("no RFC 0003"), "{}", text(&o));
+    // Lists of one kind are labelled by it; of every kind, each row is.
+    let o = r.with_token(&t, &["rfc", "list", "--kind", "adr"]);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.starts_with("DOCUMENT"), "{out}");
+    assert!(out.contains("ADR 0003"), "{out}");
+    let o = r.with_token(&t, &["rfc", "list", "--kind", "all"]);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        out.contains("ADR 0003") && out.contains("RFC 0065"),
+        "{out}"
+    );
+    let o = r.with_token(&t, &["rfc", "list"]);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.starts_with("RFC ") && out.contains("0065"), "{out}");
+}
