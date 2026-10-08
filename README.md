@@ -1,4 +1,9 @@
-<p align="center"><img alt="sdk: a TypeScript client call in a code panel with tabs for Rust, TypeScript, Python, Go, Java and C#, and iohr sdk add in a terminal" src=".github/assets/social-preview.png" width="100%"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.png">
+    <img alt="sdk: SDKs for the InOrbit API: Rust, TypeScript, Python and Go, with C# and Java from source. (live)" src=".github/assets/hero-light.png" width="100%">
+  </picture>
+</p>
 
 <p align="center">SDKs and developer tooling for the InOrbit platform.</p>
 
