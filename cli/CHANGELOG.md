@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.0-alpha.13](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.12...iohr/v0.1.0-alpha.13) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rust:** with the `otel` feature, `ClientBuilder::tracer_provider` and `meter_provider` take opentelemetry 0.33 types; an application on opentelemetry 0.32 upgrades it to 0.33 too.
+
+### Features
+
+* **cli:** a branded sign-in page that says what really happened ([#182](https://github.com/inorbithr/sdk/issues/182)) ([e5e5de4](https://github.com/inorbithr/sdk/commit/e5e5de4255d482bad107864ded6df051e9cd1038))
+* **cli:** iohr browser install, the browser extension from its store ([#178](https://github.com/inorbithr/sdk/issues/178)) ([94e74c4](https://github.com/inorbithr/sdk/commit/94e74c4c3f378ef2569a25f4cf55babcb545eb83))
+* **cli:** iohr rfc names PRDs and ADRs by kind (platform RFC 0081) ([#181](https://github.com/inorbithr/sdk/issues/181)) ([c30c8d4](https://github.com/inorbithr/sdk/commit/c30c8d42a617efc7155825c65259c6e153a8fdf0))
+
+
+### Dependencies
+
+* **rust:** opentelemetry 0.33, schemars held at 0.8 for typify ([#170](https://github.com/inorbithr/sdk/issues/170)) ([dd98b90](https://github.com/inorbithr/sdk/commit/dd98b9036907ab0647a20554fb65f6f4926c1605))
+
 ## [0.1.0-alpha.12](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.11...iohr/v0.1.0-alpha.12) (2026-10-07)
 
 
