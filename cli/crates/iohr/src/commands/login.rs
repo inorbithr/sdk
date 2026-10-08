@@ -91,7 +91,9 @@ async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
         Out::note(&text);
         auth.finish().await?
     } else {
-        let auth = Authorization::<Browser>::start(provider).await?;
+        let auth = Authorization::<Browser>::start(provider)
+            .await?
+            .for_profile(name.as_str());
         let url = auth.url().to_string();
         if browser::open(&url) {
             Out::note(&format!(

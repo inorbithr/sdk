@@ -22,6 +22,7 @@ mod error;
 mod flow;
 pub mod loopback;
 mod oidc;
+mod page;
 mod pkce;
 mod secret;
 mod session;
