@@ -119,6 +119,7 @@ pub const RESERVED: &[&str] = &[
     "config",
     "connections",
     "connectors",
+    "decisions",
     "domains",
     "ext",
     "help",
@@ -128,6 +129,8 @@ pub const RESERVED: &[&str] = &[
     "logout",
     "openapi",
     "profile",
+    // `iohr rfc` until core ADR 0056 (2026-10-08): kept from extensions so a script that
+    // still calls it fails as unknown rather than running someone else's program.
     "rfc",
     "sdk",
     "token",
