@@ -19,13 +19,11 @@ use inorbithr::public::{
     RequestReviewRequest, SaveDiagramRequest, SaveDocumentRequest, SetStatusRequest, Space,
     Surface as _,
 };
-// The SDK's Decisions operations still carry the `rfcs` tag until the spec that names
-// them `decisions` (core ADR 0056) is synced. These lines and `decisions()` below are
-// the only places that change then: `Rfcs` -> `Decisions`, `.rfcs()` -> `.decisions()`.
 use inorbithr::public::{
-    Rfcs as DecisionsOps, RfcsGetDocumentParams as GetDocumentParams,
-    RfcsListDiagramsParams as ListDiagramsParams, RfcsListDocumentsParams as ListDocumentsParams,
-    RfcsListSpacesParams as ListSpacesParams,
+    Decisions as DecisionsOps, DecisionsGetDocumentParams as GetDocumentParams,
+    DecisionsListDiagramsParams as ListDiagramsParams,
+    DecisionsListDocumentsParams as ListDocumentsParams,
+    DecisionsListSpacesParams as ListSpacesParams,
 };
 use serde_json::{Value, json};
 
@@ -426,7 +424,7 @@ fn read_model(path: &Path) -> Result<String, Error> {
 
 /// The SDK's Decisions operations on the command's client.
 fn decisions(api: &Api) -> DecisionsOps<'_, inorbithr::Public> {
-    api.client().rfcs()
+    api.client().decisions()
 }
 
 /// The spaces a command looks in: `--space` (slug or id) or every space of the account.

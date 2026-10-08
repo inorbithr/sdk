@@ -154,7 +154,7 @@
         "type": "object"
       },
       "AddCommentRequest": {
-        "description": "`iohr.rfcs.v1.AddCommentRequest`",
+        "description": "`iohr.decisions.v1.AddCommentRequest`",
         "properties": {
           "anchor": {
             "type": "string"
@@ -178,7 +178,7 @@
         "type": "object"
       },
       "AddCommentResponse": {
-        "description": "`iohr.rfcs.v1.AddCommentResponse`",
+        "description": "`iohr.decisions.v1.AddCommentResponse`",
         "properties": {
           "comment": {
             "$ref": "#/components/schemas/Comment"
@@ -246,6 +246,9 @@
           },
           "last_seen_at": {
             "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Struct"
           },
           "name": {
             "type": "string"
@@ -316,6 +319,51 @@
           "accepted",
           "rejected",
           "reconciled_at"
+        ],
+        "type": "object"
+      },
+      "AppendStatusRequest": {
+        "description": "`iohr.decisions.v1.AppendStatusRequest`",
+        "properties": {
+          "base_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "date": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "line": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AppendStatusResponse": {
+        "description": "`iohr.decisions.v1.AppendStatusResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "findings"
         ],
         "type": "object"
       },
@@ -660,7 +708,7 @@
         }
       },
       "Comment": {
-        "description": "`iohr.rfcs.v1.Comment`",
+        "description": "`iohr.decisions.v1.Comment`",
         "properties": {
           "anchor": {
             "type": "string"
@@ -1140,7 +1188,7 @@
         "type": "object"
       },
       "CreateDiagramRequest": {
-        "description": "`iohr.rfcs.v1.CreateDiagramRequest`",
+        "description": "`iohr.decisions.v1.CreateDiagramRequest`",
         "properties": {
           "model": {
             "type": "string"
@@ -1155,7 +1203,7 @@
         "type": "object"
       },
       "CreateDiagramResponse": {
-        "description": "`iohr.rfcs.v1.CreateDiagramResponse`",
+        "description": "`iohr.decisions.v1.CreateDiagramResponse`",
         "properties": {
           "diagram": {
             "$ref": "#/components/schemas/Diagram"
@@ -1170,7 +1218,7 @@
         "type": "object"
       },
       "CreateDocumentRequest": {
-        "description": "`iohr.rfcs.v1.CreateDocumentRequest`",
+        "description": "`iohr.decisions.v1.CreateDocumentRequest`",
         "properties": {
           "child_index": {
             "format": "int32",
@@ -1178,6 +1226,13 @@
           },
           "kind": {
             "type": "string"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "outward": {
+            "type": "boolean"
           },
           "parent_id": {
             "type": "string"
@@ -1198,7 +1253,7 @@
         "type": "object"
       },
       "CreateDocumentResponse": {
-        "description": "`iohr.rfcs.v1.CreateDocumentResponse`",
+        "description": "`iohr.decisions.v1.CreateDocumentResponse`",
         "properties": {
           "document": {
             "$ref": "#/components/schemas/Document"
@@ -1362,7 +1417,7 @@
         "type": "object"
       },
       "CreateSpaceRequest": {
-        "description": "`iohr.rfcs.v1.CreateSpaceRequest`",
+        "description": "`iohr.decisions.v1.CreateSpaceRequest`",
         "properties": {
           "account_id": {
             "type": "string"
@@ -1380,7 +1435,7 @@
         "type": "object"
       },
       "CreateSpaceResponse": {
-        "description": "`iohr.rfcs.v1.CreateSpaceResponse`",
+        "description": "`iohr.decisions.v1.CreateSpaceResponse`",
         "properties": {
           "space": {
             "$ref": "#/components/schemas/Space"
@@ -1405,6 +1460,55 @@
           "kind",
           "reference",
           "set_at"
+        ],
+        "type": "object"
+      },
+      "DecisionsListVersionsResponse": {
+        "description": "`iohr.decisions.v1.ListVersionsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionsVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "DecisionsVersion": {
+        "description": "`iohr.decisions.v1.Version`",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "saved_at": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "author",
+          "message",
+          "saved_at",
+          "bytes"
         ],
         "type": "object"
       },
@@ -1499,7 +1603,7 @@
         "type": "object"
       },
       "DeleteDiagramResponse": {
-        "description": "`iohr.rfcs.v1.DeleteDiagramResponse`",
+        "description": "`iohr.decisions.v1.DeleteDiagramResponse`",
         "type": "object"
       },
       "DeleteEndpointResponse": {
@@ -1519,7 +1623,7 @@
         "type": "object"
       },
       "DeleteSpaceResponse": {
-        "description": "`iohr.rfcs.v1.DeleteSpaceResponse`",
+        "description": "`iohr.decisions.v1.DeleteSpaceResponse`",
         "type": "object"
       },
       "Delivery": {
@@ -1753,7 +1857,7 @@
         ]
       },
       "Diagram": {
-        "description": "`iohr.rfcs.v1.Diagram`",
+        "description": "`iohr.decisions.v1.Diagram`",
         "properties": {
           "created_at": {
             "type": "string"
@@ -1768,6 +1872,15 @@
           "diagram_id": {
             "type": "string"
           },
+          "element_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -1778,8 +1891,18 @@
           "space_id": {
             "type": "string"
           },
+          "space_name": {
+            "type": "string"
+          },
+          "svg_path": {
+            "type": "string"
+          },
           "updated_at": {
             "type": "string"
+          },
+          "used_in_count": {
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
@@ -1790,7 +1913,95 @@
           "nodes",
           "created_by",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "kind",
+          "element_kinds",
+          "used_in_count",
+          "space_name",
+          "svg_path"
+        ],
+        "type": "object"
+      },
+      "DiagramUse": {
+        "description": "`iohr.decisions.v1.DiagramUse`",
+        "properties": {
+          "display_number": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "position": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "space_id",
+          "kind",
+          "number",
+          "display_number",
+          "title",
+          "status",
+          "position"
+        ],
+        "type": "object"
+      },
+      "DiagramVersion": {
+        "description": "`iohr.decisions.v1.DiagramVersion`",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "saved_at": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "author",
+          "message",
+          "saved_at"
+        ],
+        "type": "object"
+      },
+      "DiffLine": {
+        "description": "`iohr.decisions.v1.DiffLine`",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
         ],
         "type": "object"
       },
@@ -1887,9 +2098,12 @@
         "type": "object"
       },
       "Document": {
-        "description": "`iohr.rfcs.v1.Document`",
+        "description": "`iohr.decisions.v1.Document`",
         "properties": {
           "access": {
+            "type": "string"
+          },
+          "approved_by": {
             "type": "string"
           },
           "child_index": {
@@ -1909,6 +2123,9 @@
           "current_version": {
             "format": "int32",
             "type": "integer"
+          },
+          "decider": {
+            "type": "string"
           },
           "display_number": {
             "type": "string"
@@ -1932,6 +2149,9 @@
             "format": "int32",
             "type": "integer"
           },
+          "outward": {
+            "type": "boolean"
+          },
           "parent_id": {
             "type": "string"
           },
@@ -1941,10 +2161,22 @@
           "public": {
             "type": "boolean"
           },
+          "review_by": {
+            "type": "string"
+          },
+          "review_overdue": {
+            "type": "boolean"
+          },
           "slug": {
             "type": "string"
           },
+          "source": {
+            "type": "string"
+          },
           "space_id": {
+            "type": "string"
+          },
+          "stage": {
             "type": "string"
           },
           "status": {
@@ -1990,7 +2222,14 @@
           "headline_note",
           "supersedes_id",
           "measures_id",
-          "access"
+          "access",
+          "stage",
+          "source",
+          "decider",
+          "review_by",
+          "review_overdue",
+          "outward",
+          "approved_by"
         ],
         "type": "object"
       },
@@ -2258,7 +2497,7 @@
         "type": "object"
       },
       "ExportFile": {
-        "description": "`iohr.rfcs.v1.ExportFile`",
+        "description": "`iohr.decisions.v1.ExportFile`",
         "properties": {
           "content": {
             "type": "string"
@@ -2274,7 +2513,7 @@
         "type": "object"
       },
       "ExportSpaceResponse": {
-        "description": "`iohr.rfcs.v1.ExportSpaceResponse`",
+        "description": "`iohr.decisions.v1.ExportSpaceResponse`",
         "properties": {
           "files": {
             "items": {
@@ -2487,7 +2726,7 @@
         "type": "object"
       },
       "Finding": {
-        "description": "`iohr.rfcs.v1.Finding`",
+        "description": "`iohr.decisions.v1.Finding`",
         "properties": {
           "line": {
             "format": "int32",
@@ -2620,13 +2859,22 @@
         "type": "object"
       },
       "GetDiagramResponse": {
-        "description": "`iohr.rfcs.v1.GetDiagramResponse`",
+        "description": "`iohr.decisions.v1.GetDiagramResponse`",
         "properties": {
           "diagram": {
             "$ref": "#/components/schemas/Diagram"
           },
           "model": {
             "type": "string"
+          },
+          "svg": {
+            "type": "string"
+          },
+          "used_in": {
+            "items": {
+              "$ref": "#/components/schemas/DiagramUse"
+            },
+            "type": "array"
           },
           "version": {
             "format": "int32",
@@ -2635,7 +2883,9 @@
         },
         "required": [
           "version",
-          "model"
+          "model",
+          "svg",
+          "used_in"
         ],
         "type": "object"
       },
@@ -2649,7 +2899,7 @@
         "type": "object"
       },
       "GetDocumentResponse": {
-        "description": "`iohr.rfcs.v1.GetDocumentResponse`",
+        "description": "`iohr.decisions.v1.GetDocumentResponse`",
         "properties": {
           "author": {
             "type": "string"
@@ -2660,12 +2910,45 @@
             },
             "type": "array"
           },
+          "context": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "context_for": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "diagrams": {
+            "items": {
+              "$ref": "#/components/schemas/Diagram"
+            },
+            "type": "array"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/VersionDiff"
+          },
           "document": {
             "$ref": "#/components/schemas/Document"
           },
           "findings": {
             "items": {
               "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array"
+          },
+          "implemented_by": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array"
+          },
+          "implements": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
             },
             "type": "array"
           },
@@ -2727,7 +3010,12 @@
           "mentions",
           "mentioned_in",
           "successors",
-          "measured_by"
+          "measured_by",
+          "implements",
+          "implemented_by",
+          "context",
+          "context_for",
+          "diagrams"
         ],
         "type": "object"
       },
@@ -2947,12 +3235,15 @@
         "type": "object"
       },
       "GetPublicDiagramResponse": {
-        "description": "`iohr.rfcs.v1.GetPublicDiagramResponse`",
+        "description": "`iohr.decisions.v1.GetPublicDiagramResponse`",
         "properties": {
           "diagram": {
             "$ref": "#/components/schemas/Diagram"
           },
           "model": {
+            "type": "string"
+          },
+          "svg": {
             "type": "string"
           },
           "version": {
@@ -2962,12 +3253,13 @@
         },
         "required": [
           "version",
-          "model"
+          "model",
+          "svg"
         ],
         "type": "object"
       },
       "GetPublicDocumentResponse": {
-        "description": "`iohr.rfcs.v1.GetPublicDocumentResponse`",
+        "description": "`iohr.decisions.v1.GetPublicDocumentResponse`",
         "properties": {
           "children": {
             "items": {
@@ -3067,7 +3359,7 @@
         "type": "object"
       },
       "GetSettingsResponse": {
-        "description": "`iohr.rfcs.v1.GetSettingsResponse`",
+        "description": "`iohr.decisions.v1.GetSettingsResponse`",
         "properties": {
           "settings": {
             "$ref": "#/components/schemas/Settings"
@@ -3076,7 +3368,7 @@
         "type": "object"
       },
       "GetSpaceResponse": {
-        "description": "`iohr.rfcs.v1.GetSpaceResponse`",
+        "description": "`iohr.decisions.v1.GetSpaceResponse`",
         "properties": {
           "space": {
             "$ref": "#/components/schemas/Space"
@@ -3575,7 +3867,7 @@
         "type": "object"
       },
       "ListCommentsResponse": {
-        "description": "`iohr.rfcs.v1.ListCommentsResponse`",
+        "description": "`iohr.decisions.v1.ListCommentsResponse`",
         "properties": {
           "comments": {
             "items": {
@@ -3650,8 +3942,27 @@
         ],
         "type": "object"
       },
+      "ListDiagramVersionsResponse": {
+        "description": "`iohr.decisions.v1.ListDiagramVersionsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/DiagramVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListDiagramsResponse": {
-        "description": "`iohr.rfcs.v1.ListDiagramsResponse`",
+        "description": "`iohr.decisions.v1.ListDiagramsResponse`",
         "properties": {
           "diagrams": {
             "items": {
@@ -3689,7 +4000,7 @@
         "type": "object"
       },
       "ListDocumentsResponse": {
-        "description": "`iohr.rfcs.v1.ListDocumentsResponse`",
+        "description": "`iohr.decisions.v1.ListDocumentsResponse`",
         "properties": {
           "documents": {
             "items": {
@@ -3968,7 +4279,7 @@
         "type": "object"
       },
       "ListPublicDocumentsResponse": {
-        "description": "`iohr.rfcs.v1.ListPublicDocumentsResponse`",
+        "description": "`iohr.decisions.v1.ListPublicDocumentsResponse`",
         "properties": {
           "documents": {
             "items": {
@@ -4032,7 +4343,7 @@
         "type": "object"
       },
       "ListReviewQueueResponse": {
-        "description": "`iohr.rfcs.v1.ListReviewQueueResponse`",
+        "description": "`iohr.decisions.v1.ListReviewQueueResponse`",
         "properties": {
           "next_page_token": {
             "type": "string"
@@ -4051,13 +4362,21 @@
         "type": "object"
       },
       "ListReviewsResponse": {
-        "description": "`iohr.rfcs.v1.ListReviewsResponse`",
+        "description": "`iohr.decisions.v1.ListReviewsResponse`",
         "properties": {
           "approvals": {
             "format": "int32",
             "type": "integer"
           },
           "approvals_required": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "counted_from_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "current_version": {
             "format": "int32",
             "type": "integer"
           },
@@ -4075,12 +4394,14 @@
           "reviews",
           "next_page_token",
           "approvals",
-          "approvals_required"
+          "approvals_required",
+          "current_version",
+          "counted_from_version"
         ],
         "type": "object"
       },
       "ListSpacesResponse": {
-        "description": "`iohr.rfcs.v1.ListSpacesResponse`",
+        "description": "`iohr.decisions.v1.ListSpacesResponse`",
         "properties": {
           "next_page_token": {
             "type": "string"
@@ -4118,7 +4439,7 @@
         "type": "object"
       },
       "ListTimelineResponse": {
-        "description": "`iohr.rfcs.v1.ListTimelineResponse`",
+        "description": "`iohr.decisions.v1.ListTimelineResponse`",
         "properties": {
           "entries": {
             "items": {
@@ -4526,7 +4847,7 @@
         "type": "object"
       },
       "Pattern": {
-        "description": "`iohr.rfcs.v1.Pattern`",
+        "description": "`iohr.decisions.v1.Pattern`",
         "properties": {
           "id": {
             "type": "string"
@@ -4638,7 +4959,7 @@
         "type": "object"
       },
       "Quote": {
-        "description": "`iohr.rfcs.v1.Quote`",
+        "description": "`iohr.decisions.v1.Quote`",
         "properties": {
           "exact": {
             "type": "string"
@@ -4764,7 +5085,7 @@
         "type": "object"
       },
       "Redaction": {
-        "description": "`iohr.rfcs.v1.Redaction`",
+        "description": "`iohr.decisions.v1.Redaction`",
         "properties": {
           "domains": {
             "items": {
@@ -4865,7 +5186,7 @@
         "type": "object"
       },
       "RequestReviewRequest": {
-        "description": "`iohr.rfcs.v1.RequestReviewRequest`",
+        "description": "`iohr.decisions.v1.RequestReviewRequest`",
         "properties": {
           "document_id": {
             "type": "string"
@@ -4883,7 +5204,7 @@
         "type": "object"
       },
       "RequestReviewResponse": {
-        "description": "`iohr.rfcs.v1.RequestReviewResponse`",
+        "description": "`iohr.decisions.v1.RequestReviewResponse`",
         "properties": {
           "reviews": {
             "items": {
@@ -4898,7 +5219,7 @@
         "type": "object"
       },
       "ResolveCommentRequest": {
-        "description": "`iohr.rfcs.v1.ResolveCommentRequest`",
+        "description": "`iohr.decisions.v1.ResolveCommentRequest`",
         "properties": {
           "comment_id": {
             "type": "string"
@@ -4916,7 +5237,7 @@
         "type": "object"
       },
       "ResolveCommentResponse": {
-        "description": "`iohr.rfcs.v1.ResolveCommentResponse`",
+        "description": "`iohr.decisions.v1.ResolveCommentResponse`",
         "properties": {
           "comment": {
             "$ref": "#/components/schemas/Comment"
@@ -4962,7 +5283,7 @@
         "type": "object"
       },
       "Review": {
-        "description": "`iohr.rfcs.v1.Review`",
+        "description": "`iohr.decisions.v1.Review`",
         "properties": {
           "decided_at": {
             "type": "string"
@@ -5057,55 +5378,6 @@
         },
         "type": "object"
       },
-      "RfcsListVersionsResponse": {
-        "description": "`iohr.rfcs.v1.ListVersionsResponse`",
-        "properties": {
-          "next_page_token": {
-            "type": "string"
-          },
-          "versions": {
-            "items": {
-              "$ref": "#/components/schemas/RfcsVersion"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "versions",
-          "next_page_token"
-        ],
-        "type": "object"
-      },
-      "RfcsVersion": {
-        "description": "`iohr.rfcs.v1.Version`",
-        "properties": {
-          "author": {
-            "type": "string"
-          },
-          "bytes": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "message": {
-            "type": "string"
-          },
-          "saved_at": {
-            "type": "string"
-          },
-          "version": {
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "version",
-          "author",
-          "message",
-          "saved_at",
-          "bytes"
-        ],
-        "type": "object"
-      },
       "RotateSecretResponse": {
         "description": "`iohr.events.v1.RotateSecretResponse`",
         "properties": {
@@ -5159,7 +5431,7 @@
         "type": "object"
       },
       "SaveDiagramRequest": {
-        "description": "`iohr.rfcs.v1.SaveDiagramRequest`",
+        "description": "`iohr.decisions.v1.SaveDiagramRequest`",
         "properties": {
           "base_version": {
             "format": "int32",
@@ -5184,7 +5456,7 @@
         "type": "object"
       },
       "SaveDiagramResponse": {
-        "description": "`iohr.rfcs.v1.SaveDiagramResponse`",
+        "description": "`iohr.decisions.v1.SaveDiagramResponse`",
         "properties": {
           "diagram": {
             "$ref": "#/components/schemas/Diagram"
@@ -5200,7 +5472,7 @@
         "type": "object"
       },
       "SaveDocumentRequest": {
-        "description": "`iohr.rfcs.v1.SaveDocumentRequest`",
+        "description": "`iohr.decisions.v1.SaveDocumentRequest`",
         "properties": {
           "base_version": {
             "format": "int32",
@@ -5222,7 +5494,7 @@
         "type": "object"
       },
       "SaveDocumentResponse": {
-        "description": "`iohr.rfcs.v1.SaveDocumentResponse`",
+        "description": "`iohr.decisions.v1.SaveDocumentResponse`",
         "properties": {
           "document": {
             "$ref": "#/components/schemas/Document"
@@ -5244,6 +5516,25 @@
         ],
         "type": "object"
       },
+      "SearchDiagramsResponse": {
+        "description": "`iohr.decisions.v1.SearchDiagramsResponse`",
+        "properties": {
+          "diagrams": {
+            "items": {
+              "$ref": "#/components/schemas/Diagram"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "diagrams",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "SendTestResponse": {
         "description": "`iohr.events.v1.SendTestResponse`",
         "properties": {
@@ -5254,7 +5545,7 @@
         "type": "object"
       },
       "SetAccessRequest": {
-        "description": "`iohr.rfcs.v1.SetAccessRequest`",
+        "description": "`iohr.decisions.v1.SetAccessRequest`",
         "properties": {
           "access": {
             "type": "string"
@@ -5269,7 +5560,7 @@
         "type": "object"
       },
       "SetAccessResponse": {
-        "description": "`iohr.rfcs.v1.SetAccessResponse`",
+        "description": "`iohr.decisions.v1.SetAccessResponse`",
         "properties": {
           "document": {
             "$ref": "#/components/schemas/Document"
@@ -5277,14 +5568,106 @@
         },
         "type": "object"
       },
-      "SetStatusRequest": {
-        "description": "`iohr.rfcs.v1.SetStatusRequest`",
+      "SetOutwardRequest": {
+        "description": "`iohr.decisions.v1.SetOutwardRequest`",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "outward": {
+            "type": "boolean"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SetOutwardResponse": {
+        "description": "`iohr.decisions.v1.SetOutwardResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          }
+        },
+        "type": "object"
+      },
+      "SetSourceRequest": {
+        "description": "`iohr.decisions.v1.SetSourceRequest`",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SetSourceResponse": {
+        "description": "`iohr.decisions.v1.SetSourceResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          }
+        },
+        "type": "object"
+      },
+      "SetStageRequest": {
+        "description": "`iohr.decisions.v1.SetStageRequest`",
         "properties": {
           "base_version": {
             "format": "int32",
             "type": "integer"
           },
           "document_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SetStageResponse": {
+        "description": "`iohr.decisions.v1.SetStageResponse`",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "SetStatusRequest": {
+        "description": "`iohr.decisions.v1.SetStatusRequest`",
+        "properties": {
+          "base_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "decider": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "review_by": {
             "type": "string"
           },
           "space_id": {
@@ -5300,7 +5683,7 @@
         "type": "object"
       },
       "SetStatusResponse": {
-        "description": "`iohr.rfcs.v1.SetStatusResponse`",
+        "description": "`iohr.decisions.v1.SetStatusResponse`",
         "properties": {
           "document": {
             "$ref": "#/components/schemas/Document"
@@ -5309,7 +5692,7 @@
         "type": "object"
       },
       "Settings": {
-        "description": "`iohr.rfcs.v1.Settings`",
+        "description": "`iohr.decisions.v1.Settings`",
         "properties": {
           "approvals_required": {
             "format": "int32",
@@ -5329,7 +5712,7 @@
         "type": "object"
       },
       "Space": {
-        "description": "`iohr.rfcs.v1.Space`",
+        "description": "`iohr.decisions.v1.Space`",
         "properties": {
           "account_id": {
             "type": "string"
@@ -5380,7 +5763,7 @@
         "type": "object"
       },
       "SpaceRef": {
-        "description": "`iohr.rfcs.v1.SpaceRef`",
+        "description": "`iohr.decisions.v1.SpaceRef`",
         "properties": {
           "name": {
             "type": "string"
@@ -5496,7 +5879,7 @@
         "type": "object"
       },
       "SubmitReviewRequest": {
-        "description": "`iohr.rfcs.v1.SubmitReviewRequest`",
+        "description": "`iohr.decisions.v1.SubmitReviewRequest`",
         "properties": {
           "decision": {
             "type": "string"
@@ -5515,7 +5898,7 @@
         "type": "object"
       },
       "SubmitReviewResponse": {
-        "description": "`iohr.rfcs.v1.SubmitReviewResponse`",
+        "description": "`iohr.decisions.v1.SubmitReviewResponse`",
         "properties": {
           "review": {
             "$ref": "#/components/schemas/Review"
@@ -5592,7 +5975,7 @@
         "type": "object"
       },
       "TimelineEntry": {
-        "description": "`iohr.rfcs.v1.TimelineEntry`",
+        "description": "`iohr.decisions.v1.TimelineEntry`",
         "properties": {
           "date": {
             "type": "string"
@@ -5899,7 +6282,7 @@
         "type": "object"
       },
       "UpdateDiagramRequest": {
-        "description": "`iohr.rfcs.v1.UpdateDiagramRequest`",
+        "description": "`iohr.decisions.v1.UpdateDiagramRequest`",
         "properties": {
           "diagram_id": {
             "type": "string"
@@ -5914,7 +6297,7 @@
         "type": "object"
       },
       "UpdateDiagramResponse": {
-        "description": "`iohr.rfcs.v1.UpdateDiagramResponse`",
+        "description": "`iohr.decisions.v1.UpdateDiagramResponse`",
         "properties": {
           "diagram": {
             "$ref": "#/components/schemas/Diagram"
@@ -5998,7 +6381,7 @@
         "type": "object"
       },
       "UpdateSettingsRequest": {
-        "description": "`iohr.rfcs.v1.UpdateSettingsRequest`",
+        "description": "`iohr.decisions.v1.UpdateSettingsRequest`",
         "properties": {
           "approvals_required": {
             "format": "int32",
@@ -6014,7 +6397,7 @@
         "type": "object"
       },
       "UpdateSettingsResponse": {
-        "description": "`iohr.rfcs.v1.UpdateSettingsResponse`",
+        "description": "`iohr.decisions.v1.UpdateSettingsResponse`",
         "properties": {
           "settings": {
             "$ref": "#/components/schemas/Settings"
@@ -6023,7 +6406,7 @@
         "type": "object"
       },
       "UpdateSpaceRequest": {
-        "description": "`iohr.rfcs.v1.UpdateSpaceRequest`",
+        "description": "`iohr.decisions.v1.UpdateSpaceRequest`",
         "properties": {
           "description": {
             "type": "string"
@@ -6041,7 +6424,7 @@
         "type": "object"
       },
       "UpdateSpaceResponse": {
-        "description": "`iohr.rfcs.v1.UpdateSpaceResponse`",
+        "description": "`iohr.decisions.v1.UpdateSpaceResponse`",
         "properties": {
           "space": {
             "$ref": "#/components/schemas/Space"
@@ -6229,6 +6612,98 @@
           }
         },
         "type": "object"
+      },
+      "VersionDiff": {
+        "description": "`iohr.decisions.v1.VersionDiff`",
+        "properties": {
+          "bookkeeping_only": {
+            "type": "boolean"
+          },
+          "from_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/DiffLine"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/VersionNote"
+            },
+            "type": "array"
+          },
+          "sections_added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sections_changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sections_removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "to_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "words_added": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "words_removed": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from_version",
+          "to_version",
+          "summary",
+          "sections_added",
+          "sections_removed",
+          "sections_changed",
+          "lines",
+          "words_added",
+          "words_removed",
+          "bookkeeping_only",
+          "truncated",
+          "notes"
+        ],
+        "type": "object"
+      },
+      "VersionNote": {
+        "description": "`iohr.decisions.v1.VersionNote`",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "message"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -6248,7 +6723,7 @@
     "title": "InOrbit API",
     "version": "0.1.0",
     "x-iohr-cut": {
-      "hash": "sha256:c28f3341887323529985e7a9f352f52afb4e5f7801726af57d56827a76e89dd9",
+      "hash": "sha256:2ee56b0e0332e9ffad4f4789c88cb88a98c632cd474e957c1b19428019182014",
       "plan": "public",
       "scopes": []
     }
@@ -9440,6 +9915,2719 @@
         ]
       }
     },
+    "/v1/decisions/diagrams": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SearchDiagrams` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.SearchDiagrams",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "element_kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchDiagramsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SearchDiagramsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SearchDiagrams",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "diagrams",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SearchDiagrams",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/public/documents": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListPublicDocuments` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListPublicDocuments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "space",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPublicDocumentsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListPublicDocumentsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListPublicDocuments",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "documents",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListPublicDocuments",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/public/spaces/{space}/diagrams/{diagram_id}": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetPublicDiagram` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetPublicDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "svg",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPublicDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetPublicDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetPublicDiagram",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetPublicDiagram",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/public/spaces/{space}/{kind}/{number}": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetPublicDocument` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetPublicDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPublicDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetPublicDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetPublicDocument",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetPublicDocument",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/reviews": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListReviewQueue` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListReviewQueue",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReviewQueueResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListReviewQueueResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListReviewQueue",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "reviews",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListReviewQueue",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/spaces": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListSpaces` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListSpaces",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSpacesResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListSpacesResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListSpaces",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "spaces",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListSpaces",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/CreateSpace` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.CreateSpace",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.CreateSpaceRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.CreateSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/CreateSpace",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/CreateSpace",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/DeleteSpace` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.DeleteSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.DeleteSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/DeleteSpace",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/DeleteSpace",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetSpace` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetSpace",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetSpace",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "patch": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/UpdateSpace` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.UpdateSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSpaceRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.UpdateSpaceRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.UpdateSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/UpdateSpace",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/UpdateSpace",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/diagrams": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListDiagrams` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListDiagrams",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDiagramsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListDiagramsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListDiagrams",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "diagrams",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListDiagrams",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/CreateDiagram` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.CreateDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDiagramRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.CreateDiagramRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.CreateDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/CreateDiagram",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/CreateDiagram",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/diagrams/{diagram_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/DeleteDiagram` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.DeleteDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.DeleteDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/DeleteDiagram",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/DeleteDiagram",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      },
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetDiagram` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "svg",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetDiagram",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetDiagram",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "patch": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/UpdateDiagram` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.UpdateDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDiagramRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.UpdateDiagramRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.UpdateDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/UpdateDiagram",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/UpdateDiagram",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/diagrams/{diagram_id}/versions": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListDiagramVersions` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListDiagramVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDiagramVersionsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListDiagramVersionsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListDiagramVersions",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "versions",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListDiagramVersions",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SaveDiagram` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SaveDiagram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diagram_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDiagramRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SaveDiagramRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveDiagramResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SaveDiagramResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SaveDiagram",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SaveDiagram",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListDocuments` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListDocuments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDocumentsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListDocumentsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListDocuments",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "documents",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListDocuments",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/CreateDocument` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.CreateDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.CreateDocumentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.CreateDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/CreateDocument",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/CreateDocument",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetDocument` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "diff_from",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetDocument",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetDocument",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/access": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SetAccess` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SetAccess",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAccessRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SetAccessRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetAccessResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SetAccessResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SetAccess",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SetAccess",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/comments": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListComments` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListComments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCommentsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListCommentsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListComments",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "comments",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListComments",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/AddComment` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.AddComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCommentRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.AddCommentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddCommentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.AddCommentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/AddComment",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/AddComment",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/comments/{comment_id}/resolve": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ResolveComment` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.ResolveComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveCommentRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.ResolveCommentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveCommentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ResolveCommentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ResolveComment",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ResolveComment",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/outward": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SetOutward` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SetOutward",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetOutwardRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SetOutwardRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetOutwardResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SetOutwardResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SetOutward",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SetOutward",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/review": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SubmitReview` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SubmitReview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitReviewRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SubmitReviewRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitReviewResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SubmitReviewResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SubmitReview",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SubmitReview",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/reviews": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListReviews` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListReviews",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReviewsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListReviewsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListReviews",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "reviews",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListReviews",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/RequestReview` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.RequestReview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestReviewRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.RequestReviewRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestReviewResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.RequestReviewResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/RequestReview",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/RequestReview",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/source": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SetSource` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SetSource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSourceRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SetSourceRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSourceResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SetSourceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SetSource",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SetSource",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/stage": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SetStage` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SetStage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStageRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SetStageRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetStageResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SetStageResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SetStage",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SetStage",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/status": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SetStatus` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SetStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStatusRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SetStatusRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetStatusResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SetStatusResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SetStatus",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SetStatus",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/status-log": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/AppendStatus` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.AppendStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppendStatusRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.AppendStatusRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppendStatusResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.AppendStatusResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/AppendStatus",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/AppendStatus",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/timeline": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListTimeline` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTimelineResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListTimelineResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListTimeline",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "entries",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListTimeline",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/versions": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListVersions` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionsListVersionsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListVersionsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListVersions",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "versions",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListVersions",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SaveDocument` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.SaveDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDocumentRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.SaveDocumentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.SaveDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/SaveDocument",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/SaveDocument",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/export": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ExportSpace` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ExportSpace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSpaceResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ExportSpaceResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ExportSpace",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ExportSpace",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/settings": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetSettings` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetSettings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSettingsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetSettingsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetSettings",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetSettings",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "put": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/UpdateSettings` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.UpdateSettings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingsRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.UpdateSettingsRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSettingsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.UpdateSettingsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/UpdateSettings",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/UpdateSettings",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/timeline": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListTimeline` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTimelineResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListTimelineResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListTimeline",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "entries",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListTimeline",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
     "/v1/events/events": {
       "get": {
         "description": "Transcoded from `/iohr.events.v1.EventsService/StreamEvents` on the `events` backend.\n\nA key needs scope `events:read`.",
@@ -10245,2236 +13433,6 @@
         "x-iohr-rpc": "iohr.radar.v1.RadarService/ListItems",
         "x-iohr-scopes": [
           "radar:read"
-        ]
-      }
-    },
-    "/v1/rfcs/public/documents": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListPublicDocuments` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListPublicDocuments",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "space",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "explode": true,
-            "in": "query",
-            "name": "types",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListPublicDocumentsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListPublicDocumentsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListPublicDocuments",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "documents",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListPublicDocuments",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      }
-    },
-    "/v1/rfcs/public/spaces/{space}/diagrams/{diagram_id}": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetPublicDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.GetPublicDiagram",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "diagram_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "version",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetPublicDiagramResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.GetPublicDiagramResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/GetPublicDiagram",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetPublicDiagram",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      }
-    },
-    "/v1/rfcs/public/spaces/{space}/{kind}/{number}": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetPublicDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.GetPublicDocument",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "kind",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "version",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetPublicDocumentResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.GetPublicDocumentResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/GetPublicDocument",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetPublicDocument",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      }
-    },
-    "/v1/rfcs/reviews": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListReviewQueue` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListReviewQueue",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "account_id",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListReviewQueueResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListReviewQueueResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListReviewQueue",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "reviews",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListReviewQueue",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListSpaces` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListSpaces",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "account_id",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListSpacesResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListSpacesResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListSpaces",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "spaces",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListSpaces",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/CreateSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.CreateSpace",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSpaceRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.CreateSpaceRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateSpaceResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.CreateSpaceResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/CreateSpace",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/CreateSpace",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}": {
-      "delete": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/DeleteSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.DeleteSpace",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteSpaceResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.DeleteSpaceResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/DeleteSpace",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/DeleteSpace",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      },
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.GetSpace",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetSpaceResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.GetSpaceResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/GetSpace",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetSpace",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "patch": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/UpdateSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.UpdateSpace",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSpaceRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.UpdateSpaceRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateSpaceResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.UpdateSpaceResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/UpdateSpace",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/UpdateSpace",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/diagrams": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListDiagrams` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListDiagrams",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListDiagramsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListDiagramsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListDiagrams",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "diagrams",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListDiagrams",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/CreateDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.CreateDiagram",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateDiagramRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.CreateDiagramRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateDiagramResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.CreateDiagramResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/CreateDiagram",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/CreateDiagram",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/diagrams/{diagram_id}": {
-      "delete": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/DeleteDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.DeleteDiagram",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "diagram_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteDiagramResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.DeleteDiagramResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/DeleteDiagram",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/DeleteDiagram",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      },
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.GetDiagram",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "diagram_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "version",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetDiagramResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.GetDiagramResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/GetDiagram",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetDiagram",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "patch": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/UpdateDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.UpdateDiagram",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "diagram_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateDiagramRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.UpdateDiagramRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateDiagramResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.UpdateDiagramResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/UpdateDiagram",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/UpdateDiagram",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/diagrams/{diagram_id}/versions": {
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SaveDiagram` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.SaveDiagram",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "diagram_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveDiagramRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.SaveDiagramRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SaveDiagramResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.SaveDiagramResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/SaveDiagram",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SaveDiagram",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListDocuments` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListDocuments",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "explode": true,
-            "in": "query",
-            "name": "types",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "mine",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListDocumentsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListDocumentsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListDocuments",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "documents",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListDocuments",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/CreateDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.CreateDocument",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateDocumentRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.CreateDocumentRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateDocumentResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.CreateDocumentResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/CreateDocument",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/CreateDocument",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.GetDocument",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "version",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetDocumentResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.GetDocumentResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/GetDocument",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetDocument",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/access": {
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SetAccess` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.SetAccess",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetAccessRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.SetAccessRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SetAccessResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.SetAccessResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/SetAccess",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SetAccess",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/comments": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListComments` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListComments",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListCommentsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListCommentsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListComments",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "comments",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListComments",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/AddComment` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.AddComment",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddCommentRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.AddCommentRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AddCommentResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.AddCommentResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/AddComment",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/AddComment",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/comments/{comment_id}/resolve": {
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ResolveComment` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.ResolveComment",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "comment_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveCommentRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.ResolveCommentRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResolveCommentResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ResolveCommentResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ResolveComment",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ResolveComment",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/review": {
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SubmitReview` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.SubmitReview",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubmitReviewRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.SubmitReviewRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubmitReviewResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.SubmitReviewResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/SubmitReview",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SubmitReview",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/reviews": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListReviews` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListReviews",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListReviewsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListReviewsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListReviews",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "reviews",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListReviews",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/RequestReview` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.RequestReview",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RequestReviewRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.RequestReviewRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestReviewResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.RequestReviewResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/RequestReview",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/RequestReview",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/status": {
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SetStatus` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.SetStatus",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetStatusRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.SetStatusRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SetStatusResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.SetStatusResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/SetStatus",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SetStatus",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/timeline": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListTimeline` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListTimeline",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "from",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "to",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListTimelineResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListTimelineResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListTimeline",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "entries",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListTimeline",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/documents/{document_id}/versions": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListVersions` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListVersions",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RfcsListVersionsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListVersionsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListVersions",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "versions",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListVersions",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "post": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/SaveDocument` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.SaveDocument",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "document_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveDocumentRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.SaveDocumentRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SaveDocumentResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.SaveDocumentResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/SaveDocument",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/SaveDocument",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/export": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ExportSpace` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ExportSpace",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExportSpaceResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ExportSpaceResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ExportSpace",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ExportSpace",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/settings": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/GetSettings` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.GetSettings",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetSettingsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.GetSettingsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/GetSettings",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/GetSettings",
-        "x-iohr-scopes": [
-          "rfc:read"
-        ]
-      },
-      "put": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/UpdateSettings` on the `rfcs` backend.\n\nA key needs scope `rfc:write`.",
-        "operationId": "RfcsService.UpdateSettings",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSettingsRequest"
-              }
-            }
-          },
-          "description": "`iohr.rfcs.v1.UpdateSettingsRequest`; path variables override their fields",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateSettingsResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.UpdateSettingsResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/UpdateSettings",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/UpdateSettings",
-        "x-iohr-scopes": [
-          "rfc:write"
-        ]
-      }
-    },
-    "/v1/rfcs/spaces/{space_id}/timeline": {
-      "get": {
-        "description": "Transcoded from `/iohr.rfcs.v1.RfcsService/ListTimeline` on the `rfcs` backend.\n\nA key needs scope `rfc:read`.",
-        "operationId": "RfcsService.ListTimeline",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "space_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "document_id",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "from",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "to",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListTimelineResponse"
-                }
-              }
-            },
-            "description": "`iohr.rfcs.v1.ListTimelineResponse`"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "The error envelope, with the standard gRPC-to-HTTP status"
-          }
-        },
-        "summary": "iohr.rfcs.v1.RfcsService/ListTimeline",
-        "tags": [
-          "rfcs"
-        ],
-        "x-iohr-list": {
-          "items": "entries",
-          "next_page_token": "next_page_token",
-          "page_size": "page_size",
-          "page_token": "page_token"
-        },
-        "x-iohr-public": true,
-        "x-iohr-rpc": "iohr.rfcs.v1.RfcsService/ListTimeline",
-        "x-iohr-scopes": [
-          "rfc:read"
         ]
       }
     },
