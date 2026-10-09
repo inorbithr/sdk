@@ -1,6 +1,6 @@
 {
   "name": "@inorbithr/sdk",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "The InOrbit API client for TypeScript and JavaScript: one runtime, and the operations your credential may call.",
   "keywords": [
     "inorbit",

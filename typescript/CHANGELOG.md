@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/inorbithr/sdk/compare/typescript/v0.2.2...typescript/v0.3.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **spec:** sync the public contract, 111 operations (2026-10-07) ([#166](https://github.com/inorbithr/sdk/issues/166))
+* **spec:** in Rust, the generated answer structs gain fields (Account.probe, Agent.capabilities, Use.connection_id and more) and the Surface trait gains rfcs() and trails(); code that builds those structs with a struct literal, or implements Surface itself, must add the new fields or methods. In Go, CheckDetail is no longer comparable with == (it gained the Invariants slice). Calls, names and wire shapes are unchanged in every language.
+
+### Features
+
+* **spec:** sync the public contract, 107 operations (2026-10-06) ([#159](https://github.com/inorbithr/sdk/issues/159)) ([1b4ebf3](https://github.com/inorbithr/sdk/commit/1b4ebf3b5b9ddfef077f4437eed16f1489f60797))
+* **spec:** sync the public contract, 111 operations (2026-10-07) ([#166](https://github.com/inorbithr/sdk/issues/166)) ([f3ce0cd](https://github.com/inorbithr/sdk/commit/f3ce0cd164154ed13f96303d453765ed45c6ce90))
+
 ## [0.2.2](https://github.com/inorbithr/sdk/compare/typescript/v0.2.1...typescript/v0.2.2) (2026-10-05)
 
 
