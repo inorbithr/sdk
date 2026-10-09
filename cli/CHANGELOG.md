@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.14](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.13...iohr/v0.1.0-alpha.14) (2026-10-09)
+
+
+### Features
+
+* **cli:** iohr ext service, and install offers an extension's system service ([#186](https://github.com/inorbithr/sdk/issues/186)) ([e6783ea](https://github.com/inorbithr/sdk/commit/e6783ea7a8a5ada504dc104d1abea9bd7199284a))
+
 ## [0.1.0-alpha.13](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.12...iohr/v0.1.0-alpha.13) (2026-10-08)
 
 

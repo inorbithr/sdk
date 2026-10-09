@@ -5,7 +5,7 @@
   "python": "0.2.2",
   "csharp": "0.2.2",
   "java": "0.2.2",
-  "cli": "0.1.0-alpha.13",
+  "cli": "0.1.0-alpha.14",
   "go/otel": "0.2.2",
   "dart": "0.1.0-dev.1"
 }
