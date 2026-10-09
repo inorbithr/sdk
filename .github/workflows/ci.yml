@@ -527,6 +527,26 @@ jobs:
           install_args: "go rust node pnpm python uv dotnet java maven"
       - run: mise run examples:check
 
+  # The committed contract against the live public API (platform RFC 0090): on the full
+  # runs (nightly, by hand, every release-please pull request), spec/ must be what
+  # spec:sync would write, so a release never ships a surface behind the platform's and
+  # a drift opens the nightly issue instead of going unnoticed.
+  spec-drift:
+    name: spec drift
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          install_args: "python uv"
+      - run: mise run spec:check
+
   # The only required status check. Skipped jobs count as passing; failed or
   # cancelled ones do not.
   # The Dart runtime holds the contract and its checker so far (platform RFC 0074.8);
@@ -551,7 +571,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [repo, tools, go, rust, ts, py, java, csharp, dart, cli, examples]
+    needs: [repo, tools, go, rust, ts, py, java, csharp, dart, cli, examples, spec-drift]
     runs-on: ubuntu-latest
     permissions: {}
     steps:

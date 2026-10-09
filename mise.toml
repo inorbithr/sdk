@@ -198,6 +198,11 @@ run = """
 uv run --script tools/spec-sync.py
 """
 
+[tasks."spec:check"]
+shell = "bash -e -o pipefail -c"
+description = "Fail when spec/ differs from the live public API (https://api.inorbit.hr/openapi.json): spec:sync --check, writing nothing. In CI on the full runs; run it before merging a release pull request while CI cannot run (platform RFC 0090)"
+run = "uv run --script tools/spec-sync.py --check"
+
 [tasks."spec:lint"]
 shell = "bash -e -o pipefail -c"
 description = "Validate spec/ and report breaking changes against main"
