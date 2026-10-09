@@ -732,19 +732,26 @@ pub enum ExtCommand {
         /// Don't set up its system service now (`iohr ext service NAME` does it later).
         #[arg(long)]
         no_service: bool,
-        /// The network interface its system service attaches to (default: the one the
-        /// default route uses).
-        #[arg(long, value_name = "NAME")]
-        interface: Option<String>,
+        /// A network interface its system service attaches to; repeatable (default: asked
+        /// at a terminal, from the ones the program detects; otherwise the default route's).
+        #[arg(long = "interface", value_name = "NAME")]
+        interfaces: Vec<String>,
+        /// Every interface the program's --all picks (physical NICs, bonds, VLANs that are
+        /// up), chosen again at each start of the service.
+        #[arg(long, conflicts_with = "interfaces")]
+        all_interfaces: bool,
     },
     /// Set up the system service of an installed extension that has one (Linux, with
     /// sudo): runs `sudo <program> service install --agent-user <you>`.
     Service {
         /// The extension, such as capture.
         name: String,
-        /// The network interface it attaches to (default: the one the default route uses).
-        #[arg(long, value_name = "NAME")]
-        interface: Option<String>,
+        /// A network interface it attaches to; repeatable (default: asked at a terminal).
+        #[arg(long = "interface", value_name = "NAME")]
+        interfaces: Vec<String>,
+        /// Every interface the program's --all picks, chosen again at each start.
+        #[arg(long, conflicts_with = "interfaces")]
+        all_interfaces: bool,
     },
     /// The installed extensions.
     List,
