@@ -66,6 +66,8 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             extension,
             lock,
             yes,
+            no_service,
+            interface,
         } => {
             let (registry, policy) = setup(g, env)?;
             let f = if extension.contains('/') {
@@ -88,7 +90,20 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             )?;
             let entry = keep(&store, &registry, &f, lock.as_deref(), None)?;
             report(&f, &entry, out);
+            if f.manifest.service && !no_service {
+                offer_service(
+                    &store,
+                    &f.manifest.name,
+                    interface.as_deref(),
+                    yes,
+                    terminal().as_mut().map(|a| a as &mut Ask),
+                )?;
+            }
             Ok(())
+        }
+        ExtCommand::Service { name, interface } => {
+            check_name(&name)?;
+            service(&store, &name, interface.as_deref())
         }
         ExtCommand::Search {
             query,
@@ -185,6 +200,110 @@ type Ask<'a> = dyn FnMut(&str) -> Result<String, Error> + 'a;
 fn terminal() -> Option<impl FnMut(&str) -> Result<String, Error>> {
     (prompt::interactive() && std::io::IsTerminal::is_terminal(&std::io::stdin()))
         .then_some(prompt::line)
+}
+
+/// The command that sets up an installed extension's system service.
+fn service_command(program: &Path, user: &str, interface: Option<&str>) -> Vec<OsString> {
+    let mut c: Vec<OsString> = vec![
+        program.as_os_str().to_owned(),
+        "service".into(),
+        "install".into(),
+        "--agent-user".into(),
+        user.into(),
+    ];
+    if let Some(i) = interface {
+        c.push("--interface".into());
+        c.push(i.into());
+    }
+    c
+}
+
+fn shown(c: &[OsString]) -> String {
+    let words: Vec<String> = c.iter().map(|w| w.to_string_lossy().into_owned()).collect();
+    format!("sudo {}", words.join(" "))
+}
+
+fn current_user() -> Result<String, Error> {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .map_err(|_| Error::Usage("neither USER nor LOGNAME is set: say who runs the agent".into()))
+}
+
+/// The installed, unchanged program of an extension whose privileges were confirmed.
+fn service_program(store: &Store, name: &str) -> Result<std::path::PathBuf, Error> {
+    let Some((entry, record, dir)) = store.installed(name)? else {
+        return Err(Error::Usage(format!(
+            "{name} is not installed: iohr ext install {name}"
+        )));
+    };
+    if !record.manifest.service {
+        return Err(Error::Usage(format!(
+            "{name} has no system service of its own"
+        )));
+    }
+    crate::ext::install::check_confirmed(&entry, &record)?;
+    Ok(crate::ext::install::check_program(&record, &dir)?)
+}
+
+/// `iohr ext service NAME`: runs the set-up with sudo, which asks for the password.
+fn service(store: &Store, name: &str, interface: Option<&str>) -> Result<(), Error> {
+    if !cfg!(target_os = "linux") {
+        return Err(Error::Usage(format!(
+            "{name}'s system service runs on Linux only"
+        )));
+    }
+    let program = service_program(store, name)?;
+    let c = service_command(&program, &current_user()?, interface);
+    Out::note(&format!("Running: {}", shown(&c)));
+    let status = std::process::Command::new("sudo")
+        .args(&c)
+        .status()
+        .map_err(|e| Error::Usage(format!("could not run sudo: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::Usage(format!(
+            "setting up {name}'s system service failed; run it again with `iohr ext service {name}`"
+        )))
+    }
+}
+
+/// After installing an extension with a system service: with --yes it is set up, at a
+/// terminal the person is asked, otherwise the command to run is printed.
+fn offer_service(
+    store: &Store,
+    name: &str,
+    interface: Option<&str>,
+    yes: bool,
+    ask: Option<&mut Ask<'_>>,
+) -> Result<(), Error> {
+    if !cfg!(target_os = "linux") {
+        Out::note(&format!(
+            "{name} runs as a system service on Linux; install it on a Linux host to set that up."
+        ));
+        return Ok(());
+    }
+    let program = service_program(store, name)?;
+    let c = service_command(&program, &current_user()?, interface);
+    let line = shown(&c);
+    let go = if yes {
+        true
+    } else if let Some(ask) = ask {
+        Out::note(&format!(
+            "{name} runs as a system service. Setting it up runs, with sudo:\n  {line}"
+        ));
+        ask("Type yes to set up its system service now")? == "yes"
+    } else {
+        false
+    };
+    if go {
+        service(store, name, interface)
+    } else {
+        Out::note(&format!(
+            "Not set up yet. Run `iohr ext service {name}` (or: {line}) when you are ready."
+        ));
+        Ok(())
+    }
 }
 
 /// The privileges in plain words, one per line, for a note.
@@ -657,6 +776,20 @@ mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
 
     use super::{Ask, confirm_privileges, parse_spec, privilege_lines};
+
+    #[test]
+    fn the_service_command_names_the_program_the_user_and_the_interface() {
+        let p = std::path::Path::new(
+            "/home/a/.local/share/iohr/extensions/capture/1.0.0-abc/iohr-capture",
+        );
+        let c = super::service_command(p, "nevio", None);
+        assert_eq!(
+            super::shown(&c),
+            "sudo /home/a/.local/share/iohr/extensions/capture/1.0.0-abc/iohr-capture service install --agent-user nevio"
+        );
+        let c = super::service_command(p, "nevio", Some("enp70s0"));
+        assert!(super::shown(&c).ends_with("--agent-user nevio --interface enp70s0"));
+    }
     use crate::error::Error;
     use crate::ext::install::Want;
 

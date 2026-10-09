@@ -158,6 +158,12 @@ pub struct Manifest {
     /// means none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub privileges: Vec<String>,
+    /// It runs as a system service on Linux that the program sets up itself with
+    /// `sudo <program> service install --agent-user <user> [--interface <name>]`.
+    /// `iohr ext install` offers that step after installing; `iohr ext service` runs it
+    /// later. Absent means it has no system service of its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub service: bool,
 }
 
 /// Why a manifest or a name was refused.
@@ -403,6 +409,29 @@ mod tests {
         }
         assert!(manifest(&base).is_ok());
         assert!(Manifest::parse(&vec![b' '; 70 * 1024]).is_err());
+    }
+
+    #[test]
+    fn a_system_service_is_declared_and_absent_means_none() {
+        let base = serde_json::json!({"name": "capture", "version": "1.0.0", "entrypoint": "iohr-capture"});
+        let m = manifest(&base).unwrap();
+        assert!(!m.service);
+        assert!(
+            !serde_json::to_string(&m).unwrap().contains("service"),
+            "an older manifest keeps its exact shape"
+        );
+        let mut v = base.clone();
+        v["service"] = serde_json::json!(true);
+        v["privileges"] = serde_json::json!(["CAP_BPF", "CAP_PERFMON", "CAP_NET_ADMIN"]);
+        let m = manifest(&v).unwrap();
+        assert!(m.service);
+        assert!(
+            serde_json::to_string(&m)
+                .unwrap()
+                .contains("\"service\":true")
+        );
+        v["service"] = serde_json::json!("yes");
+        assert!(manifest(&v).is_err(), "service is a boolean");
     }
 
     #[test]
