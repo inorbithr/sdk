@@ -66,6 +66,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             extension,
             lock,
             yes,
+            no_service,
+            interfaces,
+            all_interfaces,
         } => {
             let (registry, policy) = setup(g, env)?;
             let f = if extension.contains('/') {
@@ -88,7 +91,30 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             )?;
             let entry = keep(&store, &registry, &f, lock.as_deref(), None)?;
             report(&f, &entry, out);
+            if f.manifest.service && !no_service {
+                offer_service(
+                    &store,
+                    &f.manifest.name,
+                    &Picks::from(interfaces, all_interfaces),
+                    yes,
+                    terminal().as_mut().map(|a| a as &mut Ask),
+                )?;
+            }
             Ok(())
+        }
+        ExtCommand::Service {
+            name,
+            interfaces,
+            all_interfaces,
+        } => {
+            check_name(&name)?;
+            let picks = Picks::from(interfaces, all_interfaces);
+            let picks = if picks == Picks::Default {
+                ask_interfaces(&store, &name, terminal().as_mut().map(|a| a as &mut Ask))?
+            } else {
+                picks
+            };
+            service(&store, &name, &picks)
         }
         ExtCommand::Search {
             query,
@@ -185,6 +211,241 @@ type Ask<'a> = dyn FnMut(&str) -> Result<String, Error> + 'a;
 fn terminal() -> Option<impl FnMut(&str) -> Result<String, Error>> {
     (prompt::interactive() && std::io::IsTerminal::is_terminal(&std::io::stdin()))
         .then_some(prompt::line)
+}
+
+/// Which interfaces the system service attaches to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Picks {
+    /// The program's own default (the default route's interface).
+    Default,
+    /// These names.
+    Named(Vec<String>),
+    /// The program's `--all`, chosen again at each start.
+    All,
+}
+
+impl Picks {
+    fn from(named: Vec<String>, all: bool) -> Self {
+        if all {
+            Self::All
+        } else if named.is_empty() {
+            Self::Default
+        } else {
+            Self::Named(named)
+        }
+    }
+}
+
+/// The command that sets up an installed extension's system service.
+fn service_command(program: &Path, user: &str, picks: &Picks) -> Vec<OsString> {
+    let mut c: Vec<OsString> = vec![
+        program.as_os_str().to_owned(),
+        "service".into(),
+        "install".into(),
+        "--agent-user".into(),
+        user.into(),
+    ];
+    match picks {
+        Picks::Default => {}
+        Picks::All => c.push("--all".into()),
+        Picks::Named(names) => {
+            for n in names {
+                c.push("--interface".into());
+                c.push(n.into());
+            }
+        }
+    }
+    c
+}
+
+fn shown(c: &[OsString]) -> String {
+    let words: Vec<String> = c.iter().map(|w| w.to_string_lossy().into_owned()).collect();
+    format!("sudo {}", words.join(" "))
+}
+
+fn current_user() -> Result<String, Error> {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .map_err(|_| Error::Usage("neither USER nor LOGNAME is set: say who runs the agent".into()))
+}
+
+/// The installed, unchanged program of an extension whose privileges were confirmed.
+fn service_program(store: &Store, name: &str) -> Result<std::path::PathBuf, Error> {
+    let Some((entry, record, dir)) = store.installed(name)? else {
+        return Err(Error::Usage(format!(
+            "{name} is not installed: iohr ext install {name}"
+        )));
+    };
+    if !record.manifest.service {
+        return Err(Error::Usage(format!(
+            "{name} has no system service of its own"
+        )));
+    }
+    crate::ext::install::check_confirmed(&entry, &record)?;
+    Ok(crate::ext::install::check_program(&record, &dir)?)
+}
+
+/// What the program's `interfaces --json` says: each interface, whether `--all` picks it
+/// and why, and the suggestion. Read-only, run as the person (no sudo).
+#[derive(Debug, Default, serde::Deserialize)]
+struct Detected {
+    #[serde(default)]
+    interfaces: Vec<DetectedInterface>,
+    #[serde(default)]
+    suggested: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DetectedInterface {
+    name: String,
+    picked: bool,
+    why: String,
+}
+
+fn detect(program: &Path) -> Option<Detected> {
+    let out = std::process::Command::new(program)
+        .args(["interfaces", "--json"])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| serde_json::from_slice(&out.stdout).ok())
+        .flatten()
+}
+
+/// The person's answer to the interface question: `yes` takes the suggestion, `all`
+/// the program's --all, names (spaces or commas) those names; anything else nothing.
+fn parse_choice(answer: &str, suggested: &[String]) -> Option<Picks> {
+    let a = answer.trim();
+    match a {
+        "" | "no" | "n" => None,
+        "yes" | "y" => (!suggested.is_empty()).then(|| Picks::Named(suggested.to_vec())),
+        "all" => Some(Picks::All),
+        _ => {
+            let names: Vec<String> = a
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            (!names.is_empty()).then_some(Picks::Named(names))
+        }
+    }
+}
+
+/// At a terminal, lists the interfaces the program detects with its suggestion and asks;
+/// without one, the program's default.
+fn ask_interfaces(store: &Store, name: &str, ask: Option<&mut Ask<'_>>) -> Result<Picks, Error> {
+    let Some(ask) = ask else {
+        return Ok(Picks::Default);
+    };
+    let program = service_program(store, name)?;
+    let Some(d) = detect(&program) else {
+        return Ok(Picks::Default);
+    };
+    let w = d.interfaces.iter().map(|i| i.name.len()).max().unwrap_or(0);
+    let lines: Vec<String> = d
+        .interfaces
+        .iter()
+        .map(|i| {
+            format!(
+                "  {} {:w$}  {}",
+                if i.picked { "+" } else { "-" },
+                i.name,
+                i.why
+            )
+        })
+        .collect();
+    Out::note(&format!(
+        "Interfaces on this host (+ suggested):\n{}\nSuggested: {}",
+        lines.join("\n"),
+        if d.suggested.is_empty() {
+            "none".to_owned()
+        } else {
+            d.suggested.join(" ")
+        }
+    ));
+    let answer = ask(
+        "Type yes for the suggestion, `all` to pick them again at each start, or interface names",
+    )?;
+    parse_choice(&answer, &d.suggested)
+        .ok_or_else(|| Error::Usage("no interface chosen; nothing was set up".into()))
+}
+
+/// `iohr ext service NAME`: runs the set-up with sudo, which asks for the password.
+fn service(store: &Store, name: &str, picks: &Picks) -> Result<(), Error> {
+    if !cfg!(target_os = "linux") {
+        return Err(Error::Usage(format!(
+            "{name}'s system service runs on Linux only"
+        )));
+    }
+    let program = service_program(store, name)?;
+    let c = service_command(&program, &current_user()?, picks);
+    Out::note(&format!("Running: {}", shown(&c)));
+    let status = std::process::Command::new("sudo")
+        .args(&c)
+        .status()
+        .map_err(|e| Error::Usage(format!("could not run sudo: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::Usage(format!(
+            "setting up {name}'s system service failed; run it again with `iohr ext service {name}`"
+        )))
+    }
+}
+
+/// After installing an extension with a system service: with --yes it is set up (with the
+/// interfaces given, or the program's default), at a terminal the person picks the
+/// interfaces from what the program detects, otherwise the command to run is printed.
+fn offer_service(
+    store: &Store,
+    name: &str,
+    picks: &Picks,
+    yes: bool,
+    ask: Option<&mut Ask<'_>>,
+) -> Result<(), Error> {
+    if !cfg!(target_os = "linux") {
+        Out::note(&format!(
+            "{name} runs as a system service on Linux; install it on a Linux host to set that up."
+        ));
+        return Ok(());
+    }
+    let program = service_program(store, name)?;
+    if yes {
+        return service(store, name, picks);
+    }
+    let Some(ask) = ask else {
+        let line = shown(&service_command(&program, &current_user()?, picks));
+        Out::note(&format!(
+            "Not set up yet. Run `iohr ext service {name}` (or: {line}) when you are ready."
+        ));
+        return Ok(());
+    };
+    let picks = if *picks == Picks::Default {
+        match ask_interfaces(store, name, Some(&mut *ask)) {
+            Ok(p) => p,
+            Err(e) => {
+                Out::note(&format!(
+                    "{e}. Run `iohr ext service {name}` when you are ready."
+                ));
+                return Ok(());
+            }
+        }
+    } else {
+        picks.clone()
+    };
+    let line = shown(&service_command(&program, &current_user()?, &picks));
+    Out::note(&format!(
+        "{name} runs as a system service. Setting it up runs, with sudo:\n  {line}"
+    ));
+    if ask("Type yes to set up its system service now")? == "yes" {
+        service(store, name, &picks)
+    } else {
+        Out::note(&format!(
+            "Not set up yet. Run `iohr ext service {name}` (or: {line}) when you are ready."
+        ));
+        Ok(())
+    }
 }
 
 /// The privileges in plain words, one per line, for a note.
@@ -657,6 +918,40 @@ mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
 
     use super::{Ask, confirm_privileges, parse_spec, privilege_lines};
+
+    #[test]
+    fn the_service_command_names_the_program_the_user_and_the_interface() {
+        let p = std::path::Path::new(
+            "/home/a/.local/share/iohr/extensions/capture/1.0.0-abc/iohr-capture",
+        );
+        let c = super::service_command(p, "nevio", &super::Picks::Default);
+        assert_eq!(
+            super::shown(&c),
+            "sudo /home/a/.local/share/iohr/extensions/capture/1.0.0-abc/iohr-capture service install --agent-user nevio"
+        );
+        let named = super::Picks::Named(vec!["enp70s0".into(), "bond0".into()]);
+        let c = super::service_command(p, "nevio", &named);
+        assert!(
+            super::shown(&c).ends_with("--agent-user nevio --interface enp70s0 --interface bond0")
+        );
+        let c = super::service_command(p, "nevio", &super::Picks::All);
+        assert!(super::shown(&c).ends_with("--agent-user nevio --all"));
+    }
+
+    #[test]
+    fn the_interface_answer_takes_the_suggestion_all_or_names() {
+        use super::{Picks, parse_choice};
+        let s = vec!["enp70s0".to_owned()];
+        assert_eq!(parse_choice("yes", &s), Some(Picks::Named(s.clone())));
+        assert_eq!(parse_choice(" all ", &s), Some(Picks::All));
+        assert_eq!(
+            parse_choice("enp70s0, cni0", &s),
+            Some(Picks::Named(vec!["enp70s0".into(), "cni0".into()]))
+        );
+        assert_eq!(parse_choice("", &s), None);
+        assert_eq!(parse_choice("no", &s), None);
+        assert_eq!(parse_choice("yes", &[]), None);
+    }
     use crate::error::Error;
     use crate::ext::install::Want;
 

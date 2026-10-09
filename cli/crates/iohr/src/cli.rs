@@ -725,9 +725,33 @@ pub enum ExtCommand {
         /// Also pin it in this lock file, for `iohr ext sync` elsewhere.
         #[arg(long, value_name = "FILE")]
         lock: Option<PathBuf>,
-        /// Confirm the privileges it declares without asking (needed without a terminal).
+        /// Confirm the privileges it declares without asking (needed without a terminal),
+        /// and set up its system service if it has one.
         #[arg(long, short = 'y')]
         yes: bool,
+        /// Don't set up its system service now (`iohr ext service NAME` does it later).
+        #[arg(long)]
+        no_service: bool,
+        /// A network interface its system service attaches to; repeatable (default: asked
+        /// at a terminal, from the ones the program detects; otherwise the default route's).
+        #[arg(long = "interface", value_name = "NAME")]
+        interfaces: Vec<String>,
+        /// Every interface the program's --all picks (physical NICs, bonds, VLANs that are
+        /// up), chosen again at each start of the service.
+        #[arg(long, conflicts_with = "interfaces")]
+        all_interfaces: bool,
+    },
+    /// Set up the system service of an installed extension that has one (Linux, with
+    /// sudo): runs `sudo <program> service install --agent-user <you>`.
+    Service {
+        /// The extension, such as capture.
+        name: String,
+        /// A network interface it attaches to; repeatable (default: asked at a terminal).
+        #[arg(long = "interface", value_name = "NAME")]
+        interfaces: Vec<String>,
+        /// Every interface the program's --all picks, chosen again at each start.
+        #[arg(long, conflicts_with = "interfaces")]
+        all_interfaces: bool,
     },
     /// The installed extensions.
     List,
