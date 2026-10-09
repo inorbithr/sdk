@@ -9,7 +9,7 @@ experimental = true
 cargo.binstall = true
 
 [tools]
-go = "1.27.1"
+go = "1.27.2"
 rust = { version = "1.99.0", components = "rustfmt,clippy" }
 node = "26.10.0"
 pnpm = "12.9.1"
