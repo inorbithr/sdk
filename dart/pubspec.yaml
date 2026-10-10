@@ -2,7 +2,7 @@ name: inorbit
 description: >-
   Dart runtime for the InOrbit public API. Today it checks every API answer against
   the published contract; the generated client follows (platform RFC 0074.8).
-version: 0.1.0-dev.1
+version: 0.1.1-dev.1+-dev.1
 repository: https://github.com/inorbithr/sdk/tree/main/dart
 issue_tracker: https://github.com/inorbithr/sdk/issues
 topics: [inorbit, api, sdk, contract]
