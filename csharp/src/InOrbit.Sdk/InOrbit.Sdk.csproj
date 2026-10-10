@@ -3,7 +3,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>InOrbit.Sdk</RootNamespace>
     <PackageId>InOrbit.Sdk</PackageId>
-    <Version>0.2.2</Version> <!-- x-release-please-version -->
+    <Version>0.3.0</Version> <!-- x-release-please-version -->
     <Authors>InOrbit d.o.o.</Authors>
     <Description>The InOrbit API client: the runtime and the public surface.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
