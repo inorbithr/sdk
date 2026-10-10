@@ -166,8 +166,12 @@ while let Some(digest) = digests.next().await {
 Stopping early fetches nothing more; `.collect().await` gathers every item.
 
 Every request field is optional and left out of the body when unset, so a request is
-built from its default (`CreateEndpointRequest { url: Some(url.into()), ..Default::default() }`);
-an answer's field is an `Option` unless the API always sends it. Timestamps stay the
+built from its default and the `with_` setters
+(`CreateEndpointRequest::default().with_url(url)`); an answer's field is an `Option`
+unless the API always sends it. Models, query parameters and enums are
+`#[non_exhaustive]`, so a field or value the API adds later is not a breaking change:
+build a model with `default()` (or `new(..)` when a field has no default) and its
+`with_` setters, and give a `match` on an enum a `_` arm. Timestamps stay the
 strings the API sent; `inorbithr::parse_timestamp` reads one, `""` (unset) as `None`.
 
 ## Streams

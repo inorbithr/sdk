@@ -30,6 +30,7 @@ heck = "0.5"
 keyring-core = "1"
 minijinja = "2"
 prettyplease = "0.3"
+quote = "1"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
 # Held at 0.8: typify's API takes schemars 0.8 types (`RootSchema`); see the `ignore` in
 # .github/dependabot.yml. Moves to 1.x with typify (oxidecomputer/typify#886).
