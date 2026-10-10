@@ -387,11 +387,11 @@ def call_sync(api: Public, action: dict[str, Any]) -> RawResponse:  # noqa: PLR0
         return api.events.update_endpoint(_arg(args, "endpoint_id"), body, **kw).raw
     if op == "events.delete_endpoint":
         return api.events.delete_endpoint(_arg(args, "endpoint_id"), **kw).raw
-    if op == "rfcs.create_document":
+    if op == "decisions.create_document":
         doc = CreateDocumentRequest.model_validate(
             {k: v for k, v in args.items() if k != "space_id"}
         )
-        return api.rfcs.create_document(_arg(args, "space_id"), doc, **kw).raw
+        return api.decisions.create_document(_arg(args, "space_id"), doc, **kw).raw
     raise AssertionError(f"the conformance schema names an op this driver does not know: {op}")
 
 
@@ -422,11 +422,11 @@ async def call_async(api: AsyncPublic, action: dict[str, Any]) -> RawResponse:  
         return (await api.events.update_endpoint(_arg(args, "endpoint_id"), body, **kw)).raw
     if op == "events.delete_endpoint":
         return (await api.events.delete_endpoint(_arg(args, "endpoint_id"), **kw)).raw
-    if op == "rfcs.create_document":
+    if op == "decisions.create_document":
         doc = CreateDocumentRequest.model_validate(
             {k: v for k, v in args.items() if k != "space_id"}
         )
-        return (await api.rfcs.create_document(_arg(args, "space_id"), doc, **kw)).raw
+        return (await api.decisions.create_document(_arg(args, "space_id"), doc, **kw)).raw
     raise AssertionError(f"the conformance schema names an op this driver does not know: {op}")
 
 

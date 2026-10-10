@@ -715,8 +715,8 @@ class ConformanceTest {
             }
             case "events.delete_endpoint" ->
                 api.events().deleteEndpoint(args.path("endpoint_id").asText()).raw();
-            case "rfcs.create_document" ->
-                api.rfcs()
+            case "decisions.create_document" ->
+                api.decisions()
                         .createDocument(
                                 args.path("space_id").asText(),
                                 CreateDocumentRequest.builder()

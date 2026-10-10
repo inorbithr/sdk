@@ -65,7 +65,7 @@
       "required": ["op"],
       "additionalProperties": false,
       "properties": {
-        "op": { "enum": ["me", "accounts.get_me", "accounts.get_usage", "radar.get_digest", "events.create_endpoint", "events.update_endpoint", "events.delete_endpoint", "events.stream_events", "rfcs.create_document"] },
+        "op": { "enum": ["me", "accounts.get_me", "accounts.get_usage", "radar.get_digest", "events.create_endpoint", "events.update_endpoint", "events.delete_endpoint", "events.stream_events", "decisions.create_document"] },
         "args": { "type": "object" },
         "repeat": { "type": "integer", "minimum": 1, "description": "Run the action this many times on one client." },
         "concurrent": { "type": "integer", "minimum": 1, "description": "Run the action this many times at once on one client." },

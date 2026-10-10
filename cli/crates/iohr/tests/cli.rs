@@ -624,7 +624,7 @@ async fn verbose_output_never_shows_the_token() {
         vec!["ext", "search", "--all"],
         vec!["ext", "show", "inorbit/agent"],
     ];
-    // `iohr rfc` needs typed answers: `rfc_commands_never_show_the_token` runs it.
+    // `iohr decisions` needs typed answers: `decisions_commands_never_show_the_token` runs it.
     for args in commands {
         let mut args = args.clone();
         args.push("--verbose");
@@ -2409,7 +2409,11 @@ fn sdk_add_runs_the_program_and_passes_its_exit_code_on() {
     assert_eq!(v["manager"], "pip");
 }
 
-// `iohr rfc` (platform RFC 0065): the RFCs API through the SDK's `rfcs` operations.
+// `iohr decisions` (platform RFC 0065, core ADR 0056): the Decisions API through the
+// SDK's Decisions operations.
+
+/// Where the Decisions API's routes start (`/v1/rfcs` until core ADR 0056).
+const DECISIONS: &str = "/v1/decisions";
 
 const SPACE: &str = "lab_1";
 const RFC_ID: &str = "ldoc_65";
@@ -2436,21 +2440,22 @@ fn rfc_doc(id: &str, number: i32, part: i32, version: i32, status: &str) -> serd
         "created_at": "2026-10-06T00:00:00Z", "updated_at": "2026-10-07T00:00:00Z",
         "parent_id": "", "child_index": part, "display_number": display, "children": 0,
         "headline": "", "headline_note": "", "supersedes_id": "", "measures_id": "",
-        "access": "team"
+        "access": "team", "stage": "", "source": "", "outward": false, "decider": "",
+        "approved_by": "", "review_by": "", "review_overdue": false
     })
 }
 
-/// Every route `iohr rfc` calls, answering for one space holding RFC 0065 and its part
+/// Every route `iohr decisions` calls, answering for one space holding RFC 0065 and its part
 /// 0065.1, with the bodies the commands must send.
 #[allow(
     clippy::too_many_lines,
     reason = "one mock per route, each with its body"
 )]
-async fn mount_rfcs(server: &MockServer) {
-    let docs = format!("/v1/rfcs/spaces/{SPACE}/documents");
+async fn mount_decisions(server: &MockServer) {
+    let docs = format!("{DECISIONS}/spaces/{SPACE}/documents");
     let one = format!("{docs}/{RFC_ID}");
     Mock::given(method("GET"))
-        .and(path("/v1/rfcs/spaces"))
+        .and(path(format!("{DECISIONS}/spaces")))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "spaces": [rfc_space(SPACE, "platform")], "next_page_token": ""
         })))
@@ -2471,7 +2476,8 @@ async fn mount_rfcs(server: &MockServer) {
             "document": rfc_doc(RFC_ID, 65, 0, 4, "open"), "text": "---\ntitle: RFCs everywhere\n---\n\nBody.\n",
             "version": 4, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-07T00:00:00Z",
             "findings": [], "children": [], "mentions": [], "mentioned_in": [],
-            "successors": [], "measured_by": []
+            "successors": [], "measured_by": [], "context": [], "context_for": [],
+            "diagrams": [], "implements": [], "implemented_by": []
         })))
         .mount(server)
         .await;
@@ -2544,17 +2550,18 @@ async fn mount_rfcs(server: &MockServer) {
     let diagram = serde_json::json!({
         "diagram_id": "ldia_1", "space_id": SPACE, "name": "Identity", "current_version": 1,
         "nodes": 1, "created_by": "iohr-rfcs-agent", "created_at": "2026-10-07T00:00:00Z",
-        "updated_at": "2026-10-07T00:00:00Z"
+        "updated_at": "2026-10-07T00:00:00Z", "kind": "", "space_name": "Platform",
+        "svg_path": "", "element_kinds": [], "used_in_count": 0
     });
     Mock::given(method("GET"))
-        .and(path(format!("/v1/rfcs/spaces/{SPACE}/diagrams")))
+        .and(path(format!("{DECISIONS}/spaces/{SPACE}/diagrams")))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "diagrams": [diagram], "next_page_token": ""
         })))
         .mount(server)
         .await;
     Mock::given(method("POST"))
-        .and(path(format!("/v1/rfcs/spaces/{SPACE}/diagrams")))
+        .and(path(format!("{DECISIONS}/spaces/{SPACE}/diagrams")))
         .and(body_json(serde_json::json!({
             "space_id": SPACE, "name": "Identity", "model": RFC_MODEL
         })))
@@ -2565,7 +2572,7 @@ async fn mount_rfcs(server: &MockServer) {
         .await;
     Mock::given(method("POST"))
         .and(path(format!(
-            "/v1/rfcs/spaces/{SPACE}/diagrams/ldia_1/versions"
+            "{DECISIONS}/spaces/{SPACE}/diagrams/ldia_1/versions"
         )))
         .and(body_json(serde_json::json!({
             "space_id": SPACE, "diagram_id": "ldia_1", "base_version": 1,
@@ -2595,19 +2602,32 @@ async fn mount_rfcs(server: &MockServer) {
 const RFC_MODEL: &str =
     r#"{"version":1,"nodes":[{"id":"a","kind":"service","name":"A","x":0,"y":0}],"edges":[]}"#;
 
-/// The `iohr rfc` invocations the tests run; `file` holds `# new\n`, `model` a diagram.
-fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
+/// The `iohr decisions` invocations the tests run; `file` holds `# new\n`, `model` a diagram.
+fn decisions_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
     vec![
         vec![
-            "rfc", "diagram", "--space", "platform", "--name", "Identity", "--file", model,
+            "decisions",
+            "diagram",
+            "--space",
+            "platform",
+            "--name",
+            "Identity",
+            "--file",
+            model,
         ],
         vec![
-            "rfc", "diagram", "ldia_1", "--file", model, "-m", "One node",
+            "decisions",
+            "diagram",
+            "ldia_1",
+            "--file",
+            model,
+            "-m",
+            "One node",
         ],
-        vec!["rfc", "list"],
-        vec!["rfc", "show", "0065", "--text"],
+        vec!["decisions", "list"],
+        vec!["decisions", "show", "0065", "--text"],
         vec![
-            "rfc",
+            "decisions",
             "create",
             "--space",
             "platform",
@@ -2619,7 +2639,7 @@ fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
             file,
         ],
         vec![
-            "rfc",
+            "decisions",
             "save",
             "0065",
             "--file",
@@ -2628,7 +2648,7 @@ fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
             "Status log: step 2",
         ],
         vec![
-            "rfc",
+            "decisions",
             "status",
             "0065",
             "superseded",
@@ -2636,7 +2656,7 @@ fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
             "0065.1",
         ],
         vec![
-            "rfc",
+            "decisions",
             "link-pr",
             "0065",
             "core#512",
@@ -2644,14 +2664,14 @@ fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
             "feat(labs): an agent principal",
         ],
         vec![
-            "rfc",
+            "decisions",
             "link-pr",
             "0065",
             "https://github.com/inorbithr/core/pull/512",
             "--merged",
         ],
         vec![
-            "rfc",
+            "decisions",
             "comment",
             "0065",
             "verified as the agent",
@@ -2659,9 +2679,9 @@ fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
             "sdk#161",
             "--live",
         ],
-        vec!["rfc", "comment", "0065", "Plain words."],
+        vec!["decisions", "comment", "0065", "Plain words."],
         vec![
-            "rfc",
+            "decisions",
             "review",
             "0065",
             "--reviewer",
@@ -2673,32 +2693,32 @@ fn rfc_commands<'a>(file: &'a str, model: &'a str) -> Vec<Vec<&'a str>> {
 }
 
 #[tokio::test]
-async fn rfc_commands_send_what_the_api_takes_and_print_it() {
+async fn decisions_commands_send_what_the_api_takes_and_print_it() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
     let r = Run {
         server: &server,
         config: dir.path(),
     };
-    mount_rfcs(&server).await;
+    mount_decisions(&server).await;
     let file = dir.path().join("rfc.md");
     std::fs::write(&file, "# new\n").unwrap();
     let file = file.to_str().unwrap();
     let model = dir.path().join("model.json");
     std::fs::write(&model, RFC_MODEL).unwrap();
     let model = model.to_str().unwrap();
-    let t = token(&["rfc:read", "rfc:write"]);
-    for args in rfc_commands(file, model) {
+    let t = token(&["decisions:read", "decisions:write"]);
+    for args in decisions_commands(file, model) {
         let o = r.with_token(&t, &args);
         assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
     }
 
     // Tables and pairs.
-    let o = r.with_token(&t, &["rfc", "list"]);
+    let o = r.with_token(&t, &["decisions", "list"]);
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.starts_with("RFC "), "{out}");
     assert!(out.contains("0065.1"), "{out}");
-    let o = r.with_token(&t, &["rfc", "show", "65", "--text", "--raw"]);
+    let o = r.with_token(&t, &["decisions", "show", "65", "--text", "--raw"]);
     assert_eq!(
         String::from_utf8_lossy(&o.stdout),
         "---\ntitle: RFCs everywhere\n---\n\nBody.\n"
@@ -2707,7 +2727,7 @@ async fn rfc_commands_send_what_the_api_takes_and_print_it() {
     let o = r.with_token(
         &t,
         &[
-            "rfc",
+            "decisions",
             "save",
             "0065",
             "--file",
@@ -2717,18 +2737,35 @@ async fn rfc_commands_send_what_the_api_takes_and_print_it() {
         ],
     );
     assert!(String::from_utf8_lossy(&o.stderr).contains("ip-address (line 3)"));
-    // The reviewer may come from the environment, as `mise run rfcs:token` sets it.
+    // The reviewer may come from the environment, as `mise run decisions:token` sets it.
     let o = r
-        .cmd(&["rfc", "review", "0065", "--reason", "the agent identity"])
+        .cmd(&[
+            "decisions",
+            "review",
+            "0065",
+            "--reason",
+            "the agent identity",
+        ])
         .env("IOHR_TOKEN", &t)
-        .env("IOHR_RFC_REVIEWER", "owner-subject")
+        .env("IOHR_DECISIONS_REVIEWER", "owner-subject")
         .stdin(Stdio::null())
         .output()
         .unwrap();
     assert_eq!(code(&o), 0, "{}", text(&o));
+    // `--profile decisions` stands in with `IOHR_TOKEN_DECISIONS`, as core's
+    // `mise run decisions:token` sets it, with no such profile on this machine.
+    let o = r
+        .cmd(&["--profile", "decisions", "decisions", "list"])
+        .env_remove("IOHR_TOKEN")
+        .env("IOHR_TOKEN_DECISIONS", &t)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!text(&o).contains("TOKENSIGNATUREMARKER"));
 
     // --json everywhere.
-    for args in rfc_commands(file, model) {
+    for args in decisions_commands(file, model) {
         let mut args = args.clone();
         args.push("--json");
         let o = r.with_token(&t, &args);
@@ -2737,21 +2774,30 @@ async fn rfc_commands_send_what_the_api_takes_and_print_it() {
             .unwrap_or_else(|e| panic!("{args:?}: {e}: {}", text(&o)));
         assert!(!v.is_null(), "{args:?}");
     }
-    let o = r.with_token(&t, &["rfc", "list", "--json"]);
+    let o = r.with_token(&t, &["decisions", "list", "--json"]);
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(v[0]["space"], "platform");
     assert_eq!(v[1]["display_number"], "0065.1");
 
     // Usage errors exit 2.
     for args in [
-        vec!["rfc", "show", "sixty-five"],
-        vec!["rfc", "show", "0065", "--space", "evm"],
-        vec!["rfc", "link-pr", "0065", "core"],
-        vec!["rfc", "review", "0065"],
+        vec!["decisions", "show", "sixty-five"],
+        vec!["decisions", "show", "0065", "--space", "evm"],
+        vec!["decisions", "link-pr", "0065", "core"],
+        vec!["decisions", "review", "0065"],
         vec![
-            "rfc", "diagram", "--space", "platform", "--name", "x", "--file", file,
+            "decisions",
+            "diagram",
+            "--space",
+            "platform",
+            "--name",
+            "x",
+            "--file",
+            file,
         ],
-        vec!["rfc", "comment", "0065", "x", "--live"],
+        vec!["decisions", "comment", "0065", "x", "--live"],
+        // Core ADR 0056: `iohr rfc` is gone, with no alias.
+        vec!["rfc", "list"],
     ] {
         let o = r.with_token(&t, &args);
         assert_eq!(code(&o), 2, "{args:?}: {}", text(&o));
@@ -2759,22 +2805,22 @@ async fn rfc_commands_send_what_the_api_takes_and_print_it() {
 }
 
 #[tokio::test]
-async fn rfc_commands_never_show_the_token() {
+async fn decisions_commands_never_show_the_token() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
     let r = Run {
         server: &server,
         config: dir.path(),
     };
-    mount_rfcs(&server).await;
+    mount_decisions(&server).await;
     let file = dir.path().join("rfc.md");
     std::fs::write(&file, "# new\n").unwrap();
     let file = file.to_str().unwrap();
     let model = dir.path().join("model.json");
     std::fs::write(&model, RFC_MODEL).unwrap();
     let model = model.to_str().unwrap();
-    let t = token(&["rfc:read", "rfc:write"]);
-    for args in rfc_commands(file, model) {
+    let t = token(&["decisions:read", "decisions:write"]);
+    for args in decisions_commands(file, model) {
         let mut args = args.clone();
         args.push("--verbose");
         let o = r.with_token(&t, &args);
@@ -2791,24 +2837,49 @@ async fn rfc_commands_never_show_the_token() {
     }
 }
 
-/// RFC 0081: a number names a document of `--kind` (default `rfc`); `PRD 0001` or
-/// `ADR 0003` names its kind itself; `--kind all` lists every kind, each labelled.
+/// A 403 from the Decisions API names the scopes and the task that makes a token with them.
 #[tokio::test]
-async fn rfc_kinds_name_prds_and_adrs() {
+async fn decisions_forbidden_names_the_decisions_scopes() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
     let r = Run {
         server: &server,
         config: dir.path(),
     };
-    let docs = format!("/v1/rfcs/spaces/{SPACE}/documents");
+    Mock::given(method("GET"))
+        .and(path(format!("{DECISIONS}/spaces")))
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "code": "forbidden", "error": "this token may not read decisions"
+        })))
+        .mount(&server)
+        .await;
+    let t = token(&["identity:read"]);
+    let o = r.with_token(&t, &["decisions", "list"]);
+    assert_ne!(code(&o), 0, "{}", text(&o));
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("decisions:read"), "{err}");
+    assert!(err.contains("decisions:write"), "{err}");
+    assert!(err.contains("mise run decisions:token"), "{err}");
+}
+
+/// RFC 0081: a number names a document of `--kind` (default `rfc`); `PRD 0001` or
+/// `ADR 0003` names its kind itself; `--kind all` lists every kind, each labelled.
+#[tokio::test]
+async fn decisions_kinds_name_prds_and_adrs() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let docs = format!("{DECISIONS}/spaces/{SPACE}/documents");
     let mut adr = rfc_doc("ldoc_adr3", 3, 0, 2, "accepted");
     adr["kind"] = serde_json::json!("adr");
     adr["title"] = serde_json::json!("Stale is not false");
     adr["path"] = serde_json::json!("docs/adrs/0003-stale-is-not-false.md");
     let adr_shown = adr.clone();
     Mock::given(method("GET"))
-        .and(path("/v1/rfcs/spaces"))
+        .and(path(format!("{DECISIONS}/spaces")))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "spaces": [rfc_space(SPACE, "platform")], "next_page_token": ""
         })))
@@ -2844,37 +2915,38 @@ async fn rfc_kinds_name_prds_and_adrs() {
             "document": adr_shown, "text": "---\ntitle: Stale is not false\n---\n\nBody.\n",
             "version": 2, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-08T00:00:00Z",
             "findings": [], "children": [], "mentions": [], "mentioned_in": [],
-            "successors": [], "measured_by": []
+            "successors": [], "measured_by": [], "context": [], "context_for": [],
+            "diagrams": [], "implements": [], "implemented_by": []
         })))
         .mount(&server)
         .await;
-    let t = token(&["rfc:read", "rfc:write"]);
+    let t = token(&["decisions:read", "decisions:write"]);
 
     // The name says the kind.
-    let o = r.with_token(&t, &["--json", "rfc", "show", "ADR 0003"]);
+    let o = r.with_token(&t, &["--json", "decisions", "show", "ADR 0003"]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(v["document"]["kind"], "adr");
     assert_eq!(v["document"]["display_number"], "0003");
     // So does --kind.
-    let o = r.with_token(&t, &["--json", "rfc", "show", "3", "--kind", "adr"]);
+    let o = r.with_token(&t, &["--json", "decisions", "show", "3", "--kind", "adr"]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     // A bare number is an RFC, and there is no RFC 0003.
-    let o = r.with_token(&t, &["rfc", "show", "0003"]);
+    let o = r.with_token(&t, &["decisions", "show", "0003"]);
     assert_ne!(code(&o), 0);
     assert!(text(&o).contains("no RFC 0003"), "{}", text(&o));
     // Lists of one kind are labelled by it; of every kind, each row is.
-    let o = r.with_token(&t, &["rfc", "list", "--kind", "adr"]);
+    let o = r.with_token(&t, &["decisions", "list", "--kind", "adr"]);
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.starts_with("DOCUMENT"), "{out}");
     assert!(out.contains("ADR 0003"), "{out}");
-    let o = r.with_token(&t, &["rfc", "list", "--kind", "all"]);
+    let o = r.with_token(&t, &["decisions", "list", "--kind", "all"]);
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(
         out.contains("ADR 0003") && out.contains("RFC 0065"),
         "{out}"
     );
-    let o = r.with_token(&t, &["rfc", "list"]);
+    let o = r.with_token(&t, &["decisions", "list"]);
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.starts_with("RFC ") && out.contains("0065"), "{out}");
 }
