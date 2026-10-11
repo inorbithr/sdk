@@ -322,6 +322,97 @@
         ],
         "type": "object"
       },
+      "AgentSource": {
+        "description": "`iohr.connections.v1.AgentSource`",
+        "properties": {
+          "credential": {
+            "type": "string"
+          },
+          "methods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "reads": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "setup": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "provider",
+          "reads",
+          "scopes",
+          "methods",
+          "credential",
+          "setup",
+          "snippet"
+        ],
+        "type": "object"
+      },
+      "AiApproval": {
+        "description": "`iohr.decisions.v1.AiApproval`",
+        "properties": {
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "set_by": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AnswerQuestionRequest": {
+        "description": "`iohr.decisions.v1.AnswerQuestionRequest`",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AnswerQuestionResponse": {
+        "description": "`iohr.decisions.v1.AnswerQuestionResponse`",
+        "properties": {
+          "question": {
+            "$ref": "#/components/schemas/Question"
+          }
+        },
+        "type": "object"
+      },
       "AppendStatusRequest": {
         "description": "`iohr.decisions.v1.AppendStatusRequest`",
         "properties": {
@@ -365,6 +456,36 @@
           "version",
           "findings"
         ],
+        "type": "object"
+      },
+      "AskQuestionRequest": {
+        "description": "`iohr.decisions.v1.AskQuestionRequest`",
+        "properties": {
+          "asked_of": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "unblocks": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AskQuestionResponse": {
+        "description": "`iohr.decisions.v1.AskQuestionResponse`",
+        "properties": {
+          "question": {
+            "$ref": "#/components/schemas/Question"
+          }
+        },
         "type": "object"
       },
       "AuthMode": {
@@ -683,7 +804,8 @@
           "unsupported_media_type",
           "payload_too_large",
           "method_not_allowed",
-          "unprocessable"
+          "unprocessable",
+          "upgrade_required"
         ],
         "type": "string",
         "x-http-status": {
@@ -704,7 +826,8 @@
           "unavailable": 503,
           "unimplemented": 501,
           "unprocessable": 422,
-          "unsupported_media_type": 415
+          "unsupported_media_type": 415,
+          "upgrade_required": 426
         }
       },
       "Comment": {
@@ -935,6 +1058,9 @@
             },
             "type": "array"
           },
+          "agent_source": {
+            "$ref": "#/components/schemas/AgentSource"
+          },
           "ai": {
             "type": "boolean"
           },
@@ -1128,6 +1254,98 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "Correction": {
+        "description": "`iohr.corrections.v1.Correction`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "correction_id": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expected": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "noticed_by": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string"
+          },
+          "recorded_by": {
+            "type": "string"
+          },
+          "recurrences": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "recurs": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string"
+          },
+          "what_happened": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correction_id",
+          "account_id",
+          "space_id",
+          "agent",
+          "via",
+          "kind",
+          "noticed_by",
+          "what_happened",
+          "expected",
+          "rule",
+          "severity",
+          "evidence",
+          "session",
+          "status",
+          "recurs",
+          "recurrences",
+          "recorded_by",
+          "recorded_at",
+          "updated_by",
+          "updated_at"
+        ],
         "type": "object"
       },
       "CreateConnectionRequest": {
@@ -1419,13 +1637,25 @@
       "CreateSpaceRequest": {
         "description": "`iohr.decisions.v1.CreateSpaceRequest`",
         "properties": {
+          "access_floor": {
+            "type": "string"
+          },
           "account_id": {
+            "type": "string"
+          },
+          "department": {
             "type": "string"
           },
           "description": {
             "type": "string"
           },
+          "kind": {
+            "type": "string"
+          },
           "name": {
+            "type": "string"
+          },
+          "parent_id": {
             "type": "string"
           },
           "slug": {
@@ -1460,6 +1690,47 @@
           "kind",
           "reference",
           "set_at"
+        ],
+        "type": "object"
+      },
+      "DecisionItem": {
+        "description": "`iohr.summaries.v1.DecisionItem`",
+        "properties": {
+          "decided_at": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "space_id",
+          "kind",
+          "number",
+          "title",
+          "status",
+          "decided_at",
+          "url"
         ],
         "type": "object"
       },
@@ -1521,6 +1792,9 @@
           "key": {
             "type": "string"
           },
+          "label": {
+            "type": "string"
+          },
           "notify": {
             "type": "boolean"
           },
@@ -1535,6 +1809,9 @@
           },
           "target": {
             "$ref": "#/components/schemas/DeclaredTarget"
+          },
+          "uses_secret": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1542,7 +1819,9 @@
           "refuse_by",
           "key",
           "service",
-          "notify"
+          "notify",
+          "label",
+          "uses_secret"
         ],
         "type": "object"
       },
@@ -1572,12 +1851,18 @@
       "DeclaredTarget": {
         "description": "`iohr.connections.v1.DeclaredTarget`",
         "properties": {
+          "hash": {
+            "type": "string"
+          },
           "host": {
             "type": "string"
           },
           "port": {
             "format": "int32",
             "type": "integer"
+          },
+          "shared": {
+            "type": "string"
           },
           "tls": {
             "type": "boolean"
@@ -1590,7 +1875,9 @@
           "url",
           "host",
           "port",
-          "tls"
+          "tls",
+          "shared",
+          "hash"
         ],
         "type": "object"
       },
@@ -1620,6 +1907,10 @@
       },
       "DeleteRecordingResponse": {
         "description": "`iohr.trails.v1.DeleteRecordingResponse`",
+        "type": "object"
+      },
+      "DeleteResponse": {
+        "description": "`iohr.corrections.v1.DeleteResponse`",
         "type": "object"
       },
       "DeleteSpaceResponse": {
@@ -2142,6 +2433,9 @@
           "kind": {
             "type": "string"
           },
+          "linked": {
+            "type": "boolean"
+          },
           "measures_id": {
             "type": "string"
           },
@@ -2229,7 +2523,8 @@
           "review_by",
           "review_overdue",
           "outward",
-          "approved_by"
+          "approved_by",
+          "linked"
         ],
         "type": "object"
       },
@@ -3090,6 +3385,28 @@
         },
         "type": "object"
       },
+      "GetLayoutResponse": {
+        "description": "`iohr.accounts.v1.GetLayoutResponse`",
+        "properties": {
+          "account_default": {
+            "$ref": "#/components/schemas/Layout"
+          },
+          "can_set_default": {
+            "type": "boolean"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/Layout"
+          },
+          "origin": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin",
+          "can_set_default"
+        ],
+        "type": "object"
+      },
       "GetMeResponse": {
         "description": "`iohr.accounts.v1.GetMeResponse`",
         "properties": {
@@ -3135,11 +3452,41 @@
         ],
         "type": "object"
       },
+      "GetMonitorBoardResponse": {
+        "description": "`iohr.accounts.v1.GetMonitorBoardResponse`",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/MonitorBoard"
+          },
+          "can_edit_account": {
+            "type": "boolean"
+          },
+          "person": {
+            "$ref": "#/components/schemas/MonitorBoard"
+          }
+        },
+        "required": [
+          "can_edit_account"
+        ],
+        "type": "object"
+      },
       "GetMonitorResponse": {
         "description": "`iohr.connections.v1.GetMonitorResponse`",
         "properties": {
           "monitor": {
             "$ref": "#/components/schemas/Monitor"
+          }
+        },
+        "type": "object"
+      },
+      "GetMonitorRetentionResponse": {
+        "description": "`iohr.connections.v1.GetMonitorRetentionResponse`",
+        "properties": {
+          "retention": {
+            "$ref": "#/components/schemas/MonitorRetention"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/MonitorStorage"
           }
         },
         "type": "object"
@@ -3376,6 +3723,21 @@
         },
         "type": "object"
       },
+      "GetSpaceTreeResponse": {
+        "description": "`iohr.decisions.v1.GetSpaceTreeResponse`",
+        "properties": {
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/Space"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "spaces"
+        ],
+        "type": "object"
+      },
       "GetUnitSeriesResponse": {
         "description": "`iohr.accounts.v1.GetUnitSeriesResponse`",
         "properties": {
@@ -3443,6 +3805,9 @@
           "resets_at": {
             "type": "string"
           },
+          "spending_limit": {
+            "$ref": "#/components/schemas/SpendingLimit"
+          },
           "usage": {
             "items": {
               "$ref": "#/components/schemas/UnitUsage"
@@ -3467,6 +3832,57 @@
         ],
         "type": "object"
       },
+      "GetUsageLimitsResponse": {
+        "description": "`iohr.accounts.v1.GetUsageLimitsResponse`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "admits": {
+            "type": "boolean"
+          },
+          "capacity_source": {
+            "type": "string"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "load": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "utilization": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/UsageWindow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "account_id",
+          "user_id",
+          "plan",
+          "categories",
+          "load",
+          "utilization",
+          "capacity_source",
+          "windows",
+          "admits"
+        ],
+        "type": "object"
+      },
       "GetUsageResponse": {
         "description": "`iohr.accounts.v1.GetUsageResponse`",
         "properties": {
@@ -3483,6 +3899,36 @@
         "required": [
           "rows",
           "plan"
+        ],
+        "type": "object"
+      },
+      "GetWaitingResponse": {
+        "description": "`iohr.decisions.v1.GetWaitingResponse`",
+        "properties": {
+          "decisions": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Waiting"
+            },
+            "type": "array"
+          },
+          "questions": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "reviews": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "reviews",
+          "decisions",
+          "questions"
         ],
         "type": "object"
       },
@@ -3601,6 +4047,52 @@
           "size",
           "signature",
           "endpoint_id"
+        ],
+        "type": "object"
+      },
+      "IncidentItem": {
+        "description": "`iohr.summaries.v1.IncidentItem`",
+        "properties": {
+          "duration_seconds": {
+            "format": "int64",
+            "type": "string"
+          },
+          "incident_id": {
+            "type": "string"
+          },
+          "opened_by_alert": {
+            "type": "boolean"
+          },
+          "resolved_at": {
+            "type": "string"
+          },
+          "severity": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "incident_id",
+          "title",
+          "severity",
+          "status",
+          "started_at",
+          "resolved_at",
+          "duration_seconds",
+          "opened_by_alert",
+          "url"
         ],
         "type": "object"
       },
@@ -3826,6 +4318,77 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "Layout": {
+        "description": "`iohr.accounts.v1.Layout`",
+        "properties": {
+          "page": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "string"
+          },
+          "widgets": {
+            "items": {
+              "$ref": "#/components/schemas/LayoutWidget"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "page",
+          "scope",
+          "widgets",
+          "version",
+          "updated_at",
+          "updated_by"
+        ],
+        "type": "object"
+      },
+      "LayoutWidget": {
+        "description": "`iohr.accounts.v1.LayoutWidget`",
+        "properties": {
+          "hidden": {
+            "type": "boolean"
+          },
+          "span": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "widget": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LinkDocumentRequest": {
+        "description": "`iohr.decisions.v1.LinkDocumentRequest`",
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "target_space_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LinkDocumentResponse": {
+        "description": "`iohr.decisions.v1.LinkDocumentResponse`",
         "type": "object"
       },
       "ListAccountHistoryResponse": {
@@ -4216,6 +4779,32 @@
         ],
         "type": "object"
       },
+      "ListLayoutsResponse": {
+        "description": "`iohr.accounts.v1.ListLayoutsResponse`",
+        "properties": {
+          "account": {
+            "items": {
+              "$ref": "#/components/schemas/Layout"
+            },
+            "type": "array"
+          },
+          "mine": {
+            "items": {
+              "$ref": "#/components/schemas/Layout"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mine",
+          "account",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListMonitorRunsResponse": {
         "description": "`iohr.connections.v1.ListMonitorRunsResponse`",
         "properties": {
@@ -4304,6 +4893,25 @@
         ],
         "type": "object"
       },
+      "ListQuestionsResponse": {
+        "description": "`iohr.decisions.v1.ListQuestionsResponse`",
+        "properties": {
+          "next_page_token": {
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/Question"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
       "ListRecordingsResponse": {
         "description": "`iohr.trails.v1.ListRecordingsResponse`",
         "properties": {
@@ -4338,6 +4946,25 @@
         },
         "required": [
           "requests",
+          "next_page_token"
+        ],
+        "type": "object"
+      },
+      "ListResponse": {
+        "description": "`iohr.corrections.v1.ListResponse`",
+        "properties": {
+          "corrections": {
+            "items": {
+              "$ref": "#/components/schemas/Correction"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "corrections",
           "next_page_token"
         ],
         "type": "object"
@@ -4669,6 +5296,67 @@
         ],
         "type": "object"
       },
+      "MonitorBoard": {
+        "description": "`iohr.accounts.v1.MonitorBoard`",
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorCategory"
+            },
+            "type": "array"
+          },
+          "category_order": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "collapsed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "monitor_order": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorOrder"
+            },
+            "type": "array"
+          },
+          "pins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "placements": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorPlacement"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "string"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "MonitorBucket": {
         "description": "`iohr.connections.v1.MonitorBucket`",
         "properties": {
@@ -4717,6 +5405,63 @@
         ],
         "type": "object"
       },
+      "MonitorCategory": {
+        "description": "`iohr.accounts.v1.MonitorCategory`",
+        "properties": {
+          "builtin": {
+            "type": "boolean"
+          },
+          "colour": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MonitorChange": {
+        "description": "`iohr.summaries.v1.MonitorChange`",
+        "properties": {
+          "down_seconds": {
+            "format": "int64",
+            "type": "string"
+          },
+          "monitor_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "recovered": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "still_down": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          },
+          "went_down": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "monitor_id",
+          "name",
+          "went_down",
+          "recovered",
+          "down_seconds",
+          "still_down",
+          "url"
+        ],
+        "type": "object"
+      },
       "MonitorFailureClass": {
         "description": "`iohr.connections.v1.MonitorFailureClass`",
         "properties": {
@@ -4742,6 +5487,21 @@
         ],
         "type": "object"
       },
+      "MonitorOrder": {
+        "description": "`iohr.accounts.v1.MonitorOrder`",
+        "properties": {
+          "category_id": {
+            "type": "string"
+          },
+          "monitor_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "MonitorParams": {
         "description": "`iohr.connections.v1.MonitorParams`",
         "properties": {
@@ -4757,6 +5517,64 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "MonitorPlacement": {
+        "description": "`iohr.accounts.v1.MonitorPlacement`",
+        "properties": {
+          "category_id": {
+            "type": "string"
+          },
+          "monitor_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MonitorRetention": {
+        "description": "`iohr.connections.v1.MonitorRetention`",
+        "properties": {
+          "runs_days": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "runs_days_default": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "runs_days_max": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "runs_days_set": {
+            "type": "boolean"
+          },
+          "steps_days": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "steps_days_default": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "steps_days_max": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "steps_days_set": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "runs_days",
+          "steps_days",
+          "runs_days_set",
+          "steps_days_set",
+          "runs_days_default",
+          "steps_days_default",
+          "runs_days_max",
+          "steps_days_max"
+        ],
         "type": "object"
       },
       "MonitorRun": {
@@ -4800,6 +5618,32 @@
           "latency_ms",
           "invariant",
           "failure"
+        ],
+        "type": "object"
+      },
+      "MonitorStorage": {
+        "description": "`iohr.connections.v1.MonitorStorage`",
+        "properties": {
+          "ceiling_bytes": {
+            "format": "int64",
+            "type": "string"
+          },
+          "runs": {
+            "format": "int64",
+            "type": "string"
+          },
+          "steps": {
+            "format": "int64",
+            "type": "string"
+          },
+          "used_bytes": {
+            "format": "int64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runs",
+          "steps"
         ],
         "type": "object"
       },
@@ -4958,6 +5802,62 @@
         ],
         "type": "object"
       },
+      "Question": {
+        "description": "`iohr.decisions.v1.Question`",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "answered_at": {
+            "type": "string"
+          },
+          "answered_by": {
+            "type": "string"
+          },
+          "asked_at": {
+            "type": "string"
+          },
+          "asked_by": {
+            "type": "string"
+          },
+          "asked_of": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "unblocks": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "space_id",
+          "document_id",
+          "text",
+          "unblocks",
+          "asked_by",
+          "via",
+          "asked_of",
+          "asked_at",
+          "answer",
+          "answered_by",
+          "answered_at"
+        ],
+        "type": "object"
+      },
       "Quote": {
         "description": "`iohr.decisions.v1.Quote`",
         "properties": {
@@ -4973,6 +5873,57 @@
           },
           "suffix": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RecordRequest": {
+        "description": "`iohr.corrections.v1.RecordRequest`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expected": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "noticed_by": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "what_happened": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RecordResponse": {
+        "description": "`iohr.corrections.v1.RecordResponse`",
+        "properties": {
+          "correction": {
+            "$ref": "#/components/schemas/Correction"
           }
         },
         "type": "object"
@@ -5185,6 +6136,15 @@
         ],
         "type": "object"
       },
+      "RequestResponse": {
+        "description": "`iohr.summaries.v1.RequestResponse`",
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/Summary"
+          }
+        },
+        "type": "object"
+      },
       "RequestReviewRequest": {
         "description": "`iohr.decisions.v1.RequestReviewRequest`",
         "properties": {
@@ -5304,6 +6264,9 @@
             "format": "int32",
             "type": "integer"
           },
+          "on_behalf_of": {
+            "type": "string"
+          },
           "requested_at": {
             "type": "string"
           },
@@ -5344,7 +6307,8 @@
           "kind",
           "number",
           "space_name",
-          "display_number"
+          "display_number",
+          "on_behalf_of"
         ],
         "type": "object"
       },
@@ -5391,6 +6355,65 @@
         "required": [
           "secret",
           "previous_expires_at"
+        ],
+        "type": "object"
+      },
+      "Rule": {
+        "description": "`iohr.corrections.v1.Rule`",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "correction_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "recurrences": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "agent",
+          "correction_id",
+          "kind",
+          "recurrences",
+          "status",
+          "since"
+        ],
+        "type": "object"
+      },
+      "RulesResponse": {
+        "description": "`iohr.corrections.v1.RulesResponse`",
+        "properties": {
+          "open": {
+            "items": {
+              "$ref": "#/components/schemas/Correction"
+            },
+            "type": "array"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules",
+          "open"
         ],
         "type": "object"
       },
@@ -5568,6 +6591,32 @@
         },
         "type": "object"
       },
+      "SetMonitorRetentionRequest": {
+        "description": "`iohr.connections.v1.SetMonitorRetentionRequest`",
+        "properties": {
+          "org_id": {
+            "type": "string"
+          },
+          "runs_days": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "steps_days": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SetMonitorRetentionResponse": {
+        "description": "`iohr.connections.v1.SetMonitorRetentionResponse`",
+        "properties": {
+          "retention": {
+            "$ref": "#/components/schemas/MonitorRetention"
+          }
+        },
+        "type": "object"
+      },
       "SetOutwardRequest": {
         "description": "`iohr.decisions.v1.SetOutwardRequest`",
         "properties": {
@@ -5694,6 +6743,9 @@
       "Settings": {
         "description": "`iohr.decisions.v1.Settings`",
         "properties": {
+          "ai_approval": {
+            "$ref": "#/components/schemas/AiApproval"
+          },
           "approvals_required": {
             "format": "int32",
             "type": "integer"
@@ -5714,6 +6766,9 @@
       "Space": {
         "description": "`iohr.decisions.v1.Space`",
         "properties": {
+          "access_floor": {
+            "type": "string"
+          },
           "account_id": {
             "type": "string"
           },
@@ -5721,8 +6776,19 @@
             "format": "int32",
             "type": "integer"
           },
+          "children": {
+            "format": "int32",
+            "type": "integer"
+          },
           "created_at": {
             "type": "string"
+          },
+          "department": {
+            "type": "string"
+          },
+          "depth": {
+            "format": "int32",
+            "type": "integer"
           },
           "description": {
             "type": "string"
@@ -5731,6 +6797,12 @@
             "format": "int32",
             "type": "integer"
           },
+          "effective_access_floor": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -5738,11 +6810,20 @@
             "format": "int32",
             "type": "integer"
           },
+          "parent_id": {
+            "type": "string"
+          },
           "slug": {
             "type": "string"
           },
           "space_id": {
             "type": "string"
+          },
+          "templates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "updated_at": {
             "type": "string"
@@ -5758,7 +6839,15 @@
           "updated_at",
           "documents",
           "open",
-          "awaiting_review"
+          "awaiting_review",
+          "parent_id",
+          "kind",
+          "department",
+          "access_floor",
+          "effective_access_floor",
+          "children",
+          "templates",
+          "depth"
         ],
         "type": "object"
       },
@@ -5779,6 +6868,50 @@
           "space_id",
           "slug",
           "name"
+        ],
+        "type": "object"
+      },
+      "SpendingLimit": {
+        "description": "`iohr.accounts.v1.SpendingLimit`",
+        "properties": {
+          "cap_cents": {
+            "format": "int64",
+            "type": "string"
+          },
+          "cap_units": {
+            "format": "int64",
+            "type": "string"
+          },
+          "capped": {
+            "type": "boolean"
+          },
+          "cents_per_million": {
+            "format": "int64",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "overage": {
+            "type": "boolean"
+          },
+          "overage_units": {
+            "format": "int64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "overage",
+          "capped",
+          "cap_cents",
+          "currency",
+          "is_default",
+          "cap_units",
+          "overage_units",
+          "cents_per_million"
         ],
         "type": "object"
       },
@@ -5904,6 +7037,80 @@
             "$ref": "#/components/schemas/Review"
           }
         },
+        "type": "object"
+      },
+      "Summary": {
+        "description": "`iohr.summaries.v1.Summary`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "account_name": {
+            "type": "string"
+          },
+          "built_from": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionItem"
+            },
+            "type": "array"
+          },
+          "from": {
+            "type": "string"
+          },
+          "incidents_opened": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentItem"
+            },
+            "type": "array"
+          },
+          "incidents_resolved": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentItem"
+            },
+            "type": "array"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "monitors": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorChange"
+            },
+            "type": "array"
+          },
+          "quiet": {
+            "type": "boolean"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "account_name",
+          "from",
+          "to",
+          "incidents_opened",
+          "incidents_resolved",
+          "monitors",
+          "decisions",
+          "lines",
+          "markdown",
+          "built_from",
+          "quiet"
+        ],
         "type": "object"
       },
       "Target": {
@@ -6221,6 +7428,10 @@
         ],
         "type": "object"
       },
+      "UnlinkDocumentResponse": {
+        "description": "`iohr.decisions.v1.UnlinkDocumentResponse`",
+        "type": "object"
+      },
       "UpdateConnectionRequest": {
         "description": "`iohr.connections.v1.UpdateConnectionRequest`",
         "properties": {
@@ -6380,9 +7591,39 @@
         },
         "type": "object"
       },
+      "UpdateRequest": {
+        "description": "`iohr.corrections.v1.UpdateRequest`",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "correction_id": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateResponse": {
+        "description": "`iohr.corrections.v1.UpdateResponse`",
+        "properties": {
+          "correction": {
+            "$ref": "#/components/schemas/Correction"
+          }
+        },
+        "type": "object"
+      },
       "UpdateSettingsRequest": {
         "description": "`iohr.decisions.v1.UpdateSettingsRequest`",
         "properties": {
+          "ai_approval": {
+            "$ref": "#/components/schemas/AiApproval"
+          },
           "approvals_required": {
             "format": "int32",
             "type": "integer"
@@ -6408,13 +7649,31 @@
       "UpdateSpaceRequest": {
         "description": "`iohr.decisions.v1.UpdateSpaceRequest`",
         "properties": {
+          "access_floor": {
+            "type": "string"
+          },
+          "department": {
+            "type": "string"
+          },
           "description": {
+            "type": "string"
+          },
+          "kind": {
             "type": "string"
           },
           "name": {
             "type": "string"
           },
+          "parent_id": {
+            "type": "string"
+          },
+          "set_access_floor": {
+            "type": "boolean"
+          },
           "set_description": {
+            "type": "boolean"
+          },
+          "set_parent": {
             "type": "boolean"
           },
           "space_id": {
@@ -6513,6 +7772,55 @@
           "service",
           "metric",
           "amount"
+        ],
+        "type": "object"
+      },
+      "UsageWindow": {
+        "description": "`iohr.accounts.v1.UsageWindow`",
+        "properties": {
+          "base": {
+            "format": "int64",
+            "type": "string"
+          },
+          "limit": {
+            "format": "int64",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "remaining": {
+            "format": "int64",
+            "type": "string"
+          },
+          "resets_at": {
+            "type": "string"
+          },
+          "seconds": {
+            "format": "int64",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "used": {
+            "format": "int64",
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "seconds",
+          "base",
+          "limit",
+          "used",
+          "remaining",
+          "resets_at",
+          "state",
+          "reason"
         ],
         "type": "object"
       },
@@ -6704,26 +8012,86 @@
           "message"
         ],
         "type": "object"
+      },
+      "Waiting": {
+        "description": "`iohr.decisions.v1.Waiting`",
+        "properties": {
+          "asked_by": {
+            "type": "string"
+          },
+          "display_number": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "document_kind": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          },
+          "space_id": {
+            "type": "string"
+          },
+          "space_name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "unblocks": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "space_id",
+          "space_name",
+          "document_id",
+          "title",
+          "display_number",
+          "document_kind",
+          "question_id",
+          "text",
+          "unblocks",
+          "asked_by",
+          "via",
+          "since"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
       "bearer": {
         "bearerFormat": "JWT",
-        "description": "An access token from the identity provider: a person's, or a customer's from the client credentials grant with an API key (docs.inorbit.hr). The gateway verifies it; the audience is `iohr-api`.",
+        "description": "An access token from the identity provider: a person's, or a customer's from the client credentials grant with an API key (developers.inorbit.hr). The gateway verifies it; the audience is `iohr-api`.",
         "scheme": "bearer",
         "type": "http"
       }
     }
   },
   "info": {
-    "description": "The routes an API key may call. Every body is JSON; every error is the `Problem` envelope; every route takes a bearer token except the health endpoints.",
+    "description": "The routes an API key may call. Every body is JSON; every error is the `Problem` envelope; every route takes a bearer token except the health endpoints and the public status (`GET /v1/status`).",
     "license": {
       "name": "Proprietary"
     },
     "title": "InOrbit API",
     "version": "0.1.0",
     "x-iohr-cut": {
-      "hash": "sha256:2ee56b0e0332e9ffad4f4789c88cb88a98c632cd474e957c1b19428019182014",
+      "hash": "sha256:81f17685105dd22095b1a449ad62d50b574b0aacb43085a43a4f17e306a83315",
       "plan": "public",
       "scopes": []
     }
@@ -8761,6 +10129,178 @@
         ]
       }
     },
+    "/v1/accounts/orgs/{org_id}/layouts": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/ListLayouts` on the `accounts` backend.\n\nA key needs scope `account:read`.",
+        "operationId": "AccountsService.ListLayouts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListLayoutsResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.ListLayoutsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/ListLayouts",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-list": {
+          "items": "mine",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/ListLayouts",
+        "x-iohr-scopes": [
+          "account:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/layouts/{page}": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/GetLayout` on the `accounts` backend.\n\nA key needs scope `account:read`.",
+        "operationId": "AccountsService.GetLayout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLayoutResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.GetLayoutResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/GetLayout",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetLayout",
+        "x-iohr-scopes": [
+          "account:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/monitor-board": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/GetMonitorBoard` on the `accounts` backend.\n\nA key needs scope `account:read`.",
+        "operationId": "AccountsService.GetMonitorBoard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMonitorBoardResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.GetMonitorBoardResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/GetMonitorBoard",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetMonitorBoard",
+        "x-iohr-scopes": [
+          "account:read"
+        ]
+      }
+    },
     "/v1/accounts/orgs/{org_id}/monitors": {
       "get": {
         "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/ListMonitors` on the `connections` backend.\n\nA key needs scope `connections:read`.",
@@ -8861,6 +10401,109 @@
         "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/ListMonitors",
         "x-iohr-scopes": [
           "connections:read"
+        ]
+      }
+    },
+    "/v1/accounts/orgs/{org_id}/monitors/retention": {
+      "get": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/GetMonitorRetention` on the `connections` backend.\n\nA key needs scope `connections:read`.",
+        "operationId": "ConnectionsService.GetMonitorRetention",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMonitorRetentionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.GetMonitorRetentionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/GetMonitorRetention",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/GetMonitorRetention",
+        "x-iohr-scopes": [
+          "connections:read"
+        ]
+      },
+      "put": {
+        "description": "Transcoded from `/iohr.connections.v1.ConnectionsService/SetMonitorRetention` on the `connections` backend.\n\nA key needs scope `connections:write`.",
+        "operationId": "ConnectionsService.SetMonitorRetention",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMonitorRetentionRequest"
+              }
+            }
+          },
+          "description": "`iohr.connections.v1.SetMonitorRetentionRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetMonitorRetentionResponse"
+                }
+              }
+            },
+            "description": "`iohr.connections.v1.SetMonitorRetentionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.connections.v1.ConnectionsService/SetMonitorRetention",
+        "tags": [
+          "connections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.connections.v1.ConnectionsService/SetMonitorRetention",
+        "x-iohr-scopes": [
+          "connections:write"
         ]
       }
     },
@@ -9915,6 +11558,337 @@
         ]
       }
     },
+    "/v1/corrections": {
+      "get": {
+        "description": "Transcoded from `/iohr.corrections.v1.CorrectionsService/List` on the `corrections` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "CorrectionsService.List",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "noticed_by",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "`iohr.corrections.v1.ListResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.corrections.v1.CorrectionsService/List",
+        "tags": [
+          "corrections"
+        ],
+        "x-iohr-list": {
+          "items": "corrections",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.corrections.v1.CorrectionsService/List",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.corrections.v1.CorrectionsService/Record` on the `corrections` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "CorrectionsService.Record",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordRequest"
+              }
+            }
+          },
+          "description": "`iohr.corrections.v1.RecordRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordResponse"
+                }
+              }
+            },
+            "description": "`iohr.corrections.v1.RecordResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.corrections.v1.CorrectionsService/Record",
+        "tags": [
+          "corrections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.corrections.v1.CorrectionsService/Record",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/corrections/rules": {
+      "get": {
+        "description": "Transcoded from `/iohr.corrections.v1.CorrectionsService/Rules` on the `corrections` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "CorrectionsService.Rules",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulesResponse"
+                }
+              }
+            },
+            "description": "`iohr.corrections.v1.RulesResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.corrections.v1.CorrectionsService/Rules",
+        "tags": [
+          "corrections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.corrections.v1.CorrectionsService/Rules",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/corrections/{correction_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.corrections.v1.CorrectionsService/Delete` on the `corrections` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "CorrectionsService.Delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "correction_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            },
+            "description": "`iohr.corrections.v1.DeleteResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.corrections.v1.CorrectionsService/Delete",
+        "tags": [
+          "corrections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.corrections.v1.CorrectionsService/Delete",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      },
+      "patch": {
+        "description": "Transcoded from `/iohr.corrections.v1.CorrectionsService/Update` on the `corrections` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "CorrectionsService.Update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "correction_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRequest"
+              }
+            }
+          },
+          "description": "`iohr.corrections.v1.UpdateRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponse"
+                }
+              }
+            },
+            "description": "`iohr.corrections.v1.UpdateResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.corrections.v1.CorrectionsService/Update",
+        "tags": [
+          "corrections"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.corrections.v1.CorrectionsService/Update",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
     "/v1/decisions/diagrams": {
       "get": {
         "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/SearchDiagrams` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
@@ -10370,6 +12344,38 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parent_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "department",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "top_level",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -11134,6 +13140,22 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "compact",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_linked",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -11268,6 +13290,22 @@
             "schema": {
               "format": "int32",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "related",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "section",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -11589,6 +13627,135 @@
         ],
         "x-iohr-public": true,
         "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ResolveComment",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/links": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/LinkDocument` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.LinkDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkDocumentRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.LinkDocumentRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.LinkDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/LinkDocument",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/LinkDocument",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/documents/{document_id}/links/{target_space_id}": {
+      "delete": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/UnlinkDocument` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.UnlinkDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnlinkDocumentResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.UnlinkDocumentResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/UnlinkDocument",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/UnlinkDocument",
         "x-iohr-scopes": [
           "decisions:write"
         ]
@@ -12431,6 +14598,206 @@
         ]
       }
     },
+    "/v1/decisions/spaces/{space_id}/questions": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/ListQuestions` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.ListQuestions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListQuestionsResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.ListQuestionsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/ListQuestions",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-list": {
+          "items": "questions",
+          "next_page_token": "next_page_token",
+          "page_size": "page_size",
+          "page_token": "page_token"
+        },
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListQuestions",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      },
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/AskQuestion` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.AskQuestion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskQuestionRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.AskQuestionRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskQuestionResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.AskQuestionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/AskQuestion",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/AskQuestion",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
+    "/v1/decisions/spaces/{space_id}/questions/{question_id}/answer": {
+      "post": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/AnswerQuestion` on the `decisions` backend.\n\nA key needs scope `decisions:write`.",
+        "operationId": "DecisionsService.AnswerQuestion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerQuestionRequest"
+              }
+            }
+          },
+          "description": "`iohr.decisions.v1.AnswerQuestionRequest`; path variables override their fields",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerQuestionResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.AnswerQuestionResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/AnswerQuestion",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/AnswerQuestion",
+        "x-iohr-scopes": [
+          "decisions:write"
+        ]
+      }
+    },
     "/v1/decisions/spaces/{space_id}/settings": {
       "get": {
         "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetSettings` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
@@ -12623,6 +14990,100 @@
         },
         "x-iohr-public": true,
         "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/ListTimeline",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/tree": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetSpaceTree` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetSpaceTree",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceTreeResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetSpaceTreeResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetSpaceTree",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetSpaceTree",
+        "x-iohr-scopes": [
+          "decisions:read"
+        ]
+      }
+    },
+    "/v1/decisions/waiting": {
+      "get": {
+        "description": "Transcoded from `/iohr.decisions.v1.DecisionsService/GetWaiting` on the `decisions` backend.\n\nA key needs scope `decisions:read`.",
+        "operationId": "DecisionsService.GetWaiting",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetWaitingResponse"
+                }
+              }
+            },
+            "description": "`iohr.decisions.v1.GetWaitingResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.decisions.v1.DecisionsService/GetWaiting",
+        "tags": [
+          "decisions"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.decisions.v1.DecisionsService/GetWaiting",
         "x-iohr-scopes": [
           "decisions:read"
         ]
@@ -13436,6 +15897,77 @@
         ]
       }
     },
+    "/v1/summaries": {
+      "get": {
+        "description": "Transcoded from `/iohr.summaries.v1.SummariesService/Request` on the `summaries` backend.\n\nA key needs scope `summaries:read`.",
+        "operationId": "SummariesService.Request",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestResponse"
+                }
+              }
+            },
+            "description": "`iohr.summaries.v1.RequestResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.summaries.v1.SummariesService/Request",
+        "tags": [
+          "summaries"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.summaries.v1.SummariesService/Request",
+        "x-iohr-scopes": [
+          "summaries:read"
+        ]
+      }
+    },
     "/v1/trails/recordings": {
       "get": {
         "description": "Transcoded from `/iohr.trails.v1.TrailsService/ListRecordings` on the `trails` backend.\n\nA key needs scope `trail:read`.",
@@ -13654,6 +16186,61 @@
         "x-iohr-rpc": "iohr.trails.v1.TrailsService/GetRecording",
         "x-iohr-scopes": [
           "trail:read"
+        ]
+      }
+    },
+    "/v1/usage/limits": {
+      "get": {
+        "description": "Transcoded from `/iohr.accounts.v1.AccountsService/GetUsageLimits` on the `accounts` backend.\n\nA key needs scope `usage:read`.",
+        "operationId": "AccountsService.GetUsageLimits",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "org_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetUsageLimitsResponse"
+                }
+              }
+            },
+            "description": "`iohr.accounts.v1.GetUsageLimitsResponse`"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The error envelope, with the standard gRPC-to-HTTP status"
+          }
+        },
+        "summary": "iohr.accounts.v1.AccountsService/GetUsageLimits",
+        "tags": [
+          "accounts"
+        ],
+        "x-iohr-public": true,
+        "x-iohr-rpc": "iohr.accounts.v1.AccountsService/GetUsageLimits",
+        "x-iohr-scopes": [
+          "usage:read"
         ]
       }
     },

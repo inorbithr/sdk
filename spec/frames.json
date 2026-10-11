@@ -127,7 +127,8 @@
             "unsupported_media_type",
             "payload_too_large",
             "method_not_allowed",
-            "unprocessable"
+            "unprocessable",
+            "upgrade_required"
           ],
           "type": "string"
         },
