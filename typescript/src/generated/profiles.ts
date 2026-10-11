@@ -505,7 +505,7 @@ export class PublicCorrections {
 
   /** `DELETE /v1/corrections/{correction_id}`; needs scope `decisions:write`. Transcoded from `/iohr.corrections.v1.CorrectionsService/Delete` on the `corrections` backend. */
   delete_(correctionId: string, params: CorrectionsDeleteParams = {}, options?: CallOptions): Promise<Response<DeleteResponse>> {
-    return ops.delete(this.client, correctionId, params, options);
+    return ops.delete_(this.client, correctionId, params, options);
   }
 
   /** `GET /v1/corrections`; needs scope `decisions:read`. Transcoded from `/iohr.corrections.v1.CorrectionsService/List` on the `corrections` backend. */

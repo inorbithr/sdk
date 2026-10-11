@@ -140,7 +140,7 @@ class UpdateEndpointRequest(_Model):
     url: str | None = None
 
 
-for _model in (
+_MODELS: tuple[type[BaseModel], ...] = (
     CreateEndpointRequest,
     CreateEndpointResponse,
     CreateInboxRequest,
@@ -155,5 +155,6 @@ for _model in (
     RotateSecretResponse,
     SendTestResponse,
     UpdateEndpointRequest,
-):
+)
+for _model in _MODELS:
     _model.model_rebuild()

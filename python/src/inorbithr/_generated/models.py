@@ -2859,7 +2859,7 @@ class Waiting(_Model):
     via: str
 
 
-for _model in (
+_MODELS: tuple[type[BaseModel], ...] = (
     Account,
     AccountsKey,
     ActionResult,
@@ -3151,5 +3151,6 @@ for _model in (
     VersionDiff,
     VersionNote,
     Waiting,
-):
+)
+for _model in _MODELS:
     _model.model_rebuild()

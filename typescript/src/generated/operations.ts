@@ -78,7 +78,7 @@ export interface CorrectionsDeleteParams {
 }
 
 /** `DELETE /v1/corrections/{correction_id}`; needs scope `decisions:write`. Transcoded from `/iohr.corrections.v1.CorrectionsService/Delete` on the `corrections` backend. */
-export function delete(client: Client, correctionId: string, params: CorrectionsDeleteParams = {}, options?: CallOptions): Promise<Response<DeleteResponse>> {
+export function delete_(client: Client, correctionId: string, params: CorrectionsDeleteParams = {}, options?: CallOptions): Promise<Response<DeleteResponse>> {
   return client.request(
     {
       name: "corrections.delete",
