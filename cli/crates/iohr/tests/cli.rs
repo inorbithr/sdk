@@ -2422,7 +2422,9 @@ fn rfc_space(id: &str, slug: &str) -> serde_json::Value {
     serde_json::json!({
         "space_id": id, "account_id": ACCOUNT, "slug": slug, "name": slug,
         "description": "", "created_at": "2026-10-01T00:00:00Z",
-        "updated_at": "2026-10-07T00:00:00Z", "documents": 1, "open": 1, "awaiting_review": 0
+        "updated_at": "2026-10-07T00:00:00Z", "documents": 1, "open": 1, "awaiting_review": 0,
+        "parent_id": "", "kind": "", "department": "", "depth": 0, "children": 0,
+        "access_floor": "", "effective_access_floor": "", "templates": []
     })
 }
 
@@ -2441,7 +2443,7 @@ fn rfc_doc(id: &str, number: i32, part: i32, version: i32, status: &str) -> serd
         "parent_id": "", "child_index": part, "display_number": display, "children": 0,
         "headline": "", "headline_note": "", "supersedes_id": "", "measures_id": "",
         "access": "team", "stage": "", "source": "", "outward": false, "decider": "",
-        "approved_by": "", "review_by": "", "review_overdue": false
+        "approved_by": "", "review_by": "", "review_overdue": false, "linked": false
     })
 }
 
@@ -2593,7 +2595,7 @@ async fn mount_decisions(server: &MockServer) {
                 "space_name": "Platform", "kind": "rfc", "number": 65, "display_number": "0065",
                 "title": "RFCs everywhere", "reviewer": "owner-subject",
                 "requested_by": "iohr-rfcs-agent", "version": 4, "decision": "",
-                "requested_at": "2026-10-07T00:00:00Z", "decided_at": ""}]
+                "requested_at": "2026-10-07T00:00:00Z", "decided_at": "", "on_behalf_of": ""}]
         })))
         .mount(server)
         .await;
