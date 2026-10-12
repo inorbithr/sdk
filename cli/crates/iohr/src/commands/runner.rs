@@ -163,18 +163,13 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             max_beats,
         } => {
             let signer = runner_signer(&ctx, &s, false).await?;
+            let local_key = signer.public_key();
             let svc = HttpService {
                 api: &s.api,
                 signer: Some(signer),
             };
             let all = svc.list_runners(true).await?;
-            let name = name.unwrap_or_else(host_name);
-            let me: RunnerInfo = all
-                .into_iter()
-                .find(|r| match &runner {
-                    Some(id) => &r.runner_id == id,
-                    None => r.name == name,
-                })
+            let me: RunnerInfo = pick_runner(all, runner.as_deref(), name.as_deref(), &local_key)
                 .ok_or_else(|| {
                     Error::Failed(
                         "no such runner of yours: run `iohr runner register` first".into(),
@@ -315,6 +310,31 @@ fn provider_error(state: &AuthState) -> Error {
     }
 }
 
+/// The runner `run` drives: the one named by `--runner` (id) or `--name`; else the one
+/// whose public key this machine holds (whatever name it was registered under); else the
+/// one named after this host.
+fn pick_runner(
+    all: Vec<RunnerInfo>,
+    id: Option<&str>,
+    name: Option<&str>,
+    local_key: &str,
+) -> Option<RunnerInfo> {
+    if let Some(id) = id {
+        return all.into_iter().find(|r| r.runner_id == id);
+    }
+    if let Some(name) = name {
+        return all.into_iter().find(|r| r.name == name);
+    }
+    if let Some(i) = all
+        .iter()
+        .position(|r| !r.public_key.is_empty() && r.public_key == local_key)
+    {
+        return all.into_iter().nth(i);
+    }
+    let host = host_name();
+    all.into_iter().find(|r| r.name == host)
+}
+
 fn host_name() -> String {
     std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
@@ -342,5 +362,39 @@ fn show_runner(r: &RunnerInfo, out: Out, what: &str) {
             ("name", r.name.clone()),
             ("status", format!("{} ({what})", r.status)),
         ]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(id: &str, name: &str, key: &str) -> RunnerInfo {
+        RunnerInfo {
+            runner_id: id.into(),
+            name: name.into(),
+            public_key: key.into(),
+            ..RunnerInfo::default()
+        }
+    }
+
+    #[test]
+    fn a_custom_name_is_found_by_the_key_this_machine_holds() {
+        let all = vec![r("a", "other", "KEY_B"), r("b", "my-custom-name", "KEY_A")];
+        assert_eq!(pick_runner(all, None, None, "KEY_A").unwrap().runner_id, "b");
+    }
+
+    #[test]
+    fn explicit_id_and_name_win_over_the_key() {
+        let all = || vec![r("a", "one", "KEY_B"), r("b", "two", "KEY_A")];
+        assert_eq!(pick_runner(all(), Some("a"), None, "KEY_A").unwrap().runner_id, "a");
+        assert_eq!(pick_runner(all(), None, Some("one"), "KEY_A").unwrap().runner_id, "a");
+    }
+
+    #[test]
+    fn falls_back_to_the_hostname_without_a_key_match() {
+        let all = vec![r("a", "x", "KEY_B"), r("h", &host_name(), "")];
+        assert_eq!(pick_runner(all, None, None, "KEY_A").unwrap().runner_id, "h");
+        assert!(pick_runner(vec![r("a", "x", "")], None, None, "").is_none());
     }
 }
