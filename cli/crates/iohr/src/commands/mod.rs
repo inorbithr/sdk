@@ -15,6 +15,7 @@ mod login;
 mod openapi;
 mod profile;
 mod rfc;
+mod runner;
 mod sdk;
 mod sdk_add;
 mod token;
@@ -64,6 +65,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Rfc(cmd) => rfc::run(g, &env, cmd, out).await,
+        Command::Runner(cmd) => runner::run(g, &env, cmd, out).await,
         Command::Browser(BrowserCommand::Install(args)) => {
             browser_ext::install(g, &args, out);
             Ok(())

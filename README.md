@@ -70,7 +70,8 @@ iohr api GET /v1/me
 `iohr` keeps several accounts as profiles, creates and revokes API tokens, proves
 domains, connects an account's apps (`iohr connectors`, `iohr connections`: a key or a
 browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`),
-checks Lab documents (`iohr lab check`) and keeps RFCs in the RFCs product (`iohr rfc`).
+checks Lab documents (`iohr lab check`), keeps RFCs in the RFCs product (`iohr rfc`) and
+runs coordinator turns on your own Claude subscription (`iohr runner`).
 It talks to `api.inorbit.hr` and
 `auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
 `sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry and no update

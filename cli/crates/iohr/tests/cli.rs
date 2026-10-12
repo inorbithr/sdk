@@ -623,6 +623,7 @@ async fn verbose_output_never_shows_the_token() {
         vec!["ext", "search", "agent", "--kind", "program"],
         vec!["ext", "search", "--all"],
         vec!["ext", "show", "inorbit/agent"],
+        vec!["runner", "status"],
     ];
     // `iohr rfc` needs typed answers: `rfc_commands_never_show_the_token` runs it.
     for args in commands {
