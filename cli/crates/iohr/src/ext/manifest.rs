@@ -129,6 +129,7 @@ pub const RESERVED: &[&str] = &[
     "openapi",
     "profile",
     "rfc",
+    "runner",
     "sdk",
     "token",
     "whoami",
