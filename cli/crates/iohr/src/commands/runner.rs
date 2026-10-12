@@ -50,9 +50,25 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 signer: None,
             };
             let mine = svc.list_runners(true).await?;
-            if let Some(r) = mine.iter().find(|r| r.name == name) {
+            // A name is only "already registered" when this machine holds that runner's
+            // key. A lost key, or a runner registered from another machine, registers
+            // afresh (a new runner; the old one can be revoked) instead of being stuck.
+            let local_key = match runner_signer(&ctx, &s, false).await {
+                Ok(k) => Some(k.public_key()),
+                Err(_) => None,
+            };
+            if let Some(r) = mine.iter().find(|r| {
+                r.name == name
+                    && !r.public_key.is_empty()
+                    && local_key.as_deref() == Some(&r.public_key)
+            }) {
                 show_runner(r, out, "already registered");
                 return Ok(());
+            }
+            if mine.iter().any(|r| r.name == name) {
+                Out::note(&format!(
+                    "a runner named {name} exists but this machine does not hold its key: registering this machine afresh; revoke the old one if it is gone"
+                ));
             }
             let signer = runner_signer(&ctx, &s, true).await?;
             // The challenge is one-use and lives five minutes: asked last, signed at once.
