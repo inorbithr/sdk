@@ -93,8 +93,19 @@ async fn init(
     }
     // 1. Sign-in: checked, never required. Without it the local half still happens and the
     //    report says what to do; with it the cloud steps can land once their APIs exist.
+    //    The check is one call, `GET /v1/me`, so a stale token is found here and not later.
     let signed_in = match session(g, env).await {
-        Ok(s) => Some(format!("{} ({})", s.label, s.account)),
+        Ok(s) => match s.api.get::<serde_json::Value>("/v1/me", &[]).await {
+            Ok(me) => Some(format!(
+                "{} ({}, account {})",
+                s.label,
+                me.pointer("/subject")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(&s.claims.sub),
+                s.account
+            )),
+            Err(_) => None,
+        },
         Err(_) => None,
     };
     // The account's slug is not on the token; the private-listing step reads it from
