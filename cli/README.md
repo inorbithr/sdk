@@ -414,8 +414,15 @@ iohr runner status
 ```
 
 The runner is this machine's half of a coordinator turn. It signs in to InOrbit as your
-`iohr` profile does, with no extra file or secret, and calls the coordinator's runner
-calls: register, heartbeat every 20 s (`--interval`), accept a lease. A turn is one
+`iohr` profile does, which needs the scopes `coordinator:runner coordinator:read`
+(`iohr login --scope coordinator:runner,coordinator:read`), and calls the coordinator's
+runner calls: register (it makes an Ed25519 key, kept in the credential store your
+profile uses, the macOS Keychain on a Mac, and signs the service's challenge with it),
+heartbeat (every `heartbeat_interval_seconds` the service sends, 20 s; `--interval`
+overrides), accept a lease, get its turn pack, keep the lease alive while the turn
+runs (the turn stops when the service says so), and report the signed result. A report
+the service does not take is kept in memory and retried; it is lost if the runner exits
+first. A turn is one
 `claude -p` run of the `claude` first on your PATH, as you installed it:
 `--output-format json`, the turn's `--model` and `--max-turns`, its `--allowedTools`, the
 pack as the system prompt, and `--resume <session>` only when this runner ran the
@@ -427,19 +434,21 @@ It runs on your subscription and nothing else:
 - Before every turn it asks the binary (`claude auth status`) and refuses unless it says
   `claude.ai` and `firstParty`. It never reads Claude Code's own credential files and
   never signs in for you.
-- The child gets your environment without every credential and routing variable:
-  `ANTHROPIC_*`, `CLAUDE_CODE_OAUTH*`, `CLAUDE_CODE_USE_*` (Bedrock, Vertex, Foundry),
-  `AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS` and `GOOGLE_CLOUD_*`, `OPENAI_*`, `CODEX_*`,
-  `AZURE_OPENAI_*`, and `IOHR_TOKEN*`. There is no option to pass one through.
+- The child gets an allowlist of your environment, nothing else: `PATH`, `HOME`, `USER`,
+  `LOGNAME`, `SHELL`, `TERM`, `TMPDIR`, `TZ`, `LANG`, `LC_*`, `CLAUDE_CONFIG_DIR` and the
+  XDG directories (and the Windows equivalents), so `claude` finds its own sign-in.
+  Anything whose name holds `TOKEN`, `KEY`, `SECRET` or `PASSWORD` is dropped even if
+  listed, and so are `ANTHROPIC_*`, `AWS_*`, `GOOGLE_*`, `OPENAI_*`, `AZURE_*`, `GH_TOKEN`,
+  `GITHUB_TOKEN` and `IOHR_TOKEN*`. There is no option to pass one through.
+- When the runner stops (Ctrl-C or revocation), the running turn is aborted and
+  `claude` and everything it started are killed.
 - It never passes `--bare`, `--settings` or an endpoint, and never edits the binary or
   its requests. Both the arguments and the environment are table-tested, and a `--bare`
   or an `ANTHROPIC_BASE_URL` in their output fails the build.
 - A turn is refused when its user is not the person the runner is registered to.
 
-What the sign-in service sees of the provider is the SHA-256 of the line
-`claude auth status` prints, and the method's name. Not implemented yet: the service has
-no call that hands the runner a turn's pack or takes its reply, so `run` accepts a lease
-and stops there, and says so; the runner's signing key is not made either.
+What the sign-in service sees of the provider is the SHA-256 of the account's salt, a
+newline and the line `claude auth status` prints, and the method's name.
 
 ## Where things are kept
 

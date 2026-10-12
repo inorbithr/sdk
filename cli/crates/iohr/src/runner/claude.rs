@@ -263,6 +263,29 @@ pub(crate) struct Parsed {
     pub(crate) usage: Value,
     /// Tools Claude Code was refused, for a `refused_tool` outcome.
     pub(crate) denied_tools: Vec<String>,
+    /// For `limit_hit`: when the plan window resets (RFC 3339), if the message said.
+    pub(crate) resets_at: String,
+}
+
+/// The reset time of a usage-limit message, which Claude Code ends with
+/// `|<unix seconds>`; empty when there is none.
+pub(crate) fn limit_resets_at(text: &str) -> String {
+    let Some((_, tail)) = text.trim().rsplit_once('|') else {
+        return String::new();
+    };
+    let secs: String = tail
+        .trim()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    secs.parse::<i64>()
+        .ok()
+        .and_then(|t| time::OffsetDateTime::from_unix_timestamp(t).ok())
+        .and_then(|d| {
+            d.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_default()
 }
 
 /// Reads `claude -p --output-format json`'s output. `exited_ok` is the exit status.
@@ -276,6 +299,7 @@ pub(crate) fn parse_result(stdout: &str, exited_ok: bool) -> Parsed {
         total_cost_usd: None,
         usage: Value::Null,
         denied_tools: Vec::new(),
+        resets_at: String::new(),
     };
     let Ok(v) = serde_json::from_str::<Value>(stdout.trim()) else {
         return failed(Outcome::Failed);
@@ -341,6 +365,11 @@ pub(crate) fn parse_result(stdout: &str, exited_ok: bool) -> Parsed {
         total_cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
         usage: v.get("usage").cloned().unwrap_or(Value::Null),
         denied_tools: denied,
+        resets_at: if outcome == Outcome::LimitHit {
+            limit_resets_at(text)
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -411,6 +440,16 @@ mod tests {
     }
 
     /// The argument table: each row is a turn, and the exact vector it must produce.
+    #[test]
+    fn a_limit_message_gives_its_reset_time() {
+        assert_eq!(
+            limit_resets_at("Claude usage limit reached|1760270400"),
+            "2025-10-12T12:00:00Z"
+        );
+        assert_eq!(limit_resets_at("limit reached"), "");
+        assert_eq!(limit_resets_at("x|soon"), "");
+    }
+
     #[test]
     fn argument_table() {
         struct Row {

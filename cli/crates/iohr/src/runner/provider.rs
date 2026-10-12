@@ -68,10 +68,12 @@ fn is_exe(p: &Path) -> bool {
     p.is_file() || p.with_extension("exe").is_file() || p.with_extension("cmd").is_file()
 }
 
-/// SHA-256 (lowercase hex) of the identity line as the binary printed it. The service
-/// salts per account; until the proto carries a salt this is the plain hash.
-pub(crate) fn identity_sha256(line: &str) -> String {
-    super::claude::hex(&Sha256::digest(line.trim().as_bytes()))
+/// SHA-256 (lowercase hex) over the account's salt, a newline and the identity line as
+/// the binary printed it (the salt comes with `CreateRunnerChallenge`).
+pub(crate) fn identity_sha256(salt: &str, line: &str) -> String {
+    super::claude::hex(&Sha256::digest(
+        format!("{salt}\n{}", line.trim()).as_bytes(),
+    ))
 }
 
 #[cfg(test)]
@@ -113,13 +115,19 @@ mod tests {
 
     #[test]
     fn identity_is_a_lowercase_sha256() {
-        let h = identity_sha256("line\n");
+        let h = identity_sha256("salt", "line\n");
         assert_eq!(h.len(), 64);
         assert!(
             h.bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         );
-        assert_eq!(h, identity_sha256("line"));
+        assert_eq!(h, identity_sha256("salt", "line"));
+        // sha256("salt\nline"), and another salt is another hash.
+        assert_eq!(
+            h,
+            "2ddda023dfab174ef508faa656c099f1cd248fd6d23d514a7e5cf678bfaf92d3"
+        );
+        assert_ne!(h, identity_sha256("other", "line"));
     }
 
     #[test]

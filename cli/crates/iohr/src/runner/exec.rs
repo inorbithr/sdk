@@ -8,8 +8,8 @@ use std::pin::Pin;
 use std::process::Stdio;
 use std::time::Duration;
 
-use tokio::io::AsyncWriteExt as _;
-use tokio::process::Command;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 use super::claude::{self, Outcome, Parsed, Session, TurnSpec};
 use super::env;
@@ -34,7 +34,7 @@ pub(crate) struct Finished {
 }
 
 impl Finished {
-    fn refused(outcome: &str, detail: impl Into<String>) -> Self {
+    pub(crate) fn refused(outcome: &str, detail: impl Into<String>) -> Self {
         Self {
             outcome: outcome.into(),
             parsed: None,
@@ -102,6 +102,9 @@ impl ClaudeExec {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        // Its own process group, so a stop can take the whole tree with it.
+        #[cfg(unix)]
+        c.process_group(0);
         c
     }
 
@@ -187,30 +190,34 @@ impl ClaudeExec {
             Ok(c) => c,
             Err(e) => return fail(format!("claude did not start: {e}")),
         };
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(pack.prompt.as_bytes()).await;
-            // Dropped here: the prompt ends.
-        }
+        // From here the guard kills the whole process group when this future is dropped
+        // (the loop aborts a turn on shutdown or revocation) or leaves early.
+        let mut group = GroupGuard::new(child.id());
         let wall = if pack.wall_clock_secs == 0 {
             DEFAULT_WALL_CLOCK
         } else {
             Duration::from_secs(pack.wall_clock_secs)
         };
-        let out = match tokio::time::timeout(wall, child.wait_with_output()).await {
-            Ok(Ok(o)) => o,
-            Ok(Err(e)) => return fail(format!("claude stopped: {e}")),
-            // The child is dropped, which kills it (kill_on_drop).
-            Err(_) => {
-                return Finished {
-                    outcome: Outcome::CapHit.as_str().into(),
-                    detail: "wall-clock cap".into(),
-                    ..fail(String::new())
+        let (stdout, status) = match drive(&mut child, pack.prompt.as_bytes(), wall).await {
+            Ok(done) => {
+                group.disarm();
+                done
+            }
+            Err(e) => {
+                group.kill();
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return match e {
+                    DriveError::Deadline => Finished {
+                        outcome: Outcome::CapHit.as_str().into(),
+                        detail: "wall-clock cap".into(),
+                        ..fail(String::new())
+                    },
+                    DriveError::Failed(d) => fail(d),
                 };
             }
         };
-        let mut stdout = out.stdout;
-        stdout.truncate(MAX_OUTPUT);
-        let parsed = claude::parse_result(&String::from_utf8_lossy(&stdout), out.status.success());
+        let parsed = claude::parse_result(&String::from_utf8_lossy(&stdout), status.success());
         Finished {
             outcome: parsed.outcome.as_str().into(),
             session_id: if parsed.session_id.is_empty() {
@@ -224,6 +231,113 @@ impl ClaudeExec {
             provider_version,
         }
     }
+}
+
+/// Why [`drive`] stopped early.
+enum DriveError {
+    Deadline,
+    Failed(String),
+}
+
+/// Writes the prompt, reads at most [`MAX_OUTPUT`] bytes of stdout and waits for the
+/// exit, all under one deadline. A write failure or more output than the cap ends it at
+/// once; the caller kills and reaps the child.
+async fn drive(
+    child: &mut Child,
+    prompt: &[u8],
+    wall: Duration,
+) -> Result<(Vec<u8>, std::process::ExitStatus), DriveError> {
+    let stdin = child.stdin.take();
+    let stdout = child.stdout.take();
+    let work = async {
+        let ((), out) = tokio::try_join!(write_prompt(stdin, prompt), read_capped(stdout))?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| DriveError::Failed(format!("claude stopped: {e}")))?;
+        Ok((out, status))
+    };
+    match tokio::time::timeout(wall, work).await {
+        Ok(r) => r,
+        Err(_) => Err(DriveError::Deadline),
+    }
+}
+
+async fn write_prompt(stdin: Option<ChildStdin>, prompt: &[u8]) -> Result<(), DriveError> {
+    if let Some(mut stdin) = stdin {
+        stdin
+            .write_all(prompt)
+            .await
+            .map_err(|e| DriveError::Failed(format!("the prompt was not taken by claude: {e}")))?;
+        // Dropped here: the prompt ends.
+    }
+    Ok(())
+}
+
+/// Reads to the end, holding at most `MAX_OUTPUT` bytes; one more is an error.
+async fn read_capped(stdout: Option<ChildStdout>) -> Result<Vec<u8>, DriveError> {
+    let mut out = Vec::new();
+    let Some(mut stdout) = stdout else {
+        return Ok(out);
+    };
+    let mut buf = vec![0_u8; 16 * 1024];
+    loop {
+        let n = stdout
+            .read(&mut buf)
+            .await
+            .map_err(|e| DriveError::Failed(format!("claude's output: {e}")))?;
+        if n == 0 {
+            return Ok(out);
+        }
+        if out.len() + n > MAX_OUTPUT {
+            return Err(DriveError::Failed(format!(
+                "claude printed more than {MAX_OUTPUT} bytes; stopped"
+            )));
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+}
+
+/// Kills a turn's whole process group (`claude` and whatever its tools started) when it
+/// is dropped while armed: an aborted turn task never leaves a process running.
+struct GroupGuard {
+    pgid: Option<u32>,
+}
+
+impl GroupGuard {
+    fn new(pid: Option<u32>) -> Self {
+        // `process_group(0)` made the child its group's leader: pgid is its pid.
+        Self {
+            pgid: if cfg!(unix) { pid } else { None },
+        }
+    }
+
+    /// The child exited and was reaped: its pid may be reused, so nothing to kill.
+    fn disarm(&mut self) {
+        self.pgid = None;
+    }
+
+    fn kill(&mut self) {
+        if let Some(pgid) = self.pgid.take() {
+            kill_group(pgid);
+        }
+    }
+}
+
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+/// `kill -KILL -- -<pgid>`. The crate forbids `unsafe`, so the shell's `kill` does it.
+fn kill_group(pgid: u32) {
+    let _ = std::process::Command::new("/bin/sh")
+        .args(["-c", "kill -KILL -- \"-$0\" 2>/dev/null", &pgid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 impl Exec for ClaudeExec {
@@ -295,6 +409,11 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             ("AWS_ACCESS_KEY_ID", "AKIA"),
             ("GOOGLE_APPLICATION_CREDENTIALS", "/k.json"),
             ("OPENAI_API_KEY", "sk-o"),
+            // Not in the old denylist: only an allowlist drops them.
+            ("GH_TOKEN", "ghp_secret"),
+            ("GITHUB_TOKEN", "ghs_secret"),
+            ("AZURE_API_KEY", "azure-secret"),
+            ("FOO_SECRET", "foo-secret"),
         ]
         .map(|(k, v)| (k.into(), v.into()))
         .to_vec()
@@ -348,6 +467,13 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             "AWS_ACCESS_KEY_ID",
             "GOOGLE_APPLICATION_CREDENTIALS",
             "OPENAI_API_KEY",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "AZURE_API_KEY",
+            "FOO_SECRET",
+            "ghp_secret",
+            "azure-secret",
+            "foo-secret",
         ] {
             assert!(!env.contains(bad), "{bad} reached the child");
         }
@@ -402,5 +528,113 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         let e = exec(dir.path(), r#"{"loggedIn":false}"#);
         assert_eq!(e.execute(pack("usr_me")).await.outcome, "login_expired");
         assert!(!e.providers().await[0].signed_in);
+    }
+
+    /// A `claude` whose turn is `body`; `auth status` and `--version` answer as usual.
+    fn script_claude(dir: &std::path::Path, body: &str) -> ClaudeExec {
+        let p = dir.join("claude");
+        std::fs::write(
+            &p,
+            format!(
+                "#!/bin/sh\ncase \"$1\" in\n  auth) echo '{SUB}'; exit 0;;\n  --version) echo 1; exit 0;;\nesac\n{body}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ClaudeExec::new(
+            p,
+            dir.join("work"),
+            dirty_parent(),
+            None,
+            ME.into(),
+            "usr_me".into(),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_child_that_never_reads_its_prompt_hits_the_wall_clock_and_is_killed() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let e = script_claude(
+            dir.path(),
+            &format!("echo $$ > {}\nexec sleep 60", pidfile.display()),
+        );
+        let mut p = pack("usr_me");
+        // Far over the pipe's buffer: the write blocks for good.
+        p.prompt = "x".repeat(4 * 1024 * 1024);
+        p.wall_clock_secs = 1;
+        let started = std::time::Instant::now();
+        let f = tokio::time::timeout(Duration::from_secs(15), e.execute(p))
+            .await
+            .expect("the stdin write is under the deadline");
+        assert_eq!(f.outcome, "cap_hit", "{}", f.detail);
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(gone(pid).await, "claude {pid} is still running");
+    }
+
+    #[tokio::test]
+    async fn output_over_the_cap_stops_the_turn_instead_of_filling_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = script_claude(
+            dir.path(),
+            "cat > /dev/null\nexec yes xxxxxxxxxxxxxxxxxxxxxxxx",
+        );
+        let mut p = pack("usr_me");
+        p.wall_clock_secs = 20;
+        let f = tokio::time::timeout(Duration::from_secs(25), e.execute(p))
+            .await
+            .unwrap();
+        assert_eq!(f.outcome, "failed");
+        assert!(f.detail.contains("more than"), "{}", f.detail);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_turn_kills_claude_and_what_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let (pid, kid) = (dir.path().join("pid"), dir.path().join("kid"));
+        let e = script_claude(
+            dir.path(),
+            &format!(
+                "sleep 60 &\necho $! > {}\necho $$ > {}\nwait",
+                kid.display(),
+                pid.display()
+            ),
+        );
+        let task = tokio::spawn(async move { e.execute(pack("usr_me")).await });
+        for _ in 0..100 {
+            if pid.exists() && kid.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let read = |f: &std::path::Path| -> i32 {
+            std::fs::read_to_string(f).unwrap().trim().parse().unwrap()
+        };
+        let (p, k) = (read(&pid), read(&kid));
+        task.abort();
+        let _ = task.await;
+        assert!(gone(p).await, "claude {p} is still running");
+        assert!(gone(k).await, "its child {k} is still running");
+    }
+
+    /// Whether process `pid` is gone, waiting up to 5 s.
+    async fn gone(pid: i32) -> bool {
+        for _ in 0..100 {
+            let alive = std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if !alive {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
     }
 }
