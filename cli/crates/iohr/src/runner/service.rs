@@ -672,6 +672,7 @@ impl Service for HttpService<'_> {
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
+    type Break = Box<dyn Fn(&mut super::TurnReport)>;
 
     #[test]
     fn a_report_goes_on_the_wire_with_the_contracts_shapes() {
@@ -759,7 +760,6 @@ mod tests {
     fn a_reply_over_the_services_limits_becomes_a_bounded_failure() {
         let ok = valid_report().limited();
         assert_eq!((ok.outcome.as_str(), ok.say.as_str()), ("replied", "hi"));
-        type Break = Box<dyn Fn(&mut TurnReport)>;
         let bad: Vec<(&str, Break)> = vec![
             ("say", Box::new(|r| r.say = "x".repeat(20_001))),
             ("state", Box::new(|r| r.state = "x".repeat(16_001))),
