@@ -345,9 +345,9 @@ fn field(f: &Field) -> String {
 }
 
 /// The function an operation becomes in `operations.ts`: named after its marker, which
-/// is unique.
+/// is unique, and escaped when it is a reserved word (`delete` becomes `delete_`).
 fn function_name(op: &Op) -> String {
-    op.marker.to_lower_camel_case()
+    TsNaming.escape(op.marker.to_lower_camel_case())
 }
 
 fn scopes_note(op: &Op) -> String {

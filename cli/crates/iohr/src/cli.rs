@@ -108,10 +108,11 @@ pub enum Command {
     /// Lab documents: RFCs and studies kept in your repository (RFC 0035).
     #[command(subcommand)]
     Lab(LabCommand),
-    /// RFCs in the RFCs product (RFC 0065): list and read them, create one, save a new
-    /// version, set its status, comment, link a pull request, ask for a review.
+    /// Decisions: RFCs, PRDs and ADRs in the Decisions product (RFC 0065, core ADR 0056):
+    /// list and read them, create one, save a new version, set its status, comment, link a
+    /// pull request, ask for a review.
     #[command(subcommand)]
-    Rfc(RfcCommand),
+    Decisions(DecisionsCommand),
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
     #[command(subcommand)]
     Browser(BrowserCommand),
@@ -177,9 +178,9 @@ pub struct LabCheck {
     pub strict: Option<PathBuf>,
 }
 
-/// Where an RFC is looked for.
+/// Where a document is looked for in Decisions.
 #[derive(Debug, Clone, Args)]
-pub struct RfcWhere {
+pub struct DecisionsWhere {
     /// The space, by slug (`platform`) or id (`lab_...`). Default: every space of the
     /// account; needed when two spaces hold the same number.
     #[arg(long)]
@@ -213,29 +214,29 @@ pub struct PrLine {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum RfcCommand {
-    /// The RFCs of the account's spaces: number, space, status, access, title.
+pub enum DecisionsCommand {
+    /// The documents of the account's spaces: number, space, status, access, title.
     List {
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// Only documents with this status: an RFC's `draft`, `in_review`, `accepted`,
         /// `rejected`, `superseded` or `withdrawn`; an ADR's `proposed`, `accepted`,
         /// `rejected` or `superseded` (`open` and `decided` still read as before).
         #[arg(long)]
         status: Option<String>,
-        /// Only RFCs whose title, slug or text contains this, any case.
+        /// Only documents whose title, slug or text contains this, any case.
         #[arg(long)]
         query: Option<String>,
         /// Only yours: documents you own, write or build, or are asked to review.
         #[arg(long)]
         mine: bool,
     },
-    /// One RFC: its number, status, version and, with `--text`, its text.
+    /// One document: its number, status, version and, with `--text`, its text.
     Show {
-        /// The RFC: its number (`0065`, a part `0065.1`) or its id (`ldoc_...`).
+        /// The document: its number (`0065`, a part `0065.1`) or its id (`ldoc_...`).
         rfc: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// Print the document's text after its details.
         #[arg(long)]
         text: bool,
@@ -264,7 +265,7 @@ pub enum RfcCommand {
         /// A one-paragraph summary, at most 1000 characters.
         #[arg(long)]
         summary: Option<String>,
-        /// Make it a part of this RFC (`0065` makes `0065.N`).
+        /// Make it a part of this document (`0065` makes `0065.N`).
         #[arg(long)]
         parent: Option<String>,
         /// The whole document to save after creating it (`-` reads stdin).
@@ -274,13 +275,13 @@ pub enum RfcCommand {
         #[arg(long, short, requires = "file")]
         message: Option<String>,
     },
-    /// Save a new version of an RFC from a file: the whole document, front matter and
+    /// Save a new version of a document from a file: the whole document, front matter and
     /// all. Refused when someone saved since the version it was made from.
     Save {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// The whole document (`-` reads stdin), at most 512 KiB.
         #[arg(long)]
         file: PathBuf,
@@ -296,42 +297,42 @@ pub enum RfcCommand {
     /// `--successor`); a PRD's the same without `withdrawn`; an ADR's `proposed`,
     /// `accepted`, `rejected` or `superseded`. `open` and `decided` still read as before.
     Status {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         /// The new status.
         status: String,
         #[command(flatten)]
-        at: RfcWhere,
-        /// For `superseded`: the RFC that replaces it, in the same space.
+        at: DecisionsWhere,
+        /// For `superseded`: the document that replaces it, in the same space.
         #[arg(long)]
         successor: Option<String>,
     },
-    /// Comment on an RFC. With `--pr`, the comment starts with the pull request's line
-    /// (`owner/repo#n "title": open`, `merged` or `live`), so the RFC's thread reads as
-    /// the record of the work; the same line `mise run rfcs:comment` writes.
+    /// Comment on a document. With `--pr`, the comment starts with the pull request's line
+    /// (`owner/repo#n "title": open`, `merged` or `live`), so the document's thread reads
+    /// as the record of the work; the same line `mise run decisions:comment` writes.
     Comment {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         /// The comment, 1 byte to 10 KiB with the pull request's line.
         text: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         #[command(flatten)]
         pr: PrLine,
         /// The heading the comment is on, by its id (`status-log`).
         #[arg(long)]
         anchor: Option<String>,
     },
-    /// Record a pull request that implements an RFC, as a comment with its line alone:
+    /// Record a pull request that implements a document, as a comment with its line alone:
     /// `owner/repo#n "title": open` when it opens, then `merged`, then `live`.
     LinkPr {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         /// The pull request: `repo#n` (an inorbithr repository), `owner/repo#n` or its
         /// GitHub link.
         pr: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// The pull request's title.
         #[arg(long)]
         title: Option<String>,
@@ -343,13 +344,13 @@ pub enum RfcCommand {
         live: bool,
     },
     /// Create a diagram from a model file, or with its id save a new version of one. The
-    /// model is the RFCs product's diagram JSON (`version`, `nodes`, `edges`); embed it in
-    /// an RFC with a ```` ```diagram <id> ```` block.
+    /// model is the Decisions product's diagram JSON (`version`, `nodes`, `edges`); embed it in
+    /// a document with a ```` ```diagram <id> ```` block.
     Diagram {
         /// The diagram to save a new version of (`ldia_...`); without it, a new diagram.
         id: Option<String>,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// The model, JSON (`-` reads stdin), at most 1 MiB.
         #[arg(long)]
         file: PathBuf,
@@ -360,19 +361,19 @@ pub enum RfcCommand {
         #[arg(long, short)]
         message: Option<String>,
     },
-    /// Ask for a review of an RFC's current version from members of its account who may
-    /// write (never yourself or the RFC's author).
+    /// Ask for a review of a document's current version from members of its account who
+    /// may write (never yourself or the document's author).
     Review {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// A reviewer's subject; repeat, or separate with commas, for several.
-        /// `mise run rfcs:token` sets `IOHR_RFC_REVIEWER` to the account's owner.
+        /// `mise run decisions:token` sets `IOHR_DECISIONS_REVIEWER` to the account's owner.
         #[arg(
             long = "reviewer",
             value_name = "SUBJECT",
-            env = "IOHR_RFC_REVIEWER",
+            env = "IOHR_DECISIONS_REVIEWER",
             value_delimiter = ',',
             required = true
         )]
