@@ -11,6 +11,7 @@ mod decisions;
 mod domains;
 mod ext;
 mod ext_catalogue;
+mod ext_packages;
 mod lab;
 mod login;
 mod openapi;
@@ -24,8 +25,8 @@ use clap::CommandFactory as _;
 
 use crate::Env;
 use crate::cli::{
-    AccountsCommand, AuthCommand, BrowserCommand, Cli, Command, LabCommand, OpenapiCommand,
-    SdkCommand,
+    AccountsCommand, AuthCommand, BrowserCommand, Cli, Command, ExtCommand, LabCommand,
+    OpenapiCommand, SdkCommand,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -61,6 +62,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
+        Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,

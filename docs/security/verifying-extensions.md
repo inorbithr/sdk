@@ -65,6 +65,10 @@ unit does. The lock records what you confirmed, and `iohr ext sync` refuses an a
 that declares more.
 
 `iohr ext list` shows what is installed with its digest, privileges and signer.
+`iohr ext packages` (also `iohr packages`) is the wider inventory: the packages your account
+publishes, public and private, the private ones shared with it, the unpublished ones in
+`~/.inorbit/ext-dev` and what is installed, one row each with SOURCE and VISIBILITY. The
+folders are read from disk and never sent anywhere; `--json` prints the same rows.
 `iohr ext verify` repeats checks 2 and the program's hash offline, from the bundles kept
 at install. Every run of an extension re-hashes the program first.
 

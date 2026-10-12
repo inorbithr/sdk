@@ -128,6 +128,7 @@ pub const RESERVED: &[&str] = &[
     "login",
     "logout",
     "openapi",
+    "packages",
     "profile",
     // `iohr rfc` until core ADR 0056 (2026-10-08): kept from extensions so a script that
     // still calls it fails as unknown rather than running someone else's program.

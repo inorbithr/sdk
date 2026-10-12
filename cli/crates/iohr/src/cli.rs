@@ -102,6 +102,10 @@ pub enum Command {
     /// runs as `iohr <name> ...`.
     #[command(subcommand)]
     Ext(ExtCommand),
+    /// Every package you have in one table: published by your account (public or
+    /// private), private ones shared with it, unpublished ones in progress on this
+    /// machine, and what is installed. The same as `iohr ext packages`.
+    Packages,
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -692,6 +696,11 @@ impl UseStatus {
 
 #[derive(Debug, Subcommand)]
 pub enum ExtCommand {
+    /// Every package you have, in one table: NAME, KIND, SOURCE (account, shared, local,
+    /// installed), VISIBILITY, VERSION and INSTALLED. Published ones, private too, come
+    /// from the API; local ones are the folders under ~/.inorbit/ext-dev, read from disk
+    /// and never sent anywhere. With `--json`, an array of the same fields.
+    Packages,
     /// Search the extensions catalogue (RFC 0073): name, kind, publisher, latest
     /// version and visibility. Reads the API only, never the registry.
     Search {
