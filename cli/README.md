@@ -102,6 +102,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
+| `iohr runner register [--name N] [--capacity 1] [--always-on] \| run [--name N \| --runner ID] [--interval 20] \| status` | This machine as a coordinator runner (platform RFC 0120): `register` records its name, system and the one `claude` on your PATH; `run` heartbeats, accepts a turn the coordinator offers and runs it on your installed, unmodified `claude -p`, on your subscription only (below); `status` lists your runners and what this machine can run |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
@@ -403,6 +404,43 @@ admin's say becomes an ask. Every step is re-runnable, and nothing is overwritte
 `iohr ext lint --preview`, `iohr ext dev` and `iohr ext dev --test` work in the folder as for
 any extension, and InOrbit Desktop's Code opens it after asking you.
 
+## Runner
+
+```sh
+claude                                  # once: /login with your subscription
+iohr runner register                    # this machine, by its host name
+iohr runner run                         # until Ctrl-C
+iohr runner status
+```
+
+The runner is this machine's half of a coordinator turn. It signs in to InOrbit as your
+`iohr` profile does, with no extra file or secret, and calls the coordinator's runner
+calls: register, heartbeat every 20 s (`--interval`), accept a lease. A turn is one
+`claude -p` run of the `claude` first on your PATH, as you installed it:
+`--output-format json`, the turn's `--model` and `--max-turns`, its `--allowedTools`, the
+pack as the system prompt, and `--resume <session>` only when this runner ran the
+previous turn of the thread and the session is on its disk (otherwise
+`--session-id <new>`). The prompt goes in on stdin.
+
+It runs on your subscription and nothing else:
+
+- Before every turn it asks the binary (`claude auth status`) and refuses unless it says
+  `claude.ai` and `firstParty`. It never reads Claude Code's own credential files and
+  never signs in for you.
+- The child gets your environment without every credential and routing variable:
+  `ANTHROPIC_*`, `CLAUDE_CODE_OAUTH*`, `CLAUDE_CODE_USE_*` (Bedrock, Vertex, Foundry),
+  `AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS` and `GOOGLE_CLOUD_*`, `OPENAI_*`, `CODEX_*`,
+  `AZURE_OPENAI_*`, and `IOHR_TOKEN*`. There is no option to pass one through.
+- It never passes `--bare`, `--settings` or an endpoint, and never edits the binary or
+  its requests. Both the arguments and the environment are table-tested, and a `--bare`
+  or an `ANTHROPIC_BASE_URL` in their output fails the build.
+- A turn is refused when its user is not the person the runner is registered to.
+
+What the sign-in service sees of the provider is the SHA-256 of the line
+`claude auth status` prints, and the method's name. Not implemented yet: the service has
+no call that hands the runner a turn's pack or takes its reply, so `run` accepts a lease
+and stops there, and says so; the runner's signing key is not made either.
+
 ## Where things are kept
 
 - Profiles: `config.toml` in the platform's config directory (`~/.config/iohr` on
@@ -421,6 +459,8 @@ any extension, and InOrbit Desktop's Code opens it after asking you.
   the Sigstore bundles checked at install and a record of the checks.
 - Extensions you are building: `iohr ext dev` keeps their `STATE` and `CACHE` in
   `~/.inorbit/ext-dev/NAME/`, owner-only, apart from the installed ones.
+- The runner's one working directory, `runner/coordinate` in the config directory, is
+  empty: Claude Code keeps the session itself, in its own directory.
 - `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` (the extensions catalogue is
   on the API host), and to the extension registry only in `iohr ext install`, `upgrade`
   and `sync` (ADR 0012). No telemetry, no update

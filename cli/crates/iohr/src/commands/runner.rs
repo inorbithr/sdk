@@ -1,0 +1,240 @@
+//! `iohr runner`: this machine's half of a coordinator turn (platform RFC 0120).
+//!
+//! The runner signs in to InOrbit with the profile's own session, like every command, and
+//! to the model provider not at all: it starts the installed `claude`, which the person
+//! signed in themselves.
+
+use std::collections::BTreeMap;
+use std::ffi::OsString;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::sync::watch;
+
+use crate::Env;
+use crate::cli::{Global, RunnerCommand};
+use crate::context::{Ctx, session};
+use crate::error::Error;
+use crate::output::Out;
+use crate::runner::claude;
+use crate::runner::exec::{ClaudeExec, Exec as _};
+use crate::runner::provider::{self, AuthState};
+use crate::runner::run_loop::{LoopConfig, run_loop};
+use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
+
+const KINDS: &[&str] = &["coordinate"];
+
+#[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
+pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> Result<(), Error> {
+    let s = session(g, env).await?;
+    let svc = HttpService { api: &s.api };
+    match cmd {
+        RunnerCommand::Register {
+            name,
+            capacity,
+            always_on,
+        } => {
+            let name = name.unwrap_or_else(host_name);
+            let exec = local(g)?;
+            let state = exec.auth_status().await;
+            if !state.signed_in() {
+                return Err(provider_error(&state));
+            }
+            let mine = svc.list_runners(true).await?;
+            if let Some(r) = mine.iter().find(|r| r.name == name) {
+                show_runner(r, out, "already registered");
+                return Ok(());
+            }
+            let mut identity = BTreeMap::new();
+            if let Some(line) = exec.identity_line().await {
+                identity.insert("claude".to_owned(), provider::identity_sha256(&line));
+            }
+            let reg = Registration {
+                name,
+                os: std::env::consts::OS.into(),
+                arch: std::env::consts::ARCH.into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                kinds: KINDS.iter().map(|k| (*k).to_owned()).collect(),
+                capacity,
+                always_on,
+                providers: exec.providers().await,
+                identity_sha256: identity,
+            };
+            let r = svc.register(&reg).await?;
+            show_runner(&r, out, "registered");
+            Ok(())
+        }
+        RunnerCommand::Status => {
+            let mine = svc.list_runners(true).await?;
+            let exec = local(g).ok();
+            let local_state = match &exec {
+                Some(e) => Some((
+                    e.program.display().to_string(),
+                    e.version().await,
+                    e.auth_status().await,
+                )),
+                None => None,
+            };
+            if out.json {
+                Out::print_json(&serde_json::json!({
+                    "runners": mine.iter().map(|r| serde_json::json!({
+                        "runner_id": r.runner_id, "name": r.name, "status": r.status,
+                        "last_seen_at": r.last_seen_at, "providers": r.providers,
+                    })).collect::<Vec<_>>(),
+                    "this_machine": local_state.as_ref().map(|(p, v, a)| serde_json::json!({
+                        "name": host_name(), "claude": p, "version": v,
+                        "subscription": a.signed_in(),
+                    })),
+                }));
+                return Ok(());
+            }
+            let rows: Vec<Vec<String>> = mine
+                .iter()
+                .map(|r| {
+                    vec![
+                        r.runner_id.clone(),
+                        r.name.clone(),
+                        r.status.clone(),
+                        crate::commands::day(&r.last_seen_at),
+                        r.providers.join(", "),
+                    ]
+                })
+                .collect();
+            Out::table(&["RUNNER", "NAME", "STATUS", "SEEN", "PROVIDERS"], &rows);
+            match local_state {
+                Some((path, version, auth)) => Out::note(&format!(
+                    "this machine ({}): claude {path} {version}; {}",
+                    host_name(),
+                    match auth {
+                        AuthState::Subscription => "signed in on the subscription".to_owned(),
+                        AuthState::SignedOut => "signed out: run claude, then /login".to_owned(),
+                        AuthState::Refused(why) => format!("refused: {why}"),
+                    }
+                )),
+                None => Out::note("this machine: claude was not found on PATH"),
+            }
+            Ok(())
+        }
+        RunnerCommand::Run {
+            name,
+            runner,
+            interval,
+            max_beats,
+        } => {
+            let all = svc.list_runners(true).await?;
+            let name = name.unwrap_or_else(host_name);
+            let me: RunnerInfo = all
+                .into_iter()
+                .find(|r| match &runner {
+                    Some(id) => &r.runner_id == id,
+                    None => r.name == name,
+                })
+                .ok_or_else(|| {
+                    Error::Failed(
+                        "no such runner of yours: run `iohr runner register` first".into(),
+                    )
+                })?;
+            let mut exec = local(g)?;
+            exec.runner_id.clone_from(&me.runner_id);
+            exec.user.clone_from(&me.user);
+            let auth = exec.auth_status().await;
+            if !auth.signed_in() {
+                return Err(provider_error(&auth));
+            }
+            let ctx = Ctx::load(g)?;
+            exec.workdir = ctx.dir.join("runner").join("coordinate");
+            let (tx, rx) = watch::channel(false);
+            tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                let _ = tx.send(true);
+            });
+            Out::note(&format!(
+                "runner {} ({}) is running; Ctrl-C stops it",
+                me.name, me.runner_id
+            ));
+            let cfg = LoopConfig {
+                interval: Duration::from_secs(interval),
+                max_beats,
+                ..LoopConfig::default()
+            };
+            let (end, stats) = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
+            Out::note(&format!(
+                "stopped ({end:?}): {} heartbeats, {} failed, {} leases accepted, {} turns, {} replies delivered",
+                stats.beats, stats.failures, stats.accepted, stats.turns, stats.reported
+            ));
+            Ok(())
+        }
+    }
+}
+
+/// `claude` as installed: the first one on the user's `PATH`.
+fn local(g: &Global) -> Result<ClaudeExec, Error> {
+    let parent: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+    let path = std::env::var_os("PATH");
+    let program = provider::find_on_path(claude_name(), path.as_ref()).ok_or_else(|| {
+        Error::Failed("claude was not found on PATH: install Claude Code and sign in with `claude`, then `/login`".into())
+    })?;
+    let claude_dir = claude::claude_dir(
+        std::env::var_os("CLAUDE_CONFIG_DIR").map(Into::into),
+        etcetera::home_dir().ok(),
+    );
+    let _ = g;
+    Ok(ClaudeExec::new(
+        program,
+        std::env::temp_dir(),
+        parent,
+        claude_dir,
+        String::new(),
+        String::new(),
+    ))
+}
+
+const fn claude_name() -> &'static str {
+    if cfg!(windows) {
+        "claude.exe"
+    } else {
+        "claude"
+    }
+}
+
+fn provider_error(state: &AuthState) -> Error {
+    match state {
+        AuthState::SignedOut => Error::Failed(
+            "claude is signed out: run `claude`, then `/login` (the subscription; the runner never signs in for you)".into(),
+        ),
+        AuthState::Refused(why) => Error::Failed(format!(
+            "the runner runs on the subscription only: {why}. Sign in again with `claude`, then `/login`."
+        )),
+        AuthState::Subscription => Error::Failed("unreachable".into()),
+    }
+}
+
+fn host_name() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                .filter(|h| !h.is_empty())
+        })
+        .unwrap_or_else(|| "runner".into())
+}
+
+fn show_runner(r: &RunnerInfo, out: Out, what: &str) {
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "result": what, "runner_id": r.runner_id, "name": r.name, "status": r.status,
+        }));
+    } else {
+        Out::pairs(&[
+            ("runner", r.runner_id.clone()),
+            ("name", r.name.clone()),
+            ("status", format!("{} ({what})", r.status)),
+        ]);
+    }
+}
