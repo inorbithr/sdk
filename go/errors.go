@@ -28,6 +28,7 @@ const (
 	CodePayloadTooLarge      Code = "payload_too_large"
 	CodeUnsupportedMediaType Code = "unsupported_media_type"
 	CodeUnprocessable        Code = "unprocessable"
+	CodeUpgradeRequired      Code = "upgrade_required"
 	CodeRateLimited          Code = "rate_limited"
 	CodeQuotaExceeded        Code = "quota_exceeded"
 	CodeCancelled            Code = "cancelled"
@@ -48,7 +49,7 @@ var codeStatus = map[Code]int{
 	CodeBadRequest: 400, CodeFailedPrecondition: 400, CodeUnauthenticated: 401,
 	CodeForbidden: 403, CodeNotFound: 404, CodeMethodNotAllowed: 405,
 	CodeAlreadyExists: 409, CodeConflict: 409, CodePayloadTooLarge: 413,
-	CodeUnsupportedMediaType: 415, CodeUnprocessable: 422, CodeRateLimited: 429, CodeQuotaExceeded: 429,
+	CodeUnsupportedMediaType: 415, CodeUnprocessable: 422, CodeUpgradeRequired: 426, CodeRateLimited: 429, CodeQuotaExceeded: 429,
 	CodeCancelled: 499, CodeInternal: 500, CodeUnimplemented: 501,
 	CodeUnavailable: 503, CodeTimeout: 504,
 }
@@ -74,6 +75,8 @@ func CodeForStatus(status int) Code {
 		return CodeUnsupportedMediaType
 	case 422:
 		return CodeUnprocessable
+	case 426:
+		return CodeUpgradeRequired
 	case 429:
 		return CodeRateLimited
 	case 499:
