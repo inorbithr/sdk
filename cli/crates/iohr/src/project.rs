@@ -252,6 +252,22 @@ fn cloud_steps(name: &str) -> Vec<Step> {
     ]
 }
 
+/// Writes the rendered files under `dir`, making it first; the paths written, in order.
+fn write_files(dir: &Path, files: &[(String, String)]) -> Result<Vec<String>, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let mut written = Vec::new();
+    for (rel, text) in files {
+        let p = dir.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        }
+        std::fs::write(&p, text).map_err(|e| format!("cannot write {}: {e}", p.display()))?;
+        written.push(rel.clone());
+    }
+    Ok(written)
+}
+
 /// Writes the project: the files, a git repository with its first commit, and the state
 /// folders. `dir` must not exist or must be empty; nothing is overwritten. The template's
 /// manifest must pass the lint, as `iohr ext init`'s must.
@@ -297,17 +313,7 @@ pub fn init(
                 .join("; ")
         ));
     }
-    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    let mut written = Vec::new();
-    for (rel, text) in &files {
-        let p = dir.join(rel);
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-        }
-        std::fs::write(&p, text).map_err(|e| format!("cannot write {}: {e}", p.display()))?;
-        written.push(rel.clone());
-    }
+    let written = write_files(dir, &files)?;
     let mut steps = vec![step(
         "scaffold",
         "Scaffold from the template",
