@@ -113,6 +113,10 @@ pub enum Command {
     /// pull request, ask for a review.
     #[command(subcommand)]
     Decisions(DecisionsCommand),
+    /// A project you build yourself (PRD 0088): one command sets up everything it needs,
+    /// from sign-in to a smoke test, and reports what you now have.
+    #[command(subcommand)]
+    Project(ProjectCommand),
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
     #[command(subcommand)]
     Browser(BrowserCommand),
@@ -827,6 +831,33 @@ pub enum ExtCommand {
         /// Print what it may do in plain words, as an installer shows it.
         #[arg(long)]
         preview: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectCommand {
+    /// Set up a project of your own: sign-in checked, the folder scaffolded from a
+    /// template with its manifest, a git repository with one commit, its own state under
+    /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
+    /// and a report. Idempotent: a step already done is done again without harm, and a
+    /// step that waits on an API says so instead of pretending.
+    Init {
+        /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
+        name: String,
+        /// The template: demo (a private macOS service that heartbeats and serves a tiny
+        /// panel). Others say they are coming.
+        #[arg(long, default_value = "demo")]
+        template: String,
+        /// The folder to write (default: ~/development/NAME); it must not exist or be empty.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+        /// The publisher half of the extension id (default: your account's slug, else
+        /// "local"); the private listing takes it when that step lands.
+        #[arg(long)]
+        publisher: Option<String>,
+        /// Skip the smoke test (it runs the project once with python3).
+        #[arg(long)]
+        no_smoke: bool,
     },
 }
 

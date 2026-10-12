@@ -547,6 +547,8 @@ async fn verbose_output_never_shows_the_token() {
         .await;
     let out_file = dir.path().join("doc.json");
     let out_file = out_file.to_str().unwrap();
+    let project_dir = dir.path().join("verbose-demo");
+    let project_dir = project_dir.to_str().unwrap();
     // The sdk commands need a profile and a stamped document; `sdk check` reads the
     // lock `sdk generate` leaves beside its output.
     let o = r.with_stdin(
@@ -580,6 +582,7 @@ async fn verbose_output_never_shows_the_token() {
             "sdk", "generate", "--lang", "rust", "--for", "ci", "--out", gen_dir,
         ],
         vec!["sdk", "check", "--lock", lock_file],
+        vec!["project", "init", "verbose-demo", "--dir", project_dir, "--no-smoke"],
         vec!["domains", "list"],
         vec!["domains", "add", "acme.hr"],
         vec!["domains", "verify", "acme.hr"],
