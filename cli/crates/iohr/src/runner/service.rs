@@ -19,15 +19,32 @@ use crate::context::Api;
 #[derive(Debug)]
 pub(crate) enum ServiceError {
     Api(inorbithr::Error),
-    /// Not possible here: for example a report with no signing key. Never a fake value.
-    NotImplemented(&'static str),
+    /// Refused here, for good: for example a report with no signing key, or a pack the
+    /// service did not send. Never a fake value.
+    Refused(&'static str),
 }
 
 impl std::fmt::Display for ServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Api(e) => write!(f, "{e}"),
-            Self::NotImplemented(what) => write!(f, "not implemented: {what}"),
+            Self::Refused(what) => write!(f, "not implemented: {what}"),
+        }
+    }
+}
+
+impl ServiceError {
+    /// A refusal that asking again will not change (the lease is released or reassigned,
+    /// the fence is stale, the report breaks a limit): 4xx other than a lapsed sign-in
+    /// (401), a timeout (408) and a rate limit (429). Network errors and 5xx are
+    /// transient.
+    pub(crate) fn is_permanent(&self) -> bool {
+        match self {
+            Self::Refused(_) => true,
+            Self::Api(inorbithr::Error::Api(a)) => {
+                (400..500).contains(&a.status) && !matches!(a.status, 401 | 408 | 429)
+            }
+            Self::Api(_) => false,
         }
     }
 }
@@ -42,7 +59,7 @@ impl From<ServiceError> for crate::error::Error {
     fn from(e: ServiceError) -> Self {
         match e {
             ServiceError::Api(e) => e.into(),
-            ServiceError::NotImplemented(_) => Self::Failed(e.to_string()),
+            ServiceError::Refused(_) => Self::Failed(e.to_string()),
         }
     }
 }
@@ -366,6 +383,82 @@ impl TurnReport {
     }
 }
 
+/// Keeps at most `n` characters.
+fn clip(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+fn plain(s: &str, n: usize) -> String {
+    s.chars().filter(|c| !c.is_control()).take(n).collect()
+}
+
+impl TurnReport {
+    /// The report the service will take (core #879, `check_report`): the provider's
+    /// words are held to its limits before they are signed. A reply over a limit is
+    /// replaced by a bounded `failed` report that says which limit; the shorter fields
+    /// are cut to size.
+    pub(crate) fn limited(mut self) -> Self {
+        let broke = self.reply_limit();
+        self.detail = clip(&self.detail, 2000);
+        self.provider_session_id = plain(&self.provider_session_id, 200);
+        self.provider_version = plain(&self.provider_version, 200);
+        self.denied_tools = self
+            .denied_tools
+            .iter()
+            .take(20)
+            .map(|t| plain(t, 200))
+            .collect();
+        if self.total_cost_usd.is_some_and(|c| !c.is_finite() || c < 0.0) {
+            self.total_cost_usd = None;
+        }
+        if let Some(why) = broke {
+            self.outcome = "failed".into();
+            self.say = String::new();
+            self.state = String::new();
+            self.actions = vec![];
+            self.evidence = vec![];
+            self.left = vec![];
+            self.detail = clip(&format!("the reply broke the service's limits: {why}"), 2000);
+        }
+        self
+    }
+
+    /// Which limit of the reply the report breaks, if any.
+    fn reply_limit(&self) -> Option<&'static str> {
+        if self.say.chars().count() > 20_000 || self.state.chars().count() > 16_000 {
+            return Some("say over 20,000 characters or state over 16,000");
+        }
+        if self.actions.len() > 20 {
+            return Some("more than 20 actions");
+        }
+        if self.actions.iter().any(|a| {
+            a.kind.is_empty()
+                || a.kind.len() > 40
+                || !a.kind.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        }) {
+            return Some("an action kind is not lower-case letters and underscores, 40 at most");
+        }
+        if self.actions.iter().any(|a| {
+            a.payload_json.len() > 16_384
+                || (!a.payload_json.is_empty()
+                    && serde_json::from_str::<Value>(&a.payload_json).is_err())
+        }) {
+            return Some("an action payload is over 16 KiB or not JSON");
+        }
+        if self.evidence.len() > 50
+            || self.left.len() > 50
+            || self
+                .evidence
+                .iter()
+                .chain(&self.left)
+                .any(|e| e.chars().count() > 2000)
+        {
+            return Some("more than 50 evidence or left lines, or one over 2,000 characters");
+        }
+        None
+    }
+}
+
 /// What the loop needs from the service.
 pub(crate) trait Service {
     /// Whether the service can hand over a turn's pack. While it cannot, the loop does
@@ -511,7 +604,7 @@ impl Service for HttpService<'_> {
             .await?;
         let pack = v.get("pack").unwrap_or(&Value::Null);
         if pack.is_null() {
-            return Err(ServiceError::NotImplemented("the service sent no pack"));
+            return Err(ServiceError::Refused("the service sent no pack"));
         }
         Ok(Pack::from_json(pack))
     }
@@ -545,7 +638,7 @@ impl Service for HttpService<'_> {
 
     async fn report_turn(&self, report: &TurnReport) -> Result<(), ServiceError> {
         let Some(signer) = &self.signer else {
-            return Err(ServiceError::NotImplemented(
+            return Err(ServiceError::Refused(
                 "no signing key: run `iohr runner register` on this machine",
             ));
         };
@@ -615,6 +708,90 @@ mod tests {
         );
         assert_eq!(j["signature"], "AQID");
         assert_eq!(r.idempotency_key(), "l:9007199254740993:t:2");
+    }
+
+    fn valid_report() -> TurnReport {
+        TurnReport {
+            turn_id: "t".into(),
+            lease_id: "l".into(),
+            fencing_token: 1,
+            runner_id: "r".into(),
+            pack_sha256: "a".repeat(64),
+            outcome: "replied".into(),
+            say: "hi".into(),
+            state: String::new(),
+            actions: vec![Action {
+                kind: "create_job".into(),
+                payload_json: "{}".into(),
+            }],
+            evidence: vec![],
+            left: vec![],
+            provider: "claude".into(),
+            provider_session_id: "s".into(),
+            resumed: false,
+            provider_version: "1".into(),
+            num_turns: 1,
+            duration_ms: 1,
+            total_cost_usd: Some(0.1),
+            usage: Usage::default(),
+            denied_tools: vec![],
+            detail: String::new(),
+            attempt: 1,
+            resets_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_reply_over_the_services_limits_becomes_a_bounded_failure() {
+        let ok = valid_report().limited();
+        assert_eq!((ok.outcome.as_str(), ok.say.as_str()), ("replied", "hi"));
+        let bad: Vec<(&str, Box<dyn Fn(&mut TurnReport)>)> = vec![
+            ("say", Box::new(|r| r.say = "x".repeat(20_001))),
+            ("state", Box::new(|r| r.state = "x".repeat(16_001))),
+            ("21 actions", Box::new(|r| r.actions = vec![r.actions[0].clone(); 21])),
+            ("kind caps", Box::new(|r| r.actions[0].kind = "Create".into())),
+            ("kind empty", Box::new(|r| r.actions[0].kind = String::new())),
+            ("kind long", Box::new(|r| r.actions[0].kind = "a".repeat(41))),
+            ("payload big", Box::new(|r| r.actions[0].payload_json = format!("\"{}\"", "x".repeat(16_400)))),
+            ("payload not json", Box::new(|r| r.actions[0].payload_json = "{".into())),
+            ("51 evidence", Box::new(|r| r.evidence = vec!["e".into(); 51])),
+            ("long left", Box::new(|r| r.left = vec!["e".repeat(2001)])),
+        ];
+        for (name, f) in bad {
+            let mut r = valid_report();
+            f(&mut r);
+            let r = r.limited();
+            assert_eq!(r.outcome, "failed", "{name}");
+            assert!(r.say.is_empty() && r.actions.is_empty(), "{name}");
+            assert!(r.detail.contains("limits") && r.detail.chars().count() <= 2000, "{name}");
+            // Still the pack's hash and attempt: only the words are replaced.
+            assert_eq!((r.pack_sha256.len(), r.attempt), (64, 1));
+        }
+    }
+
+    #[test]
+    fn the_short_fields_are_cut_to_size_not_failed() {
+        let mut r = valid_report();
+        r.detail = "d".repeat(5000);
+        r.provider_version = format!("1\n{}", "v".repeat(300));
+        r.denied_tools = vec!["Bash".into(); 30];
+        r.total_cost_usd = Some(f64::NAN);
+        let r = r.limited();
+        assert_eq!(r.outcome, "replied");
+        assert_eq!(r.detail.chars().count(), 2000);
+        assert_eq!(r.provider_version.chars().count(), 200);
+        assert!(!r.provider_version.contains('\n'));
+        assert_eq!((r.denied_tools.len(), r.total_cost_usd), (20, None));
+    }
+
+    #[test]
+    fn a_4xx_is_permanent_a_lapsed_sign_in_a_timeout_and_the_network_are_not() {
+        assert!(ServiceError::Refused("x").is_permanent());
+        let timeout = ServiceError::Api(inorbithr::Error::Timeout {
+            host: "h".into(),
+            secs: 1,
+        });
+        assert!(!timeout.is_permanent());
     }
 
     #[test]
