@@ -788,6 +788,53 @@ pub enum ExtCommand {
         #[arg(long, default_value = "iohr-ext.lock", value_name = "FILE")]
         lock: PathBuf,
     },
+    /// Start a new extension: a folder with its manifest (every field, commented), a
+    /// program that asks the token channel for a token and writes a heartbeat, a
+    /// self-test, a README and a release workflow that signs it.
+    Init {
+        /// PUBLISHER/NAME, such as inorbit/hello. A name holding "tbd" is refused.
+        extension: String,
+        /// The kind; this release scaffolds programs.
+        #[arg(long, value_enum, default_value_t = InitKind::Program)]
+        kind: InitKind,
+        /// The language of the program.
+        #[arg(long, value_enum)]
+        lang: crate::ext::manifest::Lang,
+        /// The folder to write (default: ./NAME); it must not exist or be empty.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Run the extension in a folder: its manifest linted, the token channel for exactly
+    /// its scopes (a refused request shown in red), its secrets, STATE and CACHE under
+    /// ~/.inorbit/ext-dev/NAME/, and its output with the time. Never touches installed
+    /// extensions or their lock.
+    Dev {
+        /// The extension's folder (default: this one).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Run its tests instead, with the same channel and environment; fails when they
+        /// write outside STATE and CACHE.
+        #[arg(long)]
+        test: bool,
+    },
+    /// Check the extension.toml in a folder: unknown keys, values that look like
+    /// secrets, data outside ADR 0063's non-sensitive kinds, unsupported targets, a
+    /// "tbd" name, and every rule of the artifact. Exits 1 on any.
+    Lint {
+        /// The extension's folder (default: this one).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Print what it may do in plain words, as an installer shows it.
+        #[arg(long)]
+        preview: bool,
+    },
+}
+
+/// What `iohr ext init` scaffolds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InitKind {
+    /// A program that runs as its own process (RFC 0073).
+    Program,
 }
 
 #[derive(Debug, Subcommand)]

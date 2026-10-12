@@ -87,6 +87,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
 | `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
 | `iohr ext install \| service \| list \| upgrade \| remove \| verify \| sync` | Extensions: install (`NAME` from the registry, or `PUBLISHER/NAME` through the catalogue), verify and pin them; one that declares privileges for its system service asks first unless `--yes`; one with a system service of its own (`inorbit/capture`) offers to set it up with sudo after installing (it lists the interfaces it detects and suggests one; `--interface` repeatable, or `--all-interfaces`), and `iohr ext service NAME` does it later; `iohr <name> ...` runs one |
+| `iohr ext init \| dev \| lint` | Build an extension locally (PRD 0084): `init PUBLISHER/NAME --lang rust\|python\|shell [--dir DIR]` scaffolds a folder (manifest with every field, entry point on the token channel, self-test, README, signing release workflow; a name holding `tbd` is refused); `dev [PATH] [--test]` runs it, or its tests, with the token channel for exactly the manifest's scopes, its secrets, `STATE` and `CACHE` under `~/.inorbit/ext-dev/NAME/` and its output timestamped, never touching installed extensions; `lint [PATH] [--preview] [--json]` checks `extension.toml` and says what it may do in plain words. Offline, except the token channel's sign-in |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
@@ -322,6 +323,39 @@ only for scopes its manifest declares; `IOHR_EXT_API` is the API's address. Unti
 platform can mint narrower tokens, the token handed out is the profile's own 15-minute
 access token, and only when it holds every scope asked for.
 
+### Building one
+
+From an empty folder to a running extension:
+
+```sh
+iohr ext init inorbit/hello --lang shell   # or rust, or python
+cd hello
+iohr ext lint --preview                    # the manifest, checked, in plain words
+iohr ext dev                               # run it: live log, token channel, heartbeat
+iohr ext dev --test                        # its self-test, same channel and folders
+```
+
+`extension.toml` is the source manifest: the artifact's config (name, version,
+entrypoint, scopes, privileges) plus how it runs, what it may reach, read, write, start
+and send up, its resources, health, secrets by reference, targets and upgrade. Unknown
+keys are refused. `iohr ext lint` exits 1 on an unknown key, a value that looks like a
+secret, a `permissions.data.leaves` kind outside ADR 0063's non-sensitive list, a
+`targets.kinds` the kind cannot be installed on, or a name holding `tbd`; `--preview`
+prints what it may do as an installer will show it, `--json` the same structured, with
+the artifact's `config`.
+
+`iohr ext dev` lints first, then runs the program with the token channel for exactly
+the manifest's scopes: every request is logged, a refused one in red. `STATE` and
+`CACHE` are `~/.inorbit/ext-dev/NAME/state` and `cache`; heartbeats are marked
+`"dev": true`; installed extensions and their lock are never read or written. The child
+gets no `IOHR_TOKEN*`, `INORBIT_TOKEN*` or `INORBIT_KEY_*`, and no folder holding an
+`iohr` stays on its `PATH`, so the channel is its only credential. A secret
+`{ name, ref, env }` comes from `IOHR_EXT_SECRET_<NAME>` or the Keychain (service
+`hr.inorbit.iohr.ext`, account the `ref`). `--test` runs `tests/` (`*.sh`,
+`python3 -m unittest`, or `cargo test`) the same way, with a fresh `HOME` and `TMPDIR`,
+and fails when anything was written outside `STATE` and `CACHE`. The whole loop:
+[developing extensions](../docs/extensions/developing.md).
+
 From a company's mirror: `iohr config set ext.registry registry.acme.hr/inorbit/iohr-ext`,
 plus `iohr config set ext.trusted_keys mirror.pub` if the mirror re-signs. A mirror that
 needs a login reads `IOHR_EXT_REGISTRY_AUTH=user:password` from the environment. How to
@@ -343,6 +377,8 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 - Extensions: the platform's data directory (`~/.local/share/iohr/extensions` on
   Linux), owner-only, with the machine's `iohr-ext.lock` and, per version, the program,
   the Sigstore bundles checked at install and a record of the checks.
+- Extensions you are building: `iohr ext dev` keeps their `STATE` and `CACHE` in
+  `~/.inorbit/ext-dev/NAME/`, owner-only, apart from the installed ones.
 - `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` (the extensions catalogue is
   on the API host), and to the extension registry only in `iohr ext install`, `upgrade`
   and `sync` (ADR 0012). No telemetry, no update

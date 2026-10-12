@@ -31,6 +31,78 @@ impl From<OciError> for Error {
     }
 }
 
+/// `iohr ext init`.
+fn init(
+    id: &str,
+    lang: crate::ext::manifest::Lang,
+    dir: Option<&Path>,
+    out: Out,
+) -> Result<(), Error> {
+    use crate::ext::init::InitError;
+    let s = crate::ext::init::init(id, lang, dir).map_err(|e| match e {
+        InitError::Usage(m) => Error::Usage(m),
+        InitError::Io(m) => Error::Failed(m),
+    })?;
+    if out.json {
+        Out::print_json(&s);
+        return Ok(());
+    }
+    Out::note(&format!(
+        "Wrote {} ({} extension):",
+        s.dir.display(),
+        lang.as_str()
+    ));
+    for f in &s.files {
+        Out::note(&format!("  {f}"));
+    }
+    Out::note(&format!(
+        "Next:\n  cd {}\n  iohr ext lint --preview   # what it may do, in plain words\n  iohr ext dev              # run it with live logs and the token channel\n  iohr ext dev --test       # run its self-test",
+        s.dir.display()
+    ));
+    Ok(())
+}
+
+/// `iohr ext lint`.
+fn lint(path: &Path, preview: bool, out: Out) -> Result<(), Error> {
+    use crate::ext::manifest::SOURCE_FILE;
+    let file = path.join(SOURCE_FILE);
+    let text = std::fs::read_to_string(&file).map_err(|e| {
+        Error::Usage(format!(
+            "cannot read {}: {e}. `iohr ext init PUBLISHER/NAME --lang shell` makes a folder with one",
+            file.display()
+        ))
+    })?;
+    let report = crate::ext::lint::lint(&text);
+    if out.json {
+        Out::print_json(&report);
+    } else {
+        for f in &report.findings {
+            Out::note(&format!("error[{}]: {}", f.rule, f.message));
+        }
+        if preview {
+            if let Some(p) = &report.preview {
+                let mut text = p.lines.join("\n");
+                text.push('\n');
+                Out::raw(text.as_bytes());
+            }
+        } else if report.ok {
+            Out::note(&format!(
+                "{}: ok. `iohr ext lint --preview` shows what it may do.",
+                file.display()
+            ));
+        }
+    }
+    if report.ok {
+        Ok(())
+    } else {
+        Err(Error::Findings(format!(
+            "{} problem(s) in {}",
+            report.findings.len(),
+            file.display()
+        )))
+    }
+}
+
 pub(crate) fn store(g: &Global) -> Result<Store, Error> {
     Ok(Store::new(match &g.data_dir {
         Some(d) => d.join("extensions"),
@@ -59,9 +131,21 @@ fn setup(g: &Global, env: &Env) -> Result<(Registry, Policy), Error> {
     Ok((registry, Policy::inorbit(keys)))
 }
 
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Result<(), Error> {
     let store = store(g)?;
     match cmd {
+        ExtCommand::Init {
+            extension,
+            kind: _,
+            lang,
+            dir,
+        } => init(&extension, lang, dir.as_deref(), out),
+        ExtCommand::Dev { path, test } => match crate::ext::dev::dev(g, env, &path, test).await? {
+            0 => Ok(()),
+            code => Err(Error::Child(code)),
+        },
+        ExtCommand::Lint { path, preview } => lint(&path, preview, out),
         ExtCommand::Install {
             extension,
             lock,

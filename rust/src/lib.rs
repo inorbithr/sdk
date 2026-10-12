@@ -38,6 +38,7 @@ mod auth;
 mod client;
 pub mod config;
 pub mod error;
+mod extsock;
 mod generated;
 mod hooks;
 mod int64;
@@ -75,6 +76,7 @@ pub use config::{LoadOptions, ResolvedConfig};
 pub use error::{
     ApiError, AuthError, Code, ConfigError, Detail, Error, Headers, Problem, RawResponse,
 };
+pub use extsock::{API_ENV as EXT_API_ENV, ExtSocketToken, SOCKET_ENV as EXT_SOCKET_ENV};
 pub use hooks::{Attempt, Hook};
 pub use int64::Int64;
 pub use middleware::{CallOptions, LogLevel, LogRecord, Middleware, Pipeline};
@@ -84,6 +86,10 @@ pub use ratelimit::{RateLimit, RateLimitMode, RateLimitPolicy};
 pub use secret::Secret;
 pub use stream::{EventStream, Streams};
 pub use timestamp::parse_timestamp;
+
+/// This crate's version, as `iohr ext init` writes it into a Rust extension's
+/// `Cargo.toml`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// What a generated surface imports: the client, the profile types, the operation
 /// builder and the error.

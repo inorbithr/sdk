@@ -19,6 +19,7 @@ use crate::auth::{
 };
 use crate::config::{LoadOptions, ResolvedConfig, Settings, show_duration};
 use crate::error::{ConfigError, Error, Headers, RawResponse};
+use crate::extsock::{API_ENV as EXT_API_ENV, ExtSocketToken, SOCKET_ENV as EXT_SOCKET_ENV};
 use crate::hooks::{Attempt, Hook};
 use crate::middleware::builtins::{self, Budget, Shared, error_kind, to_raw};
 use crate::middleware::{
@@ -1459,8 +1460,37 @@ impl<P: Profile> ClientBuilder<P> {
     /// # Errors
     ///
     /// [`Error::Config`] with [`ConfigError::Invalid`] listing every problem found.
+    ///
+    /// Run as an `iohr` extension (`IOHR_EXT_TOKEN_SOCKET` set), the client takes its
+    /// tokens from `iohr`'s channel and from nowhere else, and calls `IOHR_EXT_API`
+    /// unless a base URL is set here. A token or a key set here is then refused.
     pub fn load(mut self) -> Result<Client<P>, Error> {
         let options = self.load_options.take().unwrap_or_default();
+        let env = options.env_map();
+        if let Some(socket) = crate::extsock::socket_from(env.get(EXT_SOCKET_ENV).cloned()) {
+            if self.token.is_some() || self.key.is_some() {
+                return Err(ConfigError::Invalid {
+                    problems: vec![crate::error::Problem {
+                        setting: "credential".into(),
+                        source: "code".into(),
+                        message: format!(
+                            "{EXT_SOCKET_ENV} is set: an extension takes its tokens from iohr's \
+                             channel only, never a token or a key of its own"
+                        ),
+                    }],
+                }
+                .into());
+            }
+            if self.provider.is_none() {
+                self.provider = Some(Arc::new(ExtSocketToken::new(socket)));
+            }
+            if self.base_url.is_none() {
+                self.base_url = env
+                    .get(EXT_API_ENV)
+                    .map(|v| v.trim().to_owned())
+                    .filter(|v| !v.is_empty());
+            }
+        }
         let code = self.code();
         self.finish(&options, code)
     }
