@@ -1389,6 +1389,7 @@ dependencies = [
 name = "iohr"
 version = "0.1.0-alpha.14"
 dependencies = [
+ "aws-lc-rs",
  "base64 0.23.1",
  "clap",
  "clap_complete",

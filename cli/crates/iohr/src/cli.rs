@@ -243,9 +243,9 @@ pub enum RunnerCommand {
         /// The runner's id, from `iohr runner status`.
         #[arg(long)]
         runner: Option<String>,
-        /// Seconds between heartbeats (the RFC's 20; the service does not send one yet).
-        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(1..=300))]
-        interval: u64,
+        /// Seconds between heartbeats (default: what the service says, the RFC's 20).
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
+        interval: Option<u64>,
         /// Stop after this many answered heartbeats; for scripts.
         #[arg(long)]
         max_beats: Option<u64>,

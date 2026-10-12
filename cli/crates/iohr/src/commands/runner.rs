@@ -13,7 +13,7 @@ use tokio::sync::watch;
 
 use crate::Env;
 use crate::cli::{Global, RunnerCommand};
-use crate::context::{Ctx, session};
+use crate::context::{Ctx, blocking, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::runner::claude;
@@ -21,13 +21,18 @@ use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::provider::{self, AuthState};
 use crate::runner::run_loop::{LoopConfig, run_loop};
 use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
+use crate::runner::signing::{self, Signer};
+use iohr_auth::{EntryKey, Redacted};
 
 const KINDS: &[&str] = &["coordinate"];
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
 pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> Result<(), Error> {
     let s = session(g, env).await?;
-    let svc = HttpService { api: &s.api };
+    let ctx = Ctx::load(g)?;
+    if !matches!(cmd, RunnerCommand::Status) {
+        require_scopes(&s)?;
+    }
     match cmd {
         RunnerCommand::Register {
             name,
@@ -40,15 +45,28 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             if !state.signed_in() {
                 return Err(provider_error(&state));
             }
+            let svc = HttpService {
+                api: &s.api,
+                signer: None,
+            };
             let mine = svc.list_runners(true).await?;
             if let Some(r) = mine.iter().find(|r| r.name == name) {
                 show_runner(r, out, "already registered");
                 return Ok(());
             }
+            let signer = runner_signer(&ctx, &s, true).await?;
+            // The challenge is one-use and lives five minutes: asked last, signed at once.
+            let challenge = svc.challenge().await?;
             let mut identity = BTreeMap::new();
             if let Some(line) = exec.identity_line().await {
-                identity.insert("claude".to_owned(), provider::identity_sha256(&line));
+                identity.insert(
+                    "claude".to_owned(),
+                    provider::identity_sha256(&challenge.identity_salt, &line),
+                );
             }
+            let public_key = signer.public_key();
+            let signature = signer
+                .sign(signing::registration_message(&challenge.challenge, &public_key).as_bytes());
             let reg = Registration {
                 name,
                 os: std::env::consts::OS.into(),
@@ -59,12 +77,19 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 always_on,
                 providers: exec.providers().await,
                 identity_sha256: identity,
+                public_key,
+                challenge: challenge.challenge,
+                signature,
             };
             let r = svc.register(&reg).await?;
             show_runner(&r, out, "registered");
             Ok(())
         }
         RunnerCommand::Status => {
+            let svc = HttpService {
+                api: &s.api,
+                signer: None,
+            };
             let mine = svc.list_runners(true).await?;
             let exec = local(g).ok();
             let local_state = match &exec {
@@ -121,6 +146,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             interval,
             max_beats,
         } => {
+            let signer = runner_signer(&ctx, &s, false).await?;
+            let svc = HttpService {
+                api: &s.api,
+                signer: Some(signer),
+            };
             let all = svc.list_runners(true).await?;
             let name = name.unwrap_or_else(host_name);
             let me: RunnerInfo = all
@@ -141,7 +171,6 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             if !auth.signed_in() {
                 return Err(provider_error(&auth));
             }
-            let ctx = Ctx::load(g)?;
             exec.workdir = ctx.dir.join("runner").join("coordinate");
             let (tx, rx) = watch::channel(false);
             tokio::spawn(async move {
@@ -153,7 +182,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 me.name, me.runner_id
             ));
             let cfg = LoopConfig {
-                interval: Duration::from_secs(interval),
+                interval: interval.map(Duration::from_secs),
                 max_beats,
                 ..LoopConfig::default()
             };
@@ -165,6 +194,67 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             Ok(())
         }
     }
+}
+
+/// The scopes a runner signs in with.
+const SCOPES: &[&str] = &["coordinator:runner", "coordinator:read"];
+
+/// The runner's calls need `coordinator:runner coordinator:read`.
+fn require_scopes(s: &crate::context::Session) -> Result<(), Error> {
+    let missing: Vec<&str> = SCOPES
+        .iter()
+        .copied()
+        .filter(|w| !s.claims.scp.iter().any(|h| h == w))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Failed(format!(
+        "this sign-in lacks {}: sign in with `iohr login --scope {}`",
+        missing.join(", "),
+        SCOPES.join(",")
+    )))
+}
+
+/// The runner's Ed25519 key, from the credential store the profile uses (the macOS
+/// Keychain on a Mac; a file only when the profile was made with `--insecure-storage`).
+/// `create` makes one when there is none; otherwise a missing key says to register.
+async fn runner_signer(
+    ctx: &Ctx,
+    s: &crate::context::Session,
+    create: bool,
+) -> Result<Signer, Error> {
+    use base64::Engine as _;
+    let name = s.profile.clone().ok_or_else(|| {
+        Error::Failed(
+            "the runner's key is kept in your profile's credential store: sign in with `iohr login`, not with IOHR_TOKEN alone".into(),
+        )
+    })?;
+    let storage = ctx
+        .config
+        .profile(&name)
+        .map(|p| p.storage)
+        .ok_or_else(|| Error::Failed(format!("there is no profile {name}")))?;
+    let key = EntryKey::new(name, &format!("{}_runner_key", s.account))?;
+    let store = ctx.store(storage)?;
+    let k = key.clone();
+    let seed: Option<Redacted<String>> = blocking(Arc::clone(&store), move |st| st.get(&k)).await?;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    if let Some(seed) = seed {
+        let bytes = b64
+            .decode(seed.expose())
+            .map_err(|_| Error::Failed("the stored runner key is damaged".into()))?;
+        return Signer::from_seed(&bytes).map_err(Error::Failed);
+    }
+    if !create {
+        return Err(Error::Failed(
+            "this machine has no runner key: run `iohr runner register` first".into(),
+        ));
+    }
+    let (signer, seed) = Signer::generate().map_err(Error::Failed)?;
+    let secret = Redacted::new(b64.encode(seed));
+    blocking(store, move |st| st.set(&key, &secret)).await?;
+    Ok(signer)
 }
 
 /// `claude` as installed: the first one on the user's `PATH`.
