@@ -473,3 +473,83 @@ async fn run_needs_a_registered_runner() {
     assert_eq!(o.status.code(), Some(1));
     assert!(text(&o).contains("iohr runner register"));
 }
+
+#[tokio::test]
+async fn register_repairs_a_name_whose_key_this_machine_does_not_hold() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    login(&server, dir.path(), &token()).await;
+    mount_register(&server).await;
+    // Same name, registered from another machine: its key is not ours.
+    let mut other = runner_json();
+    other["public_key"] = json!("A".repeat(43) + "=");
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [other]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/runners/challenge"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"challenge": CHALLENGE, "identity_salt": SALT, "account_id": "acc_1"}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runner": runner_json()})))
+        .mount(&server)
+        .await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(!text(&o).contains("already registered"), "{}", text(&o));
+    let sent = bodies(&server, "/v1/coordinator/runners").await;
+    assert!(
+        sent.iter().any(|b| b.get("public_key").is_some()),
+        "a fresh registration was sent"
+    );
+}
+
+#[tokio::test]
+async fn register_with_the_matching_key_is_already_registered_and_sends_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    let first = MockServer::start().await;
+    login(&first, dir.path(), &token()).await;
+    mount_register(&first).await;
+    let o = run(&mut iohr(
+        &first,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let key = bodies(&first, "/v1/coordinator/runners")
+        .await
+        .iter()
+        .find_map(|b| b["public_key"].as_str().map(str::to_owned))
+        .unwrap();
+
+    let second = MockServer::start().await;
+    let mut mine = runner_json();
+    mine["public_key"] = json!(key);
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [mine]})))
+        .mount(&second)
+        .await;
+    let o = run(&mut iohr(
+        &second,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(text(&o).contains("already registered"), "{}", text(&o));
+    let sent = bodies(&second, "/v1/coordinator/runners").await;
+    assert!(sent.iter().all(|b| b.get("public_key").is_none()));
+}

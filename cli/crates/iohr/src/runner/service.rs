@@ -116,6 +116,9 @@ pub(crate) struct RunnerInfo {
     pub(crate) status: String,
     pub(crate) last_seen_at: String,
     pub(crate) providers: Vec<String>,
+    /// The Ed25519 public key (base64) the runner registered with; empty if the
+    /// service did not say.
+    pub(crate) public_key: String,
 }
 
 impl RunnerInfo {
@@ -132,6 +135,7 @@ impl RunnerInfo {
             name: s("name"),
             status: s("status"),
             last_seen_at: s("last_seen_at"),
+            public_key: s("public_key"),
             providers: v
                 .get("providers")
                 .and_then(Value::as_array)
@@ -246,6 +250,9 @@ pub(crate) struct Pack {
     pub(crate) fencing_token: i64,
     /// The pack's budget in tokens (characters over four).
     pub(crate) token_budget: u32,
+    /// Tokens of context (input + cache read + cache creation) above which a session is
+    /// never resumed; 0 when the service sent none (no ceiling).
+    pub(crate) context_ceiling: u32,
     /// The JSON the final message must be.
     pub(crate) reply_shape: String,
 }
@@ -286,6 +293,7 @@ impl Pack {
             lease_id: s("lease_id"),
             fencing_token: i64::try_from(num(v, "fencing_token")).unwrap_or(0),
             token_budget: u32::try_from(num(v, "token_budget")).unwrap_or(u32::MAX),
+            context_ceiling: u32::try_from(num(v, "context_ceiling")).unwrap_or(u32::MAX),
             reply_shape: s("reply_shape"),
         }
     }
@@ -408,7 +416,10 @@ impl TurnReport {
             .take(20)
             .map(|t| plain(t, 200))
             .collect();
-        if self.total_cost_usd.is_some_and(|c| !c.is_finite() || c < 0.0) {
+        if self
+            .total_cost_usd
+            .is_some_and(|c| !c.is_finite() || c < 0.0)
+        {
             self.total_cost_usd = None;
         }
         if let Some(why) = broke {
@@ -418,7 +429,10 @@ impl TurnReport {
             self.actions = vec![];
             self.evidence = vec![];
             self.left = vec![];
-            self.detail = clip(&format!("the reply broke the service's limits: {why}"), 2000);
+            self.detail = clip(
+                &format!("the reply broke the service's limits: {why}"),
+                2000,
+            );
         }
         self
     }
@@ -745,16 +759,38 @@ mod tests {
     fn a_reply_over_the_services_limits_becomes_a_bounded_failure() {
         let ok = valid_report().limited();
         assert_eq!((ok.outcome.as_str(), ok.say.as_str()), ("replied", "hi"));
-        let bad: Vec<(&str, Box<dyn Fn(&mut TurnReport)>)> = vec![
+        type Break = Box<dyn Fn(&mut TurnReport)>;
+        let bad: Vec<(&str, Break)> = vec![
             ("say", Box::new(|r| r.say = "x".repeat(20_001))),
             ("state", Box::new(|r| r.state = "x".repeat(16_001))),
-            ("21 actions", Box::new(|r| r.actions = vec![r.actions[0].clone(); 21])),
-            ("kind caps", Box::new(|r| r.actions[0].kind = "Create".into())),
-            ("kind empty", Box::new(|r| r.actions[0].kind = String::new())),
-            ("kind long", Box::new(|r| r.actions[0].kind = "a".repeat(41))),
-            ("payload big", Box::new(|r| r.actions[0].payload_json = format!("\"{}\"", "x".repeat(16_400)))),
-            ("payload not json", Box::new(|r| r.actions[0].payload_json = "{".into())),
-            ("51 evidence", Box::new(|r| r.evidence = vec!["e".into(); 51])),
+            (
+                "21 actions",
+                Box::new(|r| r.actions = vec![r.actions[0].clone(); 21]),
+            ),
+            (
+                "kind caps",
+                Box::new(|r| r.actions[0].kind = "Create".into()),
+            ),
+            (
+                "kind empty",
+                Box::new(|r| r.actions[0].kind = String::new()),
+            ),
+            (
+                "kind long",
+                Box::new(|r| r.actions[0].kind = "a".repeat(41)),
+            ),
+            (
+                "payload big",
+                Box::new(|r| r.actions[0].payload_json = format!("\"{}\"", "x".repeat(16_400))),
+            ),
+            (
+                "payload not json",
+                Box::new(|r| r.actions[0].payload_json = "{".into()),
+            ),
+            (
+                "51 evidence",
+                Box::new(|r| r.evidence = vec!["e".into(); 51]),
+            ),
             ("long left", Box::new(|r| r.left = vec!["e".repeat(2001)])),
         ];
         for (name, f) in bad {
@@ -763,7 +799,10 @@ mod tests {
             let r = r.limited();
             assert_eq!(r.outcome, "failed", "{name}");
             assert!(r.say.is_empty() && r.actions.is_empty(), "{name}");
-            assert!(r.detail.contains("limits") && r.detail.chars().count() <= 2000, "{name}");
+            assert!(
+                r.detail.contains("limits") && r.detail.chars().count() <= 2000,
+                "{name}"
+            );
             // Still the pack's hash and attempt: only the words are replaced.
             assert_eq!((r.pack_sha256.len(), r.attempt), (64, 1));
         }
@@ -802,7 +841,7 @@ mod tests {
             "allowed_tools": ["Read"], "wall_clock_secs": 600,
             "resume_session": "x", "resume_runner_id": "r", "thread_id": "th",
             "job_id": "j", "attempt": 2, "lease_id": "l", "fencing_token": "9",
-            "token_budget": 4000, "reply_shape": "{}"
+            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}"
         }));
         assert_eq!(
             (

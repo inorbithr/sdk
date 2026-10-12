@@ -93,6 +93,15 @@ impl ClaudeExec {
         }
     }
 
+    /// Where each session's last measured context is kept: beside the working directory,
+    /// not in it, so the provider's tools never see it.
+    fn context_dir(&self) -> PathBuf {
+        self.workdir
+            .parent()
+            .unwrap_or(&self.workdir)
+            .join("context")
+    }
+
     fn command(&self, args: &[String]) -> Command {
         let mut c = Command::new(&self.program);
         c.args(args)
@@ -163,6 +172,8 @@ impl ClaudeExec {
                     .as_deref()
                     .is_some_and(|d| claude::session_exists_in(d, id))
             },
+            |id| claude::recorded_context(&self.context_dir(), id),
+            pack.context_ceiling,
             claude::new_session_id,
         );
         let args = match claude::build_args(&TurnSpec {
@@ -218,6 +229,15 @@ impl ClaudeExec {
             }
         };
         let parsed = claude::parse_result(&String::from_utf8_lossy(&stdout), status.success());
+        // What the provider measured now decides, next turn, whether this session is
+        // resumed or started afresh from the pack.
+        if !parsed.session_id.is_empty() {
+            claude::record_context(
+                &self.context_dir(),
+                &parsed.session_id,
+                claude::context_tokens(&parsed.usage),
+            );
+        }
         Finished {
             outcome: parsed.outcome.as_str().into(),
             session_id: if parsed.session_id.is_empty() {
@@ -507,6 +527,31 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         assert!(!f.resumed);
         let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
         assert!(args.contains("--session-id") && !args.contains("--resume"));
+    }
+
+    #[tokio::test]
+    async fn a_session_whose_last_context_is_over_the_ceiling_starts_fresh_from_the_pack() {
+        let dir = tempfile::tempdir().unwrap();
+        let proj = dir.path().join("claudedir/projects/-w");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join(format!("{OLD}.jsonl")), "{}\n").unwrap();
+        let e = exec(dir.path(), SUB);
+        claude::record_context(&e.context_dir(), OLD, 120_001);
+
+        let mut p = pack("usr_me");
+        p.resume_session = OLD.into();
+        p.resume_runner_id = ME.into();
+        p.context_ceiling = 120_000;
+        let f = e.execute(p.clone()).await;
+        assert!(!f.resumed, "{}", f.detail);
+        let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+        assert!(args.contains("--session-id") && args.contains("--system-prompt"));
+        assert!(!args.contains("--resume") && !args.contains("--fork-session"));
+
+        // Under the ceiling the same session is resumed.
+        claude::record_context(&e.context_dir(), OLD, 119_999);
+        let f = e.execute(p).await;
+        assert!(f.resumed, "{}", f.detail);
     }
 
     #[tokio::test]

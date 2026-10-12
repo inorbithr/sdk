@@ -77,25 +77,69 @@ pub(crate) struct TurnSpec<'a> {
     pub(crate) session: &'a Session,
 }
 
-/// Resume only when this runner ran the previous turn and the session is on its disk;
-/// otherwise a fresh session with `new_id`. A takeover runner can never resume another
-/// machine's session.
+/// Resume only when this runner ran the previous turn, the session is on its disk and
+/// its last measured context is not over `ceiling`; otherwise a fresh session with
+/// `new_id`, started from the pack. A takeover runner can never resume another machine's
+/// session. A session is never forked (`--fork-session` is not a flag this runner builds).
+///
+/// `last_context` is the context the provider measured at the end of the session's last
+/// turn ([`context_tokens`]); `None` (never measured) does not block a resume, since the
+/// turn that follows measures it. A `ceiling` of 0 means the service sent none.
 pub(crate) fn choose_session(
     resume_session: &str,
     resume_runner_id: &str,
     my_runner_id: &str,
     session_exists: impl Fn(&str) -> bool,
+    last_context: impl Fn(&str) -> Option<u64>,
+    ceiling: u32,
     new_id: impl FnOnce() -> String,
 ) -> Session {
+    let over = ceiling > 0 && last_context(resume_session).is_some_and(|n| n > u64::from(ceiling));
     if !resume_session.is_empty()
         && !my_runner_id.is_empty()
         && resume_runner_id == my_runner_id
         && session_exists(resume_session)
+        && !over
     {
         Session::Resume(resume_session.to_owned())
     } else {
         Session::Fresh(new_id())
     }
+}
+
+/// The context a turn ended with, as the provider measured it in the result's `usage`:
+/// input + cache read + cache creation tokens.
+pub(crate) fn context_tokens(usage: &Value) -> u64 {
+    [
+        "input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ]
+    .iter()
+    .map(|k| usage.get(k).and_then(Value::as_u64).unwrap_or(0))
+    .fold(0, u64::saturating_add)
+}
+
+/// Remembers a session's last measured context in `dir` (one small file per session).
+pub(crate) fn record_context(dir: &Path, id: &str, tokens: u64) {
+    if !is_uuid(id) {
+        return;
+    }
+    if std::fs::create_dir_all(dir).is_ok() {
+        let _ = std::fs::write(dir.join(id), tokens.to_string());
+    }
+}
+
+/// What [`record_context`] remembered, if anything.
+pub(crate) fn recorded_context(dir: &Path, id: &str) -> Option<u64> {
+    if !is_uuid(id) {
+        return None;
+    }
+    std::fs::read_to_string(dir.join(id))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// The argument vector for `claude`, without the program name. The turn's prompt is
@@ -593,29 +637,93 @@ mod tests {
         let fresh = || ID.to_owned();
         // Same runner, session on disk: resume.
         assert_eq!(
-            choose_session(OLD, "run_a", "run_a", exists, fresh),
+            choose_session(OLD, "run_a", "run_a", exists, |_| None, 0, fresh),
             Session::Resume(OLD.into())
         );
         // A takeover runner never resumes another machine's session.
         assert_eq!(
-            choose_session(OLD, "run_a", "run_b", exists, fresh),
+            choose_session(OLD, "run_a", "run_b", exists, |_| None, 0, fresh),
             Session::Fresh(ID.into())
         );
         // Same runner, but the session is gone (cleaned, new disk).
         assert_eq!(
-            choose_session("gone", "run_a", "run_a", exists, fresh),
+            choose_session("gone", "run_a", "run_a", exists, |_| None, 0, fresh),
             Session::Fresh(ID.into())
         );
         // First turn of a thread.
         assert_eq!(
-            choose_session("", "", "run_a", exists, fresh),
+            choose_session("", "", "run_a", exists, |_| None, 0, fresh),
             Session::Fresh(ID.into())
         );
         // An unregistered runner id matches nothing, not even an empty one.
         assert_eq!(
-            choose_session(OLD, "", "", exists, fresh),
+            choose_session(OLD, "", "", exists, |_| None, 0, fresh),
             Session::Fresh(ID.into())
         );
+    }
+
+    #[test]
+    fn a_session_over_the_context_ceiling_is_never_resumed() {
+        let exists = |id: &str| id == OLD;
+        let fresh = || ID.to_owned();
+        let ceiling = 120_000;
+        // At the ceiling: still resumed. One token over: fresh, from the pack.
+        assert_eq!(
+            choose_session(
+                OLD,
+                "run_a",
+                "run_a",
+                exists,
+                |_| Some(120_000),
+                ceiling,
+                fresh
+            ),
+            Session::Resume(OLD.into())
+        );
+        assert_eq!(
+            choose_session(
+                OLD,
+                "run_a",
+                "run_a",
+                exists,
+                |_| Some(120_001),
+                ceiling,
+                fresh
+            ),
+            Session::Fresh(ID.into())
+        );
+        // Never measured: the turn after it measures; no ceiling sent: no block.
+        assert_eq!(
+            choose_session(OLD, "run_a", "run_a", exists, |_| None, ceiling, fresh),
+            Session::Resume(OLD.into())
+        );
+        assert_eq!(
+            choose_session(OLD, "run_a", "run_a", exists, |_| Some(900_000), 0, fresh),
+            Session::Resume(OLD.into())
+        );
+        // A fresh session is never a fork: the flag is not one this runner builds.
+        let args = build_args(&TurnSpec {
+            system_prompt: "s",
+            model: "sonnet",
+            max_turns: 3,
+            allowed_tools: &[],
+            session: &Session::Fresh(ID.into()),
+        })
+        .unwrap();
+        assert!(!args.iter().any(|a| a == "--fork-session"));
+    }
+
+    #[test]
+    fn context_is_input_plus_cache_read_plus_cache_creation_and_is_remembered() {
+        let u = serde_json::json!({"input_tokens": 10, "cache_read_input_tokens": 100_000,
+            "cache_creation_input_tokens": 5_000, "output_tokens": 999});
+        assert_eq!(context_tokens(&u), 105_010);
+        assert_eq!(context_tokens(&Value::Null), 0);
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(recorded_context(dir.path(), OLD), None);
+        record_context(dir.path(), OLD, 105_010);
+        assert_eq!(recorded_context(dir.path(), OLD), Some(105_010));
+        assert_eq!(recorded_context(dir.path(), "../x"), None);
     }
 
     #[test]

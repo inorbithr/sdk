@@ -19,8 +19,8 @@ use tokio::time::Instant;
 use super::claude::Reply;
 use super::exec::{Exec, Finished};
 use super::service::{
-    AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError, TurnReport,
-    Usage,
+    AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
+    TurnReport, Usage,
 };
 
 /// The RFC's runner heartbeat. The service's proto does not carry an interval yet, so
@@ -113,6 +113,8 @@ struct Fetch {
 
 type Log<'a> = &'a (dyn Fn(&str) + Sync);
 type Op<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+/// The answers to one round of lease heartbeats, each with the lease it was asked for.
+type LeaseAnswers = Vec<(Lease, Result<LeaseBeat, OpErr>)>;
 
 /// Why a service call failed, and whether asking again could help.
 struct OpErr {
@@ -164,7 +166,10 @@ fn held_leases(
     let mut all: Vec<Lease> = busy.map(|b| b.lease.clone()).into_iter().collect();
     all.extend(fetching.map(|f| f.lease.clone()));
     for r in outbox {
-        if !all.iter().any(|l| is_lease(l, &r.lease_id, r.fencing_token)) {
+        if !all
+            .iter()
+            .any(|l| is_lease(l, &r.lease_id, r.fencing_token))
+        {
             all.push(Lease {
                 lease_id: r.lease_id.clone(),
                 job_id: String::new(),
@@ -201,7 +206,9 @@ async fn flush<S: Service>(
 ) {
     let deadline = Instant::now() + limit;
     while let Some(r) = outbox.front().cloned() {
-        let left = deadline.saturating_duration_since(Instant::now()).min(op_timeout);
+        let left = deadline
+            .saturating_duration_since(Instant::now())
+            .min(op_timeout);
         if left.is_zero() {
             break;
         }
@@ -209,10 +216,18 @@ async fn flush<S: Service>(
             Ok(()) => stats.reported += 1,
             Err(e) if e.permanent => {
                 stats.rejected += 1;
-                log(&format!("report {} refused for good, dropped: {}", r.idempotency_key(), e.msg));
+                log(&format!(
+                    "report {} refused for good, dropped: {}",
+                    r.idempotency_key(),
+                    e.msg
+                ));
             }
             Err(e) => {
-                log(&format!("{} replies left undelivered at exit: {}", outbox.len(), e.msg));
+                log(&format!(
+                    "{} replies left undelivered at exit: {}",
+                    outbox.len(),
+                    e.msg
+                ));
                 break;
             }
         }
@@ -265,7 +280,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut fetching: Option<Fetch> = None;
     let mut fetch_op: Option<Op<'_, Result<Pack, OpErr>>> = None;
     let mut beating: Option<Op<'_, Result<Beat, OpErr>>> = None;
-    let mut lease_beating: Option<Op<'_, Vec<(Lease, Result<LeaseBeat, OpErr>)>>> = None;
+    let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
     let mut reporting: Option<Op<'_, (String, Result<(), OpErr>)>> = None;
     let mut service_interval: Option<Duration> = None;
     let mut outbox: VecDeque<TurnReport> = VecDeque::new();
@@ -733,6 +748,10 @@ mod tests {
 
     /// A service with scripted answers that records what it was asked.
     #[derive(Default)]
+    #[allow(
+        clippy::struct_excessive_bools,
+        reason = "one switch per failure a test injects"
+    )]
     struct Fake {
         beats: Mutex<VecDeque<Result<Vec<Lease>, ()>>>,
         calls: Mutex<Vec<String>>,
@@ -780,7 +799,14 @@ mod tests {
             if self.lease_beats_down {
                 return Err(down());
             }
-            if self.refuse_lease.as_deref() == Some(l.lease_id.as_str()) {
+            // Released while its turn runs: the service refuses once the pack was handed over.
+            let packed = self
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|c| *c == format!("pack {}", l.lease_id));
+            if packed && self.refuse_lease.as_deref() == Some(l.lease_id.as_str()) {
                 return Err(ServiceError::Refused("the lease was released"));
             }
             if let Some((id, delay)) = &self.late_stop
@@ -832,9 +858,7 @@ mod tests {
                     // The turn is held until this heartbeat is in flight beside it.
                     tokio::time::timeout(Duration::from_secs(2), g.wait())
                         .await
-                        .map_err(|_| {
-                            ServiceError::Refused("no turn beside the heartbeat")
-                        })?;
+                        .map_err(|_| ServiceError::Refused("no turn beside the heartbeat"))?;
                 }
             }
             match self.beats.lock().unwrap().pop_front() {
@@ -914,6 +938,12 @@ mod tests {
             let gate = self.gate.clone();
             // Made before the future first runs: a stop may come before its first poll.
             let hang = self.hang.clone().map(Dropped);
+            let big_say = self.big_say;
+            let slow = self
+                .slow_turn
+                .as_ref()
+                .filter(|(id, _)| *id == pack.turn_id)
+                .map(|(_, d)| *d);
             Box::pin(async move {
                 if let Some(_dropped) = hang {
                     std::future::pending::<()>().await;
@@ -928,11 +958,28 @@ mod tests {
                             outcome = "failed";
                         }
                     }
-                    None => tokio::time::sleep(Duration::from_millis(30)).await,
+                    None => tokio::time::sleep(slow.unwrap_or(Duration::from_millis(30))).await,
                 }
+                let parsed = big_say.then(|| crate::runner::claude::Parsed {
+                    outcome: crate::runner::claude::Outcome::Replied,
+                    reply: crate::runner::claude::Reply {
+                        say: "x".repeat(20_001),
+                        state: String::new(),
+                        actions: vec![],
+                        evidence: vec![],
+                        left: vec![],
+                    },
+                    session_id: String::new(),
+                    num_turns: 1,
+                    duration_ms: 1,
+                    total_cost_usd: None,
+                    usage: serde_json::json!({}),
+                    denied_tools: vec![],
+                    resets_at: String::new(),
+                });
                 Finished {
                     outcome: outcome.into(),
-                    parsed: None,
+                    parsed,
                     resumed: true,
                     session_id: format!("sess-{}", pack.turn_id),
                     detail: String::new(),
@@ -1256,7 +1303,10 @@ mod tests {
         assert_eq!(stats.reported, 1);
         let calls = fake.calls.lock().unwrap().clone();
         let first_failed = calls.iter().position(|c| c.starts_with("report ")).unwrap();
-        let last_report = calls.iter().rposition(|c| c.starts_with("report ")).unwrap();
+        let last_report = calls
+            .iter()
+            .rposition(|c| c.starts_with("report "))
+            .unwrap();
         assert!(
             calls[first_failed..last_report]
                 .iter()
@@ -1306,7 +1356,10 @@ mod tests {
         };
         let (end, _) = go_with(&fake, exec, cfg(8)).await;
         assert_eq!(end, End::MaxBeats);
-        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst), "the fenced turn kept running");
+        assert!(
+            dropped.load(std::sync::atomic::Ordering::SeqCst),
+            "the fenced turn kept running"
+        );
         assert!(fake.reports.lock().unwrap().is_empty());
     }
 
