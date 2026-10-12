@@ -178,8 +178,78 @@ fn git(dir: &Path, args: &[&str]) -> bool {
         .arg(dir)
         .args(args)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
+}
+
+/// `git init`, add everything and one commit; false when git did not answer.
+fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
+    git(dir, &["init", "-q", "-b", "main"])
+        && git(dir, &["add", "-A"])
+        && git(
+            dir,
+            &[
+                "-c",
+                "user.name=iohr",
+                "-c",
+                "user.email=iohr@inorbit.hr",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                &format!("{name}: new project from the {template} template"),
+            ],
+        )
+}
+
+/// The steps that wait on InOrbit, each with the API it needs; never done in silence.
+fn cloud_steps(name: &str) -> Vec<Step> {
+    vec![
+        step(
+            "keychain",
+            "A Keychain slot for the project's own token",
+            "not-yet",
+            format!(
+                "reserved by name, hr.inorbit.project.{name}; no token exists until InOrbit issues per-project scopes"
+            ),
+            "per-project scopes and tokens (PRD 0088, RFC 0127.1)",
+        ),
+        step(
+            "allowed",
+            "The editor may open it",
+            "ask",
+            "InOrbit Desktop asks you before Code may open a folder: Code › Allow a repository…, or New project does it with your confirm",
+            "",
+        ),
+        step(
+            "space",
+            "The project in InOrbit: a Decisions space of kind project",
+            "not-yet",
+            "decisions_create_space works for a person today; init does it once a project has a scope of its own",
+            "POST /v1/decisions/projects (RFC 0115), a project scope",
+        ),
+        step(
+            "listing",
+            "A private listing in the Marketplace",
+            "not-yet",
+            "extensions.listings has private visibility; nothing registers one from a developer's machine yet",
+            "a developer's POST /v1/extensions/listings, extensions:write (RFC 0127.1)",
+        ),
+        step(
+            "memory",
+            "A memory namespace of its own",
+            "not-yet",
+            "memory is per account today",
+            "per-project memory namespaces (PRD 0082, RFC 0106, RFC 0127.2)",
+        ),
+        step(
+            "monitors",
+            "Its own monitors and a notifications channel",
+            "not-yet",
+            "a heartbeat monitor tagged project:<name> and push to your phone",
+            "monitors with a project tag; a notifications API; push as a subscription channel (RFC 0127.2)",
+        ),
+    ]
 }
 
 /// Writes the project: the files, a git repository with its first commit, and the state
@@ -249,23 +319,7 @@ pub fn init(
         ),
         "",
     )];
-    let committed = git(dir, &["init", "-q", "-b", "main"])
-        && git(dir, &["add", "-A"])
-        && git(
-            dir,
-            &[
-                "-c",
-                "user.name=iohr",
-                "-c",
-                "user.email=iohr@inorbit.hr",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "-q",
-                "-m",
-                &format!("{name}: new project from the {template} template"),
-            ],
-        );
+    let committed = first_commit(dir, name, template);
     steps.push(if committed {
         step(
             "git",
@@ -302,48 +356,7 @@ pub fn init(
         ),
         "",
     ));
-    steps.push(step(
-        "keychain",
-        "A Keychain slot for the project's own token",
-        "not-yet",
-        format!("reserved by name, hr.inorbit.project.{name}; no token exists until InOrbit issues per-project scopes"),
-        "per-project scopes and tokens (PRD 0088, RFC 0127.1)",
-    ));
-    steps.push(step(
-        "allowed",
-        "The editor may open it",
-        "ask",
-        "InOrbit Desktop asks you before Code may open a folder: Code › Allow a repository…, or New project does it with your confirm",
-        "",
-    ));
-    steps.push(step(
-        "space",
-        "The project in InOrbit: a Decisions space of kind project",
-        "not-yet",
-        "decisions_create_space works for a person today; init does it once a project has a scope of its own",
-        "POST /v1/decisions/projects (RFC 0115), a project scope",
-    ));
-    steps.push(step(
-        "listing",
-        "A private listing in the Marketplace",
-        "not-yet",
-        "extensions.listings has private visibility; nothing registers one from a developer's machine yet",
-        "a developer's POST /v1/extensions/listings, extensions:write (RFC 0127.1)",
-    ));
-    steps.push(step(
-        "memory",
-        "A memory namespace of its own",
-        "not-yet",
-        "memory is per account today",
-        "per-project memory namespaces (PRD 0082, RFC 0106, RFC 0127.2)",
-    ));
-    steps.push(step(
-        "monitors",
-        "Its own monitors and a notifications channel",
-        "not-yet",
-        "a heartbeat monitor tagged project:<name> and push to your phone",
-        "monitors with a project tag; a notifications API; push as a subscription channel (RFC 0127.2)",
-    ));
+    steps.extend(cloud_steps(name));
     Ok(Report {
         name: name.to_owned(),
         id: format!("{publisher}/{name}"),
@@ -588,8 +601,7 @@ mod tests {
         if Command::new("python3")
             .arg("--version")
             .output()
-            .map(|o| !o.status.success())
-            .unwrap_or(true)
+            .map_or(true, |o| !o.status.success())
         {
             eprintln!("no python3 here: the smoke test is not run");
             return;
