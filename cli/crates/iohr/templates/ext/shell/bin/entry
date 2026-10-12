@@ -1,0 +1,65 @@
+#!/bin/sh
+# @@ID@@: writes $STATE/heartbeat.json every minute and asks iohr's token channel for a
+# token with the scope its manifest declares. Run it with `iohr ext dev`.
+#
+# What iohr gives it: STATE and CACHE (its own folders), IOHR_EXT_TOKEN_SOCKET and
+# IOHR_EXT_API (the token channel and the API), IOHR_EXT_DEV=1 under `iohr ext dev`.
+# It never sees your sign-in: no IOHR_TOKEN, and no iohr on its PATH.
+set -eu
+
+: "${STATE:?STATE is not set: run this with iohr ext dev}"
+: "${CACHE:?CACHE is not set: run this with iohr ext dev}"
+ID="@@ID@@"
+VERSION="0.1.0"
+EVERY="${HEARTBEAT_EVERY:-60}"
+
+log() { printf '%s\n' "$*"; }
+
+# Asks the channel for a token with identity:read. The token stays in a variable and
+# is never printed; prints granted, refused or unavailable.
+token_state() {
+  if [ -z "${IOHR_EXT_TOKEN_SOCKET:-}" ] || ! command -v curl >/dev/null 2>&1; then
+    echo unavailable
+    return
+  fi
+  answer="$(curl -sS --max-time 10 --unix-socket "$IOHR_EXT_TOKEN_SOCKET" \
+    -H 'content-type: application/json' --data '{"scopes":["identity:read"]}' \
+    -w '\n%{http_code}' http://iohr/token 2>/dev/null || true)"
+  status="$(printf '%s' "$answer" | tail -n 1)"
+  token=""
+  if [ "$status" = "200" ]; then
+    token="$(printf '%s' "$answer" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+  fi
+  if [ -n "$token" ]; then echo granted; else echo refused; fi
+  unset answer token
+}
+
+heartbeat() {
+  tok="$(token_state)"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  dev=false
+  [ "${IOHR_EXT_DEV:-}" = "1" ] && dev=true
+  tmp="$STATE/.heartbeat.json.tmp"
+  printf '{"id":"%s","version":"%s","state":"ok","at":"%s","token":"%s","dev":%s}\n' \
+    "$ID" "$VERSION" "$now" "$tok" "$dev" > "$tmp"
+  mv "$tmp" "$STATE/heartbeat.json"
+  log "heartbeat at $now (token $tok)"
+}
+
+sleeper=""
+stop() {
+  log "stopping"
+  [ -n "$sleeper" ] && kill "$sleeper" 2>/dev/null
+  exit 0
+}
+trap stop INT TERM
+log "$ID $VERSION starting; state in $STATE"
+while :; do
+  heartbeat
+  [ -n "${IOHR_EXT_ONCE:-}" ] && exit 0
+  # Sleep in the background so a stop request is answered at once.
+  sleep "$EVERY" &
+  sleeper=$!
+  wait "$sleeper" || true
+  sleeper=""
+done

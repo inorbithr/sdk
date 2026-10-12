@@ -674,6 +674,48 @@ async fn verbose_output_never_shows_the_token() {
         "{args:?} leaked the token"
     );
     assert!(!all.contains("request id"), "{args:?} made a call");
+    // The local extension loop: offline, and `ext dev` hands the extension a token over
+    // the channel without ever printing it.
+    let ext = dir.path().join("ext-verbose");
+    let ext = ext.to_str().unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut local: Vec<Vec<&str>> = vec![
+        vec![
+            "ext",
+            "init",
+            "inorbit/verbose",
+            "--lang",
+            "shell",
+            "--dir",
+            ext,
+        ],
+        vec!["ext", "lint", ext, "--preview"],
+        vec!["ext", "lint", ext, "--json"],
+    ];
+    if cfg!(unix) {
+        local.push(vec!["ext", "dev", ext]);
+        local.push(vec!["ext", "dev", ext, "--test"]);
+    }
+    for args in local {
+        let mut args = args.clone();
+        args.push("--verbose");
+        let o = r
+            .cmd(&args)
+            .env("IOHR_TOKEN", &t)
+            .env("HOME", &home)
+            .env("IOHR_EXT_ONCE", "1")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+        let all = text(&o);
+        assert!(
+            !all.contains("TOKENSIGNATUREMARKER"),
+            "{args:?} leaked the token"
+        );
+        assert!(!all.contains("request id"), "{args:?} made a call");
+    }
 }
 
 const LAB_DOC: &str = "---\ntitle: A decision\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe site is www.example.com.\n\n## Status log\n\n- 2026-10-03: opened.\n";

@@ -25,6 +25,16 @@ pub(crate) struct ProfileMinter {
     session: OnceCell<Session>,
 }
 
+impl ProfileMinter {
+    pub(crate) fn new(global: &Global, env: &Env) -> Self {
+        Self {
+            global: global.clone(),
+            env: env.clone(),
+            session: OnceCell::new(),
+        }
+    }
+}
+
 impl Minter for ProfileMinter {
     async fn mint(&self, scopes: Vec<String>) -> Result<Minted, MintError> {
         let s = self
@@ -80,20 +90,25 @@ pub(crate) async fn run(
     check_confirmed(&entry, &record).map_err(|e| Error::Failed(e.to_string()))?;
     let base = api_origin(&global.base_url)?;
     let ctx = Arc::new(Ctx {
-        minter: ProfileMinter {
-            global: global.clone(),
-            env: env.clone(),
-            session: OnceCell::new(),
-        },
+        minter: ProfileMinter::new(global, env),
         allowed: record.manifest.scopes.clone(),
         verbose: global.verbose,
+        log: false,
     });
-    serve(&program, base.as_str().trim_end_matches('/'), args, ctx).await
+    let c = command(&program, args);
+    serve(
+        c,
+        &program,
+        base.as_str().trim_end_matches('/'),
+        ctx,
+        |_| Vec::new(),
+    )
+    .await
 }
 
 /// The API's origin for `IOHR_EXT_API`: HTTPS, or plain HTTP to this machine only
 /// (SR-07), as the runtime's client accepts it.
-fn api_origin(raw: &str) -> Result<url::Url, Error> {
+pub(crate) fn api_origin(raw: &str) -> Result<url::Url, Error> {
     let url = url::Url::parse(raw)
         .map_err(|e| Error::Failed(format!("IOHR_BASE_URL is not a URL: {e}")))?;
     let loopback = match url.host() {
@@ -116,16 +131,18 @@ fn api_origin(raw: &str) -> Result<url::Url, Error> {
     }
 }
 
-fn command(program: &Path, args: &[OsString], api: &str, channel: &str) -> tokio::process::Command {
+fn command(program: &Path, args: &[OsString]) -> tokio::process::Command {
     let mut c = tokio::process::Command::new(program);
     c.args(args)
-        .env("IOHR_EXT_API", api)
-        .env("IOHR_EXT_TOKEN_SOCKET", channel)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true);
-    // Credentials stay with iohr: the extension asks the channel instead.
+        .stderr(Stdio::inherit());
+    strip_credentials(&mut c);
+    c
+}
+
+/// Credentials stay with iohr: the extension asks the channel instead.
+pub(crate) fn strip_credentials(c: &mut tokio::process::Command) {
     for (k, _) in std::env::vars_os() {
         if k.to_str()
             .is_some_and(|k| k == "IOHR_TOKEN" || k.starts_with("IOHR_TOKEN_"))
@@ -133,7 +150,24 @@ fn command(program: &Path, args: &[OsString], api: &str, channel: &str) -> tokio
             c.env_remove(k);
         }
     }
-    c
+}
+
+async fn finish(
+    status: std::io::Result<std::process::ExitStatus>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+) -> Result<u8, Error> {
+    // What the extension wrote last is still printed; a program it left running that
+    // holds its output does not keep iohr waiting.
+    for mut t in tasks {
+        if tokio::time::timeout(std::time::Duration::from_secs(2), &mut t)
+            .await
+            .is_err()
+        {
+            t.abort();
+        }
+    }
+    let status = status.map_err(|e| Error::Failed(format!("lost the extension: {e}")))?;
+    Ok(exit_code(status))
 }
 
 fn exit_code(status: std::process::ExitStatus) -> u8 {
@@ -165,12 +199,15 @@ fn spawn_failed(program: &Path, e: &std::io::Error) -> Error {
     Error::Failed(format!("cannot start {}: {e}", program.display()))
 }
 
+/// Runs `c` (the program `label`, its arguments and environment set) with the token
+/// channel open for as long as it runs; returns its exit code.
 #[cfg(unix)]
-async fn serve<M: Minter>(
-    program: &Path,
+pub(crate) async fn serve<M: Minter>(
+    mut c: tokio::process::Command,
+    label: &Path,
     api: &str,
-    args: &[OsString],
     ctx: Arc<Ctx<M>>,
+    on_spawn: impl FnOnce(&mut tokio::process::Child) -> Vec<tokio::task::JoinHandle<()>>,
 ) -> Result<u8, Error> {
     use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
 
@@ -188,9 +225,13 @@ async fn serve<M: Minter>(
         .map_err(|e| Error::Failed(format!("cannot open the token channel: {e}")))?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
         .map_err(|e| Error::Failed(format!("cannot restrict the token channel: {e}")))?;
-    let mut child = command(program, args, api, &path.to_string_lossy())
+    let mut child = c
+        .env("IOHR_EXT_API", api)
+        .env("IOHR_EXT_TOKEN_SOCKET", &path)
+        .kill_on_drop(true)
         .spawn()
-        .map_err(|e| spawn_failed(program, &e))?;
+        .map_err(|e| spawn_failed(label, &e))?;
+    let tasks = on_spawn(&mut child);
     let status = loop {
         tokio::select! {
             status = child.wait() => break status,
@@ -210,16 +251,16 @@ async fn serve<M: Minter>(
     };
     drop(listener);
     drop(guard);
-    let status = status.map_err(|e| Error::Failed(format!("lost the extension: {e}")))?;
-    Ok(exit_code(status))
+    finish(status, tasks).await
 }
 
 #[cfg(windows)]
-async fn serve<M: Minter>(
-    program: &Path,
+pub(crate) async fn serve<M: Minter>(
+    mut c: tokio::process::Command,
+    label: &Path,
     api: &str,
-    args: &[OsString],
     ctx: Arc<Ctx<M>>,
+    on_spawn: impl FnOnce(&mut tokio::process::Child) -> Vec<tokio::task::JoinHandle<()>>,
 ) -> Result<u8, Error> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
@@ -236,9 +277,13 @@ async fn serve<M: Minter>(
             .map_err(|e| Error::Failed(format!("cannot open the token channel: {e}")))
     };
     let mut server = open(true)?;
-    let mut child = command(program, args, api, &name)
+    let mut child = c
+        .env("IOHR_EXT_API", api)
+        .env("IOHR_EXT_TOKEN_SOCKET", &name)
+        .kill_on_drop(true)
         .spawn()
-        .map_err(|e| spawn_failed(program, &e))?;
+        .map_err(|e| spawn_failed(label, &e))?;
+    let tasks = on_spawn(&mut child);
     let status = loop {
         tokio::select! {
             status = child.wait() => break status,
@@ -252,6 +297,5 @@ async fn serve<M: Minter>(
         }
     };
     drop(server);
-    let status = status.map_err(|e| Error::Failed(format!("lost the extension: {e}")))?;
-    Ok(exit_code(status))
+    finish(status, tasks).await
 }
