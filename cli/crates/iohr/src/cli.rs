@@ -699,7 +699,8 @@ pub enum ExtCommand {
     /// Every package you have, in one table: NAME, KIND, SOURCE (account, shared, local,
     /// installed), VISIBILITY, VERSION and INSTALLED. Published ones, private too, come
     /// from the API; local ones are the folders under ~/.inorbit/ext-dev, read from disk
-    /// and never sent anywhere. With `--json`, an array of the same fields.
+    /// and never sent anywhere. An installed extension is matched to a package by name
+    /// alone, since the lock keeps no publisher. With `--json`, an array of the same fields.
     Packages,
     /// Search the extensions catalogue (RFC 0073): name, kind, publisher, latest
     /// version and visibility. Reads the API only, never the registry.

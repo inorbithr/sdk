@@ -46,8 +46,17 @@ pub(crate) struct Package {
 /// The names of the folders under `dir` that are extension names, sorted, at most
 /// [`MAX_LOCAL`]. A missing folder is none; a link or a file is not one.
 pub(crate) fn local_names(dir: &Path) -> Vec<String> {
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return Vec::new();
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                Out::note(&format!(
+                    "Could not read {}: {e}; its local packages are not listed.",
+                    dir.display()
+                ));
+            }
+            return Vec::new();
+        }
     };
     let mut names: Vec<String> = read
         .filter_map(Result::ok)
@@ -106,7 +115,8 @@ pub(crate) fn merge(
             source: "local".into(),
             visibility: "local".into(),
             version: "-".into(),
-            installed: version_of(n),
+            // A published package of the same name already shows the installation.
+            installed: version_of(n).filter(|_| !claimed.contains(&n.as_str())),
         });
     }
     let mut rest: Vec<&(String, String)> = installed
@@ -236,6 +246,14 @@ mod tests {
         assert_eq!(row("acme/open").visibility, "public");
         assert_eq!(row("sketch").source, "local");
         assert_eq!(row("wip").installed.as_deref(), Some("0.1.0"));
+        // A local folder named like a published, installed package does not report the
+        // same installation twice.
+        let p2 = merge(
+            &[listing("acme", "billing", "private", "own")],
+            &[("billing".to_owned(), "1.0.0".to_owned())],
+            &["billing".to_owned()],
+        );
+        assert_eq!(p2.iter().filter(|x| x.installed.is_some()).count(), 1);
         assert_eq!(row("agent").source, "installed");
         // wip is listed once, as local; billing once, as the listing.
         assert_eq!(p.iter().filter(|x| x.name == "wip").count(), 1);
