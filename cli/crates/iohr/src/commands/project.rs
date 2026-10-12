@@ -50,7 +50,19 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
             dir,
             publisher,
             no_smoke,
-        } => init(g, env, &name, &template, dir.as_deref(), publisher.as_deref(), no_smoke, out).await,
+        } => {
+            init(
+                g,
+                env,
+                &name,
+                &template,
+                dir.as_deref(),
+                publisher.as_deref(),
+                no_smoke,
+                out,
+            )
+            .await
+        }
     }
 }
 
@@ -71,7 +83,10 @@ async fn init(
             "there is no `{template}` template; one of: {}",
             TEMPLATES
                 .iter()
-                .map(|(id, what, live)| format!("{id} ({what}{})", if *live { "" } else { "; coming" }))
+                .map(|(id, what, live)| format!(
+                    "{id} ({what}{})",
+                    if *live { "" } else { "; coming" }
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         )));
@@ -92,12 +107,17 @@ async fn init(
     let state_root = state_root()?;
     // 2 to 4. The scaffold, the git repository, the project's own state, the Keychain slot
     //    by name, and every cloud step as not-yet with the API it needs.
-    let report: Report = project::init(&dir, &state_root, name, template, &publisher, &now()).map_err(Error::Failed)?;
+    let report: Report = project::init(&dir, &state_root, name, template, &publisher, &now())
+        .map_err(Error::Failed)?;
     // 5. The smoke test: the project once, under its own STATE and CACHE, no token channel.
     let smoke: Option<Smoke> = if no_smoke {
         None
     } else {
-        let (d, s, n) = (report.dir.clone(), report.state.clone(), report.name.clone());
+        let (d, s, n) = (
+            report.dir.clone(),
+            report.state.clone(),
+            report.name.clone(),
+        );
         Some(
             tokio::task::spawn_blocking(move || project::smoke(&d, &s, &n))
                 .await
@@ -112,11 +132,20 @@ async fn init(
             "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
         }));
     } else {
-        Out::note(&format!("What you now have: {} at {}", report.id, report.dir.display()));
-        for l in lines(&report, smoke.as_ref(), signed_in.as_deref()).iter().skip(1) {
+        Out::note(&format!(
+            "What you now have: {} at {}",
+            report.id,
+            report.dir.display()
+        ));
+        for l in lines(&report, smoke.as_ref(), signed_in.as_deref())
+            .iter()
+            .skip(1)
+        {
             Out::note(&format!("  {l}"));
         }
-        Out::note("Next: open it in InOrbit Desktop's Code (it asks you first), `iohr ext lint --preview` to read what it may do, `iohr ext dev` to run it with the real token channel.");
+        Out::note(
+            "Next: open it in InOrbit Desktop's Code (it asks you first), `iohr ext lint --preview` to read what it may do, `iohr ext dev` to run it with the real token channel.",
+        );
     }
     match smoke {
         Some(s) if !s.ok => Err(Error::Failed(format!("the smoke test failed: {}", s.said))),

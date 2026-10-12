@@ -51,8 +51,16 @@ pub const TEMPLATES: &[(&str, &str, bool)] = &[
         "A private macOS service that heartbeats and serves a tiny local panel (Python, no dependencies)",
         true,
     ),
-    ("macos-app", "A signed macOS app of your own; coming after the demo", false),
-    ("ui-panel", "A panel inside InOrbit Desktop; coming after the demo", false),
+    (
+        "macos-app",
+        "A signed macOS app of your own; coming after the demo",
+        false,
+    ),
+    (
+        "ui-panel",
+        "A panel inside InOrbit Desktop; coming after the demo",
+        false,
+    ),
 ];
 
 /// The name rule: the folder, the Python module and the extension's name all come from it, so
@@ -234,7 +242,11 @@ pub fn init(
         "scaffold",
         "Scaffold from the template",
         "done",
-        format!("{} files from `{template}` in {}", files.len(), dir.display()),
+        format!(
+            "{} files from `{template}` in {}",
+            files.len(),
+            dir.display()
+        ),
         "",
     )];
     let committed = git(dir, &["init", "-q", "-b", "main"])
@@ -255,7 +267,13 @@ pub fn init(
             ],
         );
     steps.push(if committed {
-        step("git", "A git repository with its first commit", "done", "main, one commit", "")
+        step(
+            "git",
+            "A git repository with its first commit",
+            "done",
+            "main, one commit",
+            "",
+        )
     } else {
         step(
             "git",
@@ -433,7 +451,10 @@ pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<
     let mut out = vec![format!("{} is at {}", r.id, r.dir.display())];
     out.push(match signed_in {
         Some(who) => format!("done: signed in as {who}"),
-        None => "not yet: not signed in; run iohr login first, so init can make the project in InOrbit".to_owned(),
+        None => {
+            "not yet: not signed in; run iohr login first, so init can make the project in InOrbit"
+                .to_owned()
+        }
     });
     for s in &r.steps {
         if s.state == "done" {
@@ -459,7 +480,11 @@ pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<
             "not-yet" => out.push(format!(
                 "not yet: {}; needs {}",
                 s.title.to_lowercase(),
-                if s.needs.is_empty() { "an API that does not exist" } else { &s.needs }
+                if s.needs.is_empty() {
+                    "an API that does not exist"
+                } else {
+                    &s.needs
+                }
             )),
             "failed" => out.push(format!("failed: {} ({})", s.title.to_lowercase(), s.said)),
             _ => {}
@@ -477,7 +502,17 @@ mod tests {
         for ok in ["demo", "my-shop", "a1"] {
             assert!(check_name(ok).is_ok(), "{ok}");
         }
-        for bad in ["", "d", "Demo", "-demo", "my_shop", "tbd-thing", "ext", "iohr", "project"] {
+        for bad in [
+            "",
+            "d",
+            "Demo",
+            "-demo",
+            "my_shop",
+            "tbd-thing",
+            "ext",
+            "iohr",
+            "project",
+        ] {
             assert!(check_name(bad).is_err(), "{bad}");
         }
     }
@@ -494,7 +529,11 @@ mod tests {
         let r = lint(manifest);
         assert!(r.ok, "{:?}", r.findings);
         assert!(manifest.contains("id = \"local/my-shop\""));
-        assert!(render("macos-app", "demo", "local", "").unwrap_err().contains("coming"));
+        assert!(
+            render("macos-app", "demo", "local", "")
+                .unwrap_err()
+                .contains("coming")
+        );
         assert!(render("nope", "demo", "local", "").is_err());
         assert!(render("demo", "tbd", "local", "").is_err());
     }
@@ -513,19 +552,35 @@ mod tests {
         let ids: Vec<&str> = r.steps.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["scaffold", "git", "runtime", "keychain", "allowed", "space", "listing", "memory", "monitors"]
+            [
+                "scaffold", "git", "runtime", "keychain", "allowed", "space", "listing", "memory",
+                "monitors"
+            ]
         );
         assert!(r.ok());
         assert!(
-            r.steps.iter().filter(|s| s.state == "not-yet").all(|s| !s.needs.is_empty()),
+            r.steps
+                .iter()
+                .filter(|s| s.state == "not-yet")
+                .all(|s| !s.needs.is_empty()),
             "a stub names what it needs"
         );
         let l = lines(&r, None, None);
-        assert_eq!(l[0], "local/demo is at ".to_owned() + &dir.display().to_string());
+        assert_eq!(
+            l[0],
+            "local/demo is at ".to_owned() + &dir.display().to_string()
+        );
         assert!(l[1].starts_with("not yet: not signed in"));
-        assert!(l.iter().any(|x| x.starts_with("asked: the editor may open it")));
+        assert!(
+            l.iter()
+                .any(|x| x.starts_with("asked: the editor may open it"))
+        );
         assert!(l.last().unwrap().starts_with("not yet: its own monitors"));
-        assert!(init(&dir, &st, "demo", "demo", "local", "").unwrap_err().contains("not empty"));
+        assert!(
+            init(&dir, &st, "demo", "demo", "local", "")
+                .unwrap_err()
+                .contains("not empty")
+        );
     }
 
     #[test]
@@ -542,7 +597,15 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("development/my-shop");
         let st = d.path().join("projects");
-        let r = init(&dir, &st, "my-shop", "demo", "local", "2026-10-12T10:00:00Z").unwrap();
+        let r = init(
+            &dir,
+            &st,
+            "my-shop",
+            "demo",
+            "local",
+            "2026-10-12T10:00:00Z",
+        )
+        .unwrap();
         let s = smoke(&r.dir, &r.state, "my-shop");
         assert!(s.ok, "{} / {}", s.said, s.output);
         let b = s.heartbeat.unwrap();
