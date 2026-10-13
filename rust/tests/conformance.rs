@@ -1137,7 +1137,7 @@ fn vectors(kind: &str) -> Vec<(PathBuf, Value)> {
         .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
         .map(|p| {
             let text = std::fs::read_to_string(&p).unwrap();
-            let v: Value = serde_yaml_ng::from_str(&text).unwrap();
+            let v: Value = serde_saphyr::from_str(&text).unwrap();
             (p, v)
         })
         .filter(|(_, v)| {

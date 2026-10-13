@@ -71,7 +71,7 @@ pkcs8 = { version = "0.11", features = ["encryption", "pem", "std"], optional = 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
 wiremock = "0.6"
-serde_yaml_ng = "0.10"
+serde-saphyr = "1"
 tempfile = "3"
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "testing"] }
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
