@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0-alpha.15](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.14...iohr/v0.1.0-alpha.15) (2026-10-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* the RFCs API is the Decisions API. `iohr rfc` is removed with no alias: use `iohr decisions`. The review default reads IOHR_DECISIONS_REVIEWER instead of IOHR_RFC_REVIEWER, and tokens need decisions:read / decisions:write instead of rfc:read / rfc:write.
+
+### Features
+
+* **cli:** iohr ext init, dev and lint, the local extension loop (PRD 0084 slice 1) ([#191](https://github.com/inorbithr/sdk/issues/191)) ([9083c23](https://github.com/inorbithr/sdk/commit/9083c23036e34e9bdc897b8839f331246366998a))
+* Decisions API, the contract synced to 136 operations, upgrade_required ([#189](https://github.com/inorbithr/sdk/issues/189)) ([91f998c](https://github.com/inorbithr/sdk/commit/91f998c9b53bb25587469e32155e893bcefe765c))
+
 ## [0.1.0-alpha.14](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.13...iohr/v0.1.0-alpha.14) (2026-10-09)
 
 

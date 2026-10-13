@@ -69,6 +69,9 @@ class RuntimeTest {
         assertEquals(Code.UNPROCESSABLE, Code.of("unprocessable"));
         assertEquals(422, Code.UNPROCESSABLE.httpStatus().orElseThrow());
         assertEquals(Code.UNPROCESSABLE, Code.forStatus(422));
+        assertEquals(Code.UPGRADE_REQUIRED, Code.of("upgrade_required"));
+        assertEquals(426, Code.UPGRADE_REQUIRED.httpStatus().orElseThrow());
+        assertEquals(Code.UPGRADE_REQUIRED, Code.forStatus(426));
     }
 
     @Test

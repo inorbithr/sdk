@@ -5,7 +5,7 @@ members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/ioh
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
@@ -56,7 +56,6 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 windows-native-keyring-store = "1"
 zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
-serde_yaml_ng = "0.10"
 tempfile = "3"
 wiremock = "0.6"
 

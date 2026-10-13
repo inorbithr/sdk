@@ -152,6 +152,26 @@ impl KeyringStore {
         Ok(Self { inner })
     }
 
+    /// A secret kept under another service than iohr's own sign-ins, such as an
+    /// extension's secret reference (service `hr.inorbit.iohr.ext`, the reference as the
+    /// account); `None` when there is none. Read only.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the store cannot be read.
+    pub fn get_named(
+        &self,
+        service: &str,
+        account: &str,
+    ) -> Result<Option<Redacted<String>>, StoreError> {
+        let entry = self.inner.build(service, account, None).map_err(failed)?;
+        match entry.get_password() {
+            Ok(s) => Ok(Some(Redacted::new(s))),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(e) => Err(failed(e)),
+        }
+    }
+
     fn entry(&self, key: &EntryKey) -> Result<Entry, StoreError> {
         self.inner.build(SERVICE, &key.user(), None).map_err(failed)
     }

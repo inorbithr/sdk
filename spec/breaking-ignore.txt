@@ -146,3 +146,119 @@ POST /v1/webhooks/deliveries/{delivery_id}/retry the response property `delivery
 POST /v1/webhooks/endpoints the response property `endpoint` became optional for the status `200`
 POST /v1/webhooks/endpoints/{endpoint_id}/test the response property `delivery` became optional for the status `200`
 POST /v1/webhooks/inboxes the response property `inbox` became optional for the status `200`
+# 2026-10-11: core ADR 0056 (RFC 0099) replaced the RFCs API with the Decisions API outright,
+# no alias: every /v1/rfcs path is now /v1/decisions with the same resources, fields and ids.
+DELETE /v1/rfcs/spaces/{space_id} api path removed without deprecation
+DELETE /v1/rfcs/spaces/{space_id}/diagrams/{diagram_id} api path removed without deprecation
+GET /v1/rfcs/public/documents api path removed without deprecation
+GET /v1/rfcs/public/spaces/{space}/{kind}/{number} api path removed without deprecation
+GET /v1/rfcs/public/spaces/{space}/diagrams/{diagram_id} api path removed without deprecation
+GET /v1/rfcs/reviews api path removed without deprecation
+GET /v1/rfcs/spaces api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id} api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/diagrams api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/diagrams/{diagram_id} api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/documents api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/documents/{document_id} api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/documents/{document_id}/comments api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/documents/{document_id}/reviews api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/documents/{document_id}/timeline api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/documents/{document_id}/versions api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/export api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/settings api path removed without deprecation
+GET /v1/rfcs/spaces/{space_id}/timeline api path removed without deprecation
+PATCH /v1/rfcs/spaces/{space_id} api path removed without deprecation
+PATCH /v1/rfcs/spaces/{space_id}/diagrams/{diagram_id} api path removed without deprecation
+POST /v1/rfcs/spaces api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/diagrams api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/diagrams/{diagram_id}/versions api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents/{document_id}/access api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents/{document_id}/comments api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents/{document_id}/comments/{comment_id}/resolve api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents/{document_id}/review api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents/{document_id}/reviews api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents/{document_id}/status api path removed without deprecation
+POST /v1/rfcs/spaces/{space_id}/documents/{document_id}/versions api path removed without deprecation
+PUT /v1/rfcs/spaces/{space_id}/settings api path removed without deprecation
+# 2026-10-11: the platform added the error code `upgrade_required` (426), answered to a
+# client older than the minimum GET /v1/clients/versions names. Every runtime knows it now and
+# keeps a code it does not know, so a client written before it reads it as an unknown code.
+DELETE /v1/accounts/orgs/{org_id}/agents/{agent_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+DELETE /v1/accounts/orgs/{org_id}/connections/{connection_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+DELETE /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants/{grant_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+DELETE /v1/accounts/orgs/{org_id}/domains/{domain} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+DELETE /v1/accounts/orgs/{org_id}/monitors/{monitor_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+DELETE /v1/trails/recordings/{recording_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+DELETE /v1/webhooks/endpoints/{endpoint_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+DELETE /v1/webhooks/inboxes/{inbox_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/me added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/agents added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/agents/{agent_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/audit added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/connections added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/connections/{connection_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/connections/connect/{session_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/connections/history added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/domains added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/domains/{domain} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/entitlements added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/monitors added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/series added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/summary added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/requests added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/units added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/units/series added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/orgs/{org_id}/usage added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/accounts/units/categories added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/connections/kinds added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/connections/tools added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/connectors added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/connectors/{connector_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/events/events added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/events/notifications added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/events/stats added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/events/types added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/extensions added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/extensions/{publisher} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/extensions/{publisher}/{name} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/extensions/{publisher}/{name}/versions added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/me added the new `upgrade_required` enum value to the `code` response property for the response status `401`
+GET /v1/radar/digests added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/radar/digests/{id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/radar/items added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/trails/recordings added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/trails/recordings/{recording_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/endpoints added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/endpoints/{endpoint_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/endpoints/{endpoint_id}/deliveries added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/inboxes added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/inboxes/{inbox_id}/requests added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+GET /v1/webhooks/stats added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+PATCH /v1/accounts/orgs/{org_id}/connections/{connection_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+PATCH /v1/accounts/orgs/{org_id}/monitors/{monitor_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+PATCH /v1/webhooks/endpoints/{endpoint_id} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/checks added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/agents/{agent_id}/revoke added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/agents/enrollments added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/connections added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/actions/{action} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/monitors added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/connections/{connection_id}/test added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/connections/connect added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/connections/connect/complete added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/domains added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/domains/{domain}/check added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/accounts/orgs/{org_id}/domains/{domain}/confirm added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/connections/tools/{name} added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/trails/recordings added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/deliveries/{delivery_id}/retry added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/endpoints added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/endpoints/{endpoint_id}/recover added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/endpoints/{endpoint_id}/rotate added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/endpoints/{endpoint_id}/test added the new `upgrade_required` enum value to the `code` response property for the response status `default`
+POST /v1/webhooks/inboxes added the new `upgrade_required` enum value to the `code` response property for the response status `default`
