@@ -1541,20 +1541,10 @@ mod tests {
             std::fs::read_to_string(f).unwrap().trim().parse().unwrap()
         };
         for p in [read(&pid), read(&kid)] {
-            let mut dead = false;
-            for _ in 0..100 {
-                let alive = std::process::Command::new("kill")
-                    .args(["-0", &p.to_string()])
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .is_ok_and(|s| s.success());
-                if !alive {
-                    dead = true;
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            assert!(dead, "process {p} survived the revocation");
+            assert!(
+                crate::runner::exec::process_gone(p).await,
+                "process {p} survived the revocation"
+            );
         }
     }
 

@@ -350,10 +350,35 @@ impl Drop for GroupGuard {
     }
 }
 
-/// `kill -KILL -- -<pgid>`. The crate forbids `unsafe`, so the shell's `kill` does it.
+/// Test helper: whether process `pid` is gone, waiting up to 5 s. A zombie counts as gone: it is
+/// dead and only waits for its parent (or an init that does not reap) to collect it.
+#[cfg(all(test, unix))]
+pub(crate) async fn process_gone(pid: i32) -> bool {
+    for _ in 0..100 {
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        let zombie = std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|t| {
+            t.rsplit(')')
+                .next()
+                .is_some_and(|r| r.trim_start().starts_with('Z'))
+        });
+        if !alive || zombie {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    false
+}
+
+/// `kill -KILL -<pgid>`. The crate forbids `unsafe`, so the shell's `kill` does it. No `--`:
+/// dash (Debian and Ubuntu's `/bin/sh`) reads it as a pid and refuses, and the error goes to
+/// /dev/null, so the group would survive without a word.
 fn kill_group(pgid: u32) {
     let _ = std::process::Command::new("/bin/sh")
-        .args(["-c", "kill -KILL -- \"-$0\" 2>/dev/null", &pgid.to_string()])
+        .args(["-c", "kill -KILL \"-$0\" 2>/dev/null", &pgid.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -386,6 +411,7 @@ impl Exec for ClaudeExec {
 #[cfg(all(test, unix))]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
+    use super::process_gone as gone;
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
 
@@ -665,21 +691,5 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         let _ = task.await;
         assert!(gone(p).await, "claude {p} is still running");
         assert!(gone(k).await, "its child {k} is still running");
-    }
-
-    /// Whether process `pid` is gone, waiting up to 5 s.
-    async fn gone(pid: i32) -> bool {
-        for _ in 0..100 {
-            let alive = std::process::Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success());
-            if !alive {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        false
     }
 }
