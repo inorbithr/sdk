@@ -360,11 +360,22 @@ pub(crate) async fn process_gone(pid: i32) -> bool {
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|s| s.success());
-        let zombie = std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|t| {
-            t.rsplit(')')
+        // /proc where it exists (Linux, any ps); `ps` elsewhere (macOS has no /proc).
+        let zombie = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(t) => t
+                .rsplit(')')
                 .next()
-                .is_some_and(|r| r.trim_start().starts_with('Z'))
-        });
+                .is_some_and(|r| r.trim_start().starts_with('Z')),
+            Err(_) => std::process::Command::new("ps")
+                .args(["-o", "stat=", "-p", &pid.to_string()])
+                .stderr(Stdio::null())
+                .output()
+                .is_ok_and(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .trim_start()
+                        .starts_with('Z')
+                }),
+        };
         if !alive || zombie {
             return true;
         }

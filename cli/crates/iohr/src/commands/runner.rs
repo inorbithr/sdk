@@ -169,10 +169,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 signer: Some(signer),
             };
             let all = svc.list_runners(true).await?;
-            let me: RunnerInfo = pick_runner(all, runner.as_deref(), name.as_deref(), &local_key)
+            let me: RunnerInfo = pick_runner(all, runner.as_deref(), name.as_deref(), &local_key)?
                 .ok_or_else(|| {
-                Error::Failed("no such runner of yours: run `iohr runner register` first".into())
-            })?;
+                    Error::Failed(
+                        "no such runner of yours: run `iohr runner register` first".into(),
+                    )
+                })?;
             let mut exec = local(g)?;
             exec.runner_id.clone_from(&me.runner_id);
             exec.user.clone_from(&me.user);
@@ -316,21 +318,34 @@ fn pick_runner(
     id: Option<&str>,
     name: Option<&str>,
     local_key: &str,
-) -> Option<RunnerInfo> {
+) -> Result<Option<RunnerInfo>, Error> {
     if let Some(id) = id {
-        return all.into_iter().find(|r| r.runner_id == id);
+        return Ok(all.into_iter().find(|r| r.runner_id == id));
     }
     if let Some(name) = name {
-        return all.into_iter().find(|r| r.name == name);
+        return Ok(all.into_iter().find(|r| r.name == name));
     }
-    if let Some(i) = all
+    let mut by_key = all
         .iter()
-        .position(|r| !r.public_key.is_empty() && r.public_key == local_key)
-    {
-        return all.into_iter().nth(i);
+        .enumerate()
+        .filter(|(_, r)| !r.public_key.is_empty() && r.public_key == local_key)
+        .map(|(i, _)| i);
+    if let Some(first) = by_key.next() {
+        if by_key.next().is_some() {
+            let ids: Vec<&str> = all
+                .iter()
+                .filter(|r| !r.public_key.is_empty() && r.public_key == local_key)
+                .map(|r| r.runner_id.as_str())
+                .collect();
+            return Err(Error::Failed(format!(
+                "this machine's key matches more than one runner ({}): pass --runner <id> or --name",
+                ids.join(", ")
+            )));
+        }
+        return Ok(all.into_iter().nth(first));
     }
     let host = host_name();
-    all.into_iter().find(|r| r.name == host)
+    Ok(all.into_iter().find(|r| r.name == host))
 }
 
 fn host_name() -> String {
@@ -380,7 +395,10 @@ mod tests {
     fn a_custom_name_is_found_by_the_key_this_machine_holds() {
         let all = vec![r("a", "other", "KEY_B"), r("b", "my-custom-name", "KEY_A")];
         assert_eq!(
-            pick_runner(all, None, None, "KEY_A").unwrap().runner_id,
+            pick_runner(all, None, None, "KEY_A")
+                .unwrap()
+                .unwrap()
+                .runner_id,
             "b"
         );
     }
@@ -391,11 +409,13 @@ mod tests {
         assert_eq!(
             pick_runner(all(), Some("a"), None, "KEY_A")
                 .unwrap()
+                .unwrap()
                 .runner_id,
             "a"
         );
         assert_eq!(
             pick_runner(all(), None, Some("one"), "KEY_A")
+                .unwrap()
                 .unwrap()
                 .runner_id,
             "a"
@@ -406,9 +426,32 @@ mod tests {
     fn falls_back_to_the_hostname_without_a_key_match() {
         let all = vec![r("a", "x", "KEY_B"), r("h", &host_name(), "")];
         assert_eq!(
-            pick_runner(all, None, None, "KEY_A").unwrap().runner_id,
+            pick_runner(all, None, None, "KEY_A")
+                .unwrap()
+                .unwrap()
+                .runner_id,
             "h"
         );
-        assert!(pick_runner(vec![r("a", "x", "")], None, None, "").is_none());
+        assert!(
+            pick_runner(vec![r("a", "x", "")], None, None, "")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_key_held_by_more_than_one_runner_is_an_error_not_a_pick() {
+        let all = vec![r("a", "one", "KEY_A"), r("b", "two", "KEY_A")];
+        let e = pick_runner(all.clone(), None, None, "KEY_A").unwrap_err();
+        let msg = format!("{e}");
+        assert!(msg.contains("more than one runner") && msg.contains('a') && msg.contains('b'));
+        // An explicit id still resolves it.
+        assert_eq!(
+            pick_runner(all, Some("b"), None, "KEY_A")
+                .unwrap()
+                .unwrap()
+                .runner_id,
+            "b"
+        );
     }
 }
