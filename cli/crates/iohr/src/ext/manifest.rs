@@ -128,6 +128,7 @@ pub const RESERVED: &[&str] = &[
     "login",
     "logout",
     "openapi",
+    "packages",
     "profile",
     "project",
     // `iohr rfc` until core ADR 0056 (2026-10-08): kept from extensions so a script that

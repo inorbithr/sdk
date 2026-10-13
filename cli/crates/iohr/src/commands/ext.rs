@@ -219,6 +219,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
         }
         ExtCommand::Show { extension } => ext_catalogue::show(g, env, &extension, out).await,
         ExtCommand::List => list(&store, out),
+        ExtCommand::Packages => crate::commands::ext_packages::packages(g, env, &store, out).await,
         ExtCommand::Upgrade { name, lock, yes } => {
             upgrade(g, env, &store, name, lock.as_deref(), yes, out).await
         }
