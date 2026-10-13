@@ -723,8 +723,9 @@ fn action_of(v: &serde_json::Value) -> Action {
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     #![allow(
+        unknown_lints,
         clippy::unused_async_trait_impl,
-        reason = "a fake with the real trait's shape"
+        reason = "a fake with the real trait's shape; the lint is newer than the MSRV toolchain's clippy"
     )]
     use super::*;
     use crate::runner::service::{Challenge, ProviderState, Registration, ServiceError};
