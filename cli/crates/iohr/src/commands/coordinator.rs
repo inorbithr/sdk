@@ -143,13 +143,31 @@ fn job_body(a: &JobArgs<'_>) -> Result<Value, Error> {
     Ok(Value::Object(b))
 }
 
+/// The first line, without control characters (a brief is other people's text and must
+/// not move the cursor or recolour the terminal), cut to 70 characters.
 fn headline(brief: &str) -> String {
-    let line = brief.lines().next().unwrap_or_default();
+    let clean: String = brief
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .collect();
+    let line = clean.lines().next().unwrap_or_default();
     if line.chars().count() > 70 {
         let cut: String = line.chars().take(69).collect();
         format!("{cut}...")
     } else {
         line.to_owned()
+    }
+}
+
+/// The list under `key`; an answer without it is an error, not an empty list. (An empty
+/// list is `[]` or, in proto3 JSON, an omitted field alongside the other fields.)
+fn items(v: &Value, key: &str) -> Result<Vec<Value>, Error> {
+    match v.get(key) {
+        Some(Value::Array(a)) => Ok(a.clone()),
+        None if v.is_object() => Ok(Vec::new()),
+        _ => Err(Error::Usage(format!(
+            "the API answered with no `{key}` list"
+        ))),
     }
 }
 
@@ -173,11 +191,7 @@ async fn list_jobs(
         .get("/v1/coordinator/jobs", &q)
         .await
         .map_err(scoped)?;
-    let jobs = v
-        .get("jobs")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let jobs = items(&v, "jobs")?;
     if out.json {
         Out::print_json(&v);
         return Ok(());
@@ -213,7 +227,11 @@ async fn create_job(s: &Session, body: &Value, out: Out) -> Result<(), Error> {
         Out::print_json(&v);
         return Ok(());
     }
-    let j = v.get("job").cloned().unwrap_or(Value::Null);
+    let j = v
+        .get("job")
+        .filter(|j| j.get("job_id").is_some())
+        .cloned()
+        .ok_or_else(|| Error::Usage("the API answered without a job".into()))?;
     Out::pairs(&[
         ("job", str_of(&j, "job_id").to_owned()),
         ("state", str_of(&j, "state").to_owned()),
@@ -243,11 +261,7 @@ async fn list_asks(
         .get("/v1/coordinator/asks", &q)
         .await
         .map_err(scoped)?;
-    let asks = v
-        .get("asks")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let asks = items(&v, "asks")?;
     if out.json {
         Out::print_json(&v);
         return Ok(());
@@ -316,6 +330,18 @@ mod tests {
         let mut a = args("x");
         a.model_override_reason = Some("why".into());
         assert!(job_body(&a).is_err());
+    }
+
+    #[test]
+    fn headline_drops_control_characters() {
+        assert_eq!(headline("a\u{1b}[31mred\nsecond"), "a[31mred");
+    }
+
+    #[test]
+    fn items_rejects_a_wrong_shape() {
+        assert!(items(&json!({"jobs": "x"}), "jobs").is_err());
+        assert!(items(&json!([]), "jobs").is_err());
+        assert_eq!(items(&json!({}), "jobs").unwrap(), Vec::<Value>::new());
     }
 
     #[test]
