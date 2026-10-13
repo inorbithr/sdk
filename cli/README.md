@@ -361,6 +361,28 @@ plus `iohr config set ext.trusted_keys mirror.pub` if the mirror re-signs. A mir
 needs a login reads `IOHR_EXT_REGISTRY_AUTH=user:password` from the environment. How to
 check an extension by hand: [verifying extensions](../docs/security/verifying-extensions.md).
 
+## A project of your own
+
+`iohr project init NAME` sets up a project you build yourself (PRD 0088) with one command,
+and tells you what you now have. The local half is real: `~/development/NAME` from a template
+(`--template demo`: a private macOS service that heartbeats and serves a tiny panel, with the
+manifest of `iohr ext init`), a git repository with one commit, the project's own state under
+`~/.inorbit/projects/NAME/` (never in the repository), a Keychain slot reserved by name, and a
+smoke test that runs the project once and reads its heartbeat back, with no token channel, so
+its token ask is refused: the proof the channel is its only credential.
+
+```sh
+iohr project init demo
+iohr project init my-shop --template demo --dir ~/work/my-shop --json
+```
+
+The steps that need InOrbit (the project as a Decisions space, its private listing, its own
+scopes and tokens, a memory namespace, monitors and notifications) are reported as `not yet`,
+each with the API it waits on; nothing is skipped in silence, and a step that needs your or an
+admin's say becomes an ask. Every step is re-runnable, and nothing is overwritten. Then
+`iohr ext lint --preview`, `iohr ext dev` and `iohr ext dev --test` work in the folder as for
+any extension, and InOrbit Desktop's Code opens it after asking you.
+
 ## Where things are kept
 
 - Profiles: `config.toml` in the platform's config directory (`~/.config/iohr` on

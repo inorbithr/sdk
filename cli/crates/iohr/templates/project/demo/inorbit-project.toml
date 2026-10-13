@@ -1,0 +1,14 @@
+# The project record InOrbit Desktop reads (Projects, the Code page's switcher). Made by
+# "New project" in the app or `iohr project init`. Nothing sensitive goes here, ever.
+version = 1
+name = "@@NAME@@"
+id = "@@ID@@"
+template = "demo"
+template_version = 1
+kind = "macos-service"           # macos-service | macos-app | ui-panel (PRD "Projects you build yourself")
+created_at = "@@CREATED_AT@@"
+# Filled by `iohr project init` when the cloud steps exist: the Decisions space, the private
+# listing, the memory namespace. Empty means "not yet".
+space_id = ""
+listing = ""
+memory_namespace = ""
