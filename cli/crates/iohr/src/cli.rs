@@ -90,6 +90,9 @@ pub enum Command {
     /// Domains an account controls, proved with one DNS record.
     #[command(subcommand)]
     Domains(DomainsCommand),
+    /// The coordinator's jobs and queued asks: list and file work (RFC 0120, RFC 0138).
+    #[command(subcommand)]
+    Coordinator(CoordinatorCommand),
     /// The apps a connection can be made from: incident tools, chat, observability, AI models
     /// (RFC 0044).
     #[command(subcommand)]
@@ -1229,4 +1232,89 @@ pub struct BrowserInstall {
     /// Print the page's address instead of opening it (for a browser on another machine).
     #[arg(long)]
     pub print: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorCommand {
+    /// The coordinator's jobs.
+    #[command(subcommand)]
+    Jobs(CoordinatorJobsCommand),
+    /// The coordinator's queued asks.
+    #[command(subcommand)]
+    Asks(CoordinatorAsksCommand),
+}
+
+#[derive(Debug, Subcommand)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "parsed once per run; a box would only add noise"
+)]
+pub enum CoordinatorJobsCommand {
+    /// List jobs.
+    List {
+        /// Only this state: a stage (intake ... done, stopped) or held, retry, awaiting.
+        #[arg(long)]
+        state: Option<String>,
+        /// Only your own jobs.
+        #[arg(long)]
+        mine: bool,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+    },
+    /// File a job. The brief is the text to work on, from --brief or `-` for standard input.
+    Create {
+        /// The kind: question, watch, docs, ui, fix, review, chore, mentor, api or design.
+        #[arg(long)]
+        kind: String,
+        /// The brief, or `-` to read it from standard input.
+        #[arg(long)]
+        brief: String,
+        /// The PRD, RFC or ADR it implements.
+        #[arg(long)]
+        document: Option<String>,
+        /// The repository, such as inorbithr/core.
+        #[arg(long)]
+        repository: Option<String>,
+        /// The model, when not the kind's default.
+        #[arg(long)]
+        model: Option<String>,
+        /// Why the model differs from the default (needed with --model).
+        #[arg(long)]
+        model_override_reason: Option<String>,
+        /// A tag; repeat or comma-separate.
+        #[arg(long = "tag", value_delimiter = ',')]
+        tags: Vec<String>,
+        /// Priority, higher first.
+        #[arg(long)]
+        priority: Option<u32>,
+        /// The job this one replaces.
+        #[arg(long)]
+        supersedes: Option<String>,
+        /// Security-relevant: done only with a compliance pull request.
+        #[arg(long)]
+        security: bool,
+        /// The inorbithr/compliance pull request, when it exists.
+        #[arg(long)]
+        compliance_pr: Option<String>,
+        /// The queued ask this job works on.
+        #[arg(long)]
+        ask: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorAsksCommand {
+    /// List queued asks.
+    List {
+        /// queued, building, stuck, done, closed, withdrawn or open.
+        #[arg(long)]
+        state: Option<String>,
+        /// Only asks from this source (cli, desktop, mcp, ...).
+        #[arg(long)]
+        source: Option<String>,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+    },
 }

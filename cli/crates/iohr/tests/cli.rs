@@ -3004,3 +3004,96 @@ async fn decisions_kinds_name_prds_and_adrs() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.starts_with("RFC ") && out.contains("0065"), "{out}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_jobs_create_list_and_asks_list() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    let job = serde_json::json!({
+        "job_id": "job_1", "state": "intake", "kind": "chore", "model": "sonnet",
+        "brief": "Fix the thing\nmore", "created_at": "2026-10-13T10:00:00Z"
+    });
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/jobs"))
+        .and(body_json(serde_json::json!({
+            "kind": "chore", "brief": "Fix the thing", "tags": ["a", "b"],
+            "priority": 2, "queued_ask_id": "ask_9"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"job": job})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/jobs"))
+        .and(query_param("state", "intake"))
+        .and(query_param("mine", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"jobs": [job]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/asks"))
+        .and(query_param("state", "open"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"asks": [{
+                "id": "ask_9", "state": "queued", "source": "cli", "title": "An ask",
+                "created_at": "2026-10-13T09:00:00Z"
+            }]})),
+        )
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "jobs",
+            "create",
+            "--kind",
+            "chore",
+            "--brief",
+            "-",
+            "--tag",
+            "a,b",
+            "--priority",
+            "2",
+            "--ask",
+            "ask_9",
+        ],
+    );
+    // stdin is null for `with_token`, so the empty brief is refused before any call.
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    let o = r.with_token_and_stdin(
+        &t,
+        "Fix the thing\n",
+        &[
+            "coordinator",
+            "jobs",
+            "create",
+            "--kind",
+            "chore",
+            "--brief",
+            "-",
+            "--tag",
+            "a,b",
+            "--priority",
+            "2",
+            "--ask",
+            "ask_9",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("job_1"));
+    let o = r.with_token(
+        &t,
+        &["coordinator", "jobs", "list", "--state", "intake", "--mine"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("Fix the thing"));
+    let o = r.with_token(&t, &["coordinator", "asks", "list", "--state", "open"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("An ask"));
+}

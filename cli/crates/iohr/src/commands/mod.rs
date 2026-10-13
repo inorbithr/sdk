@@ -7,6 +7,7 @@ mod call;
 mod config;
 mod connections;
 mod connectors;
+mod coordinator;
 mod decisions;
 mod domains;
 mod ext;
@@ -60,6 +61,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sdk(SdkCommand::Config(args)) => sdk::config(g, &args),
         Command::Sdk(SdkCommand::Add(args)) => sdk_add::add(&args, out),
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
+        Command::Coordinator(cmd) => coordinator::run(g, &env, cmd, out).await,
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
