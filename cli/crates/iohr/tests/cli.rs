@@ -3097,3 +3097,71 @@ async fn coordinator_jobs_create_list_and_asks_list() {
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(String::from_utf8_lossy(&o.stdout).contains("An ask"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_account_flag_reaches_the_api() {
+    let team = "2779ba0b-df69-4cfc-89fe-101441554413";
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    let job = serde_json::json!({
+        "job_id": "job_2", "state": "intake", "kind": "chore", "model": "sonnet",
+        "brief": "Team work", "created_at": "2026-10-13T10:00:00Z"
+    });
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/jobs"))
+        .and(body_json(serde_json::json!({
+            "kind": "chore", "brief": "Team work", "account_id": team
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"job": job})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/jobs"))
+        .and(query_param("account_id", team))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"jobs": [job]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/asks"))
+        .and(query_param("account_id", team))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"asks": [{
+                "id": "ask_t", "state": "queued", "source": "import", "title": "A team ask",
+                "created_at": "2026-10-13T09:00:00Z"
+            }]})),
+        )
+        .mount(&server)
+        .await;
+
+    let o = r.with_token_and_stdin(
+        &t,
+        "Team work\n",
+        &[
+            "coordinator",
+            "jobs",
+            "create",
+            "--kind",
+            "chore",
+            "--brief",
+            "-",
+            "--account",
+            team,
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("job_2"));
+    let o = r.with_token(&t, &["coordinator", "jobs", "list", "--account", team]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("Team work"));
+    let o = r.with_token(&t, &["coordinator", "asks", "list", "--account", team]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("A team ask"));
+    // Without the flag no call matches the account mocks: the request carries none.
+    let o = r.with_token(&t, &["coordinator", "asks", "list"]);
+    assert_ne!(code(&o), 0, "{}", text(&o));
+}

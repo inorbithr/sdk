@@ -1261,6 +1261,9 @@ pub enum CoordinatorJobsCommand {
         /// At most this many.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
     },
     /// File a job. The brief is the text to work on, from --brief or `-` for standard input.
     Create {
@@ -1300,6 +1303,9 @@ pub enum CoordinatorJobsCommand {
         /// The queued ask this job works on.
         #[arg(long)]
         ask: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
     },
 }
 
@@ -1316,5 +1322,8 @@ pub enum CoordinatorAsksCommand {
         /// At most this many.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
     },
 }
