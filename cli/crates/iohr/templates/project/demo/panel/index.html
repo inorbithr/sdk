@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@@NAME@@ panel</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1a1a1a; --muted: #6b6b6b; --ok: #1d8a4e; --bg: #fafafa; --card: #fff; --line: #e4e4e4; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #ececec; --muted: #9a9a9a; --ok: #4cc38a; --bg: #161616; --card: #1f1f1f; --line: #2c2c2c; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; max-width: 480px; }
+  h1 { font-size: 15px; margin: 0 0 6px; }
+  .muted { color: var(--muted); }
+  .ok { color: var(--ok); font-weight: 600; }
+  dl { display: grid; grid-template-columns: 9em 1fr; gap: 4px 12px; margin: 10px 0 0; }
+  dt { color: var(--muted); } dd { margin: 0; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>@@NAME@@ <span class="muted">· your own project, running on this Mac</span></h1>
+  <p id="state" class="muted">reading the heartbeat…</p>
+  <dl id="facts"></dl>
+</div>
+<script>
+  const el = (id) => document.getElementById(id);
+  async function tick() {
+    try {
+      const b = await (await fetch("/api/heartbeat")).json();
+      if (!b.at) throw new Error("no heartbeat yet");
+      el("state").innerHTML = '<span class="ok">alive</span> · heartbeat ' + b.beats + ' at ' + b.at;
+      el("facts").innerHTML = [["id", b.id], ["version", b.version], ["token", b.token], ["dev run", b.dev ? "yes" : "no"]]
+        .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+    } catch (e) {
+      el("state").textContent = "waiting for the first heartbeat (" + e.message + ")";
+    }
+  }
+  tick();
+  setInterval(tick, 5000);
+</script>
+</body>
+</html>
