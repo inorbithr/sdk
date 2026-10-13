@@ -137,10 +137,10 @@ const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A token in the cache: when it was fetched and how long it lives.
 #[derive(Clone)]
-struct Cached {
-    access: Secret<String>,
-    issued: Instant,
-    lifetime: Option<Duration>,
+pub(crate) struct Cached {
+    pub(crate) access: Secret<String>,
+    pub(crate) issued: Instant,
+    pub(crate) lifetime: Option<Duration>,
 }
 
 impl Cached {
@@ -188,7 +188,7 @@ struct CacheState {
 /// lifetime left, one refresh at a time (a caller that gives up does not cancel it for
 /// the others), and a still-valid token kept when a refresh fails.
 #[derive(Default)]
-struct Cache {
+pub(crate) struct Cache {
     state: Mutex<CacheState>,
     gate: tokio::sync::Mutex<()>,
     logger: OnceLock<Logger>,
@@ -223,14 +223,14 @@ impl Cache {
         s.pause_until = None;
     }
 
-    fn invalidate(&self) {
+    pub(crate) fn invalidate(&self) {
         let mut s = self.lock();
         s.token = None;
         s.pause_until = None;
     }
 
     /// A valid token: the cached one, or one `fetch` produces.
-    async fn get<F>(self: &Arc<Self>, fetch: F) -> Result<Token, AuthError>
+    pub(crate) async fn get<F>(self: &Arc<Self>, fetch: F) -> Result<Token, AuthError>
     where
         F: Future<Output = Result<Cached, AuthError>> + Send + 'static,
     {

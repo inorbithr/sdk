@@ -225,6 +225,8 @@ def test_backoff_stays_under_its_ceiling() -> None:
 def test_unprocessable_is_known_and_an_unknown_code_is_kept() -> None:
     assert CODES["unprocessable"] == 422
     assert code_for_status(422) == "unprocessable"
+    assert CODES["upgrade_required"] == 426
+    assert code_for_status(426) == "upgrade_required"
     assert "brand_new_code" not in CODES
 
 

@@ -1,0 +1,16 @@
+[package]
+name = "@@NAME@@"
+version = "0.1.0"
+edition = "2024"
+description = "@@ID@@: an InOrbit extension."
+publish = false
+
+[dependencies]
+# The InOrbit SDK: its ExtSocketToken asks iohr's token channel, and Client::load uses
+# that channel alone when iohr runs the program.
+inorbithr = { version = "@@INORBITHR@@", default-features = false, features = ["rustls"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "time", "signal"] }
+
+[profile.release]
+strip = true

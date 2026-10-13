@@ -171,10 +171,8 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let all = svc.list_runners(true).await?;
             let me: RunnerInfo = pick_runner(all, runner.as_deref(), name.as_deref(), &local_key)
                 .ok_or_else(|| {
-                    Error::Failed(
-                        "no such runner of yours: run `iohr runner register` first".into(),
-                    )
-                })?;
+                Error::Failed("no such runner of yours: run `iohr runner register` first".into())
+            })?;
             let mut exec = local(g)?;
             exec.runner_id.clone_from(&me.runner_id);
             exec.user.clone_from(&me.user);
@@ -381,20 +379,36 @@ mod tests {
     #[test]
     fn a_custom_name_is_found_by_the_key_this_machine_holds() {
         let all = vec![r("a", "other", "KEY_B"), r("b", "my-custom-name", "KEY_A")];
-        assert_eq!(pick_runner(all, None, None, "KEY_A").unwrap().runner_id, "b");
+        assert_eq!(
+            pick_runner(all, None, None, "KEY_A").unwrap().runner_id,
+            "b"
+        );
     }
 
     #[test]
     fn explicit_id_and_name_win_over_the_key() {
         let all = || vec![r("a", "one", "KEY_B"), r("b", "two", "KEY_A")];
-        assert_eq!(pick_runner(all(), Some("a"), None, "KEY_A").unwrap().runner_id, "a");
-        assert_eq!(pick_runner(all(), None, Some("one"), "KEY_A").unwrap().runner_id, "a");
+        assert_eq!(
+            pick_runner(all(), Some("a"), None, "KEY_A")
+                .unwrap()
+                .runner_id,
+            "a"
+        );
+        assert_eq!(
+            pick_runner(all(), None, Some("one"), "KEY_A")
+                .unwrap()
+                .runner_id,
+            "a"
+        );
     }
 
     #[test]
     fn falls_back_to_the_hostname_without_a_key_match() {
         let all = vec![r("a", "x", "KEY_B"), r("h", &host_name(), "")];
-        assert_eq!(pick_runner(all, None, None, "KEY_A").unwrap().runner_id, "h");
+        assert_eq!(
+            pick_runner(all, None, None, "KEY_A").unwrap().runner_id,
+            "h"
+        );
         assert!(pick_runner(vec![r("a", "x", "")], None, None, "").is_none());
     }
 }

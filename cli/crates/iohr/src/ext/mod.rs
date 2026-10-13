@@ -2,8 +2,11 @@
 //! pins in `iohr-ext.lock` and runs, handing them short-lived tokens over a private
 //! channel and never its refresh token (ADR 0012, platform RFC 0028).
 
+pub(crate) mod dev;
+pub mod init;
 pub mod install;
 pub mod layer;
+pub mod lint;
 pub mod lock;
 pub mod manifest;
 pub mod oci;
