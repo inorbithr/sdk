@@ -9,6 +9,7 @@ pub mod layer;
 pub mod lint;
 pub mod lock;
 pub mod manifest;
+pub(crate) mod narrow;
 pub mod oci;
 pub(crate) mod run;
 pub mod socket;

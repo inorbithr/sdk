@@ -275,6 +275,14 @@ iohr ext install inorbit/agent           # or inorbit/agent@0.1.0, or just: agen
 iohr agent status                        # runs the installed program
 ```
 
+An extension gets tokens over a private channel, for the scopes its manifest declares and
+no others. Signed in as a person, each token is narrowed to the scopes asked for: `iohr`
+makes an account key with them, exchanges it for a 15-minute token and revokes the key at
+once (an admin or owner of the account is needed; anyone else is refused with that
+reason). A key or token profile hands out its own token when it holds the scopes, and is
+refused when it does not. Minting is bounded at 30 s, then the program gets a `503` that
+says why (ADR 0012, point 6).
+
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A
 private listing the account may not see is "not found", like one that does not exist.

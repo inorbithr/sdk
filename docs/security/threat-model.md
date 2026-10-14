@@ -160,11 +160,13 @@ Boundary: `iohr` to the package manager it runs in the person's project (SR-31).
   configuration by environment; pinning (SR-06) narrows it.
 - **Memory in garbage-collected languages.** Go, TypeScript and Python cannot reliably
   wipe secrets (SR-11).
-- **Extension tokens are not narrowed yet.** The channel hands an extension the
-  profile's own 15-minute access token when it holds every scope asked for; the
-  platform cannot mint a narrower token from a person's session until token exchange
-  exists. The scope check limits what an extension may ask for, not what the token can
-  do (ADR 0012, point 6).
+- **Extension tokens for a person are narrowed by a short-lived key.** The platform
+  cannot mint a narrower token from a person's session until token exchange exists, so
+  `iohr` creates an account key with exactly the declared scopes asked for, exchanges it
+  and revokes it at once. The key exists for a moment and its secret only in memory; a
+  crash in that moment leaves a key whose secret is gone, visible in the account's keys
+  as `iohr-ext-<time>`. A key or token profile hands out its own token when it holds the
+  scopes (ADR 0012, point 6).
 - **The embedded Sigstore root ages.** A Sigstore key rotation makes installs fail
   closed until an `iohr` release carries the new root.
 - **crates.io provenance.** crates.io has no native signatures yet; we attest crates

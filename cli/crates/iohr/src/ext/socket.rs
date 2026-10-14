@@ -27,6 +27,10 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 const MAX_HEAD: usize = 8 * 1024;
 const MAX_BODY: usize = 16 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long minting one token may take (signing in or refreshing, and narrowing it).
+/// Past it the extension gets a 503 that says so, well inside the SDK's own wait
+/// (`ExtSocketToken` waits for this and the read together, then some).
+const MINT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A token handed to an extension.
 #[derive(Debug)]
@@ -229,7 +233,13 @@ async fn answer<M: Minter>(head: &Head, body: &[u8], ctx: &Ctx<M>) -> Vec<u8> {
             );
         }
     };
-    let outcome = ctx.minter.mint(scopes.clone()).await;
+    let outcome = match tokio::time::timeout(MINT_TIMEOUT, ctx.minter.mint(scopes.clone())).await {
+        Ok(o) => o,
+        Err(_) => Err(MintError::Unavailable(format!(
+            "no token within {} s: signing in, refreshing or narrowing it took too long",
+            MINT_TIMEOUT.as_secs()
+        ))),
+    };
     if ctx.verbose {
         crate::context::note(&format!(
             "the extension asked for a token with {}: {}",
@@ -378,6 +388,40 @@ mod tests {
             "POST /token HTTP/1.1\r\nhost: iohr\r\ncontent-length: {}\r\n\r\n{body}",
             body.len()
         )
+    }
+
+    /// A minter that never answers, as a sign-in that hangs does.
+    struct Stuck;
+
+    impl Minter for Stuck {
+        async fn mint(&self, _scopes: Vec<String>) -> Result<Minted, MintError> {
+            std::future::pending().await
+        }
+    }
+
+    /// The channel answers a refusal that names the reason when minting hangs, instead of
+    /// leaving the extension to give up on its own (it waited 10 s while the channel
+    /// answered at 14 s).
+    #[tokio::test(start_paused = true)]
+    async fn a_stuck_mint_is_answered_with_a_reason() {
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        let ctx = Arc::new(Ctx {
+            minter: Stuck,
+            allowed: vec!["identity:read".into()],
+            verbose: false,
+            log: false,
+        });
+        let task = tokio::spawn(handle(server, ctx));
+        client
+            .write_all(post(r#"{"scopes":["identity:read"]}"#).as_bytes())
+            .await
+            .unwrap();
+        let mut out = String::new();
+        client.read_to_string(&mut out).await.unwrap();
+        task.await.unwrap();
+        assert!(out.starts_with("HTTP/1.1 503"), "{out}");
+        assert!(out.contains("unavailable"), "{out}");
+        assert!(out.contains("no token within 30 s"), "{out}");
     }
 
     #[tokio::test]

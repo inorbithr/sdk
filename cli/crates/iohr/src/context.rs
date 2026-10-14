@@ -188,7 +188,11 @@ impl std::fmt::Debug for Api {
 }
 
 impl Api {
-    fn new(base: &str, credential: Arc<AnyCredential>, verbose: bool) -> Result<Self, Error> {
+    pub(crate) fn new(
+        base: &str,
+        credential: Arc<AnyCredential>,
+        verbose: bool,
+    ) -> Result<Self, Error> {
         let mut b = Client::builder()
             .base_url(base)
             .token_provider(Shared(credential))
