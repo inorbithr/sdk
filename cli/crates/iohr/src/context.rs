@@ -211,6 +211,14 @@ impl Api {
         Ok(Self { client })
     }
 
+    /// Another handle on the same client (it shares the connection pool and credential),
+    /// for work that outlives the call, such as a detached key revoke.
+    pub(crate) fn handle(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+        }
+    }
+
     /// The runtime's client, for the generated surface (`inorbithr::public`).
     pub(crate) fn client(&self) -> &Client {
         &self.client

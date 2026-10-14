@@ -128,7 +128,7 @@ What it does, in order:
    you learn what the extension really needs. Tokens come from your profile, as for an
    installed extension (`iohr login`, or `IOHR_TOKEN` in a pipeline). Signed in as a
    person, each token is narrowed to the scopes asked for through a short-lived account
-   key that is revoked at once, so you need to be an admin or owner of the account;
+   key that is revoked at once (also on a timeout or cancel once the key has an id), so you need to be an admin or owner of the account;
    a token profile must hold the scopes itself. The SDK waits up to 45 s for `iohr`, which
    answers with the reason when it cannot.
 3. Resolves each secret: `IOHR_EXT_SECRET_<NAME>` first (`github_token` reads

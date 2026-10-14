@@ -76,9 +76,18 @@ What a bank or a regulated company asks of such a mechanism:
    - the profile's own access token, only when it already holds every scope asked for
      (a key or a token profile), as before;
    - for a signed-in person, a 15-minute token narrowed to exactly those scopes: `iohr`
-     creates an account key with them, exchanges it, and revokes the key at once (also
-     when the exchange fails). The key's secret stays in memory for that exchange. It
-     needs an admin or owner of the account; anyone else is refused with that reason;
+     creates an account key with them, exchanges it, and revokes the key at once. The
+     key's secret stays in memory (zeroized when dropped) for that exchange. It needs an
+     admin or owner of the account (403 is refused with that reason; 401 says to sign in
+     again). Once the key create call has answered with an id, the key is revoked when
+     the exchange succeeds, when it fails, when it hits its own 15 s deadline (shorter
+     than the 30 s mint deadline), and when the call is dropped (the mint deadline, a
+     cancelled connection): a drop guard starts a detached revoke with a 10 s deadline.
+     Not revoked by `iohr`: a cancel during the create call itself, before the answer
+     with the id arrives (the server may have made the key; nothing client-side knows
+     its id), a revoke call that fails or times out (`iohr` prints the key id and
+     `iohr token revoke <id>` removes it), and the process being killed. Such keys show
+     in the account's keys as `iohr-ext-<time>`;
    - otherwise a refusal (`scope_not_held`).
 
    When the platform can exchange a token for a narrower one (RFC 8693), the channel
