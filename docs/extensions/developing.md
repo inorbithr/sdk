@@ -52,11 +52,12 @@ secrets = []                     # [{ name, ref, env }]: references, never value
 
 [runs]                           # as = service | timer | oneshot; every; restart; shutdown_grace
 [permissions]                    # scopes, privileges, network, exec
-[permissions.filesystem]         # read, write: $STATE and $CACHE are its own
+[permissions.filesystem]         # read, write: $STATE and $CACHE are its own; $REPOS the user's repository folders
 [permissions.data]               # leaves: what it may send up
 [resources]                      # cpu, memory, disk, nice
 [health]                         # heartbeat, heartbeat_every, stale_after, check
-[targets]                        # platforms, kinds (desktop, host, agent), needs
+[targets]                        # platforms, kinds (desktop, host, agent, cluster), needs
+[panel]                          # title, entry: a program that serves a panel its host shows
 [upgrade]                        # strategy, keep_previous, migrate, rollback
 [dev]                            # lang: how iohr ext dev runs the folder
 ```
@@ -87,8 +88,12 @@ It fails on:
 - a value that looks like a secret: a token, a key, a PEM block, a URL with a user name or
   password, a connection string with a password, a long random string (`secret_value`);
 - a `permissions.data.leaves` kind outside the list above (`data_class`);
-- a `targets.kinds` the kind cannot be installed on: a program on `desktop`, `host` or
-  `agent` (`target_kind`);
+- a `targets.kinds` the kind cannot be installed on: a program on `desktop`, `host`,
+  `agent` or `cluster`, an `agent-plugin` or a `web` on `cluster` (`target_kind`); a
+  `cluster` target runs the program artifact as a pod, so it needs `delivery = "program"`
+  and a `linux/...` platform when `targets.platforms` is given (`target_kind`);
+- a `[panel]` that is not a `title` (1 to 64 characters, one line) and an `entry` (a path
+  starting with one `/`, no `..`, no spaces), or on anything but a program (`panel`);
 - a name holding `tbd` (`tbd_name`);
 - anything else the artifact's config refuses, such as a version that is not semver
   (`invalid`).
@@ -194,3 +199,17 @@ and from a job that runs no repository code attaches a keyless cosign signature 
 provenance as OCI referrers. `iohr ext install` verifies both against
 `.github/workflows/release.yml` at a tag of your repository; installing another
 publisher's extension needs `ext.registry` set to its registry.
+
+## A panel, `$REPOS` and the `cluster` target (RFC 0143)
+
+A program can serve a panel: `[panel]` with `title` and `entry` (the path on its loopback
+address the host opens); both are required and no other key is read. `$REPOS` joins `$STATE`
+and `$CACHE` in `permissions.filesystem`: it stands for the repository folders the user
+added in the extension's settings in its host, kept in the host's per-extension config
+(`{"repos": ["/absolute/path"]}`), an empty list until one is added. `iohr ext dev` reads the
+same file at `~/.inorbit/ext-dev/<name>/config.json` and gives the program `REPOS` as the
+roots joined with `:`, empty when there is no file. `targets.kinds` may name `cluster` for a
+program: it is the same signed artifact run as a pod by a deployment. iohr itself installs
+on the desktop only; deploying to a cluster is the platform's, and it begins with
+`iohr ext verify ARTIFACT --bundle FILE --publisher-key PEM`
+([Verifying extensions](../security/verifying-extensions.md)).

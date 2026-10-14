@@ -309,6 +309,26 @@ fn plan(
 }
 
 /// Finds `program` on `path` (an absolute path is used as it is).
+/// `$REPOS` for a dev run (RFC 0143): the roots in the extension's host config
+/// (`config.json` beside its state, `{"repos": ["/abs/path"]}`), colon-joined, empty
+/// when there is no file.
+fn dev_repos(base: &Path) -> Result<String, Error> {
+    let file = base.join("config.json");
+    let bytes = match std::fs::read(&file) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(e) => {
+            return Err(Error::Failed(format!(
+                "cannot read {}: {e}",
+                file.display()
+            )));
+        }
+    };
+    let repos = crate::ext::manifest::repos_from_config(&bytes)
+        .map_err(|e| Error::Failed(format!("{}: {e}", file.display())))?;
+    Ok(repos.join(":"))
+}
+
 fn which(program: &Path, path: &OsStr) -> Option<PathBuf> {
     if program.components().count() > 1 {
         return Some(program.to_path_buf());
@@ -358,6 +378,7 @@ pub(crate) async fn dev(global: &Global, env: &Env, path: &Path, test: bool) -> 
     let cache = base.join("cache");
     private_dir(&state)?;
     private_dir(&cache)?;
+    let repos = dev_repos(&base)?;
     let secrets = secrets(&source).await?;
 
     let (path_var, dropped) = child_path(
@@ -427,6 +448,7 @@ pub(crate) async fn dev(global: &Global, env: &Env, path: &Path, test: bool) -> 
         c.env("PATH", &path_var)
             .env("STATE", &state)
             .env("CACHE", &cache)
+            .env("REPOS", &repos)
             .env("IOHR_EXT_DEV", "1");
         if lang == Lang::Python {
             let src = folder.join("src");
