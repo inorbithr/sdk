@@ -745,3 +745,7 @@ found=0
 [ -d examples/java ] && { found=1; (cd java && mvn -B -q -DskipTests -Dspotless.check.skip=true package dependency:build-classpath -Dmdep.includeScope=compile -Dmdep.outputFile=target/classpath.txt) && javac --release 17 -Xlint:all -Werror -d java/target/examples -cp "java/target/classes:$(cat java/target/classpath.txt)" $(find examples/java -name "*.java") || exit 1; }
 [ "$found" = 1 ] || echo "examples: none yet, skipping"
 """
+
+[tasks."env:drift"]
+description = "Compare the command line's environment list (cli/crates/iohr/environments.toml) with core's devops/ci/envs.toml, the one list (RFC 0148). Usage: mise run env:drift <path to core's envs.toml>"
+run = "python3 -I tools/env-drift.py"

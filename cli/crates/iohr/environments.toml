@@ -1,0 +1,17 @@
+# The environments the command line can target (RFC 0148, Keel K07). The names mirror
+# core's devops/ci/envs.toml, the one list; `mise run env:drift` compares the two.
+#
+# An environment with no address here uses the built-in production one. A `placeholder`
+# environment has no real address yet: the command line refuses to call it unless
+# IOHR_BASE_URL (or --base-url) names one. Never put a production host under `local`.
+
+default = "production"
+
+[production]
+
+[local]
+# No public domain (RFC 0148, core#974): it runs on a server and is reached on loopback;
+# `mise run local:tunnel` in core forwards it to a Mac. Hydra's issuer must equal `issuer`.
+# Also on that port: gRPC (plaintext) localhost:28080, console http://console.localhost:28080.
+base_url = "http://localhost:28080"
+issuer = "http://auth.localhost:28080"

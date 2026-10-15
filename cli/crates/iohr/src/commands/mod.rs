@@ -43,6 +43,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         json: cli.global.json,
     };
     let g = &cli.global;
+    g.check_environment()?;
     match cli.command {
         Command::Login(args) => login::login(g, &env, &args, out).await,
         Command::Logout => login::logout(g, out).await,

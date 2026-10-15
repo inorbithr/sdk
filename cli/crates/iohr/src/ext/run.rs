@@ -88,7 +88,7 @@ pub(crate) async fn run(
     };
     let program = check_program(&record, &dir).map_err(|e| Error::Failed(e.to_string()))?;
     check_confirmed(&entry, &record).map_err(|e| Error::Failed(e.to_string()))?;
-    let base = api_origin(&global.base_url)?;
+    let base = api_origin(global.base_url())?;
     let ctx = Arc::new(Ctx {
         minter: ProfileMinter::new(global, env),
         allowed: record.manifest.scopes.clone(),

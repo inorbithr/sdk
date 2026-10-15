@@ -9,6 +9,8 @@ use iohr_auth::ProfileName;
 
 use inorbithr::DEFAULT_BASE_URL;
 
+use crate::environments::{self, Environment, Environments};
+
 /// The InOrbit command line.
 ///
 /// Sign in, keep several accounts as profiles, and call the API. A token is never an
@@ -41,12 +43,16 @@ pub struct Global {
     /// Describe each call on stderr: method, path, status, time, request id.
     #[arg(short, long, global = true)]
     pub verbose: bool,
-    /// The API's address.
-    #[arg(long, global = true, env = "IOHR_BASE_URL", default_value = DEFAULT_BASE_URL, hide_default_value = true)]
-    pub base_url: String,
+    /// The environment to call: `production` (the default) or `local`. Sets the API and
+    /// sign-in addresses; `--base-url` and `IOHR_ISSUER` still win over it.
+    #[arg(long, global = true, env = "IOHR_ENV", value_parser = environments::parse_name, value_name = "NAME")]
+    pub env: Option<String>,
+    /// The API's address (default: the environment's).
+    #[arg(long = "base-url", global = true, env = "IOHR_BASE_URL")]
+    base_url: Option<String>,
     /// The sign-in service.
-    #[arg(long, global = true, env = "IOHR_ISSUER", default_value = iohr_auth::DEFAULT_ISSUER, hide = true)]
-    pub issuer: String,
+    #[arg(long, global = true, env = "IOHR_ISSUER", hide = true)]
+    issuer: Option<String>,
     /// The OAuth client the command line signs in as.
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
@@ -56,6 +62,53 @@ pub struct Global {
     /// Where extensions are kept (default: the platform's data directory).
     #[arg(long, global = true, env = "IOHR_DATA_DIR", hide = true)]
     pub data_dir: Option<PathBuf>,
+}
+
+impl Global {
+    /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
+    #[must_use]
+    pub fn environment(&self) -> &'static Environment {
+        let list = Environments::builtin();
+        let name = self.env.as_deref().unwrap_or_else(|| list.default_name());
+        // The name was checked on the way in; the default is checked by the tests.
+        list.get(name)
+            .unwrap_or_else(|_| unreachable!("environment names are validated"))
+    }
+
+    /// The API's address: `--base-url` or `IOHR_BASE_URL`, else the environment's, else
+    /// production's.
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        self.base_url
+            .as_deref()
+            .or(self.environment().base_url.as_deref())
+            .unwrap_or(DEFAULT_BASE_URL)
+    }
+
+    /// The sign-in service: `IOHR_ISSUER`, else the environment's, else production's.
+    #[must_use]
+    pub fn issuer(&self) -> &str {
+        self.issuer
+            .as_deref()
+            .or(self.environment().issuer.as_deref())
+            .unwrap_or(iohr_auth::DEFAULT_ISSUER)
+    }
+
+    /// Refuses an environment whose address is a placeholder, unless the caller named
+    /// the API's address.
+    ///
+    /// # Errors
+    ///
+    /// The environment has no real address yet.
+    pub fn check_environment(&self) -> Result<(), crate::Error> {
+        if self.environment().placeholder && self.base_url.is_none() {
+            return Err(crate::Error::Failed(format!(
+                "the {} environment has no address yet; set IOHR_BASE_URL or --base-url",
+                self.env.as_deref().unwrap_or("selected")
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Subcommand)]

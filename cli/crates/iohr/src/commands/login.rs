@@ -75,7 +75,7 @@ async fn with_token(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
 async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
     let (name, storage) = target(&ctx, g, args)?;
-    let provider = Provider::discover(&g.issuer, &g.client_id).await?;
+    let provider = Provider::discover(g.issuer(), &g.client_id).await?;
     let use_device = args.how.device || (!args.how.web && !browser::available());
     let granted = if use_device {
         let auth = Authorization::<Device>::start(provider).await?;
@@ -119,7 +119,7 @@ async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
         Profile::person(
             account.clone(),
             storage,
-            g.issuer.clone(),
+            g.issuer().to_owned(),
             g.client_id.clone(),
         ),
     )?;
@@ -194,7 +194,7 @@ pub(crate) async fn logout(g: &Global, out: Out) -> Result<(), Error> {
     // nothing is removed, so the next try can still revoke.
     let mut revoked = false;
     if profile.kind == Kind::Person {
-        let issuer = profile.issuer.as_deref().unwrap_or(&g.issuer);
+        let issuer = profile.issuer.as_deref().unwrap_or(g.issuer());
         let client_id = profile.client_id.as_deref().unwrap_or(&g.client_id);
         match Session::load(Arc::clone(&store), key.clone(), issuer, client_id).await {
             Ok(session) => {
