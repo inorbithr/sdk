@@ -98,20 +98,18 @@ mod tests {
     }
 
     #[test]
-    fn dev_is_a_labelled_placeholder_that_is_not_a_production_host() {
-        let d = Environments::builtin().get("dev").unwrap();
-        assert!(d.placeholder);
-        let url = d.base_url.as_deref().unwrap();
-        assert!(url.ends_with(".invalid"), "{url}");
-        assert!(!url.contains("inorbit.hr"), "{url}");
-        assert!(!d.issuer.as_deref().unwrap().contains("inorbit.hr"));
+    fn local_is_on_loopback_and_is_not_a_production_host() {
+        let l = Environments::builtin().get("local").unwrap();
+        assert!(!l.placeholder);
+        assert_eq!(l.base_url.as_deref(), Some("http://localhost:28080"));
+        assert_eq!(l.issuer.as_deref(), Some("http://auth.localhost:28080"));
     }
 
     #[test]
     fn an_unknown_name_is_refused_with_the_valid_ones() {
         let e = parse_name("staging").unwrap_err();
         assert!(
-            e.contains("staging") && e.contains("dev, production"),
+            e.contains("staging") && e.contains("local, production"),
             "{e}"
         );
     }

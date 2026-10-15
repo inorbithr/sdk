@@ -1,6 +1,5 @@
 //! Targeting an environment (RFC 0148, Keel K07): `--env` and `IOHR_ENV` choose it,
-//! production is the default, an unknown name is refused, and `dev` stays a labelled
-//! placeholder until its address is named.
+//! production is the default, an unknown name is refused, and `local` is on loopback.
 
 #![allow(
     clippy::unwrap_used,
@@ -56,17 +55,16 @@ fn production_is_the_default_and_uses_the_built_in_address() {
 }
 
 #[test]
-fn the_env_flag_selects_dev_and_never_a_production_host() {
-    let g = parse(&["--env", "dev"]).global;
-    assert!(g.base_url().ends_with(".invalid"), "{}", g.base_url());
-    assert!(!g.base_url().contains("inorbit.hr"));
-    assert!(!g.issuer().contains("inorbit.hr"));
-    assert!(g.check_environment().is_err());
+fn the_env_flag_selects_local_on_loopback_and_never_a_production_host() {
+    let g = parse(&["--env", "local"]).global;
+    assert_eq!(g.base_url(), "http://localhost:28080");
+    assert_eq!(g.issuer(), "http://auth.localhost:28080");
+    assert!(g.check_environment().is_ok());
 }
 
 #[test]
 fn an_explicit_base_url_wins_over_the_environment() {
-    let g = parse(&["--env", "dev", "--base-url", "http://127.0.0.1:9"]).global;
+    let g = parse(&["--env", "local", "--base-url", "http://127.0.0.1:9"]).global;
     assert_eq!(g.base_url(), "http://127.0.0.1:9");
     assert!(g.check_environment().is_ok());
 }
@@ -89,28 +87,8 @@ fn an_unknown_environment_is_refused_from_the_flag_and_from_the_variable() {
     );
 }
 
-#[test]
-fn dev_is_refused_until_its_address_is_named() {
-    let o = run(&["--env", "dev", "whoami"], &[("IOHR_TOKEN", "x")]);
-    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
-    assert!(
-        stderr(&o).contains("dev environment has no address yet"),
-        "{}",
-        stderr(&o)
-    );
-    // The variable does the same, and the flag beats it.
-    let o = run(&["whoami"], &[("IOHR_ENV", "dev")]);
-    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
-    let o = run(&["--env", "dev", "whoami"], &[("IOHR_ENV", "production")]);
-    assert!(
-        stderr(&o).contains("dev environment has no address yet"),
-        "{}",
-        stderr(&o)
-    );
-}
-
 #[tokio::test]
-async fn dev_calls_the_address_it_is_given() {
+async fn local_calls_the_address_it_is_given() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/ping"))
@@ -124,7 +102,7 @@ async fn dev_calls_the_address_it_is_given() {
         run(
             &args,
             &[
-                ("IOHR_ENV", "dev"),
+                ("IOHR_ENV", "local"),
                 ("IOHR_BASE_URL", &uri),
                 ("IOHR_TOKEN", &token()),
             ],

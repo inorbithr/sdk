@@ -108,13 +108,14 @@ keeps a shell set up for the command line from silently changing what a service 
 ### 2.2.1 Targeting an environment
 
 The command line takes `--env <name>` (or `IOHR_ENV`): `production`, the default, or
-`dev`. The list is closed (`cli/crates/iohr/environments.toml`, mirroring core's
+`local`. The list is closed (`cli/crates/iohr/environments.toml`, mirroring core's
 `devops/ci/envs.toml`; `mise run env:drift <path>` compares them) and any other name is a
 usage error (exit 2). An environment sets the API and sign-in addresses; `--base-url` /
-`IOHR_BASE_URL` and `IOHR_ISSUER` still win. Until the dev domain is chosen, `dev` carries
-a labelled placeholder address and the command line refuses to call it (exit 1) unless the
-address is named. The SDKs take no environment name: point one at an environment with
-`INORBIT_BASE_URL` and `INORBIT_TOKEN_URL`, which is also how their tests run against dev.
+`IOHR_BASE_URL` and `IOHR_ISSUER` still win. `local` has no public address: it is reached on
+loopback (API `http://localhost:28080`, sign-in `http://auth.localhost:28080`) through a
+tunnel to the machine that runs it (`mise run local:tunnel` in core), matching core's
+command-line doc. The SDKs take no environment name: point one at an environment with
+`INORBIT_BASE_URL` and `INORBIT_TOKEN_URL`, which is also how their tests run against `local`.
 
 ### 2.3 Environment names
 

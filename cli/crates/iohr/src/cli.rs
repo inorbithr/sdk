@@ -43,7 +43,7 @@ pub struct Global {
     /// Describe each call on stderr: method, path, status, time, request id.
     #[arg(short, long, global = true)]
     pub verbose: bool,
-    /// The environment to call: `production` (the default) or `dev`. Sets the API and
+    /// The environment to call: `production` (the default) or `local`. Sets the API and
     /// sign-in addresses; `--base-url` and `IOHR_ISSUER` still win over it.
     #[arg(long, global = true, env = "IOHR_ENV", value_parser = environments::parse_name, value_name = "NAME")]
     pub env: Option<String>,
