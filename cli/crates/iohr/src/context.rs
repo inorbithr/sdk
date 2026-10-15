@@ -188,7 +188,11 @@ impl std::fmt::Debug for Api {
 }
 
 impl Api {
-    fn new(base: &str, credential: Arc<AnyCredential>, verbose: bool) -> Result<Self, Error> {
+    pub(crate) fn new(
+        base: &str,
+        credential: Arc<AnyCredential>,
+        verbose: bool,
+    ) -> Result<Self, Error> {
         let mut b = Client::builder()
             .base_url(base)
             .token_provider(Shared(credential))
@@ -205,6 +209,14 @@ impl Api {
             other => Error::Failed(other.to_string()),
         })?;
         Ok(Self { client })
+    }
+
+    /// Another handle on the same client (it shares the connection pool and credential),
+    /// for work that outlives the call, such as a detached key revoke.
+    pub(crate) fn handle(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+        }
     }
 
     /// The runtime's client, for the generated surface (`inorbithr::public`).

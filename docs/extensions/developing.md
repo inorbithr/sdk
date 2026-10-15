@@ -126,7 +126,11 @@ What it does, in order:
 2. Opens the token channel for exactly `permissions.scopes`. Every request is logged; one
    for a scope the manifest does not declare is refused and printed in red, which is how
    you learn what the extension really needs. Tokens come from your profile, as for an
-   installed extension (`iohr login`, or `IOHR_TOKEN` in a pipeline).
+   installed extension (`iohr login`, or `IOHR_TOKEN` in a pipeline). Signed in as a
+   person, each token is narrowed to the scopes asked for through a short-lived account
+   key that is revoked at once (also on a timeout or cancel once the key has an id), so you need to be an admin or owner of the account;
+   a token profile must hold the scopes itself. The SDK waits up to 45 s for `iohr`, which
+   answers with the reason when it cannot.
 3. Resolves each secret: `IOHR_EXT_SECRET_<NAME>` first (`github_token` reads
    `IOHR_EXT_SECRET_GITHUB_TOKEN`), then the Keychain item with service
    `hr.inorbit.iohr.ext` and the `ref` as its account
