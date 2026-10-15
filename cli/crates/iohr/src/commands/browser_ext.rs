@@ -29,7 +29,7 @@ fn console_origin(base_url: &str) -> String {
 }
 
 pub(crate) fn install(g: &Global, args: &BrowserInstall, out: Out) {
-    let url = install_url(&g.base_url);
+    let url = install_url(g.base_url());
     let opened = !args.print && browser::available() && browser::open(&url);
     if out.json {
         Out::print_json(&serde_json::json!({ "url": url, "opened": opened }));

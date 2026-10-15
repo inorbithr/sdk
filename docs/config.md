@@ -105,6 +105,17 @@ own account or nothing holds.
 `IOHR_PROFILE`, the command line's switch, is not read by the SDK. One variable per tool
 keeps a shell set up for the command line from silently changing what a service calls.
 
+### 2.2.1 Targeting an environment
+
+The command line takes `--env <name>` (or `IOHR_ENV`): `production`, the default, or
+`dev`. The list is closed (`cli/crates/iohr/environments.toml`, mirroring core's
+`devops/ci/envs.toml`; `mise run env:drift <path>` compares them) and any other name is a
+usage error (exit 2). An environment sets the API and sign-in addresses; `--base-url` /
+`IOHR_BASE_URL` and `IOHR_ISSUER` still win. Until the dev domain is chosen, `dev` carries
+a labelled placeholder address and the command line refuses to call it (exit 1) unless the
+address is named. The SDKs take no environment name: point one at an environment with
+`INORBIT_BASE_URL` and `INORBIT_TOKEN_URL`, which is also how their tests run against dev.
+
 ### 2.3 Environment names
 
 - Profile names follow the command line's rule: 1 to 64 characters from `a-z`, `0-9`, `_`

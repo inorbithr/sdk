@@ -1,0 +1,17 @@
+# The environments the command line can target (RFC 0148, Keel K07). The names mirror
+# core's devops/ci/envs.toml, the one list; `mise run env:drift` compares the two.
+#
+# An environment with no address here uses the built-in production one. A `placeholder`
+# environment has no real address yet: the command line refuses to call it unless
+# IOHR_BASE_URL (or --base-url) names one. Never put a production host under `dev`.
+
+default = "production"
+
+[production]
+
+[dev]
+placeholder = true
+# Labelled placeholder until the owner chooses the dev domain (RFC 0148, chunk C4);
+# `.invalid` is reserved (RFC 2606) and never resolves.
+base_url = "https://api.dev-domain-not-chosen.invalid"
+issuer = "https://auth.dev-domain-not-chosen.invalid"
