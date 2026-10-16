@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-auth"
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.23.1",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-codegen"
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 dependencies = [
  "clap",
  "heck",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-lab"
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 dependencies = [
  "regex",
  "serde",
@@ -1473,7 +1473,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-openapi"
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 dependencies = [
  "heck",
  "serde",
