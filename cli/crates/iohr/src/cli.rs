@@ -180,6 +180,11 @@ pub enum Command {
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
     #[command(subcommand)]
     Browser(BrowserCommand),
+    /// A loopback pipe from this machine into an environment's Envoy edge, so the real
+    /// site opens at `http://www.localhost:<port>/` (and console, docs, auth). Runs
+    /// `ssh -N -L` until Ctrl-C; binds 127.0.0.1 only and goes through Envoy, never to a
+    /// service directly. The environment is `--env` (production by default).
+    Tunnel(Tunnel),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -1370,4 +1375,28 @@ pub enum CoordinatorAsksCommand {
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
     },
+}
+
+#[derive(Debug, Args)]
+pub struct Tunnel {
+    /// The ssh target that runs the environment.
+    #[arg(long, env = "IOHR_TUNNEL_HOST")]
+    pub host: String,
+    /// The port to listen on here, on 127.0.0.1 (default: the edge's own port).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// The edge port on the host, when it differs from `environments.toml` (core's
+    /// `devops/ci/envs.toml` is the source; `mise run local:tunnel` passes it).
+    #[arg(long)]
+    pub edge_port: Option<u16>,
+    /// The engine LB port to forward as well (default: the environment's, when it has
+    /// one: mobile and Trails use it); the same port on both ends.
+    #[arg(long)]
+    pub engine_port: Option<u16>,
+    /// Forward the edge only, not the engine LB.
+    #[arg(long)]
+    pub no_engine: bool,
+    /// Print the ssh command and the addresses, then stop.
+    #[arg(long)]
+    pub dry_run: bool,
 }

@@ -8,10 +8,15 @@
 default = "production"
 
 [production]
+# Envoy's edge port on the machine that runs it, 127.0.0.1 only (`iohr tunnel`); core's
+# envs.toml owns it and `mise run env:drift` compares.
+edge_port = 18080
 
 [local]
 # No public domain (RFC 0148, core#974): it runs on a server and is reached on loopback;
 # `mise run local:tunnel` in core forwards it to a Mac. Hydra's issuer must equal `issuer`.
 # Also on that port: gRPC (plaintext) localhost:28080, console http://console.localhost:28080.
+edge_port = 28080
+engine_port = 25051
 base_url = "http://localhost:28080"
 issuer = "http://auth.localhost:28080"
