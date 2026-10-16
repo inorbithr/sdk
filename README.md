@@ -44,8 +44,12 @@ has the milestones.
 ## The command line
 
 ```sh
-# macOS and Linux, Homebrew
+# macOS and Linux, Homebrew. Homebrew refuses a tap it was not told to trust, so once
+# per Mac (or Linux box) run `brew trust` before the install:
+brew trust inorbithr/tap
 brew install inorbithr/tap/iohr
+
+# later: iohr upgrade (iohr upgrade --check only looks)
 
 # Debian and Ubuntu: the repository is signed by the key with fingerprint
 # 5FF6 7AF3 D50A 6B06 FFE6  EA8A FFA5 11CF 585B F28D

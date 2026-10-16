@@ -51,6 +51,19 @@ impl Policy {
         }
     }
 
+    /// The policy for the `iohr` release archives themselves (`iohr upgrade`): the release
+    /// workflow of `inorbithr/sdk`, which attests them on a push to `main` (the release
+    /// PR's merge), not at a tag. No company keys: only the workflow is accepted.
+    #[must_use]
+    pub fn iohr_release() -> Self {
+        Self {
+            org: "inorbithr".into(),
+            workflow: ".github/workflows/release.yml".into(),
+            refs: "refs/heads/".into(),
+            keys: Vec::new(),
+        }
+    }
+
     /// The identity this policy accepts, for messages and documentation.
     #[must_use]
     pub fn describe(&self) -> String {
@@ -208,6 +221,43 @@ pub fn verify(policy: &Policy, bundles: &[(Digest, Vec<u8>)]) -> Result<Verified
         .map(|(digest, bytes)| examine(&verifier, policy, digest, bytes))
         .collect();
     decide(policy, &findings)
+}
+
+/// The repository and ref the `iohr` release archives are built from.
+const IOHR_REPOSITORY: &str = "https://github.com/inorbithr/sdk";
+const IOHR_REF: &str = "refs/heads/main";
+
+/// Checks the GitHub attestations of an `iohr` release archive: signed by the release
+/// workflow of `inorbithr/sdk` at `main`, with SLSA provenance naming the same
+/// repository, and bound to `digest`. Anything else is refused.
+///
+/// # Errors
+///
+/// [`TrustError`] unless [`verify`] accepts it under [`Policy::iohr_release`] and the
+/// repository and ref are exactly `inorbithr/sdk` and `main`.
+pub fn verify_iohr_release(digest: &Digest, bundles: &[Vec<u8>]) -> Result<Verified, TrustError> {
+    let pairs: Vec<(Digest, Vec<u8>)> = bundles
+        .iter()
+        .map(|b| (digest.clone(), b.clone()))
+        .collect();
+    let verified = verify(&Policy::iohr_release(), &pairs)?;
+    let want = format!("{IOHR_REPOSITORY}@{IOHR_REF}");
+    let from_sdk = matches!(
+        &verified.signer,
+        Signer::Workflow { repository, .. } if repository == IOHR_REPOSITORY
+    );
+    if from_sdk && verified.provenance.as_deref() == Some(want.as_str()) {
+        Ok(verified)
+    } else {
+        Err(TrustError(format!(
+            "not installed: the attestation names {}, not {want}",
+            super::manifest::printable(&format!(
+                "{} ({})",
+                verified.signer,
+                verified.provenance.as_deref().unwrap_or("no provenance")
+            ))
+        )))
+    }
 }
 
 fn decide(policy: &Policy, findings: &[Finding]) -> Result<Verified, TrustError> {
@@ -517,6 +567,39 @@ pub(crate) mod tests {
 
     pub(crate) fn pem(key: &KeyPair) -> String {
         key.public_key_der().unwrap().to_pem()
+    }
+
+    /// The two GitHub attestations (provenance and SBOM) of the real
+    /// `iohr-0.1.0-alpha.14-aarch64-apple-darwin.tar.gz`, from the attestations API.
+    const IOHR_A14: [&str; 2] = [
+        include_str!("testdata/iohr-alpha14-aarch64-apple-darwin.0.sigstore.json"),
+        include_str!("testdata/iohr-alpha14-aarch64-apple-darwin.1.sigstore.json"),
+    ];
+    const IOHR_A14_DIGEST: &str =
+        "sha256:aa46a9a72b20f8da8025060bf3e182eedde541b362c4839aa0955e33e6cbe364";
+
+    fn a14_bundles() -> Vec<Vec<u8>> {
+        IOHR_A14.iter().map(|b| b.as_bytes().to_vec()).collect()
+    }
+
+    #[test]
+    fn a_real_iohr_release_archive_verifies() {
+        let d = Digest::parse(IOHR_A14_DIGEST).unwrap();
+        let v = super::verify_iohr_release(&d, &a14_bundles()).unwrap();
+        assert_eq!(
+            v.provenance.as_deref(),
+            Some("https://github.com/inorbithr/sdk@refs/heads/main")
+        );
+    }
+
+    #[test]
+    fn an_iohr_archive_with_another_digest_or_no_bundle_is_refused() {
+        let other = Digest::of(b"a tarball someone swapped in");
+        let e = super::verify_iohr_release(&other, &a14_bundles()).unwrap_err();
+        assert!(e.0.contains("does not verify"), "{e}");
+        let d = Digest::parse(IOHR_A14_DIGEST).unwrap();
+        let e = super::verify_iohr_release(&d, &[]).unwrap_err();
+        assert!(e.0.contains("holds no Sigstore bundle"), "{e}");
     }
 
     #[test]

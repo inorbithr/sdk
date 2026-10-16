@@ -5,10 +5,20 @@ describes `main`; a change merged after the latest pre-release ships with the ne
 ([CHANGELOG.md](CHANGELOG.md), [releases](https://github.com/inorbithr/sdk/releases?q=iohr)).
 
 ```sh
+brew trust inorbithr/tap                                          # once per machine: Homebrew refuses untrusted taps
 brew install inorbithr/tap/iohr                                   # macOS, Linux
 curl -fsSL https://packages.inorbit.hr/install.sh | sh            # Linux, macOS, no sudo
 powershell -c "irm https://packages.inorbit.hr/install.ps1 | iex" # Windows
 ```
+
+To update, run `iohr upgrade` (`iohr upgrade --check` only says whether a newer release exists
+and what would run). It follows how iohr was installed: a Homebrew copy runs
+`brew upgrade inorbithr/tap/iohr` (and tells you to run `brew trust inorbithr/tap` when
+Homebrew refuses the tap); a copy from `install.sh` is downloaded, checked against the
+release's `SHA256SUMS` and its GitHub build attestation (checked inside iohr, so the GitHub
+CLI is not needed, and a release without one is refused), and replaced in place; an APT or
+other copy is told what to run. The Homebrew tap can lag a release until its formula pull
+request is merged.
 
 Debian and Ubuntu (a signed APT repository) and every other way are on
 [docs.inorbit.hr/docs/command-line](https://docs.inorbit.hr/docs/command-line/). winget
