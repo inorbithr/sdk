@@ -22,6 +22,7 @@ mod sdk;
 mod sdk_add;
 mod token;
 mod tunnel;
+mod upgrade;
 mod whoami;
 
 use clap::CommandFactory as _;
@@ -71,6 +72,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
+        Command::Upgrade { check } => upgrade::run(g, check, out).await,
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),

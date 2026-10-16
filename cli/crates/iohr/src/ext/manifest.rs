@@ -138,6 +138,7 @@ pub const RESERVED: &[&str] = &[
     "sdk",
     "token",
     "tunnel",
+    "upgrade",
     "whoami",
 ];
 

@@ -470,6 +470,11 @@ shell = "bash -e -o pipefail -c"
 description = "Command line: propose a release's Homebrew formula to inorbithr/homebrew-tap (needs GH_TOKEN for the tap)"
 run = "bash cli/release/tap.sh"
 
+[tasks."cli:tap-local"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: the same formula PR as cli:tap for an already published release, run from this machine when the workflow cannot (usage: cli:tap-local <version> [--dry-run]; token: GH_TOKEN or gh auth)"
+run = "bash cli/release/tap-local.sh"
+
 [tasks."cli:apt"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: the signed APT repository from dist/cli/*.deb into dist/apt/ (APT_SIGNING_KEY, APT_SIGNING_KEY_ID, APT_SIGNING_PASSPHRASE); --publish uploads it to the packages bucket"

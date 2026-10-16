@@ -75,6 +75,18 @@ Conventional Commits that touched it; nobody sets one by hand (no `release-as`, 
 | Homebrew (`inorbithr/homebrew-tap`) | `iohr-tap`: a formula PR the tap's CI installs and tests; a maintainer merges it | release GitHub App, token limited to the tap |
 | winget | `iohr-winget`: manifests generated and schema-checked, kept as an artifact; submitted to `microsoft/winget-pkgs` by hand from the first stable release | a maintainer's GitHub account with a fork of winget-pkgs |
 
+The Homebrew formula pins every archive by its checksum from the release's `SHA256SUMS`, so
+`iohr-tap` can only run after the `iohr` job has published the release's files, and that
+job waits for a maintainer's approval in `release-cli`. When it is never approved, or its
+run is cancelled (as for `iohr/v0.1.0-alpha.15`, 2026-10), the release exists without
+files and the tap stays on the earlier version. With GitHub Actions paused the workflow
+cannot run at all. Once a release has its files, `mise run cli:tap-local <version>` does what
+`iohr-tap` does from a maintainer's machine (`--dry-run` prints the formula first; the token
+is `GH_TOKEN` or `gh auth token`, with write access to the tap); a maintainer still merges
+the pull request. It cannot create the files: the archives carry GitHub build attestations,
+which only the workflow's identity can make. Brew users also need `brew trust
+inorbithr/tap` once; `iohr upgrade` prints that when Homebrew refuses.
+
 ## One-time setup (before the first release)
 
 - [x] Create the npm organisation `inorbithr`; publish `@inorbithr/sdk@0.0.0` by hand to

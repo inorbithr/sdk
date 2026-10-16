@@ -162,6 +162,16 @@ pub enum Command {
     /// private), private ones shared with it, unpublished ones in progress on this
     /// machine, and what is installed. The same as `iohr ext packages`.
     Packages,
+    /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs
+    /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
+    /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
+    /// against the release's checksums and attestations and replaced in place; anything
+    /// else gets the command to run. `--check` only reports. Needs no sign-in.
+    Upgrade {
+        /// Only say whether a newer release exists and what would run; change nothing.
+        #[arg(long)]
+        check: bool,
+    },
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
