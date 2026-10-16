@@ -639,7 +639,7 @@ mod tests {
     fn bundles_come_out_of_the_attestations_answer() {
         let a = serde_json::json!({"attestations": [{"bundle": {"a": 1}}, {"nobundle": 1}]});
         assert_eq!(bundles_of(a.to_string().as_bytes()).len(), 1);
-        assert!(bundles_of(b"{}").is_empty());
+        assert_eq!(bundles_of(b"{}"), Vec::<Vec<u8>>::new());
     }
 
     #[cfg(unix)]
