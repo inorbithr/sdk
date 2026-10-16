@@ -863,9 +863,26 @@ pub enum ExtCommand {
     },
     /// Check installed extensions again, offline: the program's hash, the signature
     /// and provenance kept at install, and the signer the lock pins.
+    ///
+    /// Or check one artifact that is not installed (RFC 0143): give a file, or a
+    /// `sha256:DIGEST`, with the Sigstore bundle(s) for it in `--bundle` (what `cosign
+    /// sign-blob --bundle` writes, the same file the cluster's init container checks) and,
+    /// for a publisher's own key, `--publisher-key`. It runs the same trust check as an
+    /// install, offline and with no sign-in, prints who signed, and exits 1 when the
+    /// artifact is not trusted. With `--json`, one object: ok, digest, signer, provenance,
+    /// error.
     Verify {
-        /// The extension (default: all).
+        /// The installed extension (default: all); or, for an artifact, a file path or a
+        /// `sha256:DIGEST` (a path has a `/` or a `.`; an extension name has neither).
+        #[arg(value_name = "NAME|ARTIFACT|DIGEST")]
         name: Option<String>,
+        /// A Sigstore bundle attached to the artifact; repeatable. Artifact checks only.
+        #[arg(long = "bundle", value_name = "FILE")]
+        bundles: Vec<PathBuf>,
+        /// A PEM public key the publisher signs with; repeatable (default: InOrbit's
+        /// release workflow only, never the keys in the config). Artifact checks only.
+        #[arg(long = "publisher-key", value_name = "PEM")]
+        publisher_keys: Vec<PathBuf>,
     },
     /// Install exactly what a lock file pins, by digest and signer.
     Sync {
