@@ -1310,6 +1310,13 @@ pub enum CoordinatorCommand {
     /// The coordinator's queued asks.
     #[command(subcommand)]
     Asks(CoordinatorAsksCommand),
+    /// A job's brief, the one text a worker starts from: the task, its acceptance, the
+    /// files and the linked document's excerpt, capped at the kind's token budget
+    /// (RFC 0132). Prints the text alone so it can be piped into a worker.
+    Brief {
+        /// The job id (`job_...`).
+        job: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

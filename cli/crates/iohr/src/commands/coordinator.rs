@@ -62,6 +62,7 @@ pub(crate) async fn run(
             source,
             limit,
         }) => list_asks(&s, state, source, limit, out).await,
+        CoordinatorCommand::Brief { job } => brief(&s, &job, out).await,
         CoordinatorCommand::Asks(CoordinatorAsksCommand::Create {
             kind,
             body,
@@ -383,6 +384,76 @@ async fn list_asks(
     Ok(())
 }
 
+/// A job id, safe as one path segment.
+fn job_segment(v: &str) -> Result<&str, Error> {
+    if !v.is_empty()
+        && v.len() <= 128
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        Ok(v)
+    } else {
+        Err(Error::Usage(
+            "a job id has only letters, digits, '-' and '_'".into(),
+        ))
+    }
+}
+
+/// The brief as a worker reads it: other people's text, so without control characters
+/// other than newlines and tabs, ending in one newline.
+fn brief_text(v: &Value) -> Result<String, Error> {
+    let text = v.get("text").and_then(Value::as_str).unwrap_or_default();
+    let mut clean: String = text
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .collect();
+    let end = clean.trim_end().len();
+    clean.truncate(end);
+    if clean.trim().is_empty() {
+        return Err(Error::Usage("the API answered without a brief".into()));
+    }
+    clean.push('\n');
+    Ok(clean)
+}
+
+/// The size line for the person, on stderr: estimate, budget, what was cut.
+fn brief_note(v: &Value) -> String {
+    let n = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let cut: Vec<&str> = v
+        .get("truncated")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let mut line = format!(
+        "brief for {}: ~{} of {} tokens",
+        headline(str_of(v, "job_id")),
+        n("token_estimate"),
+        n("token_budget")
+    );
+    if !cut.is_empty() {
+        line.push_str(", cut: ");
+        line.push_str(&headline(&cut.join(", ")));
+    }
+    line
+}
+
+async fn brief(s: &Session, job: &str, out: Out) -> Result<(), Error> {
+    let id = job_segment(job)?;
+    let v: Value = s
+        .api
+        .get(&format!("/v1/coordinator/jobs/{id}/brief"), &[])
+        .await
+        .map_err(scoped)?;
+    if out.json {
+        Out::print_json(&v);
+        return Ok(());
+    }
+    let text = brief_text(&v)?;
+    Out::raw(text.as_bytes());
+    Out::note(&brief_note(&v));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,6 +552,33 @@ mod tests {
         assert!(items(&json!({"jobs": "x"}), "jobs").is_err());
         assert!(items(&json!([]), "jobs").is_err());
         assert_eq!(items(&json!({}), "jobs").unwrap(), Vec::<Value>::new());
+    }
+
+    #[test]
+    fn job_ids_stay_one_path_segment() {
+        assert_eq!(job_segment("job_01ABC-x").unwrap(), "job_01ABC-x");
+        for bad in ["", "../x", "job/1", "job?x=1", "job 1"] {
+            assert!(job_segment(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn brief_text_drops_control_characters_and_keeps_lines() {
+        let v = json!({"text": "## Task\n\tdo it\u{1b}[2J\n\n"});
+        assert_eq!(brief_text(&v).unwrap(), "## Task\n\tdo it[2J\n");
+        assert!(brief_text(&json!({"text": "  "})).is_err());
+        assert!(brief_text(&json!({})).is_err());
+        assert!(brief_text(&json!({"text": "\u{0}\u{1b}\n"})).is_err());
+    }
+
+    #[test]
+    fn brief_note_says_size_budget_and_cuts() {
+        let v = json!({"job_id": "job_1", "token_estimate": 900, "token_budget": 1000,
+            "truncated": ["document"]});
+        assert_eq!(
+            brief_note(&v),
+            "brief for job_1: ~900 of 1000 tokens, cut: document"
+        );
     }
 
     #[test]
