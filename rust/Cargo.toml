@@ -69,7 +69,7 @@ opentelemetry = { version = "0.33", default-features = false, features = ["trace
 pkcs8 = { version = "0.11", features = ["encryption", "pem", "std"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "test-util"] }
 wiremock = "0.6"
 serde-saphyr = "1"
 tempfile = "3"

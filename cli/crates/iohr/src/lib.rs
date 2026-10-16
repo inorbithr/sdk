@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cli;
+pub mod environments;
 pub mod ext;
 pub mod project;
 

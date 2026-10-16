@@ -5,10 +5,20 @@ describes `main`; a change merged after the latest pre-release ships with the ne
 ([CHANGELOG.md](CHANGELOG.md), [releases](https://github.com/inorbithr/sdk/releases?q=iohr)).
 
 ```sh
+brew trust inorbithr/tap                                          # once per machine: Homebrew refuses untrusted taps
 brew install inorbithr/tap/iohr                                   # macOS, Linux
 curl -fsSL https://packages.inorbit.hr/install.sh | sh            # Linux, macOS, no sudo
 powershell -c "irm https://packages.inorbit.hr/install.ps1 | iex" # Windows
 ```
+
+To update, run `iohr upgrade` (`iohr upgrade --check` only says whether a newer release exists
+and what would run). It follows how iohr was installed: a Homebrew copy runs
+`brew upgrade inorbithr/tap/iohr` (and tells you to run `brew trust inorbithr/tap` when
+Homebrew refuses the tap); a copy from `install.sh` is downloaded, checked against the
+release's `SHA256SUMS` and its GitHub build attestation (checked inside iohr, so the GitHub
+CLI is not needed, and a release without one is refused), and replaced in place; an APT or
+other copy is told what to run. The Homebrew tap can lag a release until its formula pull
+request is merged.
 
 Debian and Ubuntu (a signed APT repository) and every other way are on
 [docs.inorbit.hr/docs/command-line](https://docs.inorbit.hr/docs/command-line/). winget
@@ -81,7 +91,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr sdk add [rust\|typescript\|python\|go] [--version V] [--dry-run]` | Add the published SDK to the project here with the package manager it already uses; the language comes from the project's files when left out (below) |
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to |
-| `iohr coordinator jobs list \| create`, `asks list` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks. `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key |
+| `iohr coordinator jobs list \| create`, `asks list \| create` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks, queue an ask (`asks create --kind K --body -`; the kind is required so the planner can file it). `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s for up to `--timeout` seconds (600) |
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
@@ -93,6 +103,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
+| `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json` and `--verbose`.
@@ -274,6 +285,14 @@ iohr ext show inorbit/agent              # publisher, signer, scopes, privileges
 iohr ext install inorbit/agent           # or inorbit/agent@0.1.0, or just: agent
 iohr agent status                        # runs the installed program
 ```
+
+An extension gets tokens over a private channel, for the scopes its manifest declares and
+no others. Signed in as a person, each token is narrowed to the scopes asked for: `iohr`
+makes an account key with them, exchanges it for a 15-minute token and revokes the key at
+once (an admin or owner of the account is needed; anyone else is refused with that
+reason). A key or token profile hands out its own token when it holds the scopes, and is
+refused when it does not. Minting is bounded at 30 s, then the program gets a `503` that
+says why (ADR 0012, point 6).
 
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A

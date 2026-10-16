@@ -63,6 +63,29 @@ pub(crate) async fn run(
             limit,
         }) => list_asks(&s, state, source, limit, out).await,
         CoordinatorCommand::Brief { job } => brief(&s, &job, out).await,
+        CoordinatorCommand::Asks(CoordinatorAsksCommand::Create {
+            kind,
+            body,
+            title,
+            priority,
+            links,
+            external_id,
+        }) => {
+            // The kind is checked before standard input is read: a bad one fails at once.
+            if !valid_kind(&kind) {
+                return Err(bad_kind());
+            }
+            let body = read_brief(&body)?;
+            let req = ask_body(&AskArgs {
+                kind: &kind,
+                body: &body,
+                title,
+                priority,
+                links,
+                external_id,
+            })?;
+            create_ask(&s, &req, out).await
+        }
     }
 }
 
@@ -242,6 +265,80 @@ async fn create_job(s: &Session, body: &Value, out: Out) -> Result<(), Error> {
     Ok(())
 }
 
+struct AskArgs<'a> {
+    kind: &'a str,
+    body: &'a str,
+    title: Option<String>,
+    priority: Option<u32>,
+    links: Vec<String>,
+    external_id: Option<String>,
+}
+
+/// A kind the API accepts: lower case, 1 to 40 of a-z, 0-9, `_` and `-`.
+fn valid_kind(k: &str) -> bool {
+    (1..=40).contains(&k.len())
+        && k.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+}
+
+fn bad_kind() -> Error {
+    Error::Usage(
+        "--kind is lower case, 1 to 40 of a-z, 0-9, _ and - (such as bug, feature or question)"
+            .into(),
+    )
+}
+
+/// The `QueueAskRequest` body: the kind is always sent, so the planner can file it.
+fn ask_body(a: &AskArgs<'_>) -> Result<Value, Error> {
+    if !valid_kind(a.kind) {
+        return Err(bad_kind());
+    }
+    let mut b = serde_json::Map::new();
+    b.insert("kind".into(), json!(a.kind));
+    b.insert("body".into(), json!(a.body));
+    b.insert("source".into(), json!("cli"));
+    if let Some(t) = &a.title {
+        b.insert("title".into(), json!(t));
+    }
+    if let Some(p) = a.priority {
+        b.insert("priority".into(), json!(p));
+    }
+    if let Some(e) = &a.external_id {
+        b.insert("external_id".into(), json!(e));
+    }
+    if !a.links.is_empty() {
+        b.insert("links".into(), json!(a.links));
+    }
+    Ok(Value::Object(b))
+}
+
+async fn create_ask(s: &Session, body: &Value, out: Out) -> Result<(), Error> {
+    let v: Value = s
+        .api
+        .send(Method::Post, "/v1/coordinator/asks", &[], Some(body))
+        .await
+        .and_then(|r| r.json())
+        .map_err(scoped)?;
+    if out.json {
+        Out::print_json(&v);
+        return Ok(());
+    }
+    let a = v.get("ask").unwrap_or(&Value::Null);
+    Out::pairs(&[
+        ("ask", str_of(a, "id").to_owned()),
+        ("state", str_of(a, "state").to_owned()),
+        ("kind", str_of(a, "kind").to_owned()),
+        (
+            "repeated",
+            v.get("repeated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                .to_string(),
+        ),
+    ]);
+    Ok(())
+}
+
 async fn list_asks(
     s: &Session,
     state: Option<String>,
@@ -274,12 +371,16 @@ async fn list_asks(
                 str_of(a, "id").to_owned(),
                 str_of(a, "state").to_owned(),
                 str_of(a, "source").to_owned(),
+                str_of(a, "kind").to_owned(),
                 day(str_of(a, "created_at")),
                 headline(str_of(a, "title")),
             ]
         })
         .collect();
-    Out::table(&["ASK", "STATE", "SOURCE", "CREATED", "TITLE"], &rows);
+    Out::table(
+        &["ASK", "STATE", "SOURCE", "KIND", "CREATED", "TITLE"],
+        &rows,
+    );
     Ok(())
 }
 
@@ -401,6 +502,44 @@ mod tests {
         let mut a = args("x");
         a.model_override_reason = Some("why".into());
         assert!(job_body(&a).is_err());
+    }
+
+    #[test]
+    fn ask_body_always_carries_the_kind() {
+        let a = AskArgs {
+            kind: "bug",
+            body: "it breaks",
+            title: None,
+            priority: None,
+            links: vec![],
+            external_id: None,
+        };
+        let b = ask_body(&a).unwrap();
+        assert_eq!(
+            b,
+            json!({"kind": "bug", "body": "it breaks", "source": "cli"})
+        );
+        let full = AskArgs {
+            title: Some("t".into()),
+            priority: Some(7),
+            links: vec!["o/r#1".into()],
+            external_id: Some("x1".into()),
+            ..a
+        };
+        let b = ask_body(&full).unwrap();
+        assert_eq!(b["priority"], 7);
+        assert_eq!(b["external_id"], "x1");
+        assert_eq!(b["links"], json!(["o/r#1"]));
+    }
+
+    #[test]
+    fn ask_kind_shape_is_checked_before_sending() {
+        for bad in ["", "Bug", "has space", "a.b", &"x".repeat(41)] {
+            assert!(!valid_kind(bad), "{bad}");
+        }
+        for ok in ["bug", "feature", "a-b_c9", &"x".repeat(40)] {
+            assert!(valid_kind(ok), "{ok}");
+        }
     }
 
     #[test]

@@ -66,12 +66,35 @@ What a bank or a regulated company asks of such a mechanism:
    `{"access_token", "expires_at"}`. Scopes outside the manifest are refused. The child
    never sees `IOHR_TOKEN` or `IOHR_TOKEN_<PROFILE>`; the refresh token never leaves
    `iohr`. The socket and its directory are removed when the child exits.
-6. **Narrower tokens are not available yet.** The sign-in service cannot mint a token
-   narrower than a person's session from that session, so the channel hands out the
-   profile's current access token (15 minutes, refreshed by `iohr`) only when it holds
-   every scope asked for, and refuses otherwise. When the platform can exchange a token
-   for a narrower one (RFC 8693), the channel returns that instead; the extension's
-   side does not change.
+6. **A token narrowed to the declared scopes, by a short-lived key, until the platform
+   can exchange tokens.** The sign-in service cannot mint a token narrower than a
+   person's session from that session (no RFC 8693 exchange), and a person's access
+   token carries only the umbrella `iohr.api`, so it never holds a scope such as
+   `identity:read` and is never handed to an extension (that would be everything the
+   person can do). Amended 2026-10-14. The channel hands out, for the scopes asked for
+   (which must be in the manifest) and nothing more:
+   - the profile's own access token, only when it already holds every scope asked for
+     (a key or a token profile), as before;
+   - for a signed-in person, a 15-minute token narrowed to exactly those scopes: `iohr`
+     creates an account key with them, exchanges it, and revokes the key at once. The
+     key's secret stays in memory (zeroized when dropped) for that exchange. It needs an
+     admin or owner of the account (403 is refused with that reason; 401 says to sign in
+     again). Once the key create call has answered with an id, the key is revoked when
+     the exchange succeeds, when it fails, when it hits its own 15 s deadline (shorter
+     than the 30 s mint deadline), and when the call is dropped (the mint deadline, a
+     cancelled connection): a drop guard starts a detached revoke with a 10 s deadline.
+     Not revoked by `iohr`: a cancel during the create call itself, before the answer
+     with the id arrives (the server may have made the key; nothing client-side knows
+     its id), a revoke call that fails or times out (`iohr` prints the key id and
+     `iohr token revoke <id>` removes it), and the process being killed. Such keys show
+     in the account's keys as `iohr-ext-<time>`;
+   - otherwise a refusal (`scope_not_held`).
+
+   When the platform can exchange a token for a narrower one (RFC 8693), the channel
+   returns that instead of making a key; the extension's side does not change.
+   Minting has its own 30 s deadline, after which the channel answers `503` with the
+   reason; the SDK waits 45 s (the channel's read and mint deadlines together, and
+   more), so a program sees `iohr`'s reason, never its own timeout.
 7. **Install shows the scopes** an extension may ask for, and `upgrade` names any new
    ones, the way a phone shows an app's permissions. Only InOrbit publishes extensions
    for now (RFC 0028).
