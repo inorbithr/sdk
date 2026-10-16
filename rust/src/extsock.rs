@@ -29,8 +29,11 @@ pub const SOCKET_ENV: &str = "IOHR_EXT_TOKEN_SOCKET";
 pub const API_ENV: &str = "IOHR_EXT_API";
 /// The largest answer read from the channel.
 const MAX_ANSWER: usize = 64 * 1024;
-/// How long one exchange may take.
-const TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one exchange may take. `iohr` bounds its own work (reading the request,
+/// then minting the token, 10 s and 30 s) and answers a refusal with its reason when
+/// that runs out, so this waits longer than both together: the program gets `iohr`'s
+/// reason, never its own guess.
+const TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Short-lived tokens from `iohr`'s extension channel, for the scopes asked for (none
 /// means every scope the extension's manifest declares). Cached and refreshed with the
@@ -112,19 +115,27 @@ impl TokenProvider for ExtSocketToken {
         let socket = self.socket.clone();
         let scopes = Arc::clone(&self.scopes);
         self.cache
-            .get(async move {
-                tokio::time::timeout(TIMEOUT, fetch(&socket, &scopes))
-                    .await
-                    .unwrap_or_else(|_| {
-                        Err(channel("iohr's token channel did not answer within 10 s"))
-                    })
-            })
+            .get(async move { within_deadline(fetch(&socket, &scopes)).await })
             .await
     }
 
     async fn invalidate(&self) {
         self.cache.invalidate();
     }
+}
+
+/// `exchange` with the client's deadline; the error names the seconds it waited.
+async fn within_deadline(
+    exchange: impl std::future::Future<Output = Result<Cached, AuthError>>,
+) -> Result<Cached, AuthError> {
+    tokio::time::timeout(TIMEOUT, exchange)
+        .await
+        .unwrap_or_else(|_| {
+            Err(channel(format!(
+                "iohr's token channel did not answer within {} s",
+                TIMEOUT.as_secs()
+            )))
+        })
 }
 
 fn channel(message: impl Into<String>) -> AuthError {
@@ -313,6 +324,36 @@ mod tests {
         ]);
         let t = ExtSocketToken::new(&p).scopes(["agents:write"]);
         assert_eq!(t.token().await.unwrap().expose(), "at2");
+    }
+
+    /// `iohr` may sign in or refresh before it answers (the first use of a profile took
+    /// 14 s in a debug build): a slow answer inside its own deadline is still an answer,
+    /// and one past ours is named with the real number of seconds.
+    #[tokio::test(start_paused = true)]
+    async fn waits_longer_than_the_channels_own_deadline() {
+        use std::time::Duration;
+        let cached = || super::Cached {
+            access: crate::secret::Secret::new("slow".to_owned()),
+            issued: std::time::Instant::now(),
+            lifetime: None,
+        };
+        let slow = async {
+            tokio::time::sleep(Duration::from_secs(14)).await;
+            Ok(cached())
+        };
+        let got = super::within_deadline(slow).await.unwrap();
+        assert_eq!(got.access.expose(), "slow");
+
+        let stuck = async {
+            tokio::time::sleep(Duration::from_secs(120)).await;
+            Ok(cached())
+        };
+        let e = super::within_deadline(stuck)
+            .await
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(e.contains("did not answer within 45 s"), "{e}");
     }
 
     #[tokio::test]
