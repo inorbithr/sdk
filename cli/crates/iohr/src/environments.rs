@@ -20,6 +20,10 @@ pub struct Environment {
     pub base_url: Option<String>,
     /// The sign-in service.
     pub issuer: Option<String>,
+    /// Envoy's edge port on the machine that runs the environment (`iohr tunnel`).
+    pub edge_port: Option<u16>,
+    /// The engine LB's port there, forwarded as well when set.
+    pub engine_port: Option<u16>,
 }
 
 /// The whole list.
