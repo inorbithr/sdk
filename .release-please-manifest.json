@@ -2,7 +2,7 @@
   "go": "0.3.0",
   "rust": "0.2.2",
   "typescript": "0.3.0",
-  "python": "0.2.2",
+  "python": "0.3.0",
   "csharp": "0.3.0",
   "java": "0.2.2",
   "cli": "0.1.0-alpha.15",
