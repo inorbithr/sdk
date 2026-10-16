@@ -23,9 +23,12 @@ pub(crate) async fn run(
 ) -> Result<(), Error> {
     let s = session(g, env).await?;
     match cmd {
-        CoordinatorCommand::Jobs(CoordinatorJobsCommand::List { state, mine, limit }) => {
-            list_jobs(&s, state, mine, limit, out).await
-        }
+        CoordinatorCommand::Jobs(CoordinatorJobsCommand::List {
+            state,
+            mine,
+            limit,
+            account,
+        }) => list_jobs(&s, state, mine, limit, account, out).await,
         CoordinatorCommand::Jobs(CoordinatorJobsCommand::Create {
             kind,
             brief,
@@ -39,6 +42,7 @@ pub(crate) async fn run(
             security,
             compliance_pr,
             ask,
+            account,
         }) => {
             let brief = read_brief(&brief)?;
             let body = job_body(&JobArgs {
@@ -54,6 +58,7 @@ pub(crate) async fn run(
                 security,
                 compliance_pr,
                 ask,
+                account,
             })?;
             create_job(&s, &body, out).await
         }
@@ -61,7 +66,8 @@ pub(crate) async fn run(
             state,
             source,
             limit,
-        }) => list_asks(&s, state, source, limit, out).await,
+            account,
+        }) => list_asks(&s, state, source, limit, account, out).await,
         CoordinatorCommand::Brief { job } => brief(&s, &job, out).await,
         CoordinatorCommand::Asks(CoordinatorAsksCommand::Create {
             kind,
@@ -131,6 +137,7 @@ struct JobArgs<'a> {
     security: bool,
     compliance_pr: Option<String>,
     ask: Option<String>,
+    account: Option<String>,
 }
 
 /// The `CreateJobRequest` body: only what was given, so the kind's defaults apply.
@@ -149,6 +156,7 @@ fn job_body(a: &JobArgs<'_>) -> Result<Value, Error> {
         ("supersedes", &a.supersedes),
         ("compliance_pr", &a.compliance_pr),
         ("queued_ask_id", &a.ask),
+        ("account_id", &a.account),
     ];
     for (k, v) in optional {
         if let Some(v) = v {
@@ -200,6 +208,7 @@ async fn list_jobs(
     state: Option<String>,
     mine: bool,
     limit: u32,
+    account: Option<String>,
     out: Out,
 ) -> Result<(), Error> {
     let size = limit.to_string();
@@ -209,6 +218,9 @@ async fn list_jobs(
     }
     if mine {
         q.push(("mine", "true"));
+    }
+    if let Some(a) = account.as_deref() {
+        q.push(("account_id", a));
     }
     let v: Value = s
         .api
@@ -344,6 +356,7 @@ async fn list_asks(
     state: Option<String>,
     source: Option<String>,
     limit: u32,
+    account: Option<String>,
     out: Out,
 ) -> Result<(), Error> {
     let size = limit.to_string();
@@ -353,6 +366,9 @@ async fn list_asks(
     }
     if let Some(src) = source.as_deref() {
         q.push(("source", src));
+    }
+    if let Some(a) = account.as_deref() {
+        q.push(("account_id", a));
     }
     let v: Value = s
         .api
@@ -472,6 +488,7 @@ mod tests {
             security: false,
             compliance_pr: None,
             ask: None,
+            account: None,
         }
     }
 
