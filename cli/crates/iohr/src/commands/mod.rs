@@ -21,6 +21,8 @@ mod project;
 mod sdk;
 mod sdk_add;
 mod token;
+mod tunnel;
+mod upgrade;
 mod whoami;
 
 use clap::CommandFactory as _;
@@ -43,6 +45,10 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         json: cli.global.json,
     };
     let g = &cli.global;
+    // A tunnel reaches an environment over ssh and calls no API, so a placeholder address is no bar.
+    if !matches!(cli.command, Command::Tunnel(_)) {
+        g.check_environment()?;
+    }
     match cli.command {
         Command::Login(args) => login::login(g, &env, &args, out).await,
         Command::Logout => login::logout(g, out).await,
@@ -66,6 +72,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
+        Command::Upgrade { check } => upgrade::run(g, check, out).await,
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
@@ -74,6 +81,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
             browser_ext::install(g, &args, out);
             Ok(())
         }
+        Command::Tunnel(args) => tunnel::run(g, &args, out),
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();

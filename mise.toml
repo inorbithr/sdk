@@ -470,6 +470,11 @@ shell = "bash -e -o pipefail -c"
 description = "Command line: propose a release's Homebrew formula to inorbithr/homebrew-tap (needs GH_TOKEN for the tap)"
 run = "bash cli/release/tap.sh"
 
+[tasks."cli:tap-local"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: the same formula PR as cli:tap for an already published release, run from this machine when the workflow cannot (usage: cli:tap-local <version> [--dry-run]; token: GH_TOKEN or gh auth)"
+run = "bash cli/release/tap-local.sh"
+
 [tasks."cli:apt"]
 shell = "bash -e -o pipefail -c"
 description = "Command line: the signed APT repository from dist/cli/*.deb into dist/apt/ (APT_SIGNING_KEY, APT_SIGNING_KEY_ID, APT_SIGNING_PASSPHRASE); --publish uploads it to the packages bucket"
@@ -745,3 +750,7 @@ found=0
 [ -d examples/java ] && { found=1; (cd java && mvn -B -q -DskipTests -Dspotless.check.skip=true package dependency:build-classpath -Dmdep.includeScope=compile -Dmdep.outputFile=target/classpath.txt) && javac --release 17 -Xlint:all -Werror -d java/target/examples -cp "java/target/classes:$(cat java/target/classpath.txt)" $(find examples/java -name "*.java") || exit 1; }
 [ "$found" = 1 ] || echo "examples: none yet, skipping"
 """
+
+[tasks."env:drift"]
+description = "Compare the command line's environment list (cli/crates/iohr/environments.toml) with core's devops/ci/envs.toml, the one list (RFC 0148). Usage: mise run env:drift <path to core's envs.toml>"
+run = "python3 -I tools/env-drift.py"

@@ -382,7 +382,7 @@ pub(crate) async fn dev(global: &Global, env: &Env, path: &Path, test: bool) -> 
         private_dir(h)?;
         private_dir(&cache.join("tmp"))?;
     }
-    let api = api_origin(&global.base_url)?;
+    let api = api_origin(global.base_url())?;
     let api = api.as_str().trim_end_matches('/').to_owned();
     let scopes = source.permissions.scopes.clone();
     log_line(

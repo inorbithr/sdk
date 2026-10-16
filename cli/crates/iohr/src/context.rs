@@ -188,7 +188,11 @@ impl std::fmt::Debug for Api {
 }
 
 impl Api {
-    fn new(base: &str, credential: Arc<AnyCredential>, verbose: bool) -> Result<Self, Error> {
+    pub(crate) fn new(
+        base: &str,
+        credential: Arc<AnyCredential>,
+        verbose: bool,
+    ) -> Result<Self, Error> {
         let mut b = Client::builder()
             .base_url(base)
             .token_provider(Shared(credential))
@@ -205,6 +209,14 @@ impl Api {
             other => Error::Failed(other.to_string()),
         })?;
         Ok(Self { client })
+    }
+
+    /// Another handle on the same client (it shares the connection pool and credential),
+    /// for work that outlives the call, such as a detached key revoke.
+    pub(crate) fn handle(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+        }
     }
 
     /// The runtime's client, for the generated surface (`inorbithr::public`).
@@ -307,7 +319,7 @@ pub(crate) async fn session_for(
     ctx: &Ctx,
     name: Option<&ProfileName>,
 ) -> Result<Session, Error> {
-    let base = global.base_url.as_str();
+    let base = global.base_url();
     // A named profile takes `IOHR_TOKEN_<PROFILE>` and nothing else from the environment;
     // the chosen profile falls back to `IOHR_TOKEN` as every command always did.
     let per_profile: Option<&Redacted<String>> = name.and_then(|n| env.profile_token(n.as_str()));
@@ -363,7 +375,7 @@ pub(crate) async fn session_for(
             (AnyCredential::Token(StaticToken::new(token)), claims)
         }
         Kind::Person => {
-            let issuer = profile.issuer.as_deref().unwrap_or(&global.issuer);
+            let issuer = profile.issuer.as_deref().unwrap_or(global.issuer());
             let client_id = profile.client_id.as_deref().unwrap_or(&global.client_id);
             let person = PersonSession::load(store, key, issuer, client_id).await?;
             // Refreshes now if needed, so the claims shown are the ones calls carry.

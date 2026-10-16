@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.0-alpha.16](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.15...iohr/v0.1.0-alpha.16) (2026-10-16)
+
+
+### Features
+
+* **cli:** --env and IOHR_ENV target production or local ([#208](https://github.com/inorbithr/sdk/issues/208)) ([3d44e90](https://github.com/inorbithr/sdk/commit/3d44e90345c0dba35d187a33f82ef685a85bce96))
+* **cli:** iohr coordinator jobs list|create and asks list ([#201](https://github.com/inorbithr/sdk/issues/201)) ([7c12ae4](https://github.com/inorbithr/sdk/commit/7c12ae4037450a732cb70558363f21c14a1f1504))
+* **cli:** iohr ext packages and iohr packages list every package, private and local too ([#197](https://github.com/inorbithr/sdk/issues/197)) ([df68793](https://github.com/inorbithr/sdk/commit/df687936866877643ca57423813a586bd880d7b9))
+* **cli:** iohr project init, a project of your own set up with one command (PRD 0088) ([#193](https://github.com/inorbithr/sdk/issues/193)) ([b7ed488](https://github.com/inorbithr/sdk/commit/b7ed48869f544bbba2fa358251f7cf6fd34853de))
+* **cli:** iohr tunnel, a loopback pipe into an environment's Envoy edge ([#212](https://github.com/inorbithr/sdk/issues/212)) ([ba33bdf](https://github.com/inorbithr/sdk/commit/ba33bdf4f7e1ba6868acb64000ce0dbeee9f9ac4))
+* **cli:** iohr upgrade, brew trust in the install docs, cli:tap-local ([#213](https://github.com/inorbithr/sdk/issues/213)) ([aaae388](https://github.com/inorbithr/sdk/commit/aaae388c8b8dd3ab0896316ad1024771425a1573))
+
+
+### Bug fixes
+
+* extension tokens for a person, and a wait that outlasts the channel ([#205](https://github.com/inorbithr/sdk/issues/205)) ([b57dbef](https://github.com/inorbithr/sdk/commit/b57dbef00126617a197ccdbd378b2170696cac2d))
+
 ## [0.1.0-alpha.15](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.14...iohr/v0.1.0-alpha.15) (2026-10-12)
 
 

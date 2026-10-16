@@ -571,6 +571,15 @@ async fn verbose_output_never_shows_the_token() {
     let secret_arg = format!("api_key={}", secret_file.to_str().unwrap());
     let commands: Vec<Vec<&str>> = vec![
         vec!["whoami"],
+        vec![
+            "coordinator",
+            "asks",
+            "create",
+            "--kind",
+            "bug",
+            "--body",
+            "x",
+        ],
         vec!["accounts", "list"],
         vec!["token", "list"],
         vec!["token", "revoke", "key_1"],
@@ -3164,4 +3173,114 @@ async fn coordinator_account_flag_reaches_the_api() {
     // Without the flag no call matches the account mocks: the request carries none.
     let o = r.with_token(&t, &["coordinator", "asks", "list"]);
     assert_ne!(code(&o), 0, "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_brief_prints_the_text_alone() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/jobs/job_1/brief"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "job_id": "job_1", "kind": "fix", "model": "sonnet",
+            "text": "## Task\nCap the brief.\n\n## Rules\nNever merge.",
+            "token_estimate": 12, "token_budget": 1000, "truncated": ["document"]
+        })))
+        .expect(3)
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(&t, &["coordinator", "brief", "job_1"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout),
+        "## Task\nCap the brief.\n\n## Rules\nNever merge.\n"
+    );
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("~12 of 1000 tokens, cut: document"), "{err}");
+
+    let o = r.with_token(&t, &["--json", "coordinator", "brief", "job_1"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["token_budget"], 1000);
+
+    // --verbose says the request, never the credential.
+    let o = r.with_token(&t, &["coordinator", "brief", "job_1", "--verbose"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let all = text(&o);
+    assert!(all.contains("request id"), "{all}");
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER"),
+        "the brief leaked the token"
+    );
+
+    // A path in the id is refused before any call.
+    let o = r.with_token(&t, &["coordinator", "brief", "../jobs"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_asks_create_sends_the_kind() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/asks"))
+        .and(body_json(serde_json::json!({
+            "kind": "bug", "body": "It breaks", "source": "cli", "priority": 7
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ask": {"id": "ask_1", "state": "queued", "kind": "bug"},
+            "repeated": false
+        })))
+        .mount(&server)
+        .await;
+    // an ask without --kind never leaves the machine
+    let o = r.with_token(
+        &t,
+        &["coordinator", "asks", "create", "--body", "It breaks"],
+    );
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    // a malformed kind is refused before any call
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "asks",
+            "create",
+            "--kind",
+            "Bug!",
+            "--body",
+            "-",
+        ],
+    );
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(server.received_requests().await.unwrap().is_empty());
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "asks",
+            "create",
+            "--kind",
+            "bug",
+            "--body",
+            "It breaks",
+            "--priority",
+            "7",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.contains("ask_1") && out.contains("bug"), "{out}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
