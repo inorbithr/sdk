@@ -1385,6 +1385,29 @@ pub enum CoordinatorAsksCommand {
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
     },
+    /// Queue an ask. The coordinator's planner files a job for a kind it knows (bug,
+    /// feature, ui, api, docs, design, review, chore, question, watch); an ask with
+    /// any other kind stays queued, with the reason.
+    Create {
+        /// What kind of ask: lower case, 1 to 40 of a-z, 0-9, _ and -.
+        #[arg(long)]
+        kind: String,
+        /// The ask, or `-` to read it from standard input.
+        #[arg(long)]
+        body: String,
+        /// A short title; empty is the body's first line.
+        #[arg(long)]
+        title: Option<String>,
+        /// Priority 1 to 10 (default 5).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=10))]
+        priority: Option<u32>,
+        /// A link (pull request, document); repeat or comma-separate.
+        #[arg(long = "link", value_delimiter = ',')]
+        links: Vec<String>,
+        /// The id in the system it came from; the same id returns the same ask.
+        #[arg(long)]
+        external_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Args)]
