@@ -21,6 +21,8 @@ The repository went public on 2026-10-01. These items waited for that.
 
 ## How a release happens
 
+The workflows (`release`, `cli-build`, `ci`, `fuzz`, `pr-title`) stay enabled on this public repository; a disabled `release` workflow starts no release-please run, and a manual run only republishes an existing tag.
+
 1. Conventional Commits land on `main` (`feat(go): ...`, `fix(py): ...`).
 2. The `release-please` workflow opens or updates one PR per package
    ("chore(main): release go 0.2.0") with the version bump and the changelog.
