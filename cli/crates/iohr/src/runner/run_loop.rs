@@ -667,10 +667,10 @@ fn report_of(lease: &Lease, pack: &Pack, runner: &RunnerInfo, f: &Finished) -> T
         outcome: f.outcome.clone(),
         say,
         state,
-        actions: actions.iter().map(action_of).collect(),
+        actions: actions_of(&actions, pack, f, &today()),
         evidence: evidence.iter().map(text_of).collect(),
         left: left.iter().map(text_of).collect(),
-        provider: "claude".into(),
+        provider: super::claude::PROVIDER.into(),
         provider_session_id: f.session_id.clone(),
         resumed: f.resumed,
         provider_version: f.provider_version.clone(),
@@ -691,6 +691,57 @@ fn report_of(lease: &Lease, pack: &Pack, runner: &RunnerInfo, f: &Finished) -> T
         attempt: pack.attempt,
         resets_at: p.map(|p| p.resets_at).unwrap_or_default(),
     }
+}
+
+/// The kind of the Critique's record (RFC 0150). Only the runner writes it: a model
+/// that writes one is never believed, so its own are dropped.
+const RECORD_CRITIQUE: &str = "record_critique";
+
+/// The reply's actions as the report carries them. A review turn the critic finished
+/// (`replied`, state `reviewed`) gets the runner's own `record_critique`: the model it
+/// ran, the day, the SHA-256 of the prompt it was given and the commit the pack named.
+/// The prompt and the reply are never logged; only their digest leaves.
+fn actions_of(actions: &[serde_json::Value], pack: &Pack, f: &Finished, date: &str) -> Vec<Action> {
+    let mut out: Vec<Action> = actions
+        .iter()
+        .map(action_of)
+        .filter(|a| a.kind != RECORD_CRITIQUE)
+        .collect();
+    let reviewed = f
+        .parsed
+        .as_ref()
+        .is_some_and(|p| p.reply.state == "reviewed");
+    if pack.kind == "review"
+        && f.outcome == "replied"
+        && reviewed
+        && !pack.critique_commit.is_empty()
+        && !f.model.is_empty()
+    {
+        out.push(Action {
+            kind: RECORD_CRITIQUE.into(),
+            payload_json: serde_json::json!({
+                "model": f.model,
+                "date": date,
+                "prompt_sha256": prompt_digest(&pack.system_prompt, &pack.prompt),
+                "commit": pack.critique_commit,
+            })
+            .to_string(),
+        });
+    }
+    out
+}
+
+/// What the service checks a Critique's prompt against: the SHA-256 of the system
+/// prompt, a blank line and the prompt, as hex (core `critique::prompt_digest`).
+fn prompt_digest(system: &str, prompt: &str) -> String {
+    use sha2::{Digest as _, Sha256};
+    super::claude::hex(&Sha256::digest(format!("{system}\n\n{prompt}").as_bytes()))
+}
+
+/// Today in UTC, `YYYY-MM-DD`.
+fn today() -> String {
+    let d = time::OffsetDateTime::now_utc().date();
+    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
 }
 
 /// A list element as text: a string as is, anything else as its JSON.
@@ -729,6 +780,7 @@ mod tests {
     )]
     use super::*;
     use crate::runner::service::{Challenge, ProviderState, Registration, ServiceError};
+    use serde_json::json;
     use std::collections::VecDeque;
     use std::future::Future;
     use std::pin::Pin;
@@ -985,6 +1037,7 @@ mod tests {
                     session_id: format!("sess-{}", pack.turn_id),
                     detail: String::new(),
                     provider_version: "x".into(),
+                    model: pack.model.clone(),
                 }
             })
         }
@@ -1022,6 +1075,106 @@ mod tests {
             pack_sha256: "a".repeat(64),
             attempt: 1,
             ..Pack::default()
+        }
+    }
+
+    fn review_pack() -> Pack {
+        Pack {
+            kind: "review".into(),
+            system_prompt: "SYS".into(),
+            prompt: "PR".into(),
+            critique_commit: "abc1234".into(),
+            ..good_pack()
+        }
+    }
+
+    fn finished(outcome: &str, state: &str, actions: Vec<serde_json::Value>) -> Finished {
+        Finished {
+            outcome: outcome.into(),
+            parsed: Some(crate::runner::claude::Parsed {
+                outcome: crate::runner::claude::Outcome::Replied,
+                reply: crate::runner::claude::Reply {
+                    say: "x".into(),
+                    state: state.into(),
+                    actions,
+                    evidence: vec![],
+                    left: vec![],
+                },
+                session_id: "s".into(),
+                num_turns: 1,
+                duration_ms: 1,
+                total_cost_usd: None,
+                usage: serde_json::Value::Null,
+                denied_tools: vec![],
+                resets_at: String::new(),
+            }),
+            resumed: false,
+            session_id: "s".into(),
+            detail: String::new(),
+            provider_version: "x".into(),
+            model: "opus".into(),
+        }
+    }
+
+    fn forged() -> serde_json::Value {
+        json!({"kind": "record_critique", "payload_json": json!({
+            "model": "opus", "date": "2026-01-01",
+            "prompt_sha256": "b".repeat(64), "commit": "abc1234"}).to_string()})
+    }
+
+    #[test]
+    fn only_the_runner_writes_record_critique_and_only_for_a_reviewed_review_turn() {
+        let other = json!({"kind": "note", "payload_json": "{}"});
+        let r = report_of(
+            &lease("lease_1", 1),
+            &review_pack(),
+            &runner(),
+            &finished("replied", "reviewed", vec![forged(), other.clone()]),
+        );
+        let kinds: Vec<&str> = r.actions.iter().map(|a| a.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            ["note", "record_critique"],
+            "the model's own is dropped"
+        );
+        let p: serde_json::Value = serde_json::from_str(&r.actions[1].payload_json).unwrap();
+        assert_eq!(p["model"], "opus");
+        assert_eq!(p["commit"], "abc1234");
+        assert_eq!(p["prompt_sha256"], prompt_digest("SYS", "PR"));
+        // The core's digest: sha256("SYS\n\nPR"), hex.
+        assert_eq!(
+            prompt_digest("SYS", "PR"),
+            crate::runner::claude::hex(&<sha2::Sha256 as sha2::Digest>::digest(b"SYS\n\nPR"))
+        );
+        let date = p["date"].as_str().unwrap();
+        assert!(
+            time::Date::parse(date, &time::format_description::well_known::Iso8601::DATE).is_ok(),
+            "{date}"
+        );
+        assert_eq!(r.provider, "claude");
+
+        // Not reviewed, not replied, not a review turn, no commit: no record, and a
+        // forged one never passes.
+        for (pack, f) in [
+            (
+                review_pack(),
+                finished("replied", "not_reviewed", vec![forged()]),
+            ),
+            (
+                review_pack(),
+                finished("failed", "reviewed", vec![forged()]),
+            ),
+            (good_pack(), finished("replied", "reviewed", vec![forged()])),
+            (
+                Pack {
+                    critique_commit: String::new(),
+                    ..review_pack()
+                },
+                finished("replied", "reviewed", vec![forged()]),
+            ),
+        ] {
+            let r = report_of(&lease("lease_1", 1), &pack, &runner(), &f);
+            assert!(r.actions.iter().all(|a| a.kind != "record_critique"));
         }
     }
 
@@ -1492,7 +1645,6 @@ mod tests {
     #[tokio::test]
     async fn revocation_kills_the_running_claude() {
         use crate::runner::exec::ClaudeExec;
-        use std::os::unix::fs::PermissionsExt as _;
         let dir = tempfile::tempdir().unwrap();
         let (pid, kid) = (dir.path().join("pid"), dir.path().join("kid"));
         let claude = dir.path().join("claude");
@@ -1505,7 +1657,7 @@ mod tests {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::runner::exec::settle_script(&claude);
         let exec = Arc::new(ClaudeExec::new(
             claude,
             dir.path().join("work"),

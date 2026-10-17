@@ -31,6 +31,8 @@ pub(crate) struct Finished {
     pub(crate) session_id: String,
     pub(crate) detail: String,
     pub(crate) provider_version: String,
+    /// The model the turn ran on; empty when it never started.
+    pub(crate) model: String,
 }
 
 impl Finished {
@@ -42,6 +44,7 @@ impl Finished {
             session_id: String::new(),
             detail: detail.into(),
             provider_version: String::new(),
+            model: String::new(),
         }
     }
 }
@@ -148,19 +151,38 @@ impl ClaudeExec {
             .unwrap_or_default()
     }
 
-    async fn run_turn(&self, pack: &Pack) -> Finished {
+    /// Why this turn may not start here, if it may not: another person's seat, another
+    /// provider's turn, or a `claude` that is not signed in on a subscription.
+    async fn refusal(&self, pack: &Pack) -> Option<Finished> {
         if pack.user != self.user {
-            return Finished::refused(
+            return Some(Finished::refused(
                 "refused_user",
                 "the turn is on another person's seat (invariant 1)",
-            );
+            ));
+        }
+        if !pack.provider.is_empty() && pack.provider != claude::PROVIDER {
+            return Some(Finished::refused(
+                "refused_provider",
+                format!(
+                    "the turn names provider {}; this runner runs {}",
+                    pack.provider,
+                    claude::PROVIDER
+                ),
+            ));
         }
         match self.auth_status().await {
-            AuthState::Subscription => {}
-            AuthState::SignedOut => {
-                return Finished::refused("login_expired", "claude is signed out on this machine");
-            }
-            AuthState::Refused(why) => return Finished::refused("refused_provider", why),
+            AuthState::Subscription => None,
+            AuthState::SignedOut => Some(Finished::refused(
+                "login_expired",
+                "claude is signed out on this machine",
+            )),
+            AuthState::Refused(why) => Some(Finished::refused("refused_provider", why)),
+        }
+    }
+
+    async fn run_turn(&self, pack: &Pack) -> Finished {
+        if let Some(no) = self.refusal(pack).await {
+            return no;
         }
         let provider_version = self.version().await;
         let session = claude::choose_session(
@@ -176,9 +198,14 @@ impl ClaudeExec {
             pack.context_ceiling,
             claude::new_session_id,
         );
+        let model = if pack.model.trim().is_empty() && pack.kind == "review" {
+            claude::CRITIC_MODEL
+        } else {
+            pack.model.as_str()
+        };
         let args = match claude::build_args(&TurnSpec {
             system_prompt: &pack.system_prompt,
-            model: &pack.model,
+            model,
             max_turns: pack.max_turns,
             allowed_tools: &pack.allowed_tools,
             session: &session,
@@ -190,6 +217,7 @@ impl ClaudeExec {
             resumed: session.resumed(),
             session_id: session.id().to_owned(),
             provider_version: provider_version.clone(),
+            model: model.to_owned(),
             ..Finished::refused("failed", detail)
         };
         if let Err(e) = tokio::fs::create_dir_all(&self.workdir).await {
@@ -249,6 +277,7 @@ impl ClaudeExec {
             resumed: matches!(session, Session::Resume(_)),
             detail: String::new(),
             provider_version,
+            model: model.to_owned(),
         }
     }
 }
@@ -407,7 +436,7 @@ impl Exec for ClaudeExec {
         Box::pin(async move {
             let s = me.auth_status().await;
             vec![ProviderState {
-                provider: "claude".into(),
+                provider: claude::PROVIDER.into(),
                 method: if s.signed_in() { "subscription" } else { "" }.into(),
                 signed_in: s.signed_in(),
             }]
@@ -419,12 +448,29 @@ impl Exec for ClaudeExec {
     }
 }
 
+/// Makes a test's fake `claude` executable and waits until it starts. Another test's
+/// fork can hold the script's write descriptor until that child execs, and Linux then
+/// refuses to run the script (ETXTBSY), which a turn reads as a refused provider. The
+/// fake answers `--version` without side effects, so it is the probe.
+#[cfg(all(test, unix))]
+pub(crate) fn settle_script(p: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap_or_default();
+    for _ in 0..400 {
+        match std::process::Command::new(p).arg("--version").output() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            _ => return,
+        }
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::process_gone as gone;
     use super::*;
-    use std::os::unix::fs::PermissionsExt as _;
 
     const ME: &str = "run_me";
     const OLD: &str = "7d2f9a10-1111-4222-8333-444455556666";
@@ -450,7 +496,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        settle_script(&p);
         p
     }
 
@@ -499,6 +545,46 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             ME.into(),
             "usr_me".into(),
         )
+    }
+
+    #[tokio::test]
+    async fn a_review_turn_runs_only_on_its_provider_and_picks_the_critic_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = exec(dir.path(), SUB);
+        let other = Pack {
+            kind: "review".into(),
+            provider: "codex".into(),
+            model: String::new(),
+            ..pack("usr_me")
+        };
+        let f = e.execute(other).await;
+        assert_eq!(f.outcome, "refused_provider", "{}", f.detail);
+        assert!(f.model.is_empty());
+        assert!(
+            !dir.path().join("args.txt").exists(),
+            "claude never started"
+        );
+
+        let mine = Pack {
+            kind: "review".into(),
+            provider: "claude".into(),
+            model: String::new(),
+            ..pack("usr_me")
+        };
+        let f = e.execute(mine).await;
+        assert_eq!(f.outcome, "replied", "{}", f.detail);
+        assert_eq!(f.model, claude::CRITIC_MODEL);
+        let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+        assert!(args.lines().any(|a| a == claude::CRITIC_MODEL));
+
+        // Any other turn still needs a model: an empty one is refused as before.
+        let f = e
+            .execute(Pack {
+                model: String::new(),
+                ..pack("usr_me")
+            })
+            .await;
+        assert_ne!(f.outcome, "replied");
     }
 
     #[tokio::test]
@@ -622,7 +708,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        settle_script(&p);
         ClaudeExec::new(
             p,
             dir.join("work"),

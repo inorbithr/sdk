@@ -200,6 +200,13 @@ pub(crate) fn assert_honest(args: &[String]) -> Result<(), ArgError> {
 }
 
 /// Lowercase hex of `bytes`.
+/// The provider this executor runs, as the service names it.
+pub(crate) const PROVIDER: &str = "claude";
+
+/// The model a review turn runs on when its pack names none: the service leaves the
+/// critic's model to the runner, and a Critique wants the strongest one.
+pub(crate) const CRITIC_MODEL: &str = "opus";
+
 pub(crate) fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes.iter().fold(String::new(), |mut s, b| {

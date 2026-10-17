@@ -255,6 +255,11 @@ pub(crate) struct Pack {
     pub(crate) context_ceiling: u32,
     /// The JSON the final message must be.
     pub(crate) reply_shape: String,
+    /// The provider the turn must run on; empty when any the runner runs will do. A
+    /// review turn (RFC 0150, the Critique) names the critic's.
+    pub(crate) provider: String,
+    /// For a review turn: the pull request's head the Critique is for.
+    pub(crate) critique_commit: String,
 }
 
 impl Pack {
@@ -295,6 +300,8 @@ impl Pack {
             token_budget: u32::try_from(num(v, "token_budget")).unwrap_or(u32::MAX),
             context_ceiling: u32::try_from(num(v, "context_ceiling")).unwrap_or(u32::MAX),
             reply_shape: s("reply_shape"),
+            provider: s("provider"),
+            critique_commit: s("critique_commit"),
         }
     }
 }
@@ -841,8 +848,13 @@ mod tests {
             "allowed_tools": ["Read"], "wall_clock_secs": 600,
             "resume_session": "x", "resume_runner_id": "r", "thread_id": "th",
             "job_id": "j", "attempt": 2, "lease_id": "l", "fencing_token": "9",
-            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}"
+            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}",
+            "provider": "claude", "critique_commit": "abc1234"
         }));
+        assert_eq!(
+            (p.provider.as_str(), p.critique_commit.as_str()),
+            ("claude", "abc1234")
+        );
         assert_eq!(
             (
                 p.thread_id.as_str(),
