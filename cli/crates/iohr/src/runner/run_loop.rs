@@ -1141,10 +1141,11 @@ mod tests {
         assert_eq!(p["model"], "opus");
         assert_eq!(p["commit"], "abc1234");
         assert_eq!(p["prompt_sha256"], prompt_digest("SYS", "PR"));
-        // The core's digest: sha256("SYS\n\nPR"), hex.
+        // The fixed vector core's `critique::prompt_digest` test carries too, so the two
+        // copies cannot drift: sha256("SYS\n\nPR"), hex.
         assert_eq!(
             prompt_digest("SYS", "PR"),
-            crate::runner::claude::hex(&<sha2::Sha256 as sha2::Digest>::digest(b"SYS\n\nPR"))
+            "cc6ab85a75dbaf807c23a207897e1d280c8039b79ee1135dc3a516d12c7e4d76"
         );
         let date = p["date"].as_str().unwrap();
         assert!(
