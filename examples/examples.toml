@@ -71,7 +71,7 @@ run = "target/debug/{name}"
 
 [language.typescript]
 dir = "examples/typescript"
-prepare = "pnpm install --frozen-lockfile"
+prepare = "(cd ../../typescript && pnpm install --frozen-lockfile && pnpm run build) && pnpm install --frozen-lockfile"
 run = "node src/{name}.ts"
 
 [language.python]
