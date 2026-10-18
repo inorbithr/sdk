@@ -158,7 +158,14 @@ func (s *Server) loadHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// listHandler answers GET /_cases with every case name under the cases directory.
+// examplesArea holds the cases the runnable examples play against (`mise run
+// examples:run`). A driver's GET /_cases leaves it out, because its cases need an
+// example program as the client, not a driver's action; GET /_cases?area=examples lists
+// only those.
+const examplesArea = "examples"
+
+// listHandler answers GET /_cases with every case name under the cases directory,
+// except the examples area, which GET /_cases?area=examples lists on its own.
 func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, problem("method_not_allowed", "GET the case list"))
@@ -169,7 +176,14 @@ func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, problem("internal", err.Error()))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cases": names})
+	want := r.URL.Query().Get("area")
+	kept := names[:0]
+	for _, n := range names {
+		if strings.HasPrefix(n, examplesArea+"/") == (want == examplesArea) {
+			kept = append(kept, n)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cases": kept})
 }
 
 func (s *Server) resultHandler(w http.ResponseWriter, r *http.Request) {
