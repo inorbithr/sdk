@@ -1,0 +1,16 @@
+name: list-pagination
+area: examples
+summary: "A paged list, ListMonitors, read page after page by following next_page_token, then one page read by hand with page_size and page_token."
+action: { op: example }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/accounts/orgs/org_1/monitors, headers: { authorization: Bearer t1 }, query: { page_size: "2" } }
+    response: { status: 200, json: { monitors: [ { monitor_id: mon_1, name: api, connection_id: conn_1, agent_id: '', category: web, created_at: '2026-10-01T09:00:00Z', fail_after: 3, health: up, interval_secs: 60, last_run_at: '2026-10-18T09:00:00Z', managed_by: '', next_run_at: '2026-10-18T09:01:00Z', paused_reason: '', rfc: '', state: up, tags: {} }, { monitor_id: mon_2, name: site, connection_id: conn_1, agent_id: '', category: web, created_at: '2026-10-01T09:00:00Z', fail_after: 3, health: up, interval_secs: 60, last_run_at: '2026-10-18T09:00:00Z', managed_by: '', next_run_at: '2026-10-18T09:01:00Z', paused_reason: '', rfc: '', state: up, tags: {} } ], next_page_token: tok_2 } }
+  - request: { method: GET, path: /v1/accounts/orgs/org_1/monitors, query: { page_size: "2", page_token: tok_2 } }
+    response: { status: 200, json: { monitors: [ { monitor_id: mon_3, name: docs, connection_id: conn_1, agent_id: '', category: web, created_at: '2026-10-01T09:00:00Z', fail_after: 3, health: up, interval_secs: 60, last_run_at: '2026-10-18T09:00:00Z', managed_by: '', next_run_at: '2026-10-18T09:01:00Z', paused_reason: '', rfc: '', state: up, tags: {} } ], next_page_token: '' } }
+  - request: { method: GET, path: /v1/accounts/orgs/org_1/monitors, query: { page_size: "1" } }
+    response: { status: 200, json: { monitors: [ { monitor_id: mon_1, name: api, connection_id: conn_1, agent_id: '', category: web, created_at: '2026-10-01T09:00:00Z', fail_after: 3, health: up, interval_secs: 60, last_run_at: '2026-10-18T09:00:00Z', managed_by: '', next_run_at: '2026-10-18T09:01:00Z', paused_reason: '', rfc: '', state: up, tags: {} } ], next_page_token: tok_2 } }
+expect:
+  attempts: 3
+  token_exchanges: 1
