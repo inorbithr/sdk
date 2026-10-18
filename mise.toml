@@ -54,7 +54,7 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "cli:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "cli:check", "conformance", "examples:check", "examples:run"]
 
 [tasks."ci:changed"]
 description = "What CI would run for your changes since origin/main, with CI's path rules; run it before a push (`-- --dry-run` prints the plan)"
@@ -723,6 +723,12 @@ run = "[ -e conformance/server ] && [ -f typescript/package.json ] || { echo 'co
 shell = "bash -e -o pipefail -c"
 depends = ["conformance:server:build"]
 run = "[ -e conformance/server ] && [ -f python/pyproject.toml ] || { echo 'conformance:py: skipping (no server or no package yet)'; exit 0; }; cd python && uv run pytest tests/conformance"
+
+[tasks."examples:run"]
+shell = "bash -e -o pipefail -c"
+description = "Run every example against the conformance replay server; writes examples-results.json"
+depends = ["conformance:server:build"]
+run = "python3 tools/run-examples.py"
 
 [tasks."examples:check"]
 shell = "bash -e -o pipefail -c"
