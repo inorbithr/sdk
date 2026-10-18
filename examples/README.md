@@ -27,6 +27,10 @@ how each language is built and run.
 | `concurrent-calls`: Several calls at once on one client | [`concurrent-calls.rs`](rust/src/bin/concurrent-calls.rs) | [`concurrent-calls.ts`](typescript/src/concurrent-calls.ts) | [`concurrent-calls`](go/concurrent-calls/main.go) | [`concurrent_calls.py`](python/concurrent_calls.py) | [`ConcurrentCalls.java`](java/src/main/java/example/ConcurrentCalls.java) | [`ConcurrentCalls.cs`](csharp/Calls/ConcurrentCalls.cs) |
 | `config-load`: A client from load, with where each setting came from | [`config-load.rs`](rust/src/bin/config-load.rs) | [`config-load.ts`](typescript/src/config-load.ts) | [`config-load`](go/config-load/main.go) | [`config_load.py`](python/config_load.py) | [`ConfigLoad.java`](java/src/main/java/example/ConfigLoad.java) | [`ConfigLoad.cs`](csharp/Calls/ConfigLoad.cs) |
 
+The Python run uses `uv run --frozen`, so `examples/python/uv.lock` is not rewritten (uv
+bumps the `inorbithr` version in it otherwise, and a dirty tree fails the gate). If you run
+`uv run` by hand, revert the lock before attesting.
+
 ## Earlier examples
 
 These predate the table above and stay. Some show the same thing as a call type

@@ -76,7 +76,7 @@ run = "node src/{name}.ts"
 
 [language.python]
 dir = "examples/python"
-run = "uv run python {snake}.py"
+run = "uv run --frozen python {snake}.py"
 
 [language.java]
 dir = "java"
