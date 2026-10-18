@@ -7,6 +7,8 @@
 results file (written by `mise run examples:run`):
   {"schema": 1, "commit": "<40 hex>", "dirty": false, "results":
    [{"language": "go", "example": "whoami", "status": "pass|fail|skip"}]}
+Several runs (Linux and the Mac, for Swift) are given as `attest --results a.json --results b.json`;
+each must be for HEAD, clean and without a fail, and the languages are checked on their union.
 A pass needs: the commit is HEAD, the tree was clean, no fail, and every language directory
 under examples/ has at least one pass. Uses `gh` (GH_TOKEN: statuses: write to attest,
 statuses: read to gate).
@@ -44,15 +46,30 @@ def verdict(res: dict, head: str, languages: set[str]) -> str | None:
     return None
 
 
+def merge(files: list[dict], head: str) -> tuple[dict | None, str | None]:
+    """One results document from several runs (Linux and Mac), or the reason they cannot be one.
+
+    Each file must itself pass the schema, commit, dirty and no-fail checks of `verdict` (no
+    language requirement); then the rows are joined, so the language check runs on the union."""
+    for i, f in enumerate(files):
+        if why := verdict(f, head, set()):
+            return None, f"results file {i + 1}: {why}"
+    rows = [r for f in files for r in f.get("results") or []]
+    return {"schema": 1, "commit": head, "dirty": False, "results": rows}, None
+
+
 def repo() -> str:
     return sh("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
 
 
-def attest(path: Path) -> int:
-    res = json.loads(path.read_text())
+def attest(paths: list[Path]) -> int:
     head = sh("git", "rev-parse", "HEAD")
     langs = {p.name for p in (ROOT / "examples").iterdir() if p.is_dir()}
-    why = verdict(res, head, langs)
+    res, why = merge([json.loads(p.read_text()) for p in paths], head)
+    if res is not None:
+        why = verdict(res, head, langs)
+    else:
+        res = {"results": []}
     state = "failure" if why else "success"
     desc = (why or f"{len(res['results'])} examples passed against the live API")[:140]
     sh("gh", "api", f"repos/{repo()}/statuses/{head}", "-f", f"state={state}",
@@ -77,11 +94,11 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("attest")
-    a.add_argument("--results", default=str(ROOT / "examples-results.json"))
+    a.add_argument("--results", action="append", help="a results file; repeat for the Linux and the Mac run (default examples-results.json)")
     g = sub.add_parser("gate")
     g.add_argument("--ref", required=True)
     args = p.parse_args()
-    return attest(Path(args.results)) if args.cmd == "attest" else gate(args.ref)
+    return attest([Path(r) for r in args.results or [ROOT / "examples-results.json"]]) if args.cmd == "attest" else gate(args.ref)
 
 
 if __name__ == "__main__":

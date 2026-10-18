@@ -35,4 +35,30 @@ class Verdict(unittest.TestCase):
         self.assertIn("go", g.verdict(r, H, {"go"}))
 
 
+def doc(lang, commit=H, **kw):
+    return {"schema": 1, "commit": commit, "dirty": False, "results": [
+        {"language": lang, "example": "x", "status": "pass"}], **kw}
+
+
+class Merge(unittest.TestCase):
+    def joined(self, files, langs):
+        res, why = g.merge(files, H)
+        return why if res is None else g.verdict(res, H, langs)
+
+    def test_linux_and_mac_pass(self):
+        self.assertIsNone(self.joined([ok, doc("swift")], L | {"swift"}))
+
+    def test_mac_on_another_commit_fails(self):
+        self.assertIn("results file 2", self.joined([ok, doc("swift", "b" * 40)], L | {"swift"}))
+
+    def test_dirty_mac_fails(self):
+        self.assertIn("dirty", self.joined([ok, doc("swift", dirty=True)], L | {"swift"}))
+
+    def test_missing_language_fails(self):
+        self.assertIn("swift", self.joined([ok], L | {"swift"}))
+
+    def test_one_file_is_as_before(self):
+        self.assertIsNone(self.joined([ok], L))
+
+
 unittest.main()
