@@ -559,7 +559,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         };
         let f = e.execute(other).await;
         assert_eq!(f.outcome, "refused_provider", "{}", f.detail);
-        assert!(f.model.is_empty());
+        assert_eq!(f.model, "");
         assert!(
             !dir.path().join("args.txt").exists(),
             "claude never started"
