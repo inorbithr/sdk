@@ -411,6 +411,42 @@ func TestBadLoads(t *testing.T) {
 	}
 }
 
+func TestExamplesCasesAreListedOnlyOnRequest(t *testing.T) {
+	ts := start(t)
+	list := func(query string) []string {
+		resp, err := client.Get(ts.URL + "/_cases" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var listed struct {
+			Cases []string `json:"cases"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+			t.Fatal(err)
+		}
+		return listed.Cases
+	}
+	count := func(cases []string) (n int) {
+		for _, c := range cases {
+			if strings.HasPrefix(c, "examples/") {
+				n++
+			}
+		}
+		return n
+	}
+	if n := count(list("")); n != 0 {
+		t.Fatalf("the default list shows %d examples cases, SDK conformance suites would run them", n)
+	}
+	if n := count(list("?area=examples")); n == 0 {
+		t.Fatal("?area=examples lists no examples case")
+	}
+	// A hidden case still loads by name.
+	if status, out := load(t, ts, `{"name": "examples/unary-get"}`); status != http.StatusOK {
+		t.Fatalf("examples/unary-get: %d %v", status, out)
+	}
+}
+
 func TestTheCaseListAndTheLoadedCaseServeTheDrivers(t *testing.T) {
 	ts := start(t)
 	resp, err := client.Get(ts.URL + "/_cases")

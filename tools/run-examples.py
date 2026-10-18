@@ -5,7 +5,7 @@ For each language and call type in examples/examples.toml the runner selects the
 that name (conformance/cases/examples), runs the example with the credentials the call
 type names and the server's address in the environment, and checks two things: the
 process exits 0, and the server says the case passed (every exchange seen, in order).
-It writes examples-results.json, one entry per example, and exits 1 if any failed.
+It writes examples-results.json ({schema: 1, commit, dirty, results: [{language, example, status, ok, duration_ms, commit}]}, the shape tools/examples-gate.py reads), and exits 1 if any failed.
 
     python tools/run-examples.py [--lang go --lang rust] [--only unary-get] [--results FILE]
 """
@@ -68,9 +68,14 @@ def start_server() -> tuple[subprocess.Popen[str], str]:
 
 def commit() -> str:
     out = subprocess.run(
-        ["git", "rev-parse", "--short=12", "HEAD"], cwd=ROOT, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True
     )
     return out.stdout.strip() or "unknown"
+
+
+def dirty() -> bool:
+    out = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True)
+    return bool(out.stdout.strip())
 
 
 def words(name: str) -> tuple[str, str]:
@@ -136,7 +141,8 @@ def main() -> int:
         server.terminate()
         server.wait(timeout=10)
 
-    Path(args.results).write_text(json.dumps(results, indent=2) + "\n")
+    doc = {"schema": 1, "commit": sha, "dirty": dirty(), "results": results}
+    Path(args.results).write_text(json.dumps(doc, indent=2) + "\n")
     ran = [r for r in results if r["ok"] is not None]
     bad = [r for r in ran if not r["ok"]]
     for lang in dict.fromkeys(str(r["language"]) for r in results):
@@ -152,6 +158,7 @@ def entry(
     out: dict[str, object] = {
         "language": lang,
         "example": name,
+        "status": "skip" if ok is None else ("pass" if ok else "fail"),
         "ok": ok,
         "duration_ms": ms,
         "commit": sha,

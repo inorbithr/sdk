@@ -7,7 +7,7 @@
 results file (written by `mise run examples:run`):
   {"schema": 1, "commit": "<40 hex>", "dirty": false, "results":
    [{"language": "go", "example": "whoami", "status": "pass|fail|skip"}]}
-Several runs (Linux and the Mac, for Swift) are given as `attest --results a.json --results b.json`;
+Several runs (for example Linux and the Mac) are given as `attest --results a.json --results b.json`;
 each must be for HEAD, clean and without a fail, and the languages are checked on their union.
 A pass needs: the commit is HEAD, the tree was clean, no fail, and every language directory
 under examples/ has at least one pass. Uses `gh` (GH_TOKEN: statuses: write to attest,
