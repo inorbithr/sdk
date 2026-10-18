@@ -92,3 +92,6 @@ run = "dotnet run --no-build -- {name}"
 dir = "examples/swift"
 prepare = "swift build"
 run = ".build/debug/Calls {name}"
+
+[language.swift.skip]
+stream-socket = "the Swift SDK has no WebSocket stream transport yet"

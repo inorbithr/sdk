@@ -9,5 +9,6 @@ let package = Package(
     targets: [
         .executableTarget(name: "Whoami", dependencies: ["InOrbit"]),
         .executableTarget(name: "ListMonitors", dependencies: ["InOrbit"]),
+        .executableTarget(name: "Calls", dependencies: ["InOrbit"]),
     ]
 )
