@@ -737,6 +737,18 @@ shell = "bash -e -o pipefail -c"
 depends = ["conformance:server:build"]
 run = "[ -e conformance/server ] && [ -f python/pyproject.toml ] || { echo 'conformance:py: skipping (no server or no package yet)'; exit 0; }; cd python && uv run pytest tests/conformance"
 
+[tasks."examples:attest"]
+description = "Post the examples-run commit status for HEAD from examples-results.json (after examples:run), only when every example passed on a clean HEAD"
+run = "python3 tools/examples-gate.py attest"
+
+[tasks."examples:gate"]
+description = "Exit 1 unless the examples-run status is green on a ref's commit: `mise run examples:gate -- main`"
+run = "python3 tools/examples-gate.py gate --ref"
+
+[tasks."examples:gate:test"]
+description = "Unit tests of the examples gate verdict"
+run = "python3 tools/test_examples_gate.py"
+
 [tasks."examples:check"]
 shell = "bash -e -o pipefail -c"
 description = "Compile every example"

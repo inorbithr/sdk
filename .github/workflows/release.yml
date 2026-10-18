@@ -83,9 +83,36 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  # RFC 0165: no publish job runs unless `mise run examples:run` passed on this exact
+  # commit and `mise run examples:attest` posted the `examples-run` status (a green status
+  # is the only evidence; docs/releasing.md).
+  examples-gate:
+    name: examples ran green on this commit
+    needs: release-please
+    if: >-
+      ${{ !cancelled() && (needs.release-please.outputs.go == 'true'
+      || needs.release-please.outputs.rust == 'true' || needs.release-please.outputs.ts == 'true'
+      || needs.release-please.outputs.py == 'true' || needs.release-please.outputs.iohr == 'true'
+      || (github.event_name == 'workflow_dispatch'
+      && (inputs.python_tag != '' || inputs.typescript_tag != ''))) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require the examples-run status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ github.event_name == 'workflow_dispatch' && (inputs.python_tag || inputs.typescript_tag) || github.sha }}
+        run: python3 tools/examples-gate.py gate --ref "$REF"
+
   go:
     name: publish go
-    needs: release-please
+    needs: [release-please, examples-gate]
     if: needs.release-please.outputs.go == 'true'
     runs-on: ubuntu-latest
     # A tag on the Go module proxy cannot be taken back: wait for a maintainer, as the
@@ -125,7 +152,7 @@ jobs:
 
   rust:
     name: publish rust
-    needs: release-please
+    needs: [release-please, examples-gate]
     if: needs.release-please.outputs.rust == 'true'
     runs-on: ubuntu-latest
     environment: release-crates
@@ -165,7 +192,7 @@ jobs:
 
   ts:
     name: publish typescript
-    needs: release-please
+    needs: [release-please, examples-gate]
     # On a manual run release-please is skipped, so the job asks not to be skipped with it.
     if: >-
       ${{ !cancelled() && (needs.release-please.outputs.ts == 'true'
@@ -223,7 +250,7 @@ jobs:
 
   py-build:
     name: build python
-    needs: release-please
+    needs: [release-please, examples-gate]
     if: needs.release-please.outputs.py == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -276,6 +303,7 @@ jobs:
 
   py-existing:
     name: publish an existing python release
+    needs: examples-gate
     if: github.event_name == 'workflow_dispatch' && inputs.python_tag != ''
     runs-on: ubuntu-latest
     environment: release-pypi
@@ -302,7 +330,7 @@ jobs:
   # winget) follow from the release once it is published.
   iohr-build:
     name: build iohr
-    needs: release-please
+    needs: [release-please, examples-gate]
     if: needs.release-please.outputs.iohr == 'true'
     permissions:
       contents: read
