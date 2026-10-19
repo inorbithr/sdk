@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.19](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.18...iohr/v0.1.0-alpha.19) (2026-10-19)
+
+
+### Bug fixes
+
+* **cli:** iohr runner acts on the profile's account, not the token's personal one ([#236](https://github.com/inorbithr/sdk/issues/236)) ([ffc5663](https://github.com/inorbithr/sdk/commit/ffc5663f35a23f937245af90a062882ba2a4955a))
+
 ## [0.1.0-alpha.18](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.17...iohr/v0.1.0-alpha.18) (2026-10-19)
 
 
