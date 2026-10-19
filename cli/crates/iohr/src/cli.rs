@@ -313,6 +313,8 @@ pub enum RunnerCommand {
         /// Mark the runner as always on (a server), so the coordinator can rely on it.
         #[arg(long)]
         always_on: bool,
+        #[command(flatten)]
+        account: AccountArg,
     },
     /// Run the loop: heartbeat, accept a lease, run its turn on `claude -p`, report it.
     /// Stops on Ctrl-C.
@@ -329,9 +331,14 @@ pub enum RunnerCommand {
         /// Stop after this many answered heartbeats; for scripts.
         #[arg(long)]
         max_beats: Option<u64>,
+        #[command(flatten)]
+        account: AccountArg,
     },
     /// Your runners as the service sees them, and what this machine can run.
-    Status,
+    Status {
+        #[command(flatten)]
+        account: AccountArg,
+    },
 }
 
 #[derive(Debug, Subcommand)]

@@ -147,6 +147,31 @@ async fn bodies(server: &MockServer, p: &str) -> Vec<Value> {
         .collect()
 }
 
+/// The account every coordinator request named, as `(METHOD path, account_id)`: from the
+/// JSON body of a POST, from the query string of a GET. `None` when it named none.
+async fn accounts_named(server: &MockServer) -> Vec<(String, Option<String>)> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().starts_with("/v1/coordinator/"))
+        .map(|r| {
+            let account = if r.method.as_str() == "GET" {
+                r.url
+                    .query_pairs()
+                    .find(|(k, _)| k == "account_id")
+                    .map(|(_, v)| v.into_owned())
+            } else {
+                serde_json::from_slice::<Value>(&r.body)
+                    .ok()
+                    .and_then(|b| b["account_id"].as_str().map(str::to_owned))
+            };
+            (format!("{} {}", r.method, r.url.path()), account)
+        })
+        .collect()
+}
+
 fn runner_json() -> Value {
     json!({"runner_id": "run_1", "user": "usr_me", "name": "mac", "status": "online",
            "last_seen_at": "2026-10-12T08:00:00Z", "providers": []})
@@ -246,6 +271,52 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
             .count()
             >= 2
     );
+}
+
+#[tokio::test]
+async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    login(&server, dir.path(), &token()).await;
+    mount_register(&server).await;
+    // The profile's account (acc_1, the token's) when no flag is given: challenge,
+    // the list that checks for an existing runner, and the registration itself.
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let named = accounts_named(&server).await;
+    for path in [
+        "GET /v1/coordinator/runners",
+        "POST /v1/coordinator/runners/challenge",
+        "POST /v1/coordinator/runners",
+    ] {
+        assert!(
+            named.iter().any(|(p, _)| p == path),
+            "{path} was not called: {named:?}"
+        );
+    }
+    for (p, a) in &named {
+        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    }
+
+    // `--account` wins over the profile's, on register and on status.
+    let before = named.len();
+    for args in [
+        &["runner", "register", "--name", "mac", "--account", "team_9"][..],
+        &["runner", "status", "--account", "team_9"][..],
+    ] {
+        let o = run(&mut iohr(&server, dir.path(), args));
+        assert_eq!(o.status.code(), Some(0), "{args:?}: {}", text(&o));
+    }
+    let named = accounts_named(&server).await;
+    assert!(named.len() > before);
+    for (p, a) in &named[before..] {
+        assert_eq!(a.as_deref(), Some("team_9"), "{p}");
+    }
 }
 
 #[tokio::test]
@@ -469,7 +540,29 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
         .into_iter()
         .find(|r| r.url.path() == "/v1/coordinator/leases/lease_1/pack")
         .unwrap();
-    assert_eq!(pack_req.url.query(), Some("fencing_token=5"));
+    assert_eq!(
+        pack_req.url.query(),
+        Some("fencing_token=5&account_id=acc_1")
+    );
+    // Every call of the loop names the profile's account: the token's own would be the
+    // person's personal one.
+    let named = accounts_named(&server).await;
+    for path in [
+        "GET /v1/coordinator/runners",
+        "POST /v1/coordinator/runners/run_1/heartbeat",
+        "POST /v1/coordinator/leases/lease_1/accept",
+        "GET /v1/coordinator/leases/lease_1/pack",
+        "POST /v1/coordinator/leases/lease_1/heartbeat",
+        "POST /v1/coordinator/turns/turn_1/report",
+    ] {
+        assert!(
+            named.iter().any(|(p, _)| p == path),
+            "{path} was not called: {named:?}"
+        );
+    }
+    for (p, a) in &named {
+        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    }
     let lease_beats = bodies(&server, "/v1/coordinator/leases/lease_1/heartbeat").await;
     assert_ne!(lease_beats.len(), 0, "no lease heartbeat during the turn");
 

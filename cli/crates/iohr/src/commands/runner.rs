@@ -13,7 +13,7 @@ use tokio::sync::watch;
 
 use crate::Env;
 use crate::cli::{Global, RunnerCommand};
-use crate::context::{Ctx, blocking, session};
+use crate::context::{Ctx, account as resolve_account, blocking, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::runner::claude;
@@ -30,7 +30,7 @@ const KINDS: &[&str] = &["coordinate"];
 pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> Result<(), Error> {
     let s = session(g, env).await?;
     let ctx = Ctx::load(g)?;
-    if !matches!(cmd, RunnerCommand::Status) {
+    if !matches!(cmd, RunnerCommand::Status { .. }) {
         require_scopes(&s)?;
     }
     match cmd {
@@ -38,7 +38,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             name,
             capacity,
             always_on,
+            account,
         } => {
+            let account = resolve_account(&s, account.account)?;
             let name = name.unwrap_or_else(host_name);
             let exec = local(g)?;
             let state = exec.auth_status().await;
@@ -47,13 +49,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             }
             let svc = HttpService {
                 api: &s.api,
+                account: account.clone(),
                 signer: None,
             };
             let mine = svc.list_runners(true).await?;
             // A name is only "already registered" when this machine holds that runner's
             // key. A lost key, or a runner registered from another machine, registers
             // afresh (a new runner; the old one can be revoked) instead of being stuck.
-            let local_key = match runner_signer(&ctx, &s, false).await {
+            let local_key = match runner_signer(&ctx, &s, &account, false).await {
                 Ok(k) => Some(k.public_key()),
                 Err(_) => None,
             };
@@ -70,7 +73,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     "a runner named {name} exists but this machine does not hold its key: registering this machine afresh; revoke the old one if it is gone"
                 ));
             }
-            let signer = runner_signer(&ctx, &s, true).await?;
+            let signer = runner_signer(&ctx, &s, &account, true).await?;
             // The challenge is one-use and lives five minutes: asked last, signed at once.
             let challenge = svc.challenge().await?;
             let mut identity = BTreeMap::new();
@@ -101,9 +104,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             show_runner(&r, out, "registered");
             Ok(())
         }
-        RunnerCommand::Status => {
+        RunnerCommand::Status { account } => {
+            let account = resolve_account(&s, account.account)?;
             let svc = HttpService {
                 api: &s.api,
+                account: account.clone(),
                 signer: None,
             };
             let mine = svc.list_runners(true).await?;
@@ -161,11 +166,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             runner,
             interval,
             max_beats,
+            account,
         } => {
-            let signer = runner_signer(&ctx, &s, false).await?;
+            let account = resolve_account(&s, account.account)?;
+            let signer = runner_signer(&ctx, &s, &account, false).await?;
             let local_key = signer.public_key();
             let svc = HttpService {
                 api: &s.api,
+                account: account.clone(),
                 signer: Some(signer),
             };
             let all = svc.list_runners(true).await?;
@@ -233,6 +241,7 @@ fn require_scopes(s: &crate::context::Session) -> Result<(), Error> {
 async fn runner_signer(
     ctx: &Ctx,
     s: &crate::context::Session,
+    account: &str,
     create: bool,
 ) -> Result<Signer, Error> {
     use base64::Engine as _;
@@ -246,7 +255,7 @@ async fn runner_signer(
         .profile(&name)
         .map(|p| p.storage)
         .ok_or_else(|| Error::Failed(format!("there is no profile {name}")))?;
-    let key = EntryKey::new(name, &format!("{}_runner_key", s.account))?;
+    let key = EntryKey::new(name, &format!("{account}_runner_key"))?;
     let store = ctx.store(storage)?;
     let k = key.clone();
     let seed: Option<Redacted<String>> = blocking(Arc::clone(&store), move |st| st.get(&k)).await?;

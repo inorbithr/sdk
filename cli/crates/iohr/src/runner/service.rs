@@ -496,11 +496,28 @@ pub(crate) trait Service {
 }
 
 /// The service over REST, called as the profile's own session.
+///
+/// Every call names `account_id`. The sign-in token's `org` claim is always the person's
+/// personal account, and the service takes the account of a request from `account_id`
+/// (a team the person is in) before it falls back to the token's: a call without it acts
+/// in the personal account whatever account the profile names.
 #[derive(Debug)]
 pub(crate) struct HttpService<'a> {
     pub(crate) api: &'a Api,
+    /// The account the runner belongs to: `--account`, else the profile's.
+    pub(crate) account: String,
     /// The runner's key, to sign reports with; absent for commands that report nothing.
     pub(crate) signer: Option<Signer>,
+}
+
+impl HttpService<'_> {
+    /// A request body with this service's `account_id` in it.
+    fn scoped(&self, mut body: Value) -> Value {
+        if let Value::Object(m) = &mut body {
+            m.insert("account_id".into(), Value::String(self.account.clone()));
+        }
+        body
+    }
 }
 
 impl Service for HttpService<'_> {
@@ -514,7 +531,7 @@ impl Service for HttpService<'_> {
             .send_body(
                 Method::Post,
                 "/v1/coordinator/runners/challenge",
-                &json!({}),
+                &self.scoped(json!({})),
             )
             .await?
             .json()?;
@@ -542,7 +559,7 @@ impl Service for HttpService<'_> {
         });
         let v: Value = self
             .api
-            .send_body(Method::Post, "/v1/coordinator/runners", &body)
+            .send_body(Method::Post, "/v1/coordinator/runners", &self.scoped(body))
             .await?
             .json()?;
         Ok(RunnerInfo::from_json(
@@ -551,8 +568,11 @@ impl Service for HttpService<'_> {
     }
 
     async fn list_runners(&self, mine: bool) -> Result<Vec<RunnerInfo>, ServiceError> {
-        let q: &[(&str, &str)] = if mine { &[("mine", "true")] } else { &[] };
-        let v: Value = self.api.get("/v1/coordinator/runners", q).await?;
+        let mut q: Vec<(&str, &str)> = vec![("account_id", self.account.as_str())];
+        if mine {
+            q.push(("mine", "true"));
+        }
+        let v: Value = self.api.get("/v1/coordinator/runners", &q).await?;
         Ok(v.get("runners")
             .and_then(Value::as_array)
             .map(|a| a.iter().map(RunnerInfo::from_json).collect())
@@ -573,7 +593,7 @@ impl Service for HttpService<'_> {
             .send_body(
                 Method::Post,
                 &format!("/v1/coordinator/runners/{runner_id}/heartbeat"),
-                &body,
+                &self.scoped(body),
             )
             .await?
             .json()?;
@@ -601,7 +621,7 @@ impl Service for HttpService<'_> {
             .send_body(
                 Method::Post,
                 &format!("/v1/coordinator/leases/{}/accept", lease.lease_id),
-                &body,
+                &self.scoped(body),
             )
             .await?;
         Ok(())
@@ -613,7 +633,10 @@ impl Service for HttpService<'_> {
             .api
             .get(
                 &format!("/v1/coordinator/leases/{}/pack", lease.lease_id),
-                &[("fencing_token", token.as_str())],
+                &[
+                    ("fencing_token", token.as_str()),
+                    ("account_id", self.account.as_str()),
+                ],
             )
             .await?;
         let pack = v.get("pack").unwrap_or(&Value::Null);
@@ -636,7 +659,7 @@ impl Service for HttpService<'_> {
             .send_body(
                 Method::Post,
                 &format!("/v1/coordinator/leases/{}/heartbeat", lease.lease_id),
-                &body,
+                &self.scoped(body),
             )
             .await?
             .json()?;
@@ -661,7 +684,7 @@ impl Service for HttpService<'_> {
             .send_body(
                 Method::Post,
                 &format!("/v1/coordinator/turns/{}/report", report.turn_id),
-                &report.to_json(&signature),
+                &self.scoped(report.to_json(&signature)),
             )
             .await?;
         Ok(())
