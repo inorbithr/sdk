@@ -1,0 +1,12 @@
+name: unary-get
+area: examples
+summary: "One unary call, GET /v1/me, with a key: the SDK exchanges the key for a token, sends it as the bearer and returns the typed account identity."
+action: { op: example }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  attempts: 1
+  token_exchanges: 1
