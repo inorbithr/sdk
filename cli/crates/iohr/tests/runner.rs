@@ -278,6 +278,89 @@ async fn the_runner_needs_the_runner_and_read_scopes() {
     assert_eq!(server.received_requests().await.unwrap().len(), before);
 }
 
+/// The bug: `iohr login` never asked for the runner's scopes, so `iohr runner register`
+/// could not be satisfied by any sign-in. The scopes the runner demands are read from its
+/// own refusal and must reach the sign-in service's request, device and browser alike.
+#[tokio::test]
+async fn login_asks_the_sign_in_service_for_the_scopes_the_runner_demands() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    login(&server, dir.path(), &token_with(&[])).await;
+    let o = run(&mut iohr(&server, dir.path(), &["runner", "register"]));
+    let hint = text(&o);
+    let wanted = hint
+        .split("iohr login --scope ")
+        .nth(1)
+        .and_then(|t| t.split_whitespace().next())
+        .unwrap_or_else(|| panic!("the refusal names no scopes: {hint}"))
+        .trim_matches('`')
+        .to_owned();
+    assert!(wanted.contains("coordinator:runner"), "{wanted}");
+
+    let uri = server.uri();
+    Mock::given(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issuer": uri,
+            "authorization_endpoint": format!("{uri}/oauth2/auth"),
+            "token_endpoint": format!("{uri}/oauth2/token"),
+            "device_authorization_endpoint": format!("{uri}/oauth2/device/auth"),
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/device/auth"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "device_code": "dc", "user_code": "ABCD2345",
+            "verification_uri": format!("{uri}/oauth2/device/verify"),
+            "expires_in": 600, "interval": 1
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": token(), "token_type": "bearer", "expires_in": 900,
+            "refresh_token": "REFRESHMARKER",
+            "id_token": format!("e30.{}.x", URL_SAFE_NO_PAD.encode(
+                json!({"iss": uri, "aud": ["iohr-cli"], "sub": "usr_me"}).to_string())),
+        })))
+        .mount(&server)
+        .await;
+    let o = run(iohr(
+        &server,
+        dir.path(),
+        &[
+            "login",
+            "--device",
+            "--insecure-storage",
+            "--profile",
+            "q",
+            "--scope",
+            &wanted,
+        ],
+    )
+    .env("IOHR_ISSUER", &uri));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let sent = server.received_requests().await.unwrap();
+    let body = sent
+        .iter()
+        .find(|r| r.url.path() == "/oauth2/device/auth")
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .unwrap();
+    let scope: String = url::form_urlencoded::parse(body.as_bytes())
+        .find(|(k, _)| k == "scope")
+        .map(|(_, v)| v.into_owned())
+        .unwrap();
+    let asked: Vec<&str> = scope.split(' ').collect();
+    for w in wanted.split(',') {
+        assert!(asked.contains(&w), "{w} missing from {scope}");
+    }
+    for d in ["openid", "offline_access", "iohr.api"] {
+        assert!(asked.contains(&d), "default {d} missing from {scope}");
+    }
+}
+
 #[tokio::test]
 #[allow(
     clippy::too_many_lines,

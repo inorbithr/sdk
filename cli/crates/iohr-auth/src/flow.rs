@@ -13,7 +13,7 @@ use url::Url;
 use crate::claims::AUDIENCE;
 use crate::error::AuthError;
 use crate::loopback::{Callback, Listener, SIGN_IN_WINDOW};
-use crate::oidc::{Provider, SCOPES, TokenError, Tokens};
+use crate::oidc::{Provider, TokenError, Tokens};
 use crate::page::Page;
 use crate::pkce::{Pkce, constant_time_eq, random_token};
 use crate::secret::Redacted;
@@ -93,7 +93,7 @@ impl Authorization<Browser> {
             .append_pair("response_type", "code")
             .append_pair("client_id", provider.client_id())
             .append_pair("redirect_uri", listener.redirect_uri())
-            .append_pair("scope", SCOPES)
+            .append_pair("scope", &provider.scope())
             .append_pair("audience", AUDIENCE)
             .append_pair("state", state.expose())
             .append_pair("code_challenge", &pkce.challenge)
@@ -276,7 +276,7 @@ impl Authorization<Device> {
             .post(endpoint)
             .form(&[
                 ("client_id", provider.client_id()),
-                ("scope", SCOPES),
+                ("scope", provider.scope().as_str()),
                 ("audience", AUDIENCE),
             ])
             .send()
