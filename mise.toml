@@ -109,7 +109,7 @@ shell = "bash -e -o pipefail -c"
 run = """
 locks=$(git ls-files '*go.sum' '*Cargo.lock' '*pnpm-lock.yaml' '*package-lock.json' '*uv.lock' | head -1)
 [ -n "$locks" ] || { echo "audit: no lockfiles yet, skipping OSV scan"; exit 0; }
-osv-scanner scan source --recursive .
+osv-scanner scan source --config osv-scanner.toml --recursive .
 """
 
 [tasks.sbom]
