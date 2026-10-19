@@ -187,6 +187,10 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// The coordinator's runner (RFC 0120): this machine runs coordinator turns on your own
+    /// installed `claude`, on your own subscription.
+    #[command(subcommand)]
+    Runner(RunnerCommand),
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
     #[command(subcommand)]
     Browser(BrowserCommand),
@@ -290,6 +294,44 @@ pub struct PrLine {
     /// The change is live: merged, rolled and serving.
     #[arg(long, requires = "pr")]
     pub live: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerCommand {
+    /// Register this machine as one of your runners: its name, system and what it can run.
+    ///
+    /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
+    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
+    /// `claude auth status` prints. Run it again and it says the runner exists.
+    Register {
+        /// The runner's name (default: this machine's host name).
+        #[arg(long)]
+        name: Option<String>,
+        /// Turns this runner may hold at once (this version runs one).
+        #[arg(long, default_value_t = 1)]
+        capacity: u32,
+        /// Mark the runner as always on (a server), so the coordinator can rely on it.
+        #[arg(long)]
+        always_on: bool,
+    },
+    /// Run the loop: heartbeat, accept a lease, run its turn on `claude -p`, report it.
+    /// Stops on Ctrl-C.
+    Run {
+        /// The runner's name (default: this machine's host name).
+        #[arg(long, conflicts_with = "runner")]
+        name: Option<String>,
+        /// The runner's id, from `iohr runner status`.
+        #[arg(long)]
+        runner: Option<String>,
+        /// Seconds between heartbeats (default: what the service says, the RFC's 20).
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
+        interval: Option<u64>,
+        /// Stop after this many answered heartbeats; for scripts.
+        #[arg(long)]
+        max_beats: Option<u64>,
+    },
+    /// Your runners as the service sees them, and what this machine can run.
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
