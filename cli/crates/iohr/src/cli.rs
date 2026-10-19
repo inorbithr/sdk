@@ -1030,6 +1030,11 @@ pub struct Login {
     /// Keep the credential in an owner-only file instead of the OS credential store.
     #[arg(long)]
     pub insecure_storage: bool,
+    /// A scope to ask for besides the defaults, such as the runner's
+    /// `coordinator:runner,coordinator:read`; repeat it or separate with commas. The
+    /// sign-in service refuses a scope the command line's client may not ask for.
+    #[arg(long = "scope", value_delimiter = ',')]
+    pub scopes: Vec<String>,
 }
 
 /// How to sign in; at most one. Without any, a browser when this machine can open
