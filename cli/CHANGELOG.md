@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.18](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.17...iohr/v0.1.0-alpha.18) (2026-10-19)
+
+
+### Bug fixes
+
+* **cli:** iohr login --scope, so the runner's scopes can be asked for ([#232](https://github.com/inorbithr/sdk/issues/232)) ([a7d03c8](https://github.com/inorbithr/sdk/commit/a7d03c860ac76d82fc8a7df97460122d882ef256))
+* **cli:** iohr login --scope, so the runner's scopes can be asked for (RFC 0120) ([a7d03c8](https://github.com/inorbithr/sdk/commit/a7d03c860ac76d82fc8a7df97460122d882ef256))
+
 ## [0.1.0-alpha.17](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.16...iohr/v0.1.0-alpha.17) (2026-10-19)
 
 
