@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.0-alpha.17](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.16...iohr/v0.1.0-alpha.17) (2026-10-19)
+
+
+### Features
+
+* **cli:** --account on iohr coordinator commands ([#202](https://github.com/inorbithr/sdk/issues/202)) ([830ffbc](https://github.com/inorbithr/sdk/commit/830ffbc4fcf802b92d8bf84a8b8aed67f11e45ae))
+* **cli:** iohr coordinator asks create --kind ([#204](https://github.com/inorbithr/sdk/issues/204)) ([05abcbd](https://github.com/inorbithr/sdk/commit/05abcbdad2790c2be695901691b3bacf8eb69231))
+* **cli:** iohr coordinator asks create --kind, and a KIND column on asks list ([05abcbd](https://github.com/inorbithr/sdk/commit/05abcbdad2790c2be695901691b3bacf8eb69231))
+* **cli:** iohr coordinator brief &lt;job&gt; ([#203](https://github.com/inorbithr/sdk/issues/203)) ([91b4387](https://github.com/inorbithr/sdk/commit/91b4387b087814c4fd7774d76927ae1c01947146))
+* **cli:** iohr coordinator brief &lt;job&gt; prints a job's capped brief ([91b4387](https://github.com/inorbithr/sdk/commit/91b4387b087814c4fd7774d76927ae1c01947146))
+* **cli:** iohr runner register, run and status ([#190](https://github.com/inorbithr/sdk/issues/190)) ([7405c0b](https://github.com/inorbithr/sdk/commit/7405c0bd5613861b0abb806f9adbc11130b1bb86))
+
+
+### Bug fixes
+
+* **cli:** clippy 1.99 assert_is_empty in the upgrade test ([#216](https://github.com/inorbithr/sdk/issues/216)) ([04ed677](https://github.com/inorbithr/sdk/commit/04ed67726a99c32366eadbd988a0a39e4f52d0d0))
+
 ## [0.1.0-alpha.16](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.15...iohr/v0.1.0-alpha.16) (2026-10-16)
 
 
