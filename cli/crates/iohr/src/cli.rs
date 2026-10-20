@@ -335,6 +335,42 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Run the check on a build job's checkout and send the service a signed report of it.
+    ///
+    /// Fetches `origin/main`, refuses a checkout with uncommitted changes or one that is
+    /// not merged with `origin/main`, runs the command with a scrubbed environment, and
+    /// signs the command, its exit code, the head, main's commit and the SHA-256 of the
+    /// output (the output stays here) with this machine's runner key. The service
+    /// checks the signature against the key you enrolled and the lease you hold; a report
+    /// that fails the check holds the job at Checked, which is the right answer.
+    GateReport {
+        /// The job (`job_...`) whose lease you hold.
+        #[arg(long)]
+        job: String,
+        /// Its lease (`lse_...`).
+        #[arg(long)]
+        lease: String,
+        /// The lease's fencing token.
+        #[arg(long)]
+        token: i64,
+        /// The checkout of the job's branch (default: the current directory).
+        #[arg(long, default_value = ".")]
+        repo: std::path::PathBuf,
+        /// The check to run, through the shell (default: `mise run ci:changed`).
+        #[arg(long, default_value = "mise run ci:changed")]
+        command: String,
+        /// Seconds the check may run (default 1800).
+        #[arg(long, default_value_t = 1800, value_parser = clap::value_parser!(u64).range(1..=21600))]
+        timeout: u64,
+        /// The runner's name (default: the one whose key this machine holds).
+        #[arg(long, conflicts_with = "runner")]
+        name: Option<String>,
+        /// The runner's id, from `iohr runner status`.
+        #[arg(long)]
+        runner: Option<String>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
     /// Your runners as the service sees them, and what this machine can run.
     Status {
         #[command(flatten)]

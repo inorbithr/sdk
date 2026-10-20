@@ -18,12 +18,15 @@ use base64::engine::general_purpose::STANDARD as B64;
 use sha2::{Digest as _, Sha256};
 
 use super::claude::hex;
-use super::service::TurnReport;
+use super::service::{GateReport, TurnReport};
 
 /// The first line of a registration proof.
 pub(crate) const REGISTER_DOMAIN: &str = "iohr.coordinator.v1.RegisterRunner";
 /// The first line of a report's signed message.
 pub(crate) const REPORT_DOMAIN: &str = "iohr.coordinator.v1.ReportTurn";
+
+/// The first line of a gate report's signed message.
+pub(crate) const GATE_DOMAIN: &str = "iohr.coordinator.v1.SubmitGateReport";
 
 /// The runner's key.
 pub(crate) struct Signer {
@@ -120,6 +123,24 @@ pub(crate) fn report_message(r: &TurnReport) -> String {
     .join("\n")
 }
 
+/// The gate report's signed message: 10 lines, field by field in the proto's order
+/// (`account_id` and the signature are not signed).
+pub(crate) fn gate_report_message(r: &GateReport) -> String {
+    [
+        GATE_DOMAIN.to_owned(),
+        h(&r.job_id),
+        h(&r.lease_id),
+        r.fencing_token.to_string(),
+        h(&r.runner_id),
+        h(&r.command),
+        r.exit_code.to_string(),
+        h(&r.head),
+        h(&r.main_commit),
+        h(&r.output_sha256),
+    ]
+    .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
@@ -189,6 +210,35 @@ mod tests {
             B64.encode(sig),
             "RXnFtoZOwUXtJMWSbFRHWXmqVTwzH33QgayOA68ejIJyTg3F5QeaV0sGFuHS1ujBshAIpMx0kJvqVgJ2/qJZAA=="
         );
+    }
+
+    /// The service's gate report vector (core `service/signing.rs`, README "Signatures"):
+    /// the same key, the message's digest and the signature, Ed25519 being deterministic.
+    #[test]
+    fn the_gate_report_test_vector() {
+        let r = GateReport {
+            job_id: "job_01J00000000000000000000000".into(),
+            lease_id: "lse_01J00000000000000000000000".into(),
+            fencing_token: 3,
+            runner_id: "rnr_01J00000000000000000000000".into(),
+            command: "mise run ci:changed".into(),
+            exit_code: 0,
+            head: "1".repeat(40),
+            main_commit: "2".repeat(40),
+            output_sha256: "b".repeat(64),
+        };
+        let msg = gate_report_message(&r);
+        assert_eq!(msg.lines().count(), 10);
+        assert!(msg.starts_with("iohr.coordinator.v1.SubmitGateReport\n"));
+        assert_eq!(
+            h(&msg),
+            "33a926ca4766776446fc155e78a88a6943a96d016bbe21b45ee80525c7103c51"
+        );
+        assert_eq!(
+            B64.encode(signer().sign(msg.as_bytes())),
+            "jATJlhhTDANbtQbqxqRWkjW2fAm1ZOWPPJay9ErQWE51CjR2f7TqqPi+A1DDVRx2bMQ0WMNmLSkxbV2xNZvqAA=="
+        );
+        assert_ne!(GATE_DOMAIN, REPORT_DOMAIN);
     }
 
     #[test]
