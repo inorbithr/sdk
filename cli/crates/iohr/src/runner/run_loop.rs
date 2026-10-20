@@ -802,7 +802,9 @@ mod tests {
         reason = "a fake with the real trait's shape; the lint is newer than the MSRV toolchain's clippy"
     )]
     use super::*;
-    use crate::runner::service::{Challenge, ProviderState, Registration, ServiceError};
+    use crate::runner::service::{
+        Challenge, GateAnswer, GateReport, ProviderState, Registration, ServiceError,
+    };
     use std::collections::VecDeque;
     use std::future::Future;
     use std::pin::Pin;
@@ -867,6 +869,9 @@ mod tests {
             !self.pack_unavailable
         }
         async fn challenge(&self) -> Result<Challenge, ServiceError> {
+            Err(ServiceError::Refused("not used"))
+        }
+        async fn submit_gate_report(&self, _: &GateReport) -> Result<GateAnswer, ServiceError> {
             Err(ServiceError::Refused("not used"))
         }
         async fn lease_heartbeat(&self, l: &Lease) -> Result<LeaseBeat, ServiceError> {

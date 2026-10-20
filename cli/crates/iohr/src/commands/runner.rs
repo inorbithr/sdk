@@ -18,9 +18,10 @@ use crate::error::Error;
 use crate::output::Out;
 use crate::runner::claude;
 use crate::runner::exec::{ClaudeExec, Exec as _};
+use crate::runner::gate;
 use crate::runner::provider::{self, AuthState};
 use crate::runner::run_loop::{LoopConfig, run_loop};
-use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
+use crate::runner::service::{GateReport, HttpService, Registration, RunnerInfo, Service as _};
 use crate::runner::signing::{self, Signer};
 use iohr_auth::{EntryKey, Redacted};
 
@@ -217,7 +218,88 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             ));
             Ok(())
         }
+        RunnerCommand::GateReport {
+            job,
+            lease,
+            token,
+            repo,
+            command,
+            timeout,
+            name,
+            runner,
+            account,
+        } => {
+            let account = resolve_account(&s, account.account)?;
+            let signer = runner_signer(&ctx, &s, &account, false).await?;
+            let local_key = signer.public_key();
+            let svc = HttpService {
+                api: &s.api,
+                account: account.clone(),
+                signer: Some(signer),
+            };
+            let all = svc.list_runners(true).await?;
+            let me: RunnerInfo = pick_runner(all, runner.as_deref(), name.as_deref(), &local_key)?
+                .ok_or_else(|| {
+                    Error::Failed(
+                        "no such runner of yours: run `iohr runner register` first".into(),
+                    )
+                })?;
+            let parent: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+            Out::note(&format!("checking {} in {}", command, repo.display()));
+            let checked = gate::check(&repo, &command, Duration::from_secs(timeout), parent)
+                .await
+                .map_err(|e| Error::Failed(format!("no report was sent: {e}")))?;
+            let report = GateReport {
+                job_id: job,
+                lease_id: lease,
+                fencing_token: token,
+                runner_id: me.runner_id.clone(),
+                command: checked.command.clone(),
+                exit_code: checked.exit_code,
+                head: checked.head.clone(),
+                main_commit: checked.main_commit.clone(),
+                output_sha256: checked.output_sha256.clone(),
+            };
+            match svc.submit_gate_report(&report).await {
+                Ok(a) => {
+                    if out.json {
+                        Out::print_json(&serde_json::json!({
+                            "job_id": report.job_id, "command": checked.command,
+                            "exit_code": checked.exit_code, "head": checked.head,
+                            "main_commit": checked.main_commit,
+                            "output_sha256": checked.output_sha256,
+                            "evidence_id": a.evidence_id, "duplicate": a.duplicate,
+                            "stage": a.stage,
+                        }));
+                    } else {
+                        Out::pairs(&[
+                            ("command", checked.command.clone()),
+                            ("exit", checked.exit_code.to_string()),
+                            ("head", short(&checked.head).to_owned()),
+                            ("main", short(&checked.main_commit).to_owned()),
+                            ("evidence", a.evidence_id.clone()),
+                            ("duplicate", a.duplicate.to_string()),
+                            ("job is now", a.stage.clone()),
+                        ]);
+                    }
+                    Ok(())
+                }
+                // An older coordinator has no such call: say so, and do not fail the caller.
+                Err(e) if e.is_missing() => {
+                    Out::note(
+                        "this coordinator does not take gate reports yet; nothing was recorded",
+                    );
+                    Ok(())
+                }
+                Err(e) => Err(e.into()),
+            }
+        }
     }
+}
+
+/// The first 12 characters of a commit.
+fn short(sha: &str) -> &str {
+    sha.get(..12).unwrap_or(sha)
 }
 
 /// The scopes a runner signs in with.

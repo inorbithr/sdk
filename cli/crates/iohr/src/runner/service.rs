@@ -49,6 +49,19 @@ impl ServiceError {
     }
 }
 
+impl ServiceError {
+    /// The service has no such call: an older coordinator. HTTP 501, or the gateway's own
+    /// 404 for a path it has no route for (`no such route`). A 404 that names a missing
+    /// job is the service refusing: that stays an error.
+    pub(crate) fn is_missing(&self) -> bool {
+        let Self::Api(inorbithr::Error::Api(a)) = self else {
+            return false;
+        };
+        a.status == 501
+            || (a.status == 404 && a.message.trim().eq_ignore_ascii_case("no such route"))
+    }
+}
+
 impl From<inorbithr::Error> for ServiceError {
     fn from(e: inorbithr::Error) -> Self {
         Self::Api(e)
@@ -394,6 +407,65 @@ impl TurnReport {
     }
 }
 
+/// `SubmitGateReportRequest`: the runner's signed report of the check it ran on a build
+/// job's PR (RFC 0120, the Checked gate).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GateReport {
+    pub(crate) job_id: String,
+    pub(crate) lease_id: String,
+    pub(crate) fencing_token: i64,
+    pub(crate) runner_id: String,
+    /// The command that ran (1 to 500 characters).
+    pub(crate) command: String,
+    pub(crate) exit_code: i32,
+    /// The PR head it ran on.
+    pub(crate) head: String,
+    /// Main's commit the head was merged with when it ran.
+    pub(crate) main_commit: String,
+    /// SHA-256 of the output, lowercase hex. The output itself never leaves the machine.
+    pub(crate) output_sha256: String,
+}
+
+impl GateReport {
+    /// The wire shape of `SubmitGateReport`, carrying `signature` (64 bytes, base64).
+    pub(crate) fn to_json(&self, signature: &[u8]) -> Value {
+        json!({
+            "job_id": self.job_id, "lease_id": self.lease_id,
+            "fencing_token": self.fencing_token.to_string(), "runner_id": self.runner_id,
+            "command": self.command, "exit_code": self.exit_code,
+            "head": self.head, "main_commit": self.main_commit,
+            "output_sha256": self.output_sha256,
+            "signature": B64.encode(signature),
+        })
+    }
+}
+
+/// What the service answered to a gate report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GateAnswer {
+    pub(crate) evidence_id: String,
+    /// The same report was recorded before; nothing changed.
+    pub(crate) duplicate: bool,
+    /// The job's stage after its next gate was asked, when the service said.
+    pub(crate) stage: String,
+}
+
+impl GateAnswer {
+    pub(crate) fn from_json(v: &Value) -> Self {
+        let s = |x: &Value, k: &str| {
+            x.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        Self {
+            evidence_id: s(v, "evidence_id"),
+            duplicate: v.get("duplicate").and_then(Value::as_bool).unwrap_or(false),
+            stage: v.get("job").map(|j| s(j, "stage")).unwrap_or_default(),
+        }
+    }
+}
+
 /// Keeps at most `n` characters.
 fn clip(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
@@ -496,6 +568,10 @@ pub(crate) trait Service {
     /// Delivers a finished turn, signed; the same report again is answered as the first
     /// was (idempotent on the turn and its attempt).
     async fn report_turn(&self, report: &TurnReport) -> Result<(), ServiceError>;
+    /// Delivers the signed report of a build job's check. A service older than the
+    /// gate report answers 404 or 501; that is [`ServiceError::is_missing`], and the
+    /// caller says so and goes on (the job holds at Checked, as it did).
+    async fn submit_gate_report(&self, report: &GateReport) -> Result<GateAnswer, ServiceError>;
 }
 
 /// The service over REST, called as the profile's own session.
@@ -692,6 +768,25 @@ impl Service for HttpService<'_> {
             .await?;
         Ok(())
     }
+
+    async fn submit_gate_report(&self, report: &GateReport) -> Result<GateAnswer, ServiceError> {
+        let Some(signer) = &self.signer else {
+            return Err(ServiceError::Refused(
+                "no signing key: run `iohr runner register` on this machine",
+            ));
+        };
+        let signature = signer.sign(super::signing::gate_report_message(report).as_bytes());
+        let v: Value = self
+            .api
+            .send_body(
+                Method::Post,
+                &format!("/v1/coordinator/jobs/{}/gate-report", report.job_id),
+                &self.scoped(report.to_json(&signature)),
+            )
+            .await?
+            .json()?;
+        Ok(GateAnswer::from_json(&v))
+    }
 }
 
 #[cfg(test)]
@@ -857,6 +952,56 @@ mod tests {
             secs: 1,
         });
         assert!(!timeout.is_permanent());
+    }
+
+    fn api_error(status: u16, body: &str) -> ServiceError {
+        let raw = inorbithr::RawResponse::for_tests(
+            status,
+            inorbithr::Headers::new([]),
+            body.as_bytes().to_vec(),
+        );
+        ServiceError::Api(inorbithr::Error::Api(Box::new(inorbithr::ApiError::parse(
+            raw,
+        ))))
+    }
+
+    #[test]
+    fn only_a_missing_route_or_a_501_means_an_older_coordinator() {
+        let gateway = r#"{"code":"not_found","error":"no such route","details":[]}"#;
+        assert!(api_error(404, gateway).is_missing());
+        assert!(api_error(501, "").is_missing());
+        // The service saying the job is not there is a refusal, not an old coordinator.
+        let job = r#"{"code":"not_found","error":"no such job","details":[]}"#;
+        assert!(!api_error(404, job).is_missing());
+        assert!(!api_error(403, gateway).is_missing());
+        assert!(!api_error(500, "").is_missing());
+        assert!(!ServiceError::Refused("x").is_missing());
+    }
+
+    #[test]
+    fn a_gate_report_goes_out_with_a_string_token_a_number_exit_and_a_base64_signature() {
+        let r = GateReport {
+            job_id: "job_1".into(),
+            lease_id: "lse_1".into(),
+            fencing_token: 9_007_199_254_740_993,
+            runner_id: "rnr_1".into(),
+            command: "mise run ci:changed".into(),
+            exit_code: 2,
+            head: "a".repeat(40),
+            main_commit: "b".repeat(40),
+            output_sha256: "c".repeat(64),
+        };
+        let v = r.to_json(&[1_u8; 64]);
+        assert_eq!(v["fencing_token"], "9007199254740993");
+        assert_eq!(v["exit_code"], 2);
+        assert_eq!(v["signature"].as_str().map(str::len), Some(88));
+        assert_eq!(v["output_sha256"], "c".repeat(64));
+        // Nothing but the report's own fields: the output never rides along.
+        assert_eq!(v.as_object().map(serde_json::Map::len), Some(10));
+        let a = GateAnswer::from_json(&json!({
+            "evidence_id": "evd_1", "duplicate": true, "job": {"stage": "checked"}
+        }));
+        assert_eq!((a.evidence_id.as_str(), a.duplicate), ("evd_1", true));
     }
 
     #[test]

@@ -320,12 +320,12 @@ async fn read_capped(stdout: Option<ChildStdout>) -> Result<Vec<u8>, DriveError>
 
 /// Kills a turn's whole process group (`claude` and whatever its tools started) when it
 /// is dropped while armed: an aborted turn task never leaves a process running.
-struct GroupGuard {
+pub(super) struct GroupGuard {
     pgid: Option<u32>,
 }
 
 impl GroupGuard {
-    fn new(pid: Option<u32>) -> Self {
+    pub(super) fn new(pid: Option<u32>) -> Self {
         // `process_group(0)` made the child its group's leader: pgid is its pid.
         Self {
             pgid: if cfg!(unix) { pid } else { None },
@@ -333,7 +333,7 @@ impl GroupGuard {
     }
 
     /// The child exited and was reaped: its pid may be reused, so nothing to kill.
-    fn disarm(&mut self) {
+    pub(super) fn disarm(&mut self) {
         self.pgid = None;
     }
 
