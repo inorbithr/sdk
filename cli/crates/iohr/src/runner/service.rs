@@ -119,6 +119,8 @@ pub(crate) struct RunnerInfo {
     /// The Ed25519 public key (base64) the runner registered with; empty if the
     /// service did not say.
     pub(crate) public_key: String,
+    /// The turns it was registered to hold at once; 0 when the service did not say.
+    pub(crate) capacity: u32,
 }
 
 impl RunnerInfo {
@@ -136,6 +138,7 @@ impl RunnerInfo {
             status: s("status"),
             last_seen_at: s("last_seen_at"),
             public_key: s("public_key"),
+            capacity: u32::try_from(num(v, "capacity")).unwrap_or(0),
             providers: v
                 .get("providers")
                 .and_then(Value::as_array)
