@@ -111,9 +111,9 @@ fn start(plan: &Plan) -> Result<(), Error> {
     if status.success() {
         Ok(())
     } else {
-        Err(Error::Child(
-            status.code().map_or(1, |c| c.clamp(1, 255) as u8),
-        ))
+        Err(Error::Child(status.code().map_or(1, |c| {
+            u8::try_from(c.clamp(1, 255)).unwrap_or(255)
+        })))
     }
 }
 

@@ -473,9 +473,7 @@ mod tests {
 
     use std::path::{Path, PathBuf};
 
-    use super::{
-        Layout, Method, brew_failure, bundles_of, detect, newest, replace, sum_of, target,
-    };
+    use super::{Layout, Method, brew_failure, bundles_of, detect, newest, sum_of, target};
 
     fn layout() -> Layout {
         Layout {
@@ -645,6 +643,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn replace_swaps_atomically_and_refuses_a_binary_that_says_another_version() {
+        use super::replace;
         use std::os::unix::fs::PermissionsExt as _;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("iohr");
