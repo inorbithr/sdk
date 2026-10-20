@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0-alpha.20](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.19...iohr/v0.1.0-alpha.20) (2026-10-20)
+
+
+### Features
+
+* **cli:** run up to --capacity turns at once in the runner loop ([#240](https://github.com/inorbithr/sdk/issues/240)) ([87b6702](https://github.com/inorbithr/sdk/commit/87b67021b9371d325e1477075d19944dac6ad2a9))
+
+
+### Bug fixes
+
+* **ci:** exclude release-please changelogs from typos, fix Windows lints ([#234](https://github.com/inorbithr/sdk/issues/234)) ([fbdf42e](https://github.com/inorbithr/sdk/commit/fbdf42efeb428c28375cd0aced9bc75a957019b4))
+
 ## [0.1.0-alpha.19](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.18...iohr/v0.1.0-alpha.19) (2026-10-19)
 
 
