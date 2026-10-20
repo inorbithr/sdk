@@ -1,7 +1,8 @@
 //! The runner's loop (RFC 0120, "Leases and heartbeats"): heartbeat on an interval,
 //! accept an offered lease, run its turn while the heartbeats carry on, report the reply.
 //!
-//! Up to `capacity` turns at once (the runner's registered capacity, 1 to 16): a lease
+//! Up to `capacity` turns at once (the declared capacity, else the registered one, 1 to
+//! 32; a reload changes it between beats, and lowering it never stops a running turn): a lease
 //! offered while every slot is taken is left to expire and goes to another runner of the
 //! same person. The service counts a slot from the moment it creates a lease until the
 //! report is delivered, so it never offers more than the runner has room for; the cap here
@@ -27,6 +28,7 @@ use super::service::{
     AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
     TurnReport, Usage,
 };
+use super::settings::{self, BuildFloor, Declared};
 
 /// The RFC's runner heartbeat. The service's proto does not carry an interval yet, so
 /// this is the default and `--interval` changes it.
@@ -40,10 +42,10 @@ const PROVIDER_EVERY: u64 = 15;
 const OUTBOX_MAX: usize = 8;
 /// Tries at fetching a pack before the lease is given up (it then expires).
 const FETCH_TRIES: u32 = 10;
-/// The most turns one runner holds at once; the service clamps a registration to this.
-pub(crate) const MAX_CAPACITY: usize = 16;
+/// The most turns one runner holds at once; the service clamps to the same.
+pub(crate) const MAX_CAPACITY: usize = settings::MAX_CAPACITY as usize;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct LoopConfig {
     /// Pins the heartbeat interval (`--interval`); `None` follows what the service says
     /// (`heartbeat_interval_seconds`), else [`DEFAULT_INTERVAL`].
@@ -59,7 +61,13 @@ pub(crate) struct LoopConfig {
     /// The most turns held at once (accepting, fetching a pack or running); clamped to
     /// 1 to [`MAX_CAPACITY`]. The service's own slot count for the runner is the limit
     /// that matters; this only keeps the runner from taking more than it registered.
+    /// A declared capacity replaces it.
     pub(crate) capacity: usize,
+    /// What each heartbeat declares, read again before every beat (a SIGHUP reload sends
+    /// a new value). `None`: no capacity, this build's version, every turn class.
+    pub(crate) declared: Option<watch::Receiver<Declared>>,
+    /// The build-disk guard; `None` turns it off.
+    pub(crate) build_floor: Option<BuildFloor>,
 }
 
 impl Default for LoopConfig {
@@ -72,8 +80,22 @@ impl Default for LoopConfig {
             op_timeout: Duration::from_secs(30),
             flush_timeout: Duration::from_secs(10),
             capacity: 1,
+            declared: None,
+            build_floor: None,
         }
     }
+}
+
+/// What the next heartbeat declares before the build-disk guard.
+fn declared_now(cfg: &LoopConfig) -> Declared {
+    cfg.declared.as_ref().map_or_else(
+        || Declared {
+            capacity: None,
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            kinds: settings::CLASSES.iter().map(|c| (*c).to_owned()).collect(),
+        },
+        |rx| rx.borrow().clone(),
+    )
 }
 
 /// Delay after `failures` failures in a row: doubles from `min` to `max`, and `jitter`
@@ -346,7 +368,9 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let providers = Arc::new(Mutex::new(exec.providers().await));
     let mut refresher: Option<JoinHandle<()>> = None;
     let mut refresh_wanted = false;
-    let capacity = cfg.capacity.clamp(1, MAX_CAPACITY);
+    let mut capacity = cfg.capacity.clamp(1, MAX_CAPACITY);
+    // Whether the last beat declared `build`; the guard's changes are logged once each.
+    let mut declared_build: Option<bool> = None;
     let mut busy: Vec<Busy> = Vec::new();
     // Accepts in flight: each answers with its lease when taken, else with its lease id.
     let mut accepting: Vec<Op<'_, Result<Lease, String>>> = Vec::new();
@@ -354,7 +378,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut accepting_ids: Vec<String> = Vec::new();
     let mut fetching: Vec<Fetch> = Vec::new();
     let mut fetch_ops: Vec<Op<'_, Fetched>> = Vec::new();
-    let mut beating: Option<Op<'_, Result<Beat, OpErr>>> = None;
+    let mut beating: Option<Op<'_, (bool, Result<Beat, OpErr>)>> = None;
     let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
     let mut reporting: Option<Op<'_, (String, Result<(), OpErr>)>> = None;
     let mut service_interval: Option<Duration> = None;
@@ -443,8 +467,30 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 .clone();
             let id = runner.runner_id.clone();
             let limit = cfg.op_timeout;
+            let declared = declared_now(&cfg);
+            if let Some(c) = declared.capacity {
+                let c = usize::try_from(c).unwrap_or(1).clamp(1, MAX_CAPACITY);
+                if c != capacity {
+                    log(&format!(
+                        "capacity is now {c} turns at once (was {capacity}); running turns carry on"
+                    ));
+                    capacity = c;
+                }
+            }
+            let floor = cfg.build_floor.clone();
             beating = Some(Box::pin(async move {
-                bounded(limit, svc.heartbeat(&id, &snapshot)).await
+                let declared = match floor {
+                    Some(f) => {
+                        let free = settings::free_bytes(&f.volume).await;
+                        declared.guarded(free, f.bytes)
+                    }
+                    None => declared,
+                };
+                let has_build = declared.kinds.iter().any(|k| k == settings::BUILD);
+                (
+                    has_build,
+                    bounded(limit, svc.heartbeat(&id, &snapshot, &declared)).await,
+                )
             }));
         }
 
@@ -469,6 +515,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             } => {
                 beating = None;
+                let (has_build, beat) = beat;
+                if declared_build == Some(true) && !has_build {
+                    log("the build volume is under its free-space floor: no new build turn until it has room");
+                } else if declared_build == Some(false) && has_build {
+                    log("the build volume has room again: build turns are taken");
+                }
+                declared_build = Some(has_build);
                 match beat {
                     Err(e) => {
                         failures = failures.saturating_add(1);
@@ -856,6 +909,8 @@ mod tests {
         /// Met by the first heartbeat after an accept, and by the turn.
         gate: Option<Arc<tokio::sync::Barrier>>,
         gated: Mutex<bool>,
+        /// What each heartbeat declared, in order.
+        declared: Mutex<Vec<Declared>>,
     }
 
     impl Fake {
@@ -913,8 +968,14 @@ mod tests {
         async fn list_runners(&self, _: bool) -> Result<Vec<RunnerInfo>, ServiceError> {
             Ok(vec![])
         }
-        async fn heartbeat(&self, id: &str, p: &[ProviderState]) -> Result<Beat, ServiceError> {
+        async fn heartbeat(
+            &self,
+            id: &str,
+            p: &[ProviderState],
+            d: &Declared,
+        ) -> Result<Beat, ServiceError> {
             self.note(format!("heartbeat {id} providers={}", p.len()));
+            self.declared.lock().unwrap().push(d.clone());
             if self.revoke_when.as_ref().is_some_and(|f| f.exists()) {
                 let runner = RunnerInfo {
                     status: "revoked".into(),
@@ -1142,6 +1203,8 @@ mod tests {
             op_timeout: Duration::from_secs(2),
             flush_timeout: Duration::from_secs(1),
             capacity: 1,
+            declared: None,
+            build_floor: None,
         }
     }
 
@@ -1677,6 +1740,97 @@ mod tests {
         let r = fake.reports.lock().unwrap();
         assert_eq!(r.len(), 2);
         assert!(r.iter().all(|x| x.outcome == "replied"), "{r:?}");
+    }
+
+    fn declaring(capacity: Option<u32>, kinds: &[&str]) -> (watch::Sender<Declared>, LoopConfig) {
+        let (tx, rx) = watch::channel(Declared {
+            capacity,
+            version: "9.9.9".into(),
+            kinds: kinds.iter().map(|k| (*k).to_owned()).collect(),
+        });
+        let c = LoopConfig {
+            declared: Some(rx),
+            ..cfg(8)
+        };
+        (tx, c)
+    }
+
+    #[tokio::test]
+    async fn a_declared_capacity_takes_effect_on_the_first_beat() {
+        // Registered with 1; the config declares 2. Both turns wait at a barrier only
+        // the other can meet, so they pass only when the second lease of the very first
+        // offer is taken beside the first.
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        let exec = FakeExec {
+            gate: Some(Arc::new(tokio::sync::Barrier::new(2))),
+            ..FakeExec::default()
+        };
+        let (_tx, c) = declaring(Some(2), &["coordinate", "build"]);
+        let (_, stats) = go_with(&fake, exec, c).await;
+        assert_eq!((stats.accepted, stats.turns, stats.reported), (2, 2, 2));
+        assert!(
+            fake.reports
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|x| x.outcome == "replied")
+        );
+        let d = fake.declared.lock().unwrap();
+        assert_eq!(d[0].capacity, Some(2));
+        assert_eq!(d[0].version, "9.9.9");
+        assert_eq!(d[0].kinds, ["coordinate", "build"]);
+    }
+
+    #[tokio::test]
+    async fn lowering_the_capacity_never_stops_a_running_turn() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(150)),
+            ..FakeExec::default()
+        };
+        let (tx, c) = declaring(Some(2), &["coordinate"]);
+        let lower = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            tx.send_modify(|d| d.capacity = Some(1));
+            tx
+        });
+        let c = LoopConfig {
+            max_beats: Some(30),
+            ..c
+        };
+        let (_, stats) = go_with(&fake, exec, c).await;
+        let _ = lower.await;
+        assert_eq!((stats.accepted, stats.reported), (2, 2));
+        assert!(
+            fake.reports
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|x| x.outcome == "replied")
+        );
+        let d = fake.declared.lock().unwrap();
+        assert_eq!(d.last().and_then(|x| x.capacity), Some(1), "{d:?}");
+    }
+
+    #[tokio::test]
+    async fn under_the_build_floor_the_beat_declares_no_build() {
+        let fake = Fake::default();
+        let c = LoopConfig {
+            // No volume has this much free: the guard always holds.
+            build_floor: Some(BuildFloor {
+                volume: std::env::temp_dir(),
+                bytes: u64::MAX,
+            }),
+            max_beats: Some(2),
+            ..declaring(None, &["coordinate", "build"]).1
+        };
+        let (_, stats) = go_with(&fake, FakeExec::default(), c).await;
+        assert_eq!(stats.beats, 2);
+        let d = fake.declared.lock().unwrap();
+        assert!(d.iter().all(|x| x.kinds == ["coordinate"]), "{d:?}");
+        assert!(d.iter().all(|x| x.capacity.is_none()), "{d:?}");
     }
 
     #[tokio::test]

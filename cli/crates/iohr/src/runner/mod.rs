@@ -9,4 +9,5 @@ pub(crate) mod gate;
 pub(crate) mod provider;
 pub(crate) mod run_loop;
 pub(crate) mod service;
+pub(crate) mod settings;
 pub(crate) mod signing;
