@@ -307,7 +307,8 @@ pub enum RunnerCommand {
         /// The runner's name (default: this machine's host name).
         #[arg(long)]
         name: Option<String>,
-        /// Turns this runner may hold at once (this version runs one).
+        /// Turns this runner may hold at once, 1 to 16. `iohr runner run` runs that many
+        /// side by side. It is fixed at registration: to change it, register again.
         #[arg(long, default_value_t = 1)]
         capacity: u32,
         /// Mark the runner as always on (a server), so the coordinator can rely on it.

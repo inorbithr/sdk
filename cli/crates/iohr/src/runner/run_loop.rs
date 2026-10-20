@@ -1,15 +1,20 @@
 //! The runner's loop (RFC 0120, "Leases and heartbeats"): heartbeat on an interval,
 //! accept an offered lease, run its turn while the heartbeats carry on, report the reply.
 //!
-//! One turn at a time (capacity 1 in this version): a lease offered while a turn runs is
-//! left to expire and goes to another runner of the same person. A lease is accepted only
-//! when its turn pack can be fetched. Finished turns are reported through an in-memory
-//! outbox (lost if the runner exits; a durable one is a follow-up).
+//! Up to `capacity` turns at once (the runner's registered capacity, 1 to 16): a lease
+//! offered while every slot is taken is left to expire and goes to another runner of the
+//! same person. The service counts a slot from the moment it creates a lease until the
+//! report is delivered, so it never offers more than the runner has room for; the cap here
+//! is the runner's own guard. Each held lease has its own pack fetch, turn and heartbeat,
+//! and one turn failing or crashing never stops the others. A lease is accepted only when
+//! its turn pack can be fetched. Finished turns are reported through an in-memory outbox
+//! (lost if the runner exits; a durable one is a follow-up).
 
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::task::Poll;
 use std::time::Duration;
 
 use tokio::sync::watch;
@@ -35,6 +40,8 @@ const PROVIDER_EVERY: u64 = 15;
 const OUTBOX_MAX: usize = 8;
 /// Tries at fetching a pack before the lease is given up (it then expires).
 const FETCH_TRIES: u32 = 10;
+/// The most turns one runner holds at once; the service clamps a registration to this.
+pub(crate) const MAX_CAPACITY: usize = 16;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LoopConfig {
@@ -49,6 +56,10 @@ pub(crate) struct LoopConfig {
     pub(crate) op_timeout: Duration,
     /// How long shutdown may spend delivering what is in the outbox.
     pub(crate) flush_timeout: Duration,
+    /// The most turns held at once (accepting, fetching a pack or running); clamped to
+    /// 1 to [`MAX_CAPACITY`]. The service's own slot count for the runner is the limit
+    /// that matters; this only keeps the runner from taking more than it registered.
+    pub(crate) capacity: usize,
 }
 
 impl Default for LoopConfig {
@@ -60,6 +71,7 @@ impl Default for LoopConfig {
             max_beats: None,
             op_timeout: Duration::from_secs(30),
             flush_timeout: Duration::from_secs(10),
+            capacity: 1,
         }
     }
 }
@@ -109,7 +121,14 @@ struct Busy {
 struct Fetch {
     lease: Lease,
     tries: u32,
+    /// Not before this instant is the pack asked for (again).
+    next: Instant,
+    /// A fetch for this lease is in flight.
+    asking: bool,
 }
+
+/// The answer to one lease's pack fetch, with the lease it was asked for.
+type Fetched = (String, i64, Result<Pack, OpErr>);
 
 type Log<'a> = &'a (dyn Fn(&str) + Sync);
 type Op<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -158,13 +177,9 @@ fn is_lease(l: &Lease, id: &str, token: i64) -> bool {
 
 /// Every lease the runner holds and must keep alive: the turn running, the pack being
 /// fetched, and each finished turn whose report is not delivered yet.
-fn held_leases(
-    busy: Option<&Busy>,
-    fetching: Option<&Fetch>,
-    outbox: &VecDeque<TurnReport>,
-) -> Vec<Lease> {
-    let mut all: Vec<Lease> = busy.map(|b| b.lease.clone()).into_iter().collect();
-    all.extend(fetching.map(|f| f.lease.clone()));
+fn held_leases(busy: &[Busy], fetching: &[Fetch], outbox: &VecDeque<TurnReport>) -> Vec<Lease> {
+    let mut all: Vec<Lease> = busy.iter().map(|b| b.lease.clone()).collect();
+    all.extend(fetching.iter().map(|f| f.lease.clone()));
     for r in outbox {
         if !all
             .iter()
@@ -181,17 +196,72 @@ fn held_leases(
     all
 }
 
-/// Stops what runs in the background, and waits until it is stopped. Aborting the turn
+/// Stops what runs in the background, and waits until it is stopped. Aborting a turn
 /// task drops its future, and with it the guard that kills `claude`'s process group.
-async fn stop(busy: Option<Busy>, refresher: Option<JoinHandle<()>>) {
-    if let Some(b) = busy {
-        b.handle.abort();
-        let _ = b.handle.await;
+async fn stop(busy: Vec<Busy>, refresher: Option<JoinHandle<()>>) {
+    for b in busy {
+        stop_turn(b).await;
     }
     if let Some(r) = refresher {
         r.abort();
         let _ = r.await;
     }
+}
+
+/// Stops one turn and waits until its task is gone.
+async fn stop_turn(b: Busy) {
+    b.handle.abort();
+    let _ = b.handle.await;
+}
+
+/// The first of `ops` to finish, removed from the list; waits for ever when there are none.
+/// Nothing is lost if this future is dropped before it finishes.
+async fn first_of<T>(ops: &mut Vec<Op<'_, T>>) -> T {
+    std::future::poll_fn(|cx| {
+        for i in 0..ops.len() {
+            if let Poll::Ready(v) = ops[i].as_mut().poll(cx) {
+                drop(ops.remove(i));
+                return Poll::Ready(v);
+            }
+        }
+        Poll::Pending
+    })
+    .await
+}
+
+/// Every one of `ops`, run side by side, answered in the order given.
+async fn all_of<T>(ops: Vec<Op<'_, T>>) -> Vec<T> {
+    let mut ops: Vec<(Op<'_, T>, Option<T>)> = ops.into_iter().map(|o| (o, None)).collect();
+    std::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (op, out) in &mut ops {
+            if out.is_none() {
+                match op.as_mut().poll(cx) {
+                    Poll::Ready(v) => *out = Some(v),
+                    Poll::Pending => pending = true,
+                }
+            }
+        }
+        if pending {
+            return Poll::Pending;
+        }
+        Poll::Ready(ops.iter_mut().filter_map(|(_, o)| o.take()).collect())
+    })
+    .await
+}
+
+/// The first running turn to end, taken off the list, with how its task ended. Waits for
+/// ever when none runs.
+async fn next_finished(busy: &mut Vec<Busy>) -> (Busy, Result<Finished, tokio::task::JoinError>) {
+    std::future::poll_fn(|cx| {
+        for i in 0..busy.len() {
+            if let Poll::Ready(r) = Pin::new(&mut busy[i].handle).poll(cx) {
+                return Poll::Ready((busy.remove(i), r));
+            }
+        }
+        Poll::Pending
+    })
+    .await
 }
 
 /// Delivers what is in the outbox, in order, until `limit` is up. A permanent refusal
@@ -246,7 +316,8 @@ fn unfinished(b: &Busy, runner: &RunnerInfo, outcome: &str, detail: String) -> T
     report_of(&b.lease, &b.pack, runner, &finished).limited()
 }
 
-/// Runs until `shutdown` is set or `cfg.max_beats` heartbeats were answered.
+/// Runs until `shutdown` is set or `cfg.max_beats` heartbeats were answered. Up to
+/// `cfg.capacity` turns are held at once, each through the same steps below.
 ///
 /// Everything that can wait (the heartbeat, accepting a lease, fetching its pack,
 /// keeping leases alive, delivering a report, refreshing the providers) is its own
@@ -257,8 +328,8 @@ fn unfinished(b: &Busy, runner: &RunnerInfo, outcome: &str, detail: String) -> T
 /// refuses it for good): while the pack is fetched (retried), while the turn runs, and
 /// while the report waits in the in-memory outbox. A lease answer is matched to the
 /// lease and fencing token it was asked for; a stop or refusal ends only that lease's
-/// work. On shutdown the turn is aborted, its cancellation is recorded as a report, and
-/// the outbox is flushed for up to `cfg.flush_timeout`.
+/// work. On shutdown every running turn is aborted, its cancellation is recorded as a
+/// report, and the outbox is flushed for up to `cfg.flush_timeout`.
 #[allow(
     clippy::too_many_lines,
     reason = "one select over the loop's operations"
@@ -275,10 +346,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let providers = Arc::new(Mutex::new(exec.providers().await));
     let mut refresher: Option<JoinHandle<()>> = None;
     let mut refresh_wanted = false;
-    let mut busy: Option<Busy> = None;
-    let mut accepting: Option<Op<'_, Option<Lease>>> = None;
-    let mut fetching: Option<Fetch> = None;
-    let mut fetch_op: Option<Op<'_, Result<Pack, OpErr>>> = None;
+    let capacity = cfg.capacity.clamp(1, MAX_CAPACITY);
+    let mut busy: Vec<Busy> = Vec::new();
+    // Accepts in flight: each answers with its lease when taken, else with its lease id.
+    let mut accepting: Vec<Op<'_, Result<Lease, String>>> = Vec::new();
+    // The ids of the leases being accepted, so a lease offered twice is taken once.
+    let mut accepting_ids: Vec<String> = Vec::new();
+    let mut fetching: Vec<Fetch> = Vec::new();
+    let mut fetch_ops: Vec<Op<'_, Fetched>> = Vec::new();
     let mut beating: Option<Op<'_, Result<Beat, OpErr>>> = None;
     let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
     let mut reporting: Option<Op<'_, (String, Result<(), OpErr>)>> = None;
@@ -288,40 +363,46 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut tries: u32 = 0;
     let mut failures: u32 = 0;
     let start = Instant::now();
-    let (mut next_beat, mut next_report, mut next_lease_beat, mut next_fetch) =
-        (start, start, start, start);
+    let (mut next_beat, mut next_report, mut next_lease_beat) = (start, start, start);
     let mut beat_started = start;
     let mut lease_beat_started = start;
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
 
     loop {
-        let held = held_leases(busy.as_ref(), fetching.as_ref(), &outbox);
+        let held = held_leases(&busy, &fetching, &outbox);
         let has_held = !held.is_empty();
         let now = Instant::now();
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
             lease_beat_started = now;
             let limit = cfg.op_timeout;
-            lease_beating = Some(Box::pin(async move {
-                let mut out = Vec::new();
-                for l in held {
-                    let r = bounded(limit, svc.lease_heartbeat(&l)).await;
-                    out.push((l, r));
-                }
-                out
-            }));
+            // Side by side: one lease's slow answer never holds back another's beat.
+            let beats: Vec<Op<'_, _>> = held
+                .into_iter()
+                .map(|l| -> Op<'_, _> {
+                    Box::pin(async move {
+                        let r = bounded(limit, svc.lease_heartbeat(&l)).await;
+                        (l, r)
+                    })
+                })
+                .collect();
+            lease_beating = Some(Box::pin(all_of(beats)));
         }
-        if fetch_op.is_none()
-            && now >= next_fetch
-            && let Some(f) = fetching.as_ref()
-        {
+        for f in fetching.iter_mut().filter(|f| !f.asking && now >= f.next) {
+            f.asking = true;
             let lease = f.lease.clone();
             let limit = cfg.op_timeout;
-            fetch_op = Some(Box::pin(async move {
-                let pack = bounded(limit, svc.fetch_pack(&lease)).await?;
-                check_pack(&pack, &lease)?;
-                Ok(pack)
+            fetch_ops.push(Box::pin(async move {
+                let got = async {
+                    let pack = bounded(limit, svc.fetch_pack(&lease)).await?;
+                    check_pack(&pack, &lease)?;
+                    Ok(pack)
+                }
+                .await;
+                (lease.lease_id, lease.fencing_token, got)
             }));
         }
+        // The next pack fetch due, if any waits for its time.
+        let next_fetch = fetching.iter().filter(|f| !f.asking).map(|f| f.next).min();
         if reporting.is_none()
             && now >= next_report
             && let Some(r) = outbox.front().cloned()
@@ -342,13 +423,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             }));
         }
         if cfg.max_beats.is_some_and(|m| stats.beats >= m)
-            && busy.is_none()
-            && accepting.is_none()
-            && fetching.is_none()
+            && busy.is_empty()
+            && accepting.is_empty()
+            && fetching.is_empty()
             && reporting.is_none()
             && (outbox.is_empty() || tries > 0)
         {
-            stop(None, refresher.take()).await;
+            stop(Vec::new(), refresher.take()).await;
             return (End::MaxBeats, stats);
         }
         if beating.is_none() && now >= next_beat {
@@ -371,15 +452,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             biased;
             _ = shutdown.changed() => {
                 drop(reporting.take());
-                if let Some(b) = busy.take() {
+                let running = std::mem::take(&mut busy);
+                for b in &running {
                     log(&format!("turn {} cancelled by shutdown", b.pack.turn_id));
-                    let report = unfinished(&b, runner, "failed", "the runner was stopped before the turn finished".into());
-                    stop(Some(b), refresher.take()).await;
                     stats.turns += 1;
-                    outbox.push_back(report);
-                } else {
-                    stop(None, refresher.take()).await;
+                    outbox.push_back(unfinished(b, runner, "failed", "the runner was stopped before the turn finished".into()));
                 }
+                stop(running, refresher.take()).await;
                 flush(svc, &mut outbox, cfg.flush_timeout, cfg.op_timeout, &mut stats, log).await;
                 return (End::Shutdown, stats);
             }
@@ -408,13 +487,20 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         next_beat = (beat_started + interval(service_interval)).max(Instant::now());
                         if beat.runner.status == "revoked" {
                             log("the service revoked this runner");
-                            stop(busy.take(), refresher.take()).await;
+                            stop(std::mem::take(&mut busy), refresher.take()).await;
                             return (End::Revoked, stats);
                         }
                         for lease in beat.offered {
-                            if busy.is_some() || accepting.is_some() || fetching.is_some() {
+                            let taken = busy.len() + accepting.len() + fetching.len();
+                            let held_already = accepting_ids.contains(&lease.lease_id)
+                                || held_leases(&busy, &fetching, &outbox)
+                                    .iter()
+                                    .any(|l| l.lease_id == lease.lease_id);
+                            if held_already {
+                                // Offered again before the service saw the accept.
+                            } else if taken >= capacity {
                                 log(&format!(
-                                    "lease {} left for another runner: a turn is running",
+                                    "lease {} left for another runner: {taken} of {capacity} turns are taken",
                                     lease.lease_id
                                 ));
                             } else if outbox.len() >= OUTBOX_MAX {
@@ -429,7 +515,8 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                     lease.lease_id
                                 ));
                             } else {
-                                accepting = Some(Box::pin(accept_lease(svc, exec, lease, cfg.op_timeout, log)));
+                                accepting_ids.push(lease.lease_id.clone());
+                                accepting.push(Box::pin(accept_lease(svc, exec, lease, cfg.op_timeout, log)));
                             }
                         }
                     }
@@ -447,7 +534,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     let (id, token) = (lease.lease_id.as_str(), lease.fencing_token);
                     // Only for a lease still held: an answer that comes after its
                     // report was delivered, or its turn was stopped, is ignored.
-                    if !held_leases(busy.as_ref(), fetching.as_ref(), &outbox)
+                    if !held_leases(&busy, &fetching, &outbox)
                         .iter()
                         .any(|l| is_lease(l, id, token))
                     {
@@ -463,13 +550,12 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         }
                     };
                     let Some(stopped) = ended else { continue };
-                    if fetching.as_ref().is_some_and(|f| is_lease(&f.lease, id, token)) {
+                    if let Some(i) = fetching.iter().position(|f| is_lease(&f.lease, id, token)) {
                         log(&format!("lease {id} ended before its pack came: {reason}"));
-                        fetching = None;
+                        fetching.remove(i);
                     }
-                    if busy.as_ref().is_some_and(|b| is_lease(&b.lease, id, token))
-                        && let Some(b) = busy.take()
-                    {
+                    if let Some(i) = busy.iter().position(|b| is_lease(&b.lease, id, token)) {
+                        let b = busy.remove(i);
                         refresh_wanted = true;
                         stats.turns += 1;
                         if stopped {
@@ -477,14 +563,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                             // group dies with it) and reported as capped.
                             log(&format!("turn {} stopped by the service: {reason}", b.pack.turn_id));
                             let report = unfinished(&b, runner, "cap_hit", format!("stopped by the service: {reason}"));
-                            stop(Some(b), None).await;
+                            stop_turn(b).await;
                             outbox.push_back(report);
                             next_report = Instant::now();
                         } else {
                             // Released, reassigned or fenced: the work is no longer ours
                             // and a report would be refused.
                             log(&format!("lease {id} is gone ({reason}): turn {} aborted", b.pack.turn_id));
-                            stop(Some(b), None).await;
+                            stop_turn(b).await;
                         }
                     }
                     if !stopped {
@@ -492,13 +578,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     }
                 }
             }
-            joined = async {
-                match busy.as_mut() {
-                    Some(b) => (&mut b.handle).await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                let Some(b) = busy.take() else { continue };
+            (b, joined) = next_finished(&mut busy) => {
                 refresh_wanted = true;
                 let finished = joined.unwrap_or_else(|e| {
                     Finished::refused("failed", format!("the turn's task stopped: {e}"))
@@ -509,32 +589,26 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 outbox.push_back(report);
                 next_report = Instant::now();
             }
-            taken = async {
-                match accepting.as_mut() {
-                    Some(f) => f.await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                accepting = None;
-                if let Some(lease) = taken {
-                    stats.accepted += 1;
-                    fetching = Some(Fetch { lease, tries: 0 });
-                    next_fetch = Instant::now();
-                    next_lease_beat = Instant::now();
+            taken = first_of(&mut accepting) => {
+                match taken {
+                    Ok(lease) => {
+                        accepting_ids.retain(|id| *id != lease.lease_id);
+                        stats.accepted += 1;
+                        fetching.push(Fetch { lease, tries: 0, next: Instant::now(), asking: false });
+                        next_lease_beat = Instant::now();
+                    }
+                    // Not accepted: `accept_lease` logged it and the lease expires.
+                    Err(id) => accepting_ids.retain(|a| *a != id),
                 }
             }
-            got = async {
-                match fetch_op.as_mut() {
-                    Some(f) => f.await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                fetch_op = None;
-                let Some(mut f) = fetching.take() else { continue };
+            (id, token, got) = first_of(&mut fetch_ops) => {
+                let Some(i) = fetching.iter().position(|f| is_lease(&f.lease, &id, token)) else { continue };
+                let mut f = fetching.remove(i);
+                f.asking = false;
                 match got {
                     Ok(pack) => {
                         let (task, p) = (exec.clone(), pack.clone());
-                        busy = Some(Busy {
+                        busy.push(Busy {
                             lease: f.lease,
                             pack,
                             handle: tokio::spawn(async move { task.execute(p).await }),
@@ -551,8 +625,8 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                             ));
                         } else {
                             log(&format!("lease {} pack not fetched, will retry: {}", f.lease.lease_id, e.msg));
-                            next_fetch = Instant::now() + interval(service_interval);
-                            fetching = Some(f);
+                            f.next = Instant::now() + interval(service_interval);
+                            fetching.push(f);
                         }
                     }
                 }
@@ -592,7 +666,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             }
             () = tokio::time::sleep_until(next_lease_beat), if lease_beating.is_none() && has_held => {}
-            () = tokio::time::sleep_until(next_fetch), if fetch_op.is_none() && fetching.is_some() => {}
+            () = tokio::time::sleep_until(next_fetch.unwrap_or(start)), if next_fetch.is_some() => {}
             () = tokio::time::sleep_until(next_beat), if beating.is_none() => {}
             () = tokio::time::sleep_until(next_report), if reporting.is_none() && !outbox.is_empty() => {}
         }
@@ -616,15 +690,15 @@ fn check_pack(p: &Pack, lease: &Lease) -> Result<(), OpErr> {
     Ok(())
 }
 
-/// `AcceptLease` under the call limit; `None` when it was not accepted (the lease is
-/// left to expire and goes to another runner).
+/// `AcceptLease` under the call limit; the lease's id when it was not accepted (the lease
+/// is left to expire and goes to another runner).
 async fn accept_lease<S: Service, X: Exec>(
     svc: &S,
     exec: &Arc<X>,
     lease: Lease,
     op_timeout: Duration,
     log: Log<'_>,
-) -> Option<Lease> {
+) -> Result<Lease, String> {
     let facts = AcceptFacts {
         // A coordinate turn has no worktree: it runs in the runner's own empty directory.
         worktree_fresh: true,
@@ -634,10 +708,10 @@ async fn accept_lease<S: Service, X: Exec>(
         caps_set: true,
     };
     match bounded(op_timeout, svc.accept(&lease, facts)).await {
-        Ok(()) => Some(lease),
+        Ok(()) => Ok(lease),
         Err(e) => {
             log(&format!("lease {} not accepted: {}", lease.lease_id, e.msg));
-            None
+            Err(lease.lease_id)
         }
     }
 }
@@ -928,8 +1002,14 @@ mod tests {
         refresh_hangs: bool,
         /// The turn never ends on its own; set to true when its future is dropped.
         hang: Option<Arc<std::sync::atomic::AtomicBool>>,
+        /// The same, for this turn only.
+        hang_turn: Option<(String, Arc<std::sync::atomic::AtomicBool>)>,
         /// This turn takes this long instead of 30 ms.
         slow_turn: Option<(String, Duration)>,
+        /// Every turn takes this long instead of 30 ms.
+        turn_time: Option<Duration>,
+        /// This turn's task panics.
+        crash_turn: Option<String>,
         /// The turn's reply has a `say` over the service's limit.
         big_say: bool,
         asked: std::sync::atomic::AtomicU32,
@@ -938,17 +1018,29 @@ mod tests {
         fn execute(&self, pack: Pack) -> Pin<Box<dyn Future<Output = Finished> + Send>> {
             let gate = self.gate.clone();
             // Made before the future first runs: a stop may come before its first poll.
-            let hang = self.hang.clone().map(Dropped);
+            let hang = self
+                .hang
+                .clone()
+                .or_else(|| {
+                    self.hang_turn
+                        .as_ref()
+                        .filter(|(id, _)| *id == pack.turn_id)
+                        .map(|(_, f)| f.clone())
+                })
+                .map(Dropped);
             let big_say = self.big_say;
             let slow = self
                 .slow_turn
                 .as_ref()
                 .filter(|(id, _)| *id == pack.turn_id)
                 .map(|(_, d)| *d);
+            let all = self.turn_time;
+            let crash = self.crash_turn.as_deref() == Some(pack.turn_id.as_str());
             Box::pin(async move {
                 if let Some(_dropped) = hang {
                     std::future::pending::<()>().await;
                 }
+                assert!(!crash, "this turn crashes");
                 let mut outcome = "replied";
                 match gate {
                     Some(g) => {
@@ -959,7 +1051,9 @@ mod tests {
                             outcome = "failed";
                         }
                     }
-                    None => tokio::time::sleep(slow.unwrap_or(Duration::from_millis(30))).await,
+                    None => {
+                        tokio::time::sleep(slow.or(all).unwrap_or(Duration::from_millis(30))).await;
+                    }
                 }
                 let parsed = big_say.then(|| crate::runner::claude::Parsed {
                     outcome: crate::runner::claude::Outcome::Replied,
@@ -1042,6 +1136,14 @@ mod tests {
             max_beats: Some(max_beats),
             op_timeout: Duration::from_secs(2),
             flush_timeout: Duration::from_secs(1),
+            capacity: 1,
+        }
+    }
+
+    fn cfg_cap(max_beats: u64, capacity: usize) -> LoopConfig {
+        LoopConfig {
+            capacity,
+            ..cfg(max_beats)
         }
     }
 
@@ -1546,6 +1648,199 @@ mod tests {
                 "process {p} survived the revocation"
             );
         }
+    }
+
+    fn pos(calls: &[String], what: &str) -> usize {
+        calls
+            .iter()
+            .position(|c| c == what)
+            .unwrap_or_else(|| panic!("no call {what}: {calls:?}"))
+    }
+
+    #[tokio::test]
+    async fn capacity_two_runs_two_leases_at_once() {
+        // Both turns wait at a barrier only the other can meet: one at a time, the
+        // first times out and fails.
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        let exec = FakeExec {
+            gate: Some(Arc::new(tokio::sync::Barrier::new(2))),
+            ..FakeExec::default()
+        };
+        let (_, stats) = go_with(&fake, exec, cfg_cap(8, 2)).await;
+        assert_eq!((stats.accepted, stats.turns, stats.reported), (2, 2, 2));
+        let r = fake.reports.lock().unwrap();
+        assert_eq!(r.len(), 2);
+        assert!(r.iter().all(|x| x.outcome == "replied"), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn one_slot_still_runs_one_turn_and_leaves_the_second_lease() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(200)),
+            ..FakeExec::default()
+        };
+        let (_, stats) = go_with(&fake, exec, cfg(40)).await;
+        assert_eq!((stats.accepted, stats.reported), (1, 1));
+        assert_eq!(calls_of(&fake, "accept lease_2"), 0);
+    }
+
+    #[tokio::test]
+    async fn a_third_lease_is_left_to_expire_while_both_slots_are_taken() {
+        let fake = Fake::default();
+        offer(
+            &fake,
+            &[
+                lease("lease_1", 1),
+                lease("lease_2", 2),
+                lease("lease_3", 3),
+            ],
+        );
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(300)),
+            ..FakeExec::default()
+        };
+        let (_, stats) = go_with(&fake, exec, cfg_cap(60, 2)).await;
+        assert_eq!((stats.accepted, stats.reported), (2, 2));
+        assert_eq!(calls_of(&fake, "accept lease_3"), 0);
+        assert_eq!(calls_of(&fake, "pack lease_3"), 0);
+        // Both held leases were kept alive on their own.
+        let calls = fake.calls.lock().unwrap().clone();
+        for id in ["lease_1", "lease_2"] {
+            assert!(
+                calls.iter().any(|c| *c == format!("lease_heartbeat {id}")),
+                "{id} was not kept alive: {calls:?}"
+            );
+        }
+        let mut turns: Vec<_> = fake
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r.turn_id.clone())
+            .collect();
+        turns.sort();
+        assert_eq!(turns, ["turn_1", "turn_2"]);
+    }
+
+    #[tokio::test]
+    async fn a_lease_offered_again_after_a_slot_frees_is_taken() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        // Beat 2 offers the third while both turns run (150 ms): declined. Beat 25
+        // (about 250 ms) offers it again: both are done and reported.
+        offer(&fake, &[lease("lease_3", 3)]);
+        for _ in 0..22 {
+            offer(&fake, &[]);
+        }
+        offer(&fake, &[lease("lease_3", 3)]);
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(150)),
+            ..FakeExec::default()
+        };
+        let (_, stats) = go_with(&fake, exec, cfg_cap(60, 2)).await;
+        assert_eq!((stats.accepted, stats.reported), (3, 3));
+        assert_eq!(calls_of(&fake, "accept lease_3"), 1);
+        let calls = fake.calls.lock().unwrap().clone();
+        assert!(
+            pos(&calls, "accept lease_3 token=3") > pos(&calls, "report lease_1:1:turn_1:1"),
+            "the third lease was taken before a slot was free: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lease_offered_twice_is_taken_once() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_1", 1)]);
+        offer(&fake, &[lease("lease_1", 1)]);
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(100)),
+            ..FakeExec::default()
+        };
+        let (_, stats) = go_with(&fake, exec, cfg_cap(20, 2)).await;
+        assert_eq!((stats.accepted, stats.reported), (1, 1));
+        assert_eq!(calls_of(&fake, "accept lease_1"), 1);
+    }
+
+    #[tokio::test]
+    async fn one_turn_crashing_leaves_the_other_running_and_reporting() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        // turn_1 panics at once; turn_2 is still running (200 ms) when it does.
+        let exec = FakeExec {
+            crash_turn: Some("turn_1".into()),
+            slow_turn: Some(("turn_2".into(), Duration::from_millis(200))),
+            ..FakeExec::default()
+        };
+        let (_, stats) = go_with(&fake, exec, cfg_cap(40, 2)).await;
+        assert_eq!((stats.accepted, stats.turns, stats.reported), (2, 2, 2));
+        let r = fake.reports.lock().unwrap();
+        let by = |t: &str| r.iter().find(|x| x.turn_id == t).map(|x| x.outcome.clone());
+        assert_eq!(by("turn_1").as_deref(), Some("failed"));
+        assert_eq!(by("turn_2").as_deref(), Some("replied"));
+        let crashed = r.iter().find(|x| x.turn_id == "turn_1").unwrap();
+        assert!(crashed.detail.contains("stopped"), "{}", crashed.detail);
+    }
+
+    #[tokio::test]
+    async fn a_lease_the_service_released_stops_only_its_own_turn() {
+        // lease_1 is refused for good once its pack is out; lease_2 carries on.
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fake = Fake {
+            refuse_lease: Some("lease_1".into()),
+            ..Fake::default()
+        };
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        let exec = FakeExec {
+            slow_turn: Some(("turn_2".into(), Duration::from_millis(250))),
+            hang_turn: Some(("turn_1".into(), dropped.clone())),
+            ..FakeExec::default()
+        };
+        let (_, stats) = go_with(&fake, exec, cfg_cap(60, 2)).await;
+        assert!(
+            dropped.load(std::sync::atomic::Ordering::SeqCst),
+            "turn_1 kept running"
+        );
+        assert_eq!(stats.reported, 1);
+        let r = fake.reports.lock().unwrap();
+        assert_eq!(
+            (r[0].turn_id.as_str(), r[0].outcome.as_str()),
+            ("turn_2", "replied")
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_records_every_cancelled_turn() {
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1), lease("lease_2", 2)]);
+        let exec = Arc::new(FakeExec {
+            hang: Some(dropped.clone()),
+            ..FakeExec::default()
+        });
+        let (tx, rx) = watch::channel(false);
+        let c = LoopConfig {
+            max_beats: None,
+            ..cfg_cap(0, 2)
+        };
+        let t = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _ = tx.send(true);
+            tx
+        });
+        let (end, stats) = run_loop(&fake, &exec, &runner(), c, rx, &|_| {}).await;
+        let _ = t.await;
+        assert_eq!(end, End::Shutdown);
+        assert_eq!((stats.turns, stats.reported), (2, 2));
+        assert!(
+            fake.reports
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|r| r.outcome == "failed")
+        );
     }
 
     #[tokio::test]

@@ -126,6 +126,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     "runners": mine.iter().map(|r| serde_json::json!({
                         "runner_id": r.runner_id, "name": r.name, "status": r.status,
                         "last_seen_at": r.last_seen_at, "providers": r.providers,
+                        "capacity": r.capacity,
                     })).collect::<Vec<_>>(),
                     "this_machine": local_state.as_ref().map(|(p, v, a)| serde_json::json!({
                         "name": host_name(), "claude": p, "version": v,
@@ -197,12 +198,16 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 let _ = tx.send(true);
             });
             Out::note(&format!(
-                "runner {} ({}) is running; Ctrl-C stops it",
-                me.name, me.runner_id
+                "runner {} ({}) is running, up to {} turns at once; Ctrl-C stops it",
+                me.name,
+                me.runner_id,
+                me.capacity.clamp(1, 16)
             ));
             let cfg = LoopConfig {
                 interval: interval.map(Duration::from_secs),
                 max_beats,
+                // What it registered with: the service offers no more than this.
+                capacity: usize::try_from(me.capacity).unwrap_or(1),
                 ..LoopConfig::default()
             };
             let (end, stats) = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
