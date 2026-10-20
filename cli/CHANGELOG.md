@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0-alpha.21](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.20...iohr/v0.1.0-alpha.21) (2026-10-20)
+
+
+### Features
+
+* **cli:** iohr runner gate-report runs the check and sends the signed gate report ([#242](https://github.com/inorbithr/sdk/issues/242)) ([0646127](https://github.com/inorbithr/sdk/commit/06461271f76e0959f3779471307d041d0df78505))
+
+
+### Dependencies
+
+* **rust:** bump the rust group across 4 directories with 14 updates ([#238](https://github.com/inorbithr/sdk/issues/238)) ([d2c7787](https://github.com/inorbithr/sdk/commit/d2c778777c522e32641c7afb4f7b6ee1c7465b51))
+
 ## [0.1.0-alpha.20](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.19...iohr/v0.1.0-alpha.20) (2026-10-20)
 
 
