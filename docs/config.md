@@ -351,6 +351,13 @@ key_secret_file = "/run/secrets/inorbit-ci"
 scopes = ["identity:read", "radar:read"]
 timeout = "10s"
 max_retries = 4
+
+[runner]                            # iohr runner, every profile (section 4.3)
+capacity = 4
+kinds = ["coordinate", "build"]
+
+[profiles.ci.runner]                # this profile's runner, over [runner]
+capacity = 8
 ```
 
 Rules:
@@ -373,6 +380,31 @@ keys (`kind`, `account`, `storage`, `issuer`, `client_id`) and the `[ext]` table
 every other key, table and comment (`toml_edit`). A profile without `kind` holds SDK keys
 only: `iohr` does not list it as one of its profiles. `iohr logout` removes the profile's
 command-line keys and leaves its SDK keys; the table goes when nothing is left.
+
+### 4.3 The runner tables
+
+`iohr runner` reads `[runner]` and the chosen profile's `[profiles.<name>.runner]` (the
+profile's keys win), and its flags win over both. The SDK does not read them.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `capacity` | 1 to 32 | as registered | `register` and `run`: the turns the runner takes at once |
+| `kinds` | `coordinate`, `build` | both | `register` and `run`: the turn classes the runner takes |
+| `always_on` | true or false | false | `register` |
+| `name` | text | the host name | `register`, and `run` to find the runner |
+
+`iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
+coordinator offers that many slots within one beat, without registering again. On
+SIGHUP it reads the file again: a valid change applies on the next beat, an invalid one
+is refused with a note and the settings in use stay. Lowering `capacity` never stops a
+running turn; new turns wait until fewer run. A coordinator older than this sends a 400
+for the new fields, and the runner falls back to the old heartbeat.
+
+When `/mnt/build` exists and has less than 100 GB free, the runner drops `build` from
+the kinds it declares until the volume has room again (`none` when nothing is left, so
+the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
+value in effect, where it came from and the build volume's free space, without signing
+in.
 
 ## 5. Credentials
 

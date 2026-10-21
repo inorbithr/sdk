@@ -6,12 +6,14 @@
 //! secret, no new file.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 use inorbithr::Method;
 use serde_json::{Value, json};
 
+use super::settings::Declared;
 use super::signing::Signer;
 use crate::context::Api;
 
@@ -46,6 +48,17 @@ impl ServiceError {
             }
             Self::Api(_) => false,
         }
+    }
+
+    /// A coordinator older than the declared heartbeat: its REST binding refuses a body
+    /// field it does not know (`unrecognized field`, HTTP 400).
+    pub(crate) fn is_unknown_field(&self) -> bool {
+        let Self::Api(inorbithr::Error::Api(a)) = self else {
+            return false;
+        };
+        a.status == 400
+            && (a.message.contains("unrecognized field")
+                || String::from_utf8_lossy(&a.raw.body).contains("unrecognized field"))
     }
 }
 
@@ -556,10 +569,13 @@ pub(crate) trait Service {
     async fn challenge(&self) -> Result<Challenge, ServiceError>;
     async fn register(&self, r: &Registration) -> Result<RunnerInfo, ServiceError>;
     async fn list_runners(&self, mine: bool) -> Result<Vec<RunnerInfo>, ServiceError>;
+    /// The runner is alive, has these providers, and declares its capacity, version and
+    /// kinds (a coordinator older than that is sent the providers alone).
     async fn heartbeat(
         &self,
         runner_id: &str,
         providers: &[ProviderState],
+        declared: &Declared,
     ) -> Result<Beat, ServiceError>;
     async fn accept(&self, lease: &Lease, facts: AcceptFacts) -> Result<(), ServiceError>;
     async fn fetch_pack(&self, lease: &Lease) -> Result<Pack, ServiceError>;
@@ -587,9 +603,20 @@ pub(crate) struct HttpService<'a> {
     pub(crate) account: String,
     /// The runner's key, to sign reports with; absent for commands that report nothing.
     pub(crate) signer: Option<Signer>,
+    /// Set once the coordinator refused the declared heartbeat as an older one: every
+    /// later beat sends the providers alone.
+    old_beat: AtomicBool,
 }
 
-impl HttpService<'_> {
+impl<'a> HttpService<'a> {
+    pub(crate) fn new(api: &'a Api, account: String, signer: Option<Signer>) -> Self {
+        Self {
+            api,
+            account,
+            signer,
+            old_beat: AtomicBool::new(false),
+        }
+    }
     /// A request body with this service's `account_id` in it.
     fn scoped(&self, mut body: Value) -> Value {
         if let Value::Object(m) = &mut body {
@@ -662,20 +689,49 @@ impl Service for HttpService<'_> {
         &self,
         runner_id: &str,
         providers: &[ProviderState],
+        declared: &Declared,
     ) -> Result<Beat, ServiceError> {
-        let body = json!({
-            "runner_id": runner_id,
-            "providers": providers.iter().map(ProviderState::to_json).collect::<Vec<_>>(),
-        });
-        let v: Value = self
-            .api
-            .send_body(
-                Method::Post,
-                &format!("/v1/coordinator/runners/{runner_id}/heartbeat"),
-                &self.scoped(body),
-            )
-            .await?
-            .json()?;
+        let path = format!("/v1/coordinator/runners/{runner_id}/heartbeat");
+        let old = || {
+            json!({
+                "runner_id": runner_id,
+                "providers": providers.iter().map(ProviderState::to_json).collect::<Vec<_>>(),
+            })
+        };
+        let answer = if self.old_beat.load(Ordering::Relaxed) {
+            self.api
+                .send_body(Method::Post, &path, &self.scoped(old()))
+                .await
+                .map_err(ServiceError::from)
+        } else {
+            let mut body = old();
+            if let Value::Object(m) = &mut body {
+                if let Some(c) = declared.capacity {
+                    m.insert("capacity".into(), json!(c));
+                }
+                m.insert("version".into(), json!(declared.version));
+                m.insert("kinds".into(), json!(declared.kinds));
+            }
+            match self
+                .api
+                .send_body(Method::Post, &path, &self.scoped(body))
+                .await
+            {
+                Ok(r) => Ok(r),
+                Err(e) => match ServiceError::from(e) {
+                    e if e.is_unknown_field() => {
+                        // An older coordinator: it keeps the registered capacity and kinds.
+                        self.old_beat.store(true, Ordering::Relaxed);
+                        self.api
+                            .send_body(Method::Post, &path, &self.scoped(old()))
+                            .await
+                            .map_err(ServiceError::from)
+                    }
+                    e => Err(e),
+                },
+            }
+        };
+        let v: Value = answer?.json()?;
         Ok(Beat {
             runner: RunnerInfo::from_json(v.get("runner").unwrap_or(&Value::Null)),
             offered: v

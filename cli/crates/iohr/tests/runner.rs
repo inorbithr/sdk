@@ -18,7 +18,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#;
@@ -246,7 +246,9 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     let sent = bodies(&server, "/v1/coordinator/runners").await;
     let post = sent.iter().find(|b| b.get("name").is_some()).unwrap();
     assert_eq!(post["name"], "mac");
-    assert_eq!(post["kinds"], json!(["coordinate"]));
+    // Every class unless `[runner] kinds` says otherwise; capacity 1 unless set.
+    assert_eq!(post["kinds"], json!(["coordinate", "build"]));
+    assert_eq!(post["capacity"], 1);
     assert_eq!(post["providers"][0]["method"], "subscription");
     // The identity hash is sha256(salt + "\n" + line).
     assert_eq!(
@@ -633,6 +635,264 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
     assert_no_secrets(dir.path());
     let t = text(&o);
     assert!(t.contains("1 replies delivered"), "{t}");
+}
+
+/// Registers runner `mac` on its own server (which makes this machine's key), then
+/// mounts a coordinator that lists it and answers every heartbeat with no offer.
+async fn registered_and_idle(dir: &Path) -> MockServer {
+    fake_claude(dir, SUB);
+    let first = MockServer::start().await;
+    login(&first, dir, &token()).await;
+    mount_register(&first).await;
+    let o = run(&mut iohr(
+        &first,
+        dir,
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [runner_json()]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/runners/run_1/heartbeat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"runner": runner_json(), "heartbeat_interval_seconds": 1})),
+        )
+        .mount(&server)
+        .await;
+    server
+}
+
+const BEAT: &str = "/v1/coordinator/runners/run_1/heartbeat";
+
+fn add_to_config(dir: &Path, toml: &str) {
+    let p = dir.join("config").join("config.toml");
+    let mut text = std::fs::read_to_string(&p).unwrap();
+    text.push_str(toml);
+    std::fs::write(&p, text).unwrap();
+}
+
+/// Waits up to 15 s for a heartbeat body that `want` accepts.
+async fn beat_where(server: &MockServer, want: impl Fn(&Value) -> bool) -> bool {
+    for _ in 0..150 {
+        if bodies(server, BEAT).await.iter().any(&want) {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    false
+}
+
+/// Waits up to 15 s for `n` heartbeats; the count seen.
+async fn beats_at_least(server: &MockServer, n: usize) -> usize {
+    let mut seen = 0;
+    for _ in 0..150 {
+        seen = bodies(server, BEAT).await.len();
+        if seen >= n {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    seen
+}
+
+fn signal(pid: u32, sig: &str) {
+    let ok = Command::new("kill")
+        .args([sig, &pid.to_string()])
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "kill {sig} {pid}");
+}
+
+#[tokio::test]
+async fn run_declares_the_configured_capacity_and_a_sighup_changes_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    add_to_config(
+        dir.path(),
+        "\n[runner]\ncapacity = 3\nkinds = [\"coordinate\"]\n",
+    );
+    let log = std::fs::File::create(dir.path().join("run.log")).unwrap();
+    let mut child = iohr(
+        &server,
+        dir.path(),
+        &["runner", "run", "--name", "mac", "--interval", "1"],
+    )
+    .stdout(Stdio::null())
+    .stderr(log)
+    .spawn()
+    .unwrap();
+    let first = beat_where(&server, |b| b["capacity"] == 3).await;
+    // Two beats in: the SIGHUP handler is surely installed.
+    let seen = beats_at_least(&server, 2).await;
+    let p = dir.path().join("config").join("config.toml");
+    let text = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, text.replace("capacity = 3", "capacity = 8")).unwrap();
+    signal(child.id(), "-HUP");
+    let raised = beat_where(&server, |b| b["capacity"] == 8).await;
+    signal(child.id(), "-INT");
+    let status = child.wait().unwrap();
+    let log = std::fs::read_to_string(dir.path().join("run.log")).unwrap();
+    assert!(first, "no heartbeat declared capacity 3: {log}");
+    assert!(seen >= 2, "fewer than two heartbeats: {log}");
+    assert!(raised, "the SIGHUP did not change the capacity sent: {log}");
+    assert!(status.success(), "{log}");
+    let beats = bodies(&server, BEAT).await;
+    for b in &beats {
+        assert_eq!(b["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(b["kinds"], json!(["coordinate"]));
+    }
+    assert!(log.contains("config.toml read again: capacity 8"), "{log}");
+}
+
+#[tokio::test]
+async fn a_bad_capacity_on_reload_keeps_the_one_in_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    add_to_config(dir.path(), "\n[runner]\ncapacity = 2\n");
+    let log = std::fs::File::create(dir.path().join("run.log")).unwrap();
+    let mut child = iohr(
+        &server,
+        dir.path(),
+        &["runner", "run", "--name", "mac", "--interval", "1"],
+    )
+    .stdout(Stdio::null())
+    .stderr(log)
+    .spawn()
+    .unwrap();
+    let seen = beats_at_least(&server, 2).await;
+    let p = dir.path().join("config").join("config.toml");
+    let text = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, text.replace("capacity = 2", "capacity = 99")).unwrap();
+    signal(child.id(), "-HUP");
+    let before = bodies(&server, BEAT).await.len();
+    // Two beats after the reload.
+    let _ = beats_at_least(&server, before + 2).await;
+    signal(child.id(), "-INT");
+    let _ = child.wait().unwrap();
+    let log = std::fs::read_to_string(dir.path().join("run.log")).unwrap();
+    assert!(seen >= 2, "{log}");
+    let beats = bodies(&server, BEAT).await;
+    assert!(beats.len() > before, "no heartbeat after the reload: {log}");
+    assert!(beats.iter().all(|b| b["capacity"] == 2), "{beats:?}");
+    assert!(log.contains("was not taken"), "{log}");
+}
+
+#[tokio::test]
+async fn an_older_coordinator_that_refuses_the_new_fields_gets_the_old_heartbeat() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    // What a coordinator from before these fields answers: its REST binding refuses a
+    // field it does not know.
+    Mock::given(method("POST"))
+        .and(path(BEAT))
+        .and(body_string_contains("\"version\""))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "code": "bad_request",
+            "error": "body unrecognized field `capacity`, expected one of runner_id, providers, account_id",
+            "details": []
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    add_to_config(dir.path(), "\n[runner]\ncapacity = 4\n");
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "1",
+            "--max-beats",
+            "2",
+        ],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let beats = bodies(&server, BEAT).await;
+    // The first beat tried the new body once; every beat after it is the old one.
+    assert_eq!(beats[0]["capacity"], 4, "{beats:?}");
+    let old: Vec<&Value> = beats.iter().skip(1).collect();
+    assert!(old.len() >= 2, "{beats:?}");
+    for b in old {
+        assert!(
+            b.get("version").is_none() && b.get("capacity").is_none(),
+            "{b}"
+        );
+        assert_eq!(b["runner_id"], "run_1");
+    }
+    assert!(text(&o).contains("0 failed"), "{}", text(&o));
+}
+
+#[tokio::test]
+async fn config_show_names_each_value_and_its_source_without_a_sign_in() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    login(&server, dir.path(), &token()).await;
+    add_to_config(
+        dir.path(),
+        "\n[runner]\ncapacity = 4\nalways_on = true\n\n[profiles.p.runner]\ncapacity = 8\n",
+    );
+    let before = server.received_requests().await.unwrap().len();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "config", "show", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        v["capacity"],
+        json!({"value": 8, "source": "[profiles.p.runner]"})
+    );
+    assert_eq!(v["always_on"], json!({"value": true, "source": "[runner]"}));
+    assert_eq!(
+        v["kinds"],
+        json!({"value": ["coordinate", "build"], "source": "default"})
+    );
+    assert_eq!(v["build_floor"]["floor_bytes"], 100_000_000_000_u64);
+    // A flag wins over both tables.
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "config",
+            "show",
+            "--json",
+            "--capacity",
+            "2",
+            "--kinds",
+            "build",
+        ],
+    ));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["capacity"], json!({"value": 2, "source": "flag"}));
+    assert_eq!(v["kinds"], json!({"value": ["build"], "source": "flag"}));
+    // A bad value is refused, naming where it came from.
+    add_to_config(dir.path(), "");
+    let p = dir.path().join("config").join("config.toml");
+    let t = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, t.replace("capacity = 8", "capacity = 40")).unwrap();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "config", "show"],
+    ));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("[profiles.p.runner]"), "{}", text(&o));
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        before,
+        "config show called the API"
+    );
 }
 
 #[tokio::test]

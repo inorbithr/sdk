@@ -304,14 +304,17 @@ pub enum RunnerCommand {
     /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
     /// `claude auth status` prints. Run it again and it says the runner exists.
     Register {
-        /// The runner's name (default: this machine's host name).
+        /// The runner's name (default: `[runner] name` in config.toml, else this
+        /// machine's host name).
         #[arg(long)]
         name: Option<String>,
-        /// Turns this runner may hold at once, 1 to 16. `iohr runner run` runs that many
-        /// side by side. It is fixed at registration: to change it, register again.
-        #[arg(long, default_value_t = 1)]
-        capacity: u32,
-        /// Mark the runner as always on (a server), so the coordinator can rely on it.
+        /// Turns this runner may hold at once, 1 to 32 (default: `[runner] capacity`,
+        /// else 1). `iohr runner run` declares the configured capacity on every
+        /// heartbeat, so a later change needs no new registration.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// Mark the runner as always on (a server), so the coordinator can rely on it
+        /// (default: `[runner] always_on`).
         #[arg(long)]
         always_on: bool,
         #[command(flatten)]
@@ -332,9 +335,22 @@ pub enum RunnerCommand {
         /// Stop after this many answered heartbeats; for scripts.
         #[arg(long)]
         max_beats: Option<u64>,
+        /// Turns to run at once, 1 to 32, declared on every heartbeat (default:
+        /// `[runner] capacity` in config.toml, read again on SIGHUP; else what the
+        /// runner registered with).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// The turn classes to take, comma separated: `coordinate`, `build` (default:
+        /// `[runner] kinds`, else both). Build turns pause while /mnt/build has under
+        /// 100 GB free.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
         #[command(flatten)]
         account: AccountArg,
     },
+    /// The runner's settings from config.toml: `[runner]` and `[profiles.<name>.runner]`.
+    #[command(subcommand)]
+    Config(RunnerConfigCommand),
     /// Run the check on a build job's checkout and send the service a signed report of it.
     ///
     /// Fetches `origin/main`, refuses a checkout with uncommitted changes or one that is
@@ -375,6 +391,20 @@ pub enum RunnerCommand {
     Status {
         #[command(flatten)]
         account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerConfigCommand {
+    /// The values `iohr runner run` would use now, each with where it came from: a flag,
+    /// `[profiles.<name>.runner]`, `[runner]` or the default. Needs no sign-in.
+    Show {
+        /// As `iohr runner run --capacity`.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// As `iohr runner run --kinds`.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
     },
 }
 
