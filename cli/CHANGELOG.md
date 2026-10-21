@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.0-alpha.22](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.21...iohr/v0.1.0-alpha.22) (2026-10-21)
+
+
+### Features
+
+* **cli:** runner capacity and kinds from config.toml, declared on every heartbeat ([#244](https://github.com/inorbithr/sdk/issues/244)) ([2a01d11](https://github.com/inorbithr/sdk/commit/2a01d113e1be2a0d84cf5388fd7606578d86002d))
+
+
+### Bug fixes
+
+* **deps:** bump rustls-webpki and webpki-root-certs for RUSTSEC-2026-0382 and 0383 ([#245](https://github.com/inorbithr/sdk/issues/245)) ([22cc5c6](https://github.com/inorbithr/sdk/commit/22cc5c6402899919bfc87f4745b171770462d1ab))
+
 ## [0.1.0-alpha.21](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.20...iohr/v0.1.0-alpha.21) (2026-10-20)
 
 
