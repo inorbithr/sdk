@@ -36,7 +36,9 @@ env:
 jobs:
   build:
     name: build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    # Shipped binaries (release.yml calls this) are built on GitHub-hosted runners for provenance;
+    # only pull request builds go to the self-hosted Docker pool (the musl build runs in Alpine).
+    runs-on: ${{ matrix.os == 'ubuntu-24.04' && github.event_name == 'pull_request' && vars.LINUX_DOCKER_RUNNER || matrix.os }}
     permissions:
       contents: read
     strategy:
