@@ -390,6 +390,29 @@ impl TurnReport {
         )
     }
 
+    /// The one journal line a finished turn leaves: its outcome and what it cost, so the
+    /// token spend of a runner is readable from `journalctl` without the service. No
+    /// reply text and no ids beyond the turn's.
+    pub(crate) fn journal_line(&self) -> String {
+        let u = &self.usage;
+        format!(
+            "turn {} ended: {} resumed={} turns={} context={} input={} output={} \
+             cache_read={} cache_write={} cost_usd={} ms={}",
+            self.turn_id,
+            self.outcome,
+            self.resumed,
+            self.num_turns,
+            u.input.saturating_add(u.cache_read).saturating_add(u.cache_write),
+            u.input,
+            u.output,
+            u.cache_read,
+            u.cache_write,
+            self.total_cost_usd
+                .map_or_else(|| "none".to_owned(), |c| format!("{c:.4}")),
+            self.duration_ms,
+        )
+    }
+
     /// The wire shape of `ReportTurn`, carrying `signature` (64 bytes, base64).
     pub(crate) fn to_json(&self, signature: &[u8]) -> Value {
         json!({
@@ -900,6 +923,27 @@ mod tests {
         );
         assert_eq!(j["signature"], "AQID");
         assert_eq!(r.idempotency_key(), "l:9007199254740993:t:2");
+    }
+
+    #[test]
+    fn a_finished_turn_leaves_its_usage_in_one_journal_line() {
+        let mut r = valid_report();
+        r.usage = Usage {
+            input: 10,
+            output: 89,
+            cache_read: 1000,
+            cache_write: 17_676,
+        };
+        r.num_turns = 2;
+        r.duration_ms = 2053;
+        r.total_cost_usd = Some(0.035_807);
+        assert_eq!(
+            r.journal_line(),
+            "turn t ended: replied resumed=false turns=2 context=18686 input=10 output=89 \
+             cache_read=1000 cache_write=17676 cost_usd=0.0358 ms=2053"
+        );
+        r.total_cost_usd = None;
+        assert!(r.journal_line().contains("cost_usd=none"));
     }
 
     fn valid_report() -> TurnReport {
