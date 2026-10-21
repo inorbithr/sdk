@@ -92,6 +92,7 @@ async fn git_ok(repo: &Path, args: &[&str]) -> Result<String, Skip> {
 /// The command through the platform's shell, its stderr joined to its stdout.
 fn shell(command: &str) -> Command {
     #[cfg(windows)]
+    #[allow(unused_mut)] // only the unix arm mutates it (process_group below)
     let mut c = {
         let mut c = Command::new("cmd");
         c.args(["/C", &format!("{command} 2>&1")]);
