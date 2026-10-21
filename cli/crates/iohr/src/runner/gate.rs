@@ -94,8 +94,12 @@ fn shell(command: &str) -> Command {
     #[cfg(windows)]
     #[allow(unused_mut)] // only the unix arm mutates it (process_group below)
     let mut c = {
+        // `raw_arg`: the standard library would quote the whole command, and cmd.exe
+        // then takes the quoted text for one program name as soon as it holds `&`, `|`
+        // or `>`. `/S` strips exactly the outer pair, and the parentheses put the
+        // redirect on the whole command, not only its last part.
         let mut c = Command::new("cmd");
-        c.args(["/C", &format!("{command} 2>&1")]);
+        c.raw_arg(format!("/S /C \"({command}) 2>&1\""));
         c
     };
     #[cfg(not(windows))]
@@ -248,22 +252,30 @@ mod tests {
 
     const LIMIT: Duration = Duration::from_secs(20);
 
+    /// One line on stdout, then one on stderr, in the platform's shell.
+    #[cfg(not(windows))]
+    const TWO_STREAMS: &str = "echo hello; echo oops 1>&2";
+    #[cfg(not(windows))]
+    const TWO_STREAMS_OUT: &[u8] = b"hello\noops\n";
+    #[cfg(windows)]
+    const TWO_STREAMS: &str = "echo hello& echo oops>&2";
+    #[cfg(windows)]
+    const TWO_STREAMS_OUT: &[u8] = b"hello\r\noops\r\n";
+
     #[tokio::test]
     async fn a_branch_merged_with_main_is_checked_and_reported_with_the_hash_of_the_output() {
         let (_root, _o, work) = repos();
-        let got = check(&work, "echo hello; echo oops 1>&2", LIMIT, parent())
-            .await
-            .unwrap();
+        let got = check(&work, TWO_STREAMS, LIMIT, parent()).await.unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.head, sh(&work, &["rev-parse", "HEAD"]));
         assert_eq!(got.main_commit, sh(&work, &["rev-parse", "origin/main"]));
         // stdout and stderr, in order, as one stream.
         assert_eq!(
             got.output_sha256,
-            hex(&Sha256::digest(b"hello\noops\n")),
+            hex(&Sha256::digest(TWO_STREAMS_OUT)),
             "the output hash covers both streams"
         );
-        assert_eq!(got.command, "echo hello; echo oops 1>&2");
+        assert_eq!(got.command, TWO_STREAMS);
     }
 
     #[tokio::test]
