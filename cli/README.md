@@ -427,7 +427,10 @@ first. A turn is one
 `--output-format json`, the turn's `--model` and `--max-turns`, its `--allowedTools`, the
 pack as the system prompt, and `--resume <session>` only when this runner ran the
 previous turn of the thread and the session is on its disk (otherwise
-`--session-id <new>`). The prompt goes in on stdin.
+`--session-id <new>`). The prompt goes in on stdin. To keep the turn's context small it
+also passes `--setting-sources project,local` and `--strict-mcp-config`, so your own
+user-level hooks, plugins, skills and MCP servers are not loaded into a turn (your
+sign-in is). On `claude` 2.1.307 one short turn went from 33,220 to 15,054 context tokens.
 
 It runs on your subscription and nothing else:
 
