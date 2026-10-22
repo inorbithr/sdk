@@ -402,7 +402,9 @@ impl TurnReport {
             self.outcome,
             self.resumed,
             self.num_turns,
-            u.input.saturating_add(u.cache_read).saturating_add(u.cache_write),
+            u.input
+                .saturating_add(u.cache_read)
+                .saturating_add(u.cache_write),
             u.input,
             u.output,
             u.cache_read,
