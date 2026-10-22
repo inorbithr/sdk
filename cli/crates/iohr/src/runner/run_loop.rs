@@ -638,7 +638,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 });
                 stats.turns += 1;
                 let report = report_of(&b.lease, &b.pack, runner, &finished).limited();
-                log(&format!("turn {} ended: {}", b.pack.turn_id, report.outcome));
+                log(&report.journal_line());
                 outbox.push_back(report);
                 next_report = Instant::now();
             }
