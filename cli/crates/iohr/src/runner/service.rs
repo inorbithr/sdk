@@ -284,6 +284,10 @@ pub(crate) struct Pack {
     pub(crate) context_ceiling: u32,
     /// The JSON the final message must be.
     pub(crate) reply_shape: String,
+    /// Where on this machine the job's branch is checked out, for the Checked gate
+    /// (JSON `checkout_path`). Empty today: the coordinator's turn pack does not carry one,
+    /// and the run loop sends no gate report for a pack without it.
+    pub(crate) checkout: String,
 }
 
 impl Pack {
@@ -324,6 +328,7 @@ impl Pack {
             token_budget: u32::try_from(num(v, "token_budget")).unwrap_or(u32::MAX),
             context_ceiling: u32::try_from(num(v, "context_ceiling")).unwrap_or(u32::MAX),
             reply_shape: s("reply_shape"),
+            checkout: s("checkout_path"),
         }
     }
 }

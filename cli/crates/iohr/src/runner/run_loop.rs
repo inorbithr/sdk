@@ -12,6 +12,7 @@
 //! (lost if the runner exits; a durable one is a follow-up).
 
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -24,6 +25,7 @@ use tokio::time::Instant;
 
 use super::claude::Reply;
 use super::exec::{Exec, Finished};
+use super::gate::{self, Checked, Held, Skip};
 use super::service::{
     AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
     TurnReport, Usage,
@@ -68,6 +70,29 @@ pub(crate) struct LoopConfig {
     pub(crate) declared: Option<watch::Receiver<Declared>>,
     /// The build-disk guard; `None` turns it off.
     pub(crate) build_floor: Option<BuildFloor>,
+    /// The Checked gate's check, run in the job's checkout after a job turn finishes and
+    /// sent as a signed gate report before the turn's own report; `None` turns it off.
+    pub(crate) gate: Option<GateCheck>,
+}
+
+/// What the run loop runs for the Checked gate (RFC 0120); the same check and the same
+/// report as `iohr runner gate-report`.
+#[derive(Debug, Clone)]
+pub(crate) struct GateCheck {
+    pub(crate) command: String,
+    pub(crate) timeout: Duration,
+    /// The runner's own environment, scrubbed by the check before the command sees it.
+    pub(crate) env: Vec<(OsString, OsString)>,
+}
+
+impl Default for GateCheck {
+    fn default() -> Self {
+        Self {
+            command: gate::DEFAULT_COMMAND.to_owned(),
+            timeout: Duration::from_secs(gate::DEFAULT_TIMEOUT_SECS),
+            env: std::env::vars_os().collect(),
+        }
+    }
 }
 
 impl Default for LoopConfig {
@@ -82,6 +107,7 @@ impl Default for LoopConfig {
             capacity: 1,
             declared: None,
             build_floor: None,
+            gate: None,
         }
     }
 }
@@ -132,6 +158,23 @@ pub(crate) struct Stats {
     /// Reports the service refused for good and the runner dropped.
     pub(crate) rejected: u64,
 }
+
+/// A finished job turn whose lease is kept alive while the gate check runs and its report
+/// is sent; the turn's own report waits here and goes to the outbox after.
+struct Gating {
+    lease: Lease,
+    job_id: String,
+    report: TurnReport,
+    /// The check, until it ends; then the report is being sent.
+    check: Option<JoinHandle<Result<Checked, Skip>>>,
+}
+
+/// The sending of one gate report, with the lease it was for.
+type Sent = (String, i64, String);
+/// Tries at sending a gate report that did not get an answer.
+const GATE_SEND_TRIES: u32 = 3;
+/// The pause between those tries.
+const GATE_SEND_PAUSE: Duration = Duration::from_secs(2);
 
 struct Busy {
     lease: Lease,
@@ -199,9 +242,15 @@ fn is_lease(l: &Lease, id: &str, token: i64) -> bool {
 
 /// Every lease the runner holds and must keep alive: the turn running, the pack being
 /// fetched, and each finished turn whose report is not delivered yet.
-fn held_leases(busy: &[Busy], fetching: &[Fetch], outbox: &VecDeque<TurnReport>) -> Vec<Lease> {
+fn held_leases(
+    busy: &[Busy],
+    fetching: &[Fetch],
+    gating: &[Gating],
+    outbox: &VecDeque<TurnReport>,
+) -> Vec<Lease> {
     let mut all: Vec<Lease> = busy.iter().map(|b| b.lease.clone()).collect();
     all.extend(fetching.iter().map(|f| f.lease.clone()));
+    all.extend(gating.iter().map(|g| g.lease.clone()));
     for r in outbox {
         if !all
             .iter()
@@ -284,6 +333,41 @@ async fn next_finished(busy: &mut Vec<Busy>) -> (Busy, Result<Finished, tokio::t
         Poll::Pending
     })
     .await
+}
+
+/// The first gate check to end, with its lease and how its task ended. Waits for ever when
+/// none runs.
+async fn next_checked(
+    gating: &mut [Gating],
+) -> (
+    String,
+    i64,
+    Result<Result<Checked, Skip>, tokio::task::JoinError>,
+) {
+    std::future::poll_fn(|cx| {
+        for g in gating.iter_mut() {
+            if let Some(h) = g.check.as_mut()
+                && let Poll::Ready(r) = Pin::new(h).poll(cx)
+            {
+                g.check = None;
+                return Poll::Ready((g.lease.lease_id.clone(), g.lease.fencing_token, r));
+            }
+        }
+        Poll::Pending
+    })
+    .await
+}
+
+/// Why a finished job turn gets no gate check, or `None` when it does: it must have
+/// replied, and its pack must name a checkout.
+fn no_gate_because(pack: &Pack, f: &Finished) -> Option<String> {
+    if !matches!(f.outcome.as_str(), "replied" | "unshaped") {
+        return Some(format!("the turn ended {}, not with a reply", f.outcome));
+    }
+    if pack.checkout.is_empty() {
+        return Some("its pack names no checkout to check".into());
+    }
+    None
 }
 
 /// Delivers what is in the outbox, in order, until `limit` is up. A permanent refusal
@@ -377,6 +461,9 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     // The ids of the leases being accepted, so a lease offered twice is taken once.
     let mut accepting_ids: Vec<String> = Vec::new();
     let mut fetching: Vec<Fetch> = Vec::new();
+    // Finished job turns whose gate check runs or whose gate report is being sent.
+    let mut gating: Vec<Gating> = Vec::new();
+    let mut gate_sends: Vec<Op<'_, Sent>> = Vec::new();
     let mut fetch_ops: Vec<Op<'_, Fetched>> = Vec::new();
     let mut beating: Option<Op<'_, (bool, Result<Beat, OpErr>)>> = None;
     let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
@@ -393,7 +480,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
 
     loop {
-        let held = held_leases(&busy, &fetching, &outbox);
+        let held = held_leases(&busy, &fetching, &gating, &outbox);
         let has_held = !held.is_empty();
         let now = Instant::now();
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
@@ -450,6 +537,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             && busy.is_empty()
             && accepting.is_empty()
             && fetching.is_empty()
+            && gating.is_empty()
             && reporting.is_none()
             && (outbox.is_empty() || tries > 0)
         {
@@ -504,6 +592,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     stats.turns += 1;
                     outbox.push_back(unfinished(b, runner, "failed", "the runner was stopped before the turn finished".into()));
                 }
+                for g in gating.drain(..) {
+                    if let Some(h) = g.check {
+                        h.abort();
+                        let _ = h.await;
+                    }
+                    outbox.push_back(g.report);
+                }
+                drop(gate_sends);
                 stop(running, refresher.take()).await;
                 flush(svc, &mut outbox, cfg.flush_timeout, cfg.op_timeout, &mut stats, log).await;
                 return (End::Shutdown, stats);
@@ -546,7 +642,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         for lease in beat.offered {
                             let taken = busy.len() + accepting.len() + fetching.len();
                             let held_already = accepting_ids.contains(&lease.lease_id)
-                                || held_leases(&busy, &fetching, &outbox)
+                                || held_leases(&busy, &fetching, &gating, &outbox)
                                     .iter()
                                     .any(|l| l.lease_id == lease.lease_id);
                             if held_already {
@@ -587,7 +683,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     let (id, token) = (lease.lease_id.as_str(), lease.fencing_token);
                     // Only for a lease still held: an answer that comes after its
                     // report was delivered, or its turn was stopped, is ignored.
-                    if !held_leases(&busy, &fetching, &outbox)
+                    if !held_leases(&busy, &fetching, &gating, &outbox)
                         .iter()
                         .any(|l| is_lease(l, id, token))
                     {
@@ -603,6 +699,21 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         }
                     };
                     let Some(stopped) = ended else { continue };
+                    if let Some(i) = gating.iter().position(|g| is_lease(&g.lease, id, token)) {
+                        let g = gating.remove(i);
+                        if let Some(h) = g.check {
+                            h.abort();
+                            let _ = h.await;
+                        }
+                        if stopped {
+                            // Capped from above: the turn did finish, so its reply goes.
+                            log(&format!("lease {id} stopped by the service ({reason}): no gate report"));
+                            outbox.push_back(g.report);
+                            next_report = Instant::now();
+                        } else {
+                            log(&format!("lease {id} is gone ({reason}): no gate report"));
+                        }
+                    }
                     if let Some(i) = fetching.iter().position(|f| is_lease(&f.lease, id, token)) {
                         log(&format!("lease {id} ended before its pack came: {reason}"));
                         fetching.remove(i);
@@ -639,8 +750,88 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 stats.turns += 1;
                 let report = report_of(&b.lease, &b.pack, runner, &finished).limited();
                 log(&report.journal_line());
-                outbox.push_back(report);
-                next_report = Instant::now();
+                let gate_cfg = cfg.gate.as_ref().filter(|_| {
+                    let wanted = b.pack.kind == "job" || b.pack.kind == settings::BUILD;
+                    let why = no_gate_because(&b.pack, &finished);
+                    if let Some(why) = &why
+                        && wanted
+                    {
+                        log(&format!("lease {}: no gate report, {why}", b.lease.lease_id));
+                    }
+                    wanted && why.is_none()
+                });
+                if let Some(g) = gate_cfg {
+                    let repo = std::path::PathBuf::from(&b.pack.checkout);
+                    log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
+                    let (command, timeout, env) = (g.command.clone(), g.timeout, g.env.clone());
+                    let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
+                    gating.push(Gating {
+                        lease: b.lease,
+                        job_id,
+                        report,
+                        check: Some(tokio::spawn(async move {
+                            gate::check(&repo, &command, timeout, env).await
+                        })),
+                    });
+                    next_lease_beat = Instant::now();
+                } else {
+                    outbox.push_back(report);
+                    next_report = Instant::now();
+                }
+            }
+            (id, token, joined) = next_checked(&mut gating) => {
+                let Some(g) = gating.iter().find(|g| is_lease(&g.lease, &id, token)) else { continue };
+                match joined {
+                    Ok(Ok(checked)) => {
+                        let gr = gate::report_of(
+                            Held {
+                                job_id: &g.job_id,
+                                lease_id: &id,
+                                fencing_token: token,
+                                runner_id: &runner.runner_id,
+                            },
+                            &checked,
+                        );
+                        let limit = cfg.op_timeout;
+                        gate_sends.push(Box::pin(async move {
+                            let mut tries = 0;
+                            let said = loop {
+                                tries += 1;
+                                match bounded(limit, gate::send(svc, &gr)).await {
+                                    Ok(Some(a)) => break format!(
+                                        "gate report for {} sent (exit {}, evidence {}, job is now {})",
+                                        gr.job_id, gr.exit_code, a.evidence_id, a.stage
+                                    ),
+                                    Ok(None) => break "this coordinator does not take gate reports yet; nothing was recorded".into(),
+                                    Err(e) if e.permanent || tries >= GATE_SEND_TRIES => {
+                                        break format!("gate report for {} not sent: {}", gr.job_id, e.msg);
+                                    }
+                                    Err(_) => tokio::time::sleep(GATE_SEND_PAUSE).await,
+                                }
+                            };
+                            (gr.lease_id.clone(), gr.fencing_token, said)
+                        }));
+                    }
+                    other => {
+                        let why = match other {
+                            Ok(Err(skip)) => skip.to_string(),
+                            Err(e) => format!("the check's task stopped: {e}"),
+                            Ok(Ok(_)) => String::new(),
+                        };
+                        log(&format!("lease {id}: no gate report was sent: {why}"));
+                        if let Some(i) = gating.iter().position(|g| is_lease(&g.lease, &id, token)) {
+                            outbox.push_back(gating.remove(i).report);
+                            next_report = Instant::now();
+                        }
+                    }
+                }
+            }
+            (id, token, said) = first_of(&mut gate_sends) => {
+                log(&format!("lease {id}: {said}"));
+                if let Some(i) = gating.iter().position(|g| is_lease(&g.lease, &id, token)) {
+                    outbox.push_back(gating.remove(i).report);
+                    next_report = Instant::now();
+                }
             }
             taken = first_of(&mut accepting) => {
                 match taken {
@@ -911,6 +1102,10 @@ mod tests {
         gated: Mutex<bool>,
         /// What each heartbeat declared, in order.
         declared: Mutex<Vec<Declared>>,
+        /// Every gate report sent.
+        gate_reports: Mutex<Vec<GateReport>>,
+        /// Lease heartbeats are refused for good once this file exists.
+        release_when: Option<std::path::PathBuf>,
     }
 
     impl Fake {
@@ -926,11 +1121,20 @@ mod tests {
         async fn challenge(&self) -> Result<Challenge, ServiceError> {
             Err(ServiceError::Refused("not used"))
         }
-        async fn submit_gate_report(&self, _: &GateReport) -> Result<GateAnswer, ServiceError> {
-            Err(ServiceError::Refused("not used"))
+        async fn submit_gate_report(&self, r: &GateReport) -> Result<GateAnswer, ServiceError> {
+            self.note(format!("gate_report {}", r.job_id));
+            self.gate_reports.lock().unwrap().push(r.clone());
+            Ok(GateAnswer {
+                evidence_id: "ev_1".into(),
+                duplicate: false,
+                stage: "checked".into(),
+            })
         }
         async fn lease_heartbeat(&self, l: &Lease) -> Result<LeaseBeat, ServiceError> {
             self.note(format!("lease_heartbeat {}", l.lease_id));
+            if self.release_when.as_ref().is_some_and(|f| f.exists()) {
+                return Err(ServiceError::Refused("the lease was released"));
+            }
             if self.lease_beats_down {
                 return Err(down());
             }
@@ -1205,6 +1409,7 @@ mod tests {
             capacity: 1,
             declared: None,
             build_floor: None,
+            gate: None,
         }
     }
 
@@ -2027,5 +2232,138 @@ mod tests {
         assert_eq!(end, End::Shutdown);
         assert!(stats.beats >= 2);
         let _ = t.await;
+    }
+
+    fn gate_cfg(command: &str) -> GateCheck {
+        GateCheck {
+            command: command.into(),
+            timeout: Duration::from_secs(20),
+            env: std::env::vars_os().collect(),
+        }
+    }
+
+    fn job_pack(checkout: &std::path::Path) -> Pack {
+        Pack {
+            kind: "job".into(),
+            job_id: "job_1".into(),
+            checkout: checkout.display().to_string(),
+            ..good_pack()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_finished_job_turn_sends_one_gate_report_with_its_lease_before_its_own_report() {
+        let (_root, _origin, work) = gate::tests::repos();
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(job_pack(&work));
+        let c = LoopConfig {
+            gate: Some(gate_cfg("exit 3")),
+            ..cfg(6)
+        };
+        let (_, stats) = go(&fake, c).await;
+        assert_eq!((stats.turns, stats.reported), (1, 1));
+        let g = fake.gate_reports.lock().unwrap().clone();
+        assert_eq!(g.len(), 1, "exactly one gate report");
+        assert_eq!(
+            (
+                g[0].job_id.as_str(),
+                g[0].lease_id.as_str(),
+                g[0].fencing_token
+            ),
+            ("job_1", "lease_1", 7)
+        );
+        assert_eq!(g[0].runner_id, "run_1");
+        // A failing check is sent as it is.
+        assert_eq!((g[0].command.as_str(), g[0].exit_code), ("exit 3", 3));
+        let calls = fake.calls.lock().unwrap().clone();
+        let gate_at = calls.iter().position(|c| c == "gate_report job_1").unwrap();
+        let report_at = calls.iter().position(|c| c.starts_with("report ")).unwrap();
+        assert!(
+            gate_at < report_at,
+            "the lease is held until the gate is sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_turn_or_one_with_no_checkout_sends_no_gate_report() {
+        let (_root, _origin, work) = gate::tests::repos();
+        // The turn crashes: no reply, no check.
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(job_pack(&work));
+        let (_tx, rx) = watch::channel(false);
+        let exec = Arc::new(FakeExec {
+            crash_turn: Some("turn_1".into()),
+            ..FakeExec::default()
+        });
+        let logged = Mutex::new(Vec::<String>::new());
+        let c = LoopConfig {
+            gate: Some(gate_cfg("true")),
+            ..cfg(4)
+        };
+        run_loop(&fake, &exec, &runner(), c, rx, &|m| {
+            logged.lock().unwrap().push(m.to_owned());
+        })
+        .await;
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+        assert!(
+            logged
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|m| m.contains("no gate report"))
+        );
+        // A pack with no checkout path: the turn is reported, nothing is checked.
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(Pack {
+            kind: "job".into(),
+            ..good_pack()
+        });
+        let c = LoopConfig {
+            gate: Some(gate_cfg("true")),
+            ..cfg(4)
+        };
+        let (_, stats) = go(&fake, c).await;
+        assert_eq!(stats.reported, 1);
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_lease_released_during_the_check_sends_no_gate_report() {
+        let (root, _origin, work) = gate::tests::repos();
+        let flag = root.path().join("running");
+        let fake = Fake {
+            release_when: Some(flag.clone()),
+            ..Fake::default()
+        };
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(job_pack(&work));
+        // The check says it has started, then runs long: the lease is gone meanwhile.
+        let c = LoopConfig {
+            gate: Some(gate_cfg(&format!("touch {} && sleep 20", flag.display()))),
+            ..cfg(6)
+        };
+        let started = std::time::Instant::now();
+        let (_, stats) = go(&fake, c).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the check was stopped"
+        );
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+        assert_eq!(stats.reported, 0, "a gone lease reports nothing");
     }
 }

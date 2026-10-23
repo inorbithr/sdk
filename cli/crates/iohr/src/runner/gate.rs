@@ -19,6 +19,12 @@ use tokio::process::Command;
 use super::claude::hex;
 use super::env;
 use super::exec::GroupGuard;
+use super::service::{GateAnswer, GateReport, Service, ServiceError};
+
+/// The check a build job's PR is held to when nothing says otherwise.
+pub(crate) const DEFAULT_COMMAND: &str = "mise run ci:changed";
+/// How long that check may run: 30 minutes.
+pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 1800;
 
 /// The branch the head must contain.
 const MAIN: &str = "origin/main";
@@ -155,6 +161,43 @@ pub(crate) async fn check(
     })
 }
 
+/// Whose lease the report is signed for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Held<'a> {
+    pub(crate) job_id: &'a str,
+    pub(crate) lease_id: &'a str,
+    pub(crate) fencing_token: i64,
+    pub(crate) runner_id: &'a str,
+}
+
+/// What the check showed, as the report the service is sent.
+pub(crate) fn report_of(held: Held<'_>, checked: &Checked) -> GateReport {
+    GateReport {
+        job_id: held.job_id.to_owned(),
+        lease_id: held.lease_id.to_owned(),
+        fencing_token: held.fencing_token,
+        runner_id: held.runner_id.to_owned(),
+        command: checked.command.clone(),
+        exit_code: checked.exit_code,
+        head: checked.head.clone(),
+        main_commit: checked.main_commit.clone(),
+        output_sha256: checked.output_sha256.clone(),
+    }
+}
+
+/// Sends a report. An older coordinator has no such call: that is `Ok(None)`, not an
+/// error (the caller says so). Every other refusal is the error.
+pub(crate) async fn send<S: Service>(
+    svc: &S,
+    report: &GateReport,
+) -> Result<Option<GateAnswer>, ServiceError> {
+    match svc.submit_gate_report(report).await {
+        Ok(a) => Ok(Some(a)),
+        Err(e) if e.is_missing() => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Runs `command` in `repo` with the scrubbed environment; streams its output into a
 /// hash (nothing is kept) and returns its exit code with the hash.
 async fn run(
@@ -200,12 +243,12 @@ async fn run(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
     use std::path::PathBuf;
 
-    fn sh(dir: &Path, args: &[&str]) -> String {
+    pub(crate) fn sh(dir: &Path, args: &[&str]) -> String {
         let out = std::process::Command::new("git")
             .args(["-c", "user.email=t@example.com", "-c", "user.name=t"])
             .args([
@@ -223,12 +266,12 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
     }
 
-    fn write(dir: &Path, name: &str, text: &str) {
+    pub(crate) fn write(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(name), text).unwrap();
     }
 
     /// An origin with one commit on main, and a clone on a branch one commit ahead of it.
-    fn repos() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    pub(crate) fn repos() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let root = tempfile::tempdir().unwrap();
         let origin = root.path().join("origin");
         let work = root.path().join("work");
