@@ -155,6 +155,25 @@ async fn serve_release(server: &MockServer, tgz: Vec<u8>, sum: &str, attestation
         .await;
 }
 
+/// There is no Windows release yet: `upgrade` says so before it downloads anything, and
+/// the installed binary and its directory stay as they were.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_platform_without_a_build_installs_nothing() {
+    let server = MockServer::start().await;
+    releases(&server, &["iohr/v99.0.0"]).await;
+    let (dir, exe) = installed();
+    let before = std::fs::read(&exe).unwrap();
+
+    let o = run(&exe, dir.path(), &server, &["upgrade"]);
+    assert!(!o.status.success());
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("there is no iohr build for"), "{err}");
+    assert_eq!(std::fs::read(&exe).unwrap(), before);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[cfg(not(windows))]
 #[tokio::test]
 async fn a_checksum_that_does_not_match_installs_nothing() {
     let server = MockServer::start().await;
@@ -172,6 +191,7 @@ async fn a_checksum_that_does_not_match_installs_nothing() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 }
 
+#[cfg(not(windows))]
 #[tokio::test]
 async fn a_release_without_an_attestation_installs_nothing() {
     let server = MockServer::start().await;
