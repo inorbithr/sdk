@@ -10,7 +10,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+#[cfg(not(windows))]
 use iohr::ext::layer::tar_gz;
+#[cfg(not(windows))]
 use iohr::ext::oci::Digest;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -61,6 +63,9 @@ async fn releases(server: &MockServer, tags: &[&str]) {
         .await;
 }
 
+/// The release target of this host; there is none for Windows yet, so the tests that
+/// serve a release only run elsewhere.
+#[cfg(not(windows))]
 fn target() -> String {
     let arch = std::env::consts::ARCH;
     let os = match std::env::consts::OS {
@@ -125,6 +130,7 @@ async fn a_copy_iohr_did_not_install_gets_instructions_and_no_change() {
 }
 
 /// An archive of a program that claims `version`, and its digest.
+#[cfg(not(windows))]
 fn archive(version: &str) -> (Vec<u8>, Digest) {
     let name = format!("iohr-{version}-{}", target());
     let program = format!("#!/bin/sh\necho 'iohr {version}'\n");
@@ -133,6 +139,7 @@ fn archive(version: &str) -> (Vec<u8>, Digest) {
     (tgz, d)
 }
 
+#[cfg(not(windows))]
 async fn serve_release(server: &MockServer, tgz: Vec<u8>, sum: &str, attestations: u16) {
     let file = format!("iohr-99.0.0-{}.tar.gz", target());
     Mock::given(method("GET"))
