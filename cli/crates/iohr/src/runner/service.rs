@@ -284,6 +284,11 @@ pub(crate) struct Pack {
     pub(crate) context_ceiling: u32,
     /// The JSON the final message must be.
     pub(crate) reply_shape: String,
+    /// Where the job's branch is checked out, for the Checked gate (JSON `checkout_path`;
+    /// `checkoutPath` is read too). The coordinator names it relative to the turn's working
+    /// directory (`checkouts/<job_id>`, empty for a job with no repository); the run loop
+    /// sends no gate report for a pack without one.
+    pub(crate) checkout: String,
 }
 
 impl Pack {
@@ -324,6 +329,11 @@ impl Pack {
             token_budget: u32::try_from(num(v, "token_budget")).unwrap_or(u32::MAX),
             context_ceiling: u32::try_from(num(v, "context_ceiling")).unwrap_or(u32::MAX),
             reply_shape: s("reply_shape"),
+            // The gateway writes proto field names (`checkout_path`); proto3 JSON's
+            // camelCase is read too.
+            checkout: Some(s("checkout_path"))
+                .filter(|c| !c.is_empty())
+                .unwrap_or_else(|| s("checkoutPath")),
         }
     }
 }
@@ -1114,8 +1124,10 @@ mod tests {
             "allowed_tools": ["Read"], "wall_clock_secs": 600,
             "resume_session": "x", "resume_runner_id": "r", "thread_id": "th",
             "job_id": "j", "attempt": 2, "lease_id": "l", "fencing_token": "9",
-            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}"
+            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}",
+            "checkout_path": "checkouts/job_1"
         }));
+        assert_eq!(p.checkout, "checkouts/job_1");
         assert_eq!(
             (
                 p.thread_id.as_str(),
@@ -1130,6 +1142,22 @@ mod tests {
             (9, 4000, "{}")
         );
         assert_eq!((p.max_turns, p.wall_clock_secs), (5, 600));
+    }
+
+    #[test]
+    fn a_pack_reads_its_checkout_under_either_json_name() {
+        // What the gateway sends today (proto field names) and proto3 JSON's camelCase.
+        let snake = Pack::from_json(&json!({"checkout_path": "checkouts/j"}));
+        let camel = Pack::from_json(&json!({"checkoutPath": "checkouts/j"}));
+        let none = Pack::from_json(&json!({"checkout_path": ""}));
+        assert_eq!(
+            (
+                snake.checkout.as_str(),
+                camel.checkout.as_str(),
+                none.checkout.as_str()
+            ),
+            ("checkouts/j", "checkouts/j", "")
+        );
     }
 
     #[test]

@@ -373,10 +373,10 @@ pub enum RunnerCommand {
         #[arg(long, default_value = ".")]
         repo: std::path::PathBuf,
         /// The check to run, through the shell (default: `mise run ci:changed`).
-        #[arg(long, default_value = "mise run ci:changed")]
+        #[arg(long, default_value = crate::runner::gate::DEFAULT_COMMAND)]
         command: String,
         /// Seconds the check may run (default 1800).
-        #[arg(long, default_value_t = 1800, value_parser = clap::value_parser!(u64).range(1..=21600))]
+        #[arg(long, default_value_t = crate::runner::gate::DEFAULT_TIMEOUT_SECS, value_parser = clap::value_parser!(u64).range(1..=21600))]
         timeout: u64,
         /// The runner's name (default: the one whose key this machine holds).
         #[arg(long, conflicts_with = "runner")]

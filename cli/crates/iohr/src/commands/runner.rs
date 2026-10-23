@@ -20,8 +20,8 @@ use crate::runner::claude;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
 use crate::runner::provider::{self, AuthState};
-use crate::runner::run_loop::{LoopConfig, run_loop};
-use crate::runner::service::{GateReport, HttpService, Registration, RunnerInfo, Service as _};
+use crate::runner::run_loop::{GateCheck, LoopConfig, run_loop};
+use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
 use crate::runner::settings::{self, BuildFloor, Declared, Effective, Flags};
 use crate::runner::signing::{self, Signer};
 use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
@@ -242,6 +242,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
+                gate: Some(GateCheck {
+                    // The pack names the checkout relative to the turns' working directory.
+                    workdir: exec.workdir.clone(),
+                    ..GateCheck::default()
+                }),
                 ..LoopConfig::default()
             };
             let (end, stats) = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
@@ -282,19 +287,17 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let checked = gate::check(&repo, &command, Duration::from_secs(timeout), parent)
                 .await
                 .map_err(|e| Error::Failed(format!("no report was sent: {e}")))?;
-            let report = GateReport {
-                job_id: job,
-                lease_id: lease,
-                fencing_token: token,
-                runner_id: me.runner_id.clone(),
-                command: checked.command.clone(),
-                exit_code: checked.exit_code,
-                head: checked.head.clone(),
-                main_commit: checked.main_commit.clone(),
-                output_sha256: checked.output_sha256.clone(),
-            };
-            match svc.submit_gate_report(&report).await {
-                Ok(a) => {
+            let report = gate::report_of(
+                gate::Held {
+                    job_id: &job,
+                    lease_id: &lease,
+                    fencing_token: token,
+                    runner_id: &me.runner_id,
+                },
+                &checked,
+            );
+            match gate::send(&svc, &report).await {
+                Ok(Some(a)) => {
                     if out.json {
                         Out::print_json(&serde_json::json!({
                             "job_id": report.job_id, "command": checked.command,
@@ -318,7 +321,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     Ok(())
                 }
                 // An older coordinator has no such call: say so, and do not fail the caller.
-                Err(e) if e.is_missing() => {
+                Ok(None) => {
                     Out::note(
                         "this coordinator does not take gate reports yet; nothing was recorded",
                     );
