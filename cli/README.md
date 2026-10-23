@@ -481,11 +481,12 @@ machine. A non-zero exit is sent as it is: the job holds at Checked, which is th
 answer. A coordinator that does not have the call yet (an older release) is reported as
 such and is not an error. `iohr runner run` does the same by itself: when a job turn ends
 with a reply, it runs this check (the same command, timeout and report) in the checkout the
-turn's pack names (`checkout_path`), keeps the lease beating while it runs, and sends the
+turn's pack names (`checkout_path`, `checkouts/<job_id>`, relative to the runner's working
+directory for turns; a path that is absolute or climbs out of it is refused), keeps the lease beating while it runs, and sends the
 report before the turn's own report. It sends nothing, and logs why, when the turn did not
-reply, the pack names no checkout, the check cannot run (dirty or unmerged checkout, time
-cap) or the lease is gone. The coordinator's pack does not carry `checkout_path` yet, so
-until it does, call the command yourself after a build job's PR is up.
+reply, the pack names no checkout (a job with no repository, or an older coordinator), the
+check cannot run (dirty or unmerged checkout, time cap) or the lease is gone. Call the
+command yourself only for a job the loop did not check.
 
 What the sign-in service sees of the provider is the SHA-256 of the account's salt, a
 newline and the line `claude auth status` prints, and the method's name.

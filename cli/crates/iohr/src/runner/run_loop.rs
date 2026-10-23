@@ -14,6 +14,7 @@
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::future::Future;
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Poll;
@@ -79,6 +80,9 @@ pub(crate) struct LoopConfig {
 /// report as `iohr runner gate-report`.
 #[derive(Debug, Clone)]
 pub(crate) struct GateCheck {
+    /// The turns' working directory (`ClaudeExec::workdir`): the pack's `checkout_path` is
+    /// relative to it.
+    pub(crate) workdir: PathBuf,
     pub(crate) command: String,
     pub(crate) timeout: Duration,
     /// The runner's own environment, scrubbed by the check before the command sees it.
@@ -88,6 +92,7 @@ pub(crate) struct GateCheck {
 impl Default for GateCheck {
     fn default() -> Self {
         Self {
+            workdir: std::env::temp_dir(),
             command: gate::DEFAULT_COMMAND.to_owned(),
             timeout: Duration::from_secs(gate::DEFAULT_TIMEOUT_SECS),
             env: std::env::vars_os().collect(),
@@ -358,16 +363,30 @@ async fn next_checked(
     .await
 }
 
+/// Where the pack's checkout is on this machine: the pack names it relative to the turn's
+/// working directory (core: `checkouts/<job_id>`). A path that is absolute or climbs out of
+/// the working directory is refused: a pack is data, and the check runs a command there.
+fn checkout_in(workdir: &Path, checkout: &str) -> Result<PathBuf, String> {
+    let rel = Path::new(checkout);
+    if rel.components().all(|c| matches!(c, Component::Normal(_))) {
+        Ok(workdir.join(rel))
+    } else {
+        Err(format!(
+            "its checkout path {checkout:?} is not inside the working directory"
+        ))
+    }
+}
+
 /// Why a finished job turn gets no gate check, or `None` when it does: it must have
-/// replied, and its pack must name a checkout.
-fn no_gate_because(pack: &Pack, f: &Finished) -> Option<String> {
+/// replied, and its pack must name a checkout inside the working directory.
+fn no_gate_because(pack: &Pack, f: &Finished, workdir: &Path) -> Option<String> {
     if !matches!(f.outcome.as_str(), "replied" | "unshaped") {
         return Some(format!("the turn ended {}, not with a reply", f.outcome));
     }
     if pack.checkout.is_empty() {
         return Some("its pack names no checkout to check".into());
     }
-    None
+    checkout_in(workdir, &pack.checkout).err()
 }
 
 /// Delivers what is in the outbox, in order, until `limit` is up. A permanent refusal
@@ -750,18 +769,18 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 stats.turns += 1;
                 let report = report_of(&b.lease, &b.pack, runner, &finished).limited();
                 log(&report.journal_line());
-                let gate_cfg = cfg.gate.as_ref().filter(|_| {
+                let gate_run = cfg.gate.as_ref().and_then(|g| {
                     let wanted = b.pack.kind == "job" || b.pack.kind == settings::BUILD;
-                    let why = no_gate_because(&b.pack, &finished);
+                    let why = no_gate_because(&b.pack, &finished, &g.workdir);
                     if let Some(why) = &why
                         && wanted
                     {
                         log(&format!("lease {}: no gate report, {why}", b.lease.lease_id));
                     }
-                    wanted && why.is_none()
+                    let repo = checkout_in(&g.workdir, &b.pack.checkout).ok()?;
+                    (wanted && why.is_none()).then_some((g, repo))
                 });
-                if let Some(g) = gate_cfg {
-                    let repo = std::path::PathBuf::from(&b.pack.checkout);
+                if let Some((g, repo)) = gate_run {
                     log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
                     let (command, timeout, env) = (g.command.clone(), g.timeout, g.env.clone());
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
@@ -2234,34 +2253,36 @@ mod tests {
         let _ = t.await;
     }
 
-    fn gate_cfg(command: &str) -> GateCheck {
+    fn gate_cfg(command: &str, workdir: &Path) -> GateCheck {
         GateCheck {
+            workdir: workdir.to_owned(),
             command: command.into(),
             timeout: Duration::from_secs(20),
             env: std::env::vars_os().collect(),
         }
     }
 
-    fn job_pack(checkout: &std::path::Path) -> Pack {
+    /// A job pack whose checkout is `work` under the working directory, as core names it.
+    fn job_pack() -> Pack {
         Pack {
             kind: "job".into(),
             job_id: "job_1".into(),
-            checkout: checkout.display().to_string(),
+            checkout: "work".into(),
             ..good_pack()
         }
     }
 
     #[tokio::test]
     async fn a_finished_job_turn_sends_one_gate_report_with_its_lease_before_its_own_report() {
-        let (_root, _origin, work) = gate::tests::repos();
+        let (root, _origin, _work) = gate::tests::repos();
         let fake = Fake::default();
         fake.beats
             .lock()
             .unwrap()
             .push_back(Ok(vec![lease("lease_1", 7)]));
-        *fake.pack.lock().unwrap() = Some(job_pack(&work));
+        *fake.pack.lock().unwrap() = Some(job_pack());
         let c = LoopConfig {
-            gate: Some(gate_cfg("exit 3")),
+            gate: Some(gate_cfg("exit 3", root.path())),
             ..cfg(6)
         };
         let (_, stats) = go(&fake, c).await;
@@ -2290,14 +2311,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_refused_turn_or_one_with_no_checkout_sends_no_gate_report() {
-        let (_root, _origin, work) = gate::tests::repos();
+        let (root, _origin, _work) = gate::tests::repos();
         // The turn crashes: no reply, no check.
         let fake = Fake::default();
         fake.beats
             .lock()
             .unwrap()
             .push_back(Ok(vec![lease("lease_1", 7)]));
-        *fake.pack.lock().unwrap() = Some(job_pack(&work));
+        *fake.pack.lock().unwrap() = Some(job_pack());
         let (_tx, rx) = watch::channel(false);
         let exec = Arc::new(FakeExec {
             crash_turn: Some("turn_1".into()),
@@ -2305,7 +2326,7 @@ mod tests {
         });
         let logged = Mutex::new(Vec::<String>::new());
         let c = LoopConfig {
-            gate: Some(gate_cfg("true")),
+            gate: Some(gate_cfg("true", root.path())),
             ..cfg(4)
         };
         run_loop(&fake, &exec, &runner(), c, rx, &|m| {
@@ -2331,7 +2352,42 @@ mod tests {
             ..good_pack()
         });
         let c = LoopConfig {
-            gate: Some(gate_cfg("true")),
+            gate: Some(gate_cfg("true", root.path())),
+            ..cfg(4)
+        };
+        let (_, stats) = go(&fake, c).await;
+        assert_eq!(stats.reported, 1);
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_checkout_is_found_under_the_working_directory_and_nowhere_else() {
+        let w = Path::new("/runner/coordinate");
+        assert_eq!(
+            checkout_in(w, "checkouts/job_1"),
+            Ok(PathBuf::from("/runner/coordinate/checkouts/job_1"))
+        );
+        for bad in ["/etc", "../x", "checkouts/../../x", "./.."] {
+            assert!(checkout_in(w, bad).is_err(), "{bad} must be refused");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pack_whose_checkout_climbs_out_of_the_working_directory_sends_no_gate_report() {
+        let (root, _origin, _work) = gate::tests::repos();
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(Pack {
+            checkout: "../work".into(),
+            ..job_pack()
+        });
+        let inner = root.path().join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let c = LoopConfig {
+            gate: Some(gate_cfg("true", &inner)),
             ..cfg(4)
         };
         let (_, stats) = go(&fake, c).await;
@@ -2341,7 +2397,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_lease_released_during_the_check_sends_no_gate_report() {
-        let (root, _origin, work) = gate::tests::repos();
+        let (root, _origin, _work) = gate::tests::repos();
         let flag = root.path().join("running");
         let fake = Fake {
             release_when: Some(flag.clone()),
@@ -2351,10 +2407,13 @@ mod tests {
             .lock()
             .unwrap()
             .push_back(Ok(vec![lease("lease_1", 7)]));
-        *fake.pack.lock().unwrap() = Some(job_pack(&work));
+        *fake.pack.lock().unwrap() = Some(job_pack());
         // The check says it has started, then runs long: the lease is gone meanwhile.
         let c = LoopConfig {
-            gate: Some(gate_cfg(&format!("touch {} && sleep 20", flag.display()))),
+            gate: Some(gate_cfg(
+                &format!("touch {} && sleep 20", flag.display()),
+                root.path(),
+            )),
             ..cfg(6)
         };
         let started = std::time::Instant::now();

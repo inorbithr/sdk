@@ -242,7 +242,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
-                gate: Some(GateCheck::default()),
+                gate: Some(GateCheck {
+                    // The pack names the checkout relative to the turns' working directory.
+                    workdir: exec.workdir.clone(),
+                    ..GateCheck::default()
+                }),
                 ..LoopConfig::default()
             };
             let (end, stats) = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
