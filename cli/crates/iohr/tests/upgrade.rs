@@ -25,15 +25,26 @@ fn installed() -> (tempfile::TempDir, PathBuf) {
     (dir, exe)
 }
 
+/// What the child needs to run at all: `SYSTEMROOT` is required for sockets on Windows,
+/// the temp variables for its download. Nothing that could hold a credential is passed on.
+fn kept_env() -> Vec<(String, std::ffi::OsString)> {
+    ["SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
+        .into_iter()
+        .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
+        .collect()
+}
+
 fn run(exe: &Path, install_dir: &Path, server: &MockServer, args: &[&str]) -> Output {
     Command::new(exe)
         .args(args)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", install_dir)
+        .env("USERPROFILE", install_dir)
         .env("IOHR_INSTALL_DIR", install_dir)
         .env("IOHR_UPGRADE_API", server.uri())
         .env("IOHR_UPGRADE_DOWNLOAD", format!("{}/dl", server.uri()))
+        .envs(kept_env())
         .output()
         .unwrap()
 }
