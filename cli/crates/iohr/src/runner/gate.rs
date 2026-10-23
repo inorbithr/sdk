@@ -305,6 +305,18 @@ pub(crate) mod tests {
     #[cfg(windows)]
     const TWO_STREAMS_OUT: &[u8] = b"hello\r\noops\r\n";
 
+    /// Exits 1 when either credential reached the shell, else prints `clean`. cmd.exe
+    /// keeps an unset `%NAME%` as literal text, so the Windows form uses `if defined`.
+    #[cfg(not(windows))]
+    const SCRUBBED: &str = "test -z \"$GH_TOKEN$FOO_SECRET\" && echo clean";
+    #[cfg(not(windows))]
+    const SCRUBBED_OUT: &[u8] = b"clean\n";
+    #[cfg(windows)]
+    const SCRUBBED: &str =
+        "(if defined GH_TOKEN exit 1)& (if defined FOO_SECRET exit 1)& echo clean";
+    #[cfg(windows)]
+    const SCRUBBED_OUT: &[u8] = b"clean\r\n";
+
     #[tokio::test]
     async fn a_branch_merged_with_main_is_checked_and_reported_with_the_hash_of_the_output() {
         let (_root, _o, work) = repos();
@@ -367,16 +379,9 @@ pub(crate) mod tests {
         let mut env = parent();
         env.push(("GH_TOKEN".into(), "secret-value".into()));
         env.push(("FOO_SECRET".into(), "secret-value".into()));
-        let got = check(
-            &work,
-            "test -z \"$GH_TOKEN$FOO_SECRET\" && echo clean",
-            LIMIT,
-            env,
-        )
-        .await
-        .unwrap();
+        let got = check(&work, SCRUBBED, LIMIT, env).await.unwrap();
         assert_eq!(got.exit_code, 0);
-        assert_eq!(got.output_sha256, hex(&Sha256::digest(b"clean\n")));
+        assert_eq!(got.output_sha256, hex(&Sha256::digest(SCRUBBED_OUT)));
     }
 
     #[tokio::test]
