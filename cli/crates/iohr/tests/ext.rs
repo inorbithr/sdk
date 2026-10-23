@@ -1276,7 +1276,9 @@ async fn packages_lists_published_private_shared_local_and_installed() {
         .await;
     let run = |args: &[&str]| {
         b.cmd(args)
+            // The home directory is HOME on unix and USERPROFILE on Windows.
             .env("HOME", &home)
+            .env("USERPROFILE", &home)
             .env("IOHR_BASE_URL", b.server.uri())
             .env("IOHR_TOKEN", token(&["extensions:read"]))
             .stdin(Stdio::null())
@@ -1338,6 +1340,7 @@ async fn packages_still_lists_this_machine_when_the_api_refuses() {
     let o = b
         .cmd(&["ext", "packages", "--json"])
         .env("HOME", &home)
+        .env("USERPROFILE", &home)
         .env("IOHR_BASE_URL", b.server.uri())
         .env("IOHR_TOKEN", token(&["extensions:read"]))
         .stdin(Stdio::null())
