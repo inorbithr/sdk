@@ -1,0 +1,17 @@
+name: stream-sse
+area: examples
+summary: "The account's events over server-sent events: each event is typed, the stream ends when the server ends it."
+action: { op: example }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/events/events, headers: { authorization: Bearer t1, accept: text/event-stream } }
+    response:
+      sse:
+        events:
+          - { comment: open }
+          - { data: { id: evt_1, type: key.created, occurred_at: "2026-10-18T10:00:01Z", account_id: acc_1, data: { key_id: key_1 } } }
+          - { data: { id: evt_2, type: key.revoked, occurred_at: "2026-10-18T10:00:02Z", account_id: acc_1, data: { key_id: key_1 } } }
+          - { data: { id: evt_3, type: key.created, occurred_at: "2026-10-18T10:00:03Z", account_id: acc_1, data: { key_id: key_1 } } }
+expect:
+  attempts: 1

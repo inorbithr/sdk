@@ -30,6 +30,7 @@ pub struct Provider {
     pub(crate) http: reqwest::Client,
     issuer: String,
     client_id: String,
+    extra_scopes: Vec<String>,
     pub(crate) authorization_endpoint: Url,
     pub(crate) token_endpoint: Url,
     pub(crate) device_authorization_endpoint: Option<Url>,
@@ -115,6 +116,7 @@ impl Provider {
             http,
             issuer: issuer.to_owned(),
             client_id: client_id.to_owned(),
+            extra_scopes: Vec::new(),
         })
     }
 
@@ -122,6 +124,27 @@ impl Provider {
     #[must_use]
     pub fn issuer(&self) -> &str {
         &self.issuer
+    }
+
+    /// Ask for these scopes besides the defaults (`openid offline_access iohr.api`) in
+    /// the next sign-in, browser or device. A scope the client is not allowed to ask for
+    /// is refused by the provider, never dropped here.
+    #[must_use]
+    pub fn with_scopes(mut self, scopes: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.extra_scopes = scopes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The `scope` parameter of a sign-in request: the defaults, then the extra scopes,
+    /// each once.
+    pub(crate) fn scope(&self) -> String {
+        let mut all: Vec<&str> = SCOPES.split(' ').collect();
+        for s in &self.extra_scopes {
+            if !s.is_empty() && !all.contains(&s.as_str()) {
+                all.push(s);
+            }
+        }
+        all.join(" ")
     }
 
     /// The OAuth client id.

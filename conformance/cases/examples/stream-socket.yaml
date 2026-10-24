@@ -1,0 +1,18 @@
+name: stream-socket
+area: examples
+summary: "The same events carried over the one multiplexed /v1/ws socket: one call frame names the RPC, each data frame is an event, an end frame closes the stream."
+action: { op: example }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/ws, headers: { authorization: Bearer t1 } }
+    response:
+      socket:
+        steps:
+          - { expect: { type: call, method: iohr.events.v1.EventsService/StreamEvents }, as: c }
+          - { send: { type: data, id: $c, body: { id: evt_1, type: key.created, occurred_at: "2026-10-18T10:00:01Z", account_id: acc_1, data: { key_id: key_1 } } } }
+          - { send: { type: data, id: $c, body: { id: evt_2, type: key.revoked, occurred_at: "2026-10-18T10:00:02Z", account_id: acc_1, data: { key_id: key_1 } } } }
+          - { send: { type: data, id: $c, body: { id: evt_3, type: key.created, occurred_at: "2026-10-18T10:00:03Z", account_id: acc_1, data: { key_id: key_1 } } } }
+          - { send: { type: end, id: $c } }
+expect:
+  attempts: 1

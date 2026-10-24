@@ -75,7 +75,7 @@ iohr api GET /v1/webhooks/endpoints --all
 
 | Command | What it does |
 |---|---|
-| `iohr login [--web \| --device] [--insecure-storage]` | Sign in and add a profile; `--insecure-storage` keeps the token in a 0600 file on a machine without a credential store |
+| `iohr login [--web \| --device] [--insecure-storage] [--scope S,...]` | Sign in and add a profile; `--insecure-storage` keeps the token in a 0600 file on a machine without a credential store; `--scope` asks for scopes besides the defaults, such as `coordinator:runner,coordinator:read` for `iohr runner` (the sign-in service refuses a scope the client may not ask for) |
 | `iohr login --with-token` | Read an API token from stdin and add a profile |
 | `iohr logout` | Forget the profile and its credential on this machine |
 | `iohr profile list \| use \| show` | The profiles here; the default one |
@@ -102,6 +102,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
+| `iohr runner register [--name N] [--capacity N] [--always-on] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--account A] \| config show [--capacity N] [--kinds K,...] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below) |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
@@ -403,6 +404,93 @@ admin's say becomes an ask. Every step is re-runnable, and nothing is overwritte
 `iohr ext lint --preview`, `iohr ext dev` and `iohr ext dev --test` work in the folder as for
 any extension, and InOrbit Desktop's Code opens it after asking you.
 
+## Runner
+
+```sh
+claude                                  # once: /login with your subscription
+iohr runner register                    # this machine, by its host name
+iohr runner run                         # until Ctrl-C
+iohr runner status
+```
+
+The runner is this machine's half of a coordinator turn. It signs in to InOrbit as your
+`iohr` profile does, which needs the scopes `coordinator:runner coordinator:read`
+(`iohr login --scope coordinator:runner,coordinator:read`), and calls the coordinator's
+runner calls: register (it makes an Ed25519 key, kept in the credential store your
+profile uses, the macOS Keychain on a Mac, and signs the service's challenge with it),
+heartbeat (every `heartbeat_interval_seconds` the service sends, 20 s; `--interval`
+overrides), accept a lease, get its turn pack, keep the lease alive while the turn
+runs (the turn stops when the service says so), and report the signed result. A report
+the service does not take is kept in memory and retried; it is lost if the runner exits
+first. A turn is one
+`claude -p` run of the `claude` first on your PATH, as you installed it:
+`--output-format json`, the turn's `--model` and `--max-turns`, its `--allowedTools`, the
+pack as the system prompt, and `--resume <session>` only when this runner ran the
+previous turn of the thread and the session is on its disk (otherwise
+`--session-id <new>`). The prompt goes in on stdin. To keep the turn's context small it
+also passes `--setting-sources project,local` and `--strict-mcp-config`, so your own
+user-level hooks, plugins, skills and MCP servers are not loaded into a turn (your
+sign-in is). On `claude` 2.1.307 one short turn went from 33,220 to 15,054 context tokens.
+
+It runs on your subscription and nothing else:
+
+- Before every turn it asks the binary (`claude auth status`) and refuses unless it says
+  `claude.ai` and `firstParty`. It never reads Claude Code's own credential files and
+  never signs in for you.
+- The child gets an allowlist of your environment, nothing else: `PATH`, `HOME`, `USER`,
+  `LOGNAME`, `SHELL`, `TERM`, `TMPDIR`, `TZ`, `LANG`, `LC_*`, `CLAUDE_CONFIG_DIR` and the
+  XDG directories (and the Windows equivalents), so `claude` finds its own sign-in.
+  Anything whose name holds `TOKEN`, `KEY`, `SECRET` or `PASSWORD` is dropped even if
+  listed, and so are `ANTHROPIC_*`, `AWS_*`, `GOOGLE_*`, `OPENAI_*`, `AZURE_*`, `GH_TOKEN`,
+  `GITHUB_TOKEN` and `IOHR_TOKEN*`. There is no option to pass one through.
+- When the runner stops (Ctrl-C or revocation), the running turn is aborted and
+  `claude` and everything it started are killed.
+- It never passes `--bare`, `--settings` or an endpoint, and never edits the binary or
+  its requests. Both the arguments and the environment are table-tested, and a `--bare`
+  or an `ANTHROPIC_BASE_URL` in their output fails the build.
+- A turn is refused when its user is not the person the runner is registered to.
+
+### Capacity
+
+How many turns the runner takes at once, and which classes, come from the `[runner]`
+table of `config.toml` (or `[profiles.<name>.runner]`), and `--capacity` and `--kinds`
+override it:
+
+```toml
+[runner]
+capacity = 4                      # 1 to 32
+kinds = ["coordinate", "build"]
+```
+
+`run` sends them on every heartbeat, so a change reaches the coordinator within one beat;
+`kill -HUP <pid>` makes a running `run` read the file again. Lowering the capacity never
+stops a running turn. Below 100 GB free on `/mnt/build` the runner takes no new build
+turn until there is room. `iohr runner config show` prints what is in effect and where
+each value came from (`docs/config.md`, section 4.3).
+
+### Gate report
+
+`iohr runner gate-report --job J --lease L --token N` is the runner's half of the Checked
+gate (platform RFC 0120). In the job's checkout (`--repo`, default the current directory)
+it fetches `origin/main`, refuses a checkout with uncommitted changes or one that does not
+contain `origin/main`, runs `--command` (default `mise run ci:changed`) through the shell
+with the scrubbed environment above and a `--timeout` (default 1800 s, at most 21600 s), and
+sends the coordinator the command, its exit code, the head, main's commit and the SHA-256
+of the output, signed with the key this runner registered. The output itself stays on this
+machine. A non-zero exit is sent as it is: the job holds at Checked, which is the honest
+answer. A coordinator that does not have the call yet (an older release) is reported as
+such and is not an error. `iohr runner run` does the same by itself: when a job turn ends
+with a reply, it runs this check (the same command, timeout and report) in the checkout the
+turn's pack names (`checkout_path`, `checkouts/<job_id>`, relative to the runner's working
+directory for turns; a path that is absolute or climbs out of it is refused), keeps the lease beating while it runs, and sends the
+report before the turn's own report. It sends nothing, and logs why, when the turn did not
+reply, the pack names no checkout (a job with no repository, or an older coordinator), the
+check cannot run (dirty or unmerged checkout, time cap) or the lease is gone. Call the
+command yourself only for a job the loop did not check.
+
+What the sign-in service sees of the provider is the SHA-256 of the account's salt, a
+newline and the line `claude auth status` prints, and the method's name.
+
 ## Where things are kept
 
 - Profiles: `config.toml` in the platform's config directory (`~/.config/iohr` on
@@ -421,6 +509,8 @@ any extension, and InOrbit Desktop's Code opens it after asking you.
   the Sigstore bundles checked at install and a record of the checks.
 - Extensions you are building: `iohr ext dev` keeps their `STATE` and `CACHE` in
   `~/.inorbit/ext-dev/NAME/`, owner-only, apart from the installed ones.
+- The runner's one working directory, `runner/coordinate` in the config directory, is
+  empty: Claude Code keeps the session itself, in its own directory.
 - `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` (the extensions catalogue is
   on the API host), and to the extension registry only in `iohr ext install`, `upgrade`
   and `sync` (ADR 0012). No telemetry, no update
