@@ -596,6 +596,30 @@ impl TurnReport {
     }
 }
 
+/// What the runner reads of a job before it accepts its lease: the repository its
+/// checkout is made from (empty for a job without one) and the document it serves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct JobInfo {
+    pub(crate) repository: String,
+    pub(crate) document_id: String,
+}
+
+impl JobInfo {
+    pub(crate) fn from_json(v: &Value) -> Self {
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_owned()
+        };
+        Self {
+            repository: s("repository"),
+            document_id: s("document_id"),
+        }
+    }
+}
+
 /// What the loop needs from the service.
 pub(crate) trait Service {
     /// Whether the service can hand over a turn's pack. While it cannot, the loop does
@@ -614,6 +638,10 @@ pub(crate) trait Service {
     ) -> Result<Beat, ServiceError>;
     async fn accept(&self, lease: &Lease, facts: AcceptFacts) -> Result<(), ServiceError>;
     async fn fetch_pack(&self, lease: &Lease) -> Result<Pack, ServiceError>;
+    /// The job a lease is for (`GetJob`): its repository, read before the lease is
+    /// accepted so the checkout exists when the turn starts. The pack does not carry the
+    /// repository yet (RFC 0147 slice B adds `TurnPack.workspace`).
+    async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError>;
     /// The lease is alive; says whether the turn must stop.
     async fn lease_heartbeat(&self, lease: &Lease) -> Result<LeaseBeat, ServiceError>;
     /// Delivers a finished turn, signed; the same report again is answered as the first
@@ -814,6 +842,28 @@ impl Service for HttpService<'_> {
             return Err(ServiceError::Refused("the service sent no pack"));
         }
         Ok(Pack::from_json(pack))
+    }
+
+    async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError> {
+        if job_id.is_empty()
+            || !job_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(ServiceError::Refused("the lease names no usable job id"));
+        }
+        let v: Value = self
+            .api
+            .get(
+                &format!("/v1/coordinator/jobs/{job_id}"),
+                &[("account_id", self.account.as_str())],
+            )
+            .await?;
+        let job = v.get("job").unwrap_or(&Value::Null);
+        if job.is_null() {
+            return Err(ServiceError::Refused("the service sent no job"));
+        }
+        Ok(JobInfo::from_json(job))
     }
 
     async fn lease_heartbeat(&self, lease: &Lease) -> Result<LeaseBeat, ServiceError> {
@@ -1157,6 +1207,19 @@ mod tests {
                 none.checkout.as_str()
             ),
             ("checkouts/j", "checkouts/j", "")
+        );
+    }
+
+    #[test]
+    fn a_job_reads_its_repository_and_document() {
+        let j = JobInfo::from_json(&serde_json::json!({
+            "id": "job_1", "repository": " inorbithr/core ", "document_id": "ldoc_1", "kind": "api"
+        }));
+        assert_eq!(j.repository, "inorbithr/core");
+        assert_eq!(j.document_id, "ldoc_1");
+        assert_eq!(
+            JobInfo::from_json(&serde_json::json!({})),
+            JobInfo::default()
         );
     }
 

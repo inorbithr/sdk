@@ -63,8 +63,20 @@ pub(crate) enum Skip {
     Moved,
 }
 
-/// `git <args>` in `repo`: the exit code and trimmed stdout.
-async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
+/// What one `git` call printed: its exit code, its stdout as it is, and the last line of
+/// its stderr (for a log line; git prints no credential there, and the caller redacts
+/// anything shaped like a token anyway).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GitOut {
+    pub(crate) code: i32,
+    pub(crate) stdout: String,
+    pub(crate) stderr_tail: String,
+}
+
+/// `git <args>` in `repo` under `limit`: never a prompt, never another repository named
+/// by the environment, nothing on stdin. The runner's own environment, so the host's git
+/// credentials apply; the model's scrubbed one is not involved.
+pub(crate) async fn git_in(repo: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Skip> {
     let mut c = Command::new("git");
     c.args(args)
         .current_dir(repo)
@@ -73,16 +85,33 @@ async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let out = tokio::time::timeout(GIT_TIMEOUT, c.output())
+    let out = tokio::time::timeout(limit, c.output())
         .await
         .map_err(|_| Skip::Git(format!("git {} took too long", args.first().unwrap_or(&""))))?
         .map_err(|e| Skip::Git(e.to_string()))?;
-    Ok((
-        out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).trim().to_owned(),
-    ))
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    Ok(GitOut {
+        code: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr_tail: stderr
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or_default()
+            .trim()
+            .chars()
+            .take(300)
+            .collect(),
+    })
+}
+
+/// `git <args>` in `repo`: the exit code and trimmed stdout.
+async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
+    let o = git_in(repo, args, GIT_TIMEOUT).await?;
+    Ok((o.code, o.stdout.trim().to_owned()))
 }
 
 async fn git_ok(repo: &Path, args: &[&str]) -> Result<String, Skip> {

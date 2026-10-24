@@ -24,6 +24,7 @@ use crate::runner::run_loop::{GateCheck, LoopConfig, run_loop};
 use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
 use crate::runner::settings::{self, BuildFloor, Declared, Effective, Flags};
 use crate::runner::signing::{self, Signer};
+use crate::runner::workspace::Workspaces;
 use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
@@ -247,6 +248,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     workdir: exec.workdir.clone(),
                     ..GateCheck::default()
                 }),
+                // Job leases get their own checkout, `checkouts/<job_id>` on `job/<id>`,
+                // and a replied turn's pull request, through the host's git and `gh`.
+                workspaces: Some(Arc::new(Workspaces::for_runner(exec.workdir.clone()))),
                 ..LoopConfig::default()
             };
             let (end, stats) = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
