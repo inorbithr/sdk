@@ -9,7 +9,7 @@ experimental = true
 cargo.binstall = true
 
 [tools]
-go = "1.27.2"
+go = "1.27.3"
 rust = { version = "1.99.0", components = "rustfmt,clippy" }
 node = "26.10.0"
 pnpm = "12.9.1"
@@ -56,7 +56,7 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "dart:check", "cli:check", "conformance", "examples:check"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "dart:check", "cli:check", "conformance", "examples:check", "examples:run"]
 
 [tasks."ci:changed"]
 description = "What CI would run for your changes since origin/main, with CI's path rules; run it before a push (`-- --dry-run` prints the plan)"
@@ -109,7 +109,7 @@ shell = "bash -e -o pipefail -c"
 run = """
 locks=$(git ls-files '*go.sum' '*Cargo.lock' '*pnpm-lock.yaml' '*package-lock.json' '*uv.lock' | head -1)
 [ -n "$locks" ] || { echo "audit: no lockfiles yet, skipping OSV scan"; exit 0; }
-osv-scanner scan source --recursive .
+osv-scanner scan source --config osv-scanner.toml --recursive .
 """
 
 [tasks.sbom]
@@ -736,6 +736,24 @@ run = "[ -e conformance/server ] && [ -f typescript/package.json ] || { echo 'co
 shell = "bash -e -o pipefail -c"
 depends = ["conformance:server:build"]
 run = "[ -e conformance/server ] && [ -f python/pyproject.toml ] || { echo 'conformance:py: skipping (no server or no package yet)'; exit 0; }; cd python && uv run pytest tests/conformance"
+
+[tasks."examples:run"]
+shell = "bash -e -o pipefail -c"
+description = "Run every example against the conformance replay server; writes examples-results.json"
+depends = ["conformance:server:build"]
+run = "python3 tools/run-examples.py"
+
+[tasks."examples:attest"]
+description = "Post the examples-run commit status for HEAD from examples-results.json (after examples:run), only when every example passed on a clean HEAD"
+run = "python3 tools/examples-gate.py attest"
+
+[tasks."examples:gate"]
+description = "Exit 1 unless the examples-run status is green on a ref's commit: `mise run examples:gate -- main`"
+run = "python3 tools/examples-gate.py gate --ref"
+
+[tasks."examples:gate:test"]
+description = "Unit tests of the examples gate verdict"
+run = "python3 tools/test_examples_gate.py"
 
 [tasks."examples:check"]
 shell = "bash -e -o pipefail -c"

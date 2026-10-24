@@ -30,7 +30,8 @@ mod store;
 
 pub use claims::{Claims, ClaimsError};
 pub use config::{
-    Config, ConfigError, ExtConfig, Kind, Profile, ProfileName, ProfileNameError, Storage,
+    Config, ConfigError, ExtConfig, Kind, Profile, ProfileName, ProfileNameError, RunnerConfig,
+    Storage,
 };
 pub use credential::{Bearer, Credential, StaticToken};
 pub use error::AuthError;

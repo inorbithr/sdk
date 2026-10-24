@@ -205,3 +205,15 @@ with 2FA. release-please does not run on a manual run, so nothing new is tagged.
 When the version is already staged on npm and a later step failed (the SBOM, the
 attestation, the release files or JSR), add `typescript_npm_staged`: the run builds and
 packs the same tag again but does not stage it a second time.
+
+## Examples gate (RFC 0165)
+
+A release needs the examples to have run green against the live API on its exact commit.
+`mise run examples:run` writes `examples-results.json`; `mise run examples:attest` posts
+the commit status `examples-run` on HEAD, and only when the file is for HEAD, the tree was
+clean, nothing failed and every language under `examples/` has a passing example.
+The `examples-gate` job in `release.yml` runs before every publish job and fails unless
+that status is `success` on the released commit (for a manual run, on the tag's commit).
+The release PR's merge commit is new, so run and attest on it, then re-run the failed
+jobs. `mise run examples:gate -- <ref>` checks the same thing by hand. The release-train
+agent refuses a roll of the SDK without it.
