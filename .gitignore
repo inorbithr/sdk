@@ -42,3 +42,5 @@ cli/**/*.cdx.json
 # Swift
 .build/
 .swiftpm/
+# Examples
+examples-results.json

@@ -9,6 +9,8 @@ use iohr_auth::ProfileName;
 
 use inorbithr::DEFAULT_BASE_URL;
 
+use crate::environments::{self, Environment, Environments};
+
 /// The InOrbit command line.
 ///
 /// Sign in, keep several accounts as profiles, and call the API. A token is never an
@@ -41,12 +43,16 @@ pub struct Global {
     /// Describe each call on stderr: method, path, status, time, request id.
     #[arg(short, long, global = true)]
     pub verbose: bool,
-    /// The API's address.
-    #[arg(long, global = true, env = "IOHR_BASE_URL", default_value = DEFAULT_BASE_URL, hide_default_value = true)]
-    pub base_url: String,
+    /// The environment to call: `production` (the default) or `local`. Sets the API and
+    /// sign-in addresses; `--base-url` and `IOHR_ISSUER` still win over it.
+    #[arg(long, global = true, env = "IOHR_ENV", value_parser = environments::parse_name, value_name = "NAME")]
+    pub env: Option<String>,
+    /// The API's address (default: the environment's).
+    #[arg(long = "base-url", global = true, env = "IOHR_BASE_URL")]
+    base_url: Option<String>,
     /// The sign-in service.
-    #[arg(long, global = true, env = "IOHR_ISSUER", default_value = iohr_auth::DEFAULT_ISSUER, hide = true)]
-    pub issuer: String,
+    #[arg(long, global = true, env = "IOHR_ISSUER", hide = true)]
+    issuer: Option<String>,
     /// The OAuth client the command line signs in as.
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
@@ -56,6 +62,53 @@ pub struct Global {
     /// Where extensions are kept (default: the platform's data directory).
     #[arg(long, global = true, env = "IOHR_DATA_DIR", hide = true)]
     pub data_dir: Option<PathBuf>,
+}
+
+impl Global {
+    /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
+    #[must_use]
+    pub fn environment(&self) -> &'static Environment {
+        let list = Environments::builtin();
+        let name = self.env.as_deref().unwrap_or_else(|| list.default_name());
+        // The name was checked on the way in; the default is checked by the tests.
+        list.get(name)
+            .unwrap_or_else(|_| unreachable!("environment names are validated"))
+    }
+
+    /// The API's address: `--base-url` or `IOHR_BASE_URL`, else the environment's, else
+    /// production's.
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        self.base_url
+            .as_deref()
+            .or(self.environment().base_url.as_deref())
+            .unwrap_or(DEFAULT_BASE_URL)
+    }
+
+    /// The sign-in service: `IOHR_ISSUER`, else the environment's, else production's.
+    #[must_use]
+    pub fn issuer(&self) -> &str {
+        self.issuer
+            .as_deref()
+            .or(self.environment().issuer.as_deref())
+            .unwrap_or(iohr_auth::DEFAULT_ISSUER)
+    }
+
+    /// Refuses an environment whose address is a placeholder, unless the caller named
+    /// the API's address.
+    ///
+    /// # Errors
+    ///
+    /// The environment has no real address yet.
+    pub fn check_environment(&self) -> Result<(), crate::Error> {
+        if self.environment().placeholder && self.base_url.is_none() {
+            return Err(crate::Error::Failed(format!(
+                "the {} environment has no address yet; set IOHR_BASE_URL or --base-url",
+                self.env.as_deref().unwrap_or("selected")
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -90,6 +143,9 @@ pub enum Command {
     /// Domains an account controls, proved with one DNS record.
     #[command(subcommand)]
     Domains(DomainsCommand),
+    /// The coordinator's jobs and queued asks: list and file work (RFC 0120, RFC 0138).
+    #[command(subcommand)]
+    Coordinator(CoordinatorCommand),
     /// The apps a connection can be made from: incident tools, chat, observability, AI models
     /// (RFC 0044).
     #[command(subcommand)]
@@ -102,16 +158,47 @@ pub enum Command {
     /// runs as `iohr <name> ...`.
     #[command(subcommand)]
     Ext(ExtCommand),
+    /// Every package you have in one table: published by your account (public or
+    /// private), private ones shared with it, unpublished ones in progress on this
+    /// machine, and what is installed. The same as `iohr ext packages`.
+    Packages,
+    /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs
+    /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
+    /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
+    /// against the release's checksums and attestations and replaced in place; anything
+    /// else gets the command to run. `--check` only reports. Needs no sign-in.
+    Upgrade {
+        /// Only say whether a newer release exists and what would run; change nothing.
+        #[arg(long)]
+        check: bool,
+    },
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
     /// Lab documents: RFCs and studies kept in your repository (RFC 0035).
     #[command(subcommand)]
     Lab(LabCommand),
-    /// RFCs in the RFCs product (RFC 0065): list and read them, create one, save a new
-    /// version, set its status, comment, link a pull request, ask for a review.
+    /// Decisions: RFCs, PRDs and ADRs in the Decisions product (RFC 0065, core ADR 0056):
+    /// list and read them, create one, save a new version, set its status, comment, link a
+    /// pull request, ask for a review.
     #[command(subcommand)]
-    Rfc(RfcCommand),
+    Decisions(DecisionsCommand),
+    /// A project you build yourself (PRD 0088): one command sets up everything it needs,
+    /// from sign-in to a smoke test, and reports what you now have.
+    #[command(subcommand)]
+    Project(ProjectCommand),
+    /// The coordinator's runner (RFC 0120): this machine runs coordinator turns on your own
+    /// installed `claude`, on your own subscription.
+    #[command(subcommand)]
+    Runner(RunnerCommand),
+    /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
+    #[command(subcommand)]
+    Browser(BrowserCommand),
+    /// A loopback pipe from this machine into an environment's Envoy edge, so the real
+    /// site opens at `http://www.localhost:<port>/` (and console, docs, auth). Runs
+    /// `ssh -N -L` until Ctrl-C; binds 127.0.0.1 only and goes through Envoy, never to a
+    /// service directly. The environment is `--env` (production by default).
+    Tunnel(Tunnel),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -174,9 +261,9 @@ pub struct LabCheck {
     pub strict: Option<PathBuf>,
 }
 
-/// Where an RFC is looked for.
+/// Where a document is looked for in Decisions.
 #[derive(Debug, Clone, Args)]
-pub struct RfcWhere {
+pub struct DecisionsWhere {
     /// The space, by slug (`platform`) or id (`lab_...`). Default: every space of the
     /// account; needed when two spaces hold the same number.
     #[arg(long)]
@@ -184,6 +271,11 @@ pub struct RfcWhere {
     /// The account whose spaces to use. Default: the credential's own.
     #[arg(long)]
     pub account: Option<String>,
+    /// The kind of document (RFC 0081): `rfc` (default), `prd`, `adr` or `study`; `all`
+    /// means every kind. A number names a document of this kind; `PRD 0001` or
+    /// `ADR 0003` in place of a number names its kind itself.
+    #[arg(long, default_value = "rfc", value_parser = ["rfc", "prd", "adr", "study", "all"])]
+    pub kind: String,
 }
 
 /// A pull request a comment is about.
@@ -205,27 +297,141 @@ pub struct PrLine {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum RfcCommand {
-    /// The RFCs of the account's spaces: number, space, status, access, title.
+pub enum RunnerCommand {
+    /// Register this machine as one of your runners: its name, system and what it can run.
+    ///
+    /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
+    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
+    /// `claude auth status` prints. Run it again and it says the runner exists.
+    Register {
+        /// The runner's name (default: `[runner] name` in config.toml, else this
+        /// machine's host name).
+        #[arg(long)]
+        name: Option<String>,
+        /// Turns this runner may hold at once, 1 to 32 (default: `[runner] capacity`,
+        /// else 1). `iohr runner run` declares the configured capacity on every
+        /// heartbeat, so a later change needs no new registration.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// Mark the runner as always on (a server), so the coordinator can rely on it
+        /// (default: `[runner] always_on`).
+        #[arg(long)]
+        always_on: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Run the loop: heartbeat, accept a lease, run its turn on `claude -p`, report it.
+    /// Stops on Ctrl-C.
+    Run {
+        /// The runner's name (default: this machine's host name).
+        #[arg(long, conflicts_with = "runner")]
+        name: Option<String>,
+        /// The runner's id, from `iohr runner status`.
+        #[arg(long)]
+        runner: Option<String>,
+        /// Seconds between heartbeats (default: what the service says, the RFC's 20).
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
+        interval: Option<u64>,
+        /// Stop after this many answered heartbeats; for scripts.
+        #[arg(long)]
+        max_beats: Option<u64>,
+        /// Turns to run at once, 1 to 32, declared on every heartbeat (default:
+        /// `[runner] capacity` in config.toml, read again on SIGHUP; else what the
+        /// runner registered with).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// The turn classes to take, comma separated: `coordinate`, `build` (default:
+        /// `[runner] kinds`, else both). Build turns pause while /mnt/build has under
+        /// 100 GB free.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// The runner's settings from config.toml: `[runner]` and `[profiles.<name>.runner]`.
+    #[command(subcommand)]
+    Config(RunnerConfigCommand),
+    /// Run the check on a build job's checkout and send the service a signed report of it.
+    ///
+    /// Fetches `origin/main`, refuses a checkout with uncommitted changes or one that is
+    /// not merged with `origin/main`, runs the command with a scrubbed environment, and
+    /// signs the command, its exit code, the head, main's commit and the SHA-256 of the
+    /// output (the output stays here) with this machine's runner key. The service
+    /// checks the signature against the key you enrolled and the lease you hold; a report
+    /// that fails the check holds the job at Checked, which is the right answer.
+    GateReport {
+        /// The job (`job_...`) whose lease you hold.
+        #[arg(long)]
+        job: String,
+        /// Its lease (`lse_...`).
+        #[arg(long)]
+        lease: String,
+        /// The lease's fencing token.
+        #[arg(long)]
+        token: i64,
+        /// The checkout of the job's branch (default: the current directory).
+        #[arg(long, default_value = ".")]
+        repo: std::path::PathBuf,
+        /// The check to run, through the shell (default: `mise run ci:changed`).
+        #[arg(long, default_value = crate::runner::gate::DEFAULT_COMMAND)]
+        command: String,
+        /// Seconds the check may run (default 1800).
+        #[arg(long, default_value_t = crate::runner::gate::DEFAULT_TIMEOUT_SECS, value_parser = clap::value_parser!(u64).range(1..=21600))]
+        timeout: u64,
+        /// The runner's name (default: the one whose key this machine holds).
+        #[arg(long, conflicts_with = "runner")]
+        name: Option<String>,
+        /// The runner's id, from `iohr runner status`.
+        #[arg(long)]
+        runner: Option<String>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Your runners as the service sees them, and what this machine can run.
+    Status {
+        #[command(flatten)]
+        account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerConfigCommand {
+    /// The values `iohr runner run` would use now, each with where it came from: a flag,
+    /// `[profiles.<name>.runner]`, `[runner]` or the default. Needs no sign-in.
+    Show {
+        /// As `iohr runner run --capacity`.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// As `iohr runner run --kinds`.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DecisionsCommand {
+    /// The documents of the account's spaces: number, space, status, access, title.
     List {
         #[command(flatten)]
-        at: RfcWhere,
-        /// Only RFCs with this status (`open`, `decided`, `superseded`).
+        at: DecisionsWhere,
+        /// Only documents with this status: an RFC's `draft`, `in_review`, `accepted`,
+        /// `rejected`, `superseded` or `withdrawn`; an ADR's `proposed`, `accepted`,
+        /// `rejected` or `superseded` (`open` and `decided` still read as before).
         #[arg(long)]
         status: Option<String>,
-        /// Only RFCs whose title, slug or text contains this, any case.
+        /// Only documents whose title, slug or text contains this, any case.
         #[arg(long)]
         query: Option<String>,
         /// Only yours: documents you own, write or build, or are asked to review.
         #[arg(long)]
         mine: bool,
     },
-    /// One RFC: its number, status, version and, with `--text`, its text.
+    /// One document: its number, status, version and, with `--text`, its text.
     Show {
-        /// The RFC: its number (`0065`, a part `0065.1`) or its id (`ldoc_...`).
+        /// The document: its number (`0065`, a part `0065.1`) or its id (`ldoc_...`).
         rfc: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// Print the document's text after its details.
         #[arg(long)]
         text: bool,
@@ -236,12 +442,15 @@ pub enum RfcCommand {
         #[arg(long = "at-version", value_name = "N")]
         at_version: Option<u32>,
     },
-    /// A new RFC in a space: the space gives it the next number. With `--file`, the
-    /// file's text is saved as its next version straight away.
+    /// A new RFC, PRD or ADR in a space: the account gives it the next number of its
+    /// kind. With `--file`, the file's text is saved as its next version straight away.
     Create {
         /// The space, by slug (`platform`) or id.
         #[arg(long)]
         space: String,
+        /// The kind (RFC 0081): `rfc` (default), `prd` or `adr`.
+        #[arg(long, default_value = "rfc", value_parser = ["rfc", "prd", "adr"])]
+        kind: String,
         /// The account the space belongs to. Default: the credential's own.
         #[arg(long)]
         account: Option<String>,
@@ -251,7 +460,7 @@ pub enum RfcCommand {
         /// A one-paragraph summary, at most 1000 characters.
         #[arg(long)]
         summary: Option<String>,
-        /// Make it a part of this RFC (`0065` makes `0065.N`).
+        /// Make it a part of this document (`0065` makes `0065.N`).
         #[arg(long)]
         parent: Option<String>,
         /// The whole document to save after creating it (`-` reads stdin).
@@ -261,13 +470,13 @@ pub enum RfcCommand {
         #[arg(long, short, requires = "file")]
         message: Option<String>,
     },
-    /// Save a new version of an RFC from a file: the whole document, front matter and
+    /// Save a new version of a document from a file: the whole document, front matter and
     /// all. Refused when someone saved since the version it was made from.
     Save {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// The whole document (`-` reads stdin), at most 512 KiB.
         #[arg(long)]
         file: PathBuf,
@@ -278,44 +487,47 @@ pub enum RfcCommand {
         #[arg(long)]
         base: Option<u32>,
     },
-    /// Set an RFC's status: `open`, `decided` or `superseded` (with `--successor`).
+    /// Set a document's status in the words of its kind (RFC 0081): an RFC's `draft`,
+    /// `in_review`, `accepted`, `rejected`, `withdrawn` or `superseded` (with
+    /// `--successor`); a PRD's the same without `withdrawn`; an ADR's `proposed`,
+    /// `accepted`, `rejected` or `superseded`. `open` and `decided` still read as before.
     Status {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         /// The new status.
         status: String,
         #[command(flatten)]
-        at: RfcWhere,
-        /// For `superseded`: the RFC that replaces it, in the same space.
+        at: DecisionsWhere,
+        /// For `superseded`: the document that replaces it, in the same space.
         #[arg(long)]
         successor: Option<String>,
     },
-    /// Comment on an RFC. With `--pr`, the comment starts with the pull request's line
-    /// (`owner/repo#n "title": open`, `merged` or `live`), so the RFC's thread reads as
-    /// the record of the work; the same line `mise run rfcs:comment` writes.
+    /// Comment on a document. With `--pr`, the comment starts with the pull request's line
+    /// (`owner/repo#n "title": open`, `merged` or `live`), so the document's thread reads
+    /// as the record of the work; the same line `mise run decisions:comment` writes.
     Comment {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         /// The comment, 1 byte to 10 KiB with the pull request's line.
         text: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         #[command(flatten)]
         pr: PrLine,
         /// The heading the comment is on, by its id (`status-log`).
         #[arg(long)]
         anchor: Option<String>,
     },
-    /// Record a pull request that implements an RFC, as a comment with its line alone:
+    /// Record a pull request that implements a document, as a comment with its line alone:
     /// `owner/repo#n "title": open` when it opens, then `merged`, then `live`.
     LinkPr {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         /// The pull request: `repo#n` (an inorbithr repository), `owner/repo#n` or its
         /// GitHub link.
         pr: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// The pull request's title.
         #[arg(long)]
         title: Option<String>,
@@ -327,13 +539,13 @@ pub enum RfcCommand {
         live: bool,
     },
     /// Create a diagram from a model file, or with its id save a new version of one. The
-    /// model is the RFCs product's diagram JSON (`version`, `nodes`, `edges`); embed it in
-    /// an RFC with a ```` ```diagram <id> ```` block.
+    /// model is the Decisions product's diagram JSON (`version`, `nodes`, `edges`); embed it in
+    /// a document with a ```` ```diagram <id> ```` block.
     Diagram {
         /// The diagram to save a new version of (`ldia_...`); without it, a new diagram.
         id: Option<String>,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// The model, JSON (`-` reads stdin), at most 1 MiB.
         #[arg(long)]
         file: PathBuf,
@@ -344,19 +556,19 @@ pub enum RfcCommand {
         #[arg(long, short)]
         message: Option<String>,
     },
-    /// Ask for a review of an RFC's current version from members of its account who may
-    /// write (never yourself or the RFC's author).
+    /// Ask for a review of a document's current version from members of its account who
+    /// may write (never yourself or the document's author).
     Review {
-        /// The RFC: its number or id.
+        /// The document: its number or id.
         rfc: String,
         #[command(flatten)]
-        at: RfcWhere,
+        at: DecisionsWhere,
         /// A reviewer's subject; repeat, or separate with commas, for several.
-        /// `mise run rfcs:token` sets `IOHR_RFC_REVIEWER` to the account's owner.
+        /// `mise run decisions:token` sets `IOHR_DECISIONS_REVIEWER` to the account's owner.
         #[arg(
             long = "reviewer",
             value_name = "SUBJECT",
-            env = "IOHR_RFC_REVIEWER",
+            env = "IOHR_DECISIONS_REVIEWER",
             value_delimiter = ',',
             required = true
         )]
@@ -675,6 +887,12 @@ impl UseStatus {
 
 #[derive(Debug, Subcommand)]
 pub enum ExtCommand {
+    /// Every package you have, in one table: NAME, KIND, SOURCE (account, shared, local,
+    /// installed), VISIBILITY, VERSION and INSTALLED. Published ones, private too, come
+    /// from the API; local ones are the folders under ~/.inorbit/ext-dev, read from disk
+    /// and never sent anywhere. An installed extension is matched to a package by name
+    /// alone, since the lock keeps no publisher. With `--json`, an array of the same fields.
+    Packages,
     /// Search the extensions catalogue (RFC 0073): name, kind, publisher, latest
     /// version and visibility. Reads the API only, never the registry.
     Search {
@@ -709,9 +927,33 @@ pub enum ExtCommand {
         /// Also pin it in this lock file, for `iohr ext sync` elsewhere.
         #[arg(long, value_name = "FILE")]
         lock: Option<PathBuf>,
-        /// Confirm the privileges it declares without asking (needed without a terminal).
+        /// Confirm the privileges it declares without asking (needed without a terminal),
+        /// and set up its system service if it has one.
         #[arg(long, short = 'y')]
         yes: bool,
+        /// Don't set up its system service now (`iohr ext service NAME` does it later).
+        #[arg(long)]
+        no_service: bool,
+        /// A network interface its system service attaches to; repeatable (default: asked
+        /// at a terminal, from the ones the program detects; otherwise the default route's).
+        #[arg(long = "interface", value_name = "NAME")]
+        interfaces: Vec<String>,
+        /// Every interface the program's --all picks (physical NICs, bonds, VLANs that are
+        /// up), chosen again at each start of the service.
+        #[arg(long, conflicts_with = "interfaces")]
+        all_interfaces: bool,
+    },
+    /// Set up the system service of an installed extension that has one (Linux, with
+    /// sudo): runs `sudo <program> service install --agent-user <you>`.
+    Service {
+        /// The extension, such as capture.
+        name: String,
+        /// A network interface it attaches to; repeatable (default: asked at a terminal).
+        #[arg(long = "interface", value_name = "NAME")]
+        interfaces: Vec<String>,
+        /// Every interface the program's --all picks, chosen again at each start.
+        #[arg(long, conflicts_with = "interfaces")]
+        all_interfaces: bool,
     },
     /// The installed extensions.
     List,
@@ -747,6 +989,80 @@ pub enum ExtCommand {
         #[arg(long, default_value = "iohr-ext.lock", value_name = "FILE")]
         lock: PathBuf,
     },
+    /// Start a new extension: a folder with its manifest (every field, commented), a
+    /// program that asks the token channel for a token and writes a heartbeat, a
+    /// self-test, a README and a release workflow that signs it.
+    Init {
+        /// PUBLISHER/NAME, such as inorbit/hello. A name holding "tbd" is refused.
+        extension: String,
+        /// The kind; this release scaffolds programs.
+        #[arg(long, value_enum, default_value_t = InitKind::Program)]
+        kind: InitKind,
+        /// The language of the program.
+        #[arg(long, value_enum)]
+        lang: crate::ext::manifest::Lang,
+        /// The folder to write (default: ./NAME); it must not exist or be empty.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Run the extension in a folder: its manifest linted, the token channel for exactly
+    /// its scopes (a refused request shown in red), its secrets, STATE and CACHE under
+    /// ~/.inorbit/ext-dev/NAME/, and its output with the time. Never touches installed
+    /// extensions or their lock.
+    Dev {
+        /// The extension's folder (default: this one).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Run its tests instead, with the same channel and environment; fails when they
+        /// write outside STATE and CACHE.
+        #[arg(long)]
+        test: bool,
+    },
+    /// Check the extension.toml in a folder: unknown keys, values that look like
+    /// secrets, data outside ADR 0063's non-sensitive kinds, unsupported targets, a
+    /// "tbd" name, and every rule of the artifact. Exits 1 on any.
+    Lint {
+        /// The extension's folder (default: this one).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Print what it may do in plain words, as an installer shows it.
+        #[arg(long)]
+        preview: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectCommand {
+    /// Set up a project of your own: sign-in checked, the folder scaffolded from a
+    /// template with its manifest, a git repository with one commit, its own state under
+    /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
+    /// and a report. Idempotent: a step already done is done again without harm, and a
+    /// step that waits on an API says so instead of pretending.
+    Init {
+        /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
+        name: String,
+        /// The template: demo (a private macOS service that heartbeats and serves a tiny
+        /// panel). Others say they are coming.
+        #[arg(long, default_value = "demo")]
+        template: String,
+        /// The folder to write (default: ~/development/NAME); it must not exist or be empty.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+        /// The publisher half of the extension id (default: your account's slug, else
+        /// "local"); the private listing takes it when that step lands.
+        #[arg(long)]
+        publisher: Option<String>,
+        /// Skip the smoke test (it runs the project once with python3).
+        #[arg(long)]
+        no_smoke: bool,
+    },
+}
+
+/// What `iohr ext init` scaffolds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InitKind {
+    /// A program that runs as its own process (RFC 0073).
+    Program,
 }
 
 #[derive(Debug, Subcommand)]
@@ -788,6 +1104,11 @@ pub struct Login {
     /// Keep the credential in an owner-only file instead of the OS credential store.
     #[arg(long)]
     pub insecure_storage: bool,
+    /// A scope to ask for besides the defaults, such as the runner's
+    /// `coordinator:runner,coordinator:read`; repeat it or separate with commas. The
+    /// sign-in service refuses a scope the command line's client may not ask for.
+    #[arg(long = "scope", value_delimiter = ',')]
+    pub scopes: Vec<String>,
 }
 
 /// How to sign in; at most one. Without any, a browser when this machine can open
@@ -1087,4 +1408,167 @@ impl Lang {
             Self::Rust => Language::Rust,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BrowserCommand {
+    /// Open the console's install page in the default browser. It adds InOrbit Trails
+    /// from that browser's store (Chrome Web Store, Edge Add-ons, Firefox add-ons), or
+    /// shows the load-unpacked steps while that store has no listing yet.
+    Install(BrowserInstall),
+}
+
+#[derive(Debug, Args)]
+pub struct BrowserInstall {
+    /// Print the page's address instead of opening it (for a browser on another machine).
+    #[arg(long)]
+    pub print: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorCommand {
+    /// The coordinator's jobs.
+    #[command(subcommand)]
+    Jobs(CoordinatorJobsCommand),
+    /// The coordinator's queued asks.
+    #[command(subcommand)]
+    Asks(CoordinatorAsksCommand),
+    /// A job's brief, the one text a worker starts from: the task, its acceptance, the
+    /// files and the linked document's excerpt, capped at the kind's token budget
+    /// (RFC 0132). Prints the text alone so it can be piped into a worker.
+    Brief {
+        /// The job id (`job_...`).
+        job: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "parsed once per run; a box would only add noise"
+)]
+pub enum CoordinatorJobsCommand {
+    /// List jobs.
+    List {
+        /// Only this state: a stage (intake ... done, stopped) or held, retry, awaiting.
+        #[arg(long)]
+        state: Option<String>,
+        /// Only your own jobs.
+        #[arg(long)]
+        mine: bool,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// File a job. The brief is the text to work on, from --brief or `-` for standard input.
+    Create {
+        /// The kind: question, watch, docs, ui, fix, review, chore, mentor, api or design.
+        #[arg(long)]
+        kind: String,
+        /// The brief, or `-` to read it from standard input.
+        #[arg(long)]
+        brief: String,
+        /// The PRD, RFC or ADR it implements.
+        #[arg(long)]
+        document: Option<String>,
+        /// The repository, such as inorbithr/core.
+        #[arg(long)]
+        repository: Option<String>,
+        /// The model, when not the kind's default.
+        #[arg(long)]
+        model: Option<String>,
+        /// Why the model differs from the default (needed with --model).
+        #[arg(long)]
+        model_override_reason: Option<String>,
+        /// A tag; repeat or comma-separate.
+        #[arg(long = "tag", value_delimiter = ',')]
+        tags: Vec<String>,
+        /// Priority, higher first.
+        #[arg(long)]
+        priority: Option<u32>,
+        /// The job this one replaces.
+        #[arg(long)]
+        supersedes: Option<String>,
+        /// Security-relevant: done only with a compliance pull request.
+        #[arg(long)]
+        security: bool,
+        /// The inorbithr/compliance pull request, when it exists.
+        #[arg(long)]
+        compliance_pr: Option<String>,
+        /// The queued ask this job works on.
+        #[arg(long)]
+        ask: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorAsksCommand {
+    /// List queued asks.
+    List {
+        /// queued, building, stuck, done, closed, withdrawn or open.
+        #[arg(long)]
+        state: Option<String>,
+        /// Only asks from this source (cli, desktop, mcp, ...).
+        #[arg(long)]
+        source: Option<String>,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Queue an ask. The coordinator's planner files a job for a kind it knows (bug,
+    /// feature, ui, api, docs, design, review, chore, question, watch); an ask with
+    /// any other kind stays queued, with the reason.
+    Create {
+        /// What kind of ask: lower case, 1 to 40 of a-z, 0-9, _ and -.
+        #[arg(long)]
+        kind: String,
+        /// The ask, or `-` to read it from standard input.
+        #[arg(long)]
+        body: String,
+        /// A short title; empty is the body's first line.
+        #[arg(long)]
+        title: Option<String>,
+        /// Priority 1 to 10 (default 5).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=10))]
+        priority: Option<u32>,
+        /// A link (pull request, document); repeat or comma-separate.
+        #[arg(long = "link", value_delimiter = ',')]
+        links: Vec<String>,
+        /// The id in the system it came from; the same id returns the same ask.
+        #[arg(long)]
+        external_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Args)]
+pub struct Tunnel {
+    /// The ssh target that runs the environment.
+    #[arg(long, env = "IOHR_TUNNEL_HOST")]
+    pub host: String,
+    /// The port to listen on here, on 127.0.0.1 (default: the edge's own port).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// The edge port on the host, when it differs from `environments.toml` (core's
+    /// `devops/ci/envs.toml` is the source; `mise run local:tunnel` passes it).
+    #[arg(long)]
+    pub edge_port: Option<u16>,
+    /// The engine LB port to forward as well (default: the environment's, when it has
+    /// one: mobile and Trails use it); the same port on both ends.
+    #[arg(long)]
+    pub engine_port: Option<u16>,
+    /// Forward the edge only, not the engine LB.
+    #[arg(long)]
+    pub no_engine: bool,
+    /// Print the ssh command and the addresses, then stop.
+    #[arg(long)]
+    pub dry_run: bool,
 }

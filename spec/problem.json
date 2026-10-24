@@ -20,7 +20,8 @@
         "unsupported_media_type",
         "payload_too_large",
         "method_not_allowed",
-        "unprocessable"
+        "unprocessable",
+        "upgrade_required"
       ],
       "type": "string",
       "x-http-status": {
@@ -41,7 +42,8 @@
         "unavailable": 503,
         "unimplemented": 501,
         "unprocessable": 422,
-        "unsupported_media_type": 415
+        "unsupported_media_type": 415,
+        "upgrade_required": 426
       }
     },
     "Detail": {

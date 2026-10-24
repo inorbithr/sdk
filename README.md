@@ -1,4 +1,9 @@
-<p align="center"><img alt="sdk: a TypeScript client call in a code panel with tabs for Rust, TypeScript, Python, Go, Java and C#, and iohr sdk add in a terminal" src=".github/assets/social-preview.png" width="100%"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.png">
+    <img alt="sdk: SDKs for the InOrbit API: Rust, TypeScript, Python and Go, with C# and Java from source. (live)" src=".github/assets/hero-light.png" width="100%">
+  </picture>
+</p>
 
 <p align="center">SDKs and developer tooling for the InOrbit platform.</p>
 
@@ -32,6 +37,7 @@ tags where there is no registry release, so the table does not go stale between 
 | C# | `InOrbit.Sdk`, .NET 8 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=csharp%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=csharp), built from source; not on NuGet yet |
 | Java | `hr.inorbit:inorbit-sdk`, Java 17 | [![release tag](https://img.shields.io/github/v/tag/inorbithr/sdk?filter=java%2Fv*&label=tag)](https://github.com/inorbithr/sdk/releases?q=java), built from source; not on Maven Central yet |
 | Swift | SwiftPM `https://github.com/inorbithr/sdk`, product `InOrbit`; iOS 15, macOS 12, Linux | not released yet; depend on `main` ([swift/README.md](swift/README.md)) |
+| Dart | `inorbit`, Dart 3.9 and Flutter: the contract and its checker so far, the client follows | not released; not on pub.dev yet ([`dart/`](dart/)) |
 
 The contract the libraries are built against is synced from the platform into
 [`spec/`](spec/), and the replay server in
@@ -41,8 +47,12 @@ has the milestones.
 ## The command line
 
 ```sh
-# macOS and Linux, Homebrew
+# macOS and Linux, Homebrew. Homebrew refuses a tap it was not told to trust, so once
+# per Mac (or Linux box) run `brew trust` before the install:
+brew trust inorbithr/tap
 brew install inorbithr/tap/iohr
+
+# later: iohr upgrade (iohr upgrade --check only looks)
 
 # Debian and Ubuntu: the repository is signed by the key with fingerprint
 # 5FF6 7AF3 D50A 6B06 FFE6  EA8A FFA5 11CF 585B F28D
@@ -67,7 +77,8 @@ iohr api GET /v1/me
 `iohr` keeps several accounts as profiles, creates and revokes API tokens, proves
 domains, connects an account's apps (`iohr connectors`, `iohr connections`: a key or a
 browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`),
-checks Lab documents (`iohr lab check`) and keeps RFCs in the RFCs product (`iohr rfc`).
+checks Lab documents (`iohr lab check`), keeps RFCs, PRDs and ADRs in the Decisions product (`iohr decisions`) and
+runs coordinator turns on your own Claude subscription (`iohr runner`).
 It talks to `api.inorbit.hr` and
 `auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
 `sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry and no update
@@ -117,6 +128,7 @@ See [docs/design.md](docs/design.md) for the library design.
 | [`spec/`](spec/) | The API contract, synced from the platform |
 | [`conformance/`](conformance/) | Shared behaviour cases and the replay server every SDK runs them against |
 | [`rust/`](rust/), [`typescript/`](typescript/), [`go/`](go/), [`python/`](python/), [`csharp/`](csharp/), [`java/`](java/), [`swift/`](swift/) | One runtime per language, with its generated public surface; Swift's `Package.swift` is at the root |
+| [`dart/`](dart/) | The Dart runtime, started: the contract and the answer checker (platform RFC 0074.8) |
 | [`examples/`](examples/) | Small programs that CI compiles |
 | [`docs/`](docs/) | Design, decisions (ADRs), releasing, style |
 

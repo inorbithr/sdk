@@ -386,11 +386,13 @@ fn render_models(models: &[Model], runtime: &str) -> String {
     out.push_str(&classes);
     out.push_str(&alias_text);
     if !class_names.is_empty() {
-        out.push_str("\n\nfor _model in (\n");
+        // Typed, because a type checker stops inferring a tuple's entries past a few
+        // hundred (pyright's limit is 256) and the loop variable would be unknown.
+        out.push_str("\n\n_MODELS: tuple[type[BaseModel], ...] = (\n");
         for name in &class_names {
             let _ = writeln!(out, "    {name},");
         }
-        out.push_str("):\n    _model.model_rebuild()\n");
+        out.push_str(")\nfor _model in _MODELS:\n    _model.model_rebuild()\n");
     }
     out
 }

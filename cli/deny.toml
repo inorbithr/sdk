@@ -5,6 +5,15 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+# zbus 6 absorbed these three crates, so RustSec marks them unmaintained; no vulnerability.
+# They arrive through iohr-auth -> zbus-secret-service-keyring-store -> secret-service 5 -> zbus 5,
+# with no release on zbus 6 yet (https://github.com/z-galaxy/zbus/issues/2043).
+# Remove all three once secret-service ships on zbus 6 (owner decision apr_01M57RXDB6NG3F183GPCJZC5SY).
+ignore = [
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); held by secret-service 5 on zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (merged into zbus 6); held by secret-service 5 on zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (merged into zbus 6); held by secret-service 5 on zbus 5" },
+]
 
 [licenses]
 confidence-threshold = 0.9
