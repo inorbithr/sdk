@@ -13,6 +13,7 @@ use base64::engine::general_purpose::STANDARD as B64;
 use inorbithr::Method;
 use serde_json::{Value, json};
 
+use super::access::Minted;
 use super::settings::Declared;
 use super::signing::Signer;
 use crate::context::Api;
@@ -651,6 +652,12 @@ pub(crate) trait Service {
     /// gate report answers 404 or 501; that is [`ServiceError::is_missing`], and the
     /// caller says so and goes on (the job holds at Checked, as it did).
     async fn submit_gate_report(&self, report: &GateReport) -> Result<GateAnswer, ServiceError>;
+    /// A GitHub App installation token for the one repository of this lease, minted by
+    /// connections (`MintRunnerGithubToken`, RFC 0120) after the coordinator confirmed the
+    /// lease is this person's and live at its fencing token. A platform older than the
+    /// call answers [`ServiceError::is_missing`]. The answer's token never prints
+    /// ([`Minted`]'s `Debug`); the response body is dropped once read.
+    async fn runner_github_token(&self, lease: &Lease) -> Result<Minted, ServiceError>;
 }
 
 /// The service over REST, called as the profile's own session.
@@ -927,6 +934,34 @@ impl Service for HttpService<'_> {
             .await?
             .json()?;
         Ok(GateAnswer::from_json(&v))
+    }
+
+    async fn runner_github_token(&self, lease: &Lease) -> Result<Minted, ServiceError> {
+        if self.account.is_empty()
+            || !self
+                .account
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err(ServiceError::Refused("the runner names no usable account"));
+        }
+        let body = json!({
+            "lease_id": lease.lease_id,
+            "fencing_token": lease.fencing_token.to_string(),
+        });
+        let v: Value = self
+            .api
+            .send_body(
+                Method::Post,
+                &format!(
+                    "/v1/accounts/orgs/{}/connections/github/runner-token",
+                    self.account
+                ),
+                &body,
+            )
+            .await?
+            .json()?;
+        Ok(Minted::from_json(&v))
     }
 }
 
@@ -1220,6 +1255,71 @@ mod tests {
         assert_eq!(
             JobInfo::from_json(&serde_json::json!({})),
             JobInfo::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_runner_token_is_asked_for_by_lease_and_never_shows_in_debug_or_errors() {
+        use iohr_auth::{Redacted, StaticToken};
+        use std::sync::Arc;
+        use wiremock::matchers::{body_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::super::access::tests::FAKE;
+        use crate::context::AnyCredential;
+
+        let server = MockServer::start().await;
+        let route = "/v1/accounts/orgs/acc_1/connections/github/runner-token";
+        Mock::given(method("POST"))
+            .and(path(route))
+            .and(body_json(
+                json!({"lease_id": "lse_1", "fencing_token": "9007199254740993"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "token": FAKE, "expires_at": "2099-01-01T00:00:00Z",
+                "repository": "acme/app", "reason": "", "detail": ""
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+            "person-token".to_owned(),
+        ))));
+        let api = Api::new(&server.uri(), person, false).unwrap();
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let lease =
+            Lease::from_json(&json!({"lease_id": "lse_1", "fencing_token": "9007199254740993"}));
+        let m = svc.runner_github_token(&lease).await.unwrap();
+        assert!(!format!("{m:?}").contains(FAKE), "the token in Debug");
+        let a = m
+            .access("acme/app", time::OffsetDateTime::now_utc())
+            .unwrap();
+        assert_eq!(a.gh_token(), Some(FAKE));
+        assert!(!format!("{a:?}").contains(FAKE) && !a.describe().contains(FAKE));
+
+        // A refusal says the platform's words; an older platform is `is_missing`.
+        let old = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(404).set_body_raw(
+                r#"{"code":"not_found","error":"no such route","details":[]}"#,
+                "application/json",
+            ))
+            .mount(&old)
+            .await;
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+            "person-token".to_owned(),
+        ))));
+        let api = Api::new(&old.uri(), person, false).unwrap();
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let e = svc.runner_github_token(&lease).await.unwrap_err();
+        assert!(e.is_missing(), "{e}");
+        assert!(!e.to_string().contains(FAKE) && !format!("{e:?}").contains(FAKE));
+        let bad = HttpService::new(&api, "../x".into(), None);
+        assert!(
+            bad.runner_github_token(&lease)
+                .await
+                .unwrap_err()
+                .is_permanent()
         );
     }
 

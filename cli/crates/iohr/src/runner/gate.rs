@@ -73,13 +73,39 @@ pub(crate) struct GitOut {
     pub(crate) stderr_tail: String,
 }
 
+/// The git subcommand in `args`, past any `-c key=value`: for an error line.
+fn subcommand<'a>(args: &[&'a str]) -> &'a str {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if *a == "-c" {
+            it.next();
+        } else if !a.starts_with('-') {
+            return a;
+        }
+    }
+    ""
+}
+
 /// `git <args>` in `repo` under `limit`: never a prompt, never another repository named
-/// by the environment, nothing on stdin. The runner's own environment, so the host's git
-/// credentials apply; the model's scrubbed one is not involved.
+/// by the environment, nothing on stdin. The runner's own environment, which holds no
+/// GitHub token (a call that reaches GitHub goes through [`git_in_with`]); the model's
+/// scrubbed one is not involved.
 pub(crate) async fn git_in(repo: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Skip> {
+    git_in_with(repo, args, limit, &[]).await
+}
+
+/// [`git_in`] with `extra` set on this one child only (the job's token for the
+/// credential helper, `access::TOKEN_VAR`); nothing else sees it.
+pub(crate) async fn git_in_with(
+    repo: &Path,
+    args: &[&str],
+    limit: Duration,
+    extra: &[(&str, &str)],
+) -> Result<GitOut, Skip> {
     let mut c = Command::new("git");
     c.args(args)
         .current_dir(repo)
+        .envs(extra.iter().copied())
         .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
@@ -90,7 +116,7 @@ pub(crate) async fn git_in(repo: &Path, args: &[&str], limit: Duration) -> Resul
         .kill_on_drop(true);
     let out = tokio::time::timeout(limit, c.output())
         .await
-        .map_err(|_| Skip::Git(format!("git {} took too long", args.first().unwrap_or(&""))))?
+        .map_err(|_| Skip::Git(format!("git {} took too long", subcommand(args))))?
         .map_err(|e| Skip::Git(e.to_string()))?;
     let stderr = String::from_utf8_lossy(&out.stderr);
     Ok(GitOut {
@@ -239,6 +265,7 @@ async fn run(
     c.current_dir(repo)
         .env_clear()
         .envs(env::scrub(parent_env))
+        .envs(env::contained())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -334,10 +361,14 @@ pub(crate) mod tests {
     #[cfg(windows)]
     const TWO_STREAMS_OUT: &[u8] = b"hello\r\noops\r\n";
 
-    /// Exits 1 when either credential reached the shell, else prints `clean`. cmd.exe
+    /// Exits 1 when either credential reached the shell or the containment is missing
+    /// (`gh` signed out, git with no credential helper), else prints `clean`. cmd.exe
     /// keeps an unset `%NAME%` as literal text, so the Windows form uses `if defined`.
     #[cfg(not(windows))]
-    const SCRUBBED: &str = "test -z \"$GH_TOKEN$FOO_SECRET\" && echo clean";
+    const SCRUBBED: &str = "test -z \"$GH_TOKEN$FOO_SECRET\" \
+        && test \"$GH_CONFIG_DIR\" = /nonexistent/iohr-gh \
+        && test \"$GIT_CONFIG_KEY_0=$GIT_CONFIG_VALUE_0\" = credential.helper= \
+        && echo clean";
     #[cfg(not(windows))]
     const SCRUBBED_OUT: &[u8] = b"clean\n";
     #[cfg(windows)]
