@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.0-alpha.23](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.22...iohr/v0.1.0-alpha.23) (2026-10-24)
+
+
+### Features
+
+* **cli:** a runner turn logs its usage and cost and leaves user settings out of its context ([#252](https://github.com/inorbithr/sdk/issues/252)) ([97f42d7](https://github.com/inorbithr/sdk/commit/97f42d7ac334c82ad25aa5a006aef73d89bef1be))
+* **cli:** the runner owns the job's checkout and opens its pull request ([#260](https://github.com/inorbithr/sdk/issues/260)) ([ed95f1e](https://github.com/inorbithr/sdk/commit/ed95f1e7bce40a214ca667661e532bc191d6848d))
+
+
+### Bug fixes
+
+* **ci:** Go 1.26.10 and 1.27.3 for GO-2026-6809; gate test holds on Windows ([#250](https://github.com/inorbithr/sdk/issues/250)) ([34ab38e](https://github.com/inorbithr/sdk/commit/34ab38e10094d64ffdb9e05440fa0e5adfa02aad))
+* **cli:** the extension tests pass on slow and Windows runners ([#258](https://github.com/inorbithr/sdk/issues/258)) ([ed6113a](https://github.com/inorbithr/sdk/commit/ed6113ac09a40f7bcd48f7adc579626f5f5e3e17))
+* **cli:** the runner's run loop sends the gate report for a finished job turn ([#254](https://github.com/inorbithr/sdk/issues/254)) ([3346863](https://github.com/inorbithr/sdk/commit/3346863b9de6f6393f9cf00ea057a87f09c0ea08))
+* **cli:** the scrubbed-environment gate test uses cmd syntax on Windows ([#257](https://github.com/inorbithr/sdk/issues/257)) ([5360ef5](https://github.com/inorbithr/sdk/commit/5360ef5e13122f68a2ecf3d6e7bed0bf348ef462))
+* **cli:** the upgrade tests reach their mock server on Windows ([#259](https://github.com/inorbithr/sdk/issues/259)) ([d76a915](https://github.com/inorbithr/sdk/commit/d76a91535bb17a350d0d1b69e500ffc7f12abfec))
+* **deps:** ctutils 0.4.5 in every Cargo lock and opentelemetry-api 1.45.1 in the Python lock so the advisory audits pass again ([#256](https://github.com/inorbithr/sdk/issues/256)) ([91446a5](https://github.com/inorbithr/sdk/commit/91446a5fea6fd4769d6d7fe4bd2c55de6b7b5316))
+
 ## [0.1.0-alpha.22](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.21...iohr/v0.1.0-alpha.22) (2026-10-21)
 
 
