@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use heck::{ToSnakeCase as _, ToUpperCamelCase as _};
 use serde_json::Value;
 
-use crate::examples::{Call, Flow, client, object_fields, scalar, strings};
+use crate::examples::{Call, Flow, client, scalar, strings};
 use crate::ir::Type;
 
 /// Words typify suffixes with `_` in a field name.
@@ -120,26 +120,14 @@ fn arguments(call: &Call<'_>) -> String {
         let fields: Vec<String> = call
             .query
             .iter()
-            .map(|(name, ty, value)| format!("{}: Some({})", query_field(name), owned(ty, value)))
+            .map(|(name, ty, value)| setter(&query_field(name), ty, value))
             .collect();
         args.push(format!("&{}", strukt(params, &fields)));
     }
     if let Some((model, fields)) = &call.body {
-        let all = object_fields(call.models, model);
         let fields: Vec<String> = fields
             .iter()
-            .map(|f| {
-                let required = all
-                    .iter()
-                    .any(|x| x.name == f.name && x.required && !x.nullable);
-                let value = owned(&f.ty, &f.value);
-                let value = if required || matches!(f.ty, Type::Array { .. }) {
-                    value
-                } else {
-                    format!("Some({value})")
-                };
-                format!("{}: {value}", model_field(&f.name))
-            })
+            .map(|f| setter(&model_field(&f.name), &f.ty, &f.value))
             .collect();
         args.push(format!(
             "&{}",
@@ -169,29 +157,28 @@ fn model_field(wire: &str) -> String {
     }
 }
 
-fn owned(ty: &Type, value: &Value) -> String {
-    match ty {
+/// `.with_<field>(value)`: the setter the surface gives every field of a struct that is
+/// `#[non_exhaustive]` (a struct expression cannot name it from another crate).
+fn setter(field: &str, ty: &Type, value: &Value) -> String {
+    let field = field.strip_prefix("r#").unwrap_or(field);
+    let value = match ty {
         Type::Array { .. } => {
             let items: Vec<String> = strings(value)
                 .iter()
-                .map(|s| format!("{s}.into()"))
+                .map(|s| format!("{s}.to_owned()"))
                 .collect();
             format!("vec![{}]", items.join(", "))
         }
-        Type::String | Type::Enum { .. } => format!("{}.into()", scalar(value)),
         _ => scalar(value),
-    }
+    };
+    format!("with_{field}({value})")
 }
 
-/// `T::default()`, or the fields set and the rest defaulted.
+/// `T::default()` with the fields set through their setters.
 fn strukt(ty: &str, fields: &[String]) -> String {
-    if fields.is_empty() {
-        return format!("{ty}::default()");
-    }
-    let mut out = format!("{ty} {{\n");
+    let mut out = format!("{ty}::default()");
     for f in fields {
-        let _ = writeln!(out, "        {f},");
+        let _ = write!(out, "\n        .{f}");
     }
-    out.push_str("        ..Default::default()\n    }");
     out
 }
