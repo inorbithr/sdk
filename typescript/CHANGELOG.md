@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/inorbithr/sdk/compare/typescript/v0.3.0...typescript/v0.3.1) (2026-10-24)
+
+
+### Dependencies
+
+* **ts:** bump smol-toml ([0109fa7](https://github.com/inorbithr/sdk/commit/0109fa7fecdd7a0abd2f6f86902ee1afb42ee189))
+* **ts:** bump smol-toml from 1.9.0 to 1.9.1 in /typescript in the ts group across 1 directory ([#223](https://github.com/inorbithr/sdk/issues/223)) ([0109fa7](https://github.com/inorbithr/sdk/commit/0109fa7fecdd7a0abd2f6f86902ee1afb42ee189))
+
 ## [0.3.0](https://github.com/inorbithr/sdk/compare/typescript/v0.2.2...typescript/v0.3.0) (2026-10-12)
 
 
