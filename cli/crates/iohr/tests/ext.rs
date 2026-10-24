@@ -1353,6 +1353,23 @@ async fn packages_still_lists_this_machine_when_the_api_refuses() {
     assert_eq!(j[0]["source"], "local");
 }
 
+/// Runs `iohr ext verify TARGET --bundle BUNDLE --publisher-key KEY`, with `--json` when asked.
+fn verify(b: &Box_, target: &str, bundle: &str, key: &str, json: bool) -> Output {
+    let mut args = vec![
+        "ext",
+        "verify",
+        target,
+        "--bundle",
+        bundle,
+        "--publisher-key",
+        key,
+    ];
+    if json {
+        args.push("--json");
+    }
+    b.run(&args)
+}
+
 /// `iohr ext verify ARTIFACT --bundle FILE --publisher-key PEM` (RFC 0143): the install's
 /// trust check on one artifact, offline, no sign-in.
 #[tokio::test(flavor = "multi_thread")]
@@ -1374,46 +1391,20 @@ async fn verifying_an_artifact_accepts_a_good_bundle_and_refuses_a_tampered_one(
 
     // A file, then its digest, both pass; the signer is the publisher's key.
     for target in [art.as_str(), digest.to_string().as_str()] {
-        let o = b.run(&[
-            "ext",
-            "verify",
-            target,
-            "--bundle",
-            good_s,
-            "--publisher-key",
-            pem_s,
-            "--json",
-        ]);
+        let o = verify(&b, target, good_s, pem_s, true);
         assert_eq!(code(&o), 0, "{}", text(&o));
         let j = stdout_json(&o);
         assert_eq!(j["ok"], true);
         assert_eq!(j["digest"], digest.to_string());
         assert_eq!(j["signer"], fingerprint(&key));
     }
-    let o = b.run(&[
-        "ext",
-        "verify",
-        &art,
-        "--bundle",
-        good_s,
-        "--publisher-key",
-        pem_s,
-    ]);
+    let o = verify(&b, &art, good_s, pem_s, false);
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(String::from_utf8_lossy(&o.stdout).contains(&fingerprint(&key)));
 
     // The artifact changed after signing: the bundle names another digest.
     std::fs::write(&artifact, b"the program, tampered").unwrap();
-    let o = b.run(&[
-        "ext",
-        "verify",
-        &art,
-        "--bundle",
-        good_s,
-        "--publisher-key",
-        pem_s,
-        "--json",
-    ]);
+    let o = verify(&b, &art, good_s, pem_s, true);
     assert_ne!(code(&o), 0, "{}", text(&o));
     let j = stdout_json(&o);
     assert_eq!(j["ok"], false);
@@ -1439,30 +1430,14 @@ async fn verifying_an_artifact_accepts_a_good_bundle_and_refuses_a_tampered_one(
     let bad = b.dir.path().join("bad.sigstore.json");
     std::fs::write(&bad, v.to_string()).unwrap();
     std::fs::write(&artifact, b"the program").unwrap();
-    let o = b.run(&[
-        "ext",
-        "verify",
-        &art,
-        "--bundle",
-        bad.to_str().unwrap(),
-        "--publisher-key",
-        pem_s,
-    ]);
+    let o = verify(&b, &art, bad.to_str().unwrap(), pem_s, false);
     assert_ne!(code(&o), 0, "{}", text(&o));
     assert!(text(&o).contains("is not trusted"), "{}", text(&o));
 
     // A signer the publisher key does not name.
     let other = b.dir.path().join("stranger.pem");
     std::fs::write(&other, stranger.public_key_der().unwrap().to_pem()).unwrap();
-    let o = b.run(&[
-        "ext",
-        "verify",
-        &art,
-        "--bundle",
-        good_s,
-        "--publisher-key",
-        other.to_str().unwrap(),
-    ]);
+    let o = verify(&b, &art, good_s, other.to_str().unwrap(), false);
     assert_ne!(code(&o), 0, "{}", text(&o));
 
     // No bundle, and a missing file, are usage errors, not a pass.
