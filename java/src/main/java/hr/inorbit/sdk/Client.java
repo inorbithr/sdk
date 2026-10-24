@@ -54,7 +54,7 @@ import java.util.function.UnaryOperator;
 public final class Client {
 
     /** This runtime's version. */
-    public static final String SDK_VERSION = "0.2.2"; // x-release-please-version
+    public static final String SDK_VERSION = "0.3.0"; // x-release-please-version
 
     /** Where the API is. */
     public static final String DEFAULT_BASE_URL = "https://api.inorbit.hr";
