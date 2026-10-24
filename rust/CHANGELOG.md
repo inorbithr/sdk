@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/inorbithr/sdk/compare/rust/v0.3.0...rust/v0.4.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rust:** a model or query-parameter struct can no longer be built with a struct literal or `..Default::default()` outside the crate; use `Model::default().with_field(value)` (or `Model::new(..)`). A match on a generated enum needs a `_` arm. Surface cannot be implemented outside the generated surface.
+
+### Features
+
+* **rust:** models and query parameters are non_exhaustive, built with setters; Surface is sealed ([#180](https://github.com/inorbithr/sdk/issues/180)) ([918625a](https://github.com/inorbithr/sdk/commit/918625a9b2a4e02f2f58499cc5546cd7c759e9b0))
+
 ## [0.3.0](https://github.com/inorbithr/sdk/compare/rust/v0.2.2...rust/v0.3.0) (2026-10-24)
 
 
