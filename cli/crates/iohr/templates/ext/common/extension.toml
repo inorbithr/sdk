@@ -1,0 +1,63 @@
+# The manifest of @@ID@@ (PRD 0084). Every field is here, so you can see what an
+# extension may declare. `iohr ext lint --preview` reads it back in plain words, the
+# way an installer will show it to the person who installs it. Unknown keys are errors.
+
+id = "@@ID@@"                    # publisher/name, as the catalogue lists it
+version = "0.1.0"                # semver; `iohr ext version` bumps it (a later slice)
+kind = "program"                 # RFC 0073 kind; a program runs as its own process
+delivery = "program"             # RFC 0073.1: how it arrives on a target
+entrypoint = "@@ENTRYPOINT@@"    # the program's path inside the artifact
+args = []                        # arguments it is started with
+description = "Writes a heartbeat every minute and asks iohr for a token with its declared scope."
+api = ">=2026.10"                # the API versions it works with
+
+# Secrets are references, never values: `ref` is a name the target resolves (on this
+# Mac a Keychain item, service hr.inorbit.iohr.ext and account <ref>; or the variable
+# IOHR_EXT_SECRET_<NAME> while you develop), given to the program as `env`.
+secrets = []
+# secrets = [{ name = "github_token", ref = "github-token", env = "GITHUB_TOKEN" }]
+
+[runs]
+as = "service"                   # service | timer | oneshot
+# every = "5m"                   # for a timer: 5m, 1h, "weekdays 17:00"
+restart = "on-failure"           # always | on-failure | never
+shutdown_grace = "10s"           # how long it has to stop when asked
+
+[permissions]
+scopes = ["identity:read"]       # API scopes it may ask iohr for; anything else is refused
+privileges = []                  # Linux capabilities of a system service; none here
+network = []                     # hosts it may reach, such as "api.github.com:443"
+exec = []                        # programs it may start, such as "git"; never a shell
+
+[permissions.filesystem]
+read = ["$STATE"]                # $STATE and $CACHE are its own folders, made for it
+write = ["$STATE", "$CACHE"]
+
+[permissions.data]
+leaves = ["extension.health"]    # what it may send up: ADR 0063's non-sensitive kinds only
+
+[resources]
+cpu = 1
+memory = "64MiB"
+disk = "16MiB"                   # for $CACHE; an installer refuses a target with less
+nice = 10
+
+[health]
+heartbeat = "$STATE/heartbeat.json"   # written every heartbeat_every
+heartbeat_every = "60s"
+stale_after = "5m"
+# check = { exec = ["@@NAME@@", "status"], every = "5m" }   # optional: exits 0 with JSON `ok`
+
+[targets]
+platforms = [@@PLATFORMS@@]
+kinds = ["desktop", "host"]      # this Mac, a host over SSH; "agent" for a customer agent
+needs = [@@NEEDS@@]              # programs the target must have
+
+[upgrade]
+strategy = "replace"             # replace | drain (let the current job finish first)
+keep_previous = 2                # artifacts kept for rollback
+# migrate = { exec = ["@@NAME@@", "migrate"] }     # optional, once before the new version starts
+# rollback = { exec = ["@@NAME@@", "rollback"] }   # optional, on rollback
+
+[dev]
+lang = "@@LANG@@"                # how `iohr ext dev` runs this folder

@@ -672,7 +672,7 @@ async fn call_typed(client: &Client<Public>, action: &Action) -> Result<RawRespo
             let id = arg("endpoint_id").unwrap_or_default();
             client.events().delete_endpoint(&id).await.map(|r| r.raw)
         }
-        "rfcs.create_document" => {
+        "decisions.create_document" => {
             let space = arg("space_id").unwrap_or_default();
             let mut fields = action.args.clone();
             fields.remove("space_id"); // the path carries it
@@ -680,7 +680,7 @@ async fn call_typed(client: &Client<Public>, action: &Action) -> Result<RawRespo
                 serde_json::from_value(Value::Object(fields.into_iter().collect()))
                     .expect("the case's args are a CreateDocumentRequest");
             client
-                .rfcs()
+                .decisions()
                 .create_document(&space, &body)
                 .await
                 .map(|r| r.raw)
@@ -1135,7 +1135,7 @@ fn vectors(kind: &str) -> Vec<(PathBuf, Value)> {
         .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
         .map(|p| {
             let text = std::fs::read_to_string(&p).unwrap();
-            let v: Value = serde_yaml_ng::from_str(&text).unwrap();
+            let v: Value = serde_saphyr::from_str(&text).unwrap();
             (p, v)
         })
         .filter(|(_, v)| {

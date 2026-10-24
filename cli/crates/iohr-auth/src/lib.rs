@@ -22,6 +22,7 @@ mod error;
 mod flow;
 pub mod loopback;
 mod oidc;
+mod page;
 mod pkce;
 mod secret;
 mod session;
@@ -29,7 +30,8 @@ mod store;
 
 pub use claims::{Claims, ClaimsError};
 pub use config::{
-    Config, ConfigError, ExtConfig, Kind, Profile, ProfileName, ProfileNameError, Storage,
+    Config, ConfigError, ExtConfig, Kind, Profile, ProfileName, ProfileNameError, RunnerConfig,
+    Storage,
 };
 pub use credential::{Bearer, Credential, StaticToken};
 pub use error::AuthError;

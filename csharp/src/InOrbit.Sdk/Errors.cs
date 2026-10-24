@@ -47,6 +47,9 @@ public readonly record struct Code(string Value)
     /// <summary>The request is well formed but its content cannot be processed.</summary>
     public static Code Unprocessable { get; } = new("unprocessable");
 
+    /// <summary>This client is older than the platform still serves; upgrade it.</summary>
+    public static Code UpgradeRequired { get; } = new("upgrade_required");
+
     /// <summary>Too many requests; try again shortly.</summary>
     public static Code RateLimited { get; } = new("rate_limited");
 
@@ -81,6 +84,7 @@ public readonly record struct Code(string Value)
         ["payload_too_large"] = 413,
         ["unsupported_media_type"] = 415,
         ["unprocessable"] = 422,
+        ["upgrade_required"] = 426,
         ["rate_limited"] = 429,
         ["quota_exceeded"] = 429,
         ["cancelled"] = 499,
@@ -110,6 +114,7 @@ public readonly record struct Code(string Value)
         413 => PayloadTooLarge,
         415 => UnsupportedMediaType,
         422 => Unprocessable,
+        426 => UpgradeRequired,
         429 => RateLimited,
         499 => Cancelled,
         501 => Unimplemented,

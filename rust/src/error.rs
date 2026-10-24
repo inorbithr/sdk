@@ -358,6 +358,8 @@ pub enum Code {
     UnsupportedMediaType,
     /// 422: the request is well formed but its content cannot be processed.
     Unprocessable,
+    /// 426: this client is older than the platform still serves; upgrade it.
+    UpgradeRequired,
     /// 429: too many requests.
     RateLimited,
     /// 429: the account's allowance is used up.
@@ -377,7 +379,7 @@ pub enum Code {
 }
 
 impl Code {
-    const KNOWN: [(Code, &'static str, u16); 18] = [
+    const KNOWN: [(Code, &'static str, u16); 19] = [
         (Code::BadRequest, "bad_request", 400),
         (Code::FailedPrecondition, "failed_precondition", 400),
         (Code::Unauthenticated, "unauthenticated", 401),
@@ -389,6 +391,7 @@ impl Code {
         (Code::PayloadTooLarge, "payload_too_large", 413),
         (Code::UnsupportedMediaType, "unsupported_media_type", 415),
         (Code::Unprocessable, "unprocessable", 422),
+        (Code::UpgradeRequired, "upgrade_required", 426),
         (Code::RateLimited, "rate_limited", 429),
         (Code::QuotaExceeded, "quota_exceeded", 429),
         (Code::Cancelled, "cancelled", 499),
@@ -432,6 +435,7 @@ impl Code {
             413 => Self::PayloadTooLarge,
             415 => Self::UnsupportedMediaType,
             422 => Self::Unprocessable,
+            426 => Self::UpgradeRequired,
             429 => Self::RateLimited,
             499 => Self::Cancelled,
             501 => Self::Unimplemented,
@@ -720,6 +724,9 @@ mod tests {
         assert_eq!(Code::from("unprocessable"), Code::Unprocessable);
         assert_eq!(Code::Unprocessable.http_status(), Some(422));
         assert_eq!(Code::for_status(422), Code::Unprocessable);
+        assert_eq!(Code::from("upgrade_required"), Code::UpgradeRequired);
+        assert_eq!(Code::UpgradeRequired.http_status(), Some(426));
+        assert_eq!(Code::for_status(426), Code::UpgradeRequired);
     }
 
     #[test]

@@ -67,6 +67,11 @@ OpenTelemetry are in [docs/recipes.md](../docs/recipes.md).
   fails); a secret file is read before every exchange and a token file again when it
   changes, so rotated Kubernetes Secrets need no restart. `TokenFile`, `CliToken`,
   `CachedToken` and `ChainedCredential` are public for a chain of your own.
+- **As an iohr extension**: when `iohr` runs the program (`IOHR_EXT_TOKEN_SOCKET` set),
+  `Client::load` takes tokens from `iohr`'s channel and from nowhere else, and calls
+  `IOHR_EXT_API`; a token or key set in code is refused. `ExtSocketToken` asks the
+  channel directly, for chosen scopes
+  ([developing extensions](../docs/extensions/developing.md)).
 - **Retries** connection failures, timeouts and `429`, `503`, `504`, on idempotent calls
   and on writes that take an `Idempotency-Key` (a key per call, the same on every
   attempt), 2 times by default, honouring `Retry-After` (seconds or a date) up to 60 s and

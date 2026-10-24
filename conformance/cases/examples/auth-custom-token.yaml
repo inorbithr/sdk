@@ -1,0 +1,10 @@
+name: auth-custom-token
+area: examples
+summary: "A token provider the caller writes supplies the bearer for every attempt: no key exchange."
+action: { op: example }
+exchanges:
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer custom-token-1 } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  attempts: 1
+  token_exchanges: 0

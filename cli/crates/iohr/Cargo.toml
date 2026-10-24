@@ -24,6 +24,7 @@ iohr-lab.workspace = true
 iohr-openapi.workspace = true
 inorbithr.workspace = true
 
+aws-lc-rs.workspace = true
 base64.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
@@ -45,9 +46,8 @@ url.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-serde_yaml_ng.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 wiremock.workspace = true
 
 [lints]
@@ -57,7 +57,7 @@ workspace = true
 # musl binary with `cargo deb --no-build`. Paths are relative to this crate.
 [package.metadata.deb]
 name = "iohr"
-maintainer = "InOrbit d.o.o. <nevio@inorbit.hr>"
+maintainer = "InOrbit d.o.o. <reach@inorbit.hr>"
 copyright = "2026, InOrbit d.o.o."
 license-file = ["../../../LICENSE", "0"]
 extended-description = """\

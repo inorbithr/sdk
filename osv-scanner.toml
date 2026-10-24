@@ -1,0 +1,22 @@
+# OSV-Scanner config for `mise run audit:osv`. Every ignore carries a reason and an expiry,
+# so it comes back for review (same three advisories as cli/deny.toml).
+
+# zbus 6 absorbed these three crates, so RustSec marks them unmaintained; no vulnerability and
+# no fixed version. They arrive through iohr-auth -> zbus-secret-service-keyring-store ->
+# secret-service 5.2.0 (the latest) -> zbus 5, with no release on zbus 6 yet
+# (https://github.com/z-galaxy/zbus/issues/2043). Remove all three once secret-service ships
+# on zbus 6 (owner decision apr_01M57RXDB6NG3F183GPCJZC5SY).
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+ignoreUntil = 2026-12-19
+reason = "zvariant unmaintained (merged into zbus 6); held by secret-service 5 on zbus 5"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+ignoreUntil = 2026-12-19
+reason = "zbus_names unmaintained (merged into zbus 6); held by secret-service 5 on zbus 5"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+ignoreUntil = 2026-12-19
+reason = "zvariant_derive unmaintained (merged into zbus 6); held by secret-service 5 on zbus 5"

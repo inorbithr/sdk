@@ -2,8 +2,10 @@
 //!
 //! A listener on `127.0.0.1` (or `[::1]` when IPv4 loopback is unavailable) on a port
 //! the operating system picks. It answers anything but `GET /callback` with an error
-//! and keeps waiting; the first `GET /callback` ends it. The page it returns loads
-//! nothing from anywhere and tells the browser not to send a referrer.
+//! and keeps waiting; the first `GET /callback` ends it, and its page is sent once the
+//! sign-in has succeeded or failed. The pages (`crate::page`) load nothing from
+//! anywhere, run only their own hashed script, and tell the browser not to send a
+//! referrer.
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -12,6 +14,8 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Instant, timeout, timeout_at};
+
+use crate::page::{Page, Rendered};
 
 /// How long a browser sign-in may take before the listener gives up.
 pub const SIGN_IN_WINDOW: Duration = Duration::from_mins(5);
@@ -141,17 +145,14 @@ impl Listener {
         &self.redirect_uri
     }
 
-    /// Waits for the one `GET /callback`, at most `window`, and answers it with a
-    /// page saying whether the sign-in can continue (`ok` decides which page; the
-    /// caller checks the callback before the page is sent).
+    /// Waits for the one `GET /callback`, at most `window`. Other requests are answered
+    /// at once and the wait goes on; the callback's answer is left to the caller, who
+    /// sends it with [`Reply::send`] once the sign-in has succeeded or failed.
     ///
     /// # Errors
     ///
     /// [`io::ErrorKind::TimedOut`] when the window passes, or the listener's I/O error.
-    pub async fn accept_callback<F>(self, window: Duration, check: F) -> io::Result<Callback>
-    where
-        F: Fn(&Callback) -> bool,
-    {
+    pub async fn accept_callback(self, window: Duration) -> io::Result<(Callback, Reply)> {
         let deadline = Instant::now() + window;
         loop {
             let (mut stream, _) =
@@ -167,19 +168,29 @@ impl Listener {
                 continue;
             };
             match parse_request(&head) {
-                Ok(Request::Callback(cb)) => {
-                    let page = if check(&cb) { DONE } else { FAILED };
-                    let _ = respond(&mut stream, "200 OK", page).await;
-                    return Ok(cb);
-                }
+                Ok(Request::Callback(cb)) => return Ok((cb, Reply { stream })),
                 Ok(Request::OtherMethod) => {
-                    let _ = respond(&mut stream, "405 Method Not Allowed", NOT_HERE).await;
+                    let _ = respond(&mut stream, "405 Method Not Allowed", Page::NotHere).await;
                 }
                 Ok(Request::OtherPath) | Err(_) => {
-                    let _ = respond(&mut stream, "404 Not Found", NOT_HERE).await;
+                    let _ = respond(&mut stream, "404 Not Found", Page::NotHere).await;
                 }
             }
         }
+    }
+}
+
+/// The browser's open connection, waiting for the page that says how the sign-in went.
+#[derive(Debug)]
+pub struct Reply {
+    stream: TcpStream,
+}
+
+impl Reply {
+    /// Sends `page` and closes the connection. A browser that went away is not an
+    /// error worth reporting: the terminal has the outcome either way.
+    pub(crate) async fn send(mut self, page: Page<'_>) {
+        let _ = timeout(READ_WINDOW, respond(&mut self.stream, "200 OK", page)).await;
     }
 }
 
@@ -199,11 +210,13 @@ async fn read_head(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     }
 }
 
-async fn respond(stream: &mut TcpStream, status: &str, body: &str) -> io::Result<()> {
+async fn respond(stream: &mut TcpStream, status: &str, page: Page<'_>) -> io::Result<()> {
+    let Rendered { body, csp } = page.render();
     let head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
-         Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n\
+         Content-Security-Policy: {csp}\r\n\
          Referrer-Policy: no-referrer\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\
+         X-Frame-Options: DENY\r\n\
          Connection: close\r\n\r\n",
         body.len()
     );
@@ -212,38 +225,9 @@ async fn respond(stream: &mut TcpStream, status: &str, body: &str) -> io::Result
     stream.shutdown().await
 }
 
-/// The one style the pages share, inline: the page loads nothing (`default-src 'none'`).
-macro_rules! style {
-    () => {
-        "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#111}\
-         @media(prefers-color-scheme:dark){body{background:#111;color:#eee}}</style>"
-    };
-}
-
-const DONE: &str = concat!(
-    "<!doctype html><html lang=en><meta charset=utf-8><title>iohr: signed in</title>",
-    style!(),
-    "<h1>Signed in</h1><p>You can close this tab and go back to the terminal.</p>"
-);
-
-const FAILED: &str = concat!(
-    "<!doctype html><html lang=en><meta charset=utf-8><title>iohr: sign-in failed</title>",
-    style!(),
-    "<h1>Sign-in did not finish</h1><p>The terminal says why. Close this tab and run <code>iohr login</code> again.</p>"
-);
-
-const NOT_HERE: &str = "<!doctype html><title>iohr</title><p>Nothing here.</p>";
-
 #[cfg(test)]
 mod tests {
     use super::{Callback, ParseError, Request, parse_request};
-
-    #[test]
-    fn the_pages_load_nothing() {
-        for page in [super::DONE, super::FAILED, super::NOT_HERE] {
-            assert!(!page.contains("src=") && !page.contains("href=") && !page.contains("<script"));
-        }
-    }
 
     #[test]
     fn reads_the_callback() {

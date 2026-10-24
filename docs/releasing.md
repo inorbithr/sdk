@@ -21,6 +21,8 @@ The repository went public on 2026-10-01. These items waited for that.
 
 ## How a release happens
 
+The workflows (`release`, `cli-build`, `ci`, `fuzz`, `pr-title`) stay enabled on this public repository; a disabled `release` workflow starts no release-please run, and a manual run only republishes an existing tag.
+
 1. Conventional Commits land on `main` (`feat(go): ...`, `fix(py): ...`).
 2. The `release-please` workflow opens or updates one PR per package
    ("chore(main): release go 0.2.0") with the version bump and the changelog.
@@ -74,6 +76,18 @@ Conventional Commits that touched it; nobody sets one by hand (no `release-as`, 
 | Installers (`https://packages.inorbit.hr/install.sh`, `.ps1`) | uploaded by `iohr-apt`; `iohr-install` runs them against the release | as above |
 | Homebrew (`inorbithr/homebrew-tap`) | `iohr-tap`: a formula PR the tap's CI installs and tests; a maintainer merges it | release GitHub App, token limited to the tap |
 | winget | `iohr-winget`: manifests generated and schema-checked, kept as an artifact; submitted to `microsoft/winget-pkgs` by hand from the first stable release | a maintainer's GitHub account with a fork of winget-pkgs |
+
+The Homebrew formula pins every archive by its checksum from the release's `SHA256SUMS`, so
+`iohr-tap` can only run after the `iohr` job has published the release's files, and that
+job waits for a maintainer's approval in `release-cli`. When it is never approved, or its
+run is cancelled (as for `iohr/v0.1.0-alpha.15`, 2026-10), the release exists without
+files and the tap stays on the earlier version. With GitHub Actions paused the workflow
+cannot run at all. Once a release has its files, `mise run cli:tap-local <version>` does what
+`iohr-tap` does from a maintainer's machine (`--dry-run` prints the formula first; the token
+is `GH_TOKEN` or `gh auth token`, with write access to the tap); a maintainer still merges
+the pull request. It cannot create the files: the archives carry GitHub build attestations,
+which only the workflow's identity can make. Brew users also need `brew trust
+inorbithr/tap` once; `iohr upgrade` prints that when Homebrew refuses.
 
 ## One-time setup (before the first release)
 
@@ -191,3 +205,15 @@ with 2FA. release-please does not run on a manual run, so nothing new is tagged.
 When the version is already staged on npm and a later step failed (the SBOM, the
 attestation, the release files or JSR), add `typescript_npm_staged`: the run builds and
 packs the same tag again but does not stage it a second time.
+
+## Examples gate (RFC 0165)
+
+A release needs the examples to have run green against the live API on its exact commit.
+`mise run examples:run` writes `examples-results.json`; `mise run examples:attest` posts
+the commit status `examples-run` on HEAD, and only when the file is for HEAD, the tree was
+clean, nothing failed and every language under `examples/` has a passing example.
+The `examples-gate` job in `release.yml` runs before every publish job and fails unless
+that status is `success` on the released commit (for a manual run, on the tag's commit).
+The release PR's merge commit is new, so run and attest on it, then re-run the failed
+jobs. `mise run examples:gate -- <ref>` checks the same thing by hand. The release-train
+agent refuses a roll of the SDK without it.
