@@ -36,6 +36,8 @@ final class OtelTelemetry implements Telemetry {
             List.of(0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0);
 
     private static final TextMapGetter<Map<String, String>> GETTER = new TextMapGetter<>() {
+        // keys is deprecated since OpenTelemetry 1.67 but abstract in older API versions: keep it.
+        @SuppressWarnings("deprecation")
         @Override
         public Iterable<String> keys(Map<String, String> carrier) {
             return carrier.keySet();

@@ -7,8 +7,14 @@ use crate::__codegen::{pages, path_segment};
 use crate::{Client, Error, EventStream, Method, Operation, Pages, Profile, Response};
 use super::models::*;
 use super::ops;
-/// The operations, as methods on [`Client`].
-pub trait Surface<P: Profile> {
+mod sealed {
+    /// Only this surface implements [`Surface`](super::Surface), so an operation added
+    /// to it is not a breaking change.
+    pub trait Sealed {}
+    impl<P: crate::Profile> Sealed for crate::Client<P> {}
+}
+/// The operations, as methods on [`Client`]. Sealed: only `Client<P>` implements it.
+pub trait Surface<P: Profile>: sealed::Sealed {
     /// The `accounts` operations.
     fn accounts(&self) -> Accounts<'_, P>;
     /// The `agents` operations.
@@ -3846,22 +3852,56 @@ impl<P: ops::UploadRecording> Trails<'_, P> {
         self.0.request(op).await
     }
 }
-/// The query parameters of `DELETE /v1/corrections/{correction_id}`; every field is optional.
+/// The query parameters of `DELETE /v1/corrections/{correction_id}`; every field is optional. Build them as
+/// `CorrectionsDeleteParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct CorrectionsDeleteParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/agents`; every field is optional.
+impl CorrectionsDeleteParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/agents`; every field is optional. Build them as
+/// `AgentsListAgentsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AgentsListAgentsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/audit`; every field is optional.
+impl AgentsListAgentsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/audit`; every field is optional. Build them as
+/// `AccountsListTeamEventsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsListTeamEventsParams {
     /// `action`
     pub action: ::std::option::Option<::std::string::String>,
@@ -3882,16 +3922,114 @@ pub struct AccountsListTeamEventsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections`; every field is optional.
+impl AccountsListTeamEventsParams {
+    /// Sets `action`.
+    #[must_use]
+    pub fn with_action(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.action = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `actor`.
+    #[must_use]
+    pub fn with_actor(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.actor = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `to`.
+    #[must_use]
+    pub fn with_to(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.to = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `limit`.
+    #[must_use]
+    pub fn with_limit(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.limit = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `after`.
+    #[must_use]
+    pub fn with_after(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.after = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections`; every field is optional. Build them as
+/// `ConnectionsListConnectionsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListConnectionsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections/history`; every field is optional.
+impl ConnectionsListConnectionsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections/history`; every field is optional. Build them as
+/// `ConnectionsListAccountHistoryParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListAccountHistoryParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
@@ -3906,40 +4044,171 @@ pub struct ConnectionsListAccountHistoryParams {
     /// `consumer`
     pub consumer: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants`; every field is optional.
+impl ConnectionsListAccountHistoryParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `connection_id`.
+    #[must_use]
+    pub fn with_connection_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.connection_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `action`.
+    #[must_use]
+    pub fn with_action(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.action = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `consumer`.
+    #[must_use]
+    pub fn with_consumer(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.consumer = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/grants`; every field is optional. Build them as
+/// `ConnectionsListGrantsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListGrantsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history`; every field is optional.
+impl ConnectionsListGrantsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/connections/{connection_id}/history`; every field is optional. Build them as
+/// `ConnectionsListHistoryParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListHistoryParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/domains`; every field is optional.
+impl ConnectionsListHistoryParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/domains`; every field is optional. Build them as
+/// `AccountsListDomainsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsListDomainsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/layouts`; every field is optional.
+impl AccountsListDomainsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/layouts`; every field is optional. Build them as
+/// `AccountsListLayoutsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsListLayoutsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/monitors`; every field is optional.
+impl AccountsListLayoutsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/monitors`; every field is optional. Build them as
+/// `ConnectionsListMonitorsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListMonitorsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
@@ -3954,8 +4223,63 @@ pub struct ConnectionsListMonitorsParams {
     /// `tag`
     pub tag: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs`; every field is optional.
+impl ConnectionsListMonitorsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `connection_id`.
+    #[must_use]
+    pub fn with_connection_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.connection_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `agent_id`.
+    #[must_use]
+    pub fn with_agent_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.agent_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `category`.
+    #[must_use]
+    pub fn with_category(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.category = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `tag`.
+    #[must_use]
+    pub fn with_tag(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.tag = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/runs`; every field is optional. Build them as
+/// `ConnectionsListMonitorRunsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListMonitorRunsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
@@ -3966,8 +4290,45 @@ pub struct ConnectionsListMonitorRunsParams {
     /// `status`
     pub status: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/series`; every field is optional.
+impl ConnectionsListMonitorRunsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/monitors/{monitor_id}/series`; every field is optional. Build them as
+/// `ConnectionsGetMonitorSeriesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsGetMonitorSeriesParams {
     /// `from`
     pub from: ::std::option::Option<::std::string::String>,
@@ -3976,8 +4337,36 @@ pub struct ConnectionsGetMonitorSeriesParams {
     /// `bucket_secs`
     pub bucket_secs: ::std::option::Option<i32>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/requests`; every field is optional.
+impl ConnectionsGetMonitorSeriesParams {
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `to`.
+    #[must_use]
+    pub fn with_to(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.to = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `bucket_secs`.
+    #[must_use]
+    pub fn with_bucket_secs(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.bucket_secs = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/requests`; every field is optional. Build them as
+/// `AccountsListRequestsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsListRequestsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
@@ -3990,8 +4379,54 @@ pub struct AccountsListRequestsParams {
     /// `after`
     pub after: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/units/series`; every field is optional.
+impl AccountsListRequestsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `after`.
+    #[must_use]
+    pub fn with_after(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.after = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/units/series`; every field is optional. Build them as
+/// `AccountsGetUnitSeriesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsGetUnitSeriesParams {
     /// `from`
     pub from: ::std::option::Option<::std::string::String>,
@@ -4000,48 +4435,177 @@ pub struct AccountsGetUnitSeriesParams {
     /// `by`
     pub by: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/orgs/{org_id}/usage`; every field is optional.
+impl AccountsGetUnitSeriesParams {
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `to`.
+    #[must_use]
+    pub fn with_to(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.to = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `by`.
+    #[must_use]
+    pub fn with_by(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.by = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/orgs/{org_id}/usage`; every field is optional. Build them as
+/// `AccountsGetUsageParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsGetUsageParams {
     /// `from`
     pub from: ::std::option::Option<::std::string::String>,
     /// `to`
     pub to: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/accounts/units/categories`; every field is optional.
+impl AccountsGetUsageParams {
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `to`.
+    #[must_use]
+    pub fn with_to(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.to = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/accounts/units/categories`; every field is optional. Build them as
+/// `AccountsListUnitCategoriesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsListUnitCategoriesParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/connections/kinds`; every field is optional.
+impl AccountsListUnitCategoriesParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/connections/kinds`; every field is optional. Build them as
+/// `ConnectionsListKindsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListKindsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/connections/tools`; every field is optional.
+impl ConnectionsListKindsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/connections/tools`; every field is optional. Build them as
+/// `ConnectionsListToolsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListToolsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/connectors`; every field is optional.
+impl ConnectionsListToolsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/connectors`; every field is optional. Build them as
+/// `ConnectionsListConnectorsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ConnectionsListConnectorsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/corrections`; every field is optional.
+impl ConnectionsListConnectorsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/corrections`; every field is optional. Build them as
+/// `CorrectionsListParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct CorrectionsListParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4060,8 +4624,81 @@ pub struct CorrectionsListParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/corrections/rules`; every field is optional.
+impl CorrectionsListParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `space_id`.
+    #[must_use]
+    pub fn with_space_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.space_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `agent`.
+    #[must_use]
+    pub fn with_agent(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.agent = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `kind`.
+    #[must_use]
+    pub fn with_kind(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.kind = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `noticed_by`.
+    #[must_use]
+    pub fn with_noticed_by(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.noticed_by = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/corrections/rules`; every field is optional. Build them as
+/// `CorrectionsRulesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct CorrectionsRulesParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4070,8 +4707,39 @@ pub struct CorrectionsRulesParams {
     /// `space_id`
     pub space_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/diagrams`; every field is optional.
+impl CorrectionsRulesParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `agent`.
+    #[must_use]
+    pub fn with_agent(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.agent = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `space_id`.
+    #[must_use]
+    pub fn with_space_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.space_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/diagrams`; every field is optional. Build them as
+/// `DecisionsSearchDiagramsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsSearchDiagramsParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4092,8 +4760,90 @@ pub struct DecisionsSearchDiagramsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/public/documents`; every field is optional.
+impl DecisionsSearchDiagramsParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `space_id`.
+    #[must_use]
+    pub fn with_space_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.space_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `document_id`.
+    #[must_use]
+    pub fn with_document_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.document_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `kind`.
+    #[must_use]
+    pub fn with_kind(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.kind = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `element_kind`.
+    #[must_use]
+    pub fn with_element_kind(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.element_kind = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `updated_after`.
+    #[must_use]
+    pub fn with_updated_after(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.updated_after = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/public/documents`; every field is optional. Build them as
+/// `DecisionsListPublicDocumentsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListPublicDocumentsParams {
     /// `space`
     pub space: ::std::option::Option<::std::string::String>,
@@ -4104,22 +4854,85 @@ pub struct DecisionsListPublicDocumentsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/public/spaces/{space}/diagrams/{diagram_id}`; every field is optional.
+impl DecisionsListPublicDocumentsParams {
+    /// Sets `space`.
+    #[must_use]
+    pub fn with_space(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.space = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `types`.
+    #[must_use]
+    pub fn with_types(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.types = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/public/spaces/{space}/diagrams/{diagram_id}`; every field is optional. Build them as
+/// `DecisionsGetPublicDiagramParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsGetPublicDiagramParams {
     /// `version`
     pub version: ::std::option::Option<i32>,
     /// `svg`
     pub svg: ::std::option::Option<bool>,
 }
-/// The query parameters of `GET /v1/decisions/public/spaces/{space}/{kind}/{number}`; every field is optional.
+impl DecisionsGetPublicDiagramParams {
+    /// Sets `version`.
+    #[must_use]
+    pub fn with_version(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.version = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `svg`.
+    #[must_use]
+    pub fn with_svg(mut self, value: impl ::std::convert::Into<bool>) -> Self {
+        self.svg = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/public/spaces/{space}/{kind}/{number}`; every field is optional. Build them as
+/// `DecisionsGetPublicDocumentParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsGetPublicDocumentParams {
     /// `version`
     pub version: ::std::option::Option<i32>,
 }
-/// The query parameters of `GET /v1/decisions/reviews`; every field is optional.
+impl DecisionsGetPublicDocumentParams {
+    /// Sets `version`.
+    #[must_use]
+    pub fn with_version(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.version = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/reviews`; every field is optional. Build them as
+/// `DecisionsListReviewQueueParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListReviewQueueParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4130,8 +4943,45 @@ pub struct DecisionsListReviewQueueParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces`; every field is optional.
+impl DecisionsListReviewQueueParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces`; every field is optional. Build them as
+/// `DecisionsListSpacesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListSpacesParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4150,8 +5000,78 @@ pub struct DecisionsListSpacesParams {
     /// `top_level`
     pub top_level: ::std::option::Option<bool>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/diagrams`; every field is optional.
+impl DecisionsListSpacesParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `parent_id`.
+    #[must_use]
+    pub fn with_parent_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.parent_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `kind`.
+    #[must_use]
+    pub fn with_kind(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.kind = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `department`.
+    #[must_use]
+    pub fn with_department(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.department = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `top_level`.
+    #[must_use]
+    pub fn with_top_level(mut self, value: impl ::std::convert::Into<bool>) -> Self {
+        self.top_level = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/diagrams`; every field is optional. Build them as
+/// `DecisionsListDiagramsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListDiagramsParams {
     /// `query`
     pub query: ::std::option::Option<::std::string::String>,
@@ -4160,24 +5080,87 @@ pub struct DecisionsListDiagramsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/diagrams/{diagram_id}`; every field is optional.
+impl DecisionsListDiagramsParams {
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/diagrams/{diagram_id}`; every field is optional. Build them as
+/// `DecisionsGetDiagramParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsGetDiagramParams {
     /// `version`
     pub version: ::std::option::Option<i32>,
     /// `svg`
     pub svg: ::std::option::Option<bool>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/diagrams/{diagram_id}/versions`; every field is optional.
+impl DecisionsGetDiagramParams {
+    /// Sets `version`.
+    #[must_use]
+    pub fn with_version(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.version = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `svg`.
+    #[must_use]
+    pub fn with_svg(mut self, value: impl ::std::convert::Into<bool>) -> Self {
+        self.svg = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/diagrams/{diagram_id}/versions`; every field is optional. Build them as
+/// `DecisionsListDiagramVersionsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListDiagramVersionsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents`; every field is optional.
+impl DecisionsListDiagramVersionsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents`; every field is optional. Build them as
+/// `DecisionsListDocumentsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListDocumentsParams {
     /// `status`
     pub status: ::std::option::Option<::std::string::String>,
@@ -4196,8 +5179,75 @@ pub struct DecisionsListDocumentsParams {
     /// `include_linked`
     pub include_linked: ::std::option::Option<bool>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}`; every field is optional.
+impl DecisionsListDocumentsParams {
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `types`.
+    #[must_use]
+    pub fn with_types(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.types = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `mine`.
+    #[must_use]
+    pub fn with_mine(mut self, value: impl ::std::convert::Into<bool>) -> Self {
+        self.mine = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `compact`.
+    #[must_use]
+    pub fn with_compact(mut self, value: impl ::std::convert::Into<bool>) -> Self {
+        self.compact = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `include_linked`.
+    #[must_use]
+    pub fn with_include_linked(
+        mut self,
+        value: impl ::std::convert::Into<bool>,
+    ) -> Self {
+        self.include_linked = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}`; every field is optional. Build them as
+/// `DecisionsGetDocumentParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsGetDocumentParams {
     /// `version`
     pub version: ::std::option::Option<i32>,
@@ -4208,8 +5258,42 @@ pub struct DecisionsGetDocumentParams {
     /// `section`
     pub section: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/comments`; every field is optional.
+impl DecisionsGetDocumentParams {
+    /// Sets `version`.
+    #[must_use]
+    pub fn with_version(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.version = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `diff_from`.
+    #[must_use]
+    pub fn with_diff_from(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.diff_from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `related`.
+    #[must_use]
+    pub fn with_related(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.related = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `section`.
+    #[must_use]
+    pub fn with_section(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.section = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/comments`; every field is optional. Build them as
+/// `DecisionsListCommentsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListCommentsParams {
     /// `status`
     pub status: ::std::option::Option<::std::string::String>,
@@ -4218,8 +5302,36 @@ pub struct DecisionsListCommentsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/reviews`; every field is optional.
+impl DecisionsListCommentsParams {
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/reviews`; every field is optional. Build them as
+/// `DecisionsListReviewsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListReviewsParams {
     /// `status`
     pub status: ::std::option::Option<::std::string::String>,
@@ -4228,8 +5340,36 @@ pub struct DecisionsListReviewsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/timeline`; every field is optional.
+impl DecisionsListReviewsParams {
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/timeline`; every field is optional. Build them as
+/// `DecisionsListTimelineParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListTimelineParams {
     /// `from`
     pub from: ::std::option::Option<::std::string::String>,
@@ -4240,22 +5380,91 @@ pub struct DecisionsListTimelineParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/versions`; every field is optional.
+impl DecisionsListTimelineParams {
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `to`.
+    #[must_use]
+    pub fn with_to(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.to = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/documents/{document_id}/versions`; every field is optional. Build them as
+/// `DecisionsListVersionsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListVersionsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/export`; every field is optional.
+impl DecisionsListVersionsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/export`; every field is optional. Build them as
+/// `DecisionsExportSpaceParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsExportSpaceParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/questions`; every field is optional.
+impl DecisionsExportSpaceParams {
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/questions`; every field is optional. Build them as
+/// `DecisionsListQuestionsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListQuestionsParams {
     /// `status`
     pub status: ::std::option::Option<::std::string::String>,
@@ -4264,8 +5473,36 @@ pub struct DecisionsListQuestionsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/spaces/{space_id}/timeline`; every field is optional.
+impl DecisionsListQuestionsParams {
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/spaces/{space_id}/timeline`; every field is optional. Build them as
+/// `DecisionsListTimelineGetParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsListTimelineGetParams {
     /// `document_id`
     pub document_id: ::std::option::Option<::std::string::String>,
@@ -4278,28 +5515,122 @@ pub struct DecisionsListTimelineGetParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/tree`; every field is optional.
+impl DecisionsListTimelineGetParams {
+    /// Sets `document_id`.
+    #[must_use]
+    pub fn with_document_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.document_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `to`.
+    #[must_use]
+    pub fn with_to(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.to = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/tree`; every field is optional. Build them as
+/// `DecisionsGetSpaceTreeParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsGetSpaceTreeParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/decisions/waiting`; every field is optional.
+impl DecisionsGetSpaceTreeParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/decisions/waiting`; every field is optional. Build them as
+/// `DecisionsGetWaitingParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DecisionsGetWaitingParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/events/events`; every field is optional.
+impl DecisionsGetWaitingParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/events/events`; every field is optional. Build them as
+/// `EventsStreamEventsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsStreamEventsParams {
     /// `types`
     pub types: ::std::option::Option<::std::string::String>,
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/events/notifications`; every field is optional.
+impl EventsStreamEventsParams {
+    /// Sets `types`.
+    #[must_use]
+    pub fn with_types(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.types = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/events/notifications`; every field is optional. Build them as
+/// `EventsListNotificationsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsListNotificationsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
@@ -4310,24 +5641,102 @@ pub struct EventsListNotificationsParams {
     /// `types`
     pub types: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/events/stats`; every field is optional.
+impl EventsListNotificationsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `types`.
+    #[must_use]
+    pub fn with_types(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.types = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/events/stats`; every field is optional. Build them as
+/// `EventsGetEventStatsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsGetEventStatsParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
     /// `range`
     pub range: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/events/types`; every field is optional.
+impl EventsGetEventStatsParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `range`.
+    #[must_use]
+    pub fn with_range(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.range = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/events/types`; every field is optional. Build them as
+/// `EventsListEventTypesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsListEventTypesParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/extensions`; every field is optional.
+impl EventsListEventTypesParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/extensions`; every field is optional. Build them as
+/// `ExtensionsListExtensionsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ExtensionsListExtensionsParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4340,20 +5749,92 @@ pub struct ExtensionsListExtensionsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/extensions/{publisher}`; every field is optional.
+impl ExtensionsListExtensionsParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `kind`.
+    #[must_use]
+    pub fn with_kind(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.kind = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/extensions/{publisher}`; every field is optional. Build them as
+/// `ExtensionsGetPublisherParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ExtensionsGetPublisherParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/extensions/{publisher}/{name}`; every field is optional.
+impl ExtensionsGetPublisherParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/extensions/{publisher}/{name}`; every field is optional. Build them as
+/// `ExtensionsGetExtensionParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ExtensionsGetExtensionParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/extensions/{publisher}/{name}/versions`; every field is optional.
+impl ExtensionsGetExtensionParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/extensions/{publisher}/{name}/versions`; every field is optional. Build them as
+/// `ExtensionsListVersionsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ExtensionsListVersionsParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4362,8 +5843,36 @@ pub struct ExtensionsListVersionsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/radar/digests`; every field is optional.
+impl ExtensionsListVersionsParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/radar/digests`; every field is optional. Build them as
+/// `RadarListDigestsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct RadarListDigestsParams {
     /// `language`
     pub language: ::std::option::Option<::std::string::String>,
@@ -4380,8 +5889,69 @@ pub struct RadarListDigestsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/radar/items`; every field is optional.
+impl RadarListDigestsParams {
+    /// Sets `language`.
+    #[must_use]
+    pub fn with_language(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.language = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `lang`.
+    #[must_use]
+    pub fn with_lang(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.lang = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `limit`.
+    #[must_use]
+    pub fn with_limit(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.limit = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `include_drafts`.
+    #[must_use]
+    pub fn with_include_drafts(
+        mut self,
+        value: impl ::std::convert::Into<bool>,
+    ) -> Self {
+        self.include_drafts = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `before_week`.
+    #[must_use]
+    pub fn with_before_week(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.before_week = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/radar/items`; every field is optional. Build them as
+/// `RadarListItemsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct RadarListItemsParams {
     /// `language`
     pub language: ::std::option::Option<::std::string::String>,
@@ -4392,8 +5962,42 @@ pub struct RadarListItemsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/summaries`; every field is optional.
+impl RadarListItemsParams {
+    /// Sets `language`.
+    #[must_use]
+    pub fn with_language(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.language = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `limit`.
+    #[must_use]
+    pub fn with_limit(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.limit = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/summaries`; every field is optional. Build them as
+/// `SummariesRequestParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct SummariesRequestParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4404,8 +6008,48 @@ pub struct SummariesRequestParams {
     /// `window`
     pub window: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/trails/recordings`; every field is optional.
+impl SummariesRequestParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `from`.
+    #[must_use]
+    pub fn with_from(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.from = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `to`.
+    #[must_use]
+    pub fn with_to(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.to = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `window`.
+    #[must_use]
+    pub fn with_window(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.window = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/trails/recordings`; every field is optional. Build them as
+/// `TrailsListRecordingsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct TrailsListRecordingsParams {
     /// `query`
     pub query: ::std::option::Option<::std::string::String>,
@@ -4414,16 +6058,66 @@ pub struct TrailsListRecordingsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/usage/limits`; every field is optional.
+impl TrailsListRecordingsParams {
+    /// Sets `query`.
+    #[must_use]
+    pub fn with_query(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.query = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/usage/limits`; every field is optional. Build them as
+/// `AccountsGetUsageLimitsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct AccountsGetUsageLimitsParams {
     /// `org_id`
     pub org_id: ::std::option::Option<::std::string::String>,
     /// `user_id`
     pub user_id: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/webhooks/endpoints`; every field is optional.
+impl AccountsGetUsageLimitsParams {
+    /// Sets `org_id`.
+    #[must_use]
+    pub fn with_org_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.org_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `user_id`.
+    #[must_use]
+    pub fn with_user_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.user_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/webhooks/endpoints`; every field is optional. Build them as
+/// `EventsListEndpointsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsListEndpointsParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4432,8 +6126,36 @@ pub struct EventsListEndpointsParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries`; every field is optional.
+impl EventsListEndpointsParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/webhooks/endpoints/{endpoint_id}/deliveries`; every field is optional. Build them as
+/// `EventsListDeliveriesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsListDeliveriesParams {
     /// `status`
     pub status: ::std::option::Option<::std::string::String>,
@@ -4442,8 +6164,36 @@ pub struct EventsListDeliveriesParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
 }
-/// The query parameters of `GET /v1/webhooks/inboxes`; every field is optional.
+impl EventsListDeliveriesParams {
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/webhooks/inboxes`; every field is optional. Build them as
+/// `EventsListInboxesParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsListInboxesParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4452,16 +6202,63 @@ pub struct EventsListInboxesParams {
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/webhooks/inboxes/{inbox_id}/requests`; every field is optional.
+impl EventsListInboxesParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/webhooks/inboxes/{inbox_id}/requests`; every field is optional. Build them as
+/// `EventsListInboxRequestsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsListInboxRequestsParams {
     /// `page_size`
     pub page_size: ::std::option::Option<i32>,
     /// `page_token`
     pub page_token: ::std::option::Option<::std::string::String>,
 }
-/// The query parameters of `GET /v1/webhooks/stats`; every field is optional.
+impl EventsListInboxRequestsParams {
+    /// Sets `page_size`.
+    #[must_use]
+    pub fn with_page_size(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.page_size = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `page_token`.
+    #[must_use]
+    pub fn with_page_token(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.page_token = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+/// The query parameters of `GET /v1/webhooks/stats`; every field is optional. Build them as
+/// `EventsGetDeliveryStatsParams::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EventsGetDeliveryStatsParams {
     /// `account_id`
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -4469,4 +6266,33 @@ pub struct EventsGetDeliveryStatsParams {
     pub endpoint_id: ::std::option::Option<::std::string::String>,
     /// `range`
     pub range: ::std::option::Option<::std::string::String>,
+}
+impl EventsGetDeliveryStatsParams {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `endpoint_id`.
+    #[must_use]
+    pub fn with_endpoint_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.endpoint_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `range`.
+    #[must_use]
+    pub fn with_range(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.range = ::std::option::Option::Some(value.into());
+        self
+    }
 }
