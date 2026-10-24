@@ -12,7 +12,9 @@
 //! (lost if the runner exits; a durable one is a follow-up).
 
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::future::Future;
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Poll;
@@ -24,11 +26,13 @@ use tokio::time::Instant;
 
 use super::claude::Reply;
 use super::exec::{Exec, Finished};
+use super::gate::{self, Checked, Held, Skip};
 use super::service::{
     AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
     TurnReport, Usage,
 };
 use super::settings::{self, BuildFloor, Declared};
+use super::workspace::{self, Prepared, Shipped, Workspaces};
 
 /// The RFC's runner heartbeat. The service's proto does not carry an interval yet, so
 /// this is the default and `--interval` changes it.
@@ -42,6 +46,8 @@ const PROVIDER_EVERY: u64 = 15;
 const OUTBOX_MAX: usize = 8;
 /// Tries at fetching a pack before the lease is given up (it then expires).
 const FETCH_TRIES: u32 = 10;
+/// The longest a job's checkout may take to make (a first fetch of a large repository).
+const PREPARE_TIMEOUT: Duration = Duration::from_secs(600);
 /// The most turns one runner holds at once; the service clamps to the same.
 pub(crate) const MAX_CAPACITY: usize = settings::MAX_CAPACITY as usize;
 
@@ -68,6 +74,36 @@ pub(crate) struct LoopConfig {
     pub(crate) declared: Option<watch::Receiver<Declared>>,
     /// The build-disk guard; `None` turns it off.
     pub(crate) build_floor: Option<BuildFloor>,
+    /// The Checked gate's check, run in the job's checkout after a job turn finishes and
+    /// sent as a signed gate report before the turn's own report; `None` turns it off.
+    pub(crate) gate: Option<GateCheck>,
+    /// The checkouts of job leases (RFC 0147 slice A): made before the accept, shipped
+    /// as a pull request after a reply; `None` keeps the old behaviour (no checkout).
+    pub(crate) workspaces: Option<Arc<Workspaces>>,
+}
+
+/// What the run loop runs for the Checked gate (RFC 0120); the same check and the same
+/// report as `iohr runner gate-report`.
+#[derive(Debug, Clone)]
+pub(crate) struct GateCheck {
+    /// The turns' working directory (`ClaudeExec::workdir`): the pack's `checkout_path` is
+    /// relative to it.
+    pub(crate) workdir: PathBuf,
+    pub(crate) command: String,
+    pub(crate) timeout: Duration,
+    /// The runner's own environment, scrubbed by the check before the command sees it.
+    pub(crate) env: Vec<(OsString, OsString)>,
+}
+
+impl Default for GateCheck {
+    fn default() -> Self {
+        Self {
+            workdir: std::env::temp_dir(),
+            command: gate::DEFAULT_COMMAND.to_owned(),
+            timeout: Duration::from_secs(gate::DEFAULT_TIMEOUT_SECS),
+            env: std::env::vars_os().collect(),
+        }
+    }
 }
 
 impl Default for LoopConfig {
@@ -82,6 +118,8 @@ impl Default for LoopConfig {
             capacity: 1,
             declared: None,
             build_floor: None,
+            gate: None,
+            workspaces: None,
         }
     }
 }
@@ -133,15 +171,53 @@ pub(crate) struct Stats {
     pub(crate) rejected: u64,
 }
 
+/// A finished job turn whose lease is kept alive while the gate check runs and its report
+/// is sent; the turn's own report waits here and goes to the outbox after.
+struct Gating {
+    lease: Lease,
+    job_id: String,
+    report: TurnReport,
+    /// The shipping and the check, until they end; then the report is being sent.
+    check: Option<JoinHandle<Gated>>,
+}
+
+/// What a finished job turn's after-work did: the pull request (when the runner owns the
+/// checkout and the turn replied) and the check (when the gate runs).
+#[derive(Debug)]
+struct Gated {
+    shipped: Option<Result<Option<Shipped>, String>>,
+    checked: Option<Result<Checked, Skip>>,
+}
+
+/// A lease accepted, with its checkout when the runner made one; else its id.
+type Accepted = Result<(Lease, Option<Owned>), String>;
+
+/// A job lease's checkout, made by this runner before it accepted the lease, and the
+/// document the job serves (for the pull request's body).
+#[derive(Debug, Clone)]
+struct Owned {
+    checkout: Prepared,
+    document_id: String,
+}
+
+/// The sending of one gate report, with the lease it was for.
+type Sent = (String, i64, String);
+/// Tries at sending a gate report that did not get an answer.
+const GATE_SEND_TRIES: u32 = 3;
+/// The pause between those tries.
+const GATE_SEND_PAUSE: Duration = Duration::from_secs(2);
+
 struct Busy {
     lease: Lease,
     pack: Pack,
+    owned: Option<Owned>,
     handle: JoinHandle<Finished>,
 }
 
 /// An accepted lease whose pack is not fetched yet.
 struct Fetch {
     lease: Lease,
+    owned: Option<Owned>,
     tries: u32,
     /// Not before this instant is the pack asked for (again).
     next: Instant,
@@ -199,9 +275,15 @@ fn is_lease(l: &Lease, id: &str, token: i64) -> bool {
 
 /// Every lease the runner holds and must keep alive: the turn running, the pack being
 /// fetched, and each finished turn whose report is not delivered yet.
-fn held_leases(busy: &[Busy], fetching: &[Fetch], outbox: &VecDeque<TurnReport>) -> Vec<Lease> {
+fn held_leases(
+    busy: &[Busy],
+    fetching: &[Fetch],
+    gating: &[Gating],
+    outbox: &VecDeque<TurnReport>,
+) -> Vec<Lease> {
     let mut all: Vec<Lease> = busy.iter().map(|b| b.lease.clone()).collect();
     all.extend(fetching.iter().map(|f| f.lease.clone()));
+    all.extend(gating.iter().map(|g| g.lease.clone()));
     for r in outbox {
         if !all
             .iter()
@@ -284,6 +366,51 @@ async fn next_finished(busy: &mut Vec<Busy>) -> (Busy, Result<Finished, tokio::t
         Poll::Pending
     })
     .await
+}
+
+/// The first gate check to end, with its lease and how its task ended. Waits for ever when
+/// none runs.
+async fn next_checked(
+    gating: &mut [Gating],
+) -> (String, i64, Result<Gated, tokio::task::JoinError>) {
+    std::future::poll_fn(|cx| {
+        for g in gating.iter_mut() {
+            if let Some(h) = g.check.as_mut()
+                && let Poll::Ready(r) = Pin::new(h).poll(cx)
+            {
+                g.check = None;
+                return Poll::Ready((g.lease.lease_id.clone(), g.lease.fencing_token, r));
+            }
+        }
+        Poll::Pending
+    })
+    .await
+}
+
+/// Where the pack's checkout is on this machine: the pack names it relative to the turn's
+/// working directory (core: `checkouts/<job_id>`). A path that is absolute or climbs out of
+/// the working directory is refused: a pack is data, and the check runs a command there.
+fn checkout_in(workdir: &Path, checkout: &str) -> Result<PathBuf, String> {
+    let rel = Path::new(checkout);
+    if rel.components().all(|c| matches!(c, Component::Normal(_))) {
+        Ok(workdir.join(rel))
+    } else {
+        Err(format!(
+            "its checkout path {checkout:?} is not inside the working directory"
+        ))
+    }
+}
+
+/// Why a finished job turn gets no gate check, or `None` when it does: it must have
+/// replied, and its pack must name a checkout inside the working directory.
+fn no_gate_because(pack: &Pack, f: &Finished, workdir: &Path) -> Option<String> {
+    if !matches!(f.outcome.as_str(), "replied" | "unshaped") {
+        return Some(format!("the turn ended {}, not with a reply", f.outcome));
+    }
+    if pack.checkout.is_empty() {
+        return Some("its pack names no checkout to check".into());
+    }
+    checkout_in(workdir, &pack.checkout).err()
 }
 
 /// Delivers what is in the outbox, in order, until `limit` is up. A permanent refusal
@@ -373,10 +500,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut declared_build: Option<bool> = None;
     let mut busy: Vec<Busy> = Vec::new();
     // Accepts in flight: each answers with its lease when taken, else with its lease id.
-    let mut accepting: Vec<Op<'_, Result<Lease, String>>> = Vec::new();
+    let mut accepting: Vec<Op<'_, Accepted>> = Vec::new();
     // The ids of the leases being accepted, so a lease offered twice is taken once.
     let mut accepting_ids: Vec<String> = Vec::new();
     let mut fetching: Vec<Fetch> = Vec::new();
+    // Finished job turns whose gate check runs or whose gate report is being sent.
+    let mut gating: Vec<Gating> = Vec::new();
+    let mut gate_sends: Vec<Op<'_, Sent>> = Vec::new();
     let mut fetch_ops: Vec<Op<'_, Fetched>> = Vec::new();
     let mut beating: Option<Op<'_, (bool, Result<Beat, OpErr>)>> = None;
     let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
@@ -393,7 +523,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
 
     loop {
-        let held = held_leases(&busy, &fetching, &outbox);
+        let held = held_leases(&busy, &fetching, &gating, &outbox);
         let has_held = !held.is_empty();
         let now = Instant::now();
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
@@ -414,11 +544,12 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
         for f in fetching.iter_mut().filter(|f| !f.asking && now >= f.next) {
             f.asking = true;
             let lease = f.lease.clone();
+            let owned = f.owned.as_ref().map(|o| o.checkout.rel.clone());
             let limit = cfg.op_timeout;
             fetch_ops.push(Box::pin(async move {
                 let got = async {
                     let pack = bounded(limit, svc.fetch_pack(&lease)).await?;
-                    check_pack(&pack, &lease)?;
+                    check_pack(&pack, &lease, owned.as_deref())?;
                     Ok(pack)
                 }
                 .await;
@@ -450,6 +581,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             && busy.is_empty()
             && accepting.is_empty()
             && fetching.is_empty()
+            && gating.is_empty()
             && reporting.is_none()
             && (outbox.is_empty() || tries > 0)
         {
@@ -504,6 +636,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     stats.turns += 1;
                     outbox.push_back(unfinished(b, runner, "failed", "the runner was stopped before the turn finished".into()));
                 }
+                for g in gating.drain(..) {
+                    if let Some(h) = g.check {
+                        h.abort();
+                        let _ = h.await;
+                    }
+                    outbox.push_back(g.report);
+                }
+                drop(gate_sends);
                 stop(running, refresher.take()).await;
                 flush(svc, &mut outbox, cfg.flush_timeout, cfg.op_timeout, &mut stats, log).await;
                 return (End::Shutdown, stats);
@@ -546,7 +686,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         for lease in beat.offered {
                             let taken = busy.len() + accepting.len() + fetching.len();
                             let held_already = accepting_ids.contains(&lease.lease_id)
-                                || held_leases(&busy, &fetching, &outbox)
+                                || held_leases(&busy, &fetching, &gating, &outbox)
                                     .iter()
                                     .any(|l| l.lease_id == lease.lease_id);
                             if held_already {
@@ -569,7 +709,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                 ));
                             } else {
                                 accepting_ids.push(lease.lease_id.clone());
-                                accepting.push(Box::pin(accept_lease(svc, exec, lease, cfg.op_timeout, log)));
+                                accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), lease, cfg.op_timeout, log)));
                             }
                         }
                     }
@@ -587,7 +727,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     let (id, token) = (lease.lease_id.as_str(), lease.fencing_token);
                     // Only for a lease still held: an answer that comes after its
                     // report was delivered, or its turn was stopped, is ignored.
-                    if !held_leases(&busy, &fetching, &outbox)
+                    if !held_leases(&busy, &fetching, &gating, &outbox)
                         .iter()
                         .any(|l| is_lease(l, id, token))
                     {
@@ -603,6 +743,21 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         }
                     };
                     let Some(stopped) = ended else { continue };
+                    if let Some(i) = gating.iter().position(|g| is_lease(&g.lease, id, token)) {
+                        let g = gating.remove(i);
+                        if let Some(h) = g.check {
+                            h.abort();
+                            let _ = h.await;
+                        }
+                        if stopped {
+                            // Capped from above: the turn did finish, so its reply goes.
+                            log(&format!("lease {id} stopped by the service ({reason}): no gate report"));
+                            outbox.push_back(g.report);
+                            next_report = Instant::now();
+                        } else {
+                            log(&format!("lease {id} is gone ({reason}): no gate report"));
+                        }
+                    }
                     if let Some(i) = fetching.iter().position(|f| is_lease(&f.lease, id, token)) {
                         log(&format!("lease {id} ended before its pack came: {reason}"));
                         fetching.remove(i);
@@ -639,15 +794,149 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 stats.turns += 1;
                 let report = report_of(&b.lease, &b.pack, runner, &finished).limited();
                 log(&report.journal_line());
-                outbox.push_back(report);
-                next_report = Instant::now();
+                // The runner ships a replied turn of a checkout it owns: commit, push
+                // `job/<id>`, open or update the pull request; before the check, so the
+                // check sees the pushed head.
+                let ship = match (&b.owned, cfg.workspaces.as_ref(), &finished.parsed) {
+                    (Some(o), Some(w), Some(parsed)) if finished.outcome == "replied" => {
+                        let m = workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply);
+                        Some((Arc::clone(w), o.checkout.clone(), m))
+                    }
+                    (Some(_), Some(_), _) => {
+                        log(&format!("lease {}: nothing shipped, the turn ended {}", b.lease.lease_id, finished.outcome));
+                        None
+                    }
+                    _ => None,
+                };
+                let gate_run = cfg.gate.as_ref().and_then(|g| {
+                    let wanted = b.pack.kind == "job" || b.pack.kind == settings::BUILD;
+                    let why = no_gate_because(&b.pack, &finished, &g.workdir);
+                    if let Some(why) = &why
+                        && wanted
+                    {
+                        log(&format!("lease {}: no gate report, {why}", b.lease.lease_id));
+                    }
+                    let repo = checkout_in(&g.workdir, &b.pack.checkout).ok()?;
+                    (wanted && why.is_none()).then_some((g, repo))
+                });
+                if gate_run.is_some() || ship.is_some() {
+                    let check = gate_run.map(|(g, repo)| {
+                        log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
+                        (repo, g.command.clone(), g.timeout, g.env.clone())
+                    });
+                    let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
+                    gating.push(Gating {
+                        lease: b.lease,
+                        job_id,
+                        report,
+                        check: Some(tokio::spawn(async move {
+                            let shipped = match ship {
+                                Some((w, p, m)) => Some(w.ship(&p, &m).await),
+                                None => None,
+                            };
+                            let checked = match check {
+                                Some((repo, command, timeout, env)) => {
+                                    Some(gate::check(&repo, &command, timeout, env).await)
+                                }
+                                None => None,
+                            };
+                            Gated { shipped, checked }
+                        })),
+                    });
+                    next_lease_beat = Instant::now();
+                } else {
+                    outbox.push_back(report);
+                    next_report = Instant::now();
+                }
+            }
+            (id, token, joined) = next_checked(&mut gating) => {
+                let Some(g) = gating.iter_mut().find(|g| is_lease(&g.lease, &id, token)) else { continue };
+                let joined = joined.map(|gated| {
+                    match gated.shipped {
+                        Some(Ok(Some(s))) => {
+                            log(&format!("lease {id}: {}", s.evidence()));
+                            if !s.withheld.is_empty() {
+                                log(&format!(
+                                    "lease {id}: not committed, the names look like secrets: {}",
+                                    s.withheld.join(", ")
+                                ));
+                            }
+                            // The service takes at most 50 evidence lines.
+                            if g.report.evidence.len() < 50 {
+                                g.report.evidence.push(s.evidence());
+                            }
+                        }
+                        Some(Ok(None)) => log(&format!("lease {id}: nothing to ship, the branch has no change from main")),
+                        Some(Err(e)) => log(&format!("lease {id}: the pull request was not shipped: {e}")),
+                        None => {}
+                    }
+                    gated.checked
+                });
+                let g = &*g;
+                match joined {
+                    Ok(None) => {
+                        if let Some(i) = gating.iter().position(|g| is_lease(&g.lease, &id, token)) {
+                            outbox.push_back(gating.remove(i).report);
+                            next_report = Instant::now();
+                        }
+                    }
+                    Ok(Some(Ok(checked))) => {
+                        let gr = gate::report_of(
+                            Held {
+                                job_id: &g.job_id,
+                                lease_id: &id,
+                                fencing_token: token,
+                                runner_id: &runner.runner_id,
+                            },
+                            &checked,
+                        );
+                        let limit = cfg.op_timeout;
+                        gate_sends.push(Box::pin(async move {
+                            let mut tries = 0;
+                            let said = loop {
+                                tries += 1;
+                                match bounded(limit, gate::send(svc, &gr)).await {
+                                    Ok(Some(a)) => break format!(
+                                        "gate report for {} sent (exit {}, evidence {}, job is now {})",
+                                        gr.job_id, gr.exit_code, a.evidence_id, a.stage
+                                    ),
+                                    Ok(None) => break "this coordinator does not take gate reports yet; nothing was recorded".into(),
+                                    Err(e) if e.permanent || tries >= GATE_SEND_TRIES => {
+                                        break format!("gate report for {} not sent: {}", gr.job_id, e.msg);
+                                    }
+                                    Err(_) => tokio::time::sleep(GATE_SEND_PAUSE).await,
+                                }
+                            };
+                            (gr.lease_id.clone(), gr.fencing_token, said)
+                        }));
+                    }
+                    other => {
+                        let why = match other {
+                            Ok(Some(Err(skip))) => skip.to_string(),
+                            Err(e) => format!("the check's task stopped: {e}"),
+                            Ok(_) => String::new(),
+                        };
+                        log(&format!("lease {id}: no gate report was sent: {why}"));
+                        if let Some(i) = gating.iter().position(|g| is_lease(&g.lease, &id, token)) {
+                            outbox.push_back(gating.remove(i).report);
+                            next_report = Instant::now();
+                        }
+                    }
+                }
+            }
+            (id, token, said) = first_of(&mut gate_sends) => {
+                log(&format!("lease {id}: {said}"));
+                if let Some(i) = gating.iter().position(|g| is_lease(&g.lease, &id, token)) {
+                    outbox.push_back(gating.remove(i).report);
+                    next_report = Instant::now();
+                }
             }
             taken = first_of(&mut accepting) => {
                 match taken {
-                    Ok(lease) => {
+                    Ok((lease, owned)) => {
                         accepting_ids.retain(|id| *id != lease.lease_id);
                         stats.accepted += 1;
-                        fetching.push(Fetch { lease, tries: 0, next: Instant::now(), asking: false });
+                        fetching.push(Fetch { lease, owned, tries: 0, next: Instant::now(), asking: false });
                         next_lease_beat = Instant::now();
                     }
                     // Not accepted: `accept_lease` logged it and the lease expires.
@@ -664,6 +953,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         busy.push(Busy {
                             lease: f.lease,
                             pack,
+                            owned: f.owned,
                             handle: tokio::spawn(async move { task.execute(p).await }),
                         });
                     }
@@ -732,11 +1022,23 @@ fn is_lease_of(r: &TurnReport, id: &str, token: i64) -> bool {
 
 /// A pack the service sent must carry what a report needs: its hash and attempt, and be
 /// the lease's own turn.
-fn check_pack(p: &Pack, lease: &Lease) -> Result<(), OpErr> {
+fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr> {
     let hash_ok = p.pack_sha256.len() == 64 && p.pack_sha256.bytes().all(|b| b.is_ascii_hexdigit());
     if !hash_ok || p.attempt == 0 || (!lease.turn_id.is_empty() && p.turn_id != lease.turn_id) {
         return Err(OpErr {
             msg: "the pack has no valid hash and attempt, or is another turn's".into(),
+            permanent: true,
+        });
+    }
+    // The turn is told where its checkout is; it must be the one the runner made.
+    if let Some(rel) = owned
+        && p.checkout != rel
+    {
+        return Err(OpErr {
+            msg: format!(
+                "the pack names the checkout {:?}, the runner made {rel:?}",
+                p.checkout
+            ),
             permanent: true,
         });
     }
@@ -745,15 +1047,62 @@ fn check_pack(p: &Pack, lease: &Lease) -> Result<(), OpErr> {
 
 /// `AcceptLease` under the call limit; the lease's id when it was not accepted (the lease
 /// is left to expire and goes to another runner).
+///
+/// A job lease whose job names a repository gets its checkout first
+/// (`checkouts/<job_id>` on `job/<job_id>`, [`Workspaces::prepare`]); a checkout that
+/// cannot be made means the lease is not accepted. A coordinator without `GetJob` keeps
+/// the old behaviour.
 async fn accept_lease<S: Service, X: Exec>(
     svc: &S,
     exec: &Arc<X>,
+    workspaces: Option<&Workspaces>,
     lease: Lease,
     op_timeout: Duration,
     log: Log<'_>,
-) -> Result<Lease, String> {
+) -> Result<(Lease, Option<Owned>), String> {
+    let refuse = |why: &str| {
+        log(&format!("lease {} not accepted: {why}", lease.lease_id));
+        lease.lease_id.clone()
+    };
+    let mut owned = None;
+    if let Some(w) = workspaces
+        && !lease.job_id.is_empty()
+        && lease.turn_id.is_empty()
+    {
+        let job = match tokio::time::timeout(op_timeout, svc.get_job(&lease.job_id)).await {
+            Ok(Ok(j)) => Some(j),
+            Ok(Err(e)) if e.is_missing() => None,
+            Ok(Err(e)) => return Err(refuse(&format!("its job could not be read: {e}"))),
+            Err(_) => return Err(refuse("its job could not be read: timed out")),
+        };
+        if let Some(job) = job.filter(|j| !j.repository.is_empty()) {
+            let made =
+                tokio::time::timeout(PREPARE_TIMEOUT, w.prepare(&lease.job_id, &job.repository))
+                    .await
+                    .unwrap_or_else(|_| Err("making the checkout took too long".into()));
+            match made {
+                Ok(p) => {
+                    log(&format!(
+                        "lease {}: {} checkout {} on {} ({})",
+                        lease.lease_id,
+                        if p.reused { "reusing" } else { "made" },
+                        p.rel,
+                        p.branch,
+                        p.repository
+                    ));
+                    owned = Some(Owned {
+                        checkout: p,
+                        document_id: job.document_id,
+                    });
+                }
+                Err(e) => return Err(refuse(&format!("its checkout could not be made: {e}"))),
+            }
+        }
+    }
     let facts = AcceptFacts {
-        // A coordinate turn has no worktree: it runs in the runner's own empty directory.
+        // A job's checkout is a worktree this runner made for the job (`job/<id>`, never
+        // a main checkout; `prepare` verified both); a coordinate turn has no worktree
+        // and runs in the runner's own empty directory.
         worktree_fresh: true,
         worktree_is_main_checkout: false,
         env_scrubbed: exec.env_is_clean(),
@@ -761,11 +1110,8 @@ async fn accept_lease<S: Service, X: Exec>(
         caps_set: true,
     };
     match bounded(op_timeout, svc.accept(&lease, facts)).await {
-        Ok(()) => Ok(lease),
-        Err(e) => {
-            log(&format!("lease {} not accepted: {}", lease.lease_id, e.msg));
-            Err(lease.lease_id)
-        }
+        Ok(()) => Ok((lease, owned)),
+        Err(e) => Err(refuse(&e.msg)),
     }
 }
 
@@ -856,7 +1202,7 @@ mod tests {
     )]
     use super::*;
     use crate::runner::service::{
-        Challenge, GateAnswer, GateReport, ProviderState, Registration, ServiceError,
+        Challenge, GateAnswer, GateReport, JobInfo, ProviderState, Registration, ServiceError,
     };
     use std::collections::VecDeque;
     use std::future::Future;
@@ -911,6 +1257,14 @@ mod tests {
         gated: Mutex<bool>,
         /// What each heartbeat declared, in order.
         declared: Mutex<Vec<Declared>>,
+        /// Every gate report sent.
+        gate_reports: Mutex<Vec<GateReport>>,
+        /// Lease heartbeats are refused for good once this file exists.
+        release_when: Option<std::path::PathBuf>,
+        /// What `GetJob` answers; `None` is an older coordinator without it.
+        job: Option<JobInfo>,
+        /// `GetJob` fails, transiently.
+        job_down: bool,
     }
 
     impl Fake {
@@ -926,11 +1280,20 @@ mod tests {
         async fn challenge(&self) -> Result<Challenge, ServiceError> {
             Err(ServiceError::Refused("not used"))
         }
-        async fn submit_gate_report(&self, _: &GateReport) -> Result<GateAnswer, ServiceError> {
-            Err(ServiceError::Refused("not used"))
+        async fn submit_gate_report(&self, r: &GateReport) -> Result<GateAnswer, ServiceError> {
+            self.note(format!("gate_report {}", r.job_id));
+            self.gate_reports.lock().unwrap().push(r.clone());
+            Ok(GateAnswer {
+                evidence_id: "ev_1".into(),
+                duplicate: false,
+                stage: "checked".into(),
+            })
         }
         async fn lease_heartbeat(&self, l: &Lease) -> Result<LeaseBeat, ServiceError> {
             self.note(format!("lease_heartbeat {}", l.lease_id));
+            if self.release_when.as_ref().is_some_and(|f| f.exists()) {
+                return Err(ServiceError::Refused("the lease was released"));
+            }
             if self.lease_beats_down {
                 return Err(down());
             }
@@ -1019,6 +1382,22 @@ mod tests {
             self.note(format!("accept {} token={}", l.lease_id, l.fencing_token));
             Ok(())
         }
+        async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError> {
+            self.note(format!("job {job_id}"));
+            if self.job_down {
+                return Err(down());
+            }
+            self.job.clone().ok_or_else(|| {
+                let raw = inorbithr::RawResponse::for_tests(
+                    404,
+                    inorbithr::Headers::new([]),
+                    br#"{"code":"not_found","error":"no such route","details":[]}"#.to_vec(),
+                );
+                ServiceError::Api(inorbithr::Error::Api(Box::new(inorbithr::ApiError::parse(
+                    raw,
+                ))))
+            })
+        }
         async fn fetch_pack(&self, l: &Lease) -> Result<Pack, ServiceError> {
             self.note(format!("pack {}", l.lease_id));
             if self.pack_refused {
@@ -1078,6 +1457,8 @@ mod tests {
         crash_turn: Option<String>,
         /// The turn's reply has a `say` over the service's limit.
         big_say: bool,
+        /// The turn writes `made.txt` in this directory and replies with a pull request.
+        writes_in: Option<PathBuf>,
         asked: std::sync::atomic::AtomicU32,
     }
     impl Exec for FakeExec {
@@ -1095,6 +1476,7 @@ mod tests {
                 })
                 .map(Dropped);
             let big_say = self.big_say;
+            let writes_in = self.writes_in.clone();
             let slow = self
                 .slow_turn
                 .as_ref()
@@ -1121,23 +1503,35 @@ mod tests {
                         tokio::time::sleep(slow.or(all).unwrap_or(Duration::from_millis(30))).await;
                     }
                 }
-                let parsed = big_say.then(|| crate::runner::claude::Parsed {
-                    outcome: crate::runner::claude::Outcome::Replied,
-                    reply: crate::runner::claude::Reply {
-                        say: "x".repeat(20_001),
-                        state: String::new(),
-                        actions: vec![],
-                        evidence: vec![],
-                        left: vec![],
-                    },
-                    session_id: String::new(),
-                    num_turns: 1,
-                    duration_ms: 1,
-                    total_cost_usd: None,
-                    usage: serde_json::json!({}),
-                    denied_tools: vec![],
-                    resets_at: String::new(),
-                });
+                if let Some(dir) = &writes_in {
+                    std::fs::write(dir.join("made.txt"), "made\n").unwrap();
+                }
+                let parsed =
+                    (big_say || writes_in.is_some()).then(|| crate::runner::claude::Parsed {
+                        outcome: crate::runner::claude::Outcome::Replied,
+                        reply: crate::runner::claude::Reply {
+                            say: if big_say {
+                                "x".repeat(20_001)
+                            } else {
+                                "Made it.".into()
+                            },
+                            state: String::new(),
+                            actions: vec![
+                                serde_json::json!({"kind": "open_pull_request", "payload": {
+                            "title": "feat(app): make it", "implements": "RFC 0147",
+                            "prd": "0152", "adr": "0141"}}),
+                            ],
+                            evidence: vec![serde_json::json!("made.txt written")],
+                            left: vec![],
+                        },
+                        session_id: String::new(),
+                        num_turns: 1,
+                        duration_ms: 1,
+                        total_cost_usd: None,
+                        usage: serde_json::json!({}),
+                        denied_tools: vec![],
+                        resets_at: String::new(),
+                    });
                 Finished {
                     outcome: outcome.into(),
                     parsed,
@@ -1205,6 +1599,8 @@ mod tests {
             capacity: 1,
             declared: None,
             build_floor: None,
+            gate: None,
+            workspaces: None,
         }
     }
 
@@ -2027,5 +2423,314 @@ mod tests {
         assert_eq!(end, End::Shutdown);
         assert!(stats.beats >= 2);
         let _ = t.await;
+    }
+
+    fn gate_cfg(command: &str, workdir: &Path) -> GateCheck {
+        GateCheck {
+            workdir: workdir.to_owned(),
+            command: command.into(),
+            timeout: Duration::from_secs(20),
+            env: std::env::vars_os().collect(),
+        }
+    }
+
+    /// A job pack whose checkout is `work` under the working directory, as core names it.
+    fn job_pack() -> Pack {
+        Pack {
+            kind: "job".into(),
+            job_id: "job_1".into(),
+            checkout: "work".into(),
+            ..good_pack()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_finished_job_turn_sends_one_gate_report_with_its_lease_before_its_own_report() {
+        let (root, _origin, _work) = gate::tests::repos();
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(job_pack());
+        let c = LoopConfig {
+            gate: Some(gate_cfg("exit 3", root.path())),
+            ..cfg(6)
+        };
+        let (_, stats) = go(&fake, c).await;
+        assert_eq!((stats.turns, stats.reported), (1, 1));
+        let g = fake.gate_reports.lock().unwrap().clone();
+        assert_eq!(g.len(), 1, "exactly one gate report");
+        assert_eq!(
+            (
+                g[0].job_id.as_str(),
+                g[0].lease_id.as_str(),
+                g[0].fencing_token
+            ),
+            ("job_1", "lease_1", 7)
+        );
+        assert_eq!(g[0].runner_id, "run_1");
+        // A failing check is sent as it is.
+        assert_eq!((g[0].command.as_str(), g[0].exit_code), ("exit 3", 3));
+        let calls = fake.calls.lock().unwrap().clone();
+        let gate_at = calls.iter().position(|c| c == "gate_report job_1").unwrap();
+        let report_at = calls.iter().position(|c| c.starts_with("report ")).unwrap();
+        assert!(
+            gate_at < report_at,
+            "the lease is held until the gate is sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_turn_or_one_with_no_checkout_sends_no_gate_report() {
+        let (root, _origin, _work) = gate::tests::repos();
+        // The turn crashes: no reply, no check.
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(job_pack());
+        let (_tx, rx) = watch::channel(false);
+        let exec = Arc::new(FakeExec {
+            crash_turn: Some("turn_1".into()),
+            ..FakeExec::default()
+        });
+        let logged = Mutex::new(Vec::<String>::new());
+        let c = LoopConfig {
+            gate: Some(gate_cfg("true", root.path())),
+            ..cfg(4)
+        };
+        run_loop(&fake, &exec, &runner(), c, rx, &|m| {
+            logged.lock().unwrap().push(m.to_owned());
+        })
+        .await;
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+        assert!(
+            logged
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|m| m.contains("no gate report"))
+        );
+        // A pack with no checkout path: the turn is reported, nothing is checked.
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(Pack {
+            kind: "job".into(),
+            ..good_pack()
+        });
+        let c = LoopConfig {
+            gate: Some(gate_cfg("true", root.path())),
+            ..cfg(4)
+        };
+        let (_, stats) = go(&fake, c).await;
+        assert_eq!(stats.reported, 1);
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_checkout_is_found_under_the_working_directory_and_nowhere_else() {
+        let w = Path::new("/runner/coordinate");
+        assert_eq!(
+            checkout_in(w, "checkouts/job_1"),
+            Ok(PathBuf::from("/runner/coordinate/checkouts/job_1"))
+        );
+        for bad in ["/etc", "../x", "checkouts/../../x", "./.."] {
+            assert!(checkout_in(w, bad).is_err(), "{bad} must be refused");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pack_whose_checkout_climbs_out_of_the_working_directory_sends_no_gate_report() {
+        let (root, _origin, _work) = gate::tests::repos();
+        let fake = Fake::default();
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(Pack {
+            checkout: "../work".into(),
+            ..job_pack()
+        });
+        let inner = root.path().join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let c = LoopConfig {
+            gate: Some(gate_cfg("true", &inner)),
+            ..cfg(4)
+        };
+        let (_, stats) = go(&fake, c).await;
+        assert_eq!(stats.reported, 1);
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_lease_released_during_the_check_sends_no_gate_report() {
+        let (root, _origin, _work) = gate::tests::repos();
+        let flag = root.path().join("running");
+        let fake = Fake {
+            release_when: Some(flag.clone()),
+            ..Fake::default()
+        };
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(job_pack());
+        // The check says it has started, then runs long: the lease is gone meanwhile.
+        let c = LoopConfig {
+            gate: Some(gate_cfg(
+                &format!("touch {} && sleep 20", flag.display()),
+                root.path(),
+            )),
+            ..cfg(6)
+        };
+        let started = std::time::Instant::now();
+        let (_, stats) = go(&fake, c).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the check was stopped"
+        );
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+        assert_eq!(stats.reported, 0, "a gone lease reports nothing");
+    }
+
+    /// A job lease as core offers it: a job, no turn yet.
+    fn job_lease(id: &str, token: i64) -> Lease {
+        Lease {
+            lease_id: id.into(),
+            job_id: "job_1".into(),
+            turn_id: String::new(),
+            fencing_token: token,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_job_lease_gets_its_checkout_before_the_accept_and_ships_its_reply_as_a_pull_request()
+    {
+        use crate::runner::workspace::tests::{FakeForge, identity, place, spaces};
+        let p = place();
+        let forge = Arc::new(FakeForge::default());
+        let spaced = spaces(&p, forge.clone());
+        // The mirror, made once, with the test's commit identity in its own config.
+        spaced.prepare("job_0", "acme/app").await.unwrap();
+        identity(&p);
+        let fake = Fake {
+            job: Some(JobInfo {
+                repository: "acme/app".into(),
+                document_id: "ldoc_1".into(),
+            }),
+            ..Fake::default()
+        };
+        offer(&fake, &[job_lease("lease_1", 7)]);
+        *fake.pack.lock().unwrap() = Some(Pack {
+            kind: "job".into(),
+            job_id: "job_1".into(),
+            checkout: "checkouts/job_1".into(),
+            ..good_pack()
+        });
+        let checkout = p.workdir.join("checkouts/job_1");
+        let exec = FakeExec {
+            writes_in: Some(checkout.clone()),
+            ..FakeExec::default()
+        };
+        let c = LoopConfig {
+            gate: Some(gate_cfg("exit 0", &p.workdir)),
+            workspaces: Some(Arc::new(spaced)),
+            ..cfg(8)
+        };
+        let (_, stats) = go_with(&fake, exec, c).await;
+        assert_eq!((stats.accepted, stats.turns, stats.reported), (1, 1, 1));
+        let calls = fake.calls.lock().unwrap().clone();
+        let job_at = calls.iter().position(|c| c == "job job_1").unwrap();
+        let accept_at = calls
+            .iter()
+            .position(|c| c.starts_with("accept lease_1"))
+            .unwrap();
+        assert!(job_at < accept_at, "the checkout is made before the accept");
+        // Pushed on the job's branch, never on main, with the turn's file.
+        let head = gate::tests::sh(&p.origin, &["rev-parse", "refs/heads/job/job_1"]);
+        let files = gate::tests::sh(&p.origin, &["ls-tree", "--name-only", &head]);
+        assert!(files.lines().any(|f| f == "made.txt"), "{files}");
+        let asked = forge.asked.lock().unwrap().clone();
+        assert_eq!(asked.len(), 1);
+        assert_eq!(asked[0].title, "feat(app): make it");
+        assert!(
+            asked[0]
+                .body
+                .contains("Implements: RFC 0147\nPRD: 0152\nADR: 0141")
+        );
+        assert!(asked[0].body.contains("Document: ldoc_1"));
+        // The check ran on the pushed head and passed.
+        let g = fake.gate_reports.lock().unwrap().clone();
+        assert_eq!(g.len(), 1);
+        assert_eq!((g[0].head.as_str(), g[0].exit_code), (head.as_str(), 0));
+        // The turn's report names the pull request.
+        let r = fake.reports.lock().unwrap().clone();
+        assert!(
+            r[0].evidence
+                .iter()
+                .any(|e| e
+                    == &format!("runner: pull request acme/app#7 opened on job/job_1 at {head}")),
+            "{:?}",
+            r[0].evidence
+        );
+    }
+
+    #[tokio::test]
+    async fn a_job_lease_whose_checkout_cannot_be_made_is_not_accepted() {
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        let p = place();
+        for fake in [
+            // The origin has no such repository.
+            Fake {
+                job: Some(JobInfo {
+                    repository: "acme/missing".into(),
+                    document_id: String::new(),
+                }),
+                ..Fake::default()
+            },
+            // The job could not be read.
+            Fake {
+                job_down: true,
+                ..Fake::default()
+            },
+        ] {
+            offer(&fake, &[job_lease("lease_1", 7)]);
+            let c = LoopConfig {
+                workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+                ..cfg(4)
+            };
+            let (_, stats) = go(&fake, c).await;
+            assert_eq!((stats.accepted, stats.turns), (0, 0));
+            assert_eq!(calls_of(&fake, "accept "), 0);
+            assert_eq!(calls_of(&fake, "job job_1"), 1);
+        }
+        assert!(!p.workdir.join("checkouts/job_1").exists());
+    }
+
+    #[tokio::test]
+    async fn a_coordinator_without_get_job_or_a_job_without_a_repository_is_accepted_as_before() {
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        let p = place();
+        for fake in [
+            Fake::default(),
+            Fake {
+                job: Some(JobInfo::default()),
+                ..Fake::default()
+            },
+        ] {
+            offer(&fake, &[job_lease("lease_1", 7)]);
+            let c = LoopConfig {
+                workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+                ..cfg(6)
+            };
+            let (_, stats) = go(&fake, c).await;
+            assert_eq!((stats.accepted, stats.turns, stats.reported), (1, 1, 1));
+        }
+        assert!(!p.workdir.join("checkouts").exists());
     }
 }

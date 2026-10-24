@@ -19,6 +19,12 @@ use tokio::process::Command;
 use super::claude::hex;
 use super::env;
 use super::exec::GroupGuard;
+use super::service::{GateAnswer, GateReport, Service, ServiceError};
+
+/// The check a build job's PR is held to when nothing says otherwise.
+pub(crate) const DEFAULT_COMMAND: &str = "mise run ci:changed";
+/// How long that check may run: 30 minutes.
+pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 1800;
 
 /// The branch the head must contain.
 const MAIN: &str = "origin/main";
@@ -57,8 +63,20 @@ pub(crate) enum Skip {
     Moved,
 }
 
-/// `git <args>` in `repo`: the exit code and trimmed stdout.
-async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
+/// What one `git` call printed: its exit code, its stdout as it is, and the last line of
+/// its stderr (for a log line; git prints no credential there, and the caller redacts
+/// anything shaped like a token anyway).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GitOut {
+    pub(crate) code: i32,
+    pub(crate) stdout: String,
+    pub(crate) stderr_tail: String,
+}
+
+/// `git <args>` in `repo` under `limit`: never a prompt, never another repository named
+/// by the environment, nothing on stdin. The runner's own environment, so the host's git
+/// credentials apply; the model's scrubbed one is not involved.
+pub(crate) async fn git_in(repo: &Path, args: &[&str], limit: Duration) -> Result<GitOut, Skip> {
     let mut c = Command::new("git");
     c.args(args)
         .current_dir(repo)
@@ -67,16 +85,33 @@ async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let out = tokio::time::timeout(GIT_TIMEOUT, c.output())
+    let out = tokio::time::timeout(limit, c.output())
         .await
         .map_err(|_| Skip::Git(format!("git {} took too long", args.first().unwrap_or(&""))))?
         .map_err(|e| Skip::Git(e.to_string()))?;
-    Ok((
-        out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).trim().to_owned(),
-    ))
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    Ok(GitOut {
+        code: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr_tail: stderr
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or_default()
+            .trim()
+            .chars()
+            .take(300)
+            .collect(),
+    })
+}
+
+/// `git <args>` in `repo`: the exit code and trimmed stdout.
+async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
+    let o = git_in(repo, args, GIT_TIMEOUT).await?;
+    Ok((o.code, o.stdout.trim().to_owned()))
 }
 
 async fn git_ok(repo: &Path, args: &[&str]) -> Result<String, Skip> {
@@ -155,6 +190,43 @@ pub(crate) async fn check(
     })
 }
 
+/// Whose lease the report is signed for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Held<'a> {
+    pub(crate) job_id: &'a str,
+    pub(crate) lease_id: &'a str,
+    pub(crate) fencing_token: i64,
+    pub(crate) runner_id: &'a str,
+}
+
+/// What the check showed, as the report the service is sent.
+pub(crate) fn report_of(held: Held<'_>, checked: &Checked) -> GateReport {
+    GateReport {
+        job_id: held.job_id.to_owned(),
+        lease_id: held.lease_id.to_owned(),
+        fencing_token: held.fencing_token,
+        runner_id: held.runner_id.to_owned(),
+        command: checked.command.clone(),
+        exit_code: checked.exit_code,
+        head: checked.head.clone(),
+        main_commit: checked.main_commit.clone(),
+        output_sha256: checked.output_sha256.clone(),
+    }
+}
+
+/// Sends a report. An older coordinator has no such call: that is `Ok(None)`, not an
+/// error (the caller says so). Every other refusal is the error.
+pub(crate) async fn send<S: Service>(
+    svc: &S,
+    report: &GateReport,
+) -> Result<Option<GateAnswer>, ServiceError> {
+    match svc.submit_gate_report(report).await {
+        Ok(a) => Ok(Some(a)),
+        Err(e) if e.is_missing() => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Runs `command` in `repo` with the scrubbed environment; streams its output into a
 /// hash (nothing is kept) and returns its exit code with the hash.
 async fn run(
@@ -200,12 +272,12 @@ async fn run(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
     use std::path::PathBuf;
 
-    fn sh(dir: &Path, args: &[&str]) -> String {
+    pub(crate) fn sh(dir: &Path, args: &[&str]) -> String {
         let out = std::process::Command::new("git")
             .args(["-c", "user.email=t@example.com", "-c", "user.name=t"])
             .args([
@@ -223,12 +295,12 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
     }
 
-    fn write(dir: &Path, name: &str, text: &str) {
+    pub(crate) fn write(dir: &Path, name: &str, text: &str) {
         std::fs::write(dir.join(name), text).unwrap();
     }
 
     /// An origin with one commit on main, and a clone on a branch one commit ahead of it.
-    fn repos() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    pub(crate) fn repos() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let root = tempfile::tempdir().unwrap();
         let origin = root.path().join("origin");
         let work = root.path().join("work");
@@ -261,6 +333,18 @@ mod tests {
     const TWO_STREAMS: &str = "echo hello& echo oops>&2";
     #[cfg(windows)]
     const TWO_STREAMS_OUT: &[u8] = b"hello\r\noops\r\n";
+
+    /// Exits 1 when either credential reached the shell, else prints `clean`. cmd.exe
+    /// keeps an unset `%NAME%` as literal text, so the Windows form uses `if defined`.
+    #[cfg(not(windows))]
+    const SCRUBBED: &str = "test -z \"$GH_TOKEN$FOO_SECRET\" && echo clean";
+    #[cfg(not(windows))]
+    const SCRUBBED_OUT: &[u8] = b"clean\n";
+    #[cfg(windows)]
+    const SCRUBBED: &str =
+        "(if defined GH_TOKEN exit 1)& (if defined FOO_SECRET exit 1)& echo clean";
+    #[cfg(windows)]
+    const SCRUBBED_OUT: &[u8] = b"clean\r\n";
 
     #[tokio::test]
     async fn a_branch_merged_with_main_is_checked_and_reported_with_the_hash_of_the_output() {
@@ -324,16 +408,9 @@ mod tests {
         let mut env = parent();
         env.push(("GH_TOKEN".into(), "secret-value".into()));
         env.push(("FOO_SECRET".into(), "secret-value".into()));
-        let got = check(
-            &work,
-            "test -z \"$GH_TOKEN$FOO_SECRET\" && echo clean",
-            LIMIT,
-            env,
-        )
-        .await
-        .unwrap();
+        let got = check(&work, SCRUBBED, LIMIT, env).await.unwrap();
         assert_eq!(got.exit_code, 0);
-        assert_eq!(got.output_sha256, hex(&Sha256::digest(b"clean\n")));
+        assert_eq!(got.output_sha256, hex(&Sha256::digest(SCRUBBED_OUT)));
     }
 
     #[tokio::test]

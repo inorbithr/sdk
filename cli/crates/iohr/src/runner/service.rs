@@ -284,6 +284,11 @@ pub(crate) struct Pack {
     pub(crate) context_ceiling: u32,
     /// The JSON the final message must be.
     pub(crate) reply_shape: String,
+    /// Where the job's branch is checked out, for the Checked gate (JSON `checkout_path`;
+    /// `checkoutPath` is read too). The coordinator names it relative to the turn's working
+    /// directory (`checkouts/<job_id>`, empty for a job with no repository); the run loop
+    /// sends no gate report for a pack without one.
+    pub(crate) checkout: String,
 }
 
 impl Pack {
@@ -324,6 +329,11 @@ impl Pack {
             token_budget: u32::try_from(num(v, "token_budget")).unwrap_or(u32::MAX),
             context_ceiling: u32::try_from(num(v, "context_ceiling")).unwrap_or(u32::MAX),
             reply_shape: s("reply_shape"),
+            // The gateway writes proto field names (`checkout_path`); proto3 JSON's
+            // camelCase is read too.
+            checkout: Some(s("checkout_path"))
+                .filter(|c| !c.is_empty())
+                .unwrap_or_else(|| s("checkoutPath")),
         }
     }
 }
@@ -586,6 +596,30 @@ impl TurnReport {
     }
 }
 
+/// What the runner reads of a job before it accepts its lease: the repository its
+/// checkout is made from (empty for a job without one) and the document it serves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct JobInfo {
+    pub(crate) repository: String,
+    pub(crate) document_id: String,
+}
+
+impl JobInfo {
+    pub(crate) fn from_json(v: &Value) -> Self {
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_owned()
+        };
+        Self {
+            repository: s("repository"),
+            document_id: s("document_id"),
+        }
+    }
+}
+
 /// What the loop needs from the service.
 pub(crate) trait Service {
     /// Whether the service can hand over a turn's pack. While it cannot, the loop does
@@ -604,6 +638,10 @@ pub(crate) trait Service {
     ) -> Result<Beat, ServiceError>;
     async fn accept(&self, lease: &Lease, facts: AcceptFacts) -> Result<(), ServiceError>;
     async fn fetch_pack(&self, lease: &Lease) -> Result<Pack, ServiceError>;
+    /// The job a lease is for (`GetJob`): its repository, read before the lease is
+    /// accepted so the checkout exists when the turn starts. The pack does not carry the
+    /// repository yet (RFC 0147 slice B adds `TurnPack.workspace`).
+    async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError>;
     /// The lease is alive; says whether the turn must stop.
     async fn lease_heartbeat(&self, lease: &Lease) -> Result<LeaseBeat, ServiceError>;
     /// Delivers a finished turn, signed; the same report again is answered as the first
@@ -804,6 +842,28 @@ impl Service for HttpService<'_> {
             return Err(ServiceError::Refused("the service sent no pack"));
         }
         Ok(Pack::from_json(pack))
+    }
+
+    async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError> {
+        if job_id.is_empty()
+            || !job_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(ServiceError::Refused("the lease names no usable job id"));
+        }
+        let v: Value = self
+            .api
+            .get(
+                &format!("/v1/coordinator/jobs/{job_id}"),
+                &[("account_id", self.account.as_str())],
+            )
+            .await?;
+        let job = v.get("job").unwrap_or(&Value::Null);
+        if job.is_null() {
+            return Err(ServiceError::Refused("the service sent no job"));
+        }
+        Ok(JobInfo::from_json(job))
     }
 
     async fn lease_heartbeat(&self, lease: &Lease) -> Result<LeaseBeat, ServiceError> {
@@ -1114,8 +1174,10 @@ mod tests {
             "allowed_tools": ["Read"], "wall_clock_secs": 600,
             "resume_session": "x", "resume_runner_id": "r", "thread_id": "th",
             "job_id": "j", "attempt": 2, "lease_id": "l", "fencing_token": "9",
-            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}"
+            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}",
+            "checkout_path": "checkouts/job_1"
         }));
+        assert_eq!(p.checkout, "checkouts/job_1");
         assert_eq!(
             (
                 p.thread_id.as_str(),
@@ -1130,6 +1192,35 @@ mod tests {
             (9, 4000, "{}")
         );
         assert_eq!((p.max_turns, p.wall_clock_secs), (5, 600));
+    }
+
+    #[test]
+    fn a_pack_reads_its_checkout_under_either_json_name() {
+        // What the gateway sends today (proto field names) and proto3 JSON's camelCase.
+        let snake = Pack::from_json(&json!({"checkout_path": "checkouts/j"}));
+        let camel = Pack::from_json(&json!({"checkoutPath": "checkouts/j"}));
+        let none = Pack::from_json(&json!({"checkout_path": ""}));
+        assert_eq!(
+            (
+                snake.checkout.as_str(),
+                camel.checkout.as_str(),
+                none.checkout.as_str()
+            ),
+            ("checkouts/j", "checkouts/j", "")
+        );
+    }
+
+    #[test]
+    fn a_job_reads_its_repository_and_document() {
+        let j = JobInfo::from_json(&serde_json::json!({
+            "id": "job_1", "repository": " inorbithr/core ", "document_id": "ldoc_1", "kind": "api"
+        }));
+        assert_eq!(j.repository, "inorbithr/core");
+        assert_eq!(j.document_id, "ldoc_1");
+        assert_eq!(
+            JobInfo::from_json(&serde_json::json!({})),
+            JobInfo::default()
+        );
     }
 
     #[test]
