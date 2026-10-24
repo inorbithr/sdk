@@ -25,16 +25,19 @@ pub enum Language {
     Java,
     /// C#, on `InOrbit.Sdk`.
     CSharp,
+    /// Swift, on the `InOrbit` package.
+    Swift,
 }
 
 impl Language {
     /// Every language, in the order the docs list them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::TypeScript,
         Self::Python,
         Self::Go,
         Self::Java,
         Self::CSharp,
+        Self::Swift,
         Self::Rust,
     ];
 
@@ -48,6 +51,7 @@ impl Language {
             Self::Go => "go",
             Self::Java => "java",
             Self::CSharp => "csharp",
+            Self::Swift => "swift",
         }
     }
 
@@ -57,7 +61,13 @@ impl Language {
     pub fn is_built(self) -> bool {
         matches!(
             self,
-            Self::Rust | Self::TypeScript | Self::Python | Self::Go | Self::Java | Self::CSharp
+            Self::Rust
+                | Self::TypeScript
+                | Self::Python
+                | Self::Go
+                | Self::Java
+                | Self::CSharp
+                | Self::Swift
         )
     }
 
@@ -71,6 +81,7 @@ impl Language {
             Self::Go => "github.com/inorbithr/sdk/go",
             Self::Java => "hr.inorbit.sdk",
             Self::CSharp => "InOrbit.Sdk",
+            Self::Swift => "InOrbit",
         }
     }
 }
@@ -133,5 +144,6 @@ pub fn render(lang: Language, api: &Api, options: &Options) -> Result<Files, Ren
         Language::Go => crate::go::GoTarget.render(api, options),
         Language::CSharp => crate::csharp::CSharpTarget.render(api, options),
         Language::Java => crate::java::JavaTarget.render(api, options),
+        Language::Swift => crate::swift::SwiftTarget.render(api, options),
     }
 }

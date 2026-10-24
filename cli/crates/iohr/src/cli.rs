@@ -1389,6 +1389,7 @@ pub enum Lang {
     Go,
     Java,
     Csharp,
+    Swift,
     Rust,
 }
 
@@ -1403,6 +1404,7 @@ impl Lang {
             Self::Go => Language::Go,
             Self::Java => Language::Java,
             Self::Csharp => Language::CSharp,
+            Self::Swift => Language::Swift,
             Self::Rust => Language::Rust,
         }
     }

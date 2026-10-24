@@ -1,7 +1,8 @@
 name: a-private-ca-is-trusted
 area: transport
 summary: Over HTTPS with a private CA, the client trusts the server once ca_bundle names the CA.
-notes: M6, docs/config.md section 6.3; replay feature 2.
+pending: [swift]
+notes: M6, docs/config.md section 6.3; replay feature 2. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 client: { transport: https }
 action: { op: me }
 exchanges:

@@ -1,7 +1,8 @@
 name: a-removed-built-in-sends-nothing
 area: middleware
 summary: Removing request_id from the pipeline leaves the x-request-id header out.
-notes: M6, docs/config.md section 7.3.
+pending: [swift]
+notes: M6, docs/config.md section 7.3. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 client:
   pipeline: { remove: [request_id] }
 action: { op: me }

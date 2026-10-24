@@ -1,7 +1,8 @@
 name: allowlisted-headers-are-logged-others-redacted
 area: middleware
 summary: With header logging on, an allowlisted response header is logged with its value and any other by name with REDACTED.
-notes: M6, docs/config.md section 7.9.
+pending: [swift]
+notes: M6, docs/config.md section 7.9. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 client:
   log: debug
   log_headers: true

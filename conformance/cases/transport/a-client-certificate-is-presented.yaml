@@ -1,7 +1,8 @@
 name: a-client-certificate-is-presented
 area: transport
 summary: Against a server that requires one, the client presents the configured client certificate.
-notes: M6, docs/config.md section 6.4; replay feature 3.
+pending: [swift]
+notes: M6, docs/config.md section 6.4; replay feature 3. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 client: { transport: mtls }
 action: { op: me }
 exchanges:

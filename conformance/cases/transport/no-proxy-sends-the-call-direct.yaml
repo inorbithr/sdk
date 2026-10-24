@@ -1,7 +1,8 @@
 name: no-proxy-sends-the-call-direct
 area: transport
 summary: A host that no_proxy names is reached directly even when a proxy is set.
-notes: M6, docs/config.md section 6.2.
+pending: [swift]
+notes: M6, docs/config.md section 6.2. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 client: { transport: proxy, no_proxy: "127.0.0.1" }
 action: { op: me }
 exchanges:

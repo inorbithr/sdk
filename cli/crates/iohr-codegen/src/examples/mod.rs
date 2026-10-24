@@ -206,6 +206,7 @@ fn snippet(lang: Language, call: &Call<'_>) -> String {
         Language::Go => crate::go::example(call),
         Language::Java => crate::java::example(call),
         Language::CSharp => crate::csharp::example(call),
+        Language::Swift => crate::swift::example(call),
         Language::Rust => crate::rust::example(call),
     }
 }
