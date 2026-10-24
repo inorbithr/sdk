@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0-alpha.24"
+version = "0.1.0-alpha.25"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-auth"
-version = "0.1.0-alpha.24"
+version = "0.1.0-alpha.25"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.23.1",
@@ -1446,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-codegen"
-version = "0.1.0-alpha.24"
+version = "0.1.0-alpha.25"
 dependencies = [
  "clap",
  "heck",
@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-lab"
-version = "0.1.0-alpha.24"
+version = "0.1.0-alpha.25"
 dependencies = [
  "regex",
  "serde",
@@ -1475,7 +1475,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-openapi"
-version = "0.1.0-alpha.24"
+version = "0.1.0-alpha.25"
 dependencies = [
  "heck",
  "serde",
