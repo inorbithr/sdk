@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.0-alpha.25](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.24...iohr/v0.1.0-alpha.25) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rust:** a model or query-parameter struct can no longer be built with a struct literal or `..Default::default()` outside the crate; use `Model::default().with_field(value)` (or `Model::new(..)`). A match on a generated enum needs a `_` arm. Surface cannot be implemented outside the generated surface.
+
+### Features
+
+* **cli:** runner pushes with its lease's own GitHub App token ([#267](https://github.com/inorbithr/sdk/issues/267)) ([d9b7e48](https://github.com/inorbithr/sdk/commit/d9b7e48d3f9b41919344cfd9ddc2dc2f73faf5d9))
+* **rust:** models and query parameters are non_exhaustive, built with setters; Surface is sealed ([#180](https://github.com/inorbithr/sdk/issues/180)) ([918625a](https://github.com/inorbithr/sdk/commit/918625a9b2a4e02f2f58499cc5546cd7c759e9b0))
+
+
+### Dependencies
+
+* **rust:** bump the rust-major group across 2 directories with 1 update ([#241](https://github.com/inorbithr/sdk/issues/241)) ([1179884](https://github.com/inorbithr/sdk/commit/1179884ddea88e8ab03ba3eedc37954dcd8ba645))
+
 ## [0.1.0-alpha.24](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.23...iohr/v0.1.0-alpha.24) (2026-10-24)
 
 
