@@ -158,7 +158,7 @@ mod tests {
         let c = contained();
         let get = |k: &str| c.iter().find(|(n, _)| *n == k).map(|(_, v)| *v);
         assert_eq!(get("GH_CONFIG_DIR"), Some(NO_GH_CONFIG));
-        assert!(!NO_GH_CONFIG.is_empty());
+        assert_ne!(NO_GH_CONFIG, "");
         assert!(!std::path::Path::new(NO_GH_CONFIG).exists());
         assert_eq!(get("GIT_CONFIG_KEY_0"), Some("credential.helper"));
         assert_eq!(get("GIT_CONFIG_VALUE_0"), Some(""));
