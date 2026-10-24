@@ -196,6 +196,21 @@ pub struct Manifest {
     /// How a new version replaces this one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upgrade: Option<Upgrade>,
+    /// The screen it serves on a loopback address, for a host to show (RFC 0143).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<Panel>,
+}
+
+/// `[panel]`: a program extension that serves its screen over HTTP on a loopback address
+/// and prints `iohr-panel <port>` when it listens (RFC 0143, section 4). The host opens
+/// it; the program only declares it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Panel {
+    /// The name in the host's Extensions menu: one line of at most 64 characters.
+    pub title: String,
+    /// The path the panel opens at, such as `/`: absolute, no `..`, no scheme.
+    pub entry: String,
 }
 
 /// How an extension runs.
@@ -257,7 +272,8 @@ pub struct Permissions {
     /// The hosts it may reach, `host:port`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub network: Vec<String>,
-    /// The paths it may read and write; `$STATE` and `$CACHE` are its own.
+    /// The paths it may read and write; `$STATE` and `$CACHE` are its own, and `$REPOS` is
+    /// the roots the user added in the host (RFC 0143), empty by default.
     #[serde(default, skip_serializing_if = "Filesystem::is_empty")]
     pub filesystem: Filesystem,
     /// The programs it may start, by name.
@@ -453,7 +469,7 @@ pub const DATA_LEAVES: &[(&str, &str)] = &[
 
 /// The extension kinds of RFC 0073 and the targets each may be installed on.
 pub const TARGET_KINDS: &[(&str, &[&str])] = &[
-    ("program", &["desktop", "host", "agent"]),
+    ("program", &["desktop", "host", "agent", "cluster"]),
     ("agent-plugin", &["agent"]),
     ("web", &[]),
     ("connector", &[]),
@@ -585,6 +601,9 @@ impl Manifest {
             }
         }
         check_secrets(&self.secrets)?;
+        if let Some(p) = &self.panel {
+            check_panel(p)?;
+        }
         if let Some(t) = &self.targets {
             for p in &t.platforms {
                 check_platform(p)?;
@@ -592,7 +611,7 @@ impl Manifest {
             for k in &t.kinds {
                 if !TARGET_KINDS.iter().any(|(_, ts)| ts.contains(&k.as_str())) {
                     return Err(ManifestError(format!(
-                        "`{}` is not a target: desktop, host or agent",
+                        "`{}` is not a target: desktop, host, agent or cluster",
                         printable(k)
                     )));
                 }
@@ -611,6 +630,77 @@ impl Manifest {
         }
         Ok(())
     }
+}
+
+/// Checks `[panel]`: a title of one line, 1 to 64 characters, and an entry path.
+///
+/// # Errors
+///
+/// [`ManifestError`] naming the field.
+pub fn check_panel(p: &Panel) -> Result<(), ManifestError> {
+    let title = p.title.trim();
+    if title.is_empty() || p.title.chars().count() > 64 || p.title.chars().any(char::is_control) {
+        return Err(ManifestError(
+            "panel.title is one line of 1 to 64 characters".into(),
+        ));
+    }
+    let e = &p.entry;
+    let ok = e.starts_with('/')
+        && !e.starts_with("//")
+        && e.chars().count() <= 256
+        && !e.chars().any(|c| c.is_control() || c == '\\' || c == ' ')
+        && !e.split('/').any(|seg| seg == "..");
+    if !ok {
+        return Err(ManifestError(
+            "panel.entry is a path on the panel's own server, such as /: it starts with one `/`, \
+             has no `..`, no scheme, no spaces and at most 256 characters"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The variable of the repository roots a user added to an extension in its host, in a
+/// manifest's `permissions.filesystem` (RFC 0143, section 1).
+pub const REPOS_VAR: &str = "$REPOS";
+
+/// Reads the repository roots from a host's per-extension config, `{"repos": ["/abs"]}`.
+/// A missing key or an empty document is an empty list, which is also the default when
+/// the host has no config at all. Every root is an absolute path without `..`.
+///
+/// # Errors
+///
+/// [`ManifestError`] when the bytes are not that shape or a root is not absolute.
+pub fn repos_from_config(bytes: &[u8]) -> Result<Vec<String>, ManifestError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Config {
+        #[serde(default)]
+        repos: Vec<String>,
+    }
+    if bytes.len() > MAX_MANIFEST {
+        return Err(ManifestError(
+            "the extension's host config is larger than 64 KiB".into(),
+        ));
+    }
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(Vec::new());
+    }
+    let c: Config = serde_json::from_slice(bytes)
+        .map_err(|e| ManifestError(format!("the extension's host config is not valid: {e}")))?;
+    for r in &c.repos {
+        let ok = r.starts_with('/')
+            && r.chars().count() <= 1024
+            && !r.chars().any(|c| c.is_control() || c == ':')
+            && !r.split('/').any(|seg| seg == "..");
+        if !ok {
+            return Err(ManifestError(format!(
+                "repos: `{}` is not an absolute path without `..` or `:`",
+                printable(r)
+            )));
+        }
+    }
+    Ok(c.repos)
 }
 
 /// One line of at most 256 characters without control characters.
@@ -963,6 +1053,9 @@ pub struct SourceManifest {
     /// See [`Manifest::upgrade`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upgrade: Option<Upgrade>,
+    /// See [`Manifest::panel`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<Panel>,
     /// How `iohr ext dev` runs it while it is being built.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dev: Option<Dev>,
@@ -1066,6 +1159,7 @@ impl SourceManifest {
             secrets: self.secrets.clone(),
             targets: self.targets.clone(),
             upgrade: self.upgrade.clone(),
+            panel: self.panel.clone(),
         };
         m.check()?;
         Ok(m)
@@ -1271,6 +1365,52 @@ mod tests {
         }
         for bad in ["", "ext", "sdk", "-a", "a-", "1a", "a_b", &"a".repeat(33)] {
             assert!(check_name(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn repos_come_from_the_host_config_and_default_to_none() {
+        use super::{REPOS_VAR, repos_from_config};
+        assert_eq!(REPOS_VAR, "$REPOS");
+        for empty in ["", "  \n", "{}", r#"{"repos": []}"#] {
+            assert!(
+                repos_from_config(empty.as_bytes()).unwrap().is_empty(),
+                "{empty}"
+            );
+        }
+        assert_eq!(
+            repos_from_config(br#"{"repos": ["/Users/a/code", "/srv/x"]}"#).unwrap(),
+            ["/Users/a/code", "/srv/x"]
+        );
+        for bad in [
+            r#"{"repos": ["relative/path"]}"#,
+            r#"{"repos": ["/a/../etc"]}"#,
+            r#"{"repos": ["/a:/b"]}"#,
+            r#"{"repos": [], "later": 1}"#,
+            "not json",
+        ] {
+            assert!(repos_from_config(bad.as_bytes()).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_panel_needs_a_title_and_an_entry_and_knows_no_other_key() {
+        use super::SourceManifest;
+        let head = "id = \"inorbit/todo\"\nversion = \"0.1.0\"\nentrypoint = \"todo\"\ndescription = \"x\"\n";
+        let ok =
+            SourceManifest::parse(&format!("{head}[panel]\ntitle = \"Todo\"\nentry = \"/\"\n"))
+                .unwrap();
+        let panel = ok.panel.unwrap();
+        assert_eq!((panel.title.as_str(), panel.entry.as_str()), ("Todo", "/"));
+        for bad in [
+            "[panel]\ntitle = \"Todo\"\n",
+            "[panel]\nentry = \"/\"\n",
+            "[panel]\ntitle = \"Todo\"\nentry = \"/\"\nicon = \"x\"\n",
+        ] {
+            assert!(
+                SourceManifest::parse(&format!("{head}{bad}")).is_err(),
+                "{bad}"
+            );
         }
     }
 }

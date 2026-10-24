@@ -72,6 +72,24 @@ folders are read from disk and never sent anywhere; `--json` prints the same row
 `iohr ext verify` repeats checks 2 and the program's hash offline, from the bundles kept
 at install. Every run of an extension re-hashes the program first.
 
+### An artifact that is not installed
+
+```sh
+iohr ext verify ./todo-0.1.0-linux-amd64.tar.gz \
+  --bundle todo.sigstore.json --publisher-key publisher.pem [--json]
+iohr ext verify sha256:<64 hex digits> --bundle todo.sigstore.json --publisher-key publisher.pem
+```
+
+The same trust check as an install, on one artifact: a file (hashed here) or a
+`sha256:` digest, with the Sigstore bundle or bundles for it (`--bundle`, repeatable; the
+format `cosign sign-blob --bundle` writes) and the publisher's PEM public key
+(`--publisher-key`, repeatable). It runs offline and needs no sign-in, and it trusts only
+InOrbit's release workflow and the keys you name, never the keys in `ext.trusted_keys`. It
+prints who signed (a workflow identity, or `key:sha256:...`) and the provenance, and exits
+`1` when the artifact is not trusted. `--json` prints one object: `ok`, `digest`,
+`signer`, `provenance`, `error`. An argument with a `/`, a `.` or a `:`, or either flag,
+selects this form; a bare extension name still checks what is installed.
+
 ## Checking by hand
 
 With [crane](https://github.com/google/go-containerregistry), [cosign](https://docs.sigstore.dev/)
