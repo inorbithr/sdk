@@ -6,12 +6,14 @@
 //! secret, no new file.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 use inorbithr::Method;
 use serde_json::{Value, json};
 
+use super::settings::Declared;
 use super::signing::Signer;
 use crate::context::Api;
 
@@ -46,6 +48,30 @@ impl ServiceError {
             }
             Self::Api(_) => false,
         }
+    }
+
+    /// A coordinator older than the declared heartbeat: its REST binding refuses a body
+    /// field it does not know (`unrecognized field`, HTTP 400).
+    pub(crate) fn is_unknown_field(&self) -> bool {
+        let Self::Api(inorbithr::Error::Api(a)) = self else {
+            return false;
+        };
+        a.status == 400
+            && (a.message.contains("unrecognized field")
+                || String::from_utf8_lossy(&a.raw.body).contains("unrecognized field"))
+    }
+}
+
+impl ServiceError {
+    /// The service has no such call: an older coordinator. HTTP 501, or the gateway's own
+    /// 404 for a path it has no route for (`no such route`). A 404 that names a missing
+    /// job is the service refusing: that stays an error.
+    pub(crate) fn is_missing(&self) -> bool {
+        let Self::Api(inorbithr::Error::Api(a)) = self else {
+            return false;
+        };
+        a.status == 501
+            || (a.status == 404 && a.message.trim().eq_ignore_ascii_case("no such route"))
     }
 }
 
@@ -258,6 +284,11 @@ pub(crate) struct Pack {
     pub(crate) context_ceiling: u32,
     /// The JSON the final message must be.
     pub(crate) reply_shape: String,
+    /// Where the job's branch is checked out, for the Checked gate (JSON `checkout_path`;
+    /// `checkoutPath` is read too). The coordinator names it relative to the turn's working
+    /// directory (`checkouts/<job_id>`, empty for a job with no repository); the run loop
+    /// sends no gate report for a pack without one.
+    pub(crate) checkout: String,
 }
 
 impl Pack {
@@ -298,6 +329,11 @@ impl Pack {
             token_budget: u32::try_from(num(v, "token_budget")).unwrap_or(u32::MAX),
             context_ceiling: u32::try_from(num(v, "context_ceiling")).unwrap_or(u32::MAX),
             reply_shape: s("reply_shape"),
+            // The gateway writes proto field names (`checkout_path`); proto3 JSON's
+            // camelCase is read too.
+            checkout: Some(s("checkout_path"))
+                .filter(|c| !c.is_empty())
+                .unwrap_or_else(|| s("checkoutPath")),
         }
     }
 }
@@ -364,6 +400,31 @@ impl TurnReport {
         )
     }
 
+    /// The one journal line a finished turn leaves: its outcome and what it cost, so the
+    /// token spend of a runner is readable from `journalctl` without the service. No
+    /// reply text and no ids beyond the turn's.
+    pub(crate) fn journal_line(&self) -> String {
+        let u = &self.usage;
+        format!(
+            "turn {} ended: {} resumed={} turns={} context={} input={} output={} \
+             cache_read={} cache_write={} cost_usd={} ms={}",
+            self.turn_id,
+            self.outcome,
+            self.resumed,
+            self.num_turns,
+            u.input
+                .saturating_add(u.cache_read)
+                .saturating_add(u.cache_write),
+            u.input,
+            u.output,
+            u.cache_read,
+            u.cache_write,
+            self.total_cost_usd
+                .map_or_else(|| "none".to_owned(), |c| format!("{c:.4}")),
+            self.duration_ms,
+        )
+    }
+
     /// The wire shape of `ReportTurn`, carrying `signature` (64 bytes, base64).
     pub(crate) fn to_json(&self, signature: &[u8]) -> Value {
         json!({
@@ -391,6 +452,65 @@ impl TurnReport {
             "attempt": self.attempt, "resets_at": self.resets_at,
             "signature": B64.encode(signature),
         })
+    }
+}
+
+/// `SubmitGateReportRequest`: the runner's signed report of the check it ran on a build
+/// job's PR (RFC 0120, the Checked gate).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GateReport {
+    pub(crate) job_id: String,
+    pub(crate) lease_id: String,
+    pub(crate) fencing_token: i64,
+    pub(crate) runner_id: String,
+    /// The command that ran (1 to 500 characters).
+    pub(crate) command: String,
+    pub(crate) exit_code: i32,
+    /// The PR head it ran on.
+    pub(crate) head: String,
+    /// Main's commit the head was merged with when it ran.
+    pub(crate) main_commit: String,
+    /// SHA-256 of the output, lowercase hex. The output itself never leaves the machine.
+    pub(crate) output_sha256: String,
+}
+
+impl GateReport {
+    /// The wire shape of `SubmitGateReport`, carrying `signature` (64 bytes, base64).
+    pub(crate) fn to_json(&self, signature: &[u8]) -> Value {
+        json!({
+            "job_id": self.job_id, "lease_id": self.lease_id,
+            "fencing_token": self.fencing_token.to_string(), "runner_id": self.runner_id,
+            "command": self.command, "exit_code": self.exit_code,
+            "head": self.head, "main_commit": self.main_commit,
+            "output_sha256": self.output_sha256,
+            "signature": B64.encode(signature),
+        })
+    }
+}
+
+/// What the service answered to a gate report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GateAnswer {
+    pub(crate) evidence_id: String,
+    /// The same report was recorded before; nothing changed.
+    pub(crate) duplicate: bool,
+    /// The job's stage after its next gate was asked, when the service said.
+    pub(crate) stage: String,
+}
+
+impl GateAnswer {
+    pub(crate) fn from_json(v: &Value) -> Self {
+        let s = |x: &Value, k: &str| {
+            x.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        Self {
+            evidence_id: s(v, "evidence_id"),
+            duplicate: v.get("duplicate").and_then(Value::as_bool).unwrap_or(false),
+            stage: v.get("job").map(|j| s(j, "stage")).unwrap_or_default(),
+        }
     }
 }
 
@@ -476,6 +596,30 @@ impl TurnReport {
     }
 }
 
+/// What the runner reads of a job before it accepts its lease: the repository its
+/// checkout is made from (empty for a job without one) and the document it serves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct JobInfo {
+    pub(crate) repository: String,
+    pub(crate) document_id: String,
+}
+
+impl JobInfo {
+    pub(crate) fn from_json(v: &Value) -> Self {
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_owned()
+        };
+        Self {
+            repository: s("repository"),
+            document_id: s("document_id"),
+        }
+    }
+}
+
 /// What the loop needs from the service.
 pub(crate) trait Service {
     /// Whether the service can hand over a turn's pack. While it cannot, the loop does
@@ -484,18 +628,29 @@ pub(crate) trait Service {
     async fn challenge(&self) -> Result<Challenge, ServiceError>;
     async fn register(&self, r: &Registration) -> Result<RunnerInfo, ServiceError>;
     async fn list_runners(&self, mine: bool) -> Result<Vec<RunnerInfo>, ServiceError>;
+    /// The runner is alive, has these providers, and declares its capacity, version and
+    /// kinds (a coordinator older than that is sent the providers alone).
     async fn heartbeat(
         &self,
         runner_id: &str,
         providers: &[ProviderState],
+        declared: &Declared,
     ) -> Result<Beat, ServiceError>;
     async fn accept(&self, lease: &Lease, facts: AcceptFacts) -> Result<(), ServiceError>;
     async fn fetch_pack(&self, lease: &Lease) -> Result<Pack, ServiceError>;
+    /// The job a lease is for (`GetJob`): its repository, read before the lease is
+    /// accepted so the checkout exists when the turn starts. The pack does not carry the
+    /// repository yet (RFC 0147 slice B adds `TurnPack.workspace`).
+    async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError>;
     /// The lease is alive; says whether the turn must stop.
     async fn lease_heartbeat(&self, lease: &Lease) -> Result<LeaseBeat, ServiceError>;
     /// Delivers a finished turn, signed; the same report again is answered as the first
     /// was (idempotent on the turn and its attempt).
     async fn report_turn(&self, report: &TurnReport) -> Result<(), ServiceError>;
+    /// Delivers the signed report of a build job's check. A service older than the
+    /// gate report answers 404 or 501; that is [`ServiceError::is_missing`], and the
+    /// caller says so and goes on (the job holds at Checked, as it did).
+    async fn submit_gate_report(&self, report: &GateReport) -> Result<GateAnswer, ServiceError>;
 }
 
 /// The service over REST, called as the profile's own session.
@@ -511,9 +666,20 @@ pub(crate) struct HttpService<'a> {
     pub(crate) account: String,
     /// The runner's key, to sign reports with; absent for commands that report nothing.
     pub(crate) signer: Option<Signer>,
+    /// Set once the coordinator refused the declared heartbeat as an older one: every
+    /// later beat sends the providers alone.
+    old_beat: AtomicBool,
 }
 
-impl HttpService<'_> {
+impl<'a> HttpService<'a> {
+    pub(crate) fn new(api: &'a Api, account: String, signer: Option<Signer>) -> Self {
+        Self {
+            api,
+            account,
+            signer,
+            old_beat: AtomicBool::new(false),
+        }
+    }
     /// A request body with this service's `account_id` in it.
     fn scoped(&self, mut body: Value) -> Value {
         if let Value::Object(m) = &mut body {
@@ -586,20 +752,49 @@ impl Service for HttpService<'_> {
         &self,
         runner_id: &str,
         providers: &[ProviderState],
+        declared: &Declared,
     ) -> Result<Beat, ServiceError> {
-        let body = json!({
-            "runner_id": runner_id,
-            "providers": providers.iter().map(ProviderState::to_json).collect::<Vec<_>>(),
-        });
-        let v: Value = self
-            .api
-            .send_body(
-                Method::Post,
-                &format!("/v1/coordinator/runners/{runner_id}/heartbeat"),
-                &self.scoped(body),
-            )
-            .await?
-            .json()?;
+        let path = format!("/v1/coordinator/runners/{runner_id}/heartbeat");
+        let old = || {
+            json!({
+                "runner_id": runner_id,
+                "providers": providers.iter().map(ProviderState::to_json).collect::<Vec<_>>(),
+            })
+        };
+        let answer = if self.old_beat.load(Ordering::Relaxed) {
+            self.api
+                .send_body(Method::Post, &path, &self.scoped(old()))
+                .await
+                .map_err(ServiceError::from)
+        } else {
+            let mut body = old();
+            if let Value::Object(m) = &mut body {
+                if let Some(c) = declared.capacity {
+                    m.insert("capacity".into(), json!(c));
+                }
+                m.insert("version".into(), json!(declared.version));
+                m.insert("kinds".into(), json!(declared.kinds));
+            }
+            match self
+                .api
+                .send_body(Method::Post, &path, &self.scoped(body))
+                .await
+            {
+                Ok(r) => Ok(r),
+                Err(e) => match ServiceError::from(e) {
+                    e if e.is_unknown_field() => {
+                        // An older coordinator: it keeps the registered capacity and kinds.
+                        self.old_beat.store(true, Ordering::Relaxed);
+                        self.api
+                            .send_body(Method::Post, &path, &self.scoped(old()))
+                            .await
+                            .map_err(ServiceError::from)
+                    }
+                    e => Err(e),
+                },
+            }
+        };
+        let v: Value = answer?.json()?;
         Ok(Beat {
             runner: RunnerInfo::from_json(v.get("runner").unwrap_or(&Value::Null)),
             offered: v
@@ -649,6 +844,28 @@ impl Service for HttpService<'_> {
         Ok(Pack::from_json(pack))
     }
 
+    async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError> {
+        if job_id.is_empty()
+            || !job_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(ServiceError::Refused("the lease names no usable job id"));
+        }
+        let v: Value = self
+            .api
+            .get(
+                &format!("/v1/coordinator/jobs/{job_id}"),
+                &[("account_id", self.account.as_str())],
+            )
+            .await?;
+        let job = v.get("job").unwrap_or(&Value::Null);
+        if job.is_null() {
+            return Err(ServiceError::Refused("the service sent no job"));
+        }
+        Ok(JobInfo::from_json(job))
+    }
+
     async fn lease_heartbeat(&self, lease: &Lease) -> Result<LeaseBeat, ServiceError> {
         // The provider's progress (turns so far, the tool it is in) is not read from the
         // child yet: the lease is kept alive and the progress left at zero.
@@ -691,6 +908,25 @@ impl Service for HttpService<'_> {
             )
             .await?;
         Ok(())
+    }
+
+    async fn submit_gate_report(&self, report: &GateReport) -> Result<GateAnswer, ServiceError> {
+        let Some(signer) = &self.signer else {
+            return Err(ServiceError::Refused(
+                "no signing key: run `iohr runner register` on this machine",
+            ));
+        };
+        let signature = signer.sign(super::signing::gate_report_message(report).as_bytes());
+        let v: Value = self
+            .api
+            .send_body(
+                Method::Post,
+                &format!("/v1/coordinator/jobs/{}/gate-report", report.job_id),
+                &self.scoped(report.to_json(&signature)),
+            )
+            .await?
+            .json()?;
+        Ok(GateAnswer::from_json(&v))
     }
 }
 
@@ -749,6 +985,27 @@ mod tests {
         );
         assert_eq!(j["signature"], "AQID");
         assert_eq!(r.idempotency_key(), "l:9007199254740993:t:2");
+    }
+
+    #[test]
+    fn a_finished_turn_leaves_its_usage_in_one_journal_line() {
+        let mut r = valid_report();
+        r.usage = Usage {
+            input: 10,
+            output: 89,
+            cache_read: 1000,
+            cache_write: 17_676,
+        };
+        r.num_turns = 2;
+        r.duration_ms = 2053;
+        r.total_cost_usd = Some(0.035_807);
+        assert_eq!(
+            r.journal_line(),
+            "turn t ended: replied resumed=false turns=2 context=18686 input=10 output=89 \
+             cache_read=1000 cache_write=17676 cost_usd=0.0358 ms=2053"
+        );
+        r.total_cost_usd = None;
+        assert!(r.journal_line().contains("cost_usd=none"));
     }
 
     fn valid_report() -> TurnReport {
@@ -859,6 +1116,56 @@ mod tests {
         assert!(!timeout.is_permanent());
     }
 
+    fn api_error(status: u16, body: &str) -> ServiceError {
+        let raw = inorbithr::RawResponse::for_tests(
+            status,
+            inorbithr::Headers::new([]),
+            body.as_bytes().to_vec(),
+        );
+        ServiceError::Api(inorbithr::Error::Api(Box::new(inorbithr::ApiError::parse(
+            raw,
+        ))))
+    }
+
+    #[test]
+    fn only_a_missing_route_or_a_501_means_an_older_coordinator() {
+        let gateway = r#"{"code":"not_found","error":"no such route","details":[]}"#;
+        assert!(api_error(404, gateway).is_missing());
+        assert!(api_error(501, "").is_missing());
+        // The service saying the job is not there is a refusal, not an old coordinator.
+        let job = r#"{"code":"not_found","error":"no such job","details":[]}"#;
+        assert!(!api_error(404, job).is_missing());
+        assert!(!api_error(403, gateway).is_missing());
+        assert!(!api_error(500, "").is_missing());
+        assert!(!ServiceError::Refused("x").is_missing());
+    }
+
+    #[test]
+    fn a_gate_report_goes_out_with_a_string_token_a_number_exit_and_a_base64_signature() {
+        let r = GateReport {
+            job_id: "job_1".into(),
+            lease_id: "lse_1".into(),
+            fencing_token: 9_007_199_254_740_993,
+            runner_id: "rnr_1".into(),
+            command: "mise run ci:changed".into(),
+            exit_code: 2,
+            head: "a".repeat(40),
+            main_commit: "b".repeat(40),
+            output_sha256: "c".repeat(64),
+        };
+        let v = r.to_json(&[1_u8; 64]);
+        assert_eq!(v["fencing_token"], "9007199254740993");
+        assert_eq!(v["exit_code"], 2);
+        assert_eq!(v["signature"].as_str().map(str::len), Some(88));
+        assert_eq!(v["output_sha256"], "c".repeat(64));
+        // Nothing but the report's own fields: the output never rides along.
+        assert_eq!(v.as_object().map(serde_json::Map::len), Some(10));
+        let a = GateAnswer::from_json(&json!({
+            "evidence_id": "evd_1", "duplicate": true, "job": {"stage": "checked"}
+        }));
+        assert_eq!((a.evidence_id.as_str(), a.duplicate), ("evd_1", true));
+    }
+
     #[test]
     fn a_pack_reads_every_field_of_the_contract() {
         let p = Pack::from_json(&json!({
@@ -867,8 +1174,10 @@ mod tests {
             "allowed_tools": ["Read"], "wall_clock_secs": 600,
             "resume_session": "x", "resume_runner_id": "r", "thread_id": "th",
             "job_id": "j", "attempt": 2, "lease_id": "l", "fencing_token": "9",
-            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}"
+            "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}",
+            "checkout_path": "checkouts/job_1"
         }));
+        assert_eq!(p.checkout, "checkouts/job_1");
         assert_eq!(
             (
                 p.thread_id.as_str(),
@@ -883,6 +1192,35 @@ mod tests {
             (9, 4000, "{}")
         );
         assert_eq!((p.max_turns, p.wall_clock_secs), (5, 600));
+    }
+
+    #[test]
+    fn a_pack_reads_its_checkout_under_either_json_name() {
+        // What the gateway sends today (proto field names) and proto3 JSON's camelCase.
+        let snake = Pack::from_json(&json!({"checkout_path": "checkouts/j"}));
+        let camel = Pack::from_json(&json!({"checkoutPath": "checkouts/j"}));
+        let none = Pack::from_json(&json!({"checkout_path": ""}));
+        assert_eq!(
+            (
+                snake.checkout.as_str(),
+                camel.checkout.as_str(),
+                none.checkout.as_str()
+            ),
+            ("checkouts/j", "checkouts/j", "")
+        );
+    }
+
+    #[test]
+    fn a_job_reads_its_repository_and_document() {
+        let j = JobInfo::from_json(&serde_json::json!({
+            "id": "job_1", "repository": " inorbithr/core ", "document_id": "ldoc_1", "kind": "api"
+        }));
+        assert_eq!(j.repository, "inorbithr/core");
+        assert_eq!(j.document_id, "ldoc_1");
+        assert_eq!(
+            JobInfo::from_json(&serde_json::json!({})),
+            JobInfo::default()
+        );
     }
 
     #[test]

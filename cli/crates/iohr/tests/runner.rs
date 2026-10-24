@@ -18,7 +18,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#;
@@ -246,7 +246,9 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     let sent = bodies(&server, "/v1/coordinator/runners").await;
     let post = sent.iter().find(|b| b.get("name").is_some()).unwrap();
     assert_eq!(post["name"], "mac");
-    assert_eq!(post["kinds"], json!(["coordinate"]));
+    // Every class unless `[runner] kinds` says otherwise; capacity 1 unless set.
+    assert_eq!(post["kinds"], json!(["coordinate", "build"]));
+    assert_eq!(post["capacity"], 1);
     assert_eq!(post["providers"][0]["method"], "subscription");
     // The identity hash is sha256(salt + "\n" + line).
     assert_eq!(
@@ -635,6 +637,264 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
     assert!(t.contains("1 replies delivered"), "{t}");
 }
 
+/// Registers runner `mac` on its own server (which makes this machine's key), then
+/// mounts a coordinator that lists it and answers every heartbeat with no offer.
+async fn registered_and_idle(dir: &Path) -> MockServer {
+    fake_claude(dir, SUB);
+    let first = MockServer::start().await;
+    login(&first, dir, &token()).await;
+    mount_register(&first).await;
+    let o = run(&mut iohr(
+        &first,
+        dir,
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [runner_json()]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/runners/run_1/heartbeat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"runner": runner_json(), "heartbeat_interval_seconds": 1})),
+        )
+        .mount(&server)
+        .await;
+    server
+}
+
+const BEAT: &str = "/v1/coordinator/runners/run_1/heartbeat";
+
+fn add_to_config(dir: &Path, toml: &str) {
+    let p = dir.join("config").join("config.toml");
+    let mut text = std::fs::read_to_string(&p).unwrap();
+    text.push_str(toml);
+    std::fs::write(&p, text).unwrap();
+}
+
+/// Waits up to 15 s for a heartbeat body that `want` accepts.
+async fn beat_where(server: &MockServer, want: impl Fn(&Value) -> bool) -> bool {
+    for _ in 0..150 {
+        if bodies(server, BEAT).await.iter().any(&want) {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    false
+}
+
+/// Waits up to 15 s for `n` heartbeats; the count seen.
+async fn beats_at_least(server: &MockServer, n: usize) -> usize {
+    let mut seen = 0;
+    for _ in 0..150 {
+        seen = bodies(server, BEAT).await.len();
+        if seen >= n {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    seen
+}
+
+fn signal(pid: u32, sig: &str) {
+    let ok = Command::new("kill")
+        .args([sig, &pid.to_string()])
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "kill {sig} {pid}");
+}
+
+#[tokio::test]
+async fn run_declares_the_configured_capacity_and_a_sighup_changes_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    add_to_config(
+        dir.path(),
+        "\n[runner]\ncapacity = 3\nkinds = [\"coordinate\"]\n",
+    );
+    let log = std::fs::File::create(dir.path().join("run.log")).unwrap();
+    let mut child = iohr(
+        &server,
+        dir.path(),
+        &["runner", "run", "--name", "mac", "--interval", "1"],
+    )
+    .stdout(Stdio::null())
+    .stderr(log)
+    .spawn()
+    .unwrap();
+    let first = beat_where(&server, |b| b["capacity"] == 3).await;
+    // Two beats in: the SIGHUP handler is surely installed.
+    let seen = beats_at_least(&server, 2).await;
+    let p = dir.path().join("config").join("config.toml");
+    let text = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, text.replace("capacity = 3", "capacity = 8")).unwrap();
+    signal(child.id(), "-HUP");
+    let raised = beat_where(&server, |b| b["capacity"] == 8).await;
+    signal(child.id(), "-INT");
+    let status = child.wait().unwrap();
+    let log = std::fs::read_to_string(dir.path().join("run.log")).unwrap();
+    assert!(first, "no heartbeat declared capacity 3: {log}");
+    assert!(seen >= 2, "fewer than two heartbeats: {log}");
+    assert!(raised, "the SIGHUP did not change the capacity sent: {log}");
+    assert!(status.success(), "{log}");
+    let beats = bodies(&server, BEAT).await;
+    for b in &beats {
+        assert_eq!(b["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(b["kinds"], json!(["coordinate"]));
+    }
+    assert!(log.contains("config.toml read again: capacity 8"), "{log}");
+}
+
+#[tokio::test]
+async fn a_bad_capacity_on_reload_keeps_the_one_in_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    add_to_config(dir.path(), "\n[runner]\ncapacity = 2\n");
+    let log = std::fs::File::create(dir.path().join("run.log")).unwrap();
+    let mut child = iohr(
+        &server,
+        dir.path(),
+        &["runner", "run", "--name", "mac", "--interval", "1"],
+    )
+    .stdout(Stdio::null())
+    .stderr(log)
+    .spawn()
+    .unwrap();
+    let seen = beats_at_least(&server, 2).await;
+    let p = dir.path().join("config").join("config.toml");
+    let text = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, text.replace("capacity = 2", "capacity = 99")).unwrap();
+    signal(child.id(), "-HUP");
+    let before = bodies(&server, BEAT).await.len();
+    // Two beats after the reload.
+    let _ = beats_at_least(&server, before + 2).await;
+    signal(child.id(), "-INT");
+    let _ = child.wait().unwrap();
+    let log = std::fs::read_to_string(dir.path().join("run.log")).unwrap();
+    assert!(seen >= 2, "{log}");
+    let beats = bodies(&server, BEAT).await;
+    assert!(beats.len() > before, "no heartbeat after the reload: {log}");
+    assert!(beats.iter().all(|b| b["capacity"] == 2), "{beats:?}");
+    assert!(log.contains("was not taken"), "{log}");
+}
+
+#[tokio::test]
+async fn an_older_coordinator_that_refuses_the_new_fields_gets_the_old_heartbeat() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    // What a coordinator from before these fields answers: its REST binding refuses a
+    // field it does not know.
+    Mock::given(method("POST"))
+        .and(path(BEAT))
+        .and(body_string_contains("\"version\""))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "code": "bad_request",
+            "error": "body unrecognized field `capacity`, expected one of runner_id, providers, account_id",
+            "details": []
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    add_to_config(dir.path(), "\n[runner]\ncapacity = 4\n");
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "1",
+            "--max-beats",
+            "2",
+        ],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let beats = bodies(&server, BEAT).await;
+    // The first beat tried the new body once; every beat after it is the old one.
+    assert_eq!(beats[0]["capacity"], 4, "{beats:?}");
+    let old: Vec<&Value> = beats.iter().skip(1).collect();
+    assert!(old.len() >= 2, "{beats:?}");
+    for b in old {
+        assert!(
+            b.get("version").is_none() && b.get("capacity").is_none(),
+            "{b}"
+        );
+        assert_eq!(b["runner_id"], "run_1");
+    }
+    assert!(text(&o).contains("0 failed"), "{}", text(&o));
+}
+
+#[tokio::test]
+async fn config_show_names_each_value_and_its_source_without_a_sign_in() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    login(&server, dir.path(), &token()).await;
+    add_to_config(
+        dir.path(),
+        "\n[runner]\ncapacity = 4\nalways_on = true\n\n[profiles.p.runner]\ncapacity = 8\n",
+    );
+    let before = server.received_requests().await.unwrap().len();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "config", "show", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        v["capacity"],
+        json!({"value": 8, "source": "[profiles.p.runner]"})
+    );
+    assert_eq!(v["always_on"], json!({"value": true, "source": "[runner]"}));
+    assert_eq!(
+        v["kinds"],
+        json!({"value": ["coordinate", "build"], "source": "default"})
+    );
+    assert_eq!(v["build_floor"]["floor_bytes"], 100_000_000_000_u64);
+    // A flag wins over both tables.
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "config",
+            "show",
+            "--json",
+            "--capacity",
+            "2",
+            "--kinds",
+            "build",
+        ],
+    ));
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["capacity"], json!({"value": 2, "source": "flag"}));
+    assert_eq!(v["kinds"], json!({"value": ["build"], "source": "flag"}));
+    // A bad value is refused, naming where it came from.
+    add_to_config(dir.path(), "");
+    let p = dir.path().join("config").join("config.toml");
+    let t = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, t.replace("capacity = 8", "capacity = 40")).unwrap();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "config", "show"],
+    ));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("[profiles.p.runner]"), "{}", text(&o));
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        before,
+        "config show called the API"
+    );
+}
+
 #[tokio::test]
 async fn run_needs_a_registered_runner() {
     let server = MockServer::start().await;
@@ -728,4 +988,267 @@ async fn register_with_the_matching_key_is_already_registered_and_sends_nothing(
     assert!(text(&o).contains("already registered"), "{}", text(&o));
     let sent = bodies(&second, "/v1/coordinator/runners").await;
     assert!(sent.iter().all(|b| b.get("public_key").is_none()));
+}
+
+// ---- `iohr runner gate-report` (platform RFC 0120, the Checked gate) ----
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(["-c", "user.email=t@example.com", "-c", "user.name=t"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", text(&out));
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// A bare origin with one commit on main, and a clone on a branch one commit ahead.
+fn checkout(root: &Path) -> std::path::PathBuf {
+    std::fs::create_dir_all(root.join("origin")).unwrap();
+    git(&root.join("origin"), &["init", "--bare", "--quiet"]);
+    git(root, &["clone", "--quiet", "origin", "work"]);
+    let work = root.join("work");
+    std::fs::write(work.join("a.txt"), "a\n").unwrap();
+    git(&work, &["add", "a.txt"]);
+    git(&work, &["commit", "--quiet", "-m", "main"]);
+    git(&work, &["push", "--quiet", "origin", "HEAD:main"]);
+    git(&work, &["checkout", "--quiet", "-b", "feature"]);
+    std::fs::write(work.join("b.txt"), "b\n").unwrap();
+    git(&work, &["add", "b.txt"]);
+    git(&work, &["commit", "--quiet", "-m", "feature"]);
+    work
+}
+
+/// Registers (which makes and stores the key), then a second service that lists the
+/// runner with that key and takes a gate report with `answer`.
+async fn gate_server(dir: &Path, answer: ResponseTemplate) -> (MockServer, String) {
+    let first = MockServer::start().await;
+    login(&first, dir, &token()).await;
+    mount_register(&first).await;
+    let o = run(&mut iohr(
+        &first,
+        dir,
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let key = bodies(&first, "/v1/coordinator/runners")
+        .await
+        .iter()
+        .find_map(|b| b["public_key"].as_str().map(str::to_owned))
+        .unwrap();
+    let server = MockServer::start().await;
+    let mut mine = runner_json();
+    mine["public_key"] = json!(key.clone());
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": [mine]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/jobs/job_1/gate-report"))
+        .respond_with(answer)
+        .mount(&server)
+        .await;
+    (server, key)
+}
+
+fn gate_args<'a>(work: &'a str, command: &'a str) -> Vec<&'a str> {
+    vec![
+        "runner",
+        "gate-report",
+        "--job",
+        "job_1",
+        "--lease",
+        "lse_1",
+        "--token",
+        "5",
+        "--repo",
+        work,
+        "--command",
+        command,
+        "--verbose",
+    ]
+}
+
+#[tokio::test]
+async fn gate_report_runs_the_check_and_sends_a_report_signed_by_the_runner_key() {
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    let work = checkout(dir.path());
+    let (server, key) = gate_server(
+        dir.path(),
+        ResponseTemplate::new(200).set_body_json(json!({
+            "evidence_id": "evd_1", "duplicate": false, "job": {"stage": "merged"}
+        })),
+    )
+    .await;
+    // The check also proves it ran with a scrubbed environment.
+    let command = "echo ok; test -z \"$GH_TOKEN$FOO_SECRET$ANTHROPIC_API_KEY$IOHR_PROFILE\"";
+    let work_s = work.to_str().unwrap();
+    let o = run(&mut iohr(&server, dir.path(), &gate_args(work_s, command)));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let said = text(&o);
+    assert!(said.contains("evd_1") && said.contains("merged"), "{said}");
+    assert!(!said.contains("TOKENSIGNATUREMARKER"), "{said}");
+
+    let sent = bodies(&server, "/v1/coordinator/jobs/job_1/gate-report").await;
+    assert_eq!(sent.len(), 1, "one report");
+    let b = &sent[0];
+    assert_eq!(b["job_id"], "job_1");
+    assert_eq!(b["lease_id"], "lse_1");
+    assert_eq!(b["fencing_token"], "5");
+    assert_eq!(b["runner_id"], "run_1");
+    assert_eq!(b["command"], command);
+    assert_eq!(b["exit_code"], 0, "the scrubbed check passed");
+    assert_eq!(b["head"], git(&work, &["rev-parse", "HEAD"]));
+    assert_eq!(b["main_commit"], git(&work, &["rev-parse", "origin/main"]));
+    assert_eq!(
+        b["output_sha256"],
+        sha("ok\n"),
+        "the hash of the output, not the output"
+    );
+    let all = serde_json::to_string(&sent).unwrap();
+    // The command text names FOO_SECRET (it tests the scrub), so the body check is on its
+    // shape instead: exactly the contract's fields, no field that could carry the output.
+    let mut keys: Vec<&str> = b.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "account_id",
+            "command",
+            "exit_code",
+            "fencing_token",
+            "head",
+            "job_id",
+            "lease_id",
+            "main_commit",
+            "output_sha256",
+            "runner_id",
+            "signature"
+        ],
+        "{all}"
+    );
+    assert!(!all.contains("ok\\n"), "{all}");
+    // Signed over the ten lines of the contract by the key the runner registered.
+    let h = |s: &str| sha(s);
+    let message = [
+        "iohr.coordinator.v1.SubmitGateReport".to_owned(),
+        h("job_1"),
+        h("lse_1"),
+        "5".to_owned(),
+        h("run_1"),
+        h(command),
+        "0".to_owned(),
+        h(b["head"].as_str().unwrap()),
+        h(b["main_commit"].as_str().unwrap()),
+        h(b["output_sha256"].as_str().unwrap()),
+    ]
+    .join("\n");
+    assert!(
+        verify(&key, &message, b["signature"].as_str().unwrap()),
+        "the signature verifies under the enrolled key"
+    );
+}
+
+#[tokio::test]
+async fn gate_report_on_an_older_coordinator_says_so_and_does_not_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    let work = checkout(dir.path());
+    let (server, _) = gate_server(
+        dir.path(),
+        ResponseTemplate::new(404)
+            .set_body_json(json!({"code": "not_found", "error": "no such route", "details": []})),
+    )
+    .await;
+    let work_s = work.to_str().unwrap();
+    let o = run(&mut iohr(&server, dir.path(), &gate_args(work_s, "true")));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(
+        text(&o).contains("does not take gate reports yet"),
+        "{}",
+        text(&o)
+    );
+}
+
+#[tokio::test]
+async fn gate_report_for_an_unknown_job_is_a_failure_not_an_old_coordinator() {
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    let work = checkout(dir.path());
+    let (server, _) = gate_server(
+        dir.path(),
+        ResponseTemplate::new(404)
+            .set_body_json(json!({"code": "not_found", "error": "no such job", "details": []})),
+    )
+    .await;
+    let work_s = work.to_str().unwrap();
+    let o = run(&mut iohr(&server, dir.path(), &gate_args(work_s, "true")));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(!text(&o).contains("does not take gate reports yet"));
+}
+
+#[tokio::test]
+async fn gate_report_sends_nothing_for_a_branch_that_lacks_main_or_has_unsaved_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    let work = checkout(dir.path());
+    let (server, _) = gate_server(
+        dir.path(),
+        ResponseTemplate::new(200).set_body_json(json!({"evidence_id": "evd_1"})),
+    )
+    .await;
+    let work_s = work.to_str().unwrap();
+    // Main moves on origin after the branch was cut.
+    git(&work, &["checkout", "--quiet", "main"]);
+    std::fs::write(work.join("c.txt"), "c\n").unwrap();
+    git(&work, &["add", "c.txt"]);
+    git(&work, &["commit", "--quiet", "-m", "more main"]);
+    git(&work, &["push", "--quiet", "origin", "HEAD:main"]);
+    git(&work, &["checkout", "--quiet", "feature"]);
+    let o = run(&mut iohr(&server, dir.path(), &gate_args(work_s, "true")));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(
+        text(&o).contains("merge main into the branch"),
+        "{}",
+        text(&o)
+    );
+    // Merged, but with a file changed and not committed.
+    git(&work, &["merge", "--quiet", "--no-edit", "origin/main"]);
+    std::fs::write(work.join("b.txt"), "changed\n").unwrap();
+    let o = run(&mut iohr(&server, dir.path(), &gate_args(work_s, "true")));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("uncommitted changes"), "{}", text(&o));
+    assert!(
+        bodies(&server, "/v1/coordinator/jobs/job_1/gate-report")
+            .await
+            .is_empty(),
+        "no report was sent"
+    );
+}
+
+#[tokio::test]
+async fn gate_report_needs_the_runner_scopes_and_a_runner_key() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    login(&server, dir.path(), &token_with(&["identity:read"])).await;
+    let o = run(&mut iohr(&server, dir.path(), &gate_args(".", "true")));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("coordinator:runner"), "{}", text(&o));
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    login(&server, dir.path(), &token()).await;
+    let o = run(&mut iohr(&server, dir.path(), &gate_args(".", "true")));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("iohr runner register"), "{}", text(&o));
 }

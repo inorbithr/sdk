@@ -304,14 +304,17 @@ pub enum RunnerCommand {
     /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
     /// `claude auth status` prints. Run it again and it says the runner exists.
     Register {
-        /// The runner's name (default: this machine's host name).
+        /// The runner's name (default: `[runner] name` in config.toml, else this
+        /// machine's host name).
         #[arg(long)]
         name: Option<String>,
-        /// Turns this runner may hold at once, 1 to 16. `iohr runner run` runs that many
-        /// side by side. It is fixed at registration: to change it, register again.
-        #[arg(long, default_value_t = 1)]
-        capacity: u32,
-        /// Mark the runner as always on (a server), so the coordinator can rely on it.
+        /// Turns this runner may hold at once, 1 to 32 (default: `[runner] capacity`,
+        /// else 1). `iohr runner run` declares the configured capacity on every
+        /// heartbeat, so a later change needs no new registration.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// Mark the runner as always on (a server), so the coordinator can rely on it
+        /// (default: `[runner] always_on`).
         #[arg(long)]
         always_on: bool,
         #[command(flatten)]
@@ -332,6 +335,55 @@ pub enum RunnerCommand {
         /// Stop after this many answered heartbeats; for scripts.
         #[arg(long)]
         max_beats: Option<u64>,
+        /// Turns to run at once, 1 to 32, declared on every heartbeat (default:
+        /// `[runner] capacity` in config.toml, read again on SIGHUP; else what the
+        /// runner registered with).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// The turn classes to take, comma separated: `coordinate`, `build` (default:
+        /// `[runner] kinds`, else both). Build turns pause while /mnt/build has under
+        /// 100 GB free.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// The runner's settings from config.toml: `[runner]` and `[profiles.<name>.runner]`.
+    #[command(subcommand)]
+    Config(RunnerConfigCommand),
+    /// Run the check on a build job's checkout and send the service a signed report of it.
+    ///
+    /// Fetches `origin/main`, refuses a checkout with uncommitted changes or one that is
+    /// not merged with `origin/main`, runs the command with a scrubbed environment, and
+    /// signs the command, its exit code, the head, main's commit and the SHA-256 of the
+    /// output (the output stays here) with this machine's runner key. The service
+    /// checks the signature against the key you enrolled and the lease you hold; a report
+    /// that fails the check holds the job at Checked, which is the right answer.
+    GateReport {
+        /// The job (`job_...`) whose lease you hold.
+        #[arg(long)]
+        job: String,
+        /// Its lease (`lse_...`).
+        #[arg(long)]
+        lease: String,
+        /// The lease's fencing token.
+        #[arg(long)]
+        token: i64,
+        /// The checkout of the job's branch (default: the current directory).
+        #[arg(long, default_value = ".")]
+        repo: std::path::PathBuf,
+        /// The check to run, through the shell (default: `mise run ci:changed`).
+        #[arg(long, default_value = crate::runner::gate::DEFAULT_COMMAND)]
+        command: String,
+        /// Seconds the check may run (default 1800).
+        #[arg(long, default_value_t = crate::runner::gate::DEFAULT_TIMEOUT_SECS, value_parser = clap::value_parser!(u64).range(1..=21600))]
+        timeout: u64,
+        /// The runner's name (default: the one whose key this machine holds).
+        #[arg(long, conflicts_with = "runner")]
+        name: Option<String>,
+        /// The runner's id, from `iohr runner status`.
+        #[arg(long)]
+        runner: Option<String>,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -339,6 +391,20 @@ pub enum RunnerCommand {
     Status {
         #[command(flatten)]
         account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerConfigCommand {
+    /// The values `iohr runner run` would use now, each with where it came from: a flag,
+    /// `[profiles.<name>.runner]`, `[runner]` or the default. Needs no sign-in.
+    Show {
+        /// As `iohr runner run --capacity`.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// As `iohr runner run --kinds`.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
     },
 }
 

@@ -19,6 +19,16 @@ pub(crate) const FORBIDDEN_FLAGS: &[&str] = &[
     "--settings",
 ];
 
+/// What keeps a turn's context small without `--bare` (which never reads the keychain
+/// sign-in, so it is forbidden): the user's own settings (hooks, enabled plugins, their
+/// MCP servers and skills) stay out, and so does any MCP server not named by
+/// `--mcp-config`. Sign-in is untouched. Measured on `claude` 2.1.307 with one short
+/// turn: 33,220 context tokens without these two flags, 15,054 with them. The
+/// `project` and `local` sources still apply, so the working directory's own settings do.
+/// `--disable-slash-commands` was measured too and made the context larger, so it is not here.
+pub(crate) const LEAN_SESSION: &[&str] =
+    &["--setting-sources", "project,local", "--strict-mcp-config"];
+
 /// Why a turn's arguments were refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ArgError {
@@ -172,6 +182,7 @@ pub(crate) fn build_args(spec: &TurnSpec<'_>) -> Result<Vec<String>, ArgError> {
         "--max-turns".into(),
         spec.max_turns.to_string(),
     ];
+    a.extend(LEAN_SESSION.iter().map(|f| (*f).to_owned()));
     match spec.session {
         Session::Resume(id) => a.extend(["--resume".into(), id.clone()]),
         Session::Fresh(id) => {
@@ -383,12 +394,14 @@ pub(crate) fn parse_result(stdout: &str, exited_ok: bool) -> Parsed {
             || lower.contains("authentication"))
     {
         Outcome::LoginExpired
+    } else if !is_error && exited_ok && parse_reply(text).is_some() {
+        // A shaped answer is the turn's outcome even when a tool was denied on the way;
+        // the denials still go in the report (`denied_tools`).
+        Outcome::Replied
     } else if !denied.is_empty() {
         Outcome::RefusedTool
     } else if is_error || !exited_ok || v.is_null() {
         Outcome::Failed
-    } else if parse_reply(text).is_some() {
-        Outcome::Replied
     } else {
         Outcome::Unshaped
     };
@@ -495,6 +508,21 @@ mod tests {
     }
 
     #[test]
+    fn every_turn_leaves_the_users_settings_and_mcp_out_but_never_uses_bare() {
+        for session in [Session::Fresh(ID.into()), Session::Resume(OLD.into())] {
+            let built = args(&session, &[]).unwrap();
+            let got = strs(&built);
+            assert!(
+                got.windows(2)
+                    .any(|w| w == ["--setting-sources", "project,local"])
+            );
+            assert!(got.contains(&"--strict-mcp-config"));
+            assert!(!got.contains(&"--bare"));
+            assert!(!got.contains(&"--settings"));
+        }
+    }
+
+    #[test]
     fn argument_table() {
         struct Row {
             name: &'static str,
@@ -515,6 +543,9 @@ mod tests {
                     "sonnet",
                     "--max-turns",
                     "12",
+                    "--setting-sources",
+                    "project,local",
+                    "--strict-mcp-config",
                     "--session-id",
                     ID,
                     "--system-prompt",
@@ -536,6 +567,9 @@ mod tests {
                     "sonnet",
                     "--max-turns",
                     "12",
+                    "--setting-sources",
+                    "project,local",
+                    "--strict-mcp-config",
                     "--resume",
                     OLD,
                     "--allowedTools",
@@ -554,6 +588,9 @@ mod tests {
                     "sonnet",
                     "--max-turns",
                     "12",
+                    "--setting-sources",
+                    "project,local",
+                    "--strict-mcp-config",
                     "--session-id",
                     ID,
                     "--system-prompt",
@@ -803,6 +840,37 @@ mod tests {
         assert_eq!(p.outcome, Outcome::RefusedTool);
         assert_eq!(p.denied_tools, vec!["Bash"]);
 
+        assert_eq!(parse_result("not json", false).outcome, Outcome::Failed);
+        let arr = serde_json::json!([{"type":"system"},{"type":"result","is_error":false,"result":"{\"say\":\"a\"}"}]);
+        assert_eq!(
+            parse_result(&arr.to_string(), true).outcome,
+            Outcome::Replied
+        );
+    }
+
+    /// `job_01M5N5FG1B1FVJZGKVW6XPYW94`: the model tried a tool it lacks, then answered in
+    /// the reply shape. The answer is the turn's outcome; the denial is still reported.
+    #[test]
+    fn a_shaped_reply_after_a_denied_tool_is_replied_and_names_the_denial() {
+        let v = serde_json::json!({"type":"result","is_error":false,
+            "result":"{\"say\":\"done\",\"actions\":[]}",
+            "permission_denials":[{"tool_name":"Bash","tool_input":{}}]});
+        let p = parse_result(&v.to_string(), true);
+        assert_eq!(p.outcome, Outcome::Replied);
+        assert_eq!(p.reply.say, "done");
+        assert_eq!(p.denied_tools, vec!["Bash"]);
+        // A failed run with a shaped text is still not a reply.
+        let failed = serde_json::json!({"type":"result","is_error":false,
+            "result":"{\"say\":\"done\"}",
+            "permission_denials":[{"tool_name":"Bash","tool_input":{}}]});
+        assert_eq!(
+            parse_result(&failed.to_string(), false).outcome,
+            Outcome::RefusedTool
+        );
+    }
+
+    #[test]
+    fn the_older_array_form_still_parses() {
         assert_eq!(parse_result("not json", false).outcome, Outcome::Failed);
         let arr = serde_json::json!([{"type":"system"},{"type":"result","is_error":false,"result":"{\"say\":\"a\"}"}]);
         assert_eq!(
