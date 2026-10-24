@@ -87,3 +87,11 @@ run = "java -cp target/examples:target/classes:$(cat target/classpath.txt) examp
 dir = "examples/csharp/Calls"
 prepare = "dotnet build -nologo -v q"
 run = "dotnet run --no-build -- {name}"
+
+[language.swift]
+dir = "examples/swift"
+prepare = "swift build"
+run = ".build/debug/Calls {name}"
+
+[language.swift.skip]
+stream-socket = "the Swift SDK has no WebSocket stream transport yet"
