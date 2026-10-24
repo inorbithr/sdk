@@ -1,0 +1,10 @@
+name: auth-token
+area: examples
+summary: "A fixed API token from INORBIT_TOKEN is sent as the bearer as is: no key exchange, no refresh."
+action: { op: example }
+exchanges:
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer api-token-1 } }
+    response: { status: 200, json: { subject: ak_test, kind: client, scopes: [identity:read] } }
+expect:
+  attempts: 1
+  token_exchanges: 0

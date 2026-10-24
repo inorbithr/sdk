@@ -57,8 +57,15 @@ Operation::new(Method::{{ op.method }}, {% if op.path_literal %}"{{ op.path_lite
 `{{ op.line }}`{% if op.scopes %}; needs scope{% if op.scopes|length > 1 %}s{% endif %} {% for s in op.scopes %}`{{ s }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.{% if op.stream %} A stream of events: see [`EventStream`].{% endif %}
 {%- endmacro -%}
 
-/// The operations, as methods on [`Client`].
-pub trait Surface<P: Profile> {
+mod sealed {
+    /// Only this surface implements [`Surface`](super::Surface), so an operation added
+    /// to it is not a breaking change.
+    pub trait Sealed {}
+    impl<P: {{ runtime }}::Profile> Sealed for {{ runtime }}::Client<P> {}
+}
+
+/// The operations, as methods on [`Client`]. Sealed: only `Client<P>` implements it.
+pub trait Surface<P: Profile>: sealed::Sealed {
 {% for h in handles %}
     /// The `{{ h.tag }}` operations.
     fn {{ h.method_name }}(&self) -> {{ h.type_name }}<'_, P>;
@@ -127,12 +134,25 @@ impl<P: ops::{{ op.marker }}> {{ h.type_name }}<'_, P> {
 {% endfor %}
 
 {% for s in params_structs %}
-/// The query parameters of `{{ s.op_line }}`; every field is optional.
+/// The query parameters of `{{ s.op_line }}`; every field is optional. Build them as
+/// `{{ s.type_name }}::default()` and the `with_` methods.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct {{ s.type_name }} {
 {% for f in s.fields %}
     {% if f.doc %}/// {{ f.doc }}{% else %}/// `{{ f.name }}`{% endif %}
     pub {{ f.field }}: ::std::option::Option<{{ f.ty }}>,
+{% endfor %}
+}
+
+impl {{ s.type_name }} {
+{% for f in s.fields %}
+    /// Sets `{{ f.name }}`.
+    #[must_use]
+    pub fn with_{{ f.field | replace("r#", "") }}(mut self, value: impl ::std::convert::Into<{{ f.ty }}>) -> Self {
+        self.{{ f.field }} = ::std::option::Option::Some(value.into());
+        self
+    }
 {% endfor %}
 }
 {% endfor %}

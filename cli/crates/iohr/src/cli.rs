@@ -9,6 +9,8 @@ use iohr_auth::ProfileName;
 
 use inorbithr::DEFAULT_BASE_URL;
 
+use crate::environments::{self, Environment, Environments};
+
 /// The InOrbit command line.
 ///
 /// Sign in, keep several accounts as profiles, and call the API. A token is never an
@@ -41,12 +43,16 @@ pub struct Global {
     /// Describe each call on stderr: method, path, status, time, request id.
     #[arg(short, long, global = true)]
     pub verbose: bool,
-    /// The API's address.
-    #[arg(long, global = true, env = "IOHR_BASE_URL", default_value = DEFAULT_BASE_URL, hide_default_value = true)]
-    pub base_url: String,
+    /// The environment to call: `production` (the default) or `local`. Sets the API and
+    /// sign-in addresses; `--base-url` and `IOHR_ISSUER` still win over it.
+    #[arg(long, global = true, env = "IOHR_ENV", value_parser = environments::parse_name, value_name = "NAME")]
+    pub env: Option<String>,
+    /// The API's address (default: the environment's).
+    #[arg(long = "base-url", global = true, env = "IOHR_BASE_URL")]
+    base_url: Option<String>,
     /// The sign-in service.
-    #[arg(long, global = true, env = "IOHR_ISSUER", default_value = iohr_auth::DEFAULT_ISSUER, hide = true)]
-    pub issuer: String,
+    #[arg(long, global = true, env = "IOHR_ISSUER", hide = true)]
+    issuer: Option<String>,
     /// The OAuth client the command line signs in as.
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
@@ -56,6 +62,53 @@ pub struct Global {
     /// Where extensions are kept (default: the platform's data directory).
     #[arg(long, global = true, env = "IOHR_DATA_DIR", hide = true)]
     pub data_dir: Option<PathBuf>,
+}
+
+impl Global {
+    /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
+    #[must_use]
+    pub fn environment(&self) -> &'static Environment {
+        let list = Environments::builtin();
+        let name = self.env.as_deref().unwrap_or_else(|| list.default_name());
+        // The name was checked on the way in; the default is checked by the tests.
+        list.get(name)
+            .unwrap_or_else(|_| unreachable!("environment names are validated"))
+    }
+
+    /// The API's address: `--base-url` or `IOHR_BASE_URL`, else the environment's, else
+    /// production's.
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        self.base_url
+            .as_deref()
+            .or(self.environment().base_url.as_deref())
+            .unwrap_or(DEFAULT_BASE_URL)
+    }
+
+    /// The sign-in service: `IOHR_ISSUER`, else the environment's, else production's.
+    #[must_use]
+    pub fn issuer(&self) -> &str {
+        self.issuer
+            .as_deref()
+            .or(self.environment().issuer.as_deref())
+            .unwrap_or(iohr_auth::DEFAULT_ISSUER)
+    }
+
+    /// Refuses an environment whose address is a placeholder, unless the caller named
+    /// the API's address.
+    ///
+    /// # Errors
+    ///
+    /// The environment has no real address yet.
+    pub fn check_environment(&self) -> Result<(), crate::Error> {
+        if self.environment().placeholder && self.base_url.is_none() {
+            return Err(crate::Error::Failed(format!(
+                "the {} environment has no address yet; set IOHR_BASE_URL or --base-url",
+                self.env.as_deref().unwrap_or("selected")
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -109,6 +162,16 @@ pub enum Command {
     /// private), private ones shared with it, unpublished ones in progress on this
     /// machine, and what is installed. The same as `iohr ext packages`.
     Packages,
+    /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs
+    /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
+    /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
+    /// against the release's checksums and attestations and replaced in place; anything
+    /// else gets the command to run. `--check` only reports. Needs no sign-in.
+    Upgrade {
+        /// Only say whether a newer release exists and what would run; change nothing.
+        #[arg(long)]
+        check: bool,
+    },
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -124,9 +187,18 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// The coordinator's runner (RFC 0120): this machine runs coordinator turns on your own
+    /// installed `claude`, on your own subscription.
+    #[command(subcommand)]
+    Runner(RunnerCommand),
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
     #[command(subcommand)]
     Browser(BrowserCommand),
+    /// A loopback pipe from this machine into an environment's Envoy edge, so the real
+    /// site opens at `http://www.localhost:<port>/` (and console, docs, auth). Runs
+    /// `ssh -N -L` until Ctrl-C; binds 127.0.0.1 only and goes through Envoy, never to a
+    /// service directly. The environment is `--env` (production by default).
+    Tunnel(Tunnel),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -222,6 +294,118 @@ pub struct PrLine {
     /// The change is live: merged, rolled and serving.
     #[arg(long, requires = "pr")]
     pub live: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerCommand {
+    /// Register this machine as one of your runners: its name, system and what it can run.
+    ///
+    /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
+    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
+    /// `claude auth status` prints. Run it again and it says the runner exists.
+    Register {
+        /// The runner's name (default: `[runner] name` in config.toml, else this
+        /// machine's host name).
+        #[arg(long)]
+        name: Option<String>,
+        /// Turns this runner may hold at once, 1 to 32 (default: `[runner] capacity`,
+        /// else 1). `iohr runner run` declares the configured capacity on every
+        /// heartbeat, so a later change needs no new registration.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// Mark the runner as always on (a server), so the coordinator can rely on it
+        /// (default: `[runner] always_on`).
+        #[arg(long)]
+        always_on: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Run the loop: heartbeat, accept a lease, run its turn on `claude -p`, report it.
+    /// Stops on Ctrl-C.
+    Run {
+        /// The runner's name (default: this machine's host name).
+        #[arg(long, conflicts_with = "runner")]
+        name: Option<String>,
+        /// The runner's id, from `iohr runner status`.
+        #[arg(long)]
+        runner: Option<String>,
+        /// Seconds between heartbeats (default: what the service says, the RFC's 20).
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
+        interval: Option<u64>,
+        /// Stop after this many answered heartbeats; for scripts.
+        #[arg(long)]
+        max_beats: Option<u64>,
+        /// Turns to run at once, 1 to 32, declared on every heartbeat (default:
+        /// `[runner] capacity` in config.toml, read again on SIGHUP; else what the
+        /// runner registered with).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// The turn classes to take, comma separated: `coordinate`, `build` (default:
+        /// `[runner] kinds`, else both). Build turns pause while /mnt/build has under
+        /// 100 GB free.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// The runner's settings from config.toml: `[runner]` and `[profiles.<name>.runner]`.
+    #[command(subcommand)]
+    Config(RunnerConfigCommand),
+    /// Run the check on a build job's checkout and send the service a signed report of it.
+    ///
+    /// Fetches `origin/main`, refuses a checkout with uncommitted changes or one that is
+    /// not merged with `origin/main`, runs the command with a scrubbed environment, and
+    /// signs the command, its exit code, the head, main's commit and the SHA-256 of the
+    /// output (the output stays here) with this machine's runner key. The service
+    /// checks the signature against the key you enrolled and the lease you hold; a report
+    /// that fails the check holds the job at Checked, which is the right answer.
+    GateReport {
+        /// The job (`job_...`) whose lease you hold.
+        #[arg(long)]
+        job: String,
+        /// Its lease (`lse_...`).
+        #[arg(long)]
+        lease: String,
+        /// The lease's fencing token.
+        #[arg(long)]
+        token: i64,
+        /// The checkout of the job's branch (default: the current directory).
+        #[arg(long, default_value = ".")]
+        repo: std::path::PathBuf,
+        /// The check to run, through the shell (default: `mise run ci:changed`).
+        #[arg(long, default_value = crate::runner::gate::DEFAULT_COMMAND)]
+        command: String,
+        /// Seconds the check may run (default 1800).
+        #[arg(long, default_value_t = crate::runner::gate::DEFAULT_TIMEOUT_SECS, value_parser = clap::value_parser!(u64).range(1..=21600))]
+        timeout: u64,
+        /// The runner's name (default: the one whose key this machine holds).
+        #[arg(long, conflicts_with = "runner")]
+        name: Option<String>,
+        /// The runner's id, from `iohr runner status`.
+        #[arg(long)]
+        runner: Option<String>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Your runners as the service sees them, and what this machine can run.
+    Status {
+        #[command(flatten)]
+        account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerConfigCommand {
+    /// The values `iohr runner run` would use now, each with where it came from: a flag,
+    /// `[profiles.<name>.runner]`, `[runner]` or the default. Needs no sign-in.
+    Show {
+        /// As `iohr runner run --capacity`.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
+        capacity: Option<u32>,
+        /// As `iohr runner run --kinds`.
+        #[arg(long, value_delimiter = ',')]
+        kinds: Option<Vec<String>>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -937,6 +1121,11 @@ pub struct Login {
     /// Keep the credential in an owner-only file instead of the OS credential store.
     #[arg(long)]
     pub insecure_storage: bool,
+    /// A scope to ask for besides the defaults, such as the runner's
+    /// `coordinator:runner,coordinator:read`; repeat it or separate with commas. The
+    /// sign-in service refuses a scope the command line's client may not ask for.
+    #[arg(long = "scope", value_delimiter = ',')]
+    pub scopes: Vec<String>,
 }
 
 /// How to sign in; at most one. Without any, a browser when this machine can open
@@ -1259,6 +1448,13 @@ pub enum CoordinatorCommand {
     /// The coordinator's queued asks.
     #[command(subcommand)]
     Asks(CoordinatorAsksCommand),
+    /// A job's brief, the one text a worker starts from: the task, its acceptance, the
+    /// files and the linked document's excerpt, capped at the kind's token budget
+    /// (RFC 0132). Prints the text alone so it can be piped into a worker.
+    Brief {
+        /// The job id (`job_...`).
+        job: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1278,6 +1474,9 @@ pub enum CoordinatorJobsCommand {
         /// At most this many.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
     },
     /// File a job. The brief is the text to work on, from --brief or `-` for standard input.
     Create {
@@ -1317,6 +1516,9 @@ pub enum CoordinatorJobsCommand {
         /// The queued ask this job works on.
         #[arg(long)]
         ask: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
     },
 }
 
@@ -1333,5 +1535,55 @@ pub enum CoordinatorAsksCommand {
         /// At most this many.
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
         limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
     },
+    /// Queue an ask. The coordinator's planner files a job for a kind it knows (bug,
+    /// feature, ui, api, docs, design, review, chore, question, watch); an ask with
+    /// any other kind stays queued, with the reason.
+    Create {
+        /// What kind of ask: lower case, 1 to 40 of a-z, 0-9, _ and -.
+        #[arg(long)]
+        kind: String,
+        /// The ask, or `-` to read it from standard input.
+        #[arg(long)]
+        body: String,
+        /// A short title; empty is the body's first line.
+        #[arg(long)]
+        title: Option<String>,
+        /// Priority 1 to 10 (default 5).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=10))]
+        priority: Option<u32>,
+        /// A link (pull request, document); repeat or comma-separate.
+        #[arg(long = "link", value_delimiter = ',')]
+        links: Vec<String>,
+        /// The id in the system it came from; the same id returns the same ask.
+        #[arg(long)]
+        external_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Args)]
+pub struct Tunnel {
+    /// The ssh target that runs the environment.
+    #[arg(long, env = "IOHR_TUNNEL_HOST")]
+    pub host: String,
+    /// The port to listen on here, on 127.0.0.1 (default: the edge's own port).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// The edge port on the host, when it differs from `environments.toml` (core's
+    /// `devops/ci/envs.toml` is the source; `mise run local:tunnel` passes it).
+    #[arg(long)]
+    pub edge_port: Option<u16>,
+    /// The engine LB port to forward as well (default: the environment's, when it has
+    /// one: mobile and Trails use it); the same port on both ends.
+    #[arg(long)]
+    pub engine_port: Option<u16>,
+    /// Forward the edge only, not the engine LB.
+    #[arg(long)]
+    pub no_engine: bool,
+    /// Print the ssh command and the addresses, then stop.
+    #[arg(long)]
+    pub dry_run: bool,
 }

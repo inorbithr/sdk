@@ -44,8 +44,12 @@ has the milestones.
 ## The command line
 
 ```sh
-# macOS and Linux, Homebrew
+# macOS and Linux, Homebrew. Homebrew refuses a tap it was not told to trust, so once
+# per Mac (or Linux box) run `brew trust` before the install:
+brew trust inorbithr/tap
 brew install inorbithr/tap/iohr
+
+# later: iohr upgrade (iohr upgrade --check only looks)
 
 # Debian and Ubuntu: the repository is signed by the key with fingerprint
 # 5FF6 7AF3 D50A 6B06 FFE6  EA8A FFA5 11CF 585B F28D
@@ -70,7 +74,8 @@ iohr api GET /v1/me
 `iohr` keeps several accounts as profiles, creates and revokes API tokens, proves
 domains, connects an account's apps (`iohr connectors`, `iohr connections`: a key or a
 browser sign-in), installs signed extensions such as the InOrbit agent (`iohr ext`),
-checks Lab documents (`iohr lab check`) and keeps RFCs, PRDs and ADRs in the Decisions product (`iohr decisions`).
+checks Lab documents (`iohr lab check`), keeps RFCs, PRDs and ADRs in the Decisions product (`iohr decisions`) and
+runs coordinator turns on your own Claude subscription (`iohr runner`).
 It talks to `api.inorbit.hr` and
 `auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
 `sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry and no update

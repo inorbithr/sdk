@@ -11,7 +11,7 @@ languages and fails in the sixth is a parity bug.
 | Path | Contents |
 |---|---|
 | `case.schema.json` | JSON Schema for a case file; editors validate against it |
-| `cases/<area>/<name>.yaml` | The cases, grouped by area (`auth`, `errors`, `retries`, `operations`, `sse`, `socket`, and from M6 `credentials`, `middleware`, `transport`) |
+| `cases/<area>/<name>.yaml` | The cases, grouped by area (`auth`, `errors`, `retries`, `operations`, `sse`, `socket`, `examples` (what `mise run examples:run` replays; hidden from the default list), and from M6 `credentials`, `middleware`, `transport`) |
 | `vector.schema.json`, `vectors/<kind>/<name>.yaml` | Pure-function vectors, run by each language as unit tests without a server: configuration resolution, config file paths, `no_proxy`, rate-limit headers, durations (`docs/config.md` section 9.2) |
 | `server/` | The replay server, a Go program with one dependency (a YAML parser) |
 | `drivers/` | Nothing yet; each language keeps its driver next to its tests (`go/internal/conformance`, `rust/tests/conformance.rs`, `typescript/test/conformance`, `python/tests/conformance`) |
@@ -101,7 +101,7 @@ them this way).
 
 A driver then:
 
-1. `GET /_cases` lists every case as `area/name`, so a driver needs no YAML reader.
+1. `GET /_cases` lists every case as `area/name`, so a driver needs no YAML reader. The `examples/` cases are left out unless the request is `GET /_cases?area=examples`, so no SDK suite replays them; they still load by name.
 2. `POST /_case` with `{"name": "auth/token-is-cached"}` (or the bare name, or
    `{"case": {...}}` for a case written inline). This starts a new session, and the
    answer carries the loaded case as JSON (`client`, `action`, `expect`, `pending`) and,

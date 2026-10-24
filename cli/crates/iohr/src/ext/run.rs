@@ -6,16 +6,17 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 
-use iohr_auth::{Claims, Credential as _, Redacted};
+use iohr_auth::{Claims, Credential as _, Kind, Redacted};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::OnceCell;
 
 use super::install::{Store, check_confirmed, check_program};
+use super::narrow;
 use super::socket::{Ctx, MintError, Minted, Minter, handle};
 use crate::Env;
 use crate::cli::Global;
-use crate::context::{Session, session};
+use crate::context::{Session, account, session};
 use crate::error::Error;
 
 /// Hands out the profile's access token, signing in (or refreshing) on first use.
@@ -49,13 +50,20 @@ impl Minter for ProfileMinter {
             .map_err(|e| MintError::Unavailable(e.to_string()))?;
         let claims = Claims::read(bearer.expose(), OffsetDateTime::now_utc())
             .map_err(|e| MintError::Unavailable(e.to_string()))?;
-        // The platform cannot narrow a person's token yet: the token is handed out only
-        // when it already holds every scope asked for (ADR 0012).
+        // A token that already holds every scope asked for (a key's, a token's) is handed
+        // out as it is. A person's holds only `iohr.api`, which is everything the person
+        // can do, so it is never handed out: the extension gets a token narrowed to the
+        // scopes asked for (ADR 0012, point 6), and a profile that cannot make one is
+        // refused.
         if let Some(missing) = scopes.iter().find(|s| !claims.scp.contains(s)) {
-            return Err(MintError::Forbidden(format!(
-                "profile {} does not hold {missing}",
-                s.label
-            )));
+            if s.kind != Kind::Person {
+                return Err(MintError::Forbidden(format!(
+                    "profile {} does not hold {missing}",
+                    s.label
+                )));
+            }
+            let account = account(s, None).map_err(|e| MintError::Unavailable(e.to_string()))?;
+            return narrow::narrowed(&s.api, &account, &scopes).await;
         }
         let expires_at = claims
             .exp
@@ -88,7 +96,7 @@ pub(crate) async fn run(
     };
     let program = check_program(&record, &dir).map_err(|e| Error::Failed(e.to_string()))?;
     check_confirmed(&entry, &record).map_err(|e| Error::Failed(e.to_string()))?;
-    let base = api_origin(&global.base_url)?;
+    let base = api_origin(global.base_url())?;
     let ctx = Arc::new(Ctx {
         minter: ProfileMinter::new(global, env),
         allowed: record.manifest.scopes.clone(),

@@ -1,5 +1,115 @@
 # Changelog
 
+## [0.1.0-alpha.24](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.23...iohr/v0.1.0-alpha.24) (2026-10-24)
+
+
+### Bug fixes
+
+* **cli:** merge main into the job branch before the runner ships ([#261](https://github.com/inorbithr/sdk/issues/261)) ([df9a9c6](https://github.com/inorbithr/sdk/commit/df9a9c6b54c2d44e07d9ef90dbbf98f0f58ad550))
+
+## [0.1.0-alpha.23](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.22...iohr/v0.1.0-alpha.23) (2026-10-24)
+
+
+### Features
+
+* **cli:** a runner turn logs its usage and cost and leaves user settings out of its context ([#252](https://github.com/inorbithr/sdk/issues/252)) ([97f42d7](https://github.com/inorbithr/sdk/commit/97f42d7ac334c82ad25aa5a006aef73d89bef1be))
+* **cli:** the runner owns the job's checkout and opens its pull request ([#260](https://github.com/inorbithr/sdk/issues/260)) ([ed95f1e](https://github.com/inorbithr/sdk/commit/ed95f1e7bce40a214ca667661e532bc191d6848d))
+
+
+### Bug fixes
+
+* **ci:** Go 1.26.10 and 1.27.3 for GO-2026-6809; gate test holds on Windows ([#250](https://github.com/inorbithr/sdk/issues/250)) ([34ab38e](https://github.com/inorbithr/sdk/commit/34ab38e10094d64ffdb9e05440fa0e5adfa02aad))
+* **cli:** the extension tests pass on slow and Windows runners ([#258](https://github.com/inorbithr/sdk/issues/258)) ([ed6113a](https://github.com/inorbithr/sdk/commit/ed6113ac09a40f7bcd48f7adc579626f5f5e3e17))
+* **cli:** the runner's run loop sends the gate report for a finished job turn ([#254](https://github.com/inorbithr/sdk/issues/254)) ([3346863](https://github.com/inorbithr/sdk/commit/3346863b9de6f6393f9cf00ea057a87f09c0ea08))
+* **cli:** the scrubbed-environment gate test uses cmd syntax on Windows ([#257](https://github.com/inorbithr/sdk/issues/257)) ([5360ef5](https://github.com/inorbithr/sdk/commit/5360ef5e13122f68a2ecf3d6e7bed0bf348ef462))
+* **cli:** the upgrade tests reach their mock server on Windows ([#259](https://github.com/inorbithr/sdk/issues/259)) ([d76a915](https://github.com/inorbithr/sdk/commit/d76a91535bb17a350d0d1b69e500ffc7f12abfec))
+* **deps:** ctutils 0.4.5 in every Cargo lock and opentelemetry-api 1.45.1 in the Python lock so the advisory audits pass again ([#256](https://github.com/inorbithr/sdk/issues/256)) ([91446a5](https://github.com/inorbithr/sdk/commit/91446a5fea6fd4769d6d7fe4bd2c55de6b7b5316))
+
+## [0.1.0-alpha.22](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.21...iohr/v0.1.0-alpha.22) (2026-10-21)
+
+
+### Features
+
+* **cli:** runner capacity and kinds from config.toml, declared on every heartbeat ([#244](https://github.com/inorbithr/sdk/issues/244)) ([2a01d11](https://github.com/inorbithr/sdk/commit/2a01d113e1be2a0d84cf5388fd7606578d86002d))
+
+
+### Bug fixes
+
+* **deps:** bump rustls-webpki and webpki-root-certs for RUSTSEC-2026-0382 and 0383 ([#245](https://github.com/inorbithr/sdk/issues/245)) ([22cc5c6](https://github.com/inorbithr/sdk/commit/22cc5c6402899919bfc87f4745b171770462d1ab))
+
+## [0.1.0-alpha.21](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.20...iohr/v0.1.0-alpha.21) (2026-10-20)
+
+
+### Features
+
+* **cli:** iohr runner gate-report runs the check and sends the signed gate report ([#242](https://github.com/inorbithr/sdk/issues/242)) ([0646127](https://github.com/inorbithr/sdk/commit/06461271f76e0959f3779471307d041d0df78505))
+
+
+### Dependencies
+
+* **rust:** bump the rust group across 4 directories with 14 updates ([#238](https://github.com/inorbithr/sdk/issues/238)) ([d2c7787](https://github.com/inorbithr/sdk/commit/d2c778777c522e32641c7afb4f7b6ee1c7465b51))
+
+## [0.1.0-alpha.20](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.19...iohr/v0.1.0-alpha.20) (2026-10-20)
+
+
+### Features
+
+* **cli:** run up to --capacity turns at once in the runner loop ([#240](https://github.com/inorbithr/sdk/issues/240)) ([87b6702](https://github.com/inorbithr/sdk/commit/87b67021b9371d325e1477075d19944dac6ad2a9))
+
+
+### Bug fixes
+
+* **ci:** exclude release-please changelogs from typos, fix Windows lints ([#234](https://github.com/inorbithr/sdk/issues/234)) ([fbdf42e](https://github.com/inorbithr/sdk/commit/fbdf42efeb428c28375cd0aced9bc75a957019b4))
+
+## [0.1.0-alpha.19](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.18...iohr/v0.1.0-alpha.19) (2026-10-19)
+
+
+### Bug fixes
+
+* **cli:** iohr runner acts on the profile's account, not the token's personal one ([#236](https://github.com/inorbithr/sdk/issues/236)) ([ffc5663](https://github.com/inorbithr/sdk/commit/ffc5663f35a23f937245af90a062882ba2a4955a))
+
+## [0.1.0-alpha.18](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.17...iohr/v0.1.0-alpha.18) (2026-10-19)
+
+
+### Bug fixes
+
+* **cli:** iohr login --scope, so the runner's scopes can be asked for ([#232](https://github.com/inorbithr/sdk/issues/232)) ([a7d03c8](https://github.com/inorbithr/sdk/commit/a7d03c860ac76d82fc8a7df97460122d882ef256))
+* **cli:** iohr login --scope, so the runner's scopes can be asked for (RFC 0120) ([a7d03c8](https://github.com/inorbithr/sdk/commit/a7d03c860ac76d82fc8a7df97460122d882ef256))
+
+## [0.1.0-alpha.17](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.16...iohr/v0.1.0-alpha.17) (2026-10-19)
+
+
+### Features
+
+* **cli:** --account on iohr coordinator commands ([#202](https://github.com/inorbithr/sdk/issues/202)) ([830ffbc](https://github.com/inorbithr/sdk/commit/830ffbc4fcf802b92d8bf84a8b8aed67f11e45ae))
+* **cli:** iohr coordinator asks create --kind ([#204](https://github.com/inorbithr/sdk/issues/204)) ([05abcbd](https://github.com/inorbithr/sdk/commit/05abcbdad2790c2be695901691b3bacf8eb69231))
+* **cli:** iohr coordinator asks create --kind, and a KIND column on asks list ([05abcbd](https://github.com/inorbithr/sdk/commit/05abcbdad2790c2be695901691b3bacf8eb69231))
+* **cli:** iohr coordinator brief &lt;job&gt; ([#203](https://github.com/inorbithr/sdk/issues/203)) ([91b4387](https://github.com/inorbithr/sdk/commit/91b4387b087814c4fd7774d76927ae1c01947146))
+* **cli:** iohr coordinator brief &lt;job&gt; prints a job's capped brief ([91b4387](https://github.com/inorbithr/sdk/commit/91b4387b087814c4fd7774d76927ae1c01947146))
+* **cli:** iohr runner register, run and status ([#190](https://github.com/inorbithr/sdk/issues/190)) ([7405c0b](https://github.com/inorbithr/sdk/commit/7405c0bd5613861b0abb806f9adbc11130b1bb86))
+
+
+### Bug fixes
+
+* **cli:** clippy 1.99 assert_is_empty in the upgrade test ([#216](https://github.com/inorbithr/sdk/issues/216)) ([04ed677](https://github.com/inorbithr/sdk/commit/04ed67726a99c32366eadbd988a0a39e4f52d0d0))
+
+## [0.1.0-alpha.16](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.15...iohr/v0.1.0-alpha.16) (2026-10-16)
+
+
+### Features
+
+* **cli:** --env and IOHR_ENV target production or local ([#208](https://github.com/inorbithr/sdk/issues/208)) ([3d44e90](https://github.com/inorbithr/sdk/commit/3d44e90345c0dba35d187a33f82ef685a85bce96))
+* **cli:** iohr coordinator jobs list|create and asks list ([#201](https://github.com/inorbithr/sdk/issues/201)) ([7c12ae4](https://github.com/inorbithr/sdk/commit/7c12ae4037450a732cb70558363f21c14a1f1504))
+* **cli:** iohr ext packages and iohr packages list every package, private and local too ([#197](https://github.com/inorbithr/sdk/issues/197)) ([df68793](https://github.com/inorbithr/sdk/commit/df687936866877643ca57423813a586bd880d7b9))
+* **cli:** iohr project init, a project of your own set up with one command (PRD 0088) ([#193](https://github.com/inorbithr/sdk/issues/193)) ([b7ed488](https://github.com/inorbithr/sdk/commit/b7ed48869f544bbba2fa358251f7cf6fd34853de))
+* **cli:** iohr tunnel, a loopback pipe into an environment's Envoy edge ([#212](https://github.com/inorbithr/sdk/issues/212)) ([ba33bdf](https://github.com/inorbithr/sdk/commit/ba33bdf4f7e1ba6868acb64000ce0dbeee9f9ac4))
+* **cli:** iohr upgrade, brew trust in the install docs, cli:tap-local ([#213](https://github.com/inorbithr/sdk/issues/213)) ([aaae388](https://github.com/inorbithr/sdk/commit/aaae388c8b8dd3ab0896316ad1024771425a1573))
+
+
+### Bug fixes
+
+* extension tokens for a person, and a wait that outlasts the channel ([#205](https://github.com/inorbithr/sdk/issues/205)) ([b57dbef](https://github.com/inorbithr/sdk/commit/b57dbef00126617a197ccdbd378b2170696cac2d))
+
 ## [0.1.0-alpha.15](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.14...iohr/v0.1.0-alpha.15) (2026-10-12)
 
 

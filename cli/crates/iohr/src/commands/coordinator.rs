@@ -23,9 +23,12 @@ pub(crate) async fn run(
 ) -> Result<(), Error> {
     let s = session(g, env).await?;
     match cmd {
-        CoordinatorCommand::Jobs(CoordinatorJobsCommand::List { state, mine, limit }) => {
-            list_jobs(&s, state, mine, limit, out).await
-        }
+        CoordinatorCommand::Jobs(CoordinatorJobsCommand::List {
+            state,
+            mine,
+            limit,
+            account,
+        }) => list_jobs(&s, state, mine, limit, account, out).await,
         CoordinatorCommand::Jobs(CoordinatorJobsCommand::Create {
             kind,
             brief,
@@ -39,6 +42,7 @@ pub(crate) async fn run(
             security,
             compliance_pr,
             ask,
+            account,
         }) => {
             let brief = read_brief(&brief)?;
             let body = job_body(&JobArgs {
@@ -54,6 +58,7 @@ pub(crate) async fn run(
                 security,
                 compliance_pr,
                 ask,
+                account,
             })?;
             create_job(&s, &body, out).await
         }
@@ -61,7 +66,32 @@ pub(crate) async fn run(
             state,
             source,
             limit,
-        }) => list_asks(&s, state, source, limit, out).await,
+            account,
+        }) => list_asks(&s, state, source, limit, account, out).await,
+        CoordinatorCommand::Brief { job } => brief(&s, &job, out).await,
+        CoordinatorCommand::Asks(CoordinatorAsksCommand::Create {
+            kind,
+            body,
+            title,
+            priority,
+            links,
+            external_id,
+        }) => {
+            // The kind is checked before standard input is read: a bad one fails at once.
+            if !valid_kind(&kind) {
+                return Err(bad_kind());
+            }
+            let body = read_brief(&body)?;
+            let req = ask_body(&AskArgs {
+                kind: &kind,
+                body: &body,
+                title,
+                priority,
+                links,
+                external_id,
+            })?;
+            create_ask(&s, &req, out).await
+        }
     }
 }
 
@@ -107,6 +137,7 @@ struct JobArgs<'a> {
     security: bool,
     compliance_pr: Option<String>,
     ask: Option<String>,
+    account: Option<String>,
 }
 
 /// The `CreateJobRequest` body: only what was given, so the kind's defaults apply.
@@ -125,6 +156,7 @@ fn job_body(a: &JobArgs<'_>) -> Result<Value, Error> {
         ("supersedes", &a.supersedes),
         ("compliance_pr", &a.compliance_pr),
         ("queued_ask_id", &a.ask),
+        ("account_id", &a.account),
     ];
     for (k, v) in optional {
         if let Some(v) = v {
@@ -176,6 +208,7 @@ async fn list_jobs(
     state: Option<String>,
     mine: bool,
     limit: u32,
+    account: Option<String>,
     out: Out,
 ) -> Result<(), Error> {
     let size = limit.to_string();
@@ -185,6 +218,9 @@ async fn list_jobs(
     }
     if mine {
         q.push(("mine", "true"));
+    }
+    if let Some(a) = account.as_deref() {
+        q.push(("account_id", a));
     }
     let v: Value = s
         .api
@@ -241,11 +277,86 @@ async fn create_job(s: &Session, body: &Value, out: Out) -> Result<(), Error> {
     Ok(())
 }
 
+struct AskArgs<'a> {
+    kind: &'a str,
+    body: &'a str,
+    title: Option<String>,
+    priority: Option<u32>,
+    links: Vec<String>,
+    external_id: Option<String>,
+}
+
+/// A kind the API accepts: lower case, 1 to 40 of a-z, 0-9, `_` and `-`.
+fn valid_kind(k: &str) -> bool {
+    (1..=40).contains(&k.len())
+        && k.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+}
+
+fn bad_kind() -> Error {
+    Error::Usage(
+        "--kind is lower case, 1 to 40 of a-z, 0-9, _ and - (such as bug, feature or question)"
+            .into(),
+    )
+}
+
+/// The `QueueAskRequest` body: the kind is always sent, so the planner can file it.
+fn ask_body(a: &AskArgs<'_>) -> Result<Value, Error> {
+    if !valid_kind(a.kind) {
+        return Err(bad_kind());
+    }
+    let mut b = serde_json::Map::new();
+    b.insert("kind".into(), json!(a.kind));
+    b.insert("body".into(), json!(a.body));
+    b.insert("source".into(), json!("cli"));
+    if let Some(t) = &a.title {
+        b.insert("title".into(), json!(t));
+    }
+    if let Some(p) = a.priority {
+        b.insert("priority".into(), json!(p));
+    }
+    if let Some(e) = &a.external_id {
+        b.insert("external_id".into(), json!(e));
+    }
+    if !a.links.is_empty() {
+        b.insert("links".into(), json!(a.links));
+    }
+    Ok(Value::Object(b))
+}
+
+async fn create_ask(s: &Session, body: &Value, out: Out) -> Result<(), Error> {
+    let v: Value = s
+        .api
+        .send(Method::Post, "/v1/coordinator/asks", &[], Some(body))
+        .await
+        .and_then(|r| r.json())
+        .map_err(scoped)?;
+    if out.json {
+        Out::print_json(&v);
+        return Ok(());
+    }
+    let a = v.get("ask").unwrap_or(&Value::Null);
+    Out::pairs(&[
+        ("ask", str_of(a, "id").to_owned()),
+        ("state", str_of(a, "state").to_owned()),
+        ("kind", str_of(a, "kind").to_owned()),
+        (
+            "repeated",
+            v.get("repeated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                .to_string(),
+        ),
+    ]);
+    Ok(())
+}
+
 async fn list_asks(
     s: &Session,
     state: Option<String>,
     source: Option<String>,
     limit: u32,
+    account: Option<String>,
     out: Out,
 ) -> Result<(), Error> {
     let size = limit.to_string();
@@ -255,6 +366,9 @@ async fn list_asks(
     }
     if let Some(src) = source.as_deref() {
         q.push(("source", src));
+    }
+    if let Some(a) = account.as_deref() {
+        q.push(("account_id", a));
     }
     let v: Value = s
         .api
@@ -273,12 +387,86 @@ async fn list_asks(
                 str_of(a, "id").to_owned(),
                 str_of(a, "state").to_owned(),
                 str_of(a, "source").to_owned(),
+                str_of(a, "kind").to_owned(),
                 day(str_of(a, "created_at")),
                 headline(str_of(a, "title")),
             ]
         })
         .collect();
-    Out::table(&["ASK", "STATE", "SOURCE", "CREATED", "TITLE"], &rows);
+    Out::table(
+        &["ASK", "STATE", "SOURCE", "KIND", "CREATED", "TITLE"],
+        &rows,
+    );
+    Ok(())
+}
+
+/// A job id, safe as one path segment.
+fn job_segment(v: &str) -> Result<&str, Error> {
+    if !v.is_empty()
+        && v.len() <= 128
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        Ok(v)
+    } else {
+        Err(Error::Usage(
+            "a job id has only letters, digits, '-' and '_'".into(),
+        ))
+    }
+}
+
+/// The brief as a worker reads it: other people's text, so without control characters
+/// other than newlines and tabs, ending in one newline.
+fn brief_text(v: &Value) -> Result<String, Error> {
+    let text = v.get("text").and_then(Value::as_str).unwrap_or_default();
+    let mut clean: String = text
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .collect();
+    let end = clean.trim_end().len();
+    clean.truncate(end);
+    if clean.trim().is_empty() {
+        return Err(Error::Usage("the API answered without a brief".into()));
+    }
+    clean.push('\n');
+    Ok(clean)
+}
+
+/// The size line for the person, on stderr: estimate, budget, what was cut.
+fn brief_note(v: &Value) -> String {
+    let n = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let cut: Vec<&str> = v
+        .get("truncated")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let mut line = format!(
+        "brief for {}: ~{} of {} tokens",
+        headline(str_of(v, "job_id")),
+        n("token_estimate"),
+        n("token_budget")
+    );
+    if !cut.is_empty() {
+        line.push_str(", cut: ");
+        line.push_str(&headline(&cut.join(", ")));
+    }
+    line
+}
+
+async fn brief(s: &Session, job: &str, out: Out) -> Result<(), Error> {
+    let id = job_segment(job)?;
+    let v: Value = s
+        .api
+        .get(&format!("/v1/coordinator/jobs/{id}/brief"), &[])
+        .await
+        .map_err(scoped)?;
+    if out.json {
+        Out::print_json(&v);
+        return Ok(());
+    }
+    let text = brief_text(&v)?;
+    Out::raw(text.as_bytes());
+    Out::note(&brief_note(&v));
     Ok(())
 }
 
@@ -300,6 +488,7 @@ mod tests {
             security: false,
             compliance_pr: None,
             ask: None,
+            account: None,
         }
     }
 
@@ -333,6 +522,44 @@ mod tests {
     }
 
     #[test]
+    fn ask_body_always_carries_the_kind() {
+        let a = AskArgs {
+            kind: "bug",
+            body: "it breaks",
+            title: None,
+            priority: None,
+            links: vec![],
+            external_id: None,
+        };
+        let b = ask_body(&a).unwrap();
+        assert_eq!(
+            b,
+            json!({"kind": "bug", "body": "it breaks", "source": "cli"})
+        );
+        let full = AskArgs {
+            title: Some("t".into()),
+            priority: Some(7),
+            links: vec!["o/r#1".into()],
+            external_id: Some("x1".into()),
+            ..a
+        };
+        let b = ask_body(&full).unwrap();
+        assert_eq!(b["priority"], 7);
+        assert_eq!(b["external_id"], "x1");
+        assert_eq!(b["links"], json!(["o/r#1"]));
+    }
+
+    #[test]
+    fn ask_kind_shape_is_checked_before_sending() {
+        for bad in ["", "Bug", "has space", "a.b", &"x".repeat(41)] {
+            assert!(!valid_kind(bad), "{bad}");
+        }
+        for ok in ["bug", "feature", "a-b_c9", &"x".repeat(40)] {
+            assert!(valid_kind(ok), "{ok}");
+        }
+    }
+
+    #[test]
     fn headline_drops_control_characters() {
         assert_eq!(headline("a\u{1b}[31mred\nsecond"), "a[31mred");
     }
@@ -342,6 +569,33 @@ mod tests {
         assert!(items(&json!({"jobs": "x"}), "jobs").is_err());
         assert!(items(&json!([]), "jobs").is_err());
         assert_eq!(items(&json!({}), "jobs").unwrap(), Vec::<Value>::new());
+    }
+
+    #[test]
+    fn job_ids_stay_one_path_segment() {
+        assert_eq!(job_segment("job_01ABC-x").unwrap(), "job_01ABC-x");
+        for bad in ["", "../x", "job/1", "job?x=1", "job 1"] {
+            assert!(job_segment(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn brief_text_drops_control_characters_and_keeps_lines() {
+        let v = json!({"text": "## Task\n\tdo it\u{1b}[2J\n\n"});
+        assert_eq!(brief_text(&v).unwrap(), "## Task\n\tdo it[2J\n");
+        assert!(brief_text(&json!({"text": "  "})).is_err());
+        assert!(brief_text(&json!({})).is_err());
+        assert!(brief_text(&json!({"text": "\u{0}\u{1b}\n"})).is_err());
+    }
+
+    #[test]
+    fn brief_note_says_size_budget_and_cuts() {
+        let v = json!({"job_id": "job_1", "token_estimate": 900, "token_budget": 1000,
+            "truncated": ["document"]});
+        assert_eq!(
+            brief_note(&v),
+            "brief for job_1: ~900 of 1000 tokens, cut: document"
+        );
     }
 
     #[test]

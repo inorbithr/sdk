@@ -1,6 +1,6 @@
 [package]
 name = "inorbithr"
-version = "0.2.1"
+version = "0.4.0"
 description = "The InOrbit API client for Rust: the runtime every generated SDK surface runs on."
 edition = "2024"
 rust-version = "1.94"
@@ -69,7 +69,7 @@ opentelemetry = { version = "0.33", default-features = false, features = ["trace
 pkcs8 = { version = "0.11", features = ["encryption", "pem", "std"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "test-util"] }
 wiremock = "0.6"
 serde-saphyr = "1"
 tempfile = "3"

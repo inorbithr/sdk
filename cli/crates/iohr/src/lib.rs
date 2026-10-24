@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cli;
+pub mod environments;
 pub mod ext;
 pub mod project;
 
@@ -18,6 +19,7 @@ mod error;
 mod lock;
 mod output;
 mod prompt;
+mod runner;
 
 pub use args::refuse_secrets_in_args;
 pub use commands::run;

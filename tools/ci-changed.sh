@@ -34,7 +34,7 @@ for lang in "${langs[@]}"; do
   fi
 done
 touched '^(cli/|rust/|spec/|mise\.toml$|\.github/workflows/ci\.yml$)' && tasks+=(cli:check)
-touched '^examples/' && tasks+=(examples:check)
+touched '^(examples/|tools/run-examples\.py|conformance/cases/examples/|conformance/server/)' && tasks+=(examples:check examples:run)
 
 echo "ci:changed: ${#files[@]} changed file(s) since $(git rev-parse --short "$base")"
 echo "ci:changed: ${tasks[*]}"
