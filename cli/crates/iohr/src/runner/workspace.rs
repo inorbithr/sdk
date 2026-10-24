@@ -1212,8 +1212,12 @@ pub(crate) mod tests {
             s.evidence()
         );
         assert!(!is_ancestor(&p.origin, &main, &s.head));
+        // Windows git checks the file out again with CRLF after the abort; the content is
+        // what counts.
         assert_eq!(
-            std::fs::read_to_string(got.path.join("a.txt")).unwrap(),
+            std::fs::read_to_string(got.path.join("a.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "ours\n"
         );
         let status = sh(&got.path, &["status", "--porcelain"]);
