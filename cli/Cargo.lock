@@ -1453,6 +1453,7 @@ dependencies = [
  "iohr-openapi",
  "minijinja",
  "prettyplease",
+ "quote",
  "schemars",
  "serde",
  "serde_json",

@@ -5,6 +5,7 @@
 //! not make does not compile.
 
 mod models;
+mod shape;
 
 mod example;
 pub(crate) use example::example;

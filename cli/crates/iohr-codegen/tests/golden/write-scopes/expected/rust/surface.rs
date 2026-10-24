@@ -7,8 +7,14 @@ use inorbithr::__codegen::path_segment;
 use inorbithr::{Client, Error, Method, Operation, Profile, Response};
 use super::models::*;
 use super::ops;
-/// The operations, as methods on [`Client`].
-pub trait Surface<P: Profile> {
+mod sealed {
+    /// Only this surface implements [`Surface`](super::Surface), so an operation added
+    /// to it is not a breaking change.
+    pub trait Sealed {}
+    impl<P: inorbithr::Profile> Sealed for inorbithr::Client<P> {}
+}
+/// The operations, as methods on [`Client`]. Sealed: only `Client<P>` implements it.
+pub trait Surface<P: Profile>: sealed::Sealed {
     /// The `events` operations.
     fn events(&self) -> Events<'_, P>;
 }

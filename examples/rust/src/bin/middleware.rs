@@ -43,10 +43,7 @@ async fn main() -> Result<(), Error> {
     println!("pipeline {}", client.config().describe()["pipeline"]);
 
     // The same key on every attempt, so the API answers a repeat with the first result.
-    let body = CreateEndpointRequest {
-        url: Some("https://hooks.example.com/inorbit".into()),
-        ..Default::default()
-    };
+    let body = CreateEndpointRequest::default().with_url("https://hooks.example.com/inorbit");
     let created = client
         .with_options(CallOptions::new().idempotency_key("endpoint-hooks-example"))
         .events()

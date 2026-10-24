@@ -15,10 +15,7 @@ async fn main() -> Result<(), Error> {
     let org = std::env::var("INORBIT_ORG_ID").unwrap_or_default();
 
     // Every item, page after page; the walk ends at the last page or at the first error.
-    let params = ConnectionsListMonitorsParams {
-        page_size: Some(2),
-        ..Default::default()
-    };
+    let params = ConnectionsListMonitorsParams::default().with_page_size(2);
     let mut monitors = connections.all_list_monitors(&org, &params);
     let mut n = 0;
     while let Some(monitor) = monitors.next().await {
@@ -29,10 +26,7 @@ async fn main() -> Result<(), Error> {
     println!("{n} monitors");
 
     // One page by hand: the next page token comes back with the page.
-    let one = ConnectionsListMonitorsParams {
-        page_size: Some(1),
-        ..Default::default()
-    };
+    let one = ConnectionsListMonitorsParams::default().with_page_size(1);
     let page = connections.list_monitors(&org, &one).await?.value;
     println!(
         "one page: {} monitor, more after {:?}",
