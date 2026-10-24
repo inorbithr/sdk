@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.24](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.23...iohr/v0.1.0-alpha.24) (2026-10-24)
+
+
+### Bug fixes
+
+* **cli:** merge main into the job branch before the runner ships ([#261](https://github.com/inorbithr/sdk/issues/261)) ([df9a9c6](https://github.com/inorbithr/sdk/commit/df9a9c6b54c2d44e07d9ef90dbbf98f0f58ad550))
+
 ## [0.1.0-alpha.23](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.22...iohr/v0.1.0-alpha.23) (2026-10-24)
 
 
