@@ -1,0 +1,57 @@
+# The manifest of @@ID@@: a private macOS service you build yourself (PRD 0084's manifest,
+# the demo project of the "Projects you build yourself" PRD). It heartbeats and serves a tiny
+# local UI panel on 127.0.0.1 that InOrbit Desktop can show as a pane. `iohr ext lint --preview`
+# reads it back in plain words. Unknown keys are errors.
+
+id = "@@ID@@"                    # publisher/name; `iohr project init` registers the private listing
+version = "0.1.0"
+kind = "program"                 # RFC 0073 kind; a program runs as its own process
+delivery = "program"             # RFC 0073.1: how it arrives on a target
+entrypoint = "@@NAME@@"          # the program's path inside the artifact
+args = []
+description = "A private macOS service that heartbeats and serves a tiny local panel; the demo project you build yourself."
+api = ">=2026.10"
+
+# Secrets are references, never values. None here: the demo needs nothing of yours.
+secrets = []
+
+[runs]
+as = "service"                   # service | timer | oneshot
+restart = "on-failure"
+shutdown_grace = "10s"
+
+[permissions]
+scopes = ["identity:read"]       # the only API scope it may ask the token socket for
+privileges = []
+network = []                     # it reaches no host; the panel listens on 127.0.0.1 only
+exec = []
+
+[permissions.filesystem]
+read = ["$STATE"]                # its own state and cache, nowhere else
+write = ["$STATE", "$CACHE"]
+
+[permissions.data]
+leaves = ["extension.health"]    # what may leave: its health, nothing else (ADR 0063)
+
+[resources]
+cpu = 1
+memory = "64MiB"
+disk = "16MiB"
+nice = 10
+
+[health]
+heartbeat = "$STATE/heartbeat.json"
+heartbeat_every = "60s"
+stale_after = "5m"
+
+[targets]
+platforms = ["darwin/arm64"]     # a private macOS service: this Mac first
+kinds = ["desktop"]
+needs = ["python3"]
+
+[upgrade]
+strategy = "replace"
+keep_previous = 2
+
+[dev]
+lang = "python"                  # how `iohr ext dev` runs this folder

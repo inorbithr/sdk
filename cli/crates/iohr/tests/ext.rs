@@ -1158,7 +1158,10 @@ mod run {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
+        // The program writes env.txt, then args.txt: wait for both, or a slow runner
+        // reads args.txt while it is still empty.
         wait_for(&work.join("env.txt"));
+        wait_for(&work.join("args.txt"));
         let env = std::fs::read_to_string(work.join("env.txt")).unwrap();
         assert!(
             !env.contains("TOKENSIGNATUREMARKER"),
@@ -1240,4 +1243,112 @@ mod run {
         assert_eq!(code(&o), 2, "{}", text(&o));
         assert!(text(&o).contains("iohr ext install agent"), "{}", text(&o));
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn packages_lists_published_private_shared_local_and_installed() {
+    let b = Box_::new().await;
+    let home = b.dir.path().join("home");
+    for d in ["wip", "Not A Name"] {
+        std::fs::create_dir_all(home.join(".inorbit/ext-dev").join(d)).unwrap();
+    }
+    std::fs::write(home.join(".inorbit/ext-dev/afile"), b"x").unwrap();
+    let ext = |p: &str, n: &str, vis: &str, rel: &str| {
+        serde_json::json!({
+            "publisher": p, "name": n, "kind": "program", "description": "d",
+            "visibility": vis, "relation": rel, "publisher_name": "Acme", "first_party": false,
+            "latest": {"version": "1.2.0"}
+        })
+    };
+    // Only answers the `mine` form: an unfiltered list would not carry the private ones.
+    Mock::given(method("GET"))
+        .and(path("/v1/extensions"))
+        .and(wiremock::matchers::query_param("mine", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "extensions": [
+                ext("acme", "billing", "private", "own"),
+                ext("acme", "open", "public", "own"),
+                ext("zeta", "partner", "private", "shared"),
+            ],
+            "next_page_token": ""
+        })))
+        .mount(&b.server)
+        .await;
+    let run = |args: &[&str]| {
+        b.cmd(args)
+            // The home directory is HOME on unix and USERPROFILE on Windows.
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("IOHR_BASE_URL", b.server.uri())
+            .env("IOHR_TOKEN", token(&["extensions:read"]))
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    let o = run(&["ext", "packages"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        out.starts_with("NAME") && out.contains("SOURCE") && out.contains("INSTALLED"),
+        "{out}"
+    );
+    assert!(
+        out.contains("acme/billing  program  account  private     1.2.0    no"),
+        "{out}"
+    );
+    assert!(
+        out.contains("acme/open     program  account  public"),
+        "{out}"
+    );
+    assert!(
+        out.contains("zeta/partner  program  shared   private"),
+        "{out}"
+    );
+    assert!(out.contains("wip") && out.contains("local"), "{out}");
+    assert!(
+        !out.contains("Not A Name") && !out.contains("afile"),
+        "{out}"
+    );
+
+    // The top-level alias is the same command, and --json is an array of the same rows.
+    let o = run(&["packages", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let j = stdout_json(&o);
+    let rows = j.as_array().unwrap();
+    assert_eq!(rows.len(), 4, "{j}");
+    let sources: Vec<&str> = rows.iter().map(|r| r["source"].as_str().unwrap()).collect();
+    assert_eq!(sources, ["account", "account", "shared", "local"]);
+    assert_eq!(rows[0]["name"], "acme/billing");
+    assert_eq!(rows[0]["visibility"], "private");
+    assert!(rows[0]["installed"].is_null());
+    assert_eq!(rows[3]["visibility"], "local");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn packages_still_lists_this_machine_when_the_api_refuses() {
+    let b = Box_::new().await;
+    let home = b.dir.path().join("home");
+    std::fs::create_dir_all(home.join(".inorbit/ext-dev/wip")).unwrap();
+    Mock::given(method("GET"))
+        .and(path("/v1/extensions"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "code": 7, "message": "denied"
+        })))
+        .mount(&b.server)
+        .await;
+    let o = b
+        .cmd(&["ext", "packages", "--json"])
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("IOHR_BASE_URL", b.server.uri())
+        .env("IOHR_TOKEN", token(&["extensions:read"]))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_ne!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("extensions:read"), "{}", text(&o));
+    let j = stdout_json(&o);
+    assert_eq!(j[0]["name"], "wip");
+    assert_eq!(j[0]["source"], "local");
 }

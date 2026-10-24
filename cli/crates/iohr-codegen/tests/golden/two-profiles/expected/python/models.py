@@ -468,7 +468,7 @@ class UsageRow(_Model):
     service: str
 
 
-for _model in (
+_MODELS: tuple[type[BaseModel], ...] = (
     Account,
     AccountsKey,
     Change,
@@ -512,5 +512,6 @@ for _model in (
     UnitUsage,
     UpdateEndpointRequest,
     UsageRow,
-):
+)
+for _model in _MODELS:
     _model.model_rebuild()

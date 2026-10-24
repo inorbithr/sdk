@@ -1,0 +1,74 @@
+:root{color-scheme:dark light;--bg:#0a0a0a;--glow:rgba(255,158,27,.13);--card:#121110;--line:#272421;--text:#f4f1ec;--muted:#aaa39a;--amber:#ff9e1b;--link:#ffb347;--chip:#1a1816;--chip-hover:#221f1c;--stage:#1b1917;--ok:#ff9e1b;--bad:#ff7a66;--focus:#ffb347;--sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:"Geist Mono",ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme:light){:root{--bg:#f7f5f1;--glow:rgba(255,158,27,.2);--card:#ffffff;--line:#e4ded5;--text:#0a0a0a;--muted:#57514a;--link:#8a4b00;--chip:#f7f3ed;--chip-hover:#efe8de;--stage:#ffe8c7;--ok:#b35f00;--bad:#b42318;--focus:#b35f00}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:32px 16px;background:radial-gradient(60rem 32rem at 50% -8rem,var(--glow),transparent 70%),var(--bg);color:var(--text);font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+.card{position:relative;width:100%;max-width:34rem;background:var(--card);border:1px solid var(--line);border-radius:24px;padding:28px 28px 26px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 24px 60px -24px rgba(0,0,0,.45)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 8px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em}
+.mark{width:28px;height:28px;color:var(--text)}
+.mark .dot{fill:var(--amber)}
+.tag{font:12px/1 var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 10px}
+.hero{position:relative;width:176px;height:176px;margin:12px auto 6px}
+.stage{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 38%,rgba(255,179,71,.28),transparent 62%),var(--stage);overflow:hidden;border:1px solid var(--line)}
+.io{display:block;width:100%;height:100%}
+.badge{position:absolute;left:-6px;bottom:2px;width:64px;height:64px;border-radius:50%;background:var(--card);padding:4px}
+.badge svg{display:block;width:100%;height:100%;overflow:visible}
+.badge .track{fill:none;stroke:var(--line);stroke-width:4}
+.badge .ring{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:0;transform:rotate(-90deg);transform-origin:32px 32px}
+.badge .orbiter{transform-origin:32px 32px}
+.badge .orbiter circle{fill:var(--ok)}
+.badge .check{fill:none;stroke:var(--ok);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:100;stroke-dashoffset:0}
+.bad .ring,.bad .check{stroke:var(--bad)}
+.bad .orbiter circle{fill:var(--bad)}
+h1{margin:14px 0 6px;text-align:center;font-size:clamp(1.6rem,4.6vw,2rem);line-height:1.15;letter-spacing:-.025em;font-weight:700}
+.lead{margin:0 auto 18px;max-width:28rem;text-align:center;color:var(--muted)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(5.25rem,1fr));gap:8px;margin:0 0 18px;padding:0}
+.facts div{border:1px solid var(--line);border-radius:14px;padding:10px 12px;min-width:0}
+.facts dt{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.facts dd{margin:2px 0 0;font:500 15px/1.35 var(--mono);overflow-wrap:anywhere}
+.close{margin:0 0 4px;text-align:center;font-weight:600}
+.count{margin:0 0 20px;text-align:center;font-size:14px;color:var(--muted);min-height:1.55em}
+.count button,.linkish{font:inherit;color:var(--link);background:none;border:0;padding:2px 4px;margin:0 0 0 2px;border-radius:6px;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+h2{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
+.chip{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--chip);color:var(--text);font:500 14px/1.2 var(--sans);text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s}
+.chip:hover{background:var(--chip-hover);border-color:var(--amber)}
+.chip code{font:500 13.5px/1.2 var(--mono)}
+.chip .pr{color:var(--ok);font:500 13.5px/1.2 var(--mono)}
+.chip .hint{font-size:12px;color:var(--muted)}
+.chip svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;color:var(--muted)}
+.why{margin:0 0 18px;padding:14px 16px;border:1px solid var(--line);border-left:3px solid var(--bad);border-radius:12px;background:var(--chip)}
+.why p{margin:0}
+.why p+p{margin-top:6px;color:var(--muted);font-size:14px}
+code{font-family:var(--mono)}
+a{color:var(--link)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.chip:focus-visible{outline-offset:2px}
+.foot{margin:0;max-width:34rem;text-align:center;font-size:13px;color:var(--muted)}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+[hidden]{display:none !important}
+.io .br{animation:io-breathe 5.2s ease-in-out infinite;transform-box:view-box;transform-origin:240px 480px}
+.io .fl{animation:io-float 4.4s ease-in-out infinite}
+.io .ft{animation:io-float-think 5s ease-in-out infinite}
+.io .ha{animation:io-halo 3.6s ease-in-out infinite}
+.io .wv{animation:io-wave 2.6s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
+.io .lk{animation:io-look 6s ease-in-out infinite}
+.io .gf{animation:io-gift 3.2s ease-in-out infinite}
+.ok .ring{animation:draw 1.2s cubic-bezier(.65,0,.35,1) both}
+.ok .orbiter{animation:orbit 1.2s cubic-bezier(.65,0,.35,1) both}
+.ok .check{animation:draw .45s ease-out 1.15s both}
+.card{animation:rise .5s ease-out both}
+@keyframes draw{from{stroke-dashoffset:100}to{stroke-dashoffset:0}}
+@keyframes orbit{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes io-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.012)}}
+@keyframes io-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@keyframes io-float-think{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-4px) rotate(2.5deg)}}
+@keyframes io-halo{0%,100%{opacity:.3}50%{opacity:.55}}
+@keyframes io-wave{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(12deg)}}
+@keyframes io-look{0%,100%{transform:translate(6px,-8px)}50%{transform:translate(10px,-11px)}}
+@keyframes io-gift{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none !important;transition:none !important}}
+@media (max-width:480px){body{justify-content:flex-start;padding-top:20px}.card{padding:20px 18px;border-radius:20px}.hero{width:148px;height:148px}.badge{width:56px;height:56px}.chip{flex:1 1 auto;justify-content:center}}
+@media (forced-colors:active){.chip,.card,.facts div{border-color:CanvasText}}

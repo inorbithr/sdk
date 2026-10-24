@@ -36,6 +36,7 @@ jobs:
             java
             csharp
             swift
+            dart
             cli
             spec
             conformance

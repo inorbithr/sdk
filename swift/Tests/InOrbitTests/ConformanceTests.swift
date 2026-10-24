@@ -197,6 +197,14 @@
                         try json(await api.accounts.getUsage(orgId: arg("org_id") ?? "", q, options: options)))
                 case "radar.get_digest":
                     return .success(try json(await api.radar.getDigest(id: arg("id") ?? "", options: options)))
+                case "decisions.create_document":
+                    var rest = args
+                    rest.removeValue(forKey: "space_id")
+                    let body = try decode(CreateDocumentRequest.self, rest)
+                    return .success(
+                        try json(
+                            await api.decisions.createDocument(
+                                spaceId: arg("space_id") ?? "", body: body, options: options)))
                 case "events.create_endpoint":
                     let body = try decode(CreateEndpointRequest.self, args)
                     return .success(try json(await api.events.createEndpoint(body: body, options: options)))

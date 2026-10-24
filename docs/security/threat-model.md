@@ -74,6 +74,7 @@ build, (4) CI to registry, (5) contributor to `main`.
 | S | `IOHR_BASE_URL` pointed at an attacker's host | SR-07 HTTPS only (loopback excepted); residual: control of the environment is control of the process |
 | S | Someone sends a device code they started, to be approved by a victim | The approval page says to enter only a code you started; codes expire after 10 minutes; code entry is rate limited at the edge |
 | S | Another local process answers the loopback redirect, or a web page calls it | `state` (32 random bytes) compared in constant time; PKCE S256; one request ends the listener; 5-minute bound |
+| I | The authorization code leaks from the loopback page (referrer, history, page script) | The page loads nothing: `default-src 'none'`, its one style and script allowed by hash; `Referrer-Policy: no-referrer`; the script drops the query from the address bar and history; no page shows the code, `state`, a token or text from the request |
 | T | A sign-in answer from another issuer (mix-up) | Discovery checks the issuer; the ID token's `iss` and `aud` are checked; every endpoint and link must be on the issuer's origin |
 | I | Refresh token stolen from this machine | 30-day lifetime, rotated on every use, a replay after rotation ends the chain; `logout` and the console revoke it |
 | E | A malicious local process reads the credential store | Out of scope: the OS store's own access control applies; tokens expire and are revoked from the console |
@@ -102,6 +103,17 @@ extension process it runs (ADR 0012).
 | T | A manifest names a made-up or misleading capability, or hides one among many | SR-32: only names the kernel defines, at most 16, none twice; control characters refused |
 | E | An `iohr` from before privileges installs a privileged extension from a team lock without showing them | SR-32: a lock with privileges is format version 2, which older versions refuse |
 | T | The machine's lock is edited so a privilege looks never declared | SR-32: `iohr <name>` and `ext verify` refuse a version whose recorded manifest declares privileges the lock does not hold |
+
+### `iohr runner` and GitHub
+
+Boundary: the runner to GitHub, and the runner to the model process it starts (SR-33).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| E | A job pushes to repositories other than its own with the person's sign-in | SR-33: the lease's own installation token, one repository, `contents` and `pull_requests` only, about an hour; the host's sign-in only where the App is not installed, said in the log |
+| I | The token is left in a file, a git configuration or a log | SR-33: memory only; given per command with `-c` and a variable on that child; tests over the log, `Debug`, errors and every configuration |
+| E | A planted mirror configuration (proxy, URL rewrite, include, hook, helper) receives the token | SR-33: token-bearing git runs only in the runner's mirror, after a check that refuses any such key and an `origin` that is not the job's repository; hooks off |
+| I | The model reads the person's `gh` sign-in or a git credential helper | SR-33 (RFC 0147 containment): empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's helpers cleared and prompts off in its environment. Not a sandbox: a process of the same user can still read files that user can |
 
 ### `iohr sdk add`
 
@@ -159,11 +171,16 @@ Boundary: `iohr` to the package manager it runs in the person's project (SR-31).
   configuration by environment; pinning (SR-06) narrows it.
 - **Memory in garbage-collected languages.** Go, TypeScript and Python cannot reliably
   wipe secrets (SR-11).
-- **Extension tokens are not narrowed yet.** The channel hands an extension the
-  profile's own 15-minute access token when it holds every scope asked for; the
-  platform cannot mint a narrower token from a person's session until token exchange
-  exists. The scope check limits what an extension may ask for, not what the token can
-  do (ADR 0012, point 6).
+- **Extension tokens for a person are narrowed by a short-lived key.** The platform
+  cannot mint a narrower token from a person's session until token exchange exists, so
+  `iohr` creates an account key with exactly the declared scopes asked for, exchanges it
+  and revokes it at once. The key exists for a moment and its secret only in memory
+  (zeroized when dropped). Revoked on success, failure, the 15 s exchange deadline and a
+  dropped call (a detached revoke, 10 s deadline). Left behind: a cancel during the
+  create call itself (no id known yet), a failed revoke call, and a process kill; each
+  leaves a key whose secret is gone, visible in the account's keys as
+  `iohr-ext-<time>`. A key or token profile hands out its own token when it holds the
+  scopes (ADR 0012, point 6).
 - **The embedded Sigstore root ages.** A Sigstore key rotation makes installs fail
   closed until an `iohr` release carries the new root.
 - **crates.io provenance.** crates.io has no native signatures yet; we attest crates

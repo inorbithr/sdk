@@ -168,6 +168,8 @@ describe("codes", () => {
   it("knows unprocessable and keeps an unknown code", () => {
     assert.equal(CODES.unprocessable, 422);
     assert.equal(codeForStatus(422), "unprocessable");
+    assert.equal(CODES.upgrade_required, 426);
+    assert.equal(codeForStatus(426), "upgrade_required");
     assert.equal(codeForStatus(418), "http_418");
   });
 });

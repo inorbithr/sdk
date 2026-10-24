@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+# State and cache live under ~/.inorbit/projects/@@NAME@@/, never here.

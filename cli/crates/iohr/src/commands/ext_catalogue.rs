@@ -30,7 +30,7 @@ const MAX_SEARCH: usize = 10_000;
 
 /// Catalogue text with control, bidirectional and invisible format characters taken
 /// out, so a listing cannot move the cursor, recolour the terminal or reorder a line.
-fn clean(s: &str) -> String {
+pub(crate) fn clean(s: &str) -> String {
     s.chars()
         .filter(|c| {
             !c.is_control()
@@ -50,7 +50,7 @@ fn clean(s: &str) -> String {
 }
 
 /// `publisher/name` from an answer, each shown only when it is a valid identifier.
-fn ident(x: &Value) -> String {
+pub(crate) fn ident(x: &Value) -> String {
     let p = str_of(x, "publisher");
     let n = str_of(x, "name");
     format!(
@@ -100,7 +100,7 @@ pub(crate) fn parse_listing(s: &str) -> Result<(String, String), Error> {
     Ok((publisher.to_owned(), name.to_owned()))
 }
 
-fn scoped(e: inorbithr::Error) -> Error {
+pub(crate) fn scoped(e: inorbithr::Error) -> Error {
     match e.status() {
         Some(403) => Error::with_hint(
             e,
