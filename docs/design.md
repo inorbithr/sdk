@@ -393,7 +393,10 @@ other field as optional (`Option<T>` in Rust, `T | None` in Python, `?` in TypeS
 a pointer in Go, nullable in C#, `null` in Java), and every request field is optional:
 what is unset is left out of the body, and the platform reads it as its default. Go
 fills a pointer field with `inorbit.Ptr(v)`; a Rust request is built with
-`..Default::default()`.
+`Default::default()` and the `with_` setters (`CreateEndpointRequest::default().with_url(url)`).
+Rust models, query parameters and enums are `#[non_exhaustive]` and the `Surface` trait is
+sealed, so an operation, field or value a spec sync adds is not a breaking change in Rust; a
+model whose field has no default (an enum without one, `Code`) is built with `new(..)`.
 
 **Unset timestamps** are `""` on the wire (rule N5, settled behaviour, not an upstream
 ask). Models keep the string as sent; each runtime has one helper that reads a

@@ -10,9 +10,18 @@
 //!
 //! After a shaped reply the runner (never the model, which has no shell) commits what the
 //! turn changed, by name, pushes `job/<id>` without force, and opens the pull request, or
-//! updates it when one is open. git and `gh` run with the runner's own environment, so
-//! the host's existing sign-in applies; the model's environment stays scrubbed and no
-//! token passes through here.
+//! updates it when one is open.
+//!
+//! Every git call that reaches GitHub (fetch, ls-remote, push) runs in the runner's own
+//! mirror, never in the model's checkout, after the mirror's configuration is checked for
+//! anything that could redirect it or run a program ([`UNSAFE_KEYS`]), with the job's
+//! [`Access`] on its command line: every configured credential helper dropped, one helper
+//! for `https://github.com`, no hooks. With the lease's GitHub App token, that helper
+//! reads the token from a variable set on that one git child, and `gh` gets it as
+//! `GH_TOKEN` on that one child; with no GitHub App for the account, the helper is the
+//! host's `gh` sign-in. No credential is written to the mirror's configuration or any
+//! file (an older runner's helper key is removed), and the model's environment holds
+//! none ([`super::env::contained`]).
 
 use std::fmt::{self, Write as _};
 use std::future::Future;
@@ -26,13 +35,16 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt as _;
 use tokio::process::Command;
 
+use super::access::Access;
 use super::claude::Reply;
-use super::gate::{GitOut, git_in};
+use super::gate::{GitOut, git_in, git_in_with};
 
 /// The branch every job starts from and its pull request goes into.
 pub(crate) const BASE: &str = "main";
 /// Where GitHub repositories are fetched from and pushed to.
 pub(crate) const GITHUB: &str = "https://github.com";
+/// The helper key an older runner wrote into its mirrors; removed on sight.
+const LEGACY_HELPER_KEY: &str = "credential.https://github.com.helper";
 /// A fetch of a large repository the first time may take a while.
 const FETCH_TIMEOUT: Duration = Duration::from_mins(15);
 /// Every other git call.
@@ -80,6 +92,10 @@ pub(crate) struct Prepared {
     pub(crate) rel: String,
     /// An earlier attempt's checkout, found and kept.
     pub(crate) reused: bool,
+    /// The runner's bare mirror the checkout belongs to; every call to GitHub runs here.
+    pub(crate) mirror: PathBuf,
+    /// The mirror's `origin`.
+    pub(crate) url: String,
 }
 
 /// A pull request the runner asks for.
@@ -145,17 +161,27 @@ type Answer<'a> = Pin<Box<dyn Future<Output = Result<Opened, String>> + Send + '
 /// Where pull requests are opened: `gh` on the host, a fake in tests.
 pub(crate) trait Forge: Send + Sync {
     /// Opens the pull request for `pr.head`, or updates the title and body of the one
-    /// that is open.
-    fn open_or_update<'a>(&'a self, pr: &'a PullRequest) -> Answer<'a>;
+    /// that is open, signed in as `access` says.
+    fn open_or_update<'a>(&'a self, pr: &'a PullRequest, access: &'a Access) -> Answer<'a>;
 }
 
-/// The host's `gh`, signed in as whoever signed it in; the runner never sees a token.
+/// `gh` on this host: with the lease's token in `GH_TOKEN` on that one child, or, when
+/// the platform has no GitHub App for the account, the host's own sign-in.
 #[derive(Debug, Default)]
 pub(crate) struct GhForge;
 
 impl GhForge {
-    async fn gh(args: &[&str], stdin: Option<&str>) -> Result<String, String> {
+    async fn gh(args: &[&str], stdin: Option<&str>, access: &Access) -> Result<String, String> {
         let mut c = Command::new("gh");
+        if let Some(token) = access.gh_token() {
+            // This child's only GitHub credential: the lease's token wins over any
+            // other the host has (`GITHUB_TOKEN`, an enterprise one, its login).
+            c.env("GH_TOKEN", token)
+                .env_remove("GITHUB_TOKEN")
+                .env_remove("GH_ENTERPRISE_TOKEN")
+                .env_remove("GITHUB_ENTERPRISE_TOKEN")
+                .env_remove("GH_HOST");
+        }
         c.args(args)
             .env("GH_PROMPT_DISABLED", "1")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
@@ -201,7 +227,7 @@ impl GhForge {
 }
 
 impl Forge for GhForge {
-    fn open_or_update<'a>(&'a self, pr: &'a PullRequest) -> Answer<'a> {
+    fn open_or_update<'a>(&'a self, pr: &'a PullRequest, access: &'a Access) -> Answer<'a> {
         Box::pin(async move {
             let r = pr.repository.as_str();
             let open = Self::gh(
@@ -220,6 +246,7 @@ impl Forge for GhForge {
                     ".[0].number // empty",
                 ],
                 None,
+                access,
             )
             .await?;
             if let Ok(number) = open.trim().parse::<u64>() {
@@ -237,6 +264,7 @@ impl Forge for GhForge {
                         "-",
                     ],
                     Some(&pr.body),
+                    access,
                 )
                 .await?;
                 return Ok(Opened {
@@ -260,6 +288,7 @@ impl Forge for GhForge {
                     "-",
                 ],
                 Some(&pr.body),
+                access,
             )
             .await?;
             let number = url
@@ -364,6 +393,99 @@ async fn git(dir: &Path, args: &[&str]) -> Result<GitOut, String> {
     git_in(dir, args, limit).await.map_err(|e| e.to_string())
 }
 
+/// Keys of the mirror's own configuration that could send a git call somewhere else, run a
+/// program with its environment (the token's variable), or add a credential: a mirror
+/// that has one is not used for a call to GitHub. Compared in lower case, by prefix.
+const UNSAFE_KEYS: &[&str] = &[
+    "credential.",
+    "http.",
+    "url.",
+    "include.",
+    "includeif.",
+    "protocol.",
+    "gpg.",
+    "push.gpgsign",
+    "core.hookspath",
+    "core.fsmonitor",
+    "core.sshcommand",
+    "core.askpass",
+    "core.gitproxy",
+    "core.alternaterefscommand",
+    "remote.origin.pushurl",
+    "remote.origin.proxy",
+    "remote.origin.uploadpack",
+    "remote.origin.receivepack",
+    "remote.origin.vcs",
+];
+
+/// Refuses a mirror whose own configuration has an [`UNSAFE_KEYS`] key, or whose
+/// `origin` is not `url`. The error names the keys, never their values.
+async fn guard(mirror: &Path, url: &str) -> Result<(), String> {
+    let keys = git_ok(mirror, &["config", "--local", "--name-only", "--list"]).await?;
+    let bad: Vec<String> = keys
+        .lines()
+        .map(|k| k.trim().to_ascii_lowercase())
+        .filter(|k| UNSAFE_KEYS.iter().any(|u| k.starts_with(u)))
+        .collect();
+    if !bad.is_empty() {
+        return Err(format!(
+            "the mirror {} has configuration the runner does not set ({}); nothing is fetched or pushed",
+            mirror.display(),
+            bad.join(", ")
+        ));
+    }
+    let origin = git_ok(
+        mirror,
+        &["config", "--local", "--get-all", "remote.origin.url"],
+    )
+    .await?;
+    if origin != url {
+        return Err(format!(
+            "the mirror {}'s origin is not {url}; nothing is fetched or pushed",
+            mirror.display()
+        ));
+    }
+    Ok(())
+}
+
+/// A git call that reaches GitHub: in the runner's mirror only, after [`guard`], with
+/// `access`'s helper on its command line and the token, if any, on this child only.
+async fn remote_git(
+    mirror: &Path,
+    url: &str,
+    access: &Access,
+    args: &[&str],
+) -> Result<GitOut, String> {
+    guard(mirror, url).await?;
+    let pre = access.git_args();
+    let mut all: Vec<&str> = pre.iter().map(String::as_str).collect();
+    all.extend_from_slice(args);
+    let env: Vec<(&str, &str)> = access.git_env().into_iter().collect();
+    git_in_with(mirror, &all, FETCH_TIMEOUT, &env)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// [`remote_git`] that must exit 0.
+async fn remote_git_ok(
+    mirror: &Path,
+    url: &str,
+    access: &Access,
+    args: &[&str],
+) -> Result<String, String> {
+    let o = remote_git(mirror, url, access, args).await?;
+    if o.code == 0 {
+        Ok(o.stdout.trim().to_owned())
+    } else {
+        Err(format!(
+            "git {} exited {}: {}",
+            args.iter().find(|a| !a.starts_with('-')).unwrap_or(&""),
+            o.code,
+            redact(&o.stderr_tail)
+        ))
+    }
+}
+
 async fn git_ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     let o = git(dir, args).await?;
     if o.code == 0 {
@@ -409,47 +531,72 @@ impl Workspaces {
         Self::new(workdir, mirrors, GITHUB.to_owned(), Arc::new(GhForge))
     }
 
-    /// The mirror of `owner/name`, made once, with `main` fetched now.
-    async fn mirror(&self, owner: &str, name: &str) -> Result<PathBuf, String> {
+    /// The mirror of `owner/name`, made once, with `main` fetched now, and its `origin`.
+    async fn mirror(
+        &self,
+        owner: &str,
+        name: &str,
+        access: &Access,
+    ) -> Result<(PathBuf, String), String> {
         let dir = self.mirrors.join(owner).join(format!("{name}.git"));
+        let url = format!("{}/{owner}/{name}.git", self.remote_base);
         if !dir.join("HEAD").is_file() {
             tokio::fs::create_dir_all(&dir)
                 .await
                 .map_err(|e| format!("the mirror directory could not be made: {e}"))?;
             git_ok(&dir, &["init", "--bare", "--quiet"]).await?;
-            let url = format!("{}/{owner}/{name}.git", self.remote_base);
             git_ok(&dir, &["remote", "add", "origin", &url]).await?;
-            if self.remote_base == GITHUB {
-                // The host's `gh` sign-in answers for this repository; set here, in the
-                // runner's own mirror, never in the host's git configuration.
-                git_ok(
-                    &dir,
-                    &[
-                        "config",
-                        "credential.https://github.com.helper",
-                        "!gh auth git-credential",
-                    ],
-                )
-                .await?;
-            }
+        }
+        // An older runner kept the host's `gh` helper in the mirror's configuration; the
+        // helper now comes on each command line, so it goes (5: there was none).
+        let old = git(&dir, &["config", "--unset-all", LEGACY_HELPER_KEY]).await?;
+        if !matches!(old.code, 0 | 5) {
+            return Err(format!(
+                "git config --unset-all exited {}: {}",
+                old.code,
+                redact(&old.stderr_tail)
+            ));
         }
         let main = format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}");
-        git_ok(&dir, &["fetch", "--quiet", "--no-tags", "origin", &main]).await?;
-        Ok(dir)
+        remote_git_ok(
+            &dir,
+            &url,
+            access,
+            &["fetch", "--quiet", "--no-tags", "origin", &main],
+        )
+        .await?;
+        Ok((dir, url))
     }
 
-    /// Makes, or finds again, the checkout of `job_id` in `repository`.
-    pub(crate) async fn prepare(&self, job_id: &str, repository: &str) -> Result<Prepared, String> {
+    /// The mirror of `repository` and its `origin`, as [`Self::prepare`] made them.
+    fn mirror_of(&self, repository: &str) -> Result<(PathBuf, String), String> {
+        let (owner, name) = valid_repository(repository)?;
+        Ok((
+            self.mirrors.join(owner).join(format!("{name}.git")),
+            format!("{}/{owner}/{name}.git", self.remote_base),
+        ))
+    }
+
+    /// Makes, or finds again, the checkout of `job_id` in `repository`, reaching GitHub
+    /// as `access` says.
+    pub(crate) async fn prepare(
+        &self,
+        job_id: &str,
+        repository: &str,
+        access: &Access,
+    ) -> Result<Prepared, String> {
         let (owner, name) = valid_repository(repository)?;
         valid_job_id(job_id)?;
         let _one = self.lock.lock().await;
-        let mirror = self.mirror(owner, name).await?;
+        let (mirror, url) = self.mirror(owner, name, access).await?;
         let branch = format!("job/{job_id}");
         let rel = format!("checkouts/{job_id}");
         let path = std::path::absolute(self.workdir.join("checkouts").join(job_id))
             .map_err(|e| format!("the checkout path: {e}"))?;
-        let remote = git(
+        let remote = remote_git(
             &mirror,
+            &url,
+            access,
             &[
                 "ls-remote",
                 "--exit-code",
@@ -471,7 +618,13 @@ impl Workspaces {
         };
         if pushed {
             let spec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
-            git_ok(&mirror, &["fetch", "--quiet", "--no-tags", "origin", &spec]).await?;
+            remote_git_ok(
+                &mirror,
+                &url,
+                access,
+                &["fetch", "--quiet", "--no-tags", "origin", &spec],
+            )
+            .await?;
         }
         let reused = tokio::fs::symlink_metadata(&path).await.is_ok();
         if !reused {
@@ -526,25 +679,36 @@ impl Workspaces {
             path,
             rel,
             reused,
+            mirror,
+            url,
         })
     }
 
     /// Commits what the turn changed, pushes the job's branch and opens or updates its
     /// pull request. `Ok(None)`: the branch has nothing main does not, so there is no
-    /// pull request to open.
-    pub(crate) async fn ship(&self, p: &Prepared, m: &Message) -> Result<Option<Shipped>, String> {
+    /// pull request to open. Only the push and the pull request reach GitHub, as
+    /// `access` says, from the runner's mirror.
+    pub(crate) async fn ship(
+        &self,
+        p: &Prepared,
+        m: &Message,
+        access: &Access,
+    ) -> Result<Option<Shipped>, String> {
         if !p.branch.starts_with("job/") || p.branch == BASE {
             return Err(format!("refused to push {:?}: not a job branch", p.branch));
         }
         let dir = p.path.as_path();
-        verify(dir, dir, &p.branch).await.or_else(|e| {
-            // `verify` compares the mirror too; here only the branch and the path matter.
-            if e.contains("another repository") {
-                Ok(())
-            } else {
-                Err(e)
-            }
-        })?;
+        // The mirror and origin this runner made for the repository, never ones the
+        // checkout names: the model can write in the checkout.
+        let (mirror, url) = self.mirror_of(&p.repository)?;
+        if !same_path(&mirror, &p.mirror) || url != p.url {
+            return Err(format!(
+                "{} is not this runner's checkout of {}; nothing is pushed",
+                dir.display(),
+                p.repository
+            ));
+        }
+        verify(dir, &mirror, &p.branch).await?;
         // Untrimmed: the first entry's status may start with a space.
         let status = git(
             dir,
@@ -575,7 +739,7 @@ impl Workspaces {
             }
             c => return Err(format!("git diff --cached exited {c}")),
         }
-        let conflict = !merge_main(dir, &p.branch).await?;
+        let conflict = !merge_main(dir, &p.branch, &mirror, &url, access).await?;
         let ahead = git_ok(
             dir,
             &["rev-list", "--count", &format!("origin/{BASE}..HEAD")],
@@ -584,26 +748,35 @@ impl Workspaces {
         if ahead.trim() == "0" {
             return Ok(None);
         }
-        let head = git_ok(dir, &["rev-parse", "HEAD"]).await?;
-        git_ok(
-            dir,
+        let head = git_ok(dir, &["rev-parse", "--verify", "HEAD^{commit}"]).await?;
+        if !(head.len() == 40 || head.len() == 64) || !head.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("git rev-parse named no commit; nothing is pushed".into());
+        }
+        // From the mirror, which shares the checkout's objects: the commit, by its id.
+        remote_git_ok(
+            &mirror,
+            &url,
+            access,
             &[
                 "push",
                 "--quiet",
                 "origin",
-                &format!("HEAD:refs/heads/{}", p.branch),
+                &format!("{head}:refs/heads/{}", p.branch),
             ],
         )
         .await?;
         let opened = self
             .forge
-            .open_or_update(&PullRequest {
-                repository: p.repository.clone(),
-                head: p.branch.clone(),
-                base: BASE.to_owned(),
-                title: m.title.clone(),
-                body: m.body.clone(),
-            })
+            .open_or_update(
+                &PullRequest {
+                    repository: p.repository.clone(),
+                    head: p.branch.clone(),
+                    base: BASE.to_owned(),
+                    title: m.title.clone(),
+                    body: m.body.clone(),
+                },
+                access,
+            )
             .await?;
         Ok(Some(Shipped {
             repository: p.repository.clone(),
@@ -620,10 +793,19 @@ impl Workspaces {
 /// Brings the job branch up to date with origin's main, so the gate check runs on a
 /// head that holds main (it skips a branch behind main, and the job then waits for the
 /// reap). A branch with no commit of its own fast-forwards to main. `Ok(false)`: the
-/// merge conflicted and was aborted; the branch stays as it was.
-async fn merge_main(dir: &Path, branch: &str) -> Result<bool, String> {
-    git_ok(
-        dir,
+/// merge conflicted and was aborted; the branch stays as it was. Main is fetched in the
+/// mirror (the one call here that reaches GitHub); the merge runs in the checkout.
+async fn merge_main(
+    dir: &Path,
+    branch: &str,
+    mirror: &Path,
+    url: &str,
+    access: &Access,
+) -> Result<bool, String> {
+    remote_git_ok(
+        mirror,
+        url,
+        access,
         &[
             "fetch",
             "--quiet",
@@ -881,11 +1063,23 @@ pub(crate) mod tests {
     pub(crate) struct FakeForge {
         pub(crate) asked: Mutex<Vec<PullRequest>>,
         pub(crate) fail: bool,
+        /// Whether each ask came with the lease's token.
+        pub(crate) tokens: Mutex<Vec<bool>>,
+    }
+
+    /// The lease's token for `acme/app`: a made-up one; the test remote is a directory,
+    /// so the GitHub helper never answers and the token goes nowhere.
+    pub(crate) fn acc() -> Access {
+        crate::runner::access::tests::token_for("acme/app")
     }
 
     impl Forge for FakeForge {
-        fn open_or_update<'a>(&'a self, pr: &'a PullRequest) -> Answer<'a> {
+        fn open_or_update<'a>(&'a self, pr: &'a PullRequest, access: &'a Access) -> Answer<'a> {
             Box::pin(async move {
+                self.tokens
+                    .lock()
+                    .unwrap()
+                    .push(access.gh_token().is_some());
                 if self.fail {
                     return Err("gh pr create exited 1: no".into());
                 }
@@ -955,7 +1149,7 @@ pub(crate) mod tests {
     async fn a_fresh_checkout_is_a_worktree_on_the_job_branch_from_origin_main() {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
-        let got = w.prepare("job_01ABC", "acme/app").await.unwrap();
+        let got = w.prepare("job_01ABC", "acme/app", &acc()).await.unwrap();
         assert_eq!(got.rel, "checkouts/job_01ABC");
         assert_eq!(got.branch, "job/job_01ABC");
         assert!(!got.reused);
@@ -987,9 +1181,9 @@ pub(crate) mod tests {
     async fn a_retry_reuses_the_checkout_and_keeps_its_work() {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
-        let first = w.prepare("job_1", "acme/app").await.unwrap();
+        let first = w.prepare("job_1", "acme/app", &acc()).await.unwrap();
         write(&first.path, "wip.txt", "half done\n");
-        let again = w.prepare("job_1", "acme/app").await.unwrap();
+        let again = w.prepare("job_1", "acme/app", &acc()).await.unwrap();
         assert!(again.reused);
         assert_eq!(again.path, first.path);
         assert_eq!(
@@ -1002,7 +1196,7 @@ pub(crate) mod tests {
     async fn a_new_attempt_on_another_runner_starts_from_the_pushed_job_branch() {
         let p = place();
         let a = spaces(&p, Arc::new(FakeForge::default()));
-        let first = a.prepare("job_2", "acme/app").await.unwrap();
+        let first = a.prepare("job_2", "acme/app", &acc()).await.unwrap();
         identity(&p);
         write(&first.path, "b.txt", "b\n");
         let shipped = a
@@ -1012,6 +1206,7 @@ pub(crate) mod tests {
                     title: "feat: b".into(),
                     body: "b".into(),
                 },
+                &acc(),
             )
             .await
             .unwrap()
@@ -1020,7 +1215,7 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(p.root.path().join("runner")).unwrap();
         std::fs::create_dir_all(&p.workdir).unwrap();
         let b = spaces(&p, Arc::new(FakeForge::default()));
-        let second = b.prepare("job_2", "acme/app").await.unwrap();
+        let second = b.prepare("job_2", "acme/app", &acc()).await.unwrap();
         assert!(!second.reused);
         assert_eq!(sh(&second.path, &["rev-parse", "HEAD"]), shipped.head);
     }
@@ -1030,19 +1225,22 @@ pub(crate) mod tests {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
         for bad in ["acme", "../x/y", "acme/..", "a b/c", ""] {
-            assert!(w.prepare("job_1", bad).await.is_err(), "{bad}");
+            assert!(w.prepare("job_1", bad, &acc()).await.is_err(), "{bad}");
         }
         for bad in ["job_", "job_a/b", "../job_1", "x_1"] {
-            assert!(w.prepare(bad, "acme/app").await.is_err(), "{bad}");
+            assert!(w.prepare(bad, "acme/app", &acc()).await.is_err(), "{bad}");
         }
         // A repository the origin does not have.
-        let e = w.prepare("job_1", "acme/missing").await.unwrap_err();
+        let e = w
+            .prepare("job_1", "acme/missing", &acc())
+            .await
+            .unwrap_err();
         assert!(e.contains("fetch"), "{e}");
         // Something else already at the path: refused and left there.
         let there = p.workdir.join("checkouts/job_9");
         std::fs::create_dir_all(&there).unwrap();
         write(&there, "mine.txt", "keep\n");
-        let e = w.prepare("job_9", "acme/app").await.unwrap_err();
+        let e = w.prepare("job_9", "acme/app", &acc()).await.unwrap_err();
         assert!(e.contains("left as it is"), "{e}");
         assert!(there.join("mine.txt").is_file());
     }
@@ -1052,7 +1250,7 @@ pub(crate) mod tests {
         let p = place();
         let forge = Arc::new(FakeForge::default());
         let w = spaces(&p, forge.clone());
-        let got = w.prepare("job_3", "acme/app").await.unwrap();
+        let got = w.prepare("job_3", "acme/app", &acc()).await.unwrap();
         identity(&p);
         let main_before = origin_main(&p);
         write(&got.path, "new.txt", "new\n");
@@ -1062,7 +1260,7 @@ pub(crate) mod tests {
             title: "feat(app): add new".into(),
             body: "Implements: RFC 0147".into(),
         };
-        let s = w.ship(&got, &m).await.unwrap().unwrap();
+        let s = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
         assert_eq!((s.number, s.created), (7, true));
         assert_eq!(s.withheld, [".env"]);
         assert_eq!(
@@ -1091,26 +1289,165 @@ pub(crate) mod tests {
         }
         // A later turn adds to the same branch and updates the same pull request.
         write(&got.path, "more.txt", "more\n");
-        let s2 = w.ship(&got, &m).await.unwrap().unwrap();
+        let s2 = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
         assert_eq!((s2.number, s2.created), (7, false));
         assert_eq!(
             sh(&p.origin, &["rev-parse", &format!("{}~1", s2.head)]),
             s.head
         );
         assert!(s.evidence().contains("acme/app#7 opened on job/job_3"));
+        assert_eq!(*forge.tokens.lock().unwrap(), [true, true]);
+    }
+
+    /// Every configuration git reads in the mirror and the checkout: no credential.
+    fn config_of(dir: &Path) -> String {
+        sh(dir, &["config", "--list", "--show-scope"])
+    }
+
+    #[tokio::test]
+    async fn no_credential_is_kept_in_any_configuration_and_an_old_helper_is_removed() {
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_c1", "acme/app", &acc()).await.unwrap();
+        let mirror = p.root.path().join("runner/mirrors/acme/app.git");
+        for dir in [&mirror, &got.path] {
+            let local: String = config_of(dir)
+                .lines()
+                .filter(|l| !l.starts_with("global") && !l.starts_with("system"))
+                .collect();
+            assert!(!local.contains("credential"), "{local}");
+            assert!(!local.contains(crate::runner::access::tests::FAKE));
+        }
+        // An older runner's helper key, in the mirror: gone after the next prepare.
+        sh(
+            &mirror,
+            &["config", LEGACY_HELPER_KEY, "!gh auth git-credential"],
+        );
+        w.prepare("job_c2", "acme/app", &acc()).await.unwrap();
+        let after = sh(&mirror, &["config", "--local", "--list"]);
+        assert!(!after.contains("credential"), "{after}");
+    }
+
+    #[tokio::test]
+    async fn a_mirror_with_configuration_the_runner_does_not_set_is_not_used() {
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_g1", "acme/app", &acc()).await.unwrap();
+        identity(&p);
+        let mirror = p.root.path().join("runner/mirrors/acme/app.git");
+        for (key, value) in [
+            ("http.proxy", "http://proxy-value.invalid"),
+            (
+                "url.https://elsewhere.invalid/.insteadOf",
+                "https://github.com/",
+            ),
+            ("core.hooksPath", "/tmp/hooks-value"),
+            ("credential.helper", "store"),
+            ("include.path", "/tmp/include-value"),
+        ] {
+            sh(&mirror, &["config", key, value]);
+            let e = w.prepare("job_g2", "acme/app", &acc()).await.unwrap_err();
+            assert!(e.contains(&key.to_ascii_lowercase()), "{e}");
+            assert!(
+                !e.contains("-value") && !e.contains("https://github.com/"),
+                "{e}"
+            );
+            write(&got.path, "g.txt", key);
+            let e = w
+                .ship(
+                    &got,
+                    &Message {
+                        title: "fix: g".into(),
+                        body: String::new(),
+                    },
+                    &acc(),
+                )
+                .await
+                .unwrap_err();
+            assert!(e.contains("nothing is fetched or pushed"), "{e}");
+            sh(&mirror, &["config", "--unset-all", key]);
+        }
+        // An origin that is not the one the runner set.
+        sh(
+            &mirror,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://elsewhere.invalid/x.git",
+            ],
+        );
+        let e = w.prepare("job_g3", "acme/app", &acc()).await.unwrap_err();
+        assert!(e.contains("origin is not"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn no_hook_runs_with_the_token_and_the_push_comes_from_the_mirror() {
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_h1", "acme/app", &acc()).await.unwrap();
+        identity(&p);
+        let mirror = p.root.path().join("runner/mirrors/acme/app.git");
+        let seen = p.root.path().join("hook-saw.txt");
+        let hook = format!("#!/bin/sh\nenv > '{}'\n", seen.display());
+        for name in ["pre-push", "reference-transaction", "post-checkout"] {
+            let h = mirror.join("hooks").join(name);
+            std::fs::create_dir_all(h.parent().unwrap()).unwrap();
+            std::fs::write(&h, &hook).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&h, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        write(&got.path, "h.txt", "h\n");
+        let m = Message {
+            title: "feat: h".into(),
+            body: String::new(),
+        };
+        let s = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
+        assert_eq!(
+            sh(&p.origin, &["rev-parse", "refs/heads/job/job_h1"]),
+            s.head
+        );
+        // A local hook (the commit's) may run, but never one with the token in reach.
+        let saw = std::fs::read_to_string(&seen).unwrap_or_default();
+        assert!(!saw.contains(crate::runner::access::TOKEN_VAR), "{saw}");
+        assert!(!saw.contains(crate::runner::access::tests::FAKE), "{saw}");
+    }
+
+    #[tokio::test]
+    async fn a_checkout_claiming_another_mirror_is_not_shipped() {
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let mut got = w.prepare("job_m1", "acme/app", &acc()).await.unwrap();
+        got.mirror = p.root.path().join("elsewhere.git");
+        write(&got.path, "m.txt", "m\n");
+        let e = w
+            .ship(
+                &got,
+                &Message {
+                    title: "fix: m".into(),
+                    body: String::new(),
+                },
+                &acc(),
+            )
+            .await
+            .unwrap_err();
+        assert!(e.contains("nothing is pushed"), "{e}");
     }
 
     #[tokio::test]
     async fn nothing_changed_ships_nothing_and_a_refused_pr_is_an_error() {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
-        let got = w.prepare("job_4", "acme/app").await.unwrap();
+        let got = w.prepare("job_4", "acme/app", &acc()).await.unwrap();
         identity(&p);
         let m = Message {
             title: "fix: x".into(),
             body: String::new(),
         };
-        assert_eq!(w.ship(&got, &m).await.unwrap(), None);
+        assert_eq!(w.ship(&got, &m, &acc()).await.unwrap(), None);
         let failing = spaces(
             &p,
             Arc::new(FakeForge {
@@ -1119,7 +1456,7 @@ pub(crate) mod tests {
             }),
         );
         write(&got.path, "x.txt", "x\n");
-        let e = failing.ship(&got, &m).await.unwrap_err();
+        let e = failing.ship(&got, &m, &acc()).await.unwrap_err();
         assert!(e.contains("gh pr create"), "{e}");
     }
 
@@ -1147,7 +1484,7 @@ pub(crate) mod tests {
     async fn main_moved_during_the_turn_is_merged_before_the_push() {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
-        let got = w.prepare("job_6", "acme/app").await.unwrap();
+        let got = w.prepare("job_6", "acme/app", &acc()).await.unwrap();
         identity(&p);
         let main = advance_main(&p, "m.txt", "m\n");
         write(&got.path, "new.txt", "new\n");
@@ -1155,7 +1492,7 @@ pub(crate) mod tests {
             title: "feat(app): add new".into(),
             body: String::new(),
         };
-        let s = w.ship(&got, &m).await.unwrap().unwrap();
+        let s = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
         assert!(!s.conflict);
         assert_eq!(
             sh(&p.origin, &["rev-parse", "refs/heads/job/job_6"]),
@@ -1180,14 +1517,14 @@ pub(crate) mod tests {
     async fn a_branch_with_nothing_of_its_own_follows_main_and_ships_nothing() {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
-        let got = w.prepare("job_7", "acme/app").await.unwrap();
+        let got = w.prepare("job_7", "acme/app", &acc()).await.unwrap();
         identity(&p);
         let main = advance_main(&p, "m.txt", "m\n");
         let m = Message {
             title: "fix: x".into(),
             body: String::new(),
         };
-        assert_eq!(w.ship(&got, &m).await.unwrap(), None);
+        assert_eq!(w.ship(&got, &m, &acc()).await.unwrap(), None);
         // The gate then sees head == main and the coordinator stops the job.
         assert_eq!(sh(&got.path, &["rev-parse", "HEAD"]), main);
     }
@@ -1196,7 +1533,7 @@ pub(crate) mod tests {
     async fn a_conflict_with_main_is_aborted_and_the_branch_ships_as_it_was() {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
-        let got = w.prepare("job_8", "acme/app").await.unwrap();
+        let got = w.prepare("job_8", "acme/app", &acc()).await.unwrap();
         identity(&p);
         let main = advance_main(&p, "a.txt", "theirs\n");
         write(&got.path, "a.txt", "ours\n");
@@ -1204,7 +1541,7 @@ pub(crate) mod tests {
             title: "fix: a".into(),
             body: String::new(),
         };
-        let s = w.ship(&got, &m).await.unwrap().unwrap();
+        let s = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
         assert!(s.conflict);
         assert!(
             s.evidence().contains("did not merge cleanly"),
@@ -1228,7 +1565,7 @@ pub(crate) mod tests {
     async fn shipping_refuses_a_branch_that_is_not_a_job_branch() {
         let p = place();
         let w = spaces(&p, Arc::new(FakeForge::default()));
-        let mut got = w.prepare("job_5", "acme/app").await.unwrap();
+        let mut got = w.prepare("job_5", "acme/app", &acc()).await.unwrap();
         got.branch = "main".into();
         let e = w
             .ship(
@@ -1237,6 +1574,7 @@ pub(crate) mod tests {
                     title: "fix: x".into(),
                     body: String::new(),
                 },
+                &acc(),
             )
             .await
             .unwrap_err();

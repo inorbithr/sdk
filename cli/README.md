@@ -449,6 +449,27 @@ It runs on your subscription and nothing else:
   its requests. Both the arguments and the environment are table-tested, and a `--bare`
   or an `ANTHROPIC_BASE_URL` in their output fails the build.
 - A turn is refused when its user is not the person the runner is registered to.
+- `gh` and git are signed out in the child: `GH_CONFIG_DIR` points at a directory that
+  does not exist, git's credential helpers are cleared (`GIT_CONFIG_COUNT`) and its
+  prompts are off (`GIT_TERMINAL_PROMPT=0`). The check a job runs gets the same.
+
+### GitHub access
+
+A job whose repository is on GitHub is checked out, pushed to `job/<job_id>` and opened
+as a pull request by the runner itself, never by `claude`. For each lease it asks the
+platform for a GitHub App installation token (platform RFC 0120): that one repository,
+`contents` and `pull_requests` write, about an hour; it asks again when fewer than
+10 minutes are left before a push. The token is kept in memory only. git gets it per
+command through a credential helper given with `-c` (every helper from your own git
+configuration is dropped for that command, and hooks are off), only in the runner's own
+mirror under its working directory after the mirror's configuration is checked; `gh`
+gets it as `GH_TOKEN` for that one call. It is never written to a file or a git
+configuration and never logged.
+
+Your own `gh` sign-in is used instead only when the platform says its App is not
+installed for the account, or the platform is older than the call; the log says which.
+Any other refusal (the App lacks a permission, the lease was not confirmed) leaves the
+lease unaccepted, so another runner can take it.
 
 ### Capacity
 
@@ -540,7 +561,7 @@ Each runtime dependency, and why (SR-20):
 | etcetera | The platform's config directory |
 | base64, sha2 | Reading a token's claims to name its account; the PKCE S256 challenge |
 | getrandom | Request ids and retry jitter |
-| typify, schemars, syn, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and prettyplease print them) |
+| typify, schemars, syn, quote, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and quote add each model's constructor and setters, prettyplease prints them) |
 | minijinja | The templates the generated surface's operations, profiles and markers are rendered from, embedded in the binary |
 | heck | Case changes for generated names (`AcmeCi`, `get_me`) |
 | sigstore-verify | Extensions: verifies Sigstore bundles (Fulcio chain, SCT, Rekor inclusion, DSSE) offline against the trusted root it embeds; from the sigstore project |

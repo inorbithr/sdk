@@ -636,10 +636,9 @@ async fn call_typed(client: &Client<Public>, action: &Action) -> Result<RawRespo
         "accounts.get_me" => client.accounts().get_me().await.map(|r| r.raw),
         "accounts.get_usage" => {
             let org = arg("org_id").unwrap_or_default();
-            let params = AccountsGetUsageParams {
-                from: arg("from"),
-                to: arg("to"),
-            };
+            let mut params = AccountsGetUsageParams::default();
+            params.from = arg("from");
+            params.to = arg("to");
             client
                 .accounts()
                 .get_usage(&org, &params)
@@ -701,10 +700,9 @@ async fn stream(client: &Client<Public>, action: &Action) -> (Vec<Value>, Option
             .and_then(Value::as_str)
             .map(str::to_owned)
     };
-    let params = EventsStreamEventsParams {
-        types: arg("types"),
-        account_id: arg("account_id"),
-    };
+    let mut params = EventsStreamEventsParams::default();
+    params.types = arg("types");
+    params.account_id = arg("account_id");
     let mut items = Vec::new();
     let mut events = match client.events().stream_events(&params).await {
         Ok(s) => s,

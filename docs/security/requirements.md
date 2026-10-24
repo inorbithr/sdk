@@ -274,6 +274,32 @@ the binary and a version is checked to be one (digits, letters, `.`, `-`, `+`). 
   arguments it received and the exit code passed on.
 - Refs: CRA I.2(d); least privilege.
 
+**SR-33. A runner reaches GitHub with its lease's own token, and its model never does.**
+`iohr runner` asks the platform for a GitHub App installation token per job lease
+(`MintRunnerGithubToken`, platform RFC 0120): one repository, `contents` and
+`pull_requests` write, about an hour, minted on demand and asked for again when fewer
+than 10 minutes are left. The token lives in memory only: never in a file, a git
+configuration, a log line, an error or a `Debug`. git gets it per command, through a
+credential helper given with `-c` that reads a variable set on that one git child; every
+other helper of every configuration file is dropped for that command, hooks are off, and
+it runs only in the runner's own bare mirror after its configuration is checked (no
+credential, proxy, URL rewrite, include or hook key; `origin` exactly the job's
+repository). `gh` gets it as `GH_TOKEN` on that one child. A token for another repository
+is refused. The host's own `gh` sign-in is used only where the platform says its App is
+not installed for the account (or the platform is older than the call), and the log says
+so; any other refusal leaves the lease unaccepted. The model's process and the check's
+process run with an empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's
+credential helpers cleared and its prompts off (RFC 0147 containment).
+- Why: a person's long-lived sign-in on a runner can push to every repository they can,
+  and a model that can read it can too.
+- Verify: unit tests that the token never appears in a log line, a `Debug` or an error;
+  that `git credential fill` answers the token for `github.com` only and never a host
+  helper; that no credential is in any git configuration and an old one is removed; that
+  a mirror with configuration the runner did not set is not used; that no hook runs with
+  the token; that only "not installed" falls back to the host; that `gh` in the model's
+  environment is signed out and git there asks no helper.
+- Refs: CRA I.2(d); least privilege.
+
 ## Reliability and traceability
 
 **SR-17. Request ids both ways.** Every request carries a client-generated request id

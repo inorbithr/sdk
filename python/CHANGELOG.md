@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/inorbithr/sdk/compare/python/v0.3.0...python/v0.3.1) (2026-10-24)
+
+
+### Dependencies
+
+* **py:** bump the py group across 1 directory with 3 updates ([#264](https://github.com/inorbithr/sdk/issues/264)) ([4f7f424](https://github.com/inorbithr/sdk/commit/4f7f4243fbddce1aea24e25f56d0c6eb34b9d997))
+* **py:** update uv-build requirement from &lt;0.13,&gt;=0.7 to &gt;=0.7,&lt;0.14 in /python ([#226](https://github.com/inorbithr/sdk/issues/226)) ([dba9e3a](https://github.com/inorbithr/sdk/commit/dba9e3afc38cb6bc21be721965ac8530ab181ede))
+* **py:** update uv-build requirement in /python ([dba9e3a](https://github.com/inorbithr/sdk/commit/dba9e3afc38cb6bc21be721965ac8530ab181ede))
+
 ## [0.3.0](https://github.com/inorbithr/sdk/compare/python/v0.2.2...python/v0.3.0) (2026-10-24)
 
 
