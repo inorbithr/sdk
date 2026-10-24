@@ -1,6 +1,6 @@
 [project]
 name = "inorbithr"
-version = "0.3.0"
+version = "0.3.1"
 description = "The InOrbit API for Python: the runtime and the public surface, sync and async."
 readme = "README.md"
 license = "Apache-2.0"
@@ -54,7 +54,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.7,<0.14"]
+requires = ["uv_build>=0.7,<0.13"]
 build-backend = "uv_build"
 
 [tool.ruff]
