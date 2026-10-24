@@ -1255,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "inorbithr"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "futures-core",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "iohr"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.24"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-auth"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.24"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.23.1",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-codegen"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.24"
 dependencies = [
  "clap",
  "heck",
@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-lab"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.24"
 dependencies = [
  "regex",
  "serde",
@@ -1383,7 +1383,7 @@ dependencies = [
 
 [[package]]
 name = "iohr-openapi"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.24"
 dependencies = [
  "heck",
  "serde",
@@ -1603,6 +1603,9 @@ name = "minijinja"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "789a6b737c4a13bec43cd3c1b982aa8a8a192ff4bf444e0fb1fd5a324f064fd1"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "miniz_oxide"
