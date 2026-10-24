@@ -24,6 +24,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+use super::access::Access;
 use super::claude::Reply;
 use super::exec::{Exec, Finished};
 use super::gate::{self, Checked, Held, Skip};
@@ -198,6 +199,9 @@ type Accepted = Result<(Lease, Option<Owned>), String>;
 struct Owned {
     checkout: Prepared,
     document_id: String,
+    /// How git and gh reach GitHub for this lease (RFC 0120): its own installation token,
+    /// or this host's sign-in where the platform says the App is not installed.
+    access: Access,
 }
 
 /// The sending of one gate report, with the lease it was for.
@@ -800,7 +804,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 let ship = match (&b.owned, cfg.workspaces.as_ref(), &finished.parsed) {
                     (Some(o), Some(w), Some(parsed)) if finished.outcome == "replied" => {
                         let m = workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply);
-                        Some((Arc::clone(w), o.checkout.clone(), m))
+                        // A token close to its end is minted again for the push; one that
+                        // cannot be is a ship that fails, said in the log.
+                        let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
+                            Ok(o.access.clone())
+                        } else {
+                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
+                        };
+                        Some((Arc::clone(w), o.checkout.clone(), m, access))
                     }
                     (Some(_), Some(_), _) => {
                         log(&format!("lease {}: nothing shipped, the turn ended {}", b.lease.lease_id, finished.outcome));
@@ -831,7 +842,8 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         report,
                         check: Some(tokio::spawn(async move {
                             let shipped = match ship {
-                                Some((w, p, m)) => Some(w.ship(&p, &m).await),
+                                Some((w, p, m, Ok(access))) => Some(w.ship(&p, &m, &access).await),
+                                Some((_, _, _, Err(e))) => Some(Err(format!("nothing pushed: {e}"))),
                                 None => None,
                             };
                             let checked = match check {
@@ -1045,6 +1057,28 @@ fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr>
     Ok(())
 }
 
+/// How git and gh reach GitHub for `lease` on `repository` (RFC 0120): the installation
+/// token connections mints for that one repository, or this host's sign-in only where
+/// the platform says our App is not installed there, or the platform is older than the
+/// call. Any other refusal (a permission the App lacks, a lease the coordinator did not
+/// confirm, a token for another repository) is an error: never a silent fallback. The
+/// token never reaches a log line or an error.
+async fn github_access<S: Service>(
+    svc: &S,
+    lease: &Lease,
+    repository: &str,
+    op_timeout: Duration,
+) -> Result<Access, String> {
+    match tokio::time::timeout(op_timeout, svc.runner_github_token(lease)).await {
+        Ok(Ok(m)) => m.access(repository, time::OffsetDateTime::now_utc()),
+        Ok(Err(e)) if e.is_missing() => Ok(Access::host(
+            "this platform does not mint runner tokens yet",
+        )),
+        Ok(Err(e)) => Err(format!("no GitHub token for the lease: {e}")),
+        Err(_) => Err("no GitHub token for the lease: timed out".into()),
+    }
+}
+
 /// `AcceptLease` under the call limit; the lease's id when it was not accepted (the lease
 /// is left to expire and goes to another runner).
 ///
@@ -1076,10 +1110,22 @@ async fn accept_lease<S: Service, X: Exec>(
             Err(_) => return Err(refuse("its job could not be read: timed out")),
         };
         if let Some(job) = job.filter(|j| !j.repository.is_empty()) {
-            let made =
-                tokio::time::timeout(PREPARE_TIMEOUT, w.prepare(&lease.job_id, &job.repository))
-                    .await
-                    .unwrap_or_else(|_| Err("making the checkout took too long".into()));
+            let access = match github_access(svc, &lease, &job.repository, op_timeout).await {
+                Ok(a) => a,
+                Err(e) => return Err(refuse(&e)),
+            };
+            log(&format!(
+                "lease {}: git reaches {} through {}",
+                lease.lease_id,
+                job.repository,
+                access.describe()
+            ));
+            let made = tokio::time::timeout(
+                PREPARE_TIMEOUT,
+                w.prepare(&lease.job_id, &job.repository, &access),
+            )
+            .await
+            .unwrap_or_else(|_| Err("making the checkout took too long".into()));
             match made {
                 Ok(p) => {
                     log(&format!(
@@ -1093,6 +1139,7 @@ async fn accept_lease<S: Service, X: Exec>(
                     owned = Some(Owned {
                         checkout: p,
                         document_id: job.document_id,
+                        access,
                     });
                 }
                 Err(e) => return Err(refuse(&format!("its checkout could not be made: {e}"))),
@@ -1265,6 +1312,8 @@ mod tests {
         job: Option<JobInfo>,
         /// `GetJob` fails, transiently.
         job_down: bool,
+        /// What `MintRunnerGithubToken` answers; `None` is an older platform without it.
+        minted: Option<crate::runner::access::Minted>,
     }
 
     impl Fake {
@@ -1381,6 +1430,22 @@ mod tests {
             );
             self.note(format!("accept {} token={}", l.lease_id, l.fencing_token));
             Ok(())
+        }
+        async fn runner_github_token(
+            &self,
+            l: &Lease,
+        ) -> Result<crate::runner::access::Minted, ServiceError> {
+            self.note(format!("runner_token {}", l.lease_id));
+            self.minted.clone().ok_or_else(|| {
+                let raw = inorbithr::RawResponse::for_tests(
+                    404,
+                    inorbithr::Headers::new([]),
+                    br#"{"code":"not_found","error":"no such route","details":[]}"#.to_vec(),
+                );
+                ServiceError::Api(inorbithr::Error::Api(Box::new(inorbithr::ApiError::parse(
+                    raw,
+                ))))
+            })
         }
         async fn get_job(&self, job_id: &str) -> Result<JobInfo, ServiceError> {
             self.note(format!("job {job_id}"));
@@ -1808,6 +1873,20 @@ mod tests {
         )
         .await
         .expect("the loop hung")
+    }
+
+    /// [`go_with`], keeping every log line.
+    async fn go_logged(fake: &Fake, exec: FakeExec, c: LoopConfig) -> (Stats, Vec<String>) {
+        let (_tx, rx) = watch::channel(false);
+        let lines = Mutex::new(Vec::new());
+        let log = |l: &str| lines.lock().unwrap().push(l.to_owned());
+        let (_, stats) = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_loop(fake, &Arc::new(exec), &runner(), c, rx, &log),
+        )
+        .await
+        .expect("the loop hung");
+        (stats, lines.into_inner().unwrap())
     }
 
     fn offer(fake: &Fake, leases: &[Lease]) {
@@ -2616,13 +2695,21 @@ mod tests {
         let forge = Arc::new(FakeForge::default());
         let spaced = spaces(&p, forge.clone());
         // The mirror, made once, with the test's commit identity in its own config.
-        spaced.prepare("job_0", "acme/app").await.unwrap();
+        spaced
+            .prepare("job_0", "acme/app", &Access::host("a test"))
+            .await
+            .unwrap();
         identity(&p);
         let fake = Fake {
             job: Some(JobInfo {
                 repository: "acme/app".into(),
                 document_id: "ldoc_1".into(),
             }),
+            minted: Some(crate::runner::access::Minted::token(
+                crate::runner::access::tests::FAKE,
+                "2099-01-01T00:00:00Z",
+                "acme/app",
+            )),
             ..Fake::default()
         };
         offer(&fake, &[job_lease("lease_1", 7)]);
@@ -2642,15 +2729,32 @@ mod tests {
             workspaces: Some(Arc::new(spaced)),
             ..cfg(8)
         };
-        let (_, stats) = go_with(&fake, exec, c).await;
+        let (stats, lines) = go_logged(&fake, exec, c).await;
         assert_eq!((stats.accepted, stats.turns, stats.reported), (1, 1, 1));
+        // The lease's own token, minted before the checkout, given to gh for the pull
+        // request, and never in a log line.
+        let fake_token = crate::runner::access::tests::FAKE;
+        assert!(lines.iter().all(|l| !l.contains(fake_token)), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("the lease's GitHub App token")),
+            "{lines:?}"
+        );
+        assert_eq!(*forge.tokens.lock().unwrap(), [true]);
         let calls = fake.calls.lock().unwrap().clone();
+        let mint_at = calls
+            .iter()
+            .position(|c| c == "runner_token lease_1")
+            .unwrap();
         let job_at = calls.iter().position(|c| c == "job job_1").unwrap();
+        assert!(job_at < mint_at, "the job names the repository first");
         let accept_at = calls
             .iter()
             .position(|c| c.starts_with("accept lease_1"))
             .unwrap();
         assert!(job_at < accept_at, "the checkout is made before the accept");
+        assert!(mint_at < accept_at, "the token is minted before the accept");
         // Pushed on the job's branch, never on main, with the turn's file.
         let head = gate::tests::sh(&p.origin, &["rev-parse", "refs/heads/job/job_1"]);
         let files = gate::tests::sh(&p.origin, &["ls-tree", "--name-only", &head]);
@@ -2732,5 +2836,78 @@ mod tests {
             assert_eq!((stats.accepted, stats.turns, stats.reported), (1, 1, 1));
         }
         assert!(!p.workdir.join("checkouts").exists());
+    }
+    #[tokio::test]
+    async fn a_lease_without_its_own_token_uses_the_host_only_where_the_app_is_not_installed() {
+        use crate::runner::access::Minted;
+        use crate::runner::access::tests::FAKE;
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        let job = || {
+            Some(JobInfo {
+                repository: "acme/app".into(),
+                document_id: String::new(),
+            })
+        };
+        // Refused: the App lacks a permission, or the token is for another repository.
+        // Nothing is prepared, nothing accepted, the host's sign-in is never tried.
+        for minted in [
+            Minted::refused("needs_permission", "contents: write"),
+            Minted::refused("unavailable", "GitHub did not answer"),
+            Minted::token(FAKE, "2099-01-01T00:00:00Z", "acme/other"),
+        ] {
+            let p = place();
+            let fake = Fake {
+                job: job(),
+                minted: Some(minted),
+                ..Fake::default()
+            };
+            offer(&fake, &[job_lease("lease_1", 7)]);
+            let c = LoopConfig {
+                workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+                ..cfg(4)
+            };
+            let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+            assert_eq!((stats.accepted, stats.turns), (0, 0));
+            assert_eq!(calls_of(&fake, "accept "), 0);
+            assert!(!p.workdir.join("checkouts/job_1").exists());
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("lease lease_1 not accepted")),
+                "{lines:?}"
+            );
+            assert!(lines.iter().all(|l| !l.contains(FAKE)), "{lines:?}");
+        }
+        // Not installed (or a platform older than the call): the host's sign-in, said.
+        for (minted, why) in [
+            (
+                Some(Minted::refused(
+                    "not_installed",
+                    "this account has not installed our GitHub App",
+                )),
+                "no GitHub App installation",
+            ),
+            (None, "does not mint runner tokens yet"),
+        ] {
+            let p = place();
+            let fake = Fake {
+                job: job(),
+                minted,
+                ..Fake::default()
+            };
+            offer(&fake, &[job_lease("lease_1", 7)]);
+            let c = LoopConfig {
+                workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+                ..cfg(4)
+            };
+            let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+            assert_eq!(stats.accepted, 1, "{lines:?}");
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("this host's gh sign-in") && l.contains(why)),
+                "{lines:?}"
+            );
+        }
     }
 }

@@ -2,6 +2,7 @@
 //! coordinator turn. It never runs a model itself and never holds a provider credential:
 //! it starts the person's own, unmodified `claude -p` and reports what it printed.
 
+pub(crate) mod access;
 pub(crate) mod claude;
 pub(crate) mod env;
 pub(crate) mod exec;
