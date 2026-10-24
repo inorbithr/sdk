@@ -363,11 +363,20 @@ keys are refused. `iohr ext lint` exits 1 on an unknown key, a value that looks 
 secret, a `permissions.data.leaves` kind outside ADR 0063's non-sensitive list, a
 `targets.kinds` the kind cannot be installed on, or a name holding `tbd`; `--preview`
 prints what it may do as an installer will show it, `--json` the same structured, with
-the artifact's `config`.
+the artifact's `config`. A program may name `cluster` in `targets.kinds` (it needs
+`delivery = "program"` and a `linux/...` platform), serve a panel (`[panel]`: `title`,
+`entry`) and read `$REPOS`, the repository folders the user adds in its host (RFC 0143).
+
+`iohr ext verify` checks what is installed; `iohr ext verify ARTIFACT|sha256:DIGEST --bundle
+FILE --publisher-key PEM` checks one artifact that is not, with the install's trust check,
+offline and without a sign-in: it prints the signer and exits 1 when it is not trusted
+(`--json`: `ok`, `digest`, `signer`, `provenance`, `error`).
 
 `iohr ext dev` lints first, then runs the program with the token channel for exactly
 the manifest's scopes: every request is logged, a refused one in red. `STATE` and
-`CACHE` are `~/.inorbit/ext-dev/NAME/state` and `cache`; heartbeats are marked
+`CACHE` are `~/.inorbit/ext-dev/NAME/state` and `cache`, and `REPOS` the roots in
+`~/.inorbit/ext-dev/NAME/config.json` (`{"repos": ["/abs/path"]}`) joined with `:`, empty
+without one; heartbeats are marked
 `"dev": true`; installed extensions and their lock are never read or written. The child
 gets no `IOHR_TOKEN*`, `INORBIT_TOKEN*` or `INORBIT_KEY_*`, and no folder holding an
 `iohr` stays on its `PATH`, so the channel is its only credential. A secret

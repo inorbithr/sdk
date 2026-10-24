@@ -1,7 +1,7 @@
 //! `iohr ext ...` and `iohr <extension> ...`.
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::Env;
 use crate::cli::{ExtCommand, Global};
@@ -238,7 +238,17 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             Out::note(&format!("Removed {name}."));
             Ok(())
         }
-        ExtCommand::Verify { name } => verify(g, env, &store, name, out),
+        ExtCommand::Verify {
+            name,
+            bundles,
+            publisher_keys,
+        } => {
+            if artifact_target(name.as_deref(), &bundles, &publisher_keys) {
+                verify_artifact(name.as_deref(), &bundles, &publisher_keys, out)
+            } else {
+                verify(g, env, &store, name, out)
+            }
+        }
         ExtCommand::Sync { lock } => sync(g, env, &store, &lock, out).await,
     }
 }
@@ -894,6 +904,141 @@ fn verify(
             "{} failed verification; do not run it. Remove it with `iohr ext remove`, then install it again.",
             failed.join(", ")
         )))
+    }
+}
+
+/// Whether `iohr ext verify` was asked about an artifact rather than an installed
+/// extension: a digest, a path (an extension name holds no `/`, `.` or `:`), or a flag
+/// only an artifact check takes.
+fn artifact_target(name: Option<&str>, bundles: &[PathBuf], keys: &[PathBuf]) -> bool {
+    !bundles.is_empty() || !keys.is_empty() || name.is_some_and(|n| n.contains(['/', '.', ':']))
+}
+
+/// What `iohr ext verify ARTIFACT` found.
+#[derive(serde::Serialize)]
+struct ArtifactReport {
+    ok: bool,
+    digest: String,
+    /// The signer: a workflow identity or `key:sha256:...`.
+    signer: Option<String>,
+    /// What the provenance says built it, when there was one.
+    provenance: Option<String>,
+    error: Option<String>,
+}
+
+/// The digest of a file, read in chunks so a large artifact is never held in memory.
+fn file_digest(path: &Path) -> Result<Digest, Error> {
+    use sha2::Digest as _;
+    use std::io::Read as _;
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| Error::Usage(format!("cannot read {}: {e}", path.display())))?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = f
+            .read(&mut buf)
+            .map_err(|e| Error::Usage(format!("cannot read {}: {e}", path.display())))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let hex = crate::ext::oci::hex(&hasher.finalize());
+    Ok(Digest::parse(&format!("sha256:{hex}"))?)
+}
+
+/// Reads a small file named on the command line, at most 1 MiB.
+fn small_file(path: &Path, what: &str) -> Result<Vec<u8>, Error> {
+    let len = std::fs::metadata(path)
+        .map_err(|e| Error::Usage(format!("cannot read {what} {}: {e}", path.display())))?
+        .len();
+    if len > 1024 * 1024 {
+        return Err(Error::Usage(format!(
+            "{what} {} is larger than 1 MiB",
+            path.display()
+        )));
+    }
+    std::fs::read(path)
+        .map_err(|e| Error::Usage(format!("cannot read {what} {}: {e}", path.display())))
+}
+
+/// `iohr ext verify ARTIFACT|DIGEST --bundle FILE [--publisher-key PEM]`: the install's
+/// trust check ([`crate::ext::trust::verify`]) on one artifact, offline.
+fn verify_artifact(
+    target: Option<&str>,
+    bundles: &[PathBuf],
+    key_files: &[PathBuf],
+    out: Out,
+) -> Result<(), Error> {
+    let Some(target) = target else {
+        return Err(Error::Usage(
+            "name the artifact: a file, or sha256:DIGEST, with --bundle FILE".into(),
+        ));
+    };
+    if bundles.is_empty() {
+        return Err(Error::Usage(
+            "give the artifact's Sigstore bundle with --bundle FILE (`cosign sign-blob --bundle` writes one)"
+                .into(),
+        ));
+    }
+    let digest = if target.starts_with("sha256:") {
+        Digest::parse(target)?
+    } else {
+        file_digest(Path::new(target))?
+    };
+    let keys = key_files
+        .iter()
+        .map(|p| {
+            let pem = String::from_utf8(small_file(p, "the publisher key")?)
+                .map_err(|_| Error::Usage(format!("{} is not a PEM public key", p.display())))?;
+            TrustedKey::from_pem(&pem).map_err(|e| Error::Usage(format!("{}: {e}", p.display())))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    let attached = bundles
+        .iter()
+        .map(|p| Ok((digest.clone(), small_file(p, "the bundle")?)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let result = crate::ext::trust::verify(&Policy::inorbit(keys), &attached);
+    let report = match &result {
+        Ok(v) => ArtifactReport {
+            ok: true,
+            digest: digest.to_string(),
+            signer: Some(v.signer.to_string()),
+            provenance: v.provenance.clone(),
+            error: None,
+        },
+        Err(e) => ArtifactReport {
+            ok: false,
+            digest: digest.to_string(),
+            signer: None,
+            provenance: None,
+            error: Some(e.to_string()),
+        },
+    };
+    if out.json {
+        Out::print_json(&report);
+    } else if let Some(e) = &report.error {
+        Out::raw(format!("FAILED {}: {e}\n", report.digest).as_bytes());
+    } else {
+        Out::raw(
+            format!(
+                "ok {}\nsigner {}{}\n",
+                report.digest,
+                report.signer.as_deref().unwrap_or_default(),
+                report
+                    .provenance
+                    .as_deref()
+                    .map(|p| format!("\nprovenance {p}"))
+                    .unwrap_or_default()
+            )
+            .as_bytes(),
+        );
+    }
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(Error::Failed(format!(
+            "{digest} is not trusted: {e}; do not run it"
+        ))),
     }
 }
 
