@@ -15,6 +15,8 @@ use heck::{ToSnakeCase as _, ToUpperCamelCase as _};
 use iohr_openapi::model::type_name;
 use iohr_openapi::{Api, Method};
 use minijinja::Environment;
+use minijinja::syntax::SyntaxConfig;
+use minijinja::value::Serde;
 use serde::Serialize;
 
 use crate::context::{self, Naming, Segment};
@@ -159,7 +161,15 @@ impl Target for RustTarget {
         files.insert("models.rs", format!("// {}\n\n{models}", ctx.header));
 
         let mut env = Environment::new();
-        env.set_keep_trailing_newline(true);
+        env.set_syntax(
+            SyntaxConfig::builder()
+                .keep_trailing_newline(true)
+                .build()
+                .map_err(|e| RenderError::Template {
+                    file: "syntax",
+                    reason: e.to_string(),
+                })?,
+        );
         for (name, source) in [
             ("mod.rs", MOD_TEMPLATE),
             ("profiles.rs", PROFILES_TEMPLATE),
@@ -175,7 +185,7 @@ impl Target for RustTarget {
         for name in ["mod.rs", "profiles.rs", "ops.rs", "surface.rs"] {
             let text = env
                 .get_template(name)
-                .and_then(|t| t.render(&ctx))
+                .and_then(|t| t.render(Serde(&ctx)))
                 .map_err(|e| RenderError::Template {
                     file: name,
                     reason: e.to_string(),
