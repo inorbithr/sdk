@@ -110,6 +110,9 @@ pub(crate) struct Shipped {
     pub(crate) created: bool,
     /// Changed files left out because their names look like secrets.
     pub(crate) withheld: Vec<String>,
+    /// Main moved during the turn and did not merge cleanly: the branch was pushed
+    /// without it, so the gate check holds until a later turn resolves the conflict.
+    pub(crate) conflict: bool,
 }
 
 impl Shipped {
@@ -122,7 +125,11 @@ impl Shipped {
             if self.created { "opened" } else { "updated" },
             self.branch,
             self.head
-        )
+        ) + if self.conflict {
+            "; main did not merge cleanly, the branch is behind main"
+        } else {
+            ""
+        }
     }
 }
 
@@ -568,6 +575,7 @@ impl Workspaces {
             }
             c => return Err(format!("git diff --cached exited {c}")),
         }
+        let conflict = !merge_main(dir, &p.branch).await?;
         let ahead = git_ok(
             dir,
             &["rev-list", "--count", &format!("origin/{BASE}..HEAD")],
@@ -604,8 +612,47 @@ impl Workspaces {
             number: opened.number,
             created: opened.created,
             withheld,
+            conflict,
         }))
     }
+}
+
+/// Brings the job branch up to date with origin's main, so the gate check runs on a
+/// head that holds main (it skips a branch behind main, and the job then waits for the
+/// reap). A branch with no commit of its own fast-forwards to main. `Ok(false)`: the
+/// merge conflicted and was aborted; the branch stays as it was.
+async fn merge_main(dir: &Path, branch: &str) -> Result<bool, String> {
+    git_ok(
+        dir,
+        &[
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "origin",
+            &format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}"),
+        ],
+    )
+    .await?;
+    let main = format!("origin/{BASE}");
+    let ancestor = git(dir, &["merge-base", "--is-ancestor", &main, "HEAD"]).await?;
+    match ancestor.code {
+        0 => return Ok(true),
+        1 => {}
+        c => {
+            return Err(format!(
+                "git merge-base exited {c}: {}",
+                redact(&ancestor.stderr_tail)
+            ));
+        }
+    }
+    let title = format!("chore: merge {BASE} into {branch}");
+    let merged = git(dir, &["merge", "--quiet", "--no-edit", "-m", &title, &main]).await?;
+    if merged.code == 0 {
+        return Ok(true);
+    }
+    // Leave the checkout as the turn left it; a failed abort leaves nothing to undo.
+    let _ = git(dir, &["merge", "--abort"]).await;
+    Ok(false)
 }
 
 /// The checkout at `path` is a linked worktree of `mirror` (not a main checkout), its
@@ -1074,6 +1121,103 @@ pub(crate) mod tests {
         write(&got.path, "x.txt", "x\n");
         let e = failing.ship(&got, &m).await.unwrap_err();
         assert!(e.contains("gh pr create"), "{e}");
+    }
+
+    /// Main moves on origin: one more commit, from the seed clone.
+    fn advance_main(p: &Place, name: &str, text: &str) -> String {
+        let seed = p.root.path().join("seed");
+        sh(&seed, &["pull", "--quiet", "--ff-only", "origin", "main"]);
+        write(&seed, name, text);
+        sh(&seed, &["add", name]);
+        sh(&seed, &["commit", "--quiet", "-m", "main moved"]);
+        sh(&seed, &["push", "--quiet", "origin", "HEAD:main"]);
+        origin_main(p)
+    }
+
+    fn is_ancestor(dir: &Path, a: &str, b: &str) -> bool {
+        std::process::Command::new("git")
+            .args(["merge-base", "--is-ancestor", a, b])
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    #[tokio::test]
+    async fn main_moved_during_the_turn_is_merged_before_the_push() {
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_6", "acme/app").await.unwrap();
+        identity(&p);
+        let main = advance_main(&p, "m.txt", "m\n");
+        write(&got.path, "new.txt", "new\n");
+        let m = Message {
+            title: "feat(app): add new".into(),
+            body: String::new(),
+        };
+        let s = w.ship(&got, &m).await.unwrap().unwrap();
+        assert!(!s.conflict);
+        assert_eq!(
+            sh(&p.origin, &["rev-parse", "refs/heads/job/job_6"]),
+            s.head
+        );
+        assert!(
+            is_ancestor(&p.origin, &main, &s.head),
+            "the pushed head holds main"
+        );
+        let files = sh(&p.origin, &["ls-tree", "--name-only", &s.head]);
+        assert_eq!(
+            files.lines().collect::<Vec<_>>(),
+            ["a.txt", "m.txt", "new.txt"]
+        );
+        assert_eq!(
+            sh(&p.origin, &["log", "-1", "--format=%s", &s.head]),
+            "chore: merge main into job/job_6"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_branch_with_nothing_of_its_own_follows_main_and_ships_nothing() {
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_7", "acme/app").await.unwrap();
+        identity(&p);
+        let main = advance_main(&p, "m.txt", "m\n");
+        let m = Message {
+            title: "fix: x".into(),
+            body: String::new(),
+        };
+        assert_eq!(w.ship(&got, &m).await.unwrap(), None);
+        // The gate then sees head == main and the coordinator stops the job.
+        assert_eq!(sh(&got.path, &["rev-parse", "HEAD"]), main);
+    }
+
+    #[tokio::test]
+    async fn a_conflict_with_main_is_aborted_and_the_branch_ships_as_it_was() {
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_8", "acme/app").await.unwrap();
+        identity(&p);
+        let main = advance_main(&p, "a.txt", "theirs\n");
+        write(&got.path, "a.txt", "ours\n");
+        let m = Message {
+            title: "fix: a".into(),
+            body: String::new(),
+        };
+        let s = w.ship(&got, &m).await.unwrap().unwrap();
+        assert!(s.conflict);
+        assert!(
+            s.evidence().contains("did not merge cleanly"),
+            "{}",
+            s.evidence()
+        );
+        assert!(!is_ancestor(&p.origin, &main, &s.head));
+        assert_eq!(
+            std::fs::read_to_string(got.path.join("a.txt")).unwrap(),
+            "ours\n"
+        );
+        let status = sh(&got.path, &["status", "--porcelain"]);
+        assert_eq!(status, "", "no merge is left half done");
     }
 
     #[tokio::test]
