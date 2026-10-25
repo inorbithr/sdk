@@ -110,6 +110,8 @@ impl ClaudeExec {
         c.args(args)
             .env_clear()
             .envs(self.env.iter().map(|(k, v)| (k, v)))
+            // The host's GitHub sign-in stays out of the model's tools (RFC 0147).
+            .envs(env::contained())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -349,12 +351,12 @@ async fn read_capped(stdout: Option<ChildStdout>) -> Result<Vec<u8>, DriveError>
 
 /// Kills a turn's whole process group (`claude` and whatever its tools started) when it
 /// is dropped while armed: an aborted turn task never leaves a process running.
-struct GroupGuard {
+pub(super) struct GroupGuard {
     pgid: Option<u32>,
 }
 
 impl GroupGuard {
-    fn new(pid: Option<u32>) -> Self {
+    pub(super) fn new(pid: Option<u32>) -> Self {
         // `process_group(0)` made the child its group's leader: pgid is its pid.
         Self {
             pgid: if cfg!(unix) { pid } else { None },
@@ -362,7 +364,7 @@ impl GroupGuard {
     }
 
     /// The child exited and was reaped: its pid may be reused, so nothing to kill.
-    fn disarm(&mut self) {
+    pub(super) fn disarm(&mut self) {
         self.pgid = None;
     }
 
@@ -621,6 +623,12 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             assert!(!env.contains(bad), "{bad} reached the child");
         }
         assert!(env.contains("HOME=/home/x"));
+        // The containment: gh signed out, no git credential helper, no prompt.
+        assert!(env.contains(&format!("GH_CONFIG_DIR={}", env::NO_GH_CONFIG)));
+        assert!(env.contains("GIT_CONFIG_KEY_0=credential.helper"));
+        assert!(env.lines().any(|l| l == "GIT_CONFIG_VALUE_0="));
+        assert!(env.contains("GIT_TERMINAL_PROMPT=0"));
+        assert!(!env.contains("IOHR_GIT_TOKEN"));
         assert_eq!(
             std::fs::read_to_string(dir.path().join("prompt.txt")).unwrap(),
             "hello there"

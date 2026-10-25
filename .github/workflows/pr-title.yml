@@ -35,6 +35,7 @@ jobs:
             py
             java
             csharp
+            swift
             dart
             cli
             spec

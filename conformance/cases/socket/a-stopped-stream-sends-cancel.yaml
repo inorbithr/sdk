@@ -1,6 +1,8 @@
 name: a-stopped-stream-sends-cancel
 area: socket
 summary: A caller that stops reading a stream (take 1, then drop or break) cancels its call on the socket with a cancel frame for the same id.
+pending: [swift]
+notes: Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 action: { op: events.stream_events, args: { types: key.created }, take: 1 }
 client: { scopes: [events:read], streams: socket }
 exchanges:

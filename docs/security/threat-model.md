@@ -104,6 +104,17 @@ extension process it runs (ADR 0012).
 | E | An `iohr` from before privileges installs a privileged extension from a team lock without showing them | SR-32: a lock with privileges is format version 2, which older versions refuse |
 | T | The machine's lock is edited so a privilege looks never declared | SR-32: `iohr <name>` and `ext verify` refuse a version whose recorded manifest declares privileges the lock does not hold |
 
+### `iohr runner` and GitHub
+
+Boundary: the runner to GitHub, and the runner to the model process it starts (SR-33).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| E | A job pushes to repositories other than its own with the person's sign-in | SR-33: the lease's own installation token, one repository, `contents` and `pull_requests` only, about an hour; the host's sign-in only where the App is not installed, said in the log |
+| I | The token is left in a file, a git configuration or a log | SR-33: memory only; given per command with `-c` and a variable on that child; tests over the log, `Debug`, errors and every configuration |
+| E | A planted mirror configuration (proxy, URL rewrite, include, hook, helper) receives the token | SR-33: token-bearing git runs only in the runner's mirror, after a check that refuses any such key and an `origin` that is not the job's repository; hooks off |
+| I | The model reads the person's `gh` sign-in or a git credential helper | SR-33 (RFC 0147 containment): empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's helpers cleared and prompts off in its environment. Not a sandbox: a process of the same user can still read files that user can |
+
 ### `iohr sdk add`
 
 Boundary: `iohr` to the package manager it runs in the person's project (SR-31).

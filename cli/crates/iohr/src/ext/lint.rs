@@ -9,15 +9,15 @@ use std::fmt::Write as _;
 use serde::Serialize;
 
 use super::manifest::{
-    DATA_LEAVES, Manifest, RunAs, SOURCE_FILE, SourceManifest, TARGET_KINDS, data_leaf, printable,
-    privilege,
+    DATA_LEAVES, Manifest, REPOS_VAR, RunAs, SOURCE_FILE, SourceManifest, TARGET_KINDS, data_leaf,
+    printable, privilege,
 };
 
 /// One problem found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {
-    /// `unknown_key`, `secret_value`, `data_class`, `target_kind`, `tbd_name` or
-    /// `invalid`.
+    /// `unknown_key`, `secret_value`, `data_class`, `target_kind`, `panel`, `tbd_name`
+    /// or `invalid`.
     pub rule: &'static str,
     /// What is wrong and what to do.
     pub message: String,
@@ -173,6 +173,57 @@ fn supported(kind: &str, target: &str) -> bool {
         .is_some_and(|(_, ts)| ts.contains(&target))
 }
 
+/// The rules for a `cluster` target and a `[panel]` (RFC 0143).
+fn cluster_and_panel_rules(raw: &toml::Table, kind: &str, findings: &mut Vec<Finding>) {
+    let kinds = raw
+        .get("targets")
+        .and_then(|t| t.get("kinds"))
+        .and_then(toml::Value::as_array);
+    let clustered = kinds
+        .into_iter()
+        .flatten()
+        .any(|t| t.as_str() == Some("cluster"));
+    if clustered && supported(kind, "cluster") {
+        // A cluster target is a pod of the same signed artifact (RFC 0143, section 6).
+        let delivery = raw
+            .get("delivery")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("program");
+        if delivery != "program" {
+            findings.push(Finding {
+                rule: "target_kind",
+                message: format!(
+                    "targets.kinds: `cluster` runs the program artifact as a pod; delivery is `{}`, not `program`",
+                    printable(delivery)
+                ),
+            });
+        }
+        let platforms = raw
+            .get("targets")
+            .and_then(|t| t.get("platforms"))
+            .and_then(toml::Value::as_array);
+        if let Some(p) = platforms
+            && !p
+                .iter()
+                .any(|x| x.as_str().is_some_and(|x| x.starts_with("linux/")))
+        {
+            findings.push(Finding {
+                rule: "target_kind",
+                message: "targets.kinds: `cluster` runs on Linux: add a `linux/...` platform, such as linux/amd64, to targets.platforms".into(),
+            });
+        }
+    }
+    if raw.contains_key("panel") && kind != "program" {
+        findings.push(Finding {
+            rule: "panel",
+            message: format!(
+                "[panel]: only a program serves a panel, and this is a {}",
+                printable(kind)
+            ),
+        });
+    }
+}
+
 /// The rules read from the raw table, so they report even when the manifest's shape is
 /// wrong elsewhere.
 fn raw_rules(raw: &toml::Table, findings: &mut Vec<Finding>) {
@@ -232,6 +283,7 @@ fn raw_rules(raw: &toml::Table, findings: &mut Vec<Finding>) {
         .get("targets")
         .and_then(|t| t.get("kinds"))
         .and_then(toml::Value::as_array);
+    cluster_and_panel_rules(raw, kind, findings);
     for t in kinds.into_iter().flatten() {
         let t = t.as_str().unwrap_or("");
         if !supported(kind, t) {
@@ -442,6 +494,7 @@ pub fn preview(s: &SourceManifest) -> Preview {
         format!("May reach {}.", and_list(&p.network))
     });
     let (read, write) = (&p.filesystem.read, &p.filesystem.write);
+    let repos = read.iter().chain(write).any(|x| x == REPOS_VAR);
     lines.push(if read.is_empty() && write.is_empty() {
         "Reads and writes no files.".to_owned()
     } else if own(read) && own(write) {
@@ -463,6 +516,12 @@ pub fn preview(s: &SourceManifest) -> Preview {
         }
         l
     });
+    if repos {
+        lines.push(
+            "$REPOS is the repository folders you add to it in its host; none until you add one."
+                .to_owned(),
+        );
+    }
     lines.push(if p.exec.is_empty() {
         "Starts no other program.".to_owned()
     } else {
@@ -531,6 +590,12 @@ pub fn preview(s: &SourceManifest) -> Preview {
             RunAs::Oneshot => "Runs once.".to_owned(),
         });
     }
+    if let Some(panel) = &s.panel {
+        lines.push(format!(
+            "Serves a panel, \"{}\", on a loopback address for its host to show.",
+            printable(&panel.title)
+        ));
+    }
     let targets: Vec<String> = s
         .targets
         .as_ref()
@@ -544,6 +609,7 @@ pub fn preview(s: &SourceManifest) -> Preview {
                 "desktop" => "this computer".to_owned(),
                 "host" => "a host over SSH".to_owned(),
                 "agent" => "a customer agent".to_owned(),
+                "cluster" => "a pod in the cluster".to_owned(),
                 other => other.to_owned(),
             })
             .collect();
@@ -696,5 +762,122 @@ lang = "shell"
         ] {
             assert!(secret_shaped(s).is_none(), "{s}");
         }
+    }
+
+    fn with_panel(extra: &str) -> String {
+        format!("{BASE}\n[panel]\n{extra}\n")
+    }
+
+    #[test]
+    fn a_cluster_program_with_a_panel_and_repos_passes() {
+        let text = BASE
+            .replace(r#""desktop", "host""#, r#""desktop", "cluster""#)
+            .replace(r#"read = ["$STATE"]"#, r#"read = ["$STATE", "$REPOS"]"#)
+            .replace(
+                "[targets]",
+                "[targets]\nplatforms = [\"darwin/arm64\", \"linux/amd64\"]",
+            )
+            + "\n[panel]\ntitle = \"Todo\"\nentry = \"/\"\n";
+        let r = lint(&text);
+        assert!(r.ok, "{:?}", r.findings);
+        let lines = r.preview.unwrap().lines;
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("$REPOS is the repository folders")),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains(r#"Serves a panel, "Todo""#)),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("a pod in the cluster")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn cluster_is_for_a_program_only() {
+        let program = BASE.replace(r#""desktop", "host""#, r#""desktop", "cluster""#);
+        assert!(lint(&program).ok, "{:?}", lint(&program).findings);
+        for kind in ["agent-plugin", "web"] {
+            let text = program
+                .replace("id = ", &format!("kind = \"{kind}\"\nid = "))
+                .replace("\n[dev]\nlang = \"shell\"\n", "");
+            let r = lint(&text);
+            assert!(
+                r.findings
+                    .iter()
+                    .any(|f| f.rule == "target_kind" && f.message.contains("on `cluster`")),
+                "{kind}: {:?}",
+                r.findings
+            );
+        }
+    }
+
+    #[test]
+    fn a_cluster_target_needs_program_delivery_and_a_linux_platform() {
+        let cluster = BASE.replace(r#""desktop", "host""#, r#""desktop", "cluster""#);
+        let no_linux = cluster.replace("[targets]", "[targets]\nplatforms = [\"darwin/arm64\"]");
+        let r = lint(&no_linux);
+        assert!(
+            r.findings
+                .iter()
+                .any(|f| f.message.contains("add a `linux/...` platform")),
+            "{:?}",
+            r.findings
+        );
+        let r = lint(&cluster.replace("id = ", "delivery = \"binary\"\nid = "));
+        assert!(
+            r.findings
+                .iter()
+                .any(|f| f.message.contains("delivery is `binary`")),
+            "{:?}",
+            r.findings
+        );
+    }
+
+    #[test]
+    fn a_panel_is_checked() {
+        assert!(lint(&with_panel("title = \"Todo\"\nentry = \"/\"")).ok);
+        // an unknown key, and a missing entry
+        assert!(
+            rules(&with_panel("title = \"Todo\"\nentry = \"/\"\nicon = \"x\""))
+                .contains(&"unknown_key")
+        );
+        let r = lint(&with_panel("title = \"Todo\""));
+        assert!(!r.ok);
+        assert!(
+            r.findings.iter().any(|f| f.message.contains("entry")),
+            "{:?}",
+            r.findings
+        );
+        for bad in [
+            "entry = \"todo\"",
+            "entry = \"//evil\"",
+            "entry = \"/a/../b\"",
+            "entry = \"/a b\"",
+        ] {
+            let r = lint(&with_panel(&format!("title = \"Todo\"\n{bad}")));
+            assert!(!r.ok, "{bad}");
+        }
+        assert!(!lint(&with_panel("title = \"\"\nentry = \"/\"")).ok);
+    }
+
+    #[test]
+    fn a_panel_on_something_that_is_not_a_program_is_refused() {
+        let text = BASE
+            .replace("id = ", "kind = \"web\"\nid = ")
+            .replace("\n[dev]\nlang = \"shell\"\n", "")
+            .replace(r#"kinds = ["desktop", "host"]"#, "kinds = []")
+            + "\n[panel]\ntitle = \"Todo\"\nentry = \"/\"\n";
+        assert!(
+            rules(&text).contains(&"panel"),
+            "{:?}",
+            lint(&text).findings
+        );
     }
 }

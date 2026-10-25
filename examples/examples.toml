@@ -1,0 +1,97 @@
+# What `mise run examples:run` runs (RFC 0165). Every language has one example per call
+# type below; a language that cannot show one lists it under `skip` with the reason.
+# The runner (tools/run-examples.py) starts the conformance replay server, loads the
+# case of the same name from conformance/cases/examples, runs the example against it,
+# and checks the exit code and the server's verdict on the case.
+
+# The call types, in the order the README table shows them. `env` is added to the base
+# environment (INORBIT_BASE_URL and INORBIT_CONFIG_FILE=off are always set).
+[[call]]
+name = "unary-get"
+shows = "One unary call, GET /v1/me"
+env = "key"
+
+[[call]]
+name = "list-pagination"
+shows = "A paged list, every item then one page by hand"
+env = "key"
+extra = { INORBIT_ORG_ID = "org_1" }
+
+[[call]]
+name = "stream-sse"
+shows = "The account's events over server-sent events"
+env = "key"
+
+[[call]]
+name = "stream-socket"
+shows = "The same events over the /v1/ws socket"
+env = "key"
+extra = { INORBIT_STREAMS = "socket" }
+
+[[call]]
+name = "typed-error"
+shows = "A refused call as a typed error with a code"
+env = "key"
+
+[[call]]
+name = "auth-token"
+shows = "A fixed API token from the environment"
+env = "token"
+
+[[call]]
+name = "auth-custom-token"
+shows = "A token provider of your own"
+env = "none"
+
+[[call]]
+name = "retries"
+shows = "A 429 with Retry-After, retried"
+env = "key"
+
+[[call]]
+name = "concurrent-calls"
+shows = "Several calls at once on one client"
+env = "key"
+
+[[call]]
+name = "config-load"
+shows = "A client from load, with where each setting came from"
+env = "key"
+
+# How to run one example of a language. {name} is the call name (unary-get), {snake} is
+# unary_get and {pascal} is UnaryGet. `prepare` runs once, in `dir`, before the examples.
+[language.go]
+dir = "examples/go"
+run = "go run ./{name}"
+
+[language.rust]
+dir = "examples/rust"
+prepare = "cargo build --bins"
+run = "target/debug/{name}"
+
+[language.typescript]
+dir = "examples/typescript"
+prepare = "(cd ../../typescript && pnpm install --frozen-lockfile && pnpm run build) && pnpm install --frozen-lockfile"
+run = "node src/{name}.ts"
+
+[language.python]
+dir = "examples/python"
+run = "uv run --frozen python {snake}.py"
+
+[language.java]
+dir = "java"
+prepare = "mvn -B -q -DskipTests -Dspotless.check.skip=true package dependency:build-classpath -Dmdep.includeScope=compile -Dmdep.outputFile=target/classpath.txt && javac --release 17 -Xlint:all -Werror -d target/examples -cp target/classes:$(cat target/classpath.txt) $(find ../examples/java -name '*.java')"
+run = "java -cp target/examples:target/classes:$(cat target/classpath.txt) example.{pascal}"
+
+[language.csharp]
+dir = "examples/csharp/Calls"
+prepare = "dotnet build -nologo -v q"
+run = "dotnet run --no-build -- {name}"
+
+[language.swift]
+dir = "examples/swift"
+prepare = "swift build"
+run = ".build/debug/Calls {name}"
+
+[language.swift.skip]
+stream-socket = "the Swift SDK has no WebSocket stream transport yet"

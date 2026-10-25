@@ -75,7 +75,9 @@ async fn with_token(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
 async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
     let (name, storage) = target(&ctx, g, args)?;
-    let provider = Provider::discover(g.issuer(), &g.client_id).await?;
+    let provider = Provider::discover(g.issuer(), &g.client_id)
+        .await?
+        .with_scopes(&args.scopes);
     let use_device = args.how.device || (!args.how.web && !browser::available());
     let granted = if use_device {
         let auth = Authorization::<Device>::start(provider).await?;

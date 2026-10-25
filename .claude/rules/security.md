@@ -4,6 +4,7 @@ paths:
   - "rust/**"
   - "typescript/**"
   - "python/**"
+  - "swift/**"
   - "examples/**"
   - "docs/security/**"
 ---

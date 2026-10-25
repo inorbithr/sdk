@@ -124,10 +124,103 @@ pub(crate) fn is_clean(env: &[(OsString, OsString)]) -> bool {
         .all(|(k, _)| k.to_str().is_some_and(|n| !is_denied(n)))
 }
 
+/// Where the model's and a check's `gh` looks for a sign-in: a directory that does not
+/// exist and only an administrator could make, so `gh` there is signed out.
+pub(crate) const NO_GH_CONFIG: &str = "/nonexistent/iohr-gh";
+
+/// Set on top of the scrubbed environment for the provider child and a check (the
+/// RFC 0147 containment ask): neither inherits the host's GitHub sign-in. `gh` gets a
+/// configuration directory that does not exist (an empty `GH_CONFIG_DIR` would mean the
+/// default one, the host's login), git drops every credential helper of every
+/// configuration file (`credential.helper` set to empty, the last and so the winning
+/// entry) and never prompts. `GH_TOKEN` and `GITHUB_TOKEN` are already gone: the
+/// allowlist drops them. This is containment, not a sandbox: a process that can run any
+/// program as this user can still reach what this user can.
+pub(crate) fn contained() -> [(&'static str, &'static str); 7] {
+    [
+        ("GH_CONFIG_DIR", NO_GH_CONFIG),
+        ("GH_PROMPT_DISABLED", "1"),
+        ("GH_NO_UPDATE_NOTIFIER", "1"),
+        ("GIT_TERMINAL_PROMPT", "0"),
+        ("GIT_CONFIG_COUNT", "1"),
+        ("GIT_CONFIG_KEY_0", "credential.helper"),
+        ("GIT_CONFIG_VALUE_0", ""),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
+
+    #[test]
+    fn the_containment_signs_gh_and_git_out_and_carries_no_credential() {
+        let c = contained();
+        let get = |k: &str| c.iter().find(|(n, _)| *n == k).map(|(_, v)| *v);
+        assert_eq!(get("GH_CONFIG_DIR"), Some(NO_GH_CONFIG));
+        assert_ne!(NO_GH_CONFIG, "");
+        assert!(!std::path::Path::new(NO_GH_CONFIG).exists());
+        assert_eq!(get("GIT_CONFIG_KEY_0"), Some("credential.helper"));
+        assert_eq!(get("GIT_CONFIG_VALUE_0"), Some(""));
+        assert_eq!(get("GH_TOKEN"), None);
+        assert_eq!(get("GITHUB_TOKEN"), None);
+    }
+
+    /// With the containment, git asks no helper for GitHub, even when the host's own
+    /// configuration names one.
+    #[test]
+    fn git_under_the_containment_asks_no_credential_helper() {
+        let d = tempfile::tempdir().unwrap();
+        let global = d.path().join("gitconfig");
+        std::fs::write(
+            &global,
+            "[credential]\n\thelper = \"!f() { echo password=host-secret; }; f\"\n\
+             [credential \"https://github.com\"]\n\thelper = \"!f() { echo password=host-secret; }; f\"\n",
+        )
+        .unwrap();
+        let mut c = std::process::Command::new("git");
+        c.args(["credential", "fill"])
+            .env_clear()
+            .envs(scrub(std::env::vars_os()))
+            .env("GIT_CONFIG_GLOBAL", &global)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .envs(contained())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        let mut child = c.spawn().unwrap();
+        {
+            use std::io::Write as _;
+            let mut i = child.stdin.take().unwrap();
+            i.write_all(b"protocol=https\nhost=github.com\nusername=x\n\n")
+                .unwrap();
+        }
+        let out = child.wait_with_output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(!text.contains("host-secret"), "{text}");
+        assert!(!out.status.success(), "{text}");
+    }
+
+    /// With the containment, `gh` is signed out (skipped where `gh` is not installed).
+    #[test]
+    fn gh_under_the_containment_is_signed_out() {
+        let Ok(out) = std::process::Command::new("gh")
+            .args(["auth", "status"])
+            .env_clear()
+            .envs(scrub(std::env::vars_os()))
+            .envs(contained())
+            .output()
+        else {
+            return;
+        };
+        assert!(!out.status.success());
+        let both = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!both.contains("Logged in"), "{both}");
+    }
 
     fn pairs(names: &[&str]) -> Vec<(OsString, OsString)> {
         names.iter().map(|n| ((*n).into(), "x".into())).collect()

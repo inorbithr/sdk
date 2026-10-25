@@ -42,6 +42,7 @@ The workflows (`release`, `cli-build`, `ci`, `fuzz`, `pr-title`) stay enabled on
 | Python | `python/vX.Y.Z` | `uv build`, `pypa/gh-action-pypi-publish` | `release-pypi` |
 | C# | `csharp/vX.Y.Z` | none yet (M4b): release-please only versions it, the `.csproj` `Version` | none |
 | Java | `java/vX.Y.Z` | none yet (M4b): release-please only versions it, `pom.xml` and `Client.SDK_VERSION` | none |
+| Swift | `vX.Y.Z` (no component: SwiftPM reads bare semantic-version tags at the repository root, ADR 0016) | none: SwiftPM fetches the tag. release-please versions `Sources/InOrbit/Version.swift`; the first release PR proposes the first version from `0.0.0` | none |
 | Command line | `iohr/vX.Y.Z` | builds six targets (`cli-build.yml`), attests every file, attaches archives, `.deb`, `.msi`, SBOMs and `SHA256SUMS` to the release; then runs the installers against it and opens the formula PR on `inorbithr/homebrew-tap` (release App token limited to the tap) ([ADR 0010](adr/0010-releasing-the-command-line.md)) | `release-cli` |
 
 C# and Java follow every change and carry the same version as the other four, so their
@@ -205,3 +206,15 @@ with 2FA. release-please does not run on a manual run, so nothing new is tagged.
 When the version is already staged on npm and a later step failed (the SBOM, the
 attestation, the release files or JSR), add `typescript_npm_staged`: the run builds and
 packs the same tag again but does not stage it a second time.
+
+## Examples gate (RFC 0165)
+
+A release needs the examples to have run green against the live API on its exact commit.
+`mise run examples:run` writes `examples-results.json`; `mise run examples:attest` posts
+the commit status `examples-run` on HEAD, and only when the file is for HEAD, the tree was
+clean, nothing failed and every language under `examples/` has a passing example.
+The `examples-gate` job in `release.yml` runs before every publish job and fails unless
+that status is `success` on the released commit (for a manual run, on the tag's commit).
+The release PR's merge commit is new, so run and attest on it, then re-run the failed
+jobs. `mise run examples:gate -- <ref>` checks the same thing by hand. The release-train
+agent refuses a roll of the SDK without it.

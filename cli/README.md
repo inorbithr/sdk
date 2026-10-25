@@ -75,7 +75,7 @@ iohr api GET /v1/webhooks/endpoints --all
 
 | Command | What it does |
 |---|---|
-| `iohr login [--web \| --device] [--insecure-storage]` | Sign in and add a profile; `--insecure-storage` keeps the token in a 0600 file on a machine without a credential store |
+| `iohr login [--web \| --device] [--insecure-storage] [--scope S,...]` | Sign in and add a profile; `--insecure-storage` keeps the token in a 0600 file on a machine without a credential store; `--scope` asks for scopes besides the defaults, such as `coordinator:runner,coordinator:read` for `iohr runner` (the sign-in service refuses a scope the client may not ask for) |
 | `iohr login --with-token` | Read an API token from stdin and add a profile |
 | `iohr logout` | Forget the profile and its credential on this machine |
 | `iohr profile list \| use \| show` | The profiles here; the default one |
@@ -85,7 +85,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr token create --name N --scope S,... [--days 30] \| list [--status S] [--query Q] \| revoke ID` | API tokens for an account (a signed-in person only) |
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`, `-i` the status and request id before the body; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
-| `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline, `--package` names the surface's package or namespace (Go, Java, C#), `--runtime` the runtime's name in your project, `--force` replaces a non-empty directory |
+| `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp\|swift --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline, `--package` names the surface's package or namespace (Go, Java, C#), `--runtime` the runtime's name in your project, `--force` replaces a non-empty directory |
 | `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
 | `iohr sdk check [--lock FILE] [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
 | `iohr sdk add [rust\|typescript\|python\|go] [--version V] [--dry-run]` | Add the published SDK to the project here with the package manager it already uses; the language comes from the project's files when left out (below) |
@@ -102,7 +102,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
-| `iohr runner register [--name N] [--capacity 1] [--always-on] \| run [--name N \| --runner ID] [--interval 20] \| status` | This machine as a coordinator runner (platform RFC 0120): `register` records its name, system and the one `claude` on your PATH; `run` heartbeats, accepts a turn the coordinator offers and runs it on your installed, unmodified `claude -p`, on your subscription only (below); `status` lists your runners and what this machine can run |
+| `iohr runner register [--name N] [--capacity N] [--always-on] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--account A] \| config show [--capacity N] [--kinds K,...] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below) |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
@@ -363,11 +363,20 @@ keys are refused. `iohr ext lint` exits 1 on an unknown key, a value that looks 
 secret, a `permissions.data.leaves` kind outside ADR 0063's non-sensitive list, a
 `targets.kinds` the kind cannot be installed on, or a name holding `tbd`; `--preview`
 prints what it may do as an installer will show it, `--json` the same structured, with
-the artifact's `config`.
+the artifact's `config`. A program may name `cluster` in `targets.kinds` (it needs
+`delivery = "program"` and a `linux/...` platform), serve a panel (`[panel]`: `title`,
+`entry`) and read `$REPOS`, the repository folders the user adds in its host (RFC 0143).
+
+`iohr ext verify` checks what is installed; `iohr ext verify ARTIFACT|sha256:DIGEST --bundle
+FILE --publisher-key PEM` checks one artifact that is not, with the install's trust check,
+offline and without a sign-in: it prints the signer and exits 1 when it is not trusted
+(`--json`: `ok`, `digest`, `signer`, `provenance`, `error`).
 
 `iohr ext dev` lints first, then runs the program with the token channel for exactly
 the manifest's scopes: every request is logged, a refused one in red. `STATE` and
-`CACHE` are `~/.inorbit/ext-dev/NAME/state` and `cache`; heartbeats are marked
+`CACHE` are `~/.inorbit/ext-dev/NAME/state` and `cache`, and `REPOS` the roots in
+`~/.inorbit/ext-dev/NAME/config.json` (`{"repos": ["/abs/path"]}`) joined with `:`, empty
+without one; heartbeats are marked
 `"dev": true`; installed extensions and their lock are never read or written. The child
 gets no `IOHR_TOKEN*`, `INORBIT_TOKEN*` or `INORBIT_KEY_*`, and no folder holding an
 `iohr` stays on its `PATH`, so the channel is its only credential. A secret
@@ -427,7 +436,10 @@ first. A turn is one
 `--output-format json`, the turn's `--model` and `--max-turns`, its `--allowedTools`, the
 pack as the system prompt, and `--resume <session>` only when this runner ran the
 previous turn of the thread and the session is on its disk (otherwise
-`--session-id <new>`). The prompt goes in on stdin.
+`--session-id <new>`). The prompt goes in on stdin. To keep the turn's context small it
+also passes `--setting-sources project,local` and `--strict-mcp-config`, so your own
+user-level hooks, plugins, skills and MCP servers are not loaded into a turn (your
+sign-in is). On `claude` 2.1.307 one short turn went from 33,220 to 15,054 context tokens.
 
 It runs on your subscription and nothing else:
 
@@ -446,6 +458,65 @@ It runs on your subscription and nothing else:
   its requests. Both the arguments and the environment are table-tested, and a `--bare`
   or an `ANTHROPIC_BASE_URL` in their output fails the build.
 - A turn is refused when its user is not the person the runner is registered to.
+- `gh` and git are signed out in the child: `GH_CONFIG_DIR` points at a directory that
+  does not exist, git's credential helpers are cleared (`GIT_CONFIG_COUNT`) and its
+  prompts are off (`GIT_TERMINAL_PROMPT=0`). The check a job runs gets the same.
+
+### GitHub access
+
+A job whose repository is on GitHub is checked out, pushed to `job/<job_id>` and opened
+as a pull request by the runner itself, never by `claude`. For each lease it asks the
+platform for a GitHub App installation token (platform RFC 0120): that one repository,
+`contents` and `pull_requests` write, about an hour; it asks again when fewer than
+10 minutes are left before a push. The token is kept in memory only. git gets it per
+command through a credential helper given with `-c` (every helper from your own git
+configuration is dropped for that command, and hooks are off), only in the runner's own
+mirror under its working directory after the mirror's configuration is checked; `gh`
+gets it as `GH_TOKEN` for that one call. It is never written to a file or a git
+configuration and never logged.
+
+Your own `gh` sign-in is used instead only when the platform says its App is not
+installed for the account, or the platform is older than the call; the log says which.
+Any other refusal (the App lacks a permission, the lease was not confirmed) leaves the
+lease unaccepted, so another runner can take it.
+
+### Capacity
+
+How many turns the runner takes at once, and which classes, come from the `[runner]`
+table of `config.toml` (or `[profiles.<name>.runner]`), and `--capacity` and `--kinds`
+override it:
+
+```toml
+[runner]
+capacity = 4                      # 1 to 32
+kinds = ["coordinate", "build"]
+```
+
+`run` sends them on every heartbeat, so a change reaches the coordinator within one beat;
+`kill -HUP <pid>` makes a running `run` read the file again. Lowering the capacity never
+stops a running turn. Below 100 GB free on `/mnt/build` the runner takes no new build
+turn until there is room. `iohr runner config show` prints what is in effect and where
+each value came from (`docs/config.md`, section 4.3).
+
+### Gate report
+
+`iohr runner gate-report --job J --lease L --token N` is the runner's half of the Checked
+gate (platform RFC 0120). In the job's checkout (`--repo`, default the current directory)
+it fetches `origin/main`, refuses a checkout with uncommitted changes or one that does not
+contain `origin/main`, runs `--command` (default `mise run ci:changed`) through the shell
+with the scrubbed environment above and a `--timeout` (default 1800 s, at most 21600 s), and
+sends the coordinator the command, its exit code, the head, main's commit and the SHA-256
+of the output, signed with the key this runner registered. The output itself stays on this
+machine. A non-zero exit is sent as it is: the job holds at Checked, which is the honest
+answer. A coordinator that does not have the call yet (an older release) is reported as
+such and is not an error. `iohr runner run` does the same by itself: when a job turn ends
+with a reply, it runs this check (the same command, timeout and report) in the checkout the
+turn's pack names (`checkout_path`, `checkouts/<job_id>`, relative to the runner's working
+directory for turns; a path that is absolute or climbs out of it is refused), keeps the lease beating while it runs, and sends the
+report before the turn's own report. It sends nothing, and logs why, when the turn did not
+reply, the pack names no checkout (a job with no repository, or an older coordinator), the
+check cannot run (dirty or unmerged checkout, time cap) or the lease is gone. Call the
+command yourself only for a job the loop did not check.
 
 What the sign-in service sees of the provider is the SHA-256 of the account's salt, a
 newline and the line `claude auth status` prints, and the method's name.
@@ -499,7 +570,7 @@ Each runtime dependency, and why (SR-20):
 | etcetera | The platform's config directory |
 | base64, sha2 | Reading a token's claims to name its account; the PKCE S256 challenge |
 | getrandom | Request ids and retry jitter |
-| typify, schemars, syn, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and prettyplease print them) |
+| typify, schemars, syn, quote, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and quote add each model's constructor and setters, prettyplease prints them) |
 | minijinja | The templates the generated surface's operations, profiles and markers are rendered from, embedded in the binary |
 | heck | Case changes for generated names (`AcmeCi`, `get_me`) |
 | sigstore-verify | Extensions: verifies Sigstore bundles (Fulcio chain, SCT, Rekor inclusion, DSSE) offline against the trusted root it embeds; from the sigstore project |

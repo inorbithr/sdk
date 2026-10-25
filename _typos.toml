@@ -9,4 +9,4 @@ hr = "hr"
 flate = "flate"
 
 [files]
-extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**"]
+extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**", "**/CHANGELOG.md"]

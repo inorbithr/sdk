@@ -70,6 +70,15 @@ pub const CSHARP: Construction = Construction {
     ],
 };
 
+/// Swift, on the `InOrbit` package: inside an `async throws` context, so the error throws.
+pub const SWIFT: Construction = Construction {
+    imports: &["InOrbit"],
+    lines: &[
+        "// Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
+        "let api = try Client<Public>.fromEnv()",
+    ],
+};
+
 /// Rust, on `inorbithr`: inside `async fn run() -> Result<(), Error>`.
 pub const RUST: Construction = Construction {
     imports: &["inorbithr::Client"],
@@ -89,6 +98,7 @@ mod tests {
             super::GO,
             super::JAVA,
             super::CSHARP,
+            super::SWIFT,
             super::RUST,
         ] {
             assert!(c.lines[0].contains(super::FROM_ENV));

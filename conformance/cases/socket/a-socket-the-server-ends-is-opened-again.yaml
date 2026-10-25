@@ -1,6 +1,8 @@
 name: a-socket-the-server-ends-is-opened-again
 area: socket
 summary: When the server ends the socket with an id-less unavailable error frame (its longest life), the client opens a new socket and issues the stream's call again; the caller sees one stream.
+pending: [swift]
+notes: Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 action: { op: events.stream_events, args: { types: key.created } }
 client: { scopes: [events:read], streams: socket }
 exchanges:

@@ -2,6 +2,7 @@
 
 ///`iohr.events.v1.CreateEndpointRequest`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct CreateEndpointRequest {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub account_id: ::std::option::Option<::std::string::String>,
@@ -14,6 +15,8 @@ pub struct CreateEndpointRequest {
 }
 ///`iohr.events.v1.CreateEndpointResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(Default)]
 pub struct CreateEndpointResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub endpoint: ::std::option::Option<Endpoint>,
@@ -21,12 +24,14 @@ pub struct CreateEndpointResponse {
 }
 ///`iohr.events.v1.CreateInboxRequest`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct CreateInboxRequest {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub account_id: ::std::option::Option<::std::string::String>,
 }
 ///`iohr.events.v1.CreateInboxResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct CreateInboxResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub inbox: ::std::option::Option<Inbox>,
@@ -85,6 +90,8 @@ for DeleteInboxResponse {
 }
 ///`iohr.events.v1.Delivery`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(Default)]
 pub struct Delivery {
     pub attempts: i32,
     pub created_at: ::std::string::String,
@@ -101,6 +108,8 @@ pub struct Delivery {
 }
 ///`iohr.events.v1.Endpoint`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(Default)]
 pub struct Endpoint {
     pub created_at: ::std::string::String,
     pub description: ::std::string::String,
@@ -117,6 +126,8 @@ pub struct Endpoint {
 }
 ///`iohr.events.v1.Inbox`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(Default)]
 pub struct Inbox {
     pub created_at: ::std::string::String,
     pub expires_at: ::std::string::String,
@@ -125,6 +136,7 @@ pub struct Inbox {
 }
 ///`{"code","error","details","request_id"}`: the REST body and the SSE `error` payload.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Problem {
     ///The slug.
     pub code: inorbithr::Code,
@@ -139,24 +151,29 @@ names the call.*/
 }
 ///`iohr.events.v1.RetryDeliveryResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct RetryDeliveryResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub delivery: ::std::option::Option<Delivery>,
 }
 ///`iohr.events.v1.RotateSecretResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(Default)]
 pub struct RotateSecretResponse {
     pub previous_expires_at: ::std::string::String,
     pub secret: ::std::string::String,
 }
 ///`iohr.events.v1.SendTestResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct SendTestResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub delivery: ::std::option::Option<Delivery>,
 }
 ///`iohr.events.v1.UpdateEndpointRequest`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct UpdateEndpointRequest {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub description: ::std::option::Option<::std::string::String>,
@@ -199,5 +216,453 @@ pub mod error {
         fn from(value: String) -> Self {
             Self(value.into())
         }
+    }
+}
+impl CreateEndpointRequest {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `description`.
+    #[must_use]
+    pub fn with_description(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.description = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `event_types`.
+    #[must_use]
+    pub fn with_event_types(
+        mut self,
+        value: impl ::std::convert::Into<::std::vec::Vec<::std::string::String>>,
+    ) -> Self {
+        self.event_types = value.into();
+        self
+    }
+    /// Sets `url`.
+    #[must_use]
+    pub fn with_url(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.url = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+impl CreateEndpointResponse {
+    /// Sets `endpoint`.
+    #[must_use]
+    pub fn with_endpoint(mut self, value: impl ::std::convert::Into<Endpoint>) -> Self {
+        self.endpoint = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `secret`.
+    #[must_use]
+    pub fn with_secret(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.secret = value.into();
+        self
+    }
+}
+impl CreateInboxRequest {
+    /// Sets `account_id`.
+    #[must_use]
+    pub fn with_account_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.account_id = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+impl CreateInboxResponse {
+    /// Sets `inbox`.
+    #[must_use]
+    pub fn with_inbox(mut self, value: impl ::std::convert::Into<Inbox>) -> Self {
+        self.inbox = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+impl Delivery {
+    /// Sets `attempts`.
+    #[must_use]
+    pub fn with_attempts(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.attempts = value.into();
+        self
+    }
+    /// Sets `created_at`.
+    #[must_use]
+    pub fn with_created_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.created_at = value.into();
+        self
+    }
+    /// Sets `endpoint_id`.
+    #[must_use]
+    pub fn with_endpoint_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.endpoint_id = value.into();
+        self
+    }
+    /// Sets `event_id`.
+    #[must_use]
+    pub fn with_event_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.event_id = value.into();
+        self
+    }
+    /// Sets `event_type`.
+    #[must_use]
+    pub fn with_event_type(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.event_type = value.into();
+        self
+    }
+    /// Sets `id`.
+    #[must_use]
+    pub fn with_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.id = value.into();
+        self
+    }
+    /// Sets `last_error`.
+    #[must_use]
+    pub fn with_last_error(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.last_error = value.into();
+        self
+    }
+    /// Sets `last_latency_ms`.
+    #[must_use]
+    pub fn with_last_latency_ms(
+        mut self,
+        value: impl ::std::convert::Into<i32>,
+    ) -> Self {
+        self.last_latency_ms = value.into();
+        self
+    }
+    /// Sets `last_status_code`.
+    #[must_use]
+    pub fn with_last_status_code(
+        mut self,
+        value: impl ::std::convert::Into<i32>,
+    ) -> Self {
+        self.last_status_code = value.into();
+        self
+    }
+    /// Sets `next_attempt_at`.
+    #[must_use]
+    pub fn with_next_attempt_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.next_attempt_at = value.into();
+        self
+    }
+    /// Sets `status`.
+    #[must_use]
+    pub fn with_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.status = value.into();
+        self
+    }
+    /// Sets `updated_at`.
+    #[must_use]
+    pub fn with_updated_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.updated_at = value.into();
+        self
+    }
+}
+impl Endpoint {
+    /// Sets `created_at`.
+    #[must_use]
+    pub fn with_created_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.created_at = value.into();
+        self
+    }
+    /// Sets `description`.
+    #[must_use]
+    pub fn with_description(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.description = value.into();
+        self
+    }
+    /// Sets `disabled_reason`.
+    #[must_use]
+    pub fn with_disabled_reason(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.disabled_reason = value.into();
+        self
+    }
+    /// Sets `enabled`.
+    #[must_use]
+    pub fn with_enabled(mut self, value: impl ::std::convert::Into<bool>) -> Self {
+        self.enabled = value.into();
+        self
+    }
+    /// Sets `event_types`.
+    #[must_use]
+    pub fn with_event_types(
+        mut self,
+        value: impl ::std::convert::Into<::std::vec::Vec<::std::string::String>>,
+    ) -> Self {
+        self.event_types = value.into();
+        self
+    }
+    /// Sets `failed_24h`.
+    #[must_use]
+    pub fn with_failed_24h(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.failed_24h = value.into();
+        self
+    }
+    /// Sets `id`.
+    #[must_use]
+    pub fn with_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.id = value.into();
+        self
+    }
+    /// Sets `last_delivery_at`.
+    #[must_use]
+    pub fn with_last_delivery_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.last_delivery_at = value.into();
+        self
+    }
+    /// Sets `last_delivery_status`.
+    #[must_use]
+    pub fn with_last_delivery_status(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.last_delivery_status = value.into();
+        self
+    }
+    /// Sets `secret_rotated_at`.
+    #[must_use]
+    pub fn with_secret_rotated_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.secret_rotated_at = value.into();
+        self
+    }
+    /// Sets `succeeded_24h`.
+    #[must_use]
+    pub fn with_succeeded_24h(mut self, value: impl ::std::convert::Into<i32>) -> Self {
+        self.succeeded_24h = value.into();
+        self
+    }
+    /// Sets `url`.
+    #[must_use]
+    pub fn with_url(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.url = value.into();
+        self
+    }
+}
+impl Inbox {
+    /// Sets `created_at`.
+    #[must_use]
+    pub fn with_created_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.created_at = value.into();
+        self
+    }
+    /// Sets `expires_at`.
+    #[must_use]
+    pub fn with_expires_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.expires_at = value.into();
+        self
+    }
+    /// Sets `id`.
+    #[must_use]
+    pub fn with_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.id = value.into();
+        self
+    }
+    /// Sets `url`.
+    #[must_use]
+    pub fn with_url(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.url = value.into();
+        self
+    }
+}
+impl Problem {
+    /// A `Problem` with the fields that have no default; set the others with the `with_` methods.
+    #[must_use]
+    pub fn new(code: impl ::std::convert::Into<inorbithr::Code>) -> Self {
+        Self {
+            code: code.into(),
+            details: ::std::default::Default::default(),
+            error: ::std::default::Default::default(),
+            request_id: ::std::default::Default::default(),
+        }
+    }
+    /// Sets `code`.
+    #[must_use]
+    pub fn with_code(
+        mut self,
+        value: impl ::std::convert::Into<inorbithr::Code>,
+    ) -> Self {
+        self.code = value.into();
+        self
+    }
+    /// Sets `details`.
+    #[must_use]
+    pub fn with_details(
+        mut self,
+        value: impl ::std::convert::Into<::std::vec::Vec<inorbithr::Detail>>,
+    ) -> Self {
+        self.details = value.into();
+        self
+    }
+    /// Sets `error`.
+    #[must_use]
+    pub fn with_error(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.error = value.into();
+        self
+    }
+    /// Sets `request_id`.
+    #[must_use]
+    pub fn with_request_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.request_id = value.into();
+        self
+    }
+}
+impl RetryDeliveryResponse {
+    /// Sets `delivery`.
+    #[must_use]
+    pub fn with_delivery(mut self, value: impl ::std::convert::Into<Delivery>) -> Self {
+        self.delivery = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+impl RotateSecretResponse {
+    /// Sets `previous_expires_at`.
+    #[must_use]
+    pub fn with_previous_expires_at(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.previous_expires_at = value.into();
+        self
+    }
+    /// Sets `secret`.
+    #[must_use]
+    pub fn with_secret(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.secret = value.into();
+        self
+    }
+}
+impl SendTestResponse {
+    /// Sets `delivery`.
+    #[must_use]
+    pub fn with_delivery(mut self, value: impl ::std::convert::Into<Delivery>) -> Self {
+        self.delivery = ::std::option::Option::Some(value.into());
+        self
+    }
+}
+impl UpdateEndpointRequest {
+    /// Sets `description`.
+    #[must_use]
+    pub fn with_description(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.description = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `enabled`.
+    #[must_use]
+    pub fn with_enabled(mut self, value: impl ::std::convert::Into<bool>) -> Self {
+        self.enabled = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `endpoint_id`.
+    #[must_use]
+    pub fn with_endpoint_id(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.endpoint_id = ::std::option::Option::Some(value.into());
+        self
+    }
+    /// Sets `event_types`.
+    #[must_use]
+    pub fn with_event_types(
+        mut self,
+        value: impl ::std::convert::Into<::std::vec::Vec<::std::string::String>>,
+    ) -> Self {
+        self.event_types = value.into();
+        self
+    }
+    /// Sets `url`.
+    #[must_use]
+    pub fn with_url(
+        mut self,
+        value: impl ::std::convert::Into<::std::string::String>,
+    ) -> Self {
+        self.url = ::std::option::Option::Some(value.into());
+        self
     }
 }

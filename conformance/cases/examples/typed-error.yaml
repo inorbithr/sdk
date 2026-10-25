@@ -1,0 +1,12 @@
+name: typed-error
+area: examples
+summary: "A call the API refuses with 403 forbidden comes back as a typed API error carrying the code, the status and the request id, never as a bare string."
+action: { op: example }
+exchanges:
+  - request: { method: POST, path: /oauth2/token }
+    response: { status: 200, json: { access_token: t1, token_type: bearer, expires_in: 899 } }
+  - request: { method: GET, path: /v1/me, headers: { authorization: Bearer t1 } }
+    response: { status: 403, json: { code: forbidden, error: The key holds no identity:read scope., details: [] } }
+expect:
+  error: { kind: api, code: forbidden, status: 403 }
+  attempts: 1

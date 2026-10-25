@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.4.0](https://github.com/inorbithr/sdk/compare/rust/v0.3.0...rust/v0.4.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rust:** a model or query-parameter struct can no longer be built with a struct literal or `..Default::default()` outside the crate; use `Model::default().with_field(value)` (or `Model::new(..)`). A match on a generated enum needs a `_` arm. Surface cannot be implemented outside the generated surface.
+
+### Features
+
+* **rust:** models and query parameters are non_exhaustive, built with setters; Surface is sealed ([#180](https://github.com/inorbithr/sdk/issues/180)) ([918625a](https://github.com/inorbithr/sdk/commit/918625a9b2a4e02f2f58499cc5546cd7c759e9b0))
+
+## [0.3.0](https://github.com/inorbithr/sdk/compare/rust/v0.2.2...rust/v0.3.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* the RFCs API is the Decisions API. `iohr rfc` is removed with no alias: use `iohr decisions`. The review default reads IOHR_DECISIONS_REVIEWER instead of IOHR_RFC_REVIEWER, and tokens need decisions:read / decisions:write instead of rfc:read / rfc:write.
+* **rust:** with the `otel` feature, `ClientBuilder::tracer_provider` and `meter_provider` take opentelemetry 0.33 types; an application on opentelemetry 0.32 upgrades it to 0.33 too.
+* **spec:** sync the public contract, 111 operations (2026-10-07) ([#166](https://github.com/inorbithr/sdk/issues/166))
+* **spec:** in Rust, the generated answer structs gain fields (Account.probe, Agent.capabilities, Use.connection_id and more) and the Surface trait gains rfcs() and trails(); code that builds those structs with a struct literal, or implements Surface itself, must add the new fields or methods. In Go, CheckDetail is no longer comparable with == (it gained the Invariants slice). Calls, names and wire shapes are unchanged in every language.
+
+### Features
+
+* **cli:** --env and IOHR_ENV target production or local ([#208](https://github.com/inorbithr/sdk/issues/208)) ([3d44e90](https://github.com/inorbithr/sdk/commit/3d44e90345c0dba35d187a33f82ef685a85bce96))
+* **cli:** iohr ext init, dev and lint, the local extension loop (PRD 0084 slice 1) ([#191](https://github.com/inorbithr/sdk/issues/191)) ([9083c23](https://github.com/inorbithr/sdk/commit/9083c23036e34e9bdc897b8839f331246366998a))
+* **cli:** runner capacity and kinds from config.toml, declared on every heartbeat ([#244](https://github.com/inorbithr/sdk/issues/244)) ([2a01d11](https://github.com/inorbithr/sdk/commit/2a01d113e1be2a0d84cf5388fd7606578d86002d))
+* Decisions API, the contract synced to 136 operations, upgrade_required ([#189](https://github.com/inorbithr/sdk/issues/189)) ([91f998c](https://github.com/inorbithr/sdk/commit/91f998c9b53bb25587469e32155e893bcefe765c))
+* **spec:** sync the public contract, 107 operations (2026-10-06) ([#159](https://github.com/inorbithr/sdk/issues/159)) ([1b4ebf3](https://github.com/inorbithr/sdk/commit/1b4ebf3b5b9ddfef077f4437eed16f1489f60797))
+* **spec:** sync the public contract, 111 operations (2026-10-07) ([#166](https://github.com/inorbithr/sdk/issues/166)) ([f3ce0cd](https://github.com/inorbithr/sdk/commit/f3ce0cd164154ed13f96303d453765ed45c6ce90))
+
+
+### Bug fixes
+
+* **cli:** the runner's run loop sends the gate report for a finished job turn ([#254](https://github.com/inorbithr/sdk/issues/254)) ([3346863](https://github.com/inorbithr/sdk/commit/3346863b9de6f6393f9cf00ea057a87f09c0ea08))
+* **deps:** ctutils 0.4.5 in every Cargo lock and opentelemetry-api 1.45.1 in the Python lock so the advisory audits pass again ([#256](https://github.com/inorbithr/sdk/issues/256)) ([91446a5](https://github.com/inorbithr/sdk/commit/91446a5fea6fd4769d6d7fe4bd2c55de6b7b5316))
+* extension tokens for a person, and a wait that outlasts the channel ([#205](https://github.com/inorbithr/sdk/issues/205)) ([b57dbef](https://github.com/inorbithr/sdk/commit/b57dbef00126617a197ccdbd378b2170696cac2d))
+
+
+### Dependencies
+
+* **rust:** bump the rust group across 4 directories with 14 updates ([#238](https://github.com/inorbithr/sdk/issues/238)) ([d2c7787](https://github.com/inorbithr/sdk/commit/d2c778777c522e32641c7afb4f7b6ee1c7465b51))
+* **rust:** opentelemetry 0.33, schemars held at 0.8 for typify ([#170](https://github.com/inorbithr/sdk/issues/170)) ([dd98b90](https://github.com/inorbithr/sdk/commit/dd98b9036907ab0647a20554fb65f6f4926c1605))
+
 ## [0.2.2](https://github.com/inorbithr/sdk/compare/rust/v0.2.1...rust/v0.2.2) (2026-10-05)
 
 

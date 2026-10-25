@@ -14,10 +14,12 @@ touched() { printf '%s\n' "${files[@]}" | grep -Eq "$1"; }
 
 # A change here regenerates or re-checks every language (ADR 0011).
 shared='^(spec/|conformance/|mise\.toml$|\.github/workflows/ci\.yml$|cli/crates/iohr-(openapi|codegen)/)'
-declare -A dir=([go]=go [rust]=rust [ts]=typescript [py]=python [java]=java [csharp]=csharp [dart]=dart)
+declare -A dir=([go]=go [rust]=rust [ts]=typescript [py]=python [java]=java [csharp]=csharp [swift]=swift [dart]=dart)
 langs=()
-for lang in go rust ts py java csharp dart; do
-  if touched "$shared" || touched "^(${dir[$lang]}|examples/${dir[$lang]})/"; then
+for lang in go rust ts py java csharp swift dart; do
+  extra=''
+  [ "$lang" = swift ] && extra='|^Package\.swift$'
+  if touched "$shared" || touched "^(${dir[$lang]}|examples/${dir[$lang]})/$extra"; then
     langs+=("$lang")
   fi
 done
@@ -34,7 +36,7 @@ for lang in "${langs[@]}"; do
   fi
 done
 touched '^(cli/|rust/|spec/|mise\.toml$|\.github/workflows/ci\.yml$)' && tasks+=(cli:check)
-touched '^examples/' && tasks+=(examples:check)
+touched '^(examples/|tools/run-examples\.py|conformance/cases/examples/|conformance/server/)' && tasks+=(examples:check examples:run)
 
 echo "ci:changed: ${#files[@]} changed file(s) since $(git rev-parse --short "$base")"
 echo "ci:changed: ${tasks[*]}"

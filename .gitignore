@@ -38,3 +38,9 @@ __pycache__/
 .DS_Store
 # SBOMs cargo-cyclonedx writes beside each manifest; released ones live in dist/.
 cli/**/*.cdx.json
+
+# Swift
+.build/
+.swiftpm/
+# Examples
+examples-results.json

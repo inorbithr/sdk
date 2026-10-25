@@ -1,7 +1,8 @@
 name: rate-limit-headers-are-read
 area: retries
 summary: The edge's X-RateLimit headers become the result's rate-limit snapshot.
-notes: M6, docs/config.md section 7.8. Envoy's draft-03 headers; Reset is seconds.
+pending: [swift]
+notes: M6, docs/config.md section 7.8. Envoy's draft-03 headers; Reset is seconds. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 action: { op: me }
 exchanges:
   - request: { method: POST, path: /oauth2/token }

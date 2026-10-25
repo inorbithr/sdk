@@ -417,3 +417,33 @@ async fn debug_output_of_a_session_holds_no_token() {
         "{shown}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extra_scopes_join_the_defaults_once_in_both_flows() {
+    let server = device_server(|issuer| {
+        vec![ResponseTemplate::new(200).set_body_json(tokens(issuer, 1, 900))]
+    })
+    .await;
+    let provider = Provider::discover(&server.uri(), CLIENT)
+        .await
+        .unwrap()
+        .with_scopes(["coordinator:runner", "iohr.api", "coordinator:read"]);
+    let scope_of = |q: &str| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .find(|(k, _)| k == "scope")
+            .map(|(_, v)| v.into_owned())
+            .unwrap()
+    };
+    let want = "openid offline_access iohr.api coordinator:runner coordinator:read";
+    let browser = Authorization::<Browser>::start(provider.clone())
+        .await
+        .unwrap();
+    assert_eq!(scope_of(browser.url().query().unwrap()), want);
+    let _ = Authorization::<Device>::start(provider).await.unwrap();
+    let sent = server.received_requests().await.unwrap();
+    let body = sent
+        .iter()
+        .find(|r| r.url.path() == "/oauth2/device/auth")
+        .unwrap();
+    assert_eq!(scope_of(&String::from_utf8_lossy(&body.body)), want);
+}

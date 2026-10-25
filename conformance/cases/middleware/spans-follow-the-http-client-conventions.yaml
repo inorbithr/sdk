@@ -1,7 +1,8 @@
 name: spans-follow-the-http-client-conventions
 area: middleware
 summary: A call that is retried once makes one internal span and two client spans, the second with resend_count 1, and each attempt carries its own traceparent.
-notes: M6, docs/config.md section 7.10; the driver installs an in-memory exporter. The token exchange is not traced as an API attempt.
+pending: [swift]
+notes: M6, docs/config.md section 7.10; the driver installs an in-memory exporter. The token exchange is not traced as an API attempt. Pending for swift until https://github.com/inorbithr/sdk/issues/172 lands.
 client: { tracing: true }
 action: { op: me }
 exchanges:

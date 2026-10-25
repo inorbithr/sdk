@@ -694,6 +694,28 @@ async fn verbose_output_never_shows_the_token() {
         "{args:?} leaked the token"
     );
     assert!(!all.contains("request id"), "{args:?} made a call");
+    // `ext verify ARTIFACT` (RFC 0143) is offline too: an artifact with a bundle that
+    // does not match fails (exit 1) and prints no token and no request line.
+    let artifact = dir.path().join("artifact.bin");
+    std::fs::write(&artifact, b"bytes").unwrap();
+    let bundle = dir.path().join("artifact.sigstore.json");
+    std::fs::write(&bundle, "{}").unwrap();
+    let args = [
+        "ext",
+        "verify",
+        artifact.to_str().unwrap(),
+        "--bundle",
+        bundle.to_str().unwrap(),
+        "--verbose",
+    ];
+    let o = r.with_token(&t, &args);
+    assert_eq!(code(&o), 1, "{args:?}: {}", text(&o));
+    let all = text(&o);
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER"),
+        "{args:?} leaked the token"
+    );
+    assert!(!all.contains("request id"), "{args:?} made a call");
     // The local extension loop: offline, and `ext dev` hands the extension a token over
     // the channel without ever printing it.
     let ext = dir.path().join("ext-verbose");

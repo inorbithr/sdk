@@ -20,7 +20,8 @@ const FILE: &str = "config.toml";
 /// table and their own keys in `[profiles.<name>]`, and a profile may hold SDK keys only
 /// (one written by hand, without `kind`). The command line owns `default`, the keys of
 /// [`Profile`] and the `[ext]` table; [`save`](Self::save) changes only those and keeps
-/// every other key, table and comment as it was read.
+/// every other key, table and comment as it was read. The `[runner]` table (and a
+/// profile's `[profiles.<name>.runner]`) is read, never written: a person edits it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Config {
@@ -34,6 +35,10 @@ pub struct Config {
     /// Where extensions come from and which extra keys may sign them.
     #[serde(default, skip_serializing_if = "ExtConfig::is_empty")]
     pub ext: ExtConfig,
+    /// `iohr runner` settings (`docs/config.md` section 4.4); a profile's own
+    /// `[profiles.<name>.runner]` overrides them key by key.
+    #[serde(default, skip_serializing_if = "RunnerConfig::is_empty")]
+    pub runner: RunnerConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -108,6 +113,38 @@ impl ExtConfig {
     }
 }
 
+/// The `[runner]` table: how `iohr runner` registers and runs on this machine. Read at
+/// start and again on SIGHUP by `iohr runner run`; command-line flags win over it. Every
+/// key is optional; an unset key falls back to the profile's table, then to the default.
+/// Values are checked where they are used, so a bad one never stops other commands.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct RunnerConfig {
+    /// Turns held at once, 1 to 32; sent on every heartbeat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<u32>,
+    /// The turn classes this runner takes: `coordinate`, `build`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kinds: Option<Vec<String>>,
+    /// Registered as always on (a server).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub always_on: Option<bool>,
+    /// The runner's name; default the host name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl RunnerConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.capacity.is_none()
+            && self.kinds.is_none()
+            && self.always_on.is_none()
+            && self.name.is_none()
+    }
+}
+
 /// One way of calling the API.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -125,6 +162,9 @@ pub struct Profile {
     /// For a person: the OAuth client the session belongs to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    /// This profile's `[profiles.<name>.runner]` table, over the file's `[runner]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<RunnerConfig>,
 }
 
 impl Profile {
@@ -137,6 +177,7 @@ impl Profile {
             storage,
             issuer: None,
             client_id: None,
+            runner: None,
         }
     }
 
@@ -154,6 +195,7 @@ impl Profile {
             storage,
             issuer: Some(issuer.into()),
             client_id: Some(client_id.into()),
+            runner: None,
         }
     }
 }
@@ -526,7 +568,7 @@ fn private_file(path: &Path) -> io::Result<fs::File> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, Kind, Profile, ProfileName, Storage};
+    use super::{Config, Kind, Profile, ProfileName, RunnerConfig, Storage};
 
     fn name(s: &str) -> ProfileName {
         s.parse().unwrap()
@@ -558,6 +600,56 @@ mod tests {
         assert!(text.contains("account = \"acc_1\""));
         assert!(!text.contains("token =") && !text.contains("secret"));
         assert_eq!(Config::load(dir.path()).unwrap(), c);
+    }
+
+    #[test]
+    fn the_runner_tables_are_read_and_a_save_keeps_them() {
+        let text = r#"default = "work"
+
+[runner]                 # this machine
+capacity = 4
+kinds = ["coordinate", "build"]
+always_on = true
+
+[profiles.work]
+kind = "token"
+account = "acc_1"
+storage = "keyring"
+
+[profiles.work.runner]   # this profile only
+capacity = 8
+"#;
+        let path = std::path::Path::new("config.toml");
+        let mut c = Config::parse(text, path).unwrap();
+        assert_eq!(c.runner.capacity, Some(4));
+        assert_eq!(
+            c.runner.kinds.as_deref(),
+            Some(&["coordinate".to_owned(), "build".to_owned()][..])
+        );
+        assert_eq!(c.runner.always_on, Some(true));
+        assert_eq!(c.runner.name, None);
+        let work = c.profile(&name("work")).unwrap();
+        assert_eq!(
+            work.runner,
+            Some(RunnerConfig {
+                capacity: Some(8),
+                ..RunnerConfig::default()
+            })
+        );
+        // The command line changes what it owns; the runner tables stay as written.
+        c.default = None;
+        let saved = c.to_toml();
+        assert!(
+            saved.contains("[runner]                 # this machine"),
+            "{saved}"
+        );
+        assert!(
+            saved.contains("[profiles.work.runner]   # this profile only"),
+            "{saved}"
+        );
+        assert!(saved.contains("capacity = 8"), "{saved}");
+        assert!(!saved.contains("default ="), "{saved}");
+        assert_eq!(Config::parse(&saved, path).unwrap(), c);
     }
 
     #[test]

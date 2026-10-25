@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.1](https://github.com/inorbithr/sdk/compare/python/v0.3.0...python/v0.3.1) (2026-10-24)
+
+
+### Dependencies
+
+* **py:** bump the py group across 1 directory with 3 updates ([#264](https://github.com/inorbithr/sdk/issues/264)) ([4f7f424](https://github.com/inorbithr/sdk/commit/4f7f4243fbddce1aea24e25f56d0c6eb34b9d997))
+* **py:** update uv-build requirement from &lt;0.13,&gt;=0.7 to &gt;=0.7,&lt;0.14 in /python ([#226](https://github.com/inorbithr/sdk/issues/226)) ([dba9e3a](https://github.com/inorbithr/sdk/commit/dba9e3afc38cb6bc21be721965ac8530ab181ede))
+* **py:** update uv-build requirement in /python ([dba9e3a](https://github.com/inorbithr/sdk/commit/dba9e3afc38cb6bc21be721965ac8530ab181ede))
+
+## [0.3.0](https://github.com/inorbithr/sdk/compare/python/v0.2.2...python/v0.3.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* the RFCs API is the Decisions API. `iohr rfc` is removed with no alias: use `iohr decisions`. The review default reads IOHR_DECISIONS_REVIEWER instead of IOHR_RFC_REVIEWER, and tokens need decisions:read / decisions:write instead of rfc:read / rfc:write.
+* **spec:** sync the public contract, 111 operations (2026-10-07) ([#166](https://github.com/inorbithr/sdk/issues/166))
+* **spec:** in Rust, the generated answer structs gain fields (Account.probe, Agent.capabilities, Use.connection_id and more) and the Surface trait gains rfcs() and trails(); code that builds those structs with a struct literal, or implements Surface itself, must add the new fields or methods. In Go, CheckDetail is no longer comparable with == (it gained the Invariants slice). Calls, names and wire shapes are unchanged in every language.
+
+### Features
+
+* Decisions API, the contract synced to 136 operations, upgrade_required ([#189](https://github.com/inorbithr/sdk/issues/189)) ([91f998c](https://github.com/inorbithr/sdk/commit/91f998c9b53bb25587469e32155e893bcefe765c))
+* **spec:** sync the public contract, 107 operations (2026-10-06) ([#159](https://github.com/inorbithr/sdk/issues/159)) ([1b4ebf3](https://github.com/inorbithr/sdk/commit/1b4ebf3b5b9ddfef077f4437eed16f1489f60797))
+* **spec:** sync the public contract, 111 operations (2026-10-07) ([#166](https://github.com/inorbithr/sdk/issues/166)) ([f3ce0cd](https://github.com/inorbithr/sdk/commit/f3ce0cd164154ed13f96303d453765ed45c6ce90))
+
+
+### Bug fixes
+
+* **deps:** bump rustls-webpki and webpki-root-certs for RUSTSEC-2026-0382 and 0383 ([#245](https://github.com/inorbithr/sdk/issues/245)) ([22cc5c6](https://github.com/inorbithr/sdk/commit/22cc5c6402899919bfc87f4745b171770462d1ab))
+* **deps:** ctutils 0.4.5 in every Cargo lock and opentelemetry-api 1.45.1 in the Python lock so the advisory audits pass again ([#256](https://github.com/inorbithr/sdk/issues/256)) ([91446a5](https://github.com/inorbithr/sdk/commit/91446a5fea6fd4769d6d7fe4bd2c55de6b7b5316))
+
+
+### Dependencies
+
+* **py:** bump griffe from 2.3.0 to 2.3.2 in /python in the py group across 1 directory ([#199](https://github.com/inorbithr/sdk/issues/199)) ([9b04475](https://github.com/inorbithr/sdk/commit/9b04475b9a1c751b2bd11e232445d8c6a8e7a369))
+* **py:** bump griffe in /python in the py group across 1 directory ([9b04475](https://github.com/inorbithr/sdk/commit/9b04475b9a1c751b2bd11e232445d8c6a8e7a369))
+
 ## [0.2.2](https://github.com/inorbithr/sdk/compare/python/v0.2.1...python/v0.2.2) (2026-10-05)
 
 

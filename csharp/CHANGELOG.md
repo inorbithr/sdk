@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/inorbithr/sdk/compare/csharp/v0.3.0...csharp/v0.3.1) (2026-10-24)
+
+
+### Dependencies
+
+* **csharp:** Bump the csharp group with 2 updates ([#225](https://github.com/inorbithr/sdk/issues/225)) ([92724ae](https://github.com/inorbithr/sdk/commit/92724ae2848b1f421545d2309525407ffe23edff))
+
 ## [0.3.0](https://github.com/inorbithr/sdk/compare/csharp/v0.2.2...csharp/v0.3.0) (2026-10-12)
 
 
