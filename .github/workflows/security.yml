@@ -77,12 +77,13 @@ jobs:
           config: |
             paths-ignore:
               - cli/crates/iohr-codegen/tests/golden
-      # `go test -run '^$'` compiles every package with its tests, so CodeQL extracts the
-      # test files too, and runs none of them.
+      # `go test -run=^$` compiles every package with its tests, so CodeQL extracts the
+      # test files too, and runs none of them. The flag and its value stay one argument:
+      # the extractor reads the same command line and takes a separate `^$` for a package.
       - if: steps.present.outputs.yes == 'true' && matrix.language == 'go'
         run: |
           for mod in $(git ls-files '*go.mod'); do
-            (cd "$(dirname "$mod")" && go test -count=1 -run '^$' ./...)
+            (cd "$(dirname "$mod")" && go test -count=1 '-run=^$' ./...)
           done
       - if: steps.present.outputs.yes == 'true'
         uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
