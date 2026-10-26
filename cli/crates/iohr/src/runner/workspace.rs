@@ -1658,7 +1658,13 @@ pub(crate) mod tests {
                 .contains("The turn named no Implements, PRD, ADR line")
         );
         assert!(!m.body.contains("Implements: "));
-        let m = compose("job_2", "", "bug", "x", &reply("fix(core): the bug", vec![]));
+        let m = compose(
+            "job_2",
+            "",
+            "bug",
+            "x",
+            &reply("fix(core): the bug", vec![]),
+        );
         assert_eq!(m.title, "fix(core): the bug");
         let m = compose("job_3", "", "", "", &reply("", vec![]));
         assert_eq!(m.title, "chore: job job_3");
@@ -1672,9 +1678,8 @@ pub(crate) mod tests {
 
     #[test]
     fn the_fallback_title_is_typed_by_kind_and_cut_at_72() {
-        let t = |kind: &str, ask: &str| {
-            compose("j", "", kind, ask, &reply("whatever", vec![])).title
-        };
+        let t =
+            |kind: &str, ask: &str| compose("j", "", kind, ask, &reply("whatever", vec![])).title;
         for (kind, ty) in [
             ("bug", "fix"),
             ("feature", "feat"),
