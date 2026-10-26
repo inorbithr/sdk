@@ -12,6 +12,8 @@ CLAUDE.local.md
 # Go
 go/coverage.out
 conformance/server/bin/
+# A plain `go build` in conformance/server writes this binary; it is never committed.
+conformance/server/server
 # CI's tools job hands its binaries over here.
 ci-tools/
 
