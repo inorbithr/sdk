@@ -325,6 +325,12 @@ pub(crate) fn redact(line: &str) -> String {
 }
 
 /// `owner/name`: letters, digits, `-`, `_` and `.`, never `.` or `..` alone.
+/// Marks a checkout found again as in use: the sweep of finished jobs' checkouts leaves
+/// it alone for a while ([`super::hygiene::GRACE`]). Best effort; nothing if it is not there.
+fn touch(path: &Path) {
+    let _ = std::fs::File::open(path).and_then(|d| d.set_modified(std::time::SystemTime::now()));
+}
+
 fn valid_repository(r: &str) -> Result<(&str, &str), String> {
     let part = |p: &str| {
         !p.is_empty()
@@ -632,13 +638,9 @@ impl Workspaces {
             )
             .await?;
         }
+        touch(&path);
         let reused = tokio::fs::symlink_metadata(&path).await.is_ok();
-        if reused {
-            // Found again: the sweep of finished jobs' checkouts leaves it alone for a
-            // while ([`super::hygiene::GRACE`]). Best effort.
-            let _ = std::fs::File::open(&path)
-                .and_then(|d| d.set_modified(std::time::SystemTime::now()));
-        } else {
+        if !reused {
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await

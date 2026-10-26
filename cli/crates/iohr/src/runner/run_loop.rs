@@ -253,6 +253,8 @@ type Fetched = (String, i64, Result<Pack, OpErr>);
 
 type Log<'a> = &'a (dyn Fn(&str) + Sync);
 type Op<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+/// A finished beat: whether leases were allowed, why they were paused, and the answer.
+type BeatDone = (bool, Option<String>, Result<Beat, OpErr>);
 /// The answers to one round of lease heartbeats, each with the lease it was asked for.
 type LeaseAnswers = Vec<(Lease, Result<LeaseBeat, OpErr>)>;
 
@@ -533,7 +535,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut gating: Vec<Gating> = Vec::new();
     let mut gate_sends: Vec<Op<'_, Sent>> = Vec::new();
     let mut fetch_ops: Vec<Op<'_, Fetched>> = Vec::new();
-    let mut beating: Option<Op<'_, (bool, Option<String>, Result<Beat, OpErr>)>> = None;
+    let mut beating: Option<Op<'_, BeatDone>> = None;
     // Why the last beat found no room for a new lease (the checkouts' disk is under its
     // floor); the offers it answered are left alone for another runner.
     let mut lease_paused: Option<String> = None;
