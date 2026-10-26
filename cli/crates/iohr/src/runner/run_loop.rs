@@ -28,6 +28,7 @@ use super::access::Access;
 use super::claude::Reply;
 use super::exec::{Exec, Finished};
 use super::gate::{self, Checked, Held, Skip};
+use super::hygiene::{self, DiskCheckouts, DiskFloor};
 use super::service::{
     AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
     TurnReport, Usage,
@@ -75,6 +76,9 @@ pub(crate) struct LoopConfig {
     pub(crate) declared: Option<watch::Receiver<Declared>>,
     /// The build-disk guard; `None` turns it off.
     pub(crate) build_floor: Option<BuildFloor>,
+    /// The free-space floor of the checkouts' filesystem: under it no new lease is taken
+    /// and the heartbeat says so; `None` turns it off.
+    pub(crate) disk_floor: Option<DiskFloor>,
     /// The Checked gate's check, run in the job's checkout after a job turn finishes and
     /// sent as a signed gate report before the turn's own report; `None` turns it off.
     pub(crate) gate: Option<GateCheck>,
@@ -119,10 +123,23 @@ impl Default for LoopConfig {
             capacity: 1,
             declared: None,
             build_floor: None,
+            disk_floor: None,
             gate: None,
             workspaces: None,
         }
     }
+}
+
+/// Free bytes on the filesystem holding `path`, or the nearest parent that exists.
+async fn free_on(path: &Path) -> Option<u64> {
+    let mut at = Some(path);
+    while let Some(p) = at {
+        if p.exists() {
+            return settings::free_bytes(p).await;
+        }
+        at = p.parent();
+    }
+    None
 }
 
 /// What the next heartbeat declares before the build-disk guard.
@@ -132,6 +149,8 @@ fn declared_now(cfg: &LoopConfig) -> Declared {
             capacity: None,
             version: env!("CARGO_PKG_VERSION").to_owned(),
             kinds: settings::CLASSES.iter().map(|c| (*c).to_owned()).collect(),
+            disk_free_bytes: None,
+            lease_paused_reason: None,
         },
         |rx| rx.borrow().clone(),
     )
@@ -507,12 +526,22 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut accepting: Vec<Op<'_, Accepted>> = Vec::new();
     // The ids of the leases being accepted, so a lease offered twice is taken once.
     let mut accepting_ids: Vec<String> = Vec::new();
+    // The same leases with their jobs: a job being accepted keeps its checkout.
+    let mut accepting_jobs: Vec<(String, String)> = Vec::new();
     let mut fetching: Vec<Fetch> = Vec::new();
     // Finished job turns whose gate check runs or whose gate report is being sent.
     let mut gating: Vec<Gating> = Vec::new();
     let mut gate_sends: Vec<Op<'_, Sent>> = Vec::new();
     let mut fetch_ops: Vec<Op<'_, Fetched>> = Vec::new();
-    let mut beating: Option<Op<'_, (bool, Result<Beat, OpErr>)>> = None;
+    let mut beating: Option<Op<'_, (bool, Option<String>, Result<Beat, OpErr>)>> = None;
+    // Why the last beat found no room for a new lease (the checkouts' disk is under its
+    // floor); the offers it answered are left alone for another runner.
+    let mut lease_paused: Option<String> = None;
+    // Leases held at the last turn of the loop, and a sweep of finished jobs' checkouts:
+    // wanted at the start, when a lease ended, and every PROVIDER_EVERY beats.
+    let mut held_before: usize = 0;
+    let mut sweep_due = cfg.workspaces.is_some();
+    let mut sweeping: Option<JoinHandle<hygiene::Swept>> = None;
     let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
     let mut reporting: Option<Op<'_, (String, Result<(), OpErr>)>> = None;
     let mut service_interval: Option<Duration> = None;
@@ -530,6 +559,39 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
         let held = held_leases(&busy, &fetching, &gating, &outbox);
         let has_held = !held.is_empty();
         let now = Instant::now();
+        // A lease ended since the last turn of the loop: its job's checkout is swept.
+        if held.len() < held_before {
+            sweep_due = cfg.workspaces.is_some();
+        }
+        held_before = held.len();
+        if sweeping.as_ref().is_some_and(JoinHandle::is_finished)
+            && let Some(done) = sweeping.take()
+            && let Ok(swept) = done.await
+        {
+            for name in &swept.released {
+                log(&format!("checkout {name} released: its target/ and worktree are gone"));
+            }
+            for (name, why) in &swept.kept {
+                log(&format!("checkout {name} kept: {why}"));
+            }
+        }
+        if sweep_due && sweeping.is_none() {
+            sweep_due = false;
+            let mut keep: std::collections::HashSet<String> = busy
+                .iter()
+                .map(|b| b.lease.job_id.clone())
+                .chain(fetching.iter().map(|f| f.lease.job_id.clone()))
+                .chain(gating.iter().map(|g| g.job_id.clone()))
+                .chain(accepting_jobs.iter().map(|(_, j)| j.clone()))
+                .collect();
+            keep.extend(busy.iter().map(|b| b.pack.job_id.clone()));
+            if let Some(w) = &cfg.workspaces {
+                let disk = DiskCheckouts { workdir: w.workdir().to_path_buf() };
+                sweeping = Some(tokio::task::spawn_blocking(move || {
+                    hygiene::sweep(&disk, &keep, hygiene::GRACE)
+                }));
+            }
+        }
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
             lease_beat_started = now;
             let limit = cfg.op_timeout;
@@ -596,6 +658,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             beat_started = now;
             if stats.beats > 0 && stats.beats % PROVIDER_EVERY == 0 {
                 refresh_wanted = true;
+                sweep_due = cfg.workspaces.is_some();
             }
             let snapshot = providers
                 .lock()
@@ -614,17 +677,26 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             }
             let floor = cfg.build_floor.clone();
+            let disk = cfg.disk_floor.clone();
             beating = Some(Box::pin(async move {
-                let declared = match floor {
+                let mut declared = match floor {
                     Some(f) => {
                         let free = settings::free_bytes(&f.volume).await;
                         declared.guarded(free, f.bytes)
                     }
                     None => declared,
                 };
+                let mut paused = None;
+                if let Some(d) = disk {
+                    let free = free_on(&d.volume).await;
+                    paused = hygiene::pause_reason(free, d.bytes);
+                    declared.disk_free_bytes = free;
+                    declared.lease_paused_reason.clone_from(&paused);
+                }
                 let has_build = declared.kinds.iter().any(|k| k == settings::BUILD);
                 (
                     has_build,
+                    paused,
                     bounded(limit, svc.heartbeat(&id, &snapshot, &declared)).await,
                 )
             }));
@@ -659,7 +731,15 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             } => {
                 beating = None;
-                let (has_build, beat) = beat;
+                let (has_build, paused, beat) = beat;
+                if lease_paused.is_none()
+                    && let Some(why) = &paused
+                {
+                    log(&format!("no new lease is taken: {why}"));
+                } else if lease_paused.is_some() && paused.is_none() {
+                    log("the checkouts' disk has room again: leases are taken");
+                }
+                lease_paused = paused;
                 if declared_build == Some(true) && !has_build {
                     log("the build volume is under its free-space floor: no new build turn until it has room");
                 } else if declared_build == Some(false) && has_build {
@@ -695,6 +775,11 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                     .any(|l| l.lease_id == lease.lease_id);
                             if held_already {
                                 // Offered again before the service saw the accept.
+                            } else if let Some(why) = &lease_paused {
+                                log(&format!(
+                                    "lease {} left for another runner: {why}",
+                                    lease.lease_id
+                                ));
                             } else if taken >= capacity {
                                 log(&format!(
                                     "lease {} left for another runner: {taken} of {capacity} turns are taken",
@@ -713,6 +798,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                 ));
                             } else {
                                 accepting_ids.push(lease.lease_id.clone());
+                                accepting_jobs.push((lease.lease_id.clone(), lease.job_id.clone()));
                                 accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), lease, cfg.op_timeout, log)));
                             }
                         }
@@ -833,7 +919,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 if gate_run.is_some() || ship.is_some() {
                     let check = gate_run.map(|(g, repo)| {
                         log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
-                        (repo, g.command.clone(), g.timeout, g.env.clone())
+                        // The repository's shared build directory, not a `target/` of this checkout.
+                        let target = hygiene::target_for(&g.workdir, &repo);
+                        let env = hygiene::with_target(g.env.clone(), target.as_deref());
+                        (repo, g.command.clone(), g.timeout, env)
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
                     gating.push(Gating {
@@ -947,12 +1036,16 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 match taken {
                     Ok((lease, owned)) => {
                         accepting_ids.retain(|id| *id != lease.lease_id);
+                        accepting_jobs.retain(|(id, _)| *id != lease.lease_id);
                         stats.accepted += 1;
                         fetching.push(Fetch { lease, owned, tries: 0, next: Instant::now(), asking: false });
                         next_lease_beat = Instant::now();
                     }
                     // Not accepted: `accept_lease` logged it and the lease expires.
-                    Err(id) => accepting_ids.retain(|a| *a != id),
+                    Err(id) => {
+                        accepting_ids.retain(|a| *a != id);
+                        accepting_jobs.retain(|(l, _)| *l != id);
+                    }
                 }
             }
             (id, token, got) = first_of(&mut fetch_ops) => {
@@ -1664,6 +1757,7 @@ mod tests {
             capacity: 1,
             declared: None,
             build_floor: None,
+            disk_floor: None,
             gate: None,
             workspaces: None,
         }
@@ -2222,6 +2316,8 @@ mod tests {
             capacity,
             version: "9.9.9".into(),
             kinds: kinds.iter().map(|k| (*k).to_owned()).collect(),
+            disk_free_bytes: None,
+            lease_paused_reason: None,
         });
         let c = LoopConfig {
             declared: Some(rx),

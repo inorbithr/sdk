@@ -19,6 +19,7 @@ use crate::output::Out;
 use crate::runner::claude;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
+use crate::runner::hygiene::{self, DiskFloor};
 use crate::runner::provider::{self, AuthState};
 use crate::runner::run_loop::{GateCheck, LoopConfig, run_loop};
 use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
@@ -243,6 +244,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
+                // No new lease under this much free space on the checkouts' disk
+                // (default 60 GB, `IOHR_RUNNER_MIN_FREE_GB`, 0 is off).
+                disk_floor: Some(DiskFloor::for_workdir(
+                    &exec.workdir,
+                    std::env::var(hygiene::MIN_FREE_ENV).ok().as_deref(),
+                )),
                 gate: Some(GateCheck {
                     // The pack names the checkout relative to the turns' working directory.
                     workdir: exec.workdir.clone(),

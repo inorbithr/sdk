@@ -5,7 +5,8 @@
 //! worktree of one bare mirror per repository (`<workdir>/../mirrors/<owner>/<repo>.git`,
 //! fetched, never cloned again), started from `origin/main`, or from `origin/job/<id>`
 //! when an earlier attempt pushed it. A retry finds the checkout and reuses it as it is:
-//! the same job's work, never another's, and nothing is ever deleted. A checkout that
+//! the same job's work, never another's. A checkout is released only once its job is no
+//! longer leased, and never with changes it did not ship ([`super::hygiene`]). A checkout that
 //! cannot be made means the lease is not accepted.
 //!
 //! After a shaped reply the runner (never the model, which has no shell) commits what the
@@ -531,6 +532,11 @@ impl Workspaces {
         Self::new(workdir, mirrors, GITHUB.to_owned(), Arc::new(GhForge))
     }
 
+    /// The turns' working directory; the checkouts are in it.
+    pub(crate) fn workdir(&self) -> &Path {
+        &self.workdir
+    }
+
     /// The mirror of `owner/name`, made once, with `main` fetched now, and its `origin`.
     async fn mirror(
         &self,
@@ -627,7 +633,12 @@ impl Workspaces {
             .await?;
         }
         let reused = tokio::fs::symlink_metadata(&path).await.is_ok();
-        if !reused {
+        if reused {
+            // Found again: the sweep of finished jobs' checkouts leaves it alone for a
+            // while ([`super::hygiene::GRACE`]). Best effort.
+            let _ = std::fs::File::open(&path)
+                .and_then(|d| d.set_modified(std::time::SystemTime::now()));
+        } else {
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await
