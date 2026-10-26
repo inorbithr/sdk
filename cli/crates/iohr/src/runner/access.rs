@@ -49,7 +49,7 @@ pub(crate) fn resolve_gh(path: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
                 .is_some_and(|d| d.components().any(|p| p.as_os_str() == "shims"));
             let is_mise = std::fs::canonicalize(c)
                 .ok()
-                .and_then(|r| r.file_name().map(|n| n.to_os_string()))
+                .and_then(|r| r.file_name().map(std::ffi::OsStr::to_os_string))
                 .is_none_or(|n| n.to_string_lossy().starts_with("mise"));
             !in_shims && !is_mise
         })
@@ -63,6 +63,51 @@ fn host_helper() -> String {
     };
     let gh = gh.to_string_lossy();
     format!("!'{}' auth git-credential", gh.replace('\'', "'\\''"))
+}
+
+/// Startup self-check of the host's `gh` sign-in: asks git for github.com's credential
+/// through [`host_helper`] (what a host-access fetch would use), in an empty temp
+/// directory with prompts off. `Err` says why there is no password; the password itself
+/// is never read into a message.
+pub(crate) async fn check_host_credential() -> Result<(), String> {
+    use tokio::io::AsyncWriteExt as _;
+    let mut child = tokio::process::Command::new("git")
+        .arg("-c")
+        .arg("credential.helper=")
+        .arg("-c")
+        .arg(format!("{HELPER_KEY}={}", host_helper()))
+        .args(["credential", "fill"])
+        .current_dir(std::env::temp_dir())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_ASKPASS")
+        .env_remove("SSH_ASKPASS")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("git could not be started: {e}"))?;
+    if let Some(mut i) = child.stdin.take() {
+        let _ = i.write_all(b"protocol=https\nhost=github.com\n\n").await;
+    }
+    let out = tokio::time::timeout(Duration::from_secs(20), child.wait_with_output())
+        .await
+        .map_err(|_| "the credential helper did not answer in 20 s".to_owned())?
+        .map_err(|e| format!("the credential helper failed: {e}"))?;
+    let got_password = out.status.success()
+        && String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .any(|l| l.strip_prefix("password=").is_some_and(|p| !p.is_empty()));
+    if got_password {
+        Ok(())
+    } else {
+        Err(format!(
+            "`gh auth git-credential get` for github.com gave no password (git exited {}); \
+             is gh signed in, and is a mise shim shadowing it?",
+            out.status.code().unwrap_or(-1)
+        ))
+    }
 }
 /// Answers `get` with the token from [`TOKEN_VAR`]; `store` and `erase` do nothing. The
 /// token is never on a command line, only in that one child's environment.
@@ -439,6 +484,34 @@ pub(crate) mod tests {
         assert_eq!(resolve_gh(&path), Some(bin.join("gh")));
         // Only a shim: none.
         assert_eq!(resolve_gh(shims.as_os_str()), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_self_check_fails_when_the_helper_gives_no_password() {
+        // A `gh` that answers nothing, first on a PATH of its own: git runs it by its
+        // absolute path (the shim-skipping `resolve_gh`), and no password means Err.
+        // PATH is process-wide, so the check is run through `git` directly with the same
+        // arguments `check_host_credential` builds, but the helper pinned to the stub.
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let gh = d.path().join("gh");
+        std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let found = resolve_gh(d.path().as_os_str()).unwrap();
+        assert_eq!(found, gh);
+        let helper = format!("!'{}' auth git-credential", found.display());
+        let out = std::process::Command::new("git")
+            .args(["-c", "credential.helper=", "-c"])
+            .arg(format!("{HELPER_KEY}={helper}"))
+            .args(["credential", "fill"])
+            .current_dir(d.path())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("password="));
     }
 
     #[test]

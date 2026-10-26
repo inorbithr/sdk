@@ -234,6 +234,13 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 me.runner_id,
                 declared.kinds.join(", ")
             ));
+            // Git must be able to sign in to GitHub before any build lease is taken.
+            let git_refusal = crate::runner::access::check_host_credential().await.err();
+            if let Some(why) = &git_refusal {
+                Out::note(&format!(
+                    "git cannot sign in to GitHub: {why}; no build leases until the runner is restarted"
+                ));
+            }
             let (declare, declared) = watch::channel(declared);
             reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare);
             let cfg = LoopConfig {
@@ -243,6 +250,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
+                git_refusal,
                 gate: Some(GateCheck {
                     // The pack names the checkout relative to the turns' working directory.
                     workdir: exec.workdir.clone(),
