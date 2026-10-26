@@ -102,7 +102,10 @@ pub(crate) fn target_from_gitfile(text: &str, state: &Path) -> Option<PathBuf> {
 /// [`target_from_gitfile`] for the checkout at `checkout`, under the runner's `workdir`
 /// (whose parent is the state directory).
 pub(crate) fn target_for(workdir: &Path, checkout: &Path) -> Option<PathBuf> {
-    let state = workdir.parent()?;
+    // Git writes the real path into the `.git` file; a state directory reached through a
+    // symlink (macOS `/var` -> `/private/var`) must be compared by its real path.
+    let state = workdir.parent()?.canonicalize().ok()?;
+    let state = state.as_path();
     let text = std::fs::read_to_string(checkout.join(".git")).ok()?;
     target_from_gitfile(&text, state)
 }
@@ -249,7 +252,10 @@ mod tests {
     #[test]
     fn under_the_floor_no_lease_is_taken_and_the_reason_says_how_much() {
         let why = pause_reason(Some(39 * GB), MIN_FREE_BYTES).unwrap();
-        assert!(why.contains("39 GB free") && why.contains("60 GB floor"), "{why}");
+        assert!(
+            why.contains("39 GB free") && why.contains("60 GB floor"),
+            "{why}"
+        );
         assert_eq!(pause_reason(Some(60 * GB), MIN_FREE_BYTES), None);
         assert_eq!(pause_reason(Some(149 * GB), MIN_FREE_BYTES), None);
     }
@@ -269,7 +275,10 @@ mod tests {
         assert_eq!(floor_from(Some("lots")), 60 * GB);
         assert_eq!(floor_from(Some("-1")), 60 * GB);
         let f = DiskFloor::for_workdir(Path::new("/r/coordinate"), Some("10"));
-        assert_eq!((f.volume, f.bytes), (PathBuf::from("/r/coordinate"), 10 * GB));
+        assert_eq!(
+            (f.volume, f.bytes),
+            (PathBuf::from("/r/coordinate"), 10 * GB)
+        );
     }
 
     #[test]
@@ -282,9 +291,15 @@ mod tests {
         );
         // Another repository's job shares nothing with it; the same one shares all.
         let other = "gitdir: /s/runner/mirrors/inorbithr/sdk.git/worktrees/job_2";
-        assert_ne!(target_from_gitfile(other, state), target_from_gitfile(git, state));
+        assert_ne!(
+            target_from_gitfile(other, state),
+            target_from_gitfile(git, state)
+        );
         let same = "gitdir: /s/runner/mirrors/inorbithr/core.git/worktrees/job_9";
-        assert_eq!(target_from_gitfile(same, state), target_from_gitfile(git, state));
+        assert_eq!(
+            target_from_gitfile(same, state),
+            target_from_gitfile(git, state)
+        );
     }
 
     #[test]
@@ -314,10 +329,12 @@ mod tests {
         assert_eq!(with_target(env.clone(), None), env);
     }
 
+    type Dir = (String, Option<Duration>, Option<String>);
+
     /// A disk of checkouts: name, age, and whether releasing it fails.
     #[derive(Default)]
     struct Fake {
-        dirs: RefCell<Vec<(String, Option<Duration>, Option<String>)>>,
+        dirs: RefCell<Vec<Dir>>,
         released: RefCell<Vec<String>>,
         unreadable: bool,
     }
@@ -328,7 +345,11 @@ mod tests {
                 dirs: RefCell::new(
                     dirs.iter()
                         .map(|(n, a, f)| {
-                            ((*n).to_owned(), a.map(Duration::from_secs), f.map(str::to_owned))
+                            (
+                                (*n).to_owned(),
+                                a.map(Duration::from_secs),
+                                f.map(str::to_owned),
+                            )
                         })
                         .collect(),
                 ),
@@ -372,7 +393,7 @@ mod tests {
         ]);
         let out = sweep(&fs, &held(&["job_held"]), GRACE);
         assert_eq!(out.released, ["job_done", "job_gone"]);
-        assert!(out.kept.is_empty());
+        assert_eq!(out.kept, []);
         assert_eq!(fs.names().unwrap(), ["job_held"]);
     }
 
@@ -441,14 +462,25 @@ mod tests {
         std::fs::write(seed.join("f"), "x").unwrap();
         sh(&seed, &["add", "f"]);
         sh(&seed, &["commit", "--quiet", "-m", "one"]);
-        sh(&seed, &["push", "--quiet", mirror.to_str().unwrap(), "main"]);
+        sh(
+            &seed,
+            &["push", "--quiet", mirror.to_str().unwrap(), "main"],
+        );
         let checkouts = workdir.join("checkouts");
         std::fs::create_dir_all(&checkouts).unwrap();
         for id in ["job_clean", "job_dirty"] {
             let p = checkouts.join(id);
             sh(
                 &mirror,
-                &["worktree", "add", "--quiet", "-b", id, p.to_str().unwrap(), "main"],
+                &[
+                    "worktree",
+                    "add",
+                    "--quiet",
+                    "-b",
+                    id,
+                    p.to_str().unwrap(),
+                    "main",
+                ],
             );
             std::fs::create_dir_all(p.join("target/debug")).unwrap();
             std::fs::write(p.join("target/debug/big"), "x").unwrap();
@@ -456,7 +488,7 @@ mod tests {
         std::fs::write(checkouts.join("job_dirty/unshipped.txt"), "work").unwrap();
 
         let target = target_for(&workdir, &checkouts.join("job_clean")).unwrap();
-        assert_eq!(target, state.join("target/o/r"));
+        assert_eq!(target, state.canonicalize().unwrap().join("target/o/r"));
 
         let disk = DiskCheckouts {
             workdir: workdir.clone(),

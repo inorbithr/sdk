@@ -569,7 +569,9 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             && let Ok(swept) = done.await
         {
             for name in &swept.released {
-                log(&format!("checkout {name} released: its target/ and worktree are gone"));
+                log(&format!(
+                    "checkout {name} released: its target/ and worktree are gone"
+                ));
             }
             for (name, why) in &swept.kept {
                 log(&format!("checkout {name} kept: {why}"));
@@ -586,7 +588,9 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 .collect();
             keep.extend(busy.iter().map(|b| b.pack.job_id.clone()));
             if let Some(w) = &cfg.workspaces {
-                let disk = DiskCheckouts { workdir: w.workdir().to_path_buf() };
+                let disk = DiskCheckouts {
+                    workdir: w.workdir().to_path_buf(),
+                };
                 sweeping = Some(tokio::task::spawn_blocking(move || {
                     hygiene::sweep(&disk, &keep, hygiene::GRACE)
                 }));
