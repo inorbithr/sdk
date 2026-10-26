@@ -32,8 +32,38 @@ pub(crate) const REFRESH_BEFORE: Duration = Duration::from_mins(10);
 /// The one credential key the runner sets, per command: GitHub over https only, so a
 /// remote rewritten to another host never gets the token.
 const HELPER_KEY: &str = "credential.https://github.com.helper";
-/// The host's own `gh` sign-in, as git's helper.
+/// The host's own `gh` sign-in, as git's helper, when no `gh` is found to pin.
 const HOST_HELPER: &str = "!gh auth git-credential";
+
+/// The first `gh` on `path` that is not a mise shim (a shim is a symlink to `mise`, or
+/// sits in a `shims` directory, and refuses to run in a directory whose `mise.toml` is
+/// not trusted, so git would get no credential). The path as found, not canonicalised.
+pub(crate) fn resolve_gh(path: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
+    std::env::split_paths(path)
+        .filter(|d| d.is_absolute())
+        .map(|d| d.join("gh"))
+        .filter(|c| c.is_file())
+        .find(|c| {
+            let in_shims = c
+                .parent()
+                .is_some_and(|d| d.components().any(|p| p.as_os_str() == "shims"));
+            let is_mise = std::fs::canonicalize(c)
+                .ok()
+                .and_then(|r| r.file_name().map(|n| n.to_os_string()))
+                .is_none_or(|n| n.to_string_lossy().starts_with("mise"));
+            !in_shims && !is_mise
+        })
+}
+
+/// `!<absolute gh> auth git-credential`, or the bare-name helper when no real `gh` is on
+/// the runner's `PATH`.
+fn host_helper() -> String {
+    let Some(gh) = std::env::var_os("PATH").and_then(|p| resolve_gh(&p)) else {
+        return HOST_HELPER.to_owned();
+    };
+    let gh = gh.to_string_lossy();
+    format!("!'{}' auth git-credential", gh.replace('\'', "'\\''"))
+}
 /// Answers `get` with the token from [`TOKEN_VAR`]; `store` and `erase` do nothing. The
 /// token is never on a command line, only in that one child's environment.
 const TOKEN_HELPER: &str = "!f() { test \"$1\" = get && printf 'username=x-access-token\\npassword=%s\\n' \"$IOHR_GIT_TOKEN\"; }; f";
@@ -205,8 +235,8 @@ impl Access {
     /// `https://github.com`, and no hooks (a hook would inherit the token's variable).
     pub(crate) fn git_args(&self) -> [String; 6] {
         let helper = match self {
-            Self::Token(_) => TOKEN_HELPER,
-            Self::Host(_) => HOST_HELPER,
+            Self::Token(_) => TOKEN_HELPER.to_owned(),
+            Self::Host(_) => host_helper(),
         };
         [
             "-c".into(),
@@ -287,7 +317,7 @@ pub(crate) mod tests {
         assert!(matches!(&host, Access::Host(why) if why.contains("no installation")));
         assert_eq!(host.git_env(), None);
         assert_eq!(host.gh_token(), None);
-        assert!(host.git_args()[3].ends_with("!gh auth git-credential"));
+        assert!(host.git_args()[3].ends_with("auth git-credential"));
         for reason in [
             "not_listed",
             "needs_permission",
@@ -389,6 +419,26 @@ pub(crate) mod tests {
         let (ok, got) = fill(&a, "elsewhere.example");
         assert!(!ok);
         assert!(!got.contains(FAKE) && !got.contains("host-secret"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_mise_shim_first_on_path_is_skipped_for_the_real_gh() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let d = tempfile::tempdir().unwrap();
+        let shims = d.path().join("mise/shims");
+        let bin = d.path().join("bin");
+        std::fs::create_dir_all(&shims).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        let mise = bin.join("mise");
+        std::fs::write(&mise, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&mise, std::fs::Permissions::from_mode(0o755)).unwrap();
+        symlink(&mise, shims.join("gh")).unwrap();
+        std::fs::write(bin.join("gh"), "#!/bin/sh\n").unwrap();
+        let path = std::env::join_paths([&shims, &bin]).unwrap();
+        assert_eq!(resolve_gh(&path), Some(bin.join("gh")));
+        // Only a shim: none.
+        assert_eq!(resolve_gh(shims.as_os_str()), None);
     }
 
     #[test]
