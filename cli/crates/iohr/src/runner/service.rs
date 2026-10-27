@@ -226,6 +226,9 @@ pub(crate) struct Beat {
     pub(crate) offered: Vec<Lease>,
     /// How often to call `RunnerHeartbeat` and `LeaseHeartbeat`; 0 when not sent.
     pub(crate) heartbeat_interval_seconds: u64,
+    /// Whole seconds the service held this call waiting for a turn to offer (RFC 0193);
+    /// 0 when it did not hold, which is what an older service always says.
+    pub(crate) waited_seconds: u64,
 }
 
 /// `LeaseHeartbeatResponse`.
@@ -676,7 +679,17 @@ pub(crate) struct HttpService<'a> {
     /// Set once the coordinator refused the declared heartbeat as an older one: every
     /// later beat sends the providers alone.
     old_beat: AtomicBool,
+    /// Seconds a beat asks the service to hold it for an offer (RFC 0193): 0 for the
+    /// commands that only look, [`HOLD_SECONDS`] for the loop.
+    wait_seconds: u32,
+    /// Set once the coordinator refused `wait_seconds` as an unknown field: later beats
+    /// leave it out and keep everything else they declare.
+    no_wait: AtomicBool,
 }
+
+/// What the loop's beat asks the service to hold it for (RFC 0193). The service holds at
+/// most 4 s, under the gateway's 5 s per-try limit, so this is the most it can give.
+pub(crate) const HOLD_SECONDS: u32 = 4;
 
 impl<'a> HttpService<'a> {
     pub(crate) fn new(api: &'a Api, account: String, signer: Option<Signer>) -> Self {
@@ -685,8 +698,20 @@ impl<'a> HttpService<'a> {
             account,
             signer,
             old_beat: AtomicBool::new(false),
+            wait_seconds: 0,
+            no_wait: AtomicBool::new(false),
         }
     }
+
+    /// Ask the service to hold each heartbeat until a turn is offered (RFC 0193), so a
+    /// turn starts at once and not at the next beat. For the loop only. A service that
+    /// does not know the field is beaten without it, still declaring everything else.
+    #[must_use]
+    pub(crate) fn holding(mut self) -> Self {
+        self.wait_seconds = HOLD_SECONDS;
+        self
+    }
+
     /// A request body with this service's `account_id` in it.
     fn scoped(&self, mut body: Value) -> Value {
         if let Value::Object(m) = &mut body {
@@ -774,31 +799,47 @@ impl Service for HttpService<'_> {
                 .await
                 .map_err(ServiceError::from)
         } else {
-            let mut body = old();
-            if let Value::Object(m) = &mut body {
-                if let Some(c) = declared.capacity {
-                    m.insert("capacity".into(), json!(c));
-                }
-                m.insert("version".into(), json!(declared.version));
-                m.insert("kinds".into(), json!(declared.kinds));
-            }
-            match self
-                .api
-                .send_body(Method::Post, &path, &self.scoped(body))
-                .await
-            {
-                Ok(r) => Ok(r),
-                Err(e) => match ServiceError::from(e) {
-                    e if e.is_unknown_field() => {
-                        // An older coordinator: it keeps the registered capacity and kinds.
-                        self.old_beat.store(true, Ordering::Relaxed);
-                        self.api
-                            .send_body(Method::Post, &path, &self.scoped(old()))
-                            .await
-                            .map_err(ServiceError::from)
+            // The declared body, with the wait when this service takes it.
+            let declared_body = |wait: bool| {
+                let mut body = old();
+                if let Value::Object(m) = &mut body {
+                    if let Some(c) = declared.capacity {
+                        m.insert("capacity".into(), json!(c));
                     }
-                    e => Err(e),
-                },
+                    m.insert("version".into(), json!(declared.version));
+                    m.insert("kinds".into(), json!(declared.kinds));
+                    if wait {
+                        m.insert("wait_seconds".into(), json!(self.wait_seconds));
+                    }
+                }
+                body
+            };
+            let wait = self.wait_seconds > 0 && !self.no_wait.load(Ordering::Relaxed);
+            let mut sent = self
+                .api
+                .send_body(Method::Post, &path, &self.scoped(declared_body(wait)))
+                .await
+                .map_err(ServiceError::from);
+            if wait && sent.as_ref().is_err_and(ServiceError::is_unknown_field) {
+                // A coordinator from before RFC 0193: it does not hold, but it knows
+                // the capacity and kinds. Beat again without the wait.
+                self.no_wait.store(true, Ordering::Relaxed);
+                sent = self
+                    .api
+                    .send_body(Method::Post, &path, &self.scoped(declared_body(false)))
+                    .await
+                    .map_err(ServiceError::from);
+            }
+            match sent {
+                Err(e) if e.is_unknown_field() => {
+                    // An older coordinator still: it keeps the registered capacity and kinds.
+                    self.old_beat.store(true, Ordering::Relaxed);
+                    self.api
+                        .send_body(Method::Post, &path, &self.scoped(old()))
+                        .await
+                        .map_err(ServiceError::from)
+                }
+                other => other,
             }
         };
         let v: Value = answer?.json()?;
@@ -810,6 +851,7 @@ impl Service for HttpService<'_> {
                 .map(|a| a.iter().map(Lease::from_json).collect())
                 .unwrap_or_default(),
             heartbeat_interval_seconds: num(&v, "heartbeat_interval_seconds"),
+            waited_seconds: num(&v, "waited_seconds"),
         })
     }
 

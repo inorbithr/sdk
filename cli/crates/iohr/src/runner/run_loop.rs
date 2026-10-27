@@ -38,6 +38,11 @@ use super::workspace::{self, Prepared, Shipped, Workspaces};
 /// The RFC's runner heartbeat. The service's proto does not carry an interval yet, so
 /// this is the default and `--interval` changes it.
 pub(crate) const DEFAULT_INTERVAL: Duration = Duration::from_secs(20);
+/// RFC 0193: a service that holds the beat for an offer is beaten again this soon after
+/// it answered without one, so one beat is always waiting for a turn to start.
+const REBEAT_AFTER_HOLD: Duration = Duration::from_millis(250);
+/// And this soon after it answered with an offer, to let the accept land first.
+const REBEAT_AFTER_OFFER: Duration = Duration::from_secs(1);
 /// Reconnect backoff bounds (RFC: 1 s to 60 s, with jitter).
 pub(crate) const BACKOFF_MIN: Duration = Duration::from_secs(1);
 pub(crate) const BACKOFF_MAX: Duration = Duration::from_secs(60);
@@ -516,6 +521,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
     let mut reporting: Option<Op<'_, (String, Result<(), OpErr>)>> = None;
     let mut service_interval: Option<Duration> = None;
+    // Set once a beat's answer said the service held it for an offer (RFC 0193): then the
+    // loop keeps one beat waiting instead of one every interval. An older service never
+    // says so, and keeps the interval.
+    let mut server_holds = false;
     let mut outbox: VecDeque<TurnReport> = VecDeque::new();
     // Delivery attempts since the last success.
     let mut tries: u32 = 0;
@@ -681,7 +690,17 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                             service_interval =
                                 Some(Duration::from_secs(beat.heartbeat_interval_seconds));
                         }
-                        next_beat = (beat_started + interval(service_interval)).max(Instant::now());
+                        server_holds |= beat.waited_seconds > 0;
+                        next_beat = if server_holds && (beat.waited_seconds > 0 || !beat.offered.is_empty()) {
+                            Instant::now()
+                                + if beat.offered.is_empty() {
+                                    REBEAT_AFTER_HOLD
+                                } else {
+                                    REBEAT_AFTER_OFFER
+                                }
+                        } else {
+                            (beat_started + interval(service_interval)).max(Instant::now())
+                        };
                         if beat.runner.status == "revoked" {
                             log("the service revoked this runner");
                             stop(std::mem::take(&mut busy), refresher.take()).await;
@@ -1312,6 +1331,9 @@ mod tests {
         job: Option<JobInfo>,
         /// `GetJob` fails, transiently.
         job_down: bool,
+        /// Seconds each heartbeat says the service held it (RFC 0193); 0 is a service that
+        /// does not hold.
+        held_seconds: u64,
         /// What `MintRunnerGithubToken` answers; `None` is an older platform without it.
         minted: Option<crate::runner::access::Minted>,
     }
@@ -1395,8 +1417,7 @@ mod tests {
                 };
                 return Ok(Beat {
                     runner,
-                    offered: vec![],
-                    heartbeat_interval_seconds: 0,
+                    ..Beat::default()
                 });
             }
             let after_accept = self
@@ -1417,11 +1438,14 @@ mod tests {
             match self.beats.lock().unwrap().pop_front() {
                 Some(Err(())) => Err(down()),
                 Some(Ok(offered)) => Ok(Beat {
-                    runner: RunnerInfo::default(),
                     offered,
-                    heartbeat_interval_seconds: 0,
+                    waited_seconds: self.held_seconds,
+                    ..Beat::default()
                 }),
-                None => Ok(Beat::default()),
+                None => Ok(Beat {
+                    waited_seconds: self.held_seconds,
+                    ..Beat::default()
+                }),
             }
         }
         async fn accept(&self, l: &Lease, f: AcceptFacts) -> Result<(), ServiceError> {
@@ -1711,6 +1735,62 @@ mod tests {
         let calls = fake.calls.lock().unwrap();
         assert_eq!(calls.len(), 4);
         assert!(calls.iter().all(|c| c == "heartbeat run_1 providers=1"));
+    }
+
+    #[tokio::test]
+    async fn a_service_that_holds_the_beat_is_beaten_again_at_once() {
+        // RFC 0193: the interval is 30 s, but each answer says the service held the call,
+        // so the next beat does not wait for it: six beats fit well inside the timeout.
+        let fake = Fake {
+            held_seconds: 4,
+            ..Fake::default()
+        };
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            ..cfg(6)
+        };
+        let (end, stats) = tokio::time::timeout(Duration::from_secs(5), go(&fake, c))
+            .await
+            .expect("beats followed one another instead of waiting for the interval");
+        assert_eq!((end, stats.beats), (End::MaxBeats, 6));
+    }
+
+    #[tokio::test]
+    async fn a_service_that_does_not_hold_keeps_the_interval() {
+        // An older service says nothing of waiting: beats stay on the interval.
+        let fake = Fake::default();
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            ..cfg(3)
+        };
+        let waited = tokio::time::timeout(Duration::from_millis(400), go(&fake, c)).await;
+        assert!(waited.is_err(), "the second beat came before the interval");
+        assert_eq!(fake.calls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_offer_from_a_holding_service_is_accepted_and_the_next_beat_waits_for_it() {
+        let fake = Fake {
+            held_seconds: 1,
+            ..Fake::default()
+        };
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(Pack {
+            turn_id: "turn_1".into(),
+            pack_sha256: "ab".repeat(32),
+            ..good_pack()
+        });
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            ..cfg(3)
+        };
+        let (_, stats) = tokio::time::timeout(Duration::from_secs(8), go(&fake, c))
+            .await
+            .expect("the loop beat again after the offer");
+        assert_eq!((stats.accepted, stats.reported), (1, 1));
     }
 
     #[tokio::test]
