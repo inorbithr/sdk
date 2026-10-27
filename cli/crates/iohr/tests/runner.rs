@@ -111,7 +111,7 @@ async fn login(server: &MockServer, dir: &Path, tok: &str) {
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
 }
 
-fn sha(s: impl AsRef<[u8]>) -> String {
+fn sha(s: &(impl AsRef<[u8]> + ?Sized)) -> String {
     use std::fmt::Write as _;
     Sha256::digest(s.as_ref())
         .iter()
@@ -1257,6 +1257,7 @@ async fn gate_report_needs_the_runner_scopes_and_a_runner_key() {
 /// no coordinator scope, and enrols it with a device's proof plus a P-256 signature of
 /// possession over the enrolment message.
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // one story: ask, then the proof file, read top to bottom
 async fn run_key_is_made_once_and_enrolled_with_a_proof_of_possession() {
     use aws_lc_rs::signature::ECDSA_P256_SHA256_ASN1;
     let dir = tempfile::tempdir().unwrap();
