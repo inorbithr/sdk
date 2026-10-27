@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.0-alpha.26](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.25...iohr/v0.1.0-alpha.26) (2026-10-27)
+
+
+### Features
+
+* **cli:** execute approved pinned run asks (k8s.delete-failed-pods) ([#285](https://github.com/inorbithr/sdk/issues/285)) ([efe6e72](https://github.com/inorbithr/sdk/commit/efe6e72eaf60c1ae4532814c938f81b3c98220a1))
+
+
+### Bug fixes
+
+* **cli:** build the kubeconfig path in a test the way the platform spells an absolute one ([#294](https://github.com/inorbithr/sdk/issues/294)) ([5704ef7](https://github.com/inorbithr/sdk/commit/5704ef7a095071388b77a9c1da7eab7a118c07c7))
+* **cli:** bump sigstore-verify to 0.15 to drop block-buffer 0.10.4 (GHSA-qwgh-2vcv-g2f7) ([#282](https://github.com/inorbithr/sdk/issues/282)) ([b042f01](https://github.com/inorbithr/sdk/commit/b042f019ddacf430e020a0c532132e91098f09ae))
+* **cli:** keep the Windows private-file check clippy clean ([#293](https://github.com/inorbithr/sdk/issues/293)) ([49f385d](https://github.com/inorbithr/sdk/commit/49f385d62a1f45665186af63e4698e0ac9116f73))
+
 ## [0.1.0-alpha.25](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.24...iohr/v0.1.0-alpha.25) (2026-10-24)
 
 
