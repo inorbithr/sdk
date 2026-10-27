@@ -206,6 +206,52 @@ impl RunKey {
     }
 }
 
+/// The first line of what the run key signs to enrol through an approved
+/// `runner_enrollment` ask (core `approval_messages::runner_enrollment::POSSESSION_TAG`).
+pub(crate) const RUNNER_ENROLLMENT_TAG: &str = "iohr-runner-enrollment-v1";
+
+/// How many hex characters of a fingerprint a person compares (core `SHORT_HEX`).
+const SHORT_HEX: usize = 24;
+
+/// A run key's fingerprint, byte for byte core's `runner_enrollment::fingerprint`: the
+/// SHA-256, lowercase hex, of the 65-byte point its base64url `public_key` holds.
+pub(crate) fn run_key_fingerprint(public_key: &str) -> Result<String, String> {
+    let point = B64URL
+        .decode(public_key.trim())
+        .map_err(|_| "the run key's public key is not base64url".to_owned())?;
+    Ok(hex(&Sha256::digest(&point)))
+}
+
+/// The part of a fingerprint a person compares between the terminal and the phone
+/// (core `runner_enrollment::short`): its first 24 hex characters in groups of four.
+pub(crate) fn fingerprint_short(fingerprint: &str) -> String {
+    let head: Vec<char> = fingerprint.chars().take(SHORT_HEX).collect();
+    head.chunks(4)
+        .map(|c| c.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// What the run key signs to enrol through the approved ask `approval_id` (core
+/// `runner_enrollment::possession_message`): the tag, the ask, the public key, the
+/// label and the fingerprint, one per line. Naming the ask binds the possession to
+/// the one approval the person gave.
+pub(crate) fn enrollment_possession_message(
+    approval_id: &str,
+    public_key: &str,
+    label: &str,
+    fingerprint: &str,
+) -> String {
+    [
+        RUNNER_ENROLLMENT_TAG,
+        approval_id,
+        public_key,
+        label,
+        fingerprint,
+    ]
+    .join("\n")
+}
+
 /// One report of a pinned run, byte for byte core's `approval_messages::run_report`: the
 /// tag, the SHA-256 of each of `approval_id`, `payload_sha256`, `step`, `note` (as the
 /// service keeps it, trimmed), `observed` (the observed payload's hash for `started`,

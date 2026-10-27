@@ -1037,5 +1037,7 @@ pub(crate) fn proof_from_json(v: &Value) -> Result<Proof, String> {
     Ok(p)
 }
 
+pub(crate) mod enrol;
+
 #[cfg(test)]
 mod tests;
