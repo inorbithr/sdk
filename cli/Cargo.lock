@@ -1343,6 +1343,7 @@ dependencies = [
  "iohr-openapi",
  "reqwest",
  "rpassword",
+ "rustix",
  "semver",
  "serde",
  "serde_json",

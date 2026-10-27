@@ -3,10 +3,13 @@
 //! it starts the person's own, unmodified `claude -p` and reports what it printed.
 
 pub(crate) mod access;
+pub(crate) mod approvals;
 pub(crate) mod claude;
 pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod gate;
+pub(crate) mod host_action;
+pub(crate) mod private;
 pub(crate) mod provider;
 pub(crate) mod run_loop;
 pub(crate) mod service;

@@ -102,7 +102,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
-| `iohr runner register [--name N] [--capacity N] [--always-on] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--account A] \| config show [--capacity N] [--kinds K,...] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below) |
+| `iohr runner register [--name N] [--capacity N] [--always-on] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--account A] \| config show [--capacity N] [--kinds K,...] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
@@ -521,6 +521,47 @@ command yourself only for a job the loop did not check.
 What the sign-in service sees of the provider is the SHA-256 of the account's salt, a
 newline and the line `claude auth status` prints, and the method's name.
 
+### Approved run asks
+
+`iohr runner run` also carries out run asks the owner approved and pinned to this runner
+(platform RFC 0172 and RFC 0153). It needs two things set up once, and stays off with a
+note saying which is missing:
+
+- A run key. `iohr runner run-key` makes a P-256 key, kept in the credential store your
+  profile uses (like the coordinator key `register` makes, and never printed), and shows
+  its public key. Have your device sign the enrolment message (`iohr-approval-runner-v1`,
+  the public key, the label, the time, a nonce and the device key id), save that proof as
+  JSON `{key_id, signed_at, nonce, signature}`, and run `iohr runner run-key --proof FILE`:
+  the runner adds its own signature of possession and enrols the key. `run-key` needs no
+  coordinator scope.
+- The device keys it trusts, in `runner/approvals/<account>/device-keys` in the config directory:
+  one `key_id public_key` per line (the key base64url of the 65-byte P-256 point), `#`
+  for a comment. The service does not list a person's public keys, so they are pinned
+  here. The file, like the record below, must belong to you and not be writable by group
+  or world (`chmod go-w`), or the runner stays off.
+- The cluster, `kube_context` and/or `kubeconfig` under `[runner]` (or a profile's
+  runner table). Every `kubectl` call gets `--context` and `--kubeconfig` from them, so an
+  approved action reaches only that cluster; with neither set, every action is refused.
+
+Every 20 seconds (up to 5 minutes after errors) the runner lists the account's approved
+`run` asks and takes those pinned to its own runner id. Before anything runs it checks,
+in the order the platform checks them, that the ask is approved and pinned, that the
+payload hashes to what was approved, that a person decided it, that the action fits the
+`runner/host-action/v0` schema, that it names this runner and its key, that it has not
+expired, and that a pinned device key signed the decision. An ask whose decision this
+machine has already carried out (the record is `runner/approvals/<account>/seen`, owner-only, one line per
+decision, a malformed line is an error) is refused as a replay. A refused ask is reported `failed` with the reason and runs nothing.
+Otherwise the runner records the decision on disk (under a file lock), reports `started`,
+runs the action and reports `done` or `failed` with at most 500 characters of what
+happened, with addresses, URLs and tokens redacted; each report is signed with the run key.
+
+The catalogue has one action, `k8s.delete-failed-pods`: `kubectl delete pods
+--field-selector=status.phase=Failed` in the namespace the ask names, or in every
+namespace. It runs `kubectl` from an absolute `PATH` entry with an argument vector (never
+a shell), the scrubbed environment above (no `KUBECONFIG`: the configured cluster is used), and a 2-minute limit. A
+namespace must be a DNS label, and `kube-system`, `kube-public` and `kube-node-lease` are
+refused. Any other action is reported `failed` as unknown.
+
 ## Where things are kept
 
 - Profiles: `config.toml` in the platform's config directory (`~/.config/iohr` on
@@ -541,13 +582,16 @@ newline and the line `claude auth status` prints, and the method's name.
   `~/.inorbit/ext-dev/NAME/`, owner-only, apart from the installed ones.
 - The runner's one working directory, `runner/coordinate` in the config directory, is
   empty: Claude Code keeps the session itself, in its own directory.
+- Approved run asks: the pinned device keys and the record of decisions carried out, in
+  `runner/approvals/<account>` in the config directory, owner-only. The run key is in the
+  credential store.
 - `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` (the extensions catalogue is
   on the API host), and to the extension registry only in `iohr ext install`, `upgrade`
   and `sync` (ADR 0012). No telemetry, no update
   check. `iohr sdk add` runs your project's package manager, which reaches its own
   registry (SR-31).
 
-The rules are SR-10 to SR-32 in [docs/security/requirements.md](../docs/security/requirements.md);
+The rules are SR-10 to SR-34 in [docs/security/requirements.md](../docs/security/requirements.md);
 the layout is [ADR 0009](../docs/adr/0009-the-command-line.md).
 
 ## Dependencies

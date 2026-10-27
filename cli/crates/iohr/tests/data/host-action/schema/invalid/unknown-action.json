@@ -1,0 +1,6 @@
+{
+  "action": "k8s.delete-namespace",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {},
+  "effect": "Deletes a namespace."
+}
