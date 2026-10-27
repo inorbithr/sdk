@@ -16,7 +16,7 @@ use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
 use crate::context::{Ctx, account as resolve_account, blocking, run_profile, session};
 use crate::error::Error;
 use crate::output::Out;
-use crate::runner::approvals;
+use crate::runner::approvals::{self, enrol};
 use crate::runner::claude;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
@@ -357,6 +357,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
         RunnerCommand::RunKey {
             proof,
             label,
+            wait,
             account,
         } => {
             let account = resolve_account(&s, account.account)?;
@@ -370,6 +371,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 return Err(Error::Usage("--label: 1 to 100 characters".into()));
             }
             let svc = HttpService::new(&s.api, account.clone(), None);
+            let by_proof = proof.is_some();
             if let Some(path) = proof {
                 let text = std::fs::read_to_string(&path).map_err(|e| {
                     Error::Failed(format!("cannot read {}: {}", path.display(), e.kind()))
@@ -383,10 +385,39 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 svc.enroll_run_key(&public, &label, &p, &possession).await?;
             }
             let runners = svc.approval_runners().await?;
-            let enrolled = approvals::enrolled(&runners, &public)
+            let mut enrolled = approvals::enrolled(&runners, &public)
                 .and_then(|r| r.get("runner_id"))
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned);
+            // RFC 0172, amendment 1: not enrolled yet, so ask on the phone and wait.
+            let mut asked = None;
+            if enrolled.is_none() && !by_proof {
+                let a = enrol::ask(&svc, &key, &label)
+                    .await
+                    .map_err(Error::Failed)?;
+                Out::note(&format!(
+                    "approve this run key on your phone: {label} \u{b7} {} (ask {})",
+                    a.short, a.approval_id
+                ));
+                Out::note(&format!(
+                    "check the phone shows the same fingerprint before you approve; waiting up to {wait} minutes"
+                ));
+                let wait = std::time::Duration::from_mins(wait);
+                match enrol::wait_and_enroll(&svc, &key, &label, &a, wait, enrol::POLL)
+                    .await
+                    .map_err(Error::Failed)?
+                {
+                    enrol::Outcome::Enrolled(id) => enrolled = Some(id),
+                    enrol::Outcome::Closed(state) => {
+                        return Err(Error::Failed(format!(
+                            "the enrolment ask {} is {state}; nothing was enrolled",
+                            a.approval_id
+                        )));
+                    }
+                    enrol::Outcome::Waiting => {}
+                }
+                asked = Some(a);
+            }
             let keys_file = approvals::state_dir(&ctx.dir, &account)
                 .map_err(Error::Failed)?
                 .join("device-keys");
@@ -396,6 +427,8 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     "public_key": public,
                     "label": label,
                     "runner_id": enrolled,
+                    "fingerprint": asked.as_ref().map(|a| &a.fingerprint),
+                    "approval_id": asked.as_ref().map(|a| &a.approval_id),
                     "device_keys": keys.len(),
                     "device_keys_file": keys_file.display().to_string(),
                 }));
@@ -415,7 +448,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             ]);
             if enrolled.is_none() {
                 Out::note(
-                    "to enrol it, have your device sign the enrolment message (iohr-approval-runner-v1) for this public key and label, save its proof as JSON {key_id, signed_at, nonce, signature} and run this again with --proof <file>",
+                    "not enrolled yet: the ask is still open on your phone; run this again to keep waiting",
                 );
             }
             Ok(())
