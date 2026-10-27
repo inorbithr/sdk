@@ -43,6 +43,30 @@ pub(crate) const DEFAULT_INTERVAL: Duration = Duration::from_secs(20);
 const REBEAT_AFTER_HOLD: Duration = Duration::from_millis(250);
 /// And this soon after it answered with an offer, to let the accept land first.
 const REBEAT_AFTER_OFFER: Duration = Duration::from_secs(1);
+/// RFC 0193: after this many beats in a row that were offered a lease the runner had
+/// already been offered (taken by nothing: at capacity, or the accept failing), the loop
+/// stops beating again after each offer and goes back to the interval. An offer that stands
+/// is the service's to re-offer; beating once a second for it is up to 20 times the writes.
+const OFFER_REPEATS_BEFORE_BACKOFF: u32 = 3;
+/// How soon the next beat follows an answer, or `None` for the interval (RFC 0193): at
+/// once after a call the service held, a second after an offer to let the accept land,
+/// and the interval for a service that does not hold or for an offer that keeps standing.
+fn rebeat_after(
+    server_holds: bool,
+    waited: bool,
+    offered: bool,
+    offer_repeats: u32,
+) -> Option<Duration> {
+    if !server_holds || !(waited || offered) || offer_repeats >= OFFER_REPEATS_BEFORE_BACKOFF {
+        return None;
+    }
+    Some(if offered {
+        REBEAT_AFTER_OFFER
+    } else {
+        REBEAT_AFTER_HOLD
+    })
+}
+
 /// Reconnect backoff bounds (RFC: 1 s to 60 s, with jitter).
 pub(crate) const BACKOFF_MIN: Duration = Duration::from_secs(1);
 pub(crate) const BACKOFF_MAX: Duration = Duration::from_secs(60);
@@ -525,6 +549,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     // loop keeps one beat waiting instead of one every interval. An older service never
     // says so, and keeps the interval.
     let mut server_holds = false;
+    // The leases the last beat offered, and how many beats in a row offered one of them
+    // again: an offer nobody takes.
+    let mut last_offered: Vec<String> = Vec::new();
+    let mut offer_repeats: u32 = 0;
     let mut outbox: VecDeque<TurnReport> = VecDeque::new();
     // Delivery attempts since the last success.
     let mut tries: u32 = 0;
@@ -691,15 +719,20 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                 Some(Duration::from_secs(beat.heartbeat_interval_seconds));
                         }
                         server_holds |= beat.waited_seconds > 0;
-                        next_beat = if server_holds && (beat.waited_seconds > 0 || !beat.offered.is_empty()) {
-                            Instant::now()
-                                + if beat.offered.is_empty() {
-                                    REBEAT_AFTER_HOLD
-                                } else {
-                                    REBEAT_AFTER_OFFER
-                                }
+                        offer_repeats = if beat.offered.iter().any(|l| last_offered.contains(&l.lease_id)) {
+                            offer_repeats.saturating_add(1)
                         } else {
-                            (beat_started + interval(service_interval)).max(Instant::now())
+                            0
+                        };
+                        last_offered = beat.offered.iter().map(|l| l.lease_id.clone()).collect();
+                        next_beat = match rebeat_after(
+                            server_holds,
+                            beat.waited_seconds > 0,
+                            !beat.offered.is_empty(),
+                            offer_repeats,
+                        ) {
+                            Some(after) => Instant::now() + after,
+                            None => (beat_started + interval(service_interval)).max(Instant::now()),
                         };
                         if beat.runner.status == "revoked" {
                             log("the service revoked this runner");
@@ -1753,6 +1786,68 @@ mod tests {
             .await
             .expect("beats followed one another instead of waiting for the interval");
         assert_eq!((end, stats.beats), (End::MaxBeats, 6));
+    }
+
+    #[test]
+    fn the_next_beat_follows_a_held_call_at_once_and_an_offer_nobody_takes_backs_off() {
+        let secs = |s| Some(Duration::from_secs(s));
+        // (server_holds, waited, offered, repeats)
+        assert_eq!(rebeat_after(true, true, false, 0), Some(REBEAT_AFTER_HOLD));
+        assert_eq!(rebeat_after(true, false, true, 0), secs(1));
+        // The same offer standing: a second apart for a few beats, then the interval.
+        for repeats in 1..OFFER_REPEATS_BEFORE_BACKOFF {
+            assert_eq!(
+                rebeat_after(true, false, true, repeats),
+                secs(1),
+                "{repeats}"
+            );
+        }
+        assert_eq!(
+            rebeat_after(true, false, true, OFFER_REPEATS_BEFORE_BACKOFF),
+            None
+        );
+        assert_eq!(rebeat_after(true, false, true, 50), None);
+        // A service that does not hold, or has nothing to say, keeps the interval.
+        assert_eq!(rebeat_after(false, true, true, 0), None);
+        assert_eq!(rebeat_after(true, false, false, 0), None);
+    }
+
+    #[tokio::test]
+    async fn an_offer_nobody_takes_does_not_keep_the_runner_beating_every_second() {
+        // The service offers the same lease on every beat and the runner is at capacity,
+        // so it is never taken. With a 30 s interval the loop beats each second for a few
+        // beats, then waits the interval: it never reaches ten beats.
+        let fake = Fake {
+            held_seconds: 1,
+            ..Fake::default()
+        };
+        for _ in 0..10 {
+            fake.beats
+                .lock()
+                .unwrap()
+                .push_back(Ok(vec![lease("lease_1", 7)]));
+        }
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            capacity: 0,
+            ..cfg(10)
+        };
+        let done = tokio::time::timeout(Duration::from_secs(8), go(&fake, c)).await;
+        assert!(
+            done.is_err(),
+            "ten beats a second apart for one standing offer"
+        );
+        let beats = fake
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c.starts_with("heartbeat"))
+            .count();
+        assert!(
+            (2..=6).contains(&beats),
+            "a few quick beats and then the interval: {beats}"
+        );
     }
 
     #[tokio::test]

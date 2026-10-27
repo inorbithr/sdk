@@ -7,6 +7,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -682,10 +684,19 @@ pub(crate) struct HttpService<'a> {
     /// Seconds a beat asks the service to hold it for an offer (RFC 0193): 0 for the
     /// commands that only look, [`HOLD_SECONDS`] for the loop.
     wait_seconds: u32,
-    /// Set once the coordinator refused `wait_seconds` as an unknown field: later beats
-    /// leave it out and keep everything else they declare.
-    no_wait: AtomicBool,
+    /// Until when beats leave `wait_seconds` out: set when the coordinator refused it as
+    /// an unknown field (one replica of a mixed rollout, or an older service), so later
+    /// beats keep everything else they declare. It lapses after `wait_recheck`, and the
+    /// next beat asks again, so one old replica does not turn the hold off until the
+    /// runner restarts.
+    no_wait_until: Mutex<Option<Instant>>,
+    /// How long a refused `wait_seconds` is left out before it is tried again.
+    wait_recheck: Duration,
 }
+
+/// How long a beat leaves `wait_seconds` out after it was refused (RFC 0193). A rollout
+/// finishes well within it; a service that still refuses costs one extra request.
+pub(crate) const WAIT_RECHECK: Duration = Duration::from_secs(600);
 
 /// What the loop's beat asks the service to hold it for (RFC 0193). The service holds at
 /// most 4 s, under the gateway's 5 s per-try limit, so this is the most it can give.
@@ -699,8 +710,26 @@ impl<'a> HttpService<'a> {
             signer,
             old_beat: AtomicBool::new(false),
             wait_seconds: 0,
-            no_wait: AtomicBool::new(false),
+            no_wait_until: Mutex::new(None),
+            wait_recheck: WAIT_RECHECK,
         }
+    }
+
+    /// Whether `wait_seconds` was refused and the refusal has not lapsed.
+    fn wait_refused(&self) -> bool {
+        let until = self
+            .no_wait_until
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        until.is_some_and(|t| Instant::now() < t)
+    }
+
+    /// The service refused `wait_seconds`: leave it out until `wait_recheck` has passed.
+    fn refuse_wait(&self) {
+        *self
+            .no_wait_until
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Instant::now() + self.wait_recheck);
     }
 
     /// Ask the service to hold each heartbeat until a turn is offered (RFC 0193), so a
@@ -814,7 +843,7 @@ impl Service for HttpService<'_> {
                 }
                 body
             };
-            let wait = self.wait_seconds > 0 && !self.no_wait.load(Ordering::Relaxed);
+            let wait = self.wait_seconds > 0 && !self.wait_refused();
             let mut sent = self
                 .api
                 .send_body(Method::Post, &path, &self.scoped(declared_body(wait)))
@@ -823,7 +852,7 @@ impl Service for HttpService<'_> {
             if wait && sent.as_ref().is_err_and(ServiceError::is_unknown_field) {
                 // A coordinator from before RFC 0193: it does not hold, but it knows
                 // the capacity and kinds. Beat again without the wait.
-                self.no_wait.store(true, Ordering::Relaxed);
+                self.refuse_wait();
                 sent = self
                     .api
                     .send_body(Method::Post, &path, &self.scoped(declared_body(false)))
@@ -1362,6 +1391,75 @@ mod tests {
                 .await
                 .unwrap_err()
                 .is_permanent()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_wait_is_left_out_for_a_while_and_then_asked_again() {
+        use iohr_auth::{Redacted, StaticToken};
+        use std::sync::Arc;
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::context::AnyCredential;
+
+        let beat = "/v1/coordinator/runners/rnr_1/heartbeat";
+        let server = MockServer::start().await;
+        // One replica of a rolling service that does not know `wait_seconds`...
+        Mock::given(method("POST"))
+            .and(path(beat))
+            .and(body_string_contains("\"wait_seconds\""))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "code": "bad_request",
+                "error": "body unrecognized field `wait_seconds`, expected one of runner_id, providers",
+                "details": []
+            })))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        // ...and the rest of the answers, as any service gives them.
+        Mock::given(method("POST"))
+            .and(path(beat))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "runner": {"id": "rnr_1"}, "heartbeat_interval_seconds": 20
+            })))
+            .with_priority(5)
+            .mount(&server)
+            .await;
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+            "person-token".to_owned(),
+        ))));
+        let api = Api::new(&server.uri(), person, false).unwrap();
+        let mut svc = HttpService::new(&api, "acc_1".into(), None).holding();
+        svc.wait_recheck = Duration::from_millis(300);
+        let declared = Declared {
+            capacity: Some(2),
+            version: "1".into(),
+            kinds: vec!["coordinate".into()],
+        };
+        let waits = |reqs: Vec<wiremock::Request>| {
+            reqs.iter()
+                .map(|r| String::from_utf8_lossy(&r.body).contains("wait_seconds"))
+                .collect::<Vec<_>>()
+        };
+
+        // The first beat asks, is refused and beats again without the wait; the next
+        // one does not ask at all.
+        svc.heartbeat("rnr_1", &[], &declared).await.unwrap();
+        svc.heartbeat("rnr_1", &[], &declared).await.unwrap();
+        assert_eq!(
+            waits(server.received_requests().await.unwrap()),
+            [true, false, false]
+        );
+
+        // Past the recheck it asks again (once more refused here, so it falls back
+        // again and latches again), and does not stay off until a restart.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        svc.heartbeat("rnr_1", &[], &declared).await.unwrap();
+        svc.heartbeat("rnr_1", &[], &declared).await.unwrap();
+        assert_eq!(
+            waits(server.received_requests().await.unwrap()),
+            [true, false, false, true, false, false]
         );
     }
 
