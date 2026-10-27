@@ -115,6 +115,18 @@ Boundary: the runner to GitHub, and the runner to the model process it starts (S
 | E | A planted mirror configuration (proxy, URL rewrite, include, hook, helper) receives the token | SR-33: token-bearing git runs only in the runner's mirror, after a check that refuses any such key and an `origin` that is not the job's repository; hooks off |
 | I | The model reads the person's `gh` sign-in or a git credential helper | SR-33 (RFC 0147 containment): empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's helpers cleared and prompts off in its environment. Not a sandbox: a process of the same user can still read files that user can |
 
+### `iohr runner` and approved run asks
+
+Boundary: the approvals service to the runner, and the runner to `kubectl` (SR-34).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| T | The payload is changed after the owner approved it | SR-34: the payload's canonical SHA-256 must equal the approved one, and the decision signature covers it |
+| S | A decision the owner's device never signed | SR-34: the signature must verify with a device key pinned on this machine |
+| R | An approved ask is replayed to run twice | SR-34: decisions carried out are recorded owner-only and refused again; an ask that cannot be recorded is not run |
+| E | An ask runs something outside the catalogue or in the cluster's own namespaces | SR-34: a fixed catalogue in the binary; `kubectl` by argument vector, no shell; `kube-system`, `kube-public`, `kube-node-lease` and non-DNS-label names refused |
+| S | Another machine reports progress as this runner | SR-34: each report is signed with this runner's enrolled P-256 key, kept in the credential store |
+
 ### `iohr sdk add`
 
 Boundary: `iohr` to the package manager it runs in the person's project (SR-31).

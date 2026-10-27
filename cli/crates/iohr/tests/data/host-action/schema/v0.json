@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.inorbit.hr/runner/host-action/v0.json",
+  "title": "Runner host action",
+  "description": "One action a person approves for one enrolled runner to carry out on its host: the action's dotted id from the catalog, the runner that runs it, its parameters (typed per action) and what it does in one plain sentence. It travels inside a signed approval for a pinned run: the approval names this schema, carries the action as its canonical JSON (keys sorted, no whitespace), pins the SHA-256 of that JSON, and the action's runner_id is the run's own. Integers and strings only, so the canonical JSON is the same in every language. The object and every params object are closed: an action can do only what its params say. Catalog: k8s.delete-failed-pods (params.namespace; absent means every namespace). Draft line: it may still be corrected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action",
+    "runner_id",
+    "params",
+    "effect"
+  ],
+  "properties": {
+    "action": {
+      "description": "The action's id from the catalog: lower-case dotted words, for example k8s.delete-failed-pods.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$"
+    },
+    "runner_id": {
+      "description": "The enrolled runner that runs it: rnr_ and a ULID, the same as the run's runner_id.",
+      "type": "string",
+      "pattern": "^rnr_[0-9A-Z]{26}$"
+    },
+    "params": {
+      "description": "The action's parameters; their shape is the action's (see the catalog below).",
+      "type": "object"
+    },
+    "effect": {
+      "description": "What it does, one plain sentence a person reads before approving, for example: Deletes every failed pod in namespace example.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "action": {
+          "const": "k8s.delete-failed-pods"
+        },
+        "params": {
+          "$ref": "#/$defs/k8s-delete-failed-pods"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  ],
+  "$defs": {
+    "k8s-delete-failed-pods": {
+      "description": "k8s.delete-failed-pods: delete the pods in phase Failed. namespace names one namespace; absent, every namespace.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namespace": {
+          "description": "A Kubernetes namespace name: lower-case letters, digits and hyphens, at most 63.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        }
+      }
+    }
+  }
+}
