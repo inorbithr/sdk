@@ -672,11 +672,11 @@ mod tests {
         assert!(KubeTarget::new(Some("--server=https://x"), None).is_err());
         assert!(KubeTarget::new(None, Some("relative/config")).is_err());
         assert!(KubeTarget::new(None, Some("-/etc/x")).is_err());
-        let both = KubeTarget::new(Some("prod"), Some("/etc/k/config")).unwrap();
-        assert_eq!(
-            both.args(),
-            ["--kubeconfig", "/etc/k/config", "--context", "prod"]
-        );
+        // An absolute path on every platform ("/etc/..." is not one on Windows).
+        let config = std::env::temp_dir().join("k").join("config");
+        let config = config.to_str().unwrap();
+        let both = KubeTarget::new(Some("prod"), Some(config)).unwrap();
+        assert_eq!(both.args(), ["--kubeconfig", config, "--context", "prod"]);
         assert_eq!(
             KubeTarget::new(Some(" prod "), None).unwrap().args(),
             ["--context", "prod"]
