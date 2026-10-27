@@ -644,6 +644,8 @@ async fn verbose_output_never_shows_the_token() {
         vec!["ext", "show", "inorbit/agent"],
         vec!["runner", "status"],
     ];
+    // `runner run-key` keeps its key in the profile's store, which a bare token has not:
+    // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
     // `iohr decisions` needs typed answers: `decisions_commands_never_show_the_token` runs it.
     for args in commands {
         let mut args = args.clone();

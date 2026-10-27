@@ -36,6 +36,7 @@ regex = { version = "1", default-features = false, features = ["std", "perf", "u
 # Held at 0.8: typify's API takes schemars 0.8 types (`RootSchema`); see the `ignore` in
 # .github/dependabot.yml. Moves to 1.x with typify (oxidecomputer/typify#886).
 schemars = "0.8"
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
 semver = "1"
 sigstore-verify = { version = "0.15", default-features = false, features = ["aws-lc-rs"] }
 syn = { version = "3", features = ["full"] }

@@ -392,6 +392,10 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `kinds` | `coordinate`, `build` | both | `register` and `run`: the turn classes the runner takes |
 | `always_on` | true or false | false | `register` |
 | `name` | text | the host name | `register`, and `run` to find the runner |
+| `kube_context` | a kubeconfig context name | not set | `run`: the cluster approved host actions reach, passed to every `kubectl` call as `--context` |
+| `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
+
+With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved host action.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On

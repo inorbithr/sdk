@@ -392,6 +392,24 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// This machine's run key: the P-256 key that signs what it reports on approved
+    /// pinned runs (RFC 0153), and whether the approvals service has it enrolled.
+    ///
+    /// Makes the key the first time and keeps it in the credential store beside the
+    /// runner key. With `--proof`, enrols it: the file holds your device's proof
+    /// (`key_id`, `signed_at`, `nonce`, `signature`) over the enrolment message this
+    /// command prints, which only your device key can sign.
+    RunKey {
+        /// A JSON file with your device's proof over the enrolment message.
+        #[arg(long)]
+        proof: Option<std::path::PathBuf>,
+        /// The enrolment's label, up to 100 characters (default: `iohr runner on` and
+        /// this machine's host name).
+        #[arg(long)]
+        label: Option<String>,
+        #[command(flatten)]
+        account: AccountArg,
+    },
 }
 
 #[derive(Debug, Subcommand)]

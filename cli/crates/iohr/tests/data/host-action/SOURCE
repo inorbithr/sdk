@@ -1,0 +1,19 @@
+Copied from inorbithr/core PR #1377 (branch feat/host-action-schema, head df28a9f3a66e7732846610262b5622f5cb6d7656), 2026-10-27: testdata/host-action/vectors/ -> vectors/, schemas/runner/host-action/ -> schema/. Never edit here; copy again when core changes them. The verifier these vectors hold to is crates/common/src/approval_messages/pinned.rs at that head.
+
+SHA-256 of each file as copied:
+305757ad3a91a93e068892b21b01453795cbeded2b235a5f53cda2f794d0059d  schema/examples/minimal.json
+8f0388a9aa86b2d81dfbf18d3365e755a09949e2c5451e5b384eea8b28d4cff2  schema/examples/one-namespace.json
+903b9a8f37c4e3716535b78a0caca8f6608418cb727e72f49eb9bc3e5c63c5da  schema/invalid/bad-namespace.json
+5c23877d407edbba45fd98de2ec0acfcf5c529ebfb85e08ed9f8bc17ce4cd614  schema/invalid/bad-runner-id.json
+61978f035de3c60dc9c173d957bac75712b1b43e82aaf1286f4e887737c4199b  schema/invalid/missing-effect.json
+139313800d808f8d3bc657a2355ec587a1bb4e83685cef0f7aa885d4b80fc87d  schema/invalid/multi-line-effect.json
+63f4b4dde66300e3f4a675c3c1ef6e45616efa214f835f3885f5a8551660edea  schema/invalid/unknown-action.json
+c3d8860d81428d22060076083950fd6d4f6671ca63529899db96406b7591509f  schema/invalid/unknown-field.json
+d37abf7f8074258a4511bfc183a2cf3eb17a5d63a7a2b721615b643859b01a69  schema/invalid/unknown-param.json
+6ab22816949d24227918e04e2e813f50ca7c422b2c5c49426e413248d767afad  schema/v0.json
+86522d2d7ec5ceedae8d2d7e95785773e2085b62de03d0915da931f1db060057  vectors/bad_signature.json
+9777993372cb92842acc3a34cfc9c5940955479bde1bc7fb2abcdd3ff511a3b1  vectors/expired.json
+1a61e24b2c46c38f672cc0e2cd63800a47d6b29793b6b98218f30fb0150eebe0  vectors/hash_mismatch.json
+a48e3325fd7de024cbb50dd513b275dfa2f1b980d9cc5c109c1cbc058b4af2fb  vectors/ok.json
+4ea14d633d3e3b3be29a01a2b055eecaaf6ab132a1ab95b31575195e54f558a4  vectors/schema_invalid.json
+bea7dd715e59a7a6d3cb5f0476b3d5148e60abfde7d5dd4855f1503d916b750a  vectors/wrong_runner.json
