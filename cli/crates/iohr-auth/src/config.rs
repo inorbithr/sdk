@@ -132,6 +132,14 @@ pub struct RunnerConfig {
     /// The runner's name; default the host name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The kubectl context approved host actions run in (`kubectl --context`). With no
+    /// context and no `kubeconfig`, the runner refuses every host action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kube_context: Option<String>,
+    /// The kubeconfig file approved host actions run with (`kubectl --kubeconfig`), an
+    /// absolute path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kubeconfig: Option<String>,
 }
 
 impl RunnerConfig {
@@ -142,6 +150,8 @@ impl RunnerConfig {
             && self.kinds.is_none()
             && self.always_on.is_none()
             && self.name.is_none()
+            && self.kube_context.is_none()
+            && self.kubeconfig.is_none()
     }
 }
 
@@ -550,7 +560,11 @@ pub(crate) fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<
     fs::rename(&tmp, dir.join(name))
 }
 
-pub(crate) fn create_private_dir(dir: &Path) -> io::Result<()> {
+/// Creates `dir` (and its parents) with mode 0700 on Unix.
+///
+/// # Errors
+/// The directory could not be created.
+pub fn create_private_dir(dir: &Path) -> io::Result<()> {
     let mut b = fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]

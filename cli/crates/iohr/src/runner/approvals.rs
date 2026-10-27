@@ -8,14 +8,18 @@
 //! recorded `payload_sha256`; a person decided it; its host action validates against
 //! `runner/host-action/v0` and is the one pinned; it pins this runner's id and key; it
 //! has not expired; and the decision's proof verifies against a device key this machine
-//! pins locally (`<config>/runner/approvals/device-keys`), never on the service's word.
-//! Then the proof's nonce must be new to this machine (`<config>/runner/approvals/seen`).
+//! pins locally (`<config>/runner/approvals/<account>/device-keys`), never on the
+//! service's word. Then the proof's nonce must be new to this machine
+//! (`<config>/runner/approvals/<account>/seen`). Both files must belong to the user and
+//! not be group- or world-writable ([`super::private`]).
 //!
 //! A run that fails a check is reported `failed` with the reason and nothing runs.
-//! Otherwise the runner reports `started` (with the payload as it saw it), records the
-//! nonce, carries out the action ([`host_action`]) and reports `done` or `failed` with
-//! the output, cut to the service's 500-character note. Every report is signed with the
-//! runner's P-256 run key over `iohr.approvals.v1.ReportRun` ([`signing::run_report_message`]).
+//! Otherwise the runner records the nonce (on disk, under a file lock, before anything
+//! else), reports `started` (with the payload as it saw it), carries out the action
+//! ([`host_action`]) and reports `done` or `failed` with the output, redacted and cut to
+//! the service's 500-character note. Every report is signed with the runner's P-256 run
+//! key over `iohr.approvals.v1.ReportRun` ([`signing::run_report_message`]) at the time
+//! it is made.
 //!
 //! Duplicates to fold later: this is the second runner registry (the coordinator's
 //! Ed25519 runners and the approvals service's P-256 runners), and `canonical`,
@@ -23,6 +27,7 @@
 //! also carries its own copy of.
 
 use std::collections::{BTreeMap, HashSet};
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -34,6 +39,7 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 
 use super::host_action::{self, HOST_ACTION, Kubectl};
+use super::private;
 use super::service::{HttpService, ServiceError};
 use super::signing::{RunKey, h as sha256_hex, run_report_message};
 
@@ -499,7 +505,7 @@ pub(crate) fn note_text(s: &str) -> String {
 }
 
 /// The decisions this runner has acted on, by approval and by the proof's key and nonce:
-/// a line `approval_id key_id nonce` each, in a file only its user reads.
+/// a line `approval_id key_id nonce` each, in a file only its user can write.
 #[derive(Debug, Default)]
 pub(crate) struct Seen {
     path: Option<PathBuf>,
@@ -507,30 +513,49 @@ pub(crate) struct Seen {
     nonces: HashSet<String>,
 }
 
+/// The two sets in a seen file's text.
+///
+/// # Errors
+/// A line that is not exactly `approval_id key_id nonce`, or a last line cut short (no
+/// new line): a record that cannot be read is never read as "nothing seen".
+fn parse_seen(text: &str) -> Result<(HashSet<String>, HashSet<String>), String> {
+    if !text.is_empty() && !text.ends_with('\n') {
+        return Err("the seen record ends in a cut line".to_owned());
+    }
+    let (mut approvals, mut nonces) = (HashSet::new(), HashSet::new());
+    for (i, line) in text.lines().enumerate() {
+        let mut f = line.split_whitespace();
+        let (Some(a), Some(k), Some(n), None) = (f.next(), f.next(), f.next(), f.next()) else {
+            return Err(format!(
+                "the seen record's line {} is not `approval_id key_id nonce`",
+                i + 1
+            ));
+        };
+        approvals.insert(a.to_owned());
+        nonces.insert(format!("{k} {n}"));
+    }
+    Ok((approvals, nonces))
+}
+
 impl Seen {
     /// The record at `path`; none yet is an empty one.
     ///
     /// # Errors
-    /// The file exists and cannot be read.
+    /// The file exists and cannot be read, belongs to another user, is writable by group
+    /// or world, or has a malformed line.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
         let mut seen = Self {
             path: Some(path.to_owned()),
             ..Self::default()
         };
-        match std::fs::read_to_string(path) {
-            Ok(t) => {
-                for line in t.lines() {
-                    let mut f = line.split_whitespace();
-                    if let (Some(a), Some(k), Some(n)) = (f.next(), f.next(), f.next()) {
-                        seen.approvals.insert(a.to_owned());
-                        seen.nonces.insert(format!("{k} {n}"));
-                    }
-                }
-                Ok(seen)
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(seen),
-            Err(e) => Err(format!("cannot read {}: {}", path.display(), e.kind())),
+        if let Some(mut f) = private::open_trusted(path, false)? {
+            let mut text = String::new();
+            f.read_to_string(&mut text)
+                .map_err(|e| format!("cannot read {}: {}", path.display(), e.kind()))?;
+            (seen.approvals, seen.nonces) =
+                parse_seen(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         }
+        Ok(seen)
     }
 
     /// Whether this approval, or its proof's nonce, was acted on before.
@@ -541,51 +566,67 @@ impl Seen {
                 .contains(&format!("{} {}", proof.key_id.trim(), proof.nonce.trim()))
     }
 
-    /// Records it, on disk first.
+    /// Records it, on disk first, under an exclusive lock on the file: the record is read
+    /// again inside the lock, so a second process sharing the file cannot record the
+    /// same decision too. `Ok(false)`: it was already there (acted on, here or by
+    /// another process), nothing was written.
     ///
     /// # Errors
-    /// The record could not be written; the caller then runs nothing.
-    pub(crate) fn record(&mut self, approval_id: &str, proof: &Proof) -> Result<(), String> {
+    /// The record could not be locked, read (or is malformed) or written; the caller then
+    /// runs nothing.
+    pub(crate) fn record(&mut self, approval_id: &str, proof: &Proof) -> Result<bool, String> {
         let (k, n) = (proof.key_id.trim(), proof.nonce.trim());
-        if k.is_empty()
+        if approval_id.is_empty()
+            || approval_id.contains(char::is_whitespace)
+            || k.is_empty()
             || n.is_empty()
             || k.contains(char::is_whitespace)
             || n.contains(char::is_whitespace)
         {
-            return Err("the proof's key id or nonce cannot be recorded".to_owned());
+            return Err("the approval id, proof key id or nonce cannot be recorded".to_owned());
         }
-        if let Some(path) = &self.path {
-            append_private(path, &format!("{approval_id} {k} {n}\n"))?;
+        if let Some(path) = self.path.clone() {
+            let fail =
+                |e: &std::io::Error| format!("cannot write {}: {}", path.display(), e.kind());
+            let mut f = private::open_trusted(&path, true)?
+                .ok_or_else(|| format!("cannot open {}", path.display()))?;
+            f.lock().map_err(|e| fail(&e))?;
+            let mut text = String::new();
+            f.read_to_string(&mut text).map_err(|e| fail(&e))?;
+            (self.approvals, self.nonces) =
+                parse_seen(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            if self.contains(approval_id, proof) {
+                return Ok(false);
+            }
+            f.write_all(format!("{approval_id} {k} {n}\n").as_bytes())
+                .and_then(|()| f.sync_all())
+                .map_err(|e| fail(&e))?;
+            // The lock goes with the handle.
+        } else if self.contains(approval_id, proof) {
+            return Ok(false);
         }
         self.approvals.insert(approval_id.to_owned());
         self.nonces.insert(format!("{k} {n}"));
-        Ok(())
+        Ok(true)
     }
 }
 
-/// Appends `line` to `path`, made readable by its owner only (and its directory too).
-fn append_private(path: &Path, line: &str) -> Result<(), String> {
-    use std::io::Write as _;
-    let fail = |e: std::io::Error| format!("cannot write {}: {}", path.display(), e.kind());
-    if let Some(dir) = path.parent() {
-        let mut b = std::fs::DirBuilder::new();
-        b.recursive(true);
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
-        b.create(dir).map_err(fail)?;
+/// Where this runner keeps one account's approvals state under the CLI's config
+/// directory: a directory per account, so two accounts on one machine never share a
+/// pinned key or a record of decisions.
+///
+/// # Errors
+/// The account is not made of letters, digits, `_` and `-` (it becomes a path part).
+pub(crate) fn state_dir(config_dir: &Path, account: &str) -> Result<PathBuf, String> {
+    if account.is_empty()
+        || account.len() > 128
+        || !account
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    {
+        return Err("the account id cannot name a state directory".to_owned());
     }
-    let mut o = std::fs::OpenOptions::new();
-    o.create(true).append(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
-    let mut f = o.open(path).map_err(fail)?;
-    f.write_all(line.as_bytes()).map_err(fail)?;
-    f.sync_all().map_err(fail)
-}
-
-/// Where this runner keeps its approvals state under the CLI's config directory.
-pub(crate) fn state_dir(config_dir: &Path) -> PathBuf {
-    config_dir.join("runner").join("approvals")
+    Ok(config_dir.join("runner").join("approvals").join(account))
 }
 
 /// What the loop needs from the approvals service.
@@ -711,10 +752,17 @@ pub(crate) struct Asks<K> {
     pub(crate) pin: Pin,
     pub(crate) keys: DeviceKeys,
     pub(crate) seen: Seen,
-    /// The host's `kubectl`; `None` when it is not installed (every action then fails).
-    pub(crate) kubectl: Option<K>,
+    /// The host's `kubectl`, pinned to the configured kube context; the reason when it
+    /// cannot be used (not installed, or no context configured): every action then
+    /// fails with it and nothing runs.
+    pub(crate) kubectl: Result<K, String>,
+    /// The time a report is signed at, read afresh for each report.
+    clock: fn() -> i64,
     /// Approvals handled by this process: never reported twice.
     handled: HashSet<String>,
+    /// Approvals recorded in `seen` whose `started` the service has not taken yet: the
+    /// next poll sends it again without a second record.
+    pending_start: HashSet<String>,
 }
 
 /// Unix seconds now.
@@ -730,7 +778,19 @@ impl<K: Kubectl> Asks<K> {
         pin: Pin,
         keys: DeviceKeys,
         seen: Seen,
-        kubectl: Option<K>,
+        kubectl: Result<K, String>,
+    ) -> Self {
+        Self::with_clock(key, pin, keys, seen, kubectl, unix_now)
+    }
+
+    /// As [`Asks::new`], on a given clock.
+    pub(crate) fn with_clock(
+        key: RunKey,
+        pin: Pin,
+        keys: DeviceKeys,
+        seen: Seen,
+        kubectl: Result<K, String>,
+        clock: fn() -> i64,
     ) -> Self {
         Self {
             key,
@@ -738,20 +798,22 @@ impl<K: Kubectl> Asks<K> {
             keys,
             seen,
             kubectl,
+            clock,
             handled: HashSet::new(),
+            pending_start: HashSet::new(),
         }
     }
 
     /// A signed report body: `step`, the note as kept, the observed payload for
-    /// `started`, and the runner's signature over all of it.
+    /// `started`, and the runner's signature over all of it, at the time now.
     fn report_body(
         &self,
         a: &Approved,
         step: &str,
         note: &str,
         observed: Option<&Value>,
-        now: i64,
     ) -> Result<Value, String> {
+        let now = (self.clock)();
         let note = note_text(note);
         // For `started`, the service hashes the observed payload in its stored form;
         // verify() already held that to `payload_sha256`.
@@ -792,17 +854,24 @@ impl<K: Kubectl> Asks<K> {
         step: &str,
         note: &str,
         observed: Option<&Value>,
-        now: i64,
     ) -> Result<(), String> {
-        let body = self.report_body(a, step, note, observed, now)?;
+        let body = self.report_body(a, step, note, observed)?;
         svc.report(&a.approval_id, &body)
             .await
             .map_err(|e| format!("the {step} report was not taken: {e}"))
     }
 
     /// The checks before anything runs; the action to carry out when all pass.
-    fn check(&self, a: &Approved, run: &Value, now: i64) -> Result<host_action::Action, Refusal> {
+    /// `retry`: the decision was recorded by this process already (its `started` was not
+    /// taken), so the record is not a replay.
+    fn check(
+        &self,
+        a: &Approved,
+        run: &Value,
+        retry: bool,
+    ) -> Result<host_action::Action, Refusal> {
         let payload = stored_payload(run)?;
+        let now = (self.clock)();
         if payload.get("action").is_none() && payload.get("schema_id").is_none() {
             // A script run: not this runner's to carry out (roll-runner's), whatever it pins.
             verify(a, &payload, &self.pin, &self.keys, now)?;
@@ -810,7 +879,7 @@ impl<K: Kubectl> Asks<K> {
         }
         verify(a, &payload, &self.pin, &self.keys, now)?;
         let proof = a.proof.clone().unwrap_or_default();
-        if self.seen.contains(&a.approval_id, &proof) {
+        if !retry && self.seen.contains(&a.approval_id, &proof) {
             return Err(Refusal::Replay);
         }
         host_action::lookup(&payload["action"]).map_err(Refusal::SchemaInvalid)
@@ -821,7 +890,6 @@ impl<K: Kubectl> Asks<K> {
     pub(crate) async fn tick(
         &mut self,
         svc: &impl RunAsks,
-        now: i64,
         note: &impl Fn(&str),
     ) -> Result<Tick, ServiceError> {
         let mut t = Tick::default();
@@ -835,44 +903,52 @@ impl<K: Kubectl> Asks<K> {
                 continue;
             }
             self.handled.insert(a.approval_id.clone());
-            let action = match self.check(&a, &run, now) {
+            let retry = self.pending_start.contains(&a.approval_id);
+            let action = match self.check(&a, &run, retry) {
                 Ok(action) => action,
                 Err(why) => {
                     t.refused += 1;
-                    let said = format!("refused ({}): {why}", why.label());
-                    note(&format!("approval {}: {said}", a.approval_id));
-                    if let Err(e) = self.send(svc, &a, "failed", &said, None, now).await {
-                        note(&format!("approval {}: {e}", a.approval_id));
-                    }
+                    self.refuse(svc, &a, &why, note).await;
                     continue;
                 }
             };
-            if let Err(e) = self.send(svc, &a, "started", "", Some(&run), now).await {
+            if !retry {
+                // On disk before anything else: a crash after this burns the approval
+                // (it is never run twice) rather than risking a second run.
+                let proof = a.proof.clone().unwrap_or_default();
+                match self.seen.record(&a.approval_id, &proof) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        t.refused += 1;
+                        self.refuse(svc, &a, &Refusal::Replay, note).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        t.failed += 1;
+                        let said = format!("{e}; nothing was run");
+                        note(&format!("approval {}: {said}", a.approval_id));
+                        if let Err(e) = self.send(svc, &a, "failed", &said, None).await {
+                            note(&format!("approval {}: {e}", a.approval_id));
+                        }
+                        continue;
+                    }
+                }
+                self.pending_start.insert(a.approval_id.clone());
+            }
+            if let Err(e) = self.send(svc, &a, "started", "", Some(&run)).await {
                 // Not started: nothing runs. A transient refusal is tried at the next poll.
                 note(&format!("approval {}: {e}; nothing was run", a.approval_id));
                 self.handled.remove(&a.approval_id);
                 continue;
             }
-            let proof = a.proof.clone().unwrap_or_default();
-            if let Err(e) = self.seen.record(&a.approval_id, &proof) {
-                t.failed += 1;
-                let said = format!("{e}; nothing was run");
-                note(&format!("approval {}: {said}", a.approval_id));
-                if let Err(e) = self
-                    .send(svc, &a, "failed", &said, None, unix_now_or(now))
-                    .await
-                {
-                    note(&format!("approval {}: {e}", a.approval_id));
-                }
-                continue;
-            }
+            self.pending_start.remove(&a.approval_id);
             note(&format!(
                 "approval {}: carrying out {action:?}",
                 a.approval_id
             ));
             let result = match &self.kubectl {
-                Some(k) => host_action::carry_out(&action, k).await,
-                None => Err("kubectl is not on this runner's PATH; nothing was run".to_owned()),
+                Ok(k) => host_action::carry_out(&action, k).await,
+                Err(why) => Err(format!("{why}; nothing was run")),
             };
             let (step, said) = match result {
                 Ok(out) => {
@@ -885,14 +961,20 @@ impl<K: Kubectl> Asks<K> {
                 }
             };
             note(&format!("approval {}: {step}", a.approval_id));
-            if let Err(e) = self
-                .send(svc, &a, step, &said, None, unix_now_or(now))
-                .await
-            {
+            if let Err(e) = self.send(svc, &a, step, &said, None).await {
                 note(&format!("approval {}: {e}", a.approval_id));
             }
         }
         Ok(t)
+    }
+
+    /// Reports a refused run `failed` with the reason.
+    async fn refuse(&self, svc: &impl RunAsks, a: &Approved, why: &Refusal, note: &impl Fn(&str)) {
+        let said = format!("refused ({}): {why}", why.label());
+        note(&format!("approval {}: {said}", a.approval_id));
+        if let Err(e) = self.send(svc, a, "failed", &said, None).await {
+            note(&format!("approval {}: {e}", a.approval_id));
+        }
     }
 
     /// Polls until `stop` turns true, every [`POLL`], backing off after failures.
@@ -907,7 +989,7 @@ impl<K: Kubectl> Asks<K> {
             if *stop.borrow() {
                 return;
             }
-            match self.tick(svc, unix_now(), note).await {
+            match self.tick(svc, note).await {
                 Ok(_) => wait = POLL,
                 Err(e) => {
                     note(&format!("approved runs could not be read: {e}"));
@@ -922,27 +1004,19 @@ impl<K: Kubectl> Asks<K> {
     }
 }
 
-/// The time a later report is signed at: now, unless the caller runs on a test clock
-/// (a `now` far from the real one), when it stays the caller's.
-fn unix_now_or(now: i64) -> i64 {
-    let real = unix_now();
-    if (real - now).abs() <= 3600 {
-        real
-    } else {
-        now
-    }
-}
-
 /// Reads the device keys this runner trusts from `path`; none is an empty set.
 ///
 /// # Errors
-/// The file exists and is unreadable or malformed.
+/// The file exists and is unreadable or malformed, belongs to another user, or is
+/// writable by group or world.
 pub(crate) fn load_device_keys(path: &Path) -> Result<DeviceKeys, String> {
-    match std::fs::read_to_string(path) {
-        Ok(t) => DeviceKeys::parse(&t),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DeviceKeys::default()),
-        Err(e) => Err(format!("cannot read {}: {}", path.display(), e.kind())),
-    }
+    let Some(mut f) = private::open_trusted(path, false)? else {
+        return Ok(DeviceKeys::default());
+    };
+    let mut text = String::new();
+    f.read_to_string(&mut text)
+        .map_err(|e| format!("cannot read {}: {}", path.display(), e.kind()))?;
+    DeviceKeys::parse(&text)
 }
 
 /// A device proof as `iohr runner run-key --proof <file>` reads it: the JSON object

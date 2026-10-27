@@ -123,7 +123,10 @@ Boundary: the approvals service to the runner, and the runner to `kubectl` (SR-3
 |---|---|---|
 | T | The payload is changed after the owner approved it | SR-34: the payload's canonical SHA-256 must equal the approved one, and the decision signature covers it |
 | S | A decision the owner's device never signed | SR-34: the signature must verify with a device key pinned on this machine |
-| R | An approved ask is replayed to run twice | SR-34: decisions carried out are recorded owner-only and refused again; an ask that cannot be recorded is not run |
+| T | Another local user edits the pinned device keys or the record of decisions | SR-34: both files must belong to the user and not be group- or world-writable (checked on the open file and its directory), a malformed record is an error |
+| E | An approved action reaches a cluster other than the intended one | SR-34: every `kubectl` call carries the configured `--context` or `--kubeconfig`; none configured, nothing runs |
+| I | `kubectl` errors put a server address or token in a report | SR-34: URLs, host:port, IPs and tokens are redacted before a report |
+| R | An approved ask is replayed to run twice | SR-34: decisions carried out are recorded (under a file lock, before `started`) and refused again; an ask that cannot be recorded is not run |
 | E | An ask runs something outside the catalogue or in the cluster's own namespaces | SR-34: a fixed catalogue in the binary; `kubectl` by argument vector, no shell; `kube-system`, `kube-public`, `kube-node-lease` and non-DNS-label names refused |
 | S | Another machine reports progress as this runner | SR-34: each report is signed with this runner's enrolled P-256 key, kept in the credential store |
 

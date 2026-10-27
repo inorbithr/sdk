@@ -333,7 +333,8 @@ fn asks(w: &World, seen: Seen, kubectl: Option<Fake>) -> Asks<Fake> {
         runner_public_key: w.run.public_key(),
     };
     let key = RunKey::from_pkcs8(&w.run_doc).unwrap();
-    Asks::new(key, pin, keys, seen, kubectl)
+    let kubectl = kubectl.ok_or_else(|| "kubectl is not on this runner's PATH".to_owned());
+    Asks::with_clock(key, pin, keys, seen, kubectl, || NOW)
 }
 
 /// Whether `body` is signed by the world's run key over core's `run_report` message.
@@ -368,7 +369,7 @@ async fn an_approved_action_is_started_carried_out_and_done() {
     let a = approval(&w, ask(ID1, "nonce-1"));
     let svc = Mock::with(vec![a.clone()]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
-    let t = asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(
         t,
         Tick {
@@ -400,18 +401,18 @@ async fn an_approved_action_is_started_carried_out_and_done() {
         [host_action::delete_failed_pods_argv("example").unwrap()]
     );
     // A second poll that still lists it reports nothing more.
-    asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps().len(), 2);
 }
 
 #[tokio::test]
 async fn a_replayed_nonce_runs_nothing() {
     let dir = tempfile::tempdir().unwrap();
-    let path = state_dir(dir.path()).join("seen");
+    let path = state_dir(dir.path(), "acct").unwrap().join("seen");
     let w = world();
     let first = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
     let mut asks1 = asks(&w, Seen::load(&path).unwrap(), Some(fake("", false)));
-    asks1.tick(&first, NOW, &|_| {}).await.unwrap();
+    asks1.tick(&first, &|_| {}).await.unwrap();
     assert_eq!(first.steps().last().unwrap().1, "done");
     #[cfg(unix)]
     {
@@ -426,7 +427,7 @@ async fn a_replayed_nonce_runs_nothing() {
         approval(&w, ask(ID1, "nonce-1")),
     ]);
     let mut asks2 = asks(&w, Seen::load(&path).unwrap(), Some(fake("", false)));
-    let t = asks2.tick(&again, NOW, &|_| {}).await.unwrap();
+    let t = asks2.tick(&again, &|_| {}).await.unwrap();
     assert_eq!(t.refused, 2);
     assert_eq!(
         again.steps(),
@@ -448,7 +449,7 @@ async fn a_replayed_nonce_runs_nothing() {
 async fn refused_with(w: &World, a: Value, label: &str) {
     let svc = Mock::with(vec![a]);
     let mut asks = asks(w, Seen::default(), Some(fake("default", false)));
-    let t = asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(t.refused, 1, "{label}");
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())], "{label}");
     let note = svc.note(0);
@@ -474,7 +475,7 @@ async fn an_unknown_action_is_refused_and_nothing_runs() {
     a.action["action"] = json!("k8s.reboot-node");
     let svc = Mock::with(vec![approval(&w, a)]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
-    asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
     assert!(svc.note(0).contains("unknown action"), "{}", svc.note(0));
     assert!(
@@ -535,7 +536,7 @@ async fn another_runner_s_run_is_left_alone() {
     a.action["runner_id"] = json!("rnr_00000000000000000000000009");
     let svc = Mock::with(vec![approval(&w, a)]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
-    let t = asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(t, Tick::default());
     assert_eq!(svc.steps(), Vec::<(String, String)>::new());
 }
@@ -546,7 +547,7 @@ async fn a_start_the_service_did_not_take_runs_nothing_and_is_tried_again() {
     let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
     *svc.refuse_started.lock().unwrap() = 1;
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
-    asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps(), Vec::<(String, String)>::new());
     assert!(
         asks.kubectl
@@ -557,7 +558,7 @@ async fn a_start_the_service_did_not_take_runs_nothing_and_is_tried_again() {
             .unwrap()
             .is_empty()
     );
-    asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(
         svc.steps(),
         [(ID1.into(), "started".into()), (ID1.into(), "done".into())]
@@ -570,7 +571,7 @@ async fn a_refused_delete_reports_failed_with_kubectl_s_words() {
     let a = approval(&w, ask(ID1, "nonce-1"));
     let svc = Mock::with(vec![a.clone()]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", true)));
-    let t = asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(t.failed, 1);
     assert_eq!(
         svc.steps(),
@@ -588,7 +589,7 @@ async fn no_kubectl_reports_failed() {
     let w = world();
     let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
     let mut asks = asks(&w, Seen::default(), None);
-    asks.tick(&svc, NOW, &|_| {}).await.unwrap();
+    asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps()[1].1, "failed");
     assert!(svc.note(1).contains("kubectl is not on this runner's PATH"));
 }
@@ -620,4 +621,273 @@ fn the_run_key_signs_what_its_public_key_verifies() {
     let shown = format!("{key:?}");
     assert!(shown.contains(&key.public_key()));
     assert!(!shown.contains(&B64URL.encode(doc.as_slice())));
+}
+
+// Items of the review of the approvals executor: what is trusted, and how.
+
+fn seen_lines(path: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+fn proof(nonce: &str) -> Proof {
+    Proof {
+        key_id: "device-0".to_owned(),
+        nonce: nonce.to_owned(),
+        ..Proof::default()
+    }
+}
+
+#[test]
+fn the_state_directory_is_one_per_account_and_never_a_path() {
+    let base = std::path::Path::new("/cfg");
+    let a = state_dir(base, "acc_1").unwrap();
+    let b = state_dir(base, "acc_2").unwrap();
+    assert_ne!(a, b);
+    assert_eq!(a, base.join("runner/approvals/acc_1"));
+    for bad in ["", "..", "a/b", "../x", "a b", "a\\b", "é"] {
+        assert!(state_dir(base, bad).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn a_malformed_seen_line_is_an_error_not_a_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("seen");
+    let ok = format!("{ID1} device-0 n1\n");
+    for (text, why) in [
+        ("garbage\n", "one field"),
+        ("a b\n", "two fields"),
+        ("a b c d\n", "four fields"),
+        ("a b c\nbroken line\n", "a later bad line"),
+        ("a b c", "a cut last line"),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let err = Seen::load(&path).unwrap_err();
+        assert!(err.contains("seen record"), "{why}: {err}");
+    }
+    std::fs::write(&path, &ok).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(Seen::load(&path).unwrap().contains(ID1, &proof("other")));
+}
+
+#[test]
+fn recording_into_a_malformed_seen_file_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("seen");
+    let mut seen = Seen::load(&path).unwrap();
+    std::fs::write(&path, "garbage\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(seen.record(ID1, &proof("n1")).is_err());
+    assert_eq!(seen_lines(&path), ["garbage"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_trust_root_and_the_seen_file_must_be_the_user_s_and_not_writable_by_others() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let w = world();
+    let keys = dir.path().join("device-keys");
+    let seen = dir.path().join("seen");
+    std::fs::write(&keys, format!("device-0 {}\n", w.device.public_key())).unwrap();
+    std::fs::write(&seen, "").unwrap();
+    let mode = |p: &std::path::Path, m: u32| {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+    };
+    // Owner-only and owner-writable-only files load.
+    for m in [0o600, 0o644, 0o400] {
+        mode(&keys, m);
+        mode(&seen, m);
+        assert_eq!(load_device_keys(&keys).unwrap().len(), 1, "{m:o}");
+        assert!(Seen::load(&seen).is_ok(), "{m:o}");
+    }
+    // Group- or world-writable is refused, whatever else is right.
+    for m in [0o620, 0o602, 0o660, 0o666, 0o777] {
+        mode(&keys, m);
+        mode(&seen, m);
+        let e = load_device_keys(&keys).unwrap_err();
+        assert!(e.contains("writable by group or world"), "{m:o}: {e}");
+        let e = Seen::load(&seen).unwrap_err();
+        assert!(e.contains("writable by group or world"), "{m:o}: {e}");
+        // And a record is not written into it.
+        let mut s = Seen {
+            path: Some(seen.clone()),
+            ..Seen::default()
+        };
+        assert!(s.record(ID1, &proof("n1")).is_err());
+        assert_eq!(std::fs::read_to_string(&seen).unwrap(), "");
+    }
+    // A file another user owns is refused.
+    let e = load_device_keys(std::path::Path::new("/etc/hosts")).unwrap_err();
+    assert!(e.contains("owned by another user"), "{e}");
+    let e = Seen::load(std::path::Path::new("/etc/hosts")).unwrap_err();
+    assert!(e.contains("owned by another user"), "{e}");
+    // A writable directory above it is refused too.
+    mode(&keys, 0o600);
+    mode(dir.path(), 0o777);
+    let e = load_device_keys(&keys).unwrap_err();
+    assert!(e.contains("writable by group or world"), "{e}");
+    mode(dir.path(), 0o700);
+}
+
+#[tokio::test]
+async fn the_decision_is_recorded_before_started_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = state_dir(dir.path(), "acct").unwrap().join("seen");
+    let w = world();
+    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    *svc.refuse_started.lock().unwrap() = 1;
+    let mut asks = asks(&w, Seen::load(&path).unwrap(), Some(fake("", false)));
+    asks.tick(&svc, &|_| {}).await.unwrap();
+    // The service took no start, nothing ran, and the decision is already on disk.
+    assert_eq!(svc.steps(), Vec::<(String, String)>::new());
+    assert_eq!(seen_lines(&path).len(), 1);
+    assert!(seen_lines(&path)[0].starts_with(ID1));
+    // The retry is not a replay of its own record: it starts, runs and finishes once.
+    asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(
+        svc.steps(),
+        [(ID1.into(), "started".into()), (ID1.into(), "done".into())]
+    );
+    assert_eq!(seen_lines(&path).len(), 1);
+    assert_eq!(
+        asks.kubectl.as_ref().unwrap().calls.lock().unwrap().len(),
+        1
+    );
+    // A new process after a restart finds it recorded and runs nothing.
+    let svc2 = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let mut asks2 = asks_with(&w, &path);
+    let t = asks2.tick(&svc2, &|_| {}).await.unwrap();
+    assert_eq!(t.refused, 1);
+    assert!(
+        asks2
+            .kubectl
+            .as_ref()
+            .unwrap()
+            .calls
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+fn asks_with(w: &World, path: &std::path::Path) -> Asks<Fake> {
+    asks(w, Seen::load(path).unwrap(), Some(fake("", false)))
+}
+
+#[tokio::test]
+async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("seen");
+    let w = world();
+    let mut seen = Seen::load(&path).unwrap();
+    // The record is replaced by a directory: it cannot be opened for writing.
+    std::fs::create_dir(&path).unwrap();
+    seen.path = Some(path.clone());
+    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let mut asks = asks(&w, seen, Some(fake("", false)));
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(t.failed, 1);
+    assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
+    assert!(svc.note(0).contains("nothing was run"));
+    assert!(
+        asks.kubectl
+            .as_ref()
+            .unwrap()
+            .calls
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn two_handles_on_one_seen_file_record_a_decision_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("seen");
+    let mut one = Seen::load(&path).unwrap();
+    let mut two = Seen::load(&path).unwrap();
+    assert_eq!(one.record(ID1, &proof("n1")), Ok(true));
+    // `two` loaded before the write and does not know it; the file says so under the lock.
+    assert_eq!(two.record(ID2, &proof("n1")), Ok(false));
+    assert_eq!(two.record(ID1, &proof("n9")), Ok(false));
+    assert_eq!(seen_lines(&path).len(), 1);
+    assert_eq!(two.record(ID2, &proof("n2")), Ok(true));
+    assert_eq!(seen_lines(&path).len(), 2);
+}
+
+#[tokio::test]
+async fn a_replay_the_load_missed_is_caught_under_the_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("seen");
+    let w = world();
+    // Loaded empty; another process records the same decision before this one acts.
+    let seen = Seen::load(&path).unwrap();
+    Seen::load(&path)
+        .unwrap()
+        .record(ID2, &proof("nonce-1"))
+        .unwrap();
+    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let mut asks = asks(&w, seen, Some(fake("", false)));
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(t.refused, 1);
+    assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
+    assert!(svc.note(0).starts_with("refused (replay)"));
+    assert!(
+        asks.kubectl
+            .as_ref()
+            .unwrap()
+            .calls
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn an_unconfigured_cluster_runs_nothing() {
+    let w = world();
+    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let mut asks = asks(&w, Seen::default(), None);
+    asks.kubectl = Err(host_action::KubeTarget::new(None, None).unwrap_err());
+    asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(svc.steps().last().unwrap().1, "failed");
+    assert!(svc.note(1).contains("no kube context is configured"));
+}
+
+#[tokio::test]
+async fn each_report_is_signed_at_the_time_it_is_made() {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static CLOCK: AtomicI64 = AtomicI64::new(NOW);
+    let w = world();
+    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
+    asks.clock = || CLOCK.fetch_add(10, Ordering::SeqCst);
+    asks.tick(&svc, &|_| {}).await.unwrap();
+    let times: Vec<i64> = svc
+        .reports
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, b)| b["runner"]["signed_at"].as_i64().unwrap())
+        .collect();
+    assert_eq!(times.len(), 2);
+    assert!(times[0] < times[1], "{times:?}");
 }

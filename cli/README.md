@@ -534,10 +534,14 @@ note saying which is missing:
   JSON `{key_id, signed_at, nonce, signature}`, and run `iohr runner run-key --proof FILE`:
   the runner adds its own signature of possession and enrols the key. `run-key` needs no
   coordinator scope.
-- The device keys it trusts, in `runner/approvals/device-keys` in the config directory:
+- The device keys it trusts, in `runner/approvals/<account>/device-keys` in the config directory:
   one `key_id public_key` per line (the key base64url of the 65-byte P-256 point), `#`
   for a comment. The service does not list a person's public keys, so they are pinned
-  here.
+  here. The file, like the record below, must belong to you and not be writable by group
+  or world (`chmod go-w`), or the runner stays off.
+- The cluster, `kube_context` and/or `kubeconfig` under `[runner]` (or a profile's
+  runner table). Every `kubectl` call gets `--context` and `--kubeconfig` from them, so an
+  approved action reaches only that cluster; with neither set, every action is refused.
 
 Every 20 seconds (up to 5 minutes after errors) the runner lists the account's approved
 `run` asks and takes those pinned to its own runner id. Before anything runs it checks,
@@ -545,15 +549,16 @@ in the order the platform checks them, that the ask is approved and pinned, that
 payload hashes to what was approved, that a person decided it, that the action fits the
 `runner/host-action/v0` schema, that it names this runner and its key, that it has not
 expired, and that a pinned device key signed the decision. An ask whose decision this
-machine has already carried out (the record is `runner/approvals/seen`, owner-only) is
-refused as a replay. A refused ask is reported `failed` with the reason and runs nothing.
-Otherwise the runner reports `started`, runs the action and reports `done` or `failed`
-with at most 500 characters of what happened; each report is signed with the run key.
+machine has already carried out (the record is `runner/approvals/<account>/seen`, owner-only, one line per
+decision, a malformed line is an error) is refused as a replay. A refused ask is reported `failed` with the reason and runs nothing.
+Otherwise the runner records the decision on disk (under a file lock), reports `started`,
+runs the action and reports `done` or `failed` with at most 500 characters of what
+happened, with addresses, URLs and tokens redacted; each report is signed with the run key.
 
 The catalogue has one action, `k8s.delete-failed-pods`: `kubectl delete pods
 --field-selector=status.phase=Failed` in the namespace the ask names, or in every
 namespace. It runs `kubectl` from an absolute `PATH` entry with an argument vector (never
-a shell), the scrubbed environment above plus `KUBECONFIG`, and a 2-minute limit. A
+a shell), the scrubbed environment above (no `KUBECONFIG`: the configured cluster is used), and a 2-minute limit. A
 namespace must be a DNS label, and `kube-system`, `kube-public` and `kube-node-lease` are
 refused. Any other action is reported `failed` as unknown.
 
@@ -578,7 +583,7 @@ refused. Any other action is reported `failed` as unknown.
 - The runner's one working directory, `runner/coordinate` in the config directory, is
   empty: Claude Code keeps the session itself, in its own directory.
 - Approved run asks: the pinned device keys and the record of decisions carried out, in
-  `runner/approvals` in the config directory, owner-only. The run key is in the
+  `runner/approvals/<account>` in the config directory, owner-only. The run key is in the
   credential store.
 - `iohr` talks to `api.inorbit.hr` and `auth.inorbit.hr` (the extensions catalogue is
   on the API host), and to the extension registry only in `iohr ext install`, `upgrade`

@@ -11,6 +11,13 @@
 //! --field-selector=status.phase=Failed -n <namespace>`, run from an argument vector
 //! with the runner's allowlisted environment, in each namespace the action names or, with
 //! none named, every namespace but the cluster's own ([`DENIED_NAMESPACES`]).
+//!
+//! Every `kubectl` call is pinned to the cluster the runner's config names (`kube_context`
+//! and/or `kubeconfig` under `[runner]`, [`KubeTarget`]), passed as `--context` and
+//! `--kubeconfig`: whatever the process environment or the kubeconfig's current context
+//! says, an approved action only ever reaches that cluster. With neither set the runner
+//! refuses to carry any action out. What `kubectl` says back goes into a report only
+//! after [`redact_kubectl`].
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -223,25 +230,161 @@ pub(crate) trait Kubectl {
     async fn run(&self, argv: &[String]) -> Result<Output, String>;
 }
 
+/// The cluster every `kubectl` call is pinned to: a context of the kubeconfig, a
+/// kubeconfig file, or both. Never empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KubeTarget {
+    context: Option<String>,
+    kubeconfig: Option<PathBuf>,
+}
+
+impl KubeTarget {
+    /// The target the runner's config names.
+    ///
+    /// # Errors
+    /// Neither is set (blank counts as not set), a context begins with `-` (it would be
+    /// read as a flag) or holds a control character, or the kubeconfig path is not
+    /// absolute.
+    pub(crate) fn new(context: Option<&str>, kubeconfig: Option<&str>) -> Result<Self, String> {
+        let context = context.map(str::trim).filter(|c| !c.is_empty());
+        let kubeconfig = kubeconfig.map(str::trim).filter(|c| !c.is_empty());
+        if context.is_none() && kubeconfig.is_none() {
+            return Err(
+                "no kube context is configured (set `kube_context` or `kubeconfig` under [runner])"
+                    .to_owned(),
+            );
+        }
+        if let Some(c) = context
+            && (c.starts_with('-') || c.chars().any(char::is_control))
+        {
+            return Err("the configured kube context is not a context name".to_owned());
+        }
+        let kubeconfig = match kubeconfig {
+            Some(k) if k.starts_with('-') || k.chars().any(char::is_control) => {
+                return Err("the configured kubeconfig is not a path".to_owned());
+            }
+            Some(k) if !std::path::Path::new(k).is_absolute() => {
+                return Err("the configured kubeconfig is not an absolute path".to_owned());
+            }
+            Some(k) => Some(PathBuf::from(k)),
+            None => None,
+        };
+        Ok(Self {
+            context: context.map(str::to_owned),
+            kubeconfig,
+        })
+    }
+
+    /// The arguments that go before every `kubectl` call's own.
+    pub(crate) fn args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(k) = &self.kubeconfig {
+            args.push("--kubeconfig".to_owned());
+            args.push(k.to_string_lossy().into_owned());
+        }
+        if let Some(c) = &self.context {
+            args.push("--context".to_owned());
+            args.push(c.clone());
+        }
+        args
+    }
+}
+
 /// The host's `kubectl`: the first on the runner's `PATH`, started directly (no shell)
-/// with the runner's allowlisted environment ([`env::scrub`]) and `KUBECONFIG`, no
-/// standard input, killed when it outlives [`KUBECTL_TIMEOUT`].
+/// with the runner's allowlisted environment ([`env::scrub`]) and no `KUBECONFIG` of its
+/// own, the [`KubeTarget`] as its first arguments, no standard input, killed when it
+/// outlives [`KUBECTL_TIMEOUT`].
 #[derive(Debug, Clone)]
 pub(crate) struct HostKubectl {
     pub(crate) program: PathBuf,
     pub(crate) env: Vec<(OsString, OsString)>,
+    pub(crate) target: KubeTarget,
 }
 
 impl HostKubectl {
-    /// `kubectl` from this process's `PATH`, or `None` when it is not installed.
-    pub(crate) fn find() -> Option<Self> {
-        let program = provider::find_on_path("kubectl", std::env::var_os("PATH").as_ref())?;
-        let mut env = env::scrub(std::env::vars_os());
-        if let Some(k) = std::env::var_os("KUBECONFIG") {
-            env.push(("KUBECONFIG".into(), k));
-        }
-        Some(Self { program, env })
+    /// `kubectl` from this process's `PATH`, pinned to the configured cluster.
+    ///
+    /// # Errors
+    /// No cluster is configured ([`KubeTarget::new`]), or `kubectl` is not installed.
+    pub(crate) fn find(context: Option<&str>, kubeconfig: Option<&str>) -> Result<Self, String> {
+        let target = KubeTarget::new(context, kubeconfig)?;
+        let program = provider::find_on_path("kubectl", std::env::var_os("PATH").as_ref())
+            .ok_or_else(|| "kubectl is not on this runner's PATH".to_owned())?;
+        // Not the process's KUBECONFIG: the cluster is the configured one.
+        let env = env::scrub(std::env::vars_os())
+            .into_iter()
+            .filter(|(k, _)| k != "KUBECONFIG")
+            .collect();
+        Ok(Self {
+            program,
+            env,
+            target,
+        })
     }
+}
+
+/// What `kubectl` said, made safe to put in a report: any URL, `host:port`, IP address,
+/// GitHub token, JWT, bearer value or long secret-looking word is replaced, line by line.
+pub(crate) fn redact_kubectl(text: &str) -> String {
+    fn bare(w: &str) -> &str {
+        w.trim_matches(|c: char| {
+            matches!(
+                c,
+                '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '<' | '>' | ':' | '.'
+            )
+        })
+    }
+    fn is_ip_or_host_port(w: &str) -> bool {
+        let (host, port) = w.rsplit_once(':').map_or((w, None), |(h, p)| (h, Some(p)));
+        let ipv4 = host.split('.').count() == 4
+            && host
+                .split('.')
+                .all(|o| !o.is_empty() && o.len() <= 3 && o.bytes().all(|b| b.is_ascii_digit()));
+        let port_ok = port.is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+        let dns_port = port_ok
+            && host.contains('.')
+            && host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'));
+        ipv4 || dns_port
+            || (w.contains(':')
+                && w.bytes().filter(|b| *b == b':').count() >= 2
+                && w.bytes().all(|b| b.is_ascii_hexdigit() || b == b':'))
+    }
+    fn secretish(w: &str) -> bool {
+        w.starts_with("eyJ")
+            || (w.len() >= 32
+                && w.bytes().all(|b| {
+                    b.is_ascii_alphanumeric()
+                        || matches!(b, b'-' | b'_' | b'+' | b'/' | b'=' | b'.')
+                })
+                && w.bytes().any(|b| b.is_ascii_digit())
+                && w.bytes().any(|b| b.is_ascii_alphabetic()))
+    }
+    text.lines()
+        .map(|line| {
+            let line = super::workspace::redact(line);
+            let mut after_bearer = false;
+            line.split(' ')
+                .map(|w| {
+                    let core = bare(w);
+                    let hide = after_bearer
+                        || core.contains("://")
+                        || is_ip_or_host_port(core)
+                        || secretish(core);
+                    after_bearer =
+                        core.eq_ignore_ascii_case("bearer") || core.eq_ignore_ascii_case("token");
+                    if hide && !core.is_empty() && core != "[redacted]" {
+                        "[redacted]".to_owned()
+                    } else {
+                        w.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn capped(bytes: &[u8]) -> String {
@@ -252,6 +395,7 @@ fn capped(bytes: &[u8]) -> String {
 impl Kubectl for HostKubectl {
     async fn run(&self, argv: &[String]) -> Result<Output, String> {
         let child = tokio::process::Command::new(&self.program)
+            .args(self.target.args())
             .args(argv)
             .env_clear()
             .envs(self.env.iter().cloned())
@@ -287,7 +431,10 @@ pub(crate) async fn carry_out(action: &Action, kubectl: &impl Kubectl) -> Result
             } else {
                 let out = kubectl.run(&list_namespaces_argv()).await?;
                 if !out.success {
-                    return Err(format!("listing namespaces: {}", out.stderr.trim()));
+                    return Err(format!(
+                        "listing namespaces: {}",
+                        redact_kubectl(out.stderr.trim())
+                    ));
                 }
                 out.stdout
                     .split_whitespace()
@@ -299,16 +446,16 @@ pub(crate) async fn carry_out(action: &Action, kubectl: &impl Kubectl) -> Result
             for ns in &namespaces {
                 let out = kubectl.run(&delete_failed_pods_argv(ns)?).await?;
                 if !out.success {
-                    done.push(format!("{ns}: {}", out.stderr.trim()));
+                    done.push(format!("{ns}: {}", redact_kubectl(out.stderr.trim())));
                     return Err(done.join("\n"));
                 }
-                let said = out.stdout.trim();
+                let said = redact_kubectl(out.stdout.trim());
                 done.push(format!(
                     "{ns}: {}",
                     if said.is_empty() {
                         "no failed pods"
                     } else {
-                        said
+                        &said
                     }
                 ));
             }
@@ -515,5 +662,109 @@ mod tests {
         )
         .await;
         assert_eq!(r, Err("example: forbidden".to_owned()));
+    }
+
+    #[test]
+    fn no_configured_cluster_is_refused_and_a_flag_is_not_a_context() {
+        assert!(KubeTarget::new(None, None).is_err());
+        assert!(KubeTarget::new(Some("  "), Some("")).is_err());
+        assert!(HostKubectl::find(None, None).is_err());
+        assert!(KubeTarget::new(Some("--server=https://x"), None).is_err());
+        assert!(KubeTarget::new(None, Some("relative/config")).is_err());
+        assert!(KubeTarget::new(None, Some("-/etc/x")).is_err());
+        let both = KubeTarget::new(Some("prod"), Some("/etc/k/config")).unwrap();
+        assert_eq!(
+            both.args(),
+            ["--kubeconfig", "/etc/k/config", "--context", "prod"]
+        );
+        assert_eq!(
+            KubeTarget::new(Some(" prod "), None).unwrap().args(),
+            ["--context", "prod"]
+        );
+    }
+
+    /// A `kubectl` that writes its arguments to a file, so the real process path is seen.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn every_call_carries_the_pinned_context_before_its_own_arguments() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("args");
+        let script = dir.path().join("kubectl");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", out.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let k = HostKubectl {
+            program: script,
+            env: Vec::new(),
+            target: KubeTarget::new(Some("prod"), None).unwrap(),
+        };
+        let r = k
+            .run(&delete_failed_pods_argv("example").unwrap())
+            .await
+            .unwrap();
+        assert!(r.success);
+        let got = std::fs::read_to_string(&out).unwrap();
+        let args: Vec<&str> = got.lines().collect();
+        assert_eq!(&args[..3], ["--context", "prod", "delete"]);
+        assert_eq!(args.last().copied(), Some("example"));
+    }
+
+    #[test]
+    fn what_kubectl_says_is_redacted_before_it_is_reported() {
+        let said = redact_kubectl(
+            "Unable to connect to the server: dial tcp 10.0.0.5:6443: i/o timeout\n\
+             error: You must be logged in (https://api.example.com:6443/api) Bearer abcdef\n\
+             token ghp_abcdefghijklmnopqrstuvwxyz0123456789 eyJhbGciOiJIUzI1NiJ9.e30.sig\n\
+             pods is forbidden in namespace \"example\"",
+        );
+        for leak in [
+            "10.0.0.5",
+            "6443",
+            "example.com",
+            "https://",
+            "abcdef",
+            "ghp_",
+            "eyJ",
+        ] {
+            assert!(!said.contains(leak), "{leak} leaked: {said}");
+        }
+        assert!(said.contains("forbidden in namespace \"example\""));
+        assert_eq!(said.lines().count(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_refused_delete_does_not_report_a_server_address() {
+        let k = Leaky;
+        let r = carry_out(
+            &Action::DeleteFailedPods {
+                namespace: Some("example".to_owned()),
+            },
+            &k,
+        )
+        .await
+        .unwrap_err();
+        assert!(!r.contains("10.1.2.3") && !r.contains("https://"), "{r}");
+        assert!(r.contains("[redacted]"));
+    }
+
+    struct Leaky;
+
+    #[allow(
+        unknown_lints,
+        clippy::unused_async_trait_impl,
+        reason = "a fake answers at once; the trait is async for the real kubectl"
+    )]
+    impl Kubectl for Leaky {
+        async fn run(&self, _argv: &[String]) -> Result<Output, String> {
+            Ok(Output {
+                success: false,
+                stdout: String::new(),
+                stderr: "Get https://10.1.2.3:6443/api: connection refused".to_owned(),
+            })
+        }
     }
 }

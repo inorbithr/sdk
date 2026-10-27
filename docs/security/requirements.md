@@ -306,14 +306,14 @@ the platform's verifier makes, in its order: approved and pinned, the payload's 
 equal to the approved one, decided by a person, the action valid against
 `runner/host-action/v0`, this runner's id and key, not expired, and a decision signature
 by a device key pinned on this machine. A decision already carried out is refused as a
-replay; the record is kept owner-only and an ask that cannot be recorded is not run. Any
+replay; the record is written, under a file lock, before the run is reported started, and an ask that cannot be recorded is not run. The pinned device keys and the record must belong to the user and not be writable by group or world, and a malformed line in the record is an error; both live in a directory per account. Every `kubectl` call is pinned to the configured kube context or kubeconfig, and with none configured every action is refused. Any
 refusal is reported `failed` and runs nothing. Actions come only from a fixed catalogue
 in the binary; an action outside it is refused. `k8s.delete-failed-pods` runs `kubectl`
 from an absolute `PATH` entry with an argument vector, never a shell, with the scrubbed
 environment and a time limit, and never in `kube-system`, `kube-public` or
 `kube-node-lease`; a namespace must be a DNS label. Every report is signed with the
 runner's own P-256 run key, kept in the credential store and never printed; the output it
-carries is capped.
+carries is capped and redacted of URLs, addresses and tokens.
 - Why: an approved ask is a command run on the owner's machines; one that was changed,
   replayed, meant for another runner or signed by no device of the owner's must not run.
 - Verify: the platform's verdict vectors, copied with their source and checked to give

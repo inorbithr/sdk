@@ -78,6 +78,11 @@ pub(crate) struct Effective {
     pub(crate) always_on: Setting<bool>,
     /// `None` when set nowhere: register uses the host name, run the key this machine holds.
     pub(crate) name: Option<Setting<String>>,
+    /// `None` when set nowhere: with no kube context either, approved host actions are
+    /// refused (every `kubectl` call is pinned to the configured cluster).
+    pub(crate) kube_context: Option<Setting<String>>,
+    /// The kubeconfig file the pinned `kubectl` reads (absolute path), if any.
+    pub(crate) kubeconfig: Option<Setting<String>>,
 }
 
 /// Resolves each key: flag, then the profile's table, then `[runner]`, then the default.
@@ -148,11 +153,15 @@ pub(crate) fn resolve(
     {
         return Err(format!("runner name ({}) is empty", n.source));
     }
+    let kube_context = pick(None, profile, file, |c| c.kube_context.clone());
+    let kubeconfig = pick(None, profile, file, |c| c.kubeconfig.clone());
     Ok(Effective {
         capacity,
         kinds,
         always_on,
         name,
+        kube_context,
+        kubeconfig,
     })
 }
 
@@ -364,5 +373,22 @@ mod tests {
         assert_eq!(df_available(mac), Some(72_290_648 * 1024));
         assert_eq!(df_available("Filesystem\n"), None);
         assert_eq!(df_available(""), None);
+    }
+
+    #[test]
+    fn the_kube_target_comes_from_the_profile_then_the_file_and_is_unset_by_default() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!((none.kube_context, none.kubeconfig), (None, None));
+        let mut file = RunnerConfig::default();
+        file.kube_context = Some("prod".into());
+        file.kubeconfig = Some("/etc/k/config".into());
+        let mut work = RunnerConfig::default();
+        work.kube_context = Some("work".into());
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(
+            e.kube_context.unwrap().source,
+            Source::Profile("work".into())
+        );
+        assert_eq!(e.kubeconfig.unwrap().source, Source::File);
     }
 }

@@ -261,7 +261,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             };
             // Approved pinned runs (RFC 0153), beside the turns, when this machine is set
             // up for them; stopped once the turn loop ends.
-            let mut asks = approvals_setup(&ctx, &s, &svc, &account).await;
+            let mut asks = approvals_setup(&ctx, &s, &svc, &account, &set).await;
             let (stop_asks, asks_stopped) = watch::channel(false);
             let turns = async {
                 let ended = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
@@ -387,7 +387,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 .and_then(|r| r.get("runner_id"))
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned);
-            let keys_file = approvals::state_dir(&ctx.dir).join("device-keys");
+            let keys_file = approvals::state_dir(&ctx.dir, &account)
+                .map_err(Error::Failed)?
+                .join("device-keys");
             let keys = approvals::load_device_keys(&keys_file).map_err(Error::Failed)?;
             if out.json {
                 Out::print_json(&serde_json::json!({
@@ -430,6 +432,7 @@ async fn approvals_setup(
     s: &crate::context::Session,
     svc: &HttpService<'_>,
     account: &str,
+    set: &Effective,
 ) -> Option<approvals::Asks<HostKubectl>> {
     let off = |why: &str| {
         Out::note(&format!("approved runs: off, {why}"));
@@ -440,7 +443,10 @@ async fn approvals_setup(
         Ok(None) => return off("this machine has no run key (`iohr runner run-key`)"),
         Err(e) => return off(&e.to_string()),
     };
-    let dir = approvals::state_dir(&ctx.dir);
+    let dir = match approvals::state_dir(&ctx.dir, account) {
+        Ok(d) => d,
+        Err(e) => return off(&e),
+    };
     let keys = match approvals::load_device_keys(&dir.join("device-keys")) {
         Ok(k) if !k.is_empty() => k,
         Ok(_) => {
@@ -467,14 +473,16 @@ async fn approvals_setup(
         Ok(seen) => seen,
         Err(e) => return off(&e),
     };
-    let kubectl = HostKubectl::find();
+    let kubectl = HostKubectl::find(
+        set.kube_context.as_ref().map(|c| c.value.as_str()),
+        set.kubeconfig.as_ref().map(|c| c.value.as_str()),
+    );
     Out::note(&format!(
         "approved runs: on, as {runner_id}, {} device keys pinned{}",
         keys.len(),
-        if kubectl.is_none() {
-            "; kubectl is not on PATH, so every action will fail"
-        } else {
-            ""
+        match &kubectl {
+            Ok(_) => String::new(),
+            Err(why) => format!("; {why}, so every action will be refused"),
         }
     ));
     let pin = approvals::Pin {
@@ -556,6 +564,14 @@ async fn show_settings(e: &Effective, out: Out) {
         || (host_name(), "host name".to_owned()),
         |n| (n.value.clone(), n.source.to_string()),
     );
+    let kube = |v: &Option<settings::Setting<String>>| {
+        v.as_ref().map_or_else(
+            || ("not set".to_owned(), "default".to_owned()),
+            |k| (k.value.clone(), k.source.to_string()),
+        )
+    };
+    let (kube_context, kube_context_from) = kube(&e.kube_context);
+    let (kubeconfig, kubeconfig_from) = kube(&e.kubeconfig);
     let volume = floor.volume.display().to_string();
     let free_text = free.map_or_else(|| "unknown".to_owned(), |f| format!("{} GB", gb(f)));
     if out.json {
@@ -564,6 +580,8 @@ async fn show_settings(e: &Effective, out: Out) {
             "kinds": { "value": e.kinds.value, "source": e.kinds.source.to_string() },
             "always_on": { "value": e.always_on.value, "source": e.always_on.source.to_string() },
             "name": { "value": name, "source": name_from },
+            "kube_context": { "value": e.kube_context.as_ref().map(|k| &k.value), "source": kube_context_from },
+            "kubeconfig": { "value": e.kubeconfig.as_ref().map(|k| &k.value), "source": kubeconfig_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
         }));
         return;
@@ -581,6 +599,8 @@ async fn show_settings(e: &Effective, out: Out) {
             e.always_on.source.to_string(),
         ],
         vec!["name".to_owned(), name, name_from],
+        vec!["kube_context".to_owned(), kube_context, kube_context_from],
+        vec!["kubeconfig".to_owned(), kubeconfig, kubeconfig_from],
         vec![
             "build_floor".to_owned(),
             format!(
