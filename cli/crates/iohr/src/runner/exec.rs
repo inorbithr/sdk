@@ -3,7 +3,7 @@
 
 use std::ffi::OsString;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 use std::time::Duration;
@@ -13,6 +13,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 use super::claude::{self, Outcome, Parsed, Session, TurnSpec};
 use super::env;
+use super::hygiene;
 use super::provider::{self, AuthState};
 use super::service::{Pack, ProviderState};
 
@@ -150,6 +151,24 @@ impl ClaudeExec {
             .unwrap_or_default()
     }
 
+    /// The model's `cargo` builds into its repository's shared directory, not into a
+    /// `target/` of the job's checkout (RFC 0189). `checkout` is relative to the working
+    /// directory.
+    fn turn_command(&self, args: &[String], checkout: &str) -> Command {
+        let mut cmd = self.command(args);
+        cmd.current_dir(&self.workdir);
+        let rel = Path::new(checkout);
+        if !checkout.is_empty()
+            && rel
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+            && let Some(t) = hygiene::target_for(&self.workdir, &self.workdir.join(rel))
+        {
+            cmd.env(hygiene::TARGET_VAR, t);
+        }
+        cmd
+    }
+
     async fn run_turn(&self, pack: &Pack) -> Finished {
         if pack.user != self.user {
             return Finished::refused(
@@ -197,8 +216,7 @@ impl ClaudeExec {
         if let Err(e) = tokio::fs::create_dir_all(&self.workdir).await {
             return fail(format!("the working directory: {e}"));
         }
-        let mut cmd = self.command(&args);
-        cmd.current_dir(&self.workdir);
+        let mut cmd = self.turn_command(&args, &pack.checkout);
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return fail(format!("claude did not start: {e}")),

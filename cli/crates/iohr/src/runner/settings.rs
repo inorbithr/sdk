@@ -181,6 +181,10 @@ pub(crate) struct Declared {
     pub(crate) capacity: Option<u32>,
     pub(crate) version: String,
     pub(crate) kinds: Vec<String>,
+    /// Free bytes on the checkouts' filesystem, when the runner measured it.
+    pub(crate) disk_free_bytes: Option<u64>,
+    /// Why the runner takes no new lease, when it does not.
+    pub(crate) lease_paused_reason: Option<String>,
 }
 
 impl Declared {
@@ -189,6 +193,8 @@ impl Declared {
             capacity: e.capacity.as_ref().map(|c| c.value),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             kinds: e.kinds.value.clone(),
+            disk_free_bytes: None,
+            lease_paused_reason: None,
         }
     }
 
@@ -326,6 +332,8 @@ mod tests {
             capacity: Some(4),
             version: "v".into(),
             kinds: vec!["coordinate".into(), "build".into()],
+            disk_free_bytes: None,
+            lease_paused_reason: None,
         };
         let floor = BUILD_FLOOR_BYTES;
         assert_eq!(
@@ -350,6 +358,8 @@ mod tests {
             capacity: None,
             version: "v".into(),
             kinds: vec!["build".into()],
+            disk_free_bytes: None,
+            lease_paused_reason: None,
         };
         assert_eq!(only.guarded(Some(0), floor).kinds, [NOTHING]);
     }

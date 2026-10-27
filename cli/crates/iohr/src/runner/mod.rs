@@ -7,6 +7,7 @@ pub(crate) mod claude;
 pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod gate;
+pub(crate) mod hygiene;
 pub(crate) mod provider;
 pub(crate) mod run_loop;
 pub(crate) mod service;

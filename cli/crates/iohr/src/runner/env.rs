@@ -36,6 +36,8 @@ pub(crate) const ALLOW_EXACT: &[&str] = &[
     "XDG_STATE_HOME",
     "XDG_CACHE_HOME",
     "XDG_RUNTIME_DIR",
+    // Where `cargo` builds: not a secret, and the runner sets it per repository.
+    "CARGO_TARGET_DIR",
     // Windows.
     "USERPROFILE",
     "USERNAME",

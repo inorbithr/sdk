@@ -781,6 +781,13 @@ impl Service for HttpService<'_> {
                 }
                 m.insert("version".into(), json!(declared.version));
                 m.insert("kinds".into(), json!(declared.kinds));
+                // 64-bit integers travel as strings.
+                if let Some(b) = declared.disk_free_bytes {
+                    m.insert("disk_free_bytes".into(), json!(b.to_string()));
+                }
+                if let Some(r) = &declared.lease_paused_reason {
+                    m.insert("lease_paused_reason".into(), json!(r));
+                }
             }
             match self
                 .api
