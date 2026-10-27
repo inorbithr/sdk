@@ -1,6 +1,8 @@
 //! The approvals half of the runner: core's vectors (copied in `tests/data/host-action`,
 //! see its `SOURCE`), then the loop against a recording service and a recording `kubectl`.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -223,6 +225,22 @@ struct Ask<'a> {
     signer: Option<&'a RunKey>,
 }
 
+/// A random nonce per name and test thread: the same name gives the same nonce within one test
+/// (a replay, or a proof matching its ask), and nothing hard-coded reaches the signed payload.
+fn nonce(name: &str) -> &'static str {
+    thread_local! {
+        static NONCES: RefCell<HashMap<String, &'static str>> = RefCell::default();
+    }
+    NONCES.with(|n| {
+        *n.borrow_mut().entry(name.to_owned()).or_insert_with(|| {
+            let mut b = [0u8; 8];
+            getrandom::fill(&mut b).unwrap();
+            // Leaked so an `Ask` can borrow it for the whole test; a few bytes per test.
+            Box::leak(format!("{:016x}", u64::from_le_bytes(b)).into_boxed_str())
+        })
+    })
+}
+
 fn ask<'a>(id: &'a str, nonce: &'a str) -> Ask<'a> {
     Ask {
         id,
@@ -366,7 +384,7 @@ const ID2: &str = "apr_00000000000000000000000002";
 #[tokio::test]
 async fn an_approved_action_is_started_carried_out_and_done() {
     let w = world();
-    let a = approval(&w, ask(ID1, "nonce-1"));
+    let a = approval(&w, ask(ID1, nonce("nonce-1")));
     let svc = Mock::with(vec![a.clone()]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
     let t = asks.tick(&svc, &|_| {}).await.unwrap();
@@ -410,7 +428,7 @@ async fn a_replayed_nonce_runs_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let path = state_dir(dir.path(), "acct").unwrap().join("seen");
     let w = world();
-    let first = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let first = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks1 = asks(&w, Seen::load(&path).unwrap(), Some(fake("", false)));
     asks1.tick(&first, &|_| {}).await.unwrap();
     assert_eq!(first.steps().last().unwrap().1, "done");
@@ -423,8 +441,8 @@ async fn a_replayed_nonce_runs_nothing() {
 
     // A new process: the same decision under another approval, and the same approval.
     let again = Mock::with(vec![
-        approval(&w, ask(ID2, "nonce-1")),
-        approval(&w, ask(ID1, "nonce-1")),
+        approval(&w, ask(ID2, nonce("nonce-1"))),
+        approval(&w, ask(ID1, nonce("nonce-1"))),
     ]);
     let mut asks2 = asks(&w, Seen::load(&path).unwrap(), Some(fake("", false)));
     let t = asks2.tick(&again, &|_| {}).await.unwrap();
@@ -471,7 +489,7 @@ async fn refused_with(w: &World, a: Value, label: &str) {
 #[tokio::test]
 async fn an_unknown_action_is_refused_and_nothing_runs() {
     let w = world();
-    let mut a = ask(ID1, "nonce-1");
+    let mut a = ask(ID1, nonce("nonce-1"));
     a.action["action"] = json!("k8s.reboot-node");
     let svc = Mock::with(vec![approval(&w, a)]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
@@ -493,7 +511,7 @@ async fn an_unknown_action_is_refused_and_nothing_runs() {
 async fn a_cluster_namespace_is_refused_before_anything_starts() {
     let w = world();
     for ns in host_action::DENIED_NAMESPACES {
-        let mut a = ask(ID1, "nonce-1");
+        let mut a = ask(ID1, nonce("nonce-1"));
         a.action = action(&json!({ "namespace": ns }));
         refused_with(&w, approval(&w, a), "schema_invalid").await;
     }
@@ -502,28 +520,28 @@ async fn a_cluster_namespace_is_refused_before_anything_starts() {
 #[tokio::test]
 async fn each_refusal_reports_failed_and_runs_nothing() {
     let w = world();
-    let mut expired = ask(ID1, "nonce-1");
+    let mut expired = ask(ID1, nonce("nonce-1"));
     expired.expires_at = NOW - 1;
     refused_with(&w, approval(&w, expired), "expired").await;
 
-    let mut other_key = ask(ID1, "nonce-1");
+    let mut other_key = ask(ID1, nonce("nonce-1"));
     other_key.runner_key = Some(world().run.public_key());
     refused_with(&w, approval(&w, other_key), "wrong_runner").await;
 
     let stranger = world();
-    let mut forged = ask(ID1, "nonce-1");
+    let mut forged = ask(ID1, nonce("nonce-1"));
     forged.signer = Some(&stranger.device);
     refused_with(&w, approval(&w, forged), "bad_signature").await;
 
-    let mut tampered = approval(&w, ask(ID1, "nonce-1"));
+    let mut tampered = approval(&w, ask(ID1, nonce("nonce-1")));
     tampered["payload"]["run"]["effect"] = json!("local");
     refused_with(&w, tampered, "hash_mismatch").await;
 
-    let mut by_service = approval(&w, ask(ID1, "nonce-1"));
+    let mut by_service = approval(&w, ask(ID1, nonce("nonce-1")));
     by_service["decided_by"] = json!("svc:auto");
     refused_with(&w, by_service, "no_approver").await;
 
-    let mut unsigned = approval(&w, ask(ID1, "nonce-1"));
+    let mut unsigned = approval(&w, ask(ID1, nonce("nonce-1")));
     unsigned["decision_proof"] = Value::Null;
     refused_with(&w, unsigned, "bad_signature").await;
 }
@@ -531,7 +549,7 @@ async fn each_refusal_reports_failed_and_runs_nothing() {
 #[tokio::test]
 async fn another_runner_s_run_is_left_alone() {
     let w = world();
-    let mut a = ask(ID1, "nonce-1");
+    let mut a = ask(ID1, nonce("nonce-1"));
     a.runner_id = "rnr_00000000000000000000000009";
     a.action["runner_id"] = json!("rnr_00000000000000000000000009");
     let svc = Mock::with(vec![approval(&w, a)]);
@@ -544,7 +562,7 @@ async fn another_runner_s_run_is_left_alone() {
 #[tokio::test]
 async fn a_start_the_service_did_not_take_runs_nothing_and_is_tried_again() {
     let w = world();
-    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     *svc.refuse_started.lock().unwrap() = 1;
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
     asks.tick(&svc, &|_| {}).await.unwrap();
@@ -568,7 +586,7 @@ async fn a_start_the_service_did_not_take_runs_nothing_and_is_tried_again() {
 #[tokio::test]
 async fn a_refused_delete_reports_failed_with_kubectl_s_words() {
     let w = world();
-    let a = approval(&w, ask(ID1, "nonce-1"));
+    let a = approval(&w, ask(ID1, nonce("nonce-1")));
     let svc = Mock::with(vec![a.clone()]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", true)));
     let t = asks.tick(&svc, &|_| {}).await.unwrap();
@@ -587,7 +605,7 @@ async fn a_refused_delete_reports_failed_with_kubectl_s_words() {
 #[tokio::test]
 async fn no_kubectl_reports_failed() {
     let w = world();
-    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks = asks(&w, Seen::default(), None);
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps()[1].1, "failed");
@@ -680,7 +698,11 @@ fn a_malformed_seen_line_is_an_error_not_a_skip() {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-    assert!(Seen::load(&path).unwrap().contains(ID1, &proof("other")));
+    assert!(
+        Seen::load(&path)
+            .unwrap()
+            .contains(ID1, &proof(nonce("other")))
+    );
 }
 
 #[test]
@@ -694,7 +716,7 @@ fn recording_into_a_malformed_seen_file_writes_nothing() {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-    assert!(seen.record(ID1, &proof("n1")).is_err());
+    assert!(seen.record(ID1, &proof(nonce("n1"))).is_err());
     assert_eq!(seen_lines(&path), ["garbage"]);
 }
 
@@ -731,7 +753,7 @@ fn the_trust_root_and_the_seen_file_must_be_the_user_s_and_not_writable_by_other
             path: Some(seen.clone()),
             ..Seen::default()
         };
-        assert!(s.record(ID1, &proof("n1")).is_err());
+        assert!(s.record(ID1, &proof(nonce("n1"))).is_err());
         assert_eq!(std::fs::read_to_string(&seen).unwrap(), "");
     }
     // A file another user owns is refused.
@@ -752,7 +774,7 @@ async fn the_decision_is_recorded_before_started_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let path = state_dir(dir.path(), "acct").unwrap().join("seen");
     let w = world();
-    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     *svc.refuse_started.lock().unwrap() = 1;
     let mut asks = asks(&w, Seen::load(&path).unwrap(), Some(fake("", false)));
     asks.tick(&svc, &|_| {}).await.unwrap();
@@ -772,7 +794,7 @@ async fn the_decision_is_recorded_before_started_is_reported() {
         1
     );
     // A new process after a restart finds it recorded and runs nothing.
-    let svc2 = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc2 = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks2 = asks_with(&w, &path);
     let t = asks2.tick(&svc2, &|_| {}).await.unwrap();
     assert_eq!(t.refused, 1);
@@ -801,7 +823,7 @@ async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
     // The record is replaced by a directory: it cannot be opened for writing.
     std::fs::create_dir(&path).unwrap();
     seen.path = Some(path.clone());
-    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks = asks(&w, seen, Some(fake("", false)));
     let t = asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(t.failed, 1);
@@ -824,12 +846,12 @@ fn two_handles_on_one_seen_file_record_a_decision_once() {
     let path = dir.path().join("seen");
     let mut one = Seen::load(&path).unwrap();
     let mut two = Seen::load(&path).unwrap();
-    assert_eq!(one.record(ID1, &proof("n1")), Ok(true));
+    assert_eq!(one.record(ID1, &proof(nonce("n1"))), Ok(true));
     // `two` loaded before the write and does not know it; the file says so under the lock.
-    assert_eq!(two.record(ID2, &proof("n1")), Ok(false));
-    assert_eq!(two.record(ID1, &proof("n9")), Ok(false));
+    assert_eq!(two.record(ID2, &proof(nonce("n1"))), Ok(false));
+    assert_eq!(two.record(ID1, &proof(nonce("n9"))), Ok(false));
     assert_eq!(seen_lines(&path).len(), 1);
-    assert_eq!(two.record(ID2, &proof("n2")), Ok(true));
+    assert_eq!(two.record(ID2, &proof(nonce("n2"))), Ok(true));
     assert_eq!(seen_lines(&path).len(), 2);
 }
 
@@ -842,9 +864,9 @@ async fn a_replay_the_load_missed_is_caught_under_the_lock() {
     let seen = Seen::load(&path).unwrap();
     Seen::load(&path)
         .unwrap()
-        .record(ID2, &proof("nonce-1"))
+        .record(ID2, &proof(nonce("nonce-1")))
         .unwrap();
-    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks = asks(&w, seen, Some(fake("", false)));
     let t = asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(t.refused, 1);
@@ -864,7 +886,7 @@ async fn a_replay_the_load_missed_is_caught_under_the_lock() {
 #[tokio::test]
 async fn an_unconfigured_cluster_runs_nothing() {
     let w = world();
-    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks = asks(&w, Seen::default(), None);
     asks.kubectl = Err(host_action::KubeTarget::new(None, None).unwrap_err());
     asks.tick(&svc, &|_| {}).await.unwrap();
@@ -877,7 +899,7 @@ async fn each_report_is_signed_at_the_time_it_is_made() {
     use std::sync::atomic::{AtomicI64, Ordering};
     static CLOCK: AtomicI64 = AtomicI64::new(NOW);
     let w = world();
-    let svc = Mock::with(vec![approval(&w, ask(ID1, "nonce-1"))]);
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
     asks.clock = || CLOCK.fetch_add(10, Ordering::SeqCst);
     asks.tick(&svc, &|_| {}).await.unwrap();
