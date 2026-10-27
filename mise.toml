@@ -87,12 +87,13 @@ git diff --exit-code -- go rust typescript python java csharp swift dart || {
 
 [tasks."repo:check"]
 shell = "bash -e -o pipefail -c"
-description = "Spelling, workflow lint and workflow security audit"
+description = "Spelling, workflow lint and workflow security audit, the examples gate tests"
 run = [
   "typos",
   "actionlint",
   "zizmor --min-severity low .github/workflows",
   "python3 tools/check-repo.py",
+  "python3 tools/test_examples_gate.py",
 ]
 
 # ---------------------------------------------------------------- supply chain
