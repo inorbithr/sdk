@@ -53,8 +53,10 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 const GH_TIMEOUT: Duration = Duration::from_secs(60);
 /// The longest pull request body sent (GitHub's own cap is 65,536 characters).
 const BODY_MAX: usize = 60_000;
-/// The longest title.
+/// The longest title accepted as a Conventional Commit.
 const TITLE_MAX: usize = 100;
+/// The longest title the runner writes.
+const TITLE_FIT: usize = 72;
 /// Paths given to one `git add`.
 const ADD_CHUNK: usize = 200;
 
@@ -241,32 +243,26 @@ impl Forge for GhForge {
                     "--state",
                     "open",
                     "--json",
-                    "number",
+                    "number,title",
                     "--jq",
-                    ".[0].number // empty",
+                    r#".[0] | select(.) | "\(.number)\t\(.title)""#,
                 ],
                 None,
                 access,
             )
             .await?;
-            if let Ok(number) = open.trim().parse::<u64>() {
+            let (num, current) = open.split_once('\t').unwrap_or((open.as_str(), ""));
+            if let Ok(number) = num.trim().parse::<u64>() {
                 let n = number.to_string();
-                Self::gh(
-                    &[
-                        "pr",
-                        "edit",
-                        &n,
-                        "-R",
-                        r,
-                        "--title",
-                        &pr.title,
-                        "--body-file",
-                        "-",
-                    ],
-                    Some(&pr.body),
-                    access,
-                )
-                .await?;
+                // The title already on the pull request is kept; only the body is
+                // refreshed.
+                let new = title_to_set(current, &pr.title);
+                let mut args = vec!["pr", "edit", &n, "-R", r];
+                if let Some(t) = new.as_deref() {
+                    args.extend(["--title", t]);
+                }
+                args.extend(["--body-file", "-"]);
+                Self::gh(&args, Some(&pr.body), access).await?;
                 return Ok(Opened {
                     number,
                     created: false,
@@ -731,11 +727,16 @@ impl Workspaces {
             args.extend(chunk.iter().map(String::as_str));
             git_ok(dir, &args).await?;
         }
+        let title = if m.title.trim().is_empty() {
+            title_from_paths(&paths, &p.job_id)
+        } else {
+            m.title.clone()
+        };
         let staged = git(dir, &["diff", "--cached", "--quiet"]).await?;
         match staged.code {
             0 => {}
             1 => {
-                git_ok(dir, &["commit", "--quiet", "-m", &m.title, "-m", &m.body]).await?;
+                git_ok(dir, &["commit", "--quiet", "-m", &title, "-m", &m.body]).await?;
             }
             c => return Err(format!("git diff --cached exited {c}")),
         }
@@ -772,7 +773,7 @@ impl Workspaces {
                     repository: p.repository.clone(),
                     head: p.branch.clone(),
                     base: BASE.to_owned(),
-                    title: m.title.clone(),
+                    title,
                     body: m.body.clone(),
                 },
                 access,
@@ -966,6 +967,82 @@ fn truncate(s: &str, max: usize) -> String {
     t
 }
 
+/// Cuts a title to `max` characters at a word end after the colon when there is one,
+/// never with an ellipsis.
+fn fit_title(t: &str, max: usize) -> String {
+    if t.chars().count() <= max {
+        return t.to_owned();
+    }
+    let cut: String = t.chars().take(max).collect();
+    let floor = t.find(": ").map_or(0, |i| t[..i].chars().count() + 2);
+    let at = cut
+        .char_indices()
+        .filter(|&(i, c)| c == ' ' && cut[..i].chars().count() > floor)
+        .map(|(i, _)| i)
+        .next_back();
+    let cut = at.map_or(cut.as_str(), |i| &cut[..i]);
+    cut.trim_end_matches([' ', ',', ';', ':', '-', '.'])
+        .to_owned()
+}
+
+/// A Conventional Commit title for a change that named none: `type(scope): summary`
+/// from the files it touches, at most 72 characters.
+pub(crate) fn title_from_paths(paths: &[String], job_id: &str) -> String {
+    let Some(first) = paths.first() else {
+        return format!("chore: job {job_id}");
+    };
+    let ty = if paths.iter().all(|p| p.ends_with(".md")) {
+        "docs"
+    } else if paths
+        .iter()
+        .all(|p| p.contains("/tests/") || p.starts_with("tests/"))
+    {
+        "test"
+    } else {
+        "chore"
+    };
+    // The scope: the deepest directory every file shares that is not a generic one.
+    let mut common: Vec<&str> = first.split('/').collect();
+    common.pop();
+    for p in &paths[1..] {
+        let mut d: Vec<&str> = p.split('/').collect();
+        d.pop();
+        let n = common.iter().zip(&d).take_while(|(a, b)| a == b).count();
+        common.truncate(n);
+    }
+    let scope = common
+        .iter()
+        .rev()
+        .find(|d| !matches!(**d, "src" | "crates" | "lib" | "docs"))
+        .filter(|d| {
+            d.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        });
+    let name = |p: &String| p.rsplit('/').next().unwrap_or(p).to_owned();
+    let what = match paths.len() {
+        1..=3 => format!("update {}", paths.iter().map(name).collect::<Vec<_>>().join(", ")),
+        n => format!("update {n} files"),
+    };
+    let t = match scope {
+        Some(s) => format!("{ty}({s}): {what}"),
+        None => format!("{ty}: {what}"),
+    };
+    let fitted = fit_title(&t, TITLE_FIT);
+    if is_conventional(&fitted) {
+        fitted
+    } else {
+        format!("{ty}: update {} files", paths.len())
+    }
+}
+
+/// The title an open pull request is given: none, so its own stays (a person or the
+/// coordinator may have set it), unless it is empty or an earlier turn left it cut with
+/// an ellipsis, in which case `new`.
+fn title_to_set(current: &str, new: &str) -> Option<String> {
+    let c = current.trim();
+    (c.is_empty() || c.ends_with('…') || c.ends_with("...")).then(|| new.to_owned())
+}
+
 /// A line that would credit a tool or a model with the commit: never written.
 fn attribution(line: &str) -> bool {
     let l = line.to_ascii_lowercase();
@@ -985,19 +1062,13 @@ pub(crate) fn compose(job_id: &str, document_id: &str, reply: &Reply) -> Message
             .map_or("", str::trim)
             .to_owned()
     };
+    // Only the turn's own `open_pull_request` title; the status line (`say`) is never a
+    // title. An empty one is filled in by `ship` from the files changed.
     let asked = first_line(&text("title")).to_owned();
-    let said = first_line(&reply.say).to_owned();
-    let title = if is_conventional(&asked) {
-        asked
-    } else if is_conventional(&said) {
-        said
+    let title = if is_conventional(&asked) && !attribution(&asked) {
+        fit_title(&asked, TITLE_FIT)
     } else {
-        let what = if said.is_empty() {
-            format!("job {job_id}")
-        } else {
-            said
-        };
-        truncate(&format!("chore: {what}"), 72)
+        String::new()
     };
     let mut body = String::new();
     let given = text("body");
@@ -1041,11 +1112,7 @@ pub(crate) fn compose(job_id: &str, document_id: &str, reply: &Reply) -> Message
         .collect::<Vec<_>>()
         .join("\n");
     Message {
-        title: if attribution(&title) {
-            format!("chore: job {job_id}")
-        } else {
-            title
-        },
+        title,
         body: truncate(body.trim(), BODY_MAX),
     }
 }
@@ -1623,19 +1690,71 @@ pub(crate) mod tests {
     #[test]
     fn the_message_never_invents_a_document_line_or_a_type() {
         let m = compose("job_2", "", &reply("Added the thing\nmore", vec![]));
-        assert_eq!(m.title, "chore: Added the thing");
+        // The status line is never the title; `ship` derives one from the change.
+        assert_eq!(m.title, "");
+        assert!(m.body.starts_with("Added the thing"));
         assert!(
             m.body
                 .contains("The turn named no Implements, PRD, ADR line")
         );
         assert!(!m.body.contains("Implements: "));
         let m = compose("job_2", "", &reply("fix(core): the bug", vec![]));
-        assert_eq!(m.title, "fix(core): the bug");
+        assert_eq!(m.title, "");
         let m = compose("job_3", "", &reply("", vec![]));
-        assert_eq!(m.title, "chore: job job_3");
+        assert_eq!(m.title, "");
         // A payload sent as a JSON string is read too.
         let a = json!({"kind": "open_pull_request", "payload": "{\"title\":\"docs: x\"}"});
         assert_eq!(compose("job_4", "", &reply("y", vec![a])).title, "docs: x");
+    }
+
+    #[test]
+    fn a_long_asked_title_is_cut_to_72_without_an_ellipsis() {
+        let long = "feat(cli): the runner now writes a pull request title from the change and keeps it";
+        let a = json!({"kind": "open_pull_request", "payload": {"title": long}});
+        let t = compose("job_5", "", &reply("chore: status line", vec![a])).title;
+        assert!(t.chars().count() <= 72, "{t}");
+        assert!(!t.contains('…') && !t.ends_with("..."), "{t}");
+        assert!(long.starts_with(&t) && is_conventional(&t), "{t}");
+    }
+
+    #[test]
+    fn a_title_from_the_change_is_conventional_and_short() {
+        let p = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            title_from_paths(&p(&["cli/crates/iohr/src/runner/workspace.rs"]), "j"),
+            "chore(runner): update workspace.rs"
+        );
+        assert_eq!(title_from_paths(&p(&["a.md", "docs/b.md"]), "j"), "docs: update a.md, b.md");
+        assert_eq!(title_from_paths(&p(&[]), "job_1"), "chore: job job_1");
+        let many: Vec<String> = (0..9).map(|i| format!("go/pkg/f{i}.go")).collect();
+        let t = title_from_paths(&many, "j");
+        assert_eq!(t, "chore(pkg): update 9 files");
+        let long = p(&["x/averyveryverylongfilenamethatgoeson.rs", "x/anotherveryverylongfilename.rs", "x/third_long_file_name.rs"]);
+        let t = title_from_paths(&long, "j");
+        assert!(t.chars().count() <= 72 && is_conventional(&t) && !t.contains('…'), "{t}");
+    }
+
+    #[test]
+    fn an_open_pull_requests_title_is_kept_unless_empty_or_cut() {
+        assert_eq!(title_to_set("fix(cli): set by the coordinator", "chore: x"), None);
+        assert_eq!(title_to_set("chore: Most of this was already on main, so the…", "feat: a").as_deref(), Some("feat: a"));
+        assert_eq!(title_to_set("", "feat: a").as_deref(), Some("feat: a"));
+    }
+
+    #[tokio::test]
+    async fn shipping_with_no_asked_title_commits_a_title_from_the_files_not_the_status() {
+        let p = place();
+        let forge = Arc::new(FakeForge::default());
+        let w = spaces(&p, forge.clone());
+        let got = w.prepare("job_8", "acme/app", &acc()).await.unwrap();
+        identity(&p);
+        write(&got.path, "src/new.txt", "new\n");
+        let m = compose("job_8", "", &reply("chore: Most of this was already on main, so the change is small: three things", vec![]));
+        let s = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
+        let subject = sh(&p.origin, &["log", "-1", "--format=%s", &s.head]);
+        assert_eq!(subject, "chore: update new.txt");
+        assert_eq!(forge.asked.lock().unwrap()[0].title, "chore: update new.txt");
+        assert!(forge.asked.lock().unwrap()[0].body.contains("Most of this was already on main"));
     }
 
     #[test]
