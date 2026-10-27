@@ -23,9 +23,6 @@ use crate::runner::signing::{
 /// The ask's kind.
 pub(crate) const KIND: &str = "runner_enrollment";
 
-/// How long one run of the command waits for the person; a rerun resumes the wait.
-pub(crate) const WAIT: Duration = Duration::from_secs(15 * 60);
-
 /// How often the ask is read while waiting.
 pub(crate) const POLL: Duration = Duration::from_secs(3);
 
@@ -82,10 +79,16 @@ pub(crate) async fn ask(svc: &impl EnrolAsks, key: &RunKey, label: &str) -> Resu
     if !is_approval_id(&approval_id) {
         return Err("the service answered without an approval id".into());
     }
-    let theirs = str_at(&a, &["payload", "runner_enrollment", "fingerprint"]);
-    if !theirs.is_empty() && theirs != fingerprint {
+    // The reply must name exactly this key, label and fingerprint: the phone shows
+    // the reply, so anything else would ask the person about another key.
+    let named = |field: &str| str_at(&a, &["payload", "runner_enrollment", field]);
+    if named("fingerprint") != fingerprint
+        || named("public_key") != public
+        || named("label") != label
+    {
         return Err(
-            "the service names another fingerprint for this key; nothing was enrolled".into(),
+            "the service's ask names another key, label or fingerprint; nothing was enrolled"
+                .into(),
         );
     }
     Ok(Asked {
@@ -241,6 +244,8 @@ mod tests {
         }
     }
 
+    // The trait's methods are async; the fake answers at once.
+    #[allow(clippy::unused_async)]
     impl EnrolAsks for Fake {
         async fn file(&self, p: &str, l: &str, f: &str) -> Result<Value, ServiceError> {
             self.filed.lock().unwrap().push(json!([p, l, f]));
@@ -296,7 +301,7 @@ mod tests {
             asked.fingerprint,
             run_key_fingerprint(&k.public_key()).unwrap()
         );
-        let out = wait_and_enroll(&svc, &k, "owner Mac", &asked, WAIT, POLL)
+        let out = wait_and_enroll(&svc, &k, "owner Mac", &asked, Duration::from_mins(15), POLL)
             .await
             .unwrap();
         assert_eq!(
@@ -327,7 +332,7 @@ mod tests {
             let svc = fake(&["pending", state]);
             let k = key();
             let asked = ask(&svc, &k, "l").await.unwrap();
-            let out = wait_and_enroll(&svc, &k, "l", &asked, WAIT, POLL)
+            let out = wait_and_enroll(&svc, &k, "l", &asked, Duration::from_mins(15), POLL)
                 .await
                 .unwrap();
             assert_eq!(out, Outcome::Closed(state.into()));
@@ -349,9 +354,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_service_naming_another_fingerprint_is_refused() {
-        let mut svc = fake(&["approved"]);
-        svc.fingerprint = Some("0".repeat(64));
-        let err = ask(&svc, &key(), "l").await.unwrap_err();
-        assert!(err.contains("another fingerprint"), "{err}");
+        // Another fingerprint, or none at all (an old or lying service).
+        for theirs in ["0".repeat(64), String::new()] {
+            let mut svc = fake(&["approved"]);
+            svc.fingerprint = Some(theirs);
+            let err = ask(&svc, &key(), "l").await.unwrap_err();
+            assert!(err.contains("another key, label or fingerprint"), "{err}");
+            assert!(svc.enrolled.lock().unwrap().is_empty());
+        }
     }
 }

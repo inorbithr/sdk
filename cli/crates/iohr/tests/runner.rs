@@ -111,9 +111,9 @@ async fn login(server: &MockServer, dir: &Path, tok: &str) {
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
 }
 
-fn sha(s: &str) -> String {
+fn sha(s: impl AsRef<[u8]>) -> String {
     use std::fmt::Write as _;
-    Sha256::digest(s.as_bytes())
+    Sha256::digest(s.as_ref())
         .iter()
         .fold(String::new(), |mut o, b| {
             let _ = write!(o, "{b:02x}");
@@ -1268,18 +1268,49 @@ async fn run_key_is_made_once_and_enrolled_with_a_proof_of_possession() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": []})))
         .mount(&server)
         .await;
-    let args = ["runner", "run-key", "--json", "--verbose"];
+    // Not enrolled, so it files a `runner_enrollment` ask (RFC 0172, amendment 1); the
+    // service answers with the ask as filed, which is still pending.
+    let ask = "apr_01M5Z1KKYQ16SMN4XFYS5K5RFA";
+    Mock::given(method("POST"))
+        .and(path("/v1/approvals"))
+        .respond_with(move |r: &wiremock::Request| {
+            let b: Value = serde_json::from_slice(&r.body).unwrap();
+            ResponseTemplate::new(200).set_body_json(json!({"approval": {
+                "approval_id": ask, "status": "pending", "payload": b["payload"],
+            }}))
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/approvals/{ask}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"approval": {
+                "approval_id": ask, "status": "pending",
+            }})),
+        )
+        .mount(&server)
+        .await;
+    let args = ["runner", "run-key", "--json", "--verbose", "--wait", "0"];
     let o = run(&mut iohr(&server, dir.path(), &args));
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
     let first: Value = serde_json::from_slice(&o.stdout).unwrap();
     let public = first["public_key"].as_str().unwrap().to_owned();
-    assert_eq!(
-        URL_SAFE_NO_PAD.decode(&public).unwrap().len(),
-        65,
-        "a P-256 point"
-    );
+    let point = URL_SAFE_NO_PAD.decode(&public).unwrap();
+    assert_eq!(point.len(), 65, "a P-256 point");
     assert_eq!(first["runner_id"], Value::Null, "not enrolled yet");
+    assert_eq!(first["approval_id"], ask);
+    let fingerprint = sha(&point);
+    assert_eq!(first["fingerprint"], fingerprint.as_str());
+    let filed = bodies(&server, "/v1/approvals").await;
+    assert_eq!(filed.len(), 1, "one ask");
+    assert_eq!(filed[0]["kind"], "runner_enrollment");
+    assert_eq!(filed[0]["account_id"], "acc_1");
+    let e = &filed[0]["payload"]["runner_enrollment"];
+    assert_eq!(e["public_key"], public.as_str());
+    assert_eq!(e["fingerprint"], fingerprint.as_str());
     let said = text(&o);
+    assert!(said.contains(&fingerprint[..4]), "the short form: {said}");
+    assert!(said.contains(ask), "{said}");
     assert!(said.contains("request id"), "{said}");
     assert!(!said.contains("TOKENSIGNATUREMARKER"), "{said}");
 

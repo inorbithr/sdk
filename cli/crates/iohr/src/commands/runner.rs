@@ -357,6 +357,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
         RunnerCommand::RunKey {
             proof,
             label,
+            wait,
             account,
         } => {
             let account = resolve_account(&s, account.account)?;
@@ -398,10 +399,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     "approve this run key on your phone: {label} \u{b7} {} (ask {})",
                     a.short, a.approval_id
                 ));
-                Out::note(
-                    "check the phone shows the same fingerprint before you approve; waiting up to 15 minutes",
-                );
-                match enrol::wait_and_enroll(&svc, &key, &label, &a, enrol::WAIT, enrol::POLL)
+                Out::note(&format!(
+                    "check the phone shows the same fingerprint before you approve; waiting up to {wait} minutes"
+                ));
+                let wait = std::time::Duration::from_mins(wait);
+                match enrol::wait_and_enroll(&svc, &key, &label, &a, wait, enrol::POLL)
                     .await
                     .map_err(Error::Failed)?
                 {

@@ -397,8 +397,8 @@ pub enum RunnerCommand {
     ///
     /// Makes the key the first time and keeps it in the credential store beside the
     /// runner key. Not enrolled yet, it asks you on your phone (a `runner_enrollment`
-    /// ask showing the key's label and fingerprint), waits up to 15 minutes for your
-    /// approval and enrols the key; run it again to keep waiting on the same ask.
+    /// ask showing the key's label and fingerprint), waits up to `--wait` minutes (15)
+    /// for your approval and enrols the key; run it again to keep waiting on the same ask.
     /// `--proof` still enrols from a file holding your device's proof (`key_id`,
     /// `signed_at`, `nonce`, `signature`) over the enrolment message.
     RunKey {
@@ -409,6 +409,9 @@ pub enum RunnerCommand {
         /// this machine's host name).
         #[arg(long)]
         label: Option<String>,
+        /// Minutes to wait for your approval, 0 to 60; 0 files the ask and returns.
+        #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=60))]
+        wait: u64,
         #[command(flatten)]
         account: AccountArg,
     },
