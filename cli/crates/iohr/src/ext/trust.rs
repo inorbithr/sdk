@@ -448,11 +448,10 @@ fn examine_keyed(
             dsse_signed_by(key, bundle, statement, &subject)
         } else {
             verifier
-                .verify_with_key(
+                .verify(
                     subject,
                     bundle,
-                    &key.der,
-                    &PublicKeyVerificationPolicy::default(),
+                    &PublicKeyVerificationPolicy::new(key.der.clone()),
                 )
                 .map(|_| ())
                 .map_err(|e| e.to_string())
