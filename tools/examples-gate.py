@@ -9,8 +9,8 @@ results file (written by `mise run examples:run`):
    [{"language": "go", "example": "whoami", "status": "pass|fail|skip"}]}
 Several runs (for example Linux and the Mac) are given as `attest --results a.json --results b.json`;
 each must be for HEAD, clean and without a fail, and the languages are checked on their union.
-A pass needs: the commit is HEAD, the tree was clean, no fail, and every language directory
-under examples/ has at least one pass. Uses `gh` (GH_TOKEN: statuses: write to attest,
+A pass needs: the commit is HEAD, the tree was clean, no fail, and every language in
+examples/examples.toml (what the runner runs) has at least one pass. Uses `gh` (GH_TOKEN: statuses: write to attest,
 statuses: read to gate).
 """
 
@@ -18,6 +18,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -58,13 +59,18 @@ def merge(files: list[dict], head: str) -> tuple[dict | None, str | None]:
     return {"schema": 1, "commit": head, "dirty": False, "results": rows}, None
 
 
+def languages() -> set[str]:
+    """The languages the runner runs: examples/examples.toml, the same table run-examples.py reads."""
+    return set(tomllib.loads((ROOT / "examples/examples.toml").read_text())["language"])
+
+
 def repo() -> str:
     return sh("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
 
 
 def attest(paths: list[Path]) -> int:
     head = sh("git", "rev-parse", "HEAD")
-    langs = {p.name for p in (ROOT / "examples").iterdir() if p.is_dir()}
+    langs = languages()
     res, why = merge([json.loads(p.read_text()) for p in paths], head)
     if res is not None:
         why = verdict(res, head, langs)

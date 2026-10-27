@@ -195,7 +195,8 @@ jobs:
     needs: [release-please, examples-gate]
     # On a manual run release-please is skipped, so the job asks not to be skipped with it.
     if: >-
-      ${{ !cancelled() && (needs.release-please.outputs.ts == 'true'
+      ${{ !cancelled() && needs.examples-gate.result == 'success'
+      && (needs.release-please.outputs.ts == 'true'
       || (github.event_name == 'workflow_dispatch' && inputs.typescript_tag != '')) }}
     runs-on: ubuntu-latest
     environment: release-npm
