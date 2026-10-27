@@ -76,6 +76,7 @@ fn check(meta: &std::fs::Metadata, path: &Path, what: &str) -> Result<(), String
 
 /// Other systems keep access in ACLs, which this check does not read.
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps, reason = "same signature as the unix check")]
 fn check(_: &std::fs::Metadata, _: &Path, _: &str) -> Result<(), String> {
     Ok(())
 }
