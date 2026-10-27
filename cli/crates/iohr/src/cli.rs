@@ -396,9 +396,11 @@ pub enum RunnerCommand {
     /// pinned runs (RFC 0153), and whether the approvals service has it enrolled.
     ///
     /// Makes the key the first time and keeps it in the credential store beside the
-    /// runner key. With `--proof`, enrols it: the file holds your device's proof
-    /// (`key_id`, `signed_at`, `nonce`, `signature`) over the enrolment message this
-    /// command prints, which only your device key can sign.
+    /// runner key. Not enrolled yet, it asks you on your phone (a `runner_enrollment`
+    /// ask showing the key's label and fingerprint), waits up to 15 minutes for your
+    /// approval and enrols the key; run it again to keep waiting on the same ask.
+    /// `--proof` still enrols from a file holding your device's proof (`key_id`,
+    /// `signed_at`, `nonce`, `signature`) over the enrolment message.
     RunKey {
         /// A JSON file with your device's proof over the enrolment message.
         #[arg(long)]
