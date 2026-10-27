@@ -245,7 +245,7 @@ mod tests {
     }
 
     // The trait's methods are async; the fake answers at once.
-    #[allow(clippy::unused_async_trait_impl)]
+    #[allow(unknown_lints, clippy::unused_async_trait_impl)]
     impl EnrolAsks for Fake {
         async fn file(&self, p: &str, l: &str, f: &str) -> Result<Value, ServiceError> {
             self.filed.lock().unwrap().push(json!([p, l, f]));
