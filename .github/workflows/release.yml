@@ -299,7 +299,7 @@ jobs:
         with:
           name: python-dist
           path: dist
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   py-existing:
     name: publish an existing python release
@@ -323,7 +323,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: for f in dist/*; do gh attestation verify "$f" --repo "$GITHUB_REPOSITORY"; done
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   # The command line (ADR 0010): build every target, then attest and attach in one job
   # that waits for a maintainer in the release-cli environment. Channels (APT, Homebrew,

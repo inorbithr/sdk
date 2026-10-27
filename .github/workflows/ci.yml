@@ -156,7 +156,7 @@ jobs:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           install_args: "rust go"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       - run: cargo build --locked --manifest-path cli/Cargo.toml -p iohr
@@ -215,7 +215,7 @@ jobs:
       - run: mise run go:audit
       - run: mise run conformance:go
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       # A generated two-profile surface builds and the wrong profile does not.
@@ -260,7 +260,7 @@ jobs:
         run: |
           chmod +x ci-tools/iohr ci-tools/replay
           mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: rust
       # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
@@ -315,7 +315,7 @@ jobs:
       - run: mise run ts:audit
       - run: mise run conformance:ts
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       # A generated two-profile surface type-checks and the wrong profile does not.
@@ -366,7 +366,7 @@ jobs:
       - run: mise run py:audit
       - run: mise run conformance:py
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       # A generated two-profile surface passes pyright and mypy (strict) and the wrong
@@ -416,7 +416,7 @@ jobs:
       - run: mise run java:check
       - run: mise run conformance:java
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       # A generated two-profile surface compiles and the wrong profile does not.
@@ -464,7 +464,7 @@ jobs:
       - run: mise run csharp:check
       - run: mise run conformance:csharp
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       # A generated two-profile surface builds and the wrong profile does not.
@@ -487,7 +487,7 @@ jobs:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           install_args: "rust go cargo-binstall cargo:cargo-nextest"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       - run: mise run swift:gen && git diff --exit-code -- swift
@@ -550,7 +550,7 @@ jobs:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           install_args: "rust cargo-binstall cargo:cargo-nextest cargo-deny shellcheck"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: cli
       # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
