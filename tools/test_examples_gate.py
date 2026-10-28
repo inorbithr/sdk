@@ -35,6 +35,14 @@ class Verdict(unittest.TestCase):
         self.assertIn("go", g.verdict(r, H, {"go"}))
 
 
+class Languages(unittest.TestCase):
+    def test_every_example_directory_is_run(self):
+        # The gate requires the languages in examples.toml; a directory missing there would
+        # never run and never be required.
+        dirs = {p.name for p in (g.ROOT / "examples").iterdir() if p.is_dir()}
+        self.assertEqual(set(), dirs - g.languages())
+
+
 def doc(lang, commit=H, **kw):
     return {"schema": 1, "commit": commit, "dirty": False, "results": [
         {"language": lang, "example": "x", "status": "pass"}], **kw}

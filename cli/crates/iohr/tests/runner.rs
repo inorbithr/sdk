@@ -111,9 +111,9 @@ async fn login(server: &MockServer, dir: &Path, tok: &str) {
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
 }
 
-fn sha(s: &str) -> String {
+fn sha(s: &(impl AsRef<[u8]> + ?Sized)) -> String {
     use std::fmt::Write as _;
-    Sha256::digest(s.as_bytes())
+    Sha256::digest(s.as_ref())
         .iter()
         .fold(String::new(), |mut o, b| {
             let _ = write!(o, "{b:02x}");
@@ -1251,4 +1251,123 @@ async fn gate_report_needs_the_runner_scopes_and_a_runner_key() {
     let o = run(&mut iohr(&server, dir.path(), &gate_args(".", "true")));
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
     assert!(text(&o).contains("iohr runner register"), "{}", text(&o));
+}
+
+/// `runner run-key` makes the approvals key once, keeps it in the profile's store, needs
+/// no coordinator scope, and enrols it with a device's proof plus a P-256 signature of
+/// possession over the enrolment message.
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // one story: ask, then the proof file, read top to bottom
+async fn run_key_is_made_once_and_enrolled_with_a_proof_of_possession() {
+    use aws_lc_rs::signature::ECDSA_P256_SHA256_ASN1;
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    // A person sign-in without the coordinator scopes: run-key does not need them.
+    login(&server, dir.path(), &token_with(&["identity:read"])).await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": []})))
+        .mount(&server)
+        .await;
+    // Not enrolled, so it files a `runner_enrollment` ask (RFC 0172, amendment 1); the
+    // service answers with the ask as filed, which is still pending.
+    let ask = "apr_01M5Z1KKYQ16SMN4XFYS5K5RFA";
+    Mock::given(method("POST"))
+        .and(path("/v1/approvals"))
+        .respond_with(move |r: &wiremock::Request| {
+            let b: Value = serde_json::from_slice(&r.body).unwrap();
+            ResponseTemplate::new(200).set_body_json(json!({"approval": {
+                "approval_id": ask, "status": "pending", "payload": b["payload"],
+            }}))
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/approvals/{ask}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"approval": {
+                "approval_id": ask, "status": "pending",
+            }})),
+        )
+        .mount(&server)
+        .await;
+    let args = ["runner", "run-key", "--json", "--verbose", "--wait", "0"];
+    let o = run(&mut iohr(&server, dir.path(), &args));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let first: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let public = first["public_key"].as_str().unwrap().to_owned();
+    let point = URL_SAFE_NO_PAD.decode(&public).unwrap();
+    assert_eq!(point.len(), 65, "a P-256 point");
+    assert_eq!(first["runner_id"], Value::Null, "not enrolled yet");
+    assert_eq!(first["approval_id"], ask);
+    let fingerprint = sha(&point);
+    assert_eq!(first["fingerprint"], fingerprint.as_str());
+    let filed = bodies(&server, "/v1/approvals").await;
+    assert_eq!(filed.len(), 1, "one ask");
+    assert_eq!(filed[0]["kind"], "runner_enrollment");
+    assert_eq!(filed[0]["account_id"], "acc_1");
+    let e = &filed[0]["payload"]["runner_enrollment"];
+    assert_eq!(e["public_key"], public.as_str());
+    assert_eq!(e["fingerprint"], fingerprint.as_str());
+    let said = text(&o);
+    assert!(said.contains(&fingerprint[..4]), "the short form: {said}");
+    assert!(said.contains(ask), "{said}");
+    assert!(said.contains("request id"), "{said}");
+    assert!(!said.contains("TOKENSIGNATUREMARKER"), "{said}");
+
+    server.reset().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "runner": {"runner_id": "arn_1", "public_key": public}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "runners": [{"runner_id": "arn_1", "public_key": public, "label": "mac"}]
+        })))
+        .mount(&server)
+        .await;
+    let proof = dir.path().join("proof.json");
+    std::fs::write(
+        &proof,
+        json!({"key_id": "dk_1", "signed_at": 1_700_000_000, "nonce": "n1", "signature": "c2ln"})
+            .to_string(),
+    )
+    .unwrap();
+    let proof_s = proof.to_str().unwrap();
+    let args = [
+        "runner", "run-key", "--proof", proof_s, "--label", "mac", "--json",
+    ];
+    let o = run(&mut iohr(&server, dir.path(), &args));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let second: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(second["public_key"], public.as_str(), "the same key, kept");
+    assert_eq!(second["runner_id"], "arn_1");
+
+    let sent: Vec<Value> = bodies(&server, "/v1/approvals/runners")
+        .await
+        .into_iter()
+        .filter(|b| !b.is_null())
+        .collect();
+    assert_eq!(sent.len(), 1, "one enrolment");
+    let b = &sent[0];
+    assert_eq!(b["account_id"], "acc_1");
+    assert_eq!(b["public_key"], public.as_str());
+    assert_eq!(b["label"], "mac");
+    assert_eq!(b["proof"]["key_id"], "dk_1");
+    assert_eq!(b["proof"]["nonce"], "n1");
+    assert_eq!(b["proof"]["signature"], "c2ln");
+    let message = format!("iohr-approval-runner-v1\n{public}\nmac\n1700000000\nn1\ndk_1");
+    let possession = URL_SAFE_NO_PAD
+        .decode(b["possession"].as_str().unwrap())
+        .unwrap();
+    UnparsedPublicKey::new(
+        &ECDSA_P256_SHA256_ASN1,
+        URL_SAFE_NO_PAD.decode(&public).unwrap(),
+    )
+    .verify(message.as_bytes(), &possession)
+    .expect("the possession signature verifies with the run key");
 }

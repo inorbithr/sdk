@@ -12,9 +12,12 @@
 
 use std::fmt;
 
-use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
+use aws_lc_rs::rand::SystemRandom;
+use aws_lc_rs::signature::{
+    ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, Ed25519KeyPair, KeyPair as _,
+};
 use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as B64;
+use base64::engine::general_purpose::{STANDARD as B64, URL_SAFE_NO_PAD as B64URL};
 use sha2::{Digest as _, Sha256};
 
 use super::claude::hex;
@@ -74,7 +77,7 @@ pub(crate) fn registration_message(challenge: &str, public_key: &str) -> String 
     [REGISTER_DOMAIN, challenge, public_key].join("\n")
 }
 
-fn h(s: &str) -> String {
+pub(crate) fn h(s: &str) -> String {
     hex(&Sha256::digest(s.as_bytes()))
 }
 
@@ -137,6 +140,161 @@ pub(crate) fn gate_report_message(r: &GateReport) -> String {
         h(&r.head),
         h(&r.main_commit),
         h(&r.output_sha256),
+    ]
+    .join("\n")
+}
+
+/// The first line of a pinned run's report (core `approval_messages::RUN_REPORT_TAG`).
+pub(crate) const RUN_REPORT_TAG: &str = "iohr.approvals.v1.ReportRun";
+
+/// The first line of the message that enrols a run key (labs `runner_enroll_message`).
+pub(crate) const RUN_ENROLL_TAG: &str = "iohr-approval-runner-v1";
+
+/// The runner's key for approved pinned runs (RFC 0153): ECDSA P-256 over SHA-256, as
+/// the approvals service enrols it (`EnrollRunner`) and checks every report against it.
+/// A second key beside the coordinator's Ed25519 one, because the two services keep two
+/// runner registries (see the module notes in `approvals`).
+///
+/// The private key is its PKCS#8 document, kept in the profile's credential store like
+/// the Ed25519 seed, never in a plain file.
+pub(crate) struct RunKey {
+    pair: EcdsaKeyPair,
+}
+
+impl fmt::Debug for RunKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Never the key.
+        f.debug_struct("RunKey")
+            .field("public_key", &self.public_key())
+            .finish()
+    }
+}
+
+impl RunKey {
+    /// The key in a PKCS#8 document.
+    pub(crate) fn from_pkcs8(pkcs8: &[u8]) -> Result<Self, String> {
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8)
+            .map(|pair| Self { pair })
+            .map_err(|_| "the run key is not a P-256 PKCS#8 document".to_owned())
+    }
+
+    /// A new key and its PKCS#8 document (the secret to keep).
+    pub(crate) fn generate() -> Result<(Self, zeroize::Zeroizing<Vec<u8>>), String> {
+        let pair = EcdsaKeyPair::generate(&ECDSA_P256_SHA256_ASN1_SIGNING)
+            .map_err(|_| "no P-256 key could be made".to_owned())?;
+        let doc = pair
+            .to_pkcs8v1()
+            .map_err(|_| "the P-256 key could not be written".to_owned())?;
+        Ok((
+            Self { pair },
+            zeroize::Zeroizing::new(doc.as_ref().to_vec()),
+        ))
+    }
+
+    /// base64url (no padding) of the 65-byte uncompressed point, as `EnrollRunner` takes
+    /// it and a pinned run's `runner_public_key` names it.
+    pub(crate) fn public_key(&self) -> String {
+        B64URL.encode(self.pair.public_key().as_ref())
+    }
+
+    /// base64url (no padding) of the DER signature over `message`.
+    pub(crate) fn sign(&self, message: &[u8]) -> Result<String, String> {
+        self.pair
+            .sign(&SystemRandom::new(), message)
+            .map(|s| B64URL.encode(s.as_ref()))
+            .map_err(|_| "the run key could not sign".to_owned())
+    }
+}
+
+/// The first line of what the run key signs to enrol through an approved
+/// `runner_enrollment` ask (core `approval_messages::runner_enrollment::POSSESSION_TAG`).
+pub(crate) const RUNNER_ENROLLMENT_TAG: &str = "iohr-runner-enrollment-v1";
+
+/// How many hex characters of a fingerprint a person compares (core `SHORT_HEX`).
+const SHORT_HEX: usize = 24;
+
+/// A run key's fingerprint, byte for byte core's `runner_enrollment::fingerprint`: the
+/// SHA-256, lowercase hex, of the 65-byte point its base64url `public_key` holds.
+pub(crate) fn run_key_fingerprint(public_key: &str) -> Result<String, String> {
+    let point = B64URL
+        .decode(public_key.trim())
+        .map_err(|_| "the run key's public key is not base64url".to_owned())?;
+    Ok(hex(&Sha256::digest(&point)))
+}
+
+/// The part of a fingerprint a person compares between the terminal and the phone
+/// (core `runner_enrollment::short`): its first 24 hex characters in groups of four.
+pub(crate) fn fingerprint_short(fingerprint: &str) -> String {
+    let head: Vec<char> = fingerprint.chars().take(SHORT_HEX).collect();
+    head.chunks(4)
+        .map(|c| c.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// What the run key signs to enrol through the approved ask `approval_id` (core
+/// `runner_enrollment::possession_message`): the tag, the ask, the public key, the
+/// label and the fingerprint, one per line. Naming the ask binds the possession to
+/// the one approval the person gave.
+pub(crate) fn enrollment_possession_message(
+    approval_id: &str,
+    public_key: &str,
+    label: &str,
+    fingerprint: &str,
+) -> String {
+    [
+        RUNNER_ENROLLMENT_TAG,
+        approval_id,
+        public_key,
+        label,
+        fingerprint,
+    ]
+    .join("\n")
+}
+
+/// One report of a pinned run, byte for byte core's `approval_messages::run_report`: the
+/// tag, the SHA-256 of each of `approval_id`, `payload_sha256`, `step`, `note` (as the
+/// service keeps it, trimmed), `observed` (the observed payload's hash for `started`,
+/// empty otherwise) and `runner_id`, then `signed_at` in decimal.
+pub(crate) fn run_report_message(
+    approval_id: &str,
+    payload_sha256: &str,
+    step: &str,
+    note: &str,
+    observed: &str,
+    runner_id: &str,
+    signed_at: i64,
+) -> String {
+    [
+        RUN_REPORT_TAG.to_owned(),
+        h(approval_id),
+        h(payload_sha256),
+        h(step),
+        h(note),
+        h(observed),
+        h(runner_id),
+        signed_at.to_string(),
+    ]
+    .join("\n")
+}
+
+/// What a device key and the run key both sign to enrol it (labs
+/// `runner_enroll_message`): the tag, the public key, the label, then the device
+/// proof's time, nonce and key id, trimmed, one per line.
+pub(crate) fn run_enroll_message(
+    public_key: &str,
+    label: &str,
+    signed_at: i64,
+    nonce: &str,
+    key_id: &str,
+) -> String {
+    [
+        RUN_ENROLL_TAG,
+        public_key.trim(),
+        label.trim(),
+        &signed_at.to_string(),
+        nonce.trim(),
+        key_id.trim(),
     ]
     .join("\n")
 }
