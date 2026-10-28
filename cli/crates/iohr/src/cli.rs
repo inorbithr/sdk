@@ -1149,6 +1149,11 @@ pub struct Login {
     /// sign-in service refuses a scope the command line's client may not ask for.
     #[arg(long = "scope", value_delimiter = ',')]
     pub scopes: Vec<String>,
+    /// The account this profile acts for, by id or slug, among the ones you belong to.
+    /// It is kept when you sign in again. Without it: the account this profile was last
+    /// pointed at, else the one you made your default, else your own.
+    #[arg(long, value_name = "ID|SLUG", conflicts_with = "with_token")]
+    pub account: Option<String>,
 }
 
 /// How to sign in; at most one. Without any, a browser when this machine can open
