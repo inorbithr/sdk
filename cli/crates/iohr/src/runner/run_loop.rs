@@ -75,6 +75,9 @@ pub(crate) struct LoopConfig {
     pub(crate) declared: Option<watch::Receiver<Declared>>,
     /// The build-disk guard; `None` turns it off.
     pub(crate) build_floor: Option<BuildFloor>,
+    /// Read the machine (`runner::host`) for every beat and send it as resources and
+    /// signals; off in tests, where the beat stays free of `df` and `sysctl`.
+    pub(crate) report_host: bool,
     /// The Checked gate's check, run in the job's checkout after a job turn finishes and
     /// sent as a signed gate report before the turn's own report; `None` turns it off.
     pub(crate) gate: Option<GateCheck>,
@@ -119,6 +122,7 @@ impl Default for LoopConfig {
             capacity: 1,
             declared: None,
             build_floor: None,
+            report_host: false,
             gate: None,
             workspaces: None,
         }
@@ -132,6 +136,7 @@ fn declared_now(cfg: &LoopConfig) -> Declared {
             capacity: None,
             version: env!("CARGO_PKG_VERSION").to_owned(),
             kinds: settings::CLASSES.iter().map(|c| (*c).to_owned()).collect(),
+            host: None,
         },
         |rx| rx.borrow().clone(),
     )
@@ -614,7 +619,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             }
             let floor = cfg.build_floor.clone();
+            let report_host = cfg.report_host;
             beating = Some(Box::pin(async move {
+                let mut declared = declared;
+                if report_host {
+                    let volume = floor.as_ref().map(|f| f.volume.as_path());
+                    declared.host = Some(super::host::probe(volume).await);
+                }
                 let declared = match floor {
                     Some(f) => {
                         let free = settings::free_bytes(&f.volume).await;
@@ -1685,6 +1696,7 @@ mod tests {
             build_floor: None,
             gate: None,
             workspaces: None,
+            report_host: false,
         }
     }
 
@@ -2241,6 +2253,7 @@ mod tests {
             capacity,
             version: "9.9.9".into(),
             kinds: kinds.iter().map(|k| (*k).to_owned()).collect(),
+            host: None,
         });
         let c = LoopConfig {
             declared: Some(rx),
