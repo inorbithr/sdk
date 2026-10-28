@@ -310,7 +310,9 @@ replay; the record is written, under a file lock, before the run is reported sta
 refusal is reported `failed` and runs nothing. Actions come only from a fixed catalogue
 in the binary (`k8s.delete-failed-pods`, `k8s.rollout-restart`, `systemd.user-restart`,
 `docker.prune-images`, `gh.cancel-run`, `iohr.upgrade`); an action outside it is refused.
-Each action is planned to fixed argument vectors, its params checked again, before
+The run's `effect` must be the catalogue's one sentence for its action and params
+(core's `effect_of`, ported unchanged), so the words the owner approved are what runs; any
+other effect is refused. Each action is planned to fixed argument vectors, its params checked again, before
 anything runs. Each tool (`kubectl`, `systemctl --user`, `docker`, `gh`) runs from an
 absolute `PATH` entry with an argument vector, never a shell, with the scrubbed
 environment and a time limit; a missing tool is a refusal. No Kubernetes action runs in

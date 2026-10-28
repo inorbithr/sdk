@@ -261,7 +261,7 @@ fn approval(w: &World, a: Ask<'_>) -> Value {
         "cmd": id_word,
         "argv": [id_word],
         "script_sha256": payload_digest(&a.action),
-        "effect": "remote",
+        "effect": a.action["effect"],
         "runner_id": a.runner_id,
         "runner_public_key": a.runner_key.unwrap_or_else(|| w.run.public_key()),
         "expires_at": a.expires_at,
@@ -499,6 +499,21 @@ async fn a_cluster_namespace_is_refused_before_anything_starts() {
 }
 
 #[tokio::test]
+async fn a_run_whose_effect_is_not_its_sentence_is_refused_before_anything_starts() {
+    let w = world();
+    // Signed and hashed correctly, params valid, but the words the owner saw are not the
+    // catalog's sentence for what would run.
+    let mut a = ask(ID1, nonce("nonce-1"));
+    a.action["effect"] = json!("Does one thing on the runner's host.");
+    refused_with(&w, approval(&w, a), "schema_invalid").await;
+
+    // The same words for other params: the sentence says one namespace, the run another.
+    let mut b = ask(ID1, nonce("nonce-1"));
+    b.action["params"] = json!({ "namespace": "other" });
+    refused_with(&w, approval(&w, b), "schema_invalid").await;
+}
+
+#[tokio::test]
 async fn each_refusal_reports_failed_and_runs_nothing() {
     let w = world();
     let mut expired = ask(ID1, nonce("nonce-1"));
@@ -515,7 +530,7 @@ async fn each_refusal_reports_failed_and_runs_nothing() {
     refused_with(&w, approval(&w, forged), "bad_signature").await;
 
     let mut tampered = approval(&w, ask(ID1, nonce("nonce-1")));
-    tampered["payload"]["run"]["effect"] = json!("local");
+    tampered["payload"]["run"]["effect"] = json!("Deletes every failed pod in every namespace.");
     refused_with(&w, tampered, "hash_mismatch").await;
 
     let mut by_service = approval(&w, ask(ID1, nonce("nonce-1")));

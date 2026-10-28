@@ -142,6 +142,47 @@ fn is_effect(s: &str) -> bool {
             .any(|c| matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}'))
 }
 
+/// What `action` with `params` does, one plain sentence in the catalog's own words, built
+/// from the params alone: the same function as core's
+/// `approval_messages::pinned::effect_of`, which refuses a run whose `effect` differs. The
+/// owner approves this sentence, so the runner, which executes, refuses a run whose
+/// `effect` is not it. `None` for an action outside the catalog or a param of the wrong
+/// type; `None` means refuse.
+#[must_use]
+pub(crate) fn effect_of(action: &str, params: &Value) -> Option<String> {
+    let text = |k: &str| params.get(k).and_then(Value::as_str);
+    let int = |k: &str| params.get(k).and_then(Value::as_i64);
+    Some(match action {
+        DELETE_FAILED_PODS => match params.get("namespace") {
+            None => "Deletes every failed pod in every namespace.".to_owned(),
+            Some(_) => format!(
+                "Deletes every failed pod in namespace {}.",
+                text("namespace")?
+            ),
+        },
+        ROLLOUT_RESTART => format!(
+            "Restarts deployment {} in namespace {} and waits for the new pods.",
+            text("deployment")?,
+            text("namespace")?
+        ),
+        USER_RESTART => format!(
+            "Restarts the user service {} on the runner's host.",
+            text("unit")?
+        ),
+        PRUNE_IMAGES => format!(
+            "Removes the unused Docker images older than {} hours on the runner's host.",
+            int("until_hours")?
+        ),
+        CANCEL_RUN => format!(
+            "Cancels GitHub Actions run {} of {}.",
+            int("run_id")?,
+            text("repo")?
+        ),
+        UPGRADE => "Upgrades iohr on the runner's host to the newest release.".to_owned(),
+        _ => return None,
+    })
+}
+
 fn closed(m: &Map<String, Value>, allowed: &[&str], at: &str) -> Result<(), String> {
     match m.keys().find(|k| !allowed.contains(&k.as_str())) {
         Some(_) => Err(format!("{at}: a field the schema does not allow")),
@@ -237,6 +278,9 @@ pub(crate) fn validate(action: &Value) -> Result<(), String> {
         }
         UPGRADE => closed(params, &[], "/params")?,
         _ => return Err("/action: unknown action".to_owned()),
+    }
+    if effect_of(id, &m["params"]).as_deref() != Some(effect) {
+        return Err("/effect: not the catalog's sentence for the action and its params".to_owned());
     }
     Ok(())
 }

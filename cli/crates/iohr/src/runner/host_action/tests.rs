@@ -112,6 +112,98 @@ fn an_id_outside_the_catalog_is_an_unknown_action() {
 }
 
 #[test]
+fn the_effect_is_the_catalog_sentence_for_each_action_and_its_params() {
+    let cases = [
+        (
+            DELETE_FAILED_PODS,
+            json!({}),
+            "Deletes every failed pod in every namespace.",
+        ),
+        (
+            DELETE_FAILED_PODS,
+            json!({"namespace": "example"}),
+            "Deletes every failed pod in namespace example.",
+        ),
+        (
+            ROLLOUT_RESTART,
+            json!({"namespace": "ns", "deployment": "web"}),
+            "Restarts deployment web in namespace ns and waits for the new pods.",
+        ),
+        (
+            USER_RESTART,
+            json!({"unit": "iohr-runner.service"}),
+            "Restarts the user service iohr-runner.service on the runner's host.",
+        ),
+        (
+            PRUNE_IMAGES,
+            json!({"until_hours": 24}),
+            "Removes the unused Docker images older than 24 hours on the runner's host.",
+        ),
+        (
+            CANCEL_RUN,
+            json!({"run_id": 7, "repo": "inorbithr/core"}),
+            "Cancels GitHub Actions run 7 of inorbithr/core.",
+        ),
+        (
+            UPGRADE,
+            json!({}),
+            "Upgrades iohr on the runner's host to the newest release.",
+        ),
+    ];
+    for (id, params, want) in cases {
+        assert_eq!(effect_of(id, &params).as_deref(), Some(want), "{id}");
+        assert_eq!(validate(&action(id, &params)), Ok(()), "{id}");
+    }
+}
+
+#[test]
+fn a_run_whose_effect_is_not_the_sentence_for_its_params_is_refused() {
+    let refused =
+        Err("/effect: not the catalog's sentence for the action and its params".to_owned());
+    // Free text, another action's sentence, the same sentence for other params, and a
+    // sentence with a trailing change: each is a well-formed effect that is not this run's.
+    let mut d = action(DELETE_FAILED_PODS, &json!({"namespace": "example"}));
+    for effect in [
+        "Does one thing on the runner's host.",
+        "Deletes every failed pod in every namespace.",
+        "Deletes every failed pod in namespace other.",
+        "Deletes every failed pod in namespace example. ",
+    ] {
+        d["effect"] = json!(effect);
+        assert_eq!(validate(&d), refused, "{effect}");
+    }
+    let mut d = action(PRUNE_IMAGES, &json!({"until_hours": 24}));
+    d["params"] = json!({"until_hours": 48});
+    assert_eq!(validate(&d), refused);
+}
+
+#[test]
+fn an_action_outside_the_catalog_has_no_effect_and_a_wrong_param_type_has_none_either() {
+    assert_eq!(effect_of("sh.run", &json!({})), None);
+    assert_eq!(
+        effect_of("k8s.delete-namespace", &json!({"namespace": "example"})),
+        None
+    );
+    for (id, params) in [
+        (DELETE_FAILED_PODS, json!({"namespace": 7})),
+        (ROLLOUT_RESTART, json!({"namespace": "ns"})),
+        (ROLLOUT_RESTART, json!({"namespace": "ns", "deployment": 1})),
+        (USER_RESTART, json!({"unit": ["a"]})),
+        (PRUNE_IMAGES, json!({"until_hours": "24"})),
+        (PRUNE_IMAGES, json!({"until_hours": 24.5})),
+        (CANCEL_RUN, json!({"run_id": "7", "repo": "inorbithr/core"})),
+        (CANCEL_RUN, json!({"run_id": 7, "repo": 3})),
+    ] {
+        assert_eq!(effect_of(id, &params), None, "{id} {params}");
+        assert!(validate(&action(id, &params)).is_err(), "{id} {params}");
+    }
+    // An unknown action is refused whatever effect it carries.
+    let mut d = action(UPGRADE, &json!({}));
+    d["action"] = json!("sh.run");
+    assert!(validate(&d).is_err());
+}
+
+#[test]
 fn the_cluster_namespaces_and_bad_names_are_refused() {
     for ns in DENIED_NAMESPACES {
         assert!(delete_failed_pods_argv(ns).is_err(), "{ns}");
@@ -297,12 +389,16 @@ fn host(dir: &std::path::Path, kube: Result<KubeTarget, String>) -> HostRunner {
     }
 }
 
+/// A run of `id` whose `effect` is the catalog's sentence for it (the words the owner
+/// approves), as the coordinator files it. Params the catalog has no sentence for (a
+/// run that is refused anyway) carry a one-line placeholder, so the refusal under test
+/// is the params' own.
 fn action(id: &str, params: &Value) -> Value {
     json!({
         "action": id,
         "runner_id": "rnr_00000000000000000000000001",
         "params": params,
-        "effect": "Does one thing on the runner's host.",
+        "effect": effect_of(id, params).unwrap_or_else(|| "Placeholder.".to_owned()),
     })
 }
 
