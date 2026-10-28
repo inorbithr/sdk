@@ -20,6 +20,7 @@ use super::claude::hex;
 use super::env;
 use super::exec::GroupGuard;
 use super::service::{GateAnswer, GateReport, Service, ServiceError};
+use super::workspace::redact;
 
 /// The check a build job's PR is held to when nothing says otherwise.
 pub(crate) const DEFAULT_COMMAND: &str = "mise run ci:changed";
@@ -49,6 +50,8 @@ pub(crate) enum Skip {
     BadCommand,
     #[error("git failed: {0}")]
     Git(String),
+    #[error("no GitHub access to fetch main: {0}")]
+    Access(String),
     #[error("the checkout has uncommitted changes; the check would not describe its head")]
     Dirty,
     #[error(
@@ -140,6 +143,35 @@ async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
     Ok((o.code, o.stdout.trim().to_owned()))
 }
 
+/// Where the check's `origin/main` comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MainFrom {
+    /// `git fetch origin main` in the checkout, as the host's own git configuration says,
+    /// with no token: a checkout the runner does not own, or `iohr runner gate-report`
+    /// run by a person on their machine.
+    Checkout,
+    /// The runner's mirror, already fetched behind its guard
+    /// ([`super::workspace::Workspaces::fetch_main`]): the checkout is a linked worktree
+    /// of it and shares its refs. Nothing is fetched in the checkout, whose configuration
+    /// the turn can write.
+    Mirror,
+}
+
+/// `git fetch origin main` in `repo`, with no token ([`MainFrom::Checkout`]); a failure
+/// says git's last stderr line, redacted.
+async fn fetch_main(repo: &Path) -> Result<(), Skip> {
+    let o = git_in(repo, &["fetch", "--quiet", "origin", "main"], GIT_TIMEOUT).await?;
+    if o.code == 0 {
+        Ok(())
+    } else {
+        Err(Skip::Git(format!(
+            "git fetch exited {}: {}",
+            o.code,
+            redact(&o.stderr_tail)
+        )))
+    }
+}
+
 async fn git_ok(repo: &Path, args: &[&str]) -> Result<String, Skip> {
     match git(repo, args).await? {
         (0, out) => Ok(out),
@@ -175,19 +207,24 @@ fn shell(command: &str) -> Command {
     c
 }
 
-/// Fetches main, checks `repo` is clean and contains it, runs `command` and returns what
-/// to report. `env` is the runner's own environment; it is scrubbed here.
+/// Fetches main (where `main` says), checks `repo` is clean and contains it, runs
+/// `command` and returns what to report. `env` is the runner's own environment; it is
+/// scrubbed here. No call here carries a token: a checkout the runner owns has main
+/// fetched in the runner's mirror first ([`MainFrom::Mirror`]).
 pub(crate) async fn check(
     repo: &Path,
     command: &str,
     limit: Duration,
     parent_env: Vec<(OsString, OsString)>,
+    main: MainFrom,
 ) -> Result<Checked, Skip> {
     let command = command.trim();
     if command.is_empty() || command.chars().count() > 500 {
         return Err(Skip::BadCommand);
     }
-    git_ok(repo, &["fetch", "--quiet", "origin", "main"]).await?;
+    if main == MainFrom::Checkout {
+        fetch_main(repo).await?;
+    }
     if !git_ok(repo, &["status", "--porcelain"]).await?.is_empty() {
         return Err(Skip::Dirty);
     }
@@ -380,7 +417,9 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_branch_merged_with_main_is_checked_and_reported_with_the_hash_of_the_output() {
         let (_root, _o, work) = repos();
-        let got = check(&work, TWO_STREAMS, LIMIT, parent()).await.unwrap();
+        let got = check(&work, TWO_STREAMS, LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.head, sh(&work, &["rev-parse", "HEAD"]));
         assert_eq!(got.main_commit, sh(&work, &["rev-parse", "origin/main"]));
@@ -396,7 +435,9 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_failing_check_is_reported_with_its_exit_code() {
         let (_root, _o, work) = repos();
-        let got = check(&work, "exit 3", LIMIT, parent()).await.unwrap();
+        let got = check(&work, "exit 3", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.exit_code, 3);
     }
 
@@ -410,7 +451,9 @@ pub(crate) mod tests {
         sh(&other, &["add", "c.txt"]);
         sh(&other, &["commit", "--quiet", "-m", "more main"]);
         sh(&other, &["push", "--quiet", "origin", "HEAD:main"]);
-        let err = check(&work, "true", LIMIT, parent()).await.unwrap_err();
+        let err = check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap_err();
         let Skip::NotMerged { head, main } = err else {
             panic!("expected NotMerged, got {err:?}");
         };
@@ -418,7 +461,9 @@ pub(crate) mod tests {
         assert_eq!(main, sh(&other, &["rev-parse", "HEAD"]));
         // After the merge it is checked, on main's new commit.
         sh(&work, &["merge", "--quiet", "--no-edit", "origin/main"]);
-        let got = check(&work, "true", LIMIT, parent()).await.unwrap();
+        let got = check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.main_commit, main);
         assert_eq!(got.exit_code, 0);
     }
@@ -428,7 +473,9 @@ pub(crate) mod tests {
         let (_root, _o, work) = repos();
         write(&work, "b.txt", "changed\n");
         assert_eq!(
-            check(&work, "true", LIMIT, parent()).await.unwrap_err(),
+            check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+                .await
+                .unwrap_err(),
             Skip::Dirty
         );
     }
@@ -439,7 +486,9 @@ pub(crate) mod tests {
         let mut env = parent();
         env.push(("GH_TOKEN".into(), "secret-value".into()));
         env.push(("FOO_SECRET".into(), "secret-value".into()));
-        let got = check(&work, SCRUBBED, LIMIT, env).await.unwrap();
+        let got = check(&work, SCRUBBED, LIMIT, env, MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.output_sha256, hex(&Sha256::digest(SCRUBBED_OUT)));
     }
@@ -447,9 +496,15 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_check_over_the_time_cap_is_stopped_and_makes_no_report() {
         let (_root, _o, work) = repos();
-        let err = check(&work, "sleep 30", Duration::from_secs(1), parent())
-            .await
-            .unwrap_err();
+        let err = check(
+            &work,
+            "sleep 30",
+            Duration::from_secs(1),
+            parent(),
+            MainFrom::Checkout,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, Skip::TimedOut(1));
     }
 
@@ -457,11 +512,13 @@ pub(crate) mod tests {
     async fn an_empty_or_long_command_is_refused_before_anything_runs() {
         let (_root, _o, work) = repos();
         assert_eq!(
-            check(&work, "  ", LIMIT, parent()).await.unwrap_err(),
+            check(&work, "  ", LIMIT, parent(), MainFrom::Checkout)
+                .await
+                .unwrap_err(),
             Skip::BadCommand
         );
         assert_eq!(
-            check(&work, &"x".repeat(501), LIMIT, parent())
+            check(&work, &"x".repeat(501), LIMIT, parent(), MainFrom::Checkout)
                 .await
                 .unwrap_err(),
             Skip::BadCommand
@@ -472,8 +529,79 @@ pub(crate) mod tests {
     async fn a_directory_that_is_not_a_checkout_is_a_git_error() {
         let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            check(dir.path(), "true", LIMIT, parent()).await,
+            check(dir.path(), "true", LIMIT, parent(), MainFrom::Checkout).await,
             Err(Skip::Git(_))
         ));
+    }
+
+    /// A program planted in the checkout's configuration (the turn's check command can
+    /// write it) never runs when main comes from the runner's mirror: nothing is fetched
+    /// in the checkout. With [`MainFrom::Checkout`] the host's own fetch runs there, as
+    /// before, with no token.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn main_from_the_mirror_fetches_nothing_in_the_checkout() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (root, _o, work) = repos();
+        let seen = root.path().join("saw.txt");
+        let upload = root.path().join("upload.sh");
+        std::fs::write(
+            &upload,
+            format!(
+                "#!/bin/sh\necho \"token=${}\" >> '{}'\nexec git-upload-pack \"$@\"\n",
+                crate::runner::access::TOKEN_VAR,
+                seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&upload, std::fs::Permissions::from_mode(0o755)).unwrap();
+        sh(
+            &work,
+            &[
+                "config",
+                "remote.origin.uploadpack",
+                &upload.display().to_string(),
+            ],
+        );
+        sh(
+            &work,
+            &["config", "core.sshCommand", &upload.display().to_string()],
+        );
+        let got = check(&work, "true", LIMIT, parent(), MainFrom::Mirror)
+            .await
+            .unwrap();
+        assert_eq!(got.exit_code, 0);
+        assert!(!seen.exists(), "a fetch ran in the checkout");
+        // The host's own fetch in the checkout: the planted program runs, with no token.
+        check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&seen).unwrap(), "token=\n");
+    }
+
+    /// The fetch in the checkout fails with git's reason and no credential, from an
+    /// origin whose URL holds a token.
+    #[tokio::test]
+    async fn a_failed_fetch_says_why_without_the_token() {
+        let (_root, _o, work) = repos();
+        sh(
+            &work,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://x-access-token:ghs_test@127.0.0.1:1/",
+            ],
+        );
+        let Err(Skip::Git(why)) = check(&work, "true", LIMIT, parent(), MainFrom::Checkout).await
+        else {
+            panic!("expected a git failure");
+        };
+        assert!(why.starts_with("git fetch exited 128: "), "{why}");
+        assert!(why.contains("127.0.0.1"), "{why}");
+        assert!(
+            !why.contains("ghs_") && !why.contains("x-access-token"),
+            "{why}"
+        );
     }
 }
