@@ -343,6 +343,7 @@ ca_bundle = "~/certs/corp-root.pem"
 [profiles.work]                     # written by iohr login
 kind = "person"
 account = "acc_8d2e"
+account_pinned = true               # set by `iohr login --account` or `iohr profile account`
 storage = "keyring"
 
 [profiles.ci]                       # written by hand or by configuration management
@@ -364,8 +365,11 @@ Rules:
 
 - The file layer for a profile is its `[profiles.<name>]` table over the `[sdk]` table.
   With no profile chosen, only `[sdk]` applies.
-- The command line's keys (`kind`, `account`, `storage`, `issuer`, `client_id`, and the
+- The command line's keys (`kind`, `account`, `account_pinned`, `storage`, `issuer`, `client_id`, and the
   top-level `ext`) are read by the `cli` credential source and otherwise left alone.
+- `account_pinned = true` means the account was chosen (by `iohr login --account` or
+  `iohr profile account`) and a later `iohr login` keeps it. Absent, a sign-in picks the
+  account again: the `default_account_id` preference when you belong to it, else your own.
 - **Secrets are never in the file.** `key_secret`, `token`, `client_key_password` and a
   `proxy` URL with user-info are a `ConfigError` naming the file and the table, with the
   way out: `key_secret_file`, `token_file`, the environment, or `iohr login`. A secret
@@ -376,7 +380,7 @@ Rules:
 - A value of the wrong type is a `ConfigError`, the same as a bad environment value.
 
 The command line keeps what it does not own. It changes only `default`, its own profile
-keys (`kind`, `account`, `storage`, `issuer`, `client_id`) and the `[ext]` table, and keeps
+keys (`kind`, `account`, `account_pinned`, `storage`, `issuer`, `client_id`) and the `[ext]` table, and keeps
 every other key, table and comment (`toml_edit`). A profile without `kind` holds SDK keys
 only: `iohr` does not list it as one of its profiles. `iohr logout` removes the profile's
 command-line keys and leaves its SDK keys; the table goes when nothing is left.

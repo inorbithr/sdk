@@ -1,8 +1,9 @@
-use iohr_auth::{EntryKey, Kind, ProfileName};
+use iohr_auth::{EntryKey, Kind, Profile, ProfileName};
 use serde_json::Value;
 
 use crate::Env;
 use crate::cli::{Global, ProfileCommand};
+use crate::commands::accounts::Me;
 use crate::commands::login::storage_name;
 use crate::context::{Ctx, blocking, session_for};
 use crate::error::Error;
@@ -55,48 +56,66 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProfileCommand, out: Out) ->
             Out::note(&format!("Profile {name} is now the default."));
             Ok(())
         }
-        ProfileCommand::Show { name } => {
-            let name = match name {
-                Some(n) => n,
-                None => ctx.chosen(g)?,
-            };
-            let p = ctx
-                .config
-                .profile(&name)
-                .cloned()
-                .ok_or_else(|| Error::Usage(format!("there is no profile {name}")))?;
-            let key = EntryKey::new(name.clone(), &p.account)?;
-            let present = blocking(ctx.store(p.storage)?, move |s| {
-                s.get(&key).map(|v| v.is_some())
-            })
-            .await?;
-            let default = ctx.config.default.as_ref() == Some(&name);
-            if out.json {
-                Out::print_json(&serde_json::json!({
-                    "profile": name.as_str(), "kind": kind(p.kind), "account": p.account,
-                    "storage": p.storage, "default": default, "credential_present": present,
-                }));
-            } else {
-                Out::pairs(&[
-                    ("profile", name.to_string()),
-                    ("kind", kind(p.kind).into()),
-                    ("account", p.account),
-                    ("kept in", storage_name(p.storage).into()),
-                    ("default", if default { "yes" } else { "no" }.into()),
-                    (
-                        "credential",
-                        if present {
-                            "present"
-                        } else {
-                            "missing: sign in again"
-                        }
-                        .into(),
-                    ),
-                ]);
-            }
-            Ok(())
-        }
+        ProfileCommand::Show { name } => show(g, &ctx, name, out).await,
     }
+}
+
+/// `iohr profile show [NAME]`: one profile, never its secret.
+async fn show(g: &Global, ctx: &Ctx, name: Option<ProfileName>, out: Out) -> Result<(), Error> {
+    let name = match name {
+        Some(n) => n,
+        None => ctx.chosen(g)?,
+    };
+    let p = ctx
+        .config
+        .profile(&name)
+        .cloned()
+        .ok_or_else(|| Error::Usage(format!("there is no profile {name}")))?;
+    let key = EntryKey::new(name.clone(), &p.account)?;
+    let present = blocking(ctx.store(p.storage)?, move |s| {
+        s.get(&key).map(|v| v.is_some())
+    })
+    .await?;
+    let default = ctx.config.default.as_ref() == Some(&name);
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "profile": name.as_str(), "kind": kind(p.kind), "account": p.account,
+            "account_chosen": p.account_pinned,
+            "storage": p.storage, "default": default, "credential_present": present,
+        }));
+    } else {
+        let mut pairs = vec![
+            ("profile", name.to_string()),
+            ("kind", kind(p.kind).into()),
+            ("account", p.account),
+        ];
+        if p.kind == Kind::Person {
+            pairs.push((
+                "account chosen",
+                if p.account_pinned {
+                    "yes: a sign-in again keeps it"
+                } else {
+                    "no: a sign-in again follows your default account"
+                }
+                .into(),
+            ));
+        }
+        pairs.extend([
+            ("kept in", storage_name(p.storage).into()),
+            ("default", if default { "yes" } else { "no" }.into()),
+            (
+                "credential",
+                if present {
+                    "present"
+                } else {
+                    "missing: sign in again"
+                }
+                .into(),
+            ),
+        ]);
+        Out::pairs(&pairs);
+    }
+    Ok(())
 }
 
 /// `iohr profile account NAME ACCOUNT`: point a person's profile at one of their
@@ -123,43 +142,42 @@ async fn account_of(
     // list is refused, so a profile never points at an account it cannot act for.
     let s = session_for(g, env, ctx, Some(&name)).await?;
     let me: Value = s.api.get("/v1/accounts/me", &[]).await?;
-    let mut accounts: Vec<&Value> = me.get("account").into_iter().collect();
-    accounts.extend(
-        me.get("teams")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten(),
-    );
-    let field = |a: &Value, k: &str| {
-        a.get(k)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let Some(found) = accounts.iter().find(|a| {
-        field(a, "id") == account || (!account.is_empty() && field(a, "slug") == account)
-    }) else {
-        let known: Vec<String> = accounts
-            .iter()
-            .map(|a| {
-                let slug = field(a, "slug");
-                if slug.is_empty() {
-                    field(a, "id")
-                } else {
-                    format!("{} ({slug})", field(a, "id"))
-                }
-            })
-            .collect();
+    let me = Me::read(&me)
+        .ok_or_else(|| Error::Failed("the API listed no account for this profile".into()))?;
+    let Some(found) = me.find(account) else {
         return Err(Error::Usage(format!(
             "{account} is not an account {name} belongs to; the ones it does: {}",
-            known.join(", ")
+            me.listed()
         )));
     };
-    let id = field(found, "id");
+    // Named by hand: a later sign-in keeps it.
+    point_at(ctx, &name, profile, &found.id, true).await?;
+    if out.json {
+        Out::print_json(
+            &serde_json::json!({ "profile": name.as_str(), "account": found.id, "name": found.name, "plan": found.plan }),
+        );
+    } else {
+        Out::note(&format!(
+            "Profile {name} now acts for {} ({}, plan {}), and a later `iohr login` keeps it.",
+            found.id, found.name, found.plan
+        ));
+    }
+    Ok(())
+}
+
+/// Points `profile` at account `id` and saves it. The credential entry is keyed by
+/// profile and account, so it moves with the account. `chosen` marks the account as the
+/// person's own choice, which a sign-in again keeps.
+pub(crate) async fn point_at(
+    ctx: &mut Ctx,
+    name: &ProfileName,
+    profile: Profile,
+    id: &str,
+    chosen: bool,
+) -> Result<(), Error> {
     if id != profile.account {
-        // The credential entry is keyed by profile and account: move it.
         let old_key = EntryKey::new(name.clone(), &profile.account)?;
-        let new_key = EntryKey::new(name.clone(), &id)?;
+        let new_key = EntryKey::new(name.clone(), id)?;
         let store = ctx.store(profile.storage)?;
         blocking(store, move |st| {
             if let Some(secret) = st.get(&old_key)? {
@@ -171,21 +189,10 @@ async fn account_of(
         .await?;
     }
     let mut updated = profile;
-    updated.account.clone_from(&id);
+    id.clone_into(&mut updated.account);
+    updated.account_pinned = chosen;
     ctx.config.profiles.insert(name.clone(), updated);
-    ctx.save()?;
-    if out.json {
-        Out::print_json(
-            &serde_json::json!({ "profile": name.as_str(), "account": id, "name": field(found, "name"), "plan": field(found, "plan") }),
-        );
-    } else {
-        Out::note(&format!(
-            "Profile {name} now acts for {id} ({}, plan {}).",
-            field(found, "name"),
-            field(found, "plan")
-        ));
-    }
-    Ok(())
+    ctx.save()
 }
 
 fn kind(k: Kind) -> &'static str {
