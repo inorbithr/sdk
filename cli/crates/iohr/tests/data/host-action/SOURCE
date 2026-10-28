@@ -1,16 +1,36 @@
-Copied from inorbithr/core PR #1377 (branch feat/host-action-schema, head df28a9f3a66e7732846610262b5622f5cb6d7656), 2026-10-27: testdata/host-action/vectors/ -> vectors/, schemas/runner/host-action/ -> schema/. Never edit here; copy again when core changes them. The verifier these vectors hold to is crates/common/src/approval_messages/pinned.rs at that head.
+Copied from inorbithr/core PR #1417 (branch feat/host-action-catalog-1, head bb7bcb7556af015c82d1515ea63dab38600459b4), 2026-10-28: testdata/host-action/vectors/ -> vectors/, schemas/runner/host-action/ -> schema/. Never edit here; copy again when core changes them. The verifier these vectors hold to is crates/common/src/approval_messages/pinned.rs at that head.
 
 SHA-256 of each file as copied:
+1786064842bc56ec420658c87e39e0a0120f46611073b886019801f7b2950a9b  schema/examples/cancel-run.json
 305757ad3a91a93e068892b21b01453795cbeded2b235a5f53cda2f794d0059d  schema/examples/minimal.json
 8f0388a9aa86b2d81dfbf18d3365e755a09949e2c5451e5b384eea8b28d4cff2  schema/examples/one-namespace.json
+dcf08762704c57cd2b84b2f822c86b90ab0ffc2c2819ef1800ce922ad4f1a2f3  schema/examples/prune-images.json
+74817d02095d9c99e6cf3775498a59f8f04d52941a71be7a15c9b0c949acfd72  schema/examples/rollout-restart.json
+2731ac9b42c2120c561078e1a719703a7aa4662a48aae79a53405c4cdb903c76  schema/examples/upgrade.json
+eaf39d691be564d4d9487dfdc0d8456f3860fc42b21fc30a49871c4c438cb29a  schema/examples/user-restart.json
 903b9a8f37c4e3716535b78a0caca8f6608418cb727e72f49eb9bc3e5c63c5da  schema/invalid/bad-namespace.json
 5c23877d407edbba45fd98de2ec0acfcf5c529ebfb85e08ed9f8bc17ce4cd614  schema/invalid/bad-runner-id.json
+8a9f17f0b5748389fc23b01d377cb8eaf50d434a5bf0f5830bfdc8de2bc1c72e  schema/invalid/cancel-run-huge-id.json
+41915f27a7ddc7280901e620a880845513776ec7e606aea9e62ca5cb5a55d504  schema/invalid/cancel-run-other-owner.json
+78fffbc004f1399b2172d2cbbd23f718c72f0105b9b8412882a7414e3ce935a8  schema/invalid/cancel-run-unknown-param.json
+89321fad468e9034070848e50ff4ea7084c60b9b291cd28c71cd5fc565a91b30  schema/invalid/cancel-run-zero-id.json
 61978f035de3c60dc9c173d957bac75712b1b43e82aaf1286f4e887737c4199b  schema/invalid/missing-effect.json
 139313800d808f8d3bc657a2355ec587a1bb4e83685cef0f7aa885d4b80fc87d  schema/invalid/multi-line-effect.json
+3b037014ab3bba03bc7034847bbb95ffad7c5df5a4dabb72195ee45634b5516d  schema/invalid/prune-images-string-hours.json
+a4f6ec97aee5af87c7785ab2eacb61cdf8e31540c367860030b2e0d33886719e  schema/invalid/prune-images-too-many-hours.json
+92e1ae5a43298e9b73cf99ad491fcf166a840bae756d8a0d4c7cd3e9c9597c30  schema/invalid/prune-images-unknown-param.json
+16a61716612d26ee01480e8479c3d9f7c406a886ccd91919de67524a107b3d09  schema/invalid/prune-images-zero-hours.json
+4b914893211604401c5700b5aece8aaac2e95a29137f5d426c2e8262cc1b73aa  schema/invalid/rollout-restart-bad-deployment.json
+fc40f338d65e79e17099ed9e491bb25f47c89d3e39e361f7d4eca0aadbeb7445  schema/invalid/rollout-restart-missing-deployment.json
+b984893fb1608bbb3e00db85aae2e0071d716fac20fae636e8d1d7e50d2a2b16  schema/invalid/rollout-restart-unknown-param.json
 63f4b4dde66300e3f4a675c3c1ef6e45616efa214f835f3885f5a8551660edea  schema/invalid/unknown-action.json
 c3d8860d81428d22060076083950fd6d4f6671ca63529899db96406b7591509f  schema/invalid/unknown-field.json
 d37abf7f8074258a4511bfc183a2cf3eb17a5d63a7a2b721615b643859b01a69  schema/invalid/unknown-param.json
-6ab22816949d24227918e04e2e813f50ca7c422b2c5c49426e413248d767afad  schema/v0.json
+18c52b1ce0f342d386d238e5b4b6a8d782e2a95cb7091c8d59ab31ee20152278  schema/invalid/upgrade-unknown-param.json
+021f8a038cc53d802a39abc9a328754ff0867f80ed3e2c855c4638e16fa36aeb  schema/invalid/user-restart-bad-unit.json
+d946b0da1e225a270ab825764fa63289be423b7ed5c8bc27a0559aa4630c76d9  schema/invalid/user-restart-shell-unit.json
+5aaa24df869dc07cbe13bb15e5180fe093b780450d579f9bc38de82b71cf34ea  schema/invalid/user-restart-unknown-param.json
+dd0f9f39f7518aa0db34345fbbef6b1e3a67dda16d212af5dee85cd3e01b67fa  schema/v0.json
 86522d2d7ec5ceedae8d2d7e95785773e2085b62de03d0915da931f1db060057  vectors/bad_signature.json
 9777993372cb92842acc3a34cfc9c5940955479bde1bc7fb2abcdd3ff511a3b1  vectors/expired.json
 1a61e24b2c46c38f672cc0e2cd63800a47d6b29793b6b98218f30fb0150eebe0  vectors/hash_mismatch.json
