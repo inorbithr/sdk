@@ -223,6 +223,9 @@ struct Ask<'a> {
     runner_id: &'a str,
     runner_key: Option<String>,
     signer: Option<&'a RunKey>,
+    /// The run's own `effect`: a class, `local_write` as core files it unless a test says
+    /// otherwise.
+    effect: &'a str,
 }
 
 /// A random nonce per name and test thread: the same name gives the same nonce within one test
@@ -250,6 +253,7 @@ fn ask<'a>(id: &'a str, nonce: &'a str) -> Ask<'a> {
         runner_id: RUNNER,
         runner_key: None,
         signer: None,
+        effect: "local_write",
     }
 }
 
@@ -261,7 +265,7 @@ fn approval(w: &World, a: Ask<'_>) -> Value {
         "cmd": id_word,
         "argv": [id_word],
         "script_sha256": payload_digest(&a.action),
-        "effect": a.action["effect"],
+        "effect": a.effect,
         "runner_id": a.runner_id,
         "runner_public_key": a.runner_key.unwrap_or_else(|| w.run.public_key()),
         "expires_at": a.expires_at,
@@ -511,6 +515,56 @@ async fn a_run_whose_effect_is_not_its_sentence_is_refused_before_anything_start
     let mut b = ask(ID1, nonce("nonce-1"));
     b.action["params"] = json!({ "namespace": "other" });
     refused_with(&w, approval(&w, b), "schema_invalid").await;
+}
+
+/// A run as core's coordinator files it (`host_action_ask.rs`): the run's own `effect` is the
+/// class `local_write` (`approvals.proto`, `Run.effect`), the action's is the catalogue's
+/// sentence from `effect_of`. It is accepted and carried out.
+#[tokio::test]
+async fn a_run_as_core_files_it_is_accepted() {
+    let w = world();
+    let a = ask(ID1, nonce("nonce-1"));
+    assert_eq!(
+        a.action["effect"],
+        host_action::effect_of("k8s.delete-failed-pods", &json!({ "namespace": "example" }))
+            .unwrap()
+    );
+    let run = approval(&w, a);
+    assert_eq!(run["payload"]["run"]["effect"], "local_write");
+    let svc = Mock::with(vec![run]);
+    let mut asks = asks(&w, Seen::default(), Some(fake("default", false)));
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(t.refused, 0);
+    assert!(!asks.tools.ran_nothing());
+}
+
+/// The run's own `effect` is a class, never a sentence: a sentence there (the action's own,
+/// or any other) is refused and nothing runs, as is a class that does not exist.
+#[tokio::test]
+async fn a_run_whose_own_effect_is_not_a_class_is_refused_before_anything_starts() {
+    let w = world();
+    for effect in [
+        "Deletes every failed pod in namespace example.",
+        "Deletes every failed pod in every namespace.",
+        "Does one thing on the runner's host.",
+        "local",
+        "",
+    ] {
+        let mut a = ask(ID1, nonce("nonce-1"));
+        a.effect = effect;
+        refused_with(&w, approval(&w, a), "schema_invalid").await;
+    }
+    for effect in ["read_only", "local_write", "remote", "production"] {
+        let mut a = ask(ID1, nonce("nonce-1"));
+        a.effect = effect;
+        let svc = Mock::with(vec![approval(&w, a)]);
+        let mut asks = asks(&w, Seen::default(), Some(fake("default", false)));
+        assert_eq!(
+            asks.tick(&svc, &|_| {}).await.unwrap().refused,
+            0,
+            "{effect}"
+        );
+    }
 }
 
 #[tokio::test]

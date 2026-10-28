@@ -312,7 +312,12 @@ fn has_float(v: &Value) -> bool {
     }
 }
 
-/// Whether `action` is a host action this run may carry (core `check_action`).
+/// The classes of a run's own `effect` (`approvals.proto`, `Run.effect`). Never the action's
+/// sentence: that one is the action's own `effect`, held to the catalogue by `validate`.
+const EFFECT_CLASSES: [&str; 4] = ["read_only", "local_write", "remote", "production"];
+
+/// Whether `action` is a host action this run may carry (core `check_action`), and `effect`,
+/// the run's own, is one of the [`EFFECT_CLASSES`].
 ///
 /// # Errors
 /// What is wrong, naming fields only.
@@ -322,6 +327,7 @@ pub(crate) fn check_action(
     script_sha256: &str,
     argv: &[String],
     runner_id: &str,
+    effect: &str,
 ) -> Result<(), String> {
     if schema_id != HOST_ACTION {
         return Err(format!("schema_id: only {HOST_ACTION}"));
@@ -333,6 +339,9 @@ pub(crate) fn check_action(
         .map_err(|at| format!("action: not a {HOST_ACTION} document (at {at})"))?;
     if payload_digest(action) != script_sha256 {
         return Err("script_sha256: not the SHA-256 of the action's canonical JSON".to_owned());
+    }
+    if !EFFECT_CLASSES.contains(&effect) {
+        return Err("effect: not read_only, local_write, remote or production".to_owned());
     }
     let id = action["action"].as_str().unwrap_or_default();
     if argv.len() != 1 || argv[0] != id {
@@ -402,6 +411,7 @@ pub(crate) fn verify(
                 &script,
                 &argv,
                 &runner,
+                &text(payload, "effect"),
             )
             .map_err(Refusal::SchemaInvalid)?;
         }
