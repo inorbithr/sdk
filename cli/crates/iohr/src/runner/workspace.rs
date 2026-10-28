@@ -319,18 +319,22 @@ pub(crate) fn redact(line: &str) -> String {
         .join(" ")
 }
 
-/// `owner/name`: letters, digits, `-`, `_` and `.`, never `.` or `..` alone.
+/// One part of `owner/name`: 1 to 100 letters, digits, `-`, `_` and `.`, never `.` or
+/// `..` alone. The one check for both the job's repository and a host action's.
+pub(crate) fn is_repository_part(p: &str) -> bool {
+    (1..=100).contains(&p.len())
+        && p != "."
+        && p != ".."
+        && p.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
+/// `owner/name`, each part [`is_repository_part`].
 fn valid_repository(r: &str) -> Result<(&str, &str), String> {
-    let part = |p: &str| {
-        !p.is_empty()
-            && p.len() <= 100
-            && p != "."
-            && p != ".."
-            && p.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-    };
     match r.split_once('/') {
-        Some((o, n)) if part(o) && part(n) => Ok((o, n.trim_end_matches(".git"))),
+        Some((o, n)) if is_repository_part(o) && is_repository_part(n) => {
+            Ok((o, n.trim_end_matches(".git")))
+        }
         _ => Err(format!("the job's repository {r:?} is not owner/name")),
     }
 }

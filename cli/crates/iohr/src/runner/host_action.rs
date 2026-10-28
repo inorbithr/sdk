@@ -30,8 +30,11 @@
 //! input and a time limit per tool. Every `kubectl` call is pinned to the cluster the
 //! runner's config names (`kube_context` and/or `kubeconfig` under `[runner]`,
 //! [`KubeTarget`]); with neither set a Kubernetes action is refused and nothing runs.
-//! What a tool says back goes into a report only after [`redact_output`], cut to
-//! [`OUTPUT_CAP`].
+//! What a tool says back is read as it comes, in bounded memory ([`Capture`]): the
+//! first [`OUTPUT_CAP`] bytes are kept, cut only between words so no secret is left
+//! half there, and the counts a summary needs are taken from the whole stream. It goes
+//! into a report only after [`redact_output`], and the report is cut to [`OUTPUT_CAP`]
+//! after that.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -122,13 +125,11 @@ pub(crate) fn is_user_unit(s: &str) -> bool {
     })
 }
 
-/// A repository of the one owner: `^inorbithr/[a-z0-9._-]{1,100}$`.
+/// A repository of the one owner: `^inorbithr/(?!\.\.?$)[a-z0-9._-]{1,100}$`, the name
+/// held to [`super::workspace::is_repository_part`] and lower case.
 pub(crate) fn is_repo(s: &str) -> bool {
     s.strip_prefix(REPO_OWNER).is_some_and(|name| {
-        (1..=100).contains(&name.len())
-            && name.bytes().all(|c| {
-                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-')
-            })
+        super::workspace::is_repository_part(name) && !name.bytes().any(|c| c.is_ascii_uppercase())
     })
 }
 
@@ -489,12 +490,123 @@ pub(crate) fn plan(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>
     })
 }
 
-/// What one call gave.
+/// What one call gave: each stream as [`Capture`] kept it, and the tally of all stdout.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Output {
     pub(crate) success: bool,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
+    pub(crate) tally: Tally,
+}
+
+#[cfg(test)]
+impl Output {
+    /// What a call that wrote `stdout` and `stderr` gives, read as [`HostRunner`] reads.
+    pub(crate) fn new(success: bool, stdout: &str, stderr: &str) -> Self {
+        let read = |text: &str| {
+            let mut c = Capture::default();
+            c.push(text.as_bytes());
+            c.finish()
+        };
+        let (stdout, tally) = read(stdout);
+        let (stderr, _) = read(stderr);
+        Self {
+            success,
+            stdout,
+            stderr,
+            tally,
+        }
+    }
+}
+
+/// What a summary counts over a whole stream, however long it was.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Tally {
+    /// Lines that start with `deleted:` (`docker image prune`).
+    pub(crate) deleted: usize,
+    /// The last line that starts with `Total reclaimed space`, not yet redacted.
+    pub(crate) total: Option<String>,
+}
+
+/// Longest line start a [`Tally`] looks at.
+const LINE_HEAD: usize = 256;
+
+/// One stream read in bounded memory: the first [`OUTPUT_CAP`] bytes, cut between words,
+/// and a [`Tally`] of every line.
+#[derive(Debug, Default)]
+struct Capture {
+    kept: Vec<u8>,
+    full: bool,
+    head: Vec<u8>,
+    tally: Tally,
+}
+
+impl Capture {
+    fn push(&mut self, chunk: &[u8]) {
+        if !self.full {
+            self.kept.extend_from_slice(chunk);
+            if self.kept.len() > OUTPUT_CAP {
+                self.full = true;
+                // A word cut at the cap could be half a secret: drop it.
+                if !self.kept[OUTPUT_CAP].is_ascii_whitespace()
+                    && let Some(at) = self.kept[..OUTPUT_CAP]
+                        .iter()
+                        .rposition(u8::is_ascii_whitespace)
+                {
+                    self.kept.truncate(at + 1);
+                } else {
+                    self.kept.truncate(OUTPUT_CAP);
+                }
+            }
+        }
+        for &b in chunk {
+            if b == b'\n' {
+                self.end_line();
+            } else if self.head.len() < LINE_HEAD {
+                self.head.push(b);
+            }
+        }
+    }
+
+    fn end_line(&mut self) {
+        let line = String::from_utf8_lossy(&self.head);
+        let line = line.trim_end_matches('\r');
+        if line.trim_start().starts_with("deleted:") {
+            self.tally.deleted += 1;
+        } else if line.starts_with("Total reclaimed space") {
+            self.tally.total = Some(line.to_owned());
+        }
+        self.head.clear();
+    }
+
+    fn finish(mut self) -> (String, Tally) {
+        if !self.head.is_empty() {
+            self.end_line();
+        }
+        (
+            clipped(String::from_utf8_lossy(&self.kept).into_owned()),
+            self.tally,
+        )
+    }
+}
+
+/// Reads `stream` to its end through a [`Capture`].
+async fn drain(
+    stream: Option<impl tokio::io::AsyncRead + Unpin>,
+) -> std::io::Result<(String, Tally)> {
+    use tokio::io::AsyncReadExt as _;
+    let mut capture = Capture::default();
+    if let Some(mut stream) = stream {
+        let mut buf = vec![0u8; 8 * 1024];
+        loop {
+            let n = stream.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            capture.push(&buf[..n]);
+        }
+    }
+    Ok(capture.finish())
 }
 
 /// Runs one host tool with an argument vector: the only way a host action starts a
@@ -641,7 +753,7 @@ impl ArgvRunner for HostRunner {
         };
         full.extend_from_slice(argv);
         let name = tool.name();
-        let child = tokio::process::Command::new(self.program(tool)?)
+        let mut child = tokio::process::Command::new(self.program(tool)?)
             .args(&full)
             .env_clear()
             .envs(self.env_for(tool))
@@ -651,14 +763,20 @@ impl ArgvRunner for HostRunner {
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("{name} did not start: {}", e.kind()))?;
-        let out = tokio::time::timeout(tool.timeout(), child.wait_with_output())
+        let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
+        let all = async {
+            let (out, err, status) = tokio::join!(drain(stdout), drain(stderr), child.wait());
+            Ok::<_, std::io::Error>((out?, err?, status?))
+        };
+        let ((stdout, tally), (stderr, _), status) = tokio::time::timeout(tool.timeout(), all)
             .await
             .map_err(|_| format!("{name} took over {}s", tool.timeout().as_secs()))?
             .map_err(|e| format!("{name} failed: {}", e.kind()))?;
         Ok(Output {
-            success: out.status.success(),
-            stdout: capped(&out.stdout),
-            stderr: capped(&out.stderr),
+            success: status.success(),
+            stdout,
+            stderr,
+            tally,
         })
     }
 }
@@ -705,31 +823,30 @@ pub(crate) fn redact_output(text: &str) -> String {
         .map(|line| {
             let line = super::workspace::redact(line);
             let mut after_bearer = false;
-            line.split(' ')
-                .map(|w| {
+            // Words split on any whitespace, each kept with what followed it.
+            line.split_inclusive(char::is_whitespace)
+                .map(|piece| {
+                    let w = piece.trim_end_matches(char::is_whitespace);
                     let core = bare(w);
+                    if core.is_empty() {
+                        return piece.to_owned();
+                    }
                     let hide = after_bearer
                         || core.contains("://")
                         || is_ip_or_host_port(core)
                         || secretish(core);
                     after_bearer =
                         core.eq_ignore_ascii_case("bearer") || core.eq_ignore_ascii_case("token");
-                    if hide && !core.is_empty() && core != "[redacted]" {
-                        "[redacted]".to_owned()
+                    if hide && core != "[redacted]" {
+                        format!("[redacted]{}", &piece[w.len()..])
                     } else {
-                        w.to_owned()
+                        piece.to_owned()
                     }
                 })
-                .collect::<Vec<_>>()
-                .join(" ")
+                .collect::<String>()
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn capped(bytes: &[u8]) -> String {
-    let end = bytes.len().min(OUTPUT_CAP);
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
 /// `text` cut to [`OUTPUT_CAP`] bytes on a character boundary.
@@ -785,7 +902,7 @@ pub(crate) async fn carry_out_on(
                 }
                 return Err(clipped(done.join("\n")));
             }
-            if let Some(line) = summary(action, &what) {
+            if let Some(line) = summary(action, &what, &out.tally) {
                 done.push(line);
             }
         }
@@ -794,8 +911,9 @@ pub(crate) async fn carry_out_on(
     result.map(clipped).map_err(clipped)
 }
 
-/// The line a person reads for one successful call, from what the tool said (redacted).
-fn summary(action: &Action, what: &str) -> Option<String> {
+/// The line a person reads for one successful call, from what the tool said (redacted)
+/// and the tally of all its stdout.
+fn summary(action: &Action, what: &str, tally: &Tally) -> Option<String> {
     match action {
         Action::DeleteFailedPods { .. } => None,
         Action::RolloutRestart {
@@ -808,15 +926,11 @@ fn summary(action: &Action, what: &str) -> Option<String> {
             format!("{unit}: {what}")
         }),
         Action::PruneImages { .. } => {
-            let removed = what
-                .lines()
-                .filter(|l| l.trim_start().starts_with("deleted:"))
-                .count();
-            let total = what
-                .lines()
-                .find(|l| l.starts_with("Total reclaimed space"))
-                .unwrap_or("Total reclaimed space: unknown");
-            Some(format!("{removed} images removed; {total}"))
+            let total = tally.total.as_deref().map_or_else(
+                || "Total reclaimed space: unknown".to_owned(),
+                redact_output,
+            );
+            Some(format!("{} images removed; {total}", tally.deleted))
         }
         Action::CancelRun { repo, run_id } => Some(if what.is_empty() {
             format!("{repo} run {run_id}: cancel requested")
@@ -920,11 +1034,7 @@ pub(crate) mod testing {
             }
             self.calls.lock().unwrap().push((tool, argv.to_vec()));
             if tool == Tool::Kubectl && argv[0] == "get" {
-                return Ok(Output {
-                    success: true,
-                    stdout: self.namespaces.to_owned(),
-                    stderr: String::new(),
-                });
+                return Ok(Output::new(true, self.namespaces, ""));
             }
             if let Some(out) = &self.answer {
                 return Ok(out.clone());
@@ -934,15 +1044,11 @@ pub(crate) mod testing {
             } else {
                 String::new()
             };
-            Ok(Output {
-                success: !self.fail,
-                stdout,
-                stderr: if self.fail {
-                    "forbidden".to_owned()
-                } else {
-                    String::new()
-                },
-            })
+            Ok(Output::new(
+                !self.fail,
+                &stdout,
+                if self.fail { "forbidden" } else { "" },
+            ))
         }
     }
 
