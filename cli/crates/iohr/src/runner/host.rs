@@ -263,6 +263,9 @@ mod tests {
         );
     }
 
+    // Memory, disks and load come from /proc, sysctl and df: Windows has none of them
+    // and reports cores only.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[tokio::test]
     async fn this_machine_reports_cores_memory_and_root() {
         let h = probe(None).await;
