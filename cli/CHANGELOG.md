@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.0-alpha.27](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.26...iohr/v0.1.0-alpha.27) (2026-10-28)
+
+
+### Features
+
+* **cli:** enrol the run key through an ask approved on the phone ([#295](https://github.com/inorbithr/sdk/issues/295)) ([4be4686](https://github.com/inorbithr/sdk/commit/4be4686431c0750a52eef342c56c5a39fbba5c1b))
+* **cli:** sign in on the account you chose or made your default ([#299](https://github.com/inorbithr/sdk/issues/299)) ([5a4bc6d](https://github.com/inorbithr/sdk/commit/5a4bc6d323e0184807d1a840905105c19ab28ba5))
+
+
+### Bug fixes
+
+* **cli:** never title a runner PR from the status line; derive a Conventional Commit title and repair cut ones ([#283](https://github.com/inorbithr/sdk/issues/283)) ([3bf04f4](https://github.com/inorbithr/sdk/commit/3bf04f4df08989f18c725c7b457adfc6a2b6a6dd))
+* **cli:** runner gate check fetches main with the lease's token ([#302](https://github.com/inorbithr/sdk/issues/302)) ([3ad0655](https://github.com/inorbithr/sdk/commit/3ad06556e668f68b13eb0c6873a13c401bbaaa0c))
+
 ## [0.1.0-alpha.26](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.25...iohr/v0.1.0-alpha.26) (2026-10-27)
 
 
