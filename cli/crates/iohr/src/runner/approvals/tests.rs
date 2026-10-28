@@ -351,8 +351,12 @@ fn asks(w: &World, seen: Seen, kubectl: Option<Fake>) -> Asks<Fake> {
         runner_public_key: w.run.public_key(),
     };
     let key = RunKey::from_pkcs8(&w.run_doc).unwrap();
-    let kubectl = kubectl.ok_or_else(|| "kubectl is not on this runner's PATH".to_owned());
-    Asks::with_clock(key, pin, keys, seen, kubectl, || NOW)
+    let tools = kubectl.unwrap_or_else(|| {
+        let mut f = fake("", false);
+        f.missing = Some("kubectl is not on this runner's PATH".to_owned());
+        f
+    });
+    Asks::with_clock(key, pin, keys, seen, tools, || NOW)
 }
 
 /// Whether `body` is signed by the world's run key over core's `run_report` message.
@@ -413,10 +417,13 @@ async fn an_approved_action_is_started_carried_out_and_done() {
         a["payload_sha256"].as_str().unwrap()
     );
     assert!(reports[1].1.get("observed").is_none());
-    let calls = asks.kubectl.as_ref().unwrap().calls.lock().unwrap().clone();
+    let calls = asks.tools.calls();
     assert_eq!(
         calls,
-        [host_action::delete_failed_pods_argv("example").unwrap()]
+        [(
+            host_action::Tool::Kubectl,
+            host_action::delete_failed_pods_argv("example").unwrap()
+        )]
     );
     // A second poll that still lists it reports nothing more.
     asks.tick(&svc, &|_| {}).await.unwrap();
@@ -452,16 +459,7 @@ async fn a_replayed_nonce_runs_nothing() {
         [(ID2.into(), "failed".into()), (ID1.into(), "failed".into())]
     );
     assert!(again.note(0).starts_with("refused (replay)"));
-    assert!(
-        asks2
-            .kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks2.tools.ran_nothing());
 }
 
 async fn refused_with(w: &World, a: Value, label: &str) {
@@ -474,16 +472,7 @@ async fn refused_with(w: &World, a: Value, label: &str) {
     assert!(note.starts_with(&format!("refused ({label})")), "{note}");
     let body = svc.reports.lock().unwrap()[0].1.clone();
     assert!(signed(w, &svc.approvals[0], &body));
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty(),
-        "{label}: something ran"
-    );
+    assert!(asks.tools.ran_nothing(), "{label}: something ran");
 }
 
 #[tokio::test]
@@ -496,15 +485,7 @@ async fn an_unknown_action_is_refused_and_nothing_runs() {
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
     assert!(svc.note(0).contains("unknown action"), "{}", svc.note(0));
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks.tools.ran_nothing());
 }
 
 #[tokio::test]
@@ -567,15 +548,7 @@ async fn a_start_the_service_did_not_take_runs_nothing_and_is_tried_again() {
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps(), Vec::<(String, String)>::new());
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks.tools.ran_nothing());
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(
         svc.steps(),
@@ -789,25 +762,13 @@ async fn the_decision_is_recorded_before_started_is_reported() {
         [(ID1.into(), "started".into()), (ID1.into(), "done".into())]
     );
     assert_eq!(seen_lines(&path).len(), 1);
-    assert_eq!(
-        asks.kubectl.as_ref().unwrap().calls.lock().unwrap().len(),
-        1
-    );
+    assert_eq!(asks.tools.calls().len(), 1);
     // A new process after a restart finds it recorded and runs nothing.
     let svc2 = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks2 = asks_with(&w, &path);
     let t = asks2.tick(&svc2, &|_| {}).await.unwrap();
     assert_eq!(t.refused, 1);
-    assert!(
-        asks2
-            .kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks2.tools.ran_nothing());
 }
 
 fn asks_with(w: &World, path: &std::path::Path) -> Asks<Fake> {
@@ -829,15 +790,7 @@ async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
     assert_eq!(t.failed, 1);
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
     assert!(svc.note(0).contains("nothing was run"));
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks.tools.ran_nothing());
 }
 
 #[test]
@@ -872,15 +825,7 @@ async fn a_replay_the_load_missed_is_caught_under_the_lock() {
     assert_eq!(t.refused, 1);
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
     assert!(svc.note(0).starts_with("refused (replay)"));
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks.tools.ran_nothing());
 }
 
 #[tokio::test]
@@ -888,7 +833,7 @@ async fn an_unconfigured_cluster_runs_nothing() {
     let w = world();
     let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks = asks(&w, Seen::default(), None);
-    asks.kubectl = Err(host_action::KubeTarget::new(None, None).unwrap_err());
+    asks.tools.missing = Some(host_action::KubeTarget::new(None, None).unwrap_err());
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps().last().unwrap().1, "failed");
     assert!(svc.note(1).contains("no kube context is configured"));

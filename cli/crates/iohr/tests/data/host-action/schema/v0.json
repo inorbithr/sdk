@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.inorbit.hr/runner/host-action/v0.json",
   "title": "Runner host action",
-  "description": "One action a person approves for one enrolled runner to carry out on its host: the action's dotted id from the catalog, the runner that runs it, its parameters (typed per action) and what it does in one plain sentence. It travels inside a signed approval for a pinned run: the approval names this schema, carries the action as its canonical JSON (keys sorted, no whitespace), pins the SHA-256 of that JSON, and the action's runner_id is the run's own. Integers and strings only, so the canonical JSON is the same in every language. The object and every params object are closed: an action can do only what its params say. Catalog: k8s.delete-failed-pods (params.namespace; absent means every namespace). Draft line: it may still be corrected.",
+  "description": "One action a person approves for one enrolled runner to carry out on its host: the action's dotted id from the catalog, the runner that runs it, its parameters (typed per action) and what it does in one plain sentence. It travels inside a signed approval for a pinned run: the approval names this schema, carries the action as its canonical JSON (keys sorted, no whitespace), pins the SHA-256 of that JSON, and the action's runner_id is the run's own. Integers and strings only, so the canonical JSON is the same in every language. The object and every params object are closed: an action can do only what its params say. Catalog: k8s.delete-failed-pods (params.namespace; absent means every namespace); k8s.rollout-restart (params.namespace and params.deployment: restart one deployment and wait for its rollout; the cluster's own namespaces are refused); systemd.user-restart (params.unit: reload the user's systemd manager and restart one user service; Linux only); docker.prune-images (params.until_hours: remove the images unused and older than that many hours; never volumes); gh.cancel-run (params.repo and params.run_id: cancel one GitHub Actions run of an inorbithr repository); iohr.upgrade (no params: the runner upgrades its own iohr the way it was installed). Draft line: it may still be corrected.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -48,6 +48,71 @@
       "required": [
         "action"
       ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "k8s.rollout-restart"
+        },
+        "params": {
+          "$ref": "#/$defs/k8s-rollout-restart"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "systemd.user-restart"
+        },
+        "params": {
+          "$ref": "#/$defs/systemd-user-restart"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "docker.prune-images"
+        },
+        "params": {
+          "$ref": "#/$defs/docker-prune-images"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "gh.cancel-run"
+        },
+        "params": {
+          "$ref": "#/$defs/gh-cancel-run"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "iohr.upgrade"
+        },
+        "params": {
+          "$ref": "#/$defs/iohr-upgrade"
+        }
+      },
+      "required": [
+        "action"
+      ]
     }
   ],
   "$defs": {
@@ -64,6 +129,93 @@
           "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
         }
       }
+    },
+    "k8s-rollout-restart": {
+      "description": "k8s.rollout-restart: restart deployment `deployment` in namespace `namespace` and wait for it to roll out. The cluster's own namespaces (kube-system, kube-public, kube-node-lease) are refused by the runner. Effect, as a person reads it: Restarts deployment example in namespace example and waits for the new pods.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "deployment"
+      ],
+      "properties": {
+        "namespace": {
+          "description": "A Kubernetes namespace name: lower-case letters, digits and hyphens, at most 63.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "deployment": {
+          "description": "A deployment's name in that namespace: lower-case letters, digits and hyphens, at most 63.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        }
+      }
+    },
+    "systemd-user-restart": {
+      "description": "systemd.user-restart: reload the user's systemd manager, then restart one user service. Linux only; a runner on any other system refuses it. Effect, as a person reads it: Restarts the user service example.service on the runner's host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit"
+      ],
+      "properties": {
+        "unit": {
+          "description": "A user service unit: lower-case letters, digits and @ . _ -, ending in .service, at most 71 characters.",
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 71,
+          "pattern": "^[a-z0-9][a-z0-9@._-]{0,62}\\.service$"
+        }
+      }
+    },
+    "docker-prune-images": {
+      "description": "docker.prune-images: remove every image no container uses that is older than until_hours. Never volumes, networks or a system prune. Effect, as a person reads it: Removes the unused Docker images older than 24 hours on the runner's host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "until_hours"
+      ],
+      "properties": {
+        "until_hours": {
+          "description": "Only images created more than this many hours ago: 1 to 720 (30 days).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 720
+        }
+      }
+    },
+    "gh-cancel-run": {
+      "description": "gh.cancel-run: cancel one GitHub Actions workflow run, with the runner host's own GitHub sign-in. Effect, as a person reads it: Cancels GitHub Actions run 1 of inorbithr/example.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "run_id"
+      ],
+      "properties": {
+        "repo": {
+          "description": "The repository, owner/name, of the inorbithr organisation only.",
+          "type": "string",
+          "maxLength": 110,
+          "pattern": "^inorbithr/[a-z0-9._-]{1,100}$"
+        },
+        "run_id": {
+          "description": "The workflow run's id: 1 to 2^53 - 1, so it is exact in every language.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "iohr-upgrade": {
+      "description": "iohr.upgrade: the runner upgrades its own iohr to the newest release the way it was installed (Homebrew, or the install script's checked archive); never a downloaded script. No params. Effect, as a person reads it: Upgrades iohr on the runner's host to the newest release.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
     }
   }
 }

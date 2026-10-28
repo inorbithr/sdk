@@ -38,7 +38,7 @@ use inorbithr::Method;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
-use super::host_action::{self, HOST_ACTION, Kubectl};
+use super::host_action::{self, ArgvRunner, HOST_ACTION};
 use super::private;
 use super::service::{HttpService, ServiceError};
 use super::signing::{RunKey, h as sha256_hex, run_report_message};
@@ -752,10 +752,10 @@ pub(crate) struct Asks<K> {
     pub(crate) pin: Pin,
     pub(crate) keys: DeviceKeys,
     pub(crate) seen: Seen,
-    /// The host's `kubectl`, pinned to the configured kube context; the reason when it
-    /// cannot be used (not installed, or no context configured): every action then
-    /// fails with it and nothing runs.
-    pub(crate) kubectl: Result<K, String>,
+    /// The host's tools (`kubectl` pinned to the configured kube context): a tool that
+    /// cannot be used (not installed, or no context configured) fails the action that
+    /// needs it, and nothing of that action runs.
+    pub(crate) tools: K,
     /// The time a report is signed at, read afresh for each report.
     clock: fn() -> i64,
     /// Approvals handled by this process: never reported twice.
@@ -772,15 +772,9 @@ pub(crate) fn unix_now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-impl<K: Kubectl> Asks<K> {
-    pub(crate) fn new(
-        key: RunKey,
-        pin: Pin,
-        keys: DeviceKeys,
-        seen: Seen,
-        kubectl: Result<K, String>,
-    ) -> Self {
-        Self::with_clock(key, pin, keys, seen, kubectl, unix_now)
+impl<K: ArgvRunner> Asks<K> {
+    pub(crate) fn new(key: RunKey, pin: Pin, keys: DeviceKeys, seen: Seen, tools: K) -> Self {
+        Self::with_clock(key, pin, keys, seen, tools, unix_now)
     }
 
     /// As [`Asks::new`], on a given clock.
@@ -789,7 +783,7 @@ impl<K: Kubectl> Asks<K> {
         pin: Pin,
         keys: DeviceKeys,
         seen: Seen,
-        kubectl: Result<K, String>,
+        tools: K,
         clock: fn() -> i64,
     ) -> Self {
         Self {
@@ -797,7 +791,7 @@ impl<K: Kubectl> Asks<K> {
             pin,
             keys,
             seen,
-            kubectl,
+            tools,
             clock,
             handled: HashSet::new(),
             pending_start: HashSet::new(),
@@ -942,14 +936,13 @@ impl<K: Kubectl> Asks<K> {
                 continue;
             }
             self.pending_start.remove(&a.approval_id);
+            // The id only: the parameters are the requester's text.
             note(&format!(
-                "approval {}: carrying out {action:?}",
-                a.approval_id
+                "approval {}: carrying out {}",
+                a.approval_id,
+                action.id()
             ));
-            let result = match &self.kubectl {
-                Ok(k) => host_action::carry_out(&action, k).await,
-                Err(why) => Err(format!("{why}; nothing was run")),
-            };
+            let result = host_action::carry_out(&action, &self.tools).await;
             let (step, said) = match result {
                 Ok(out) => {
                     t.done += 1;

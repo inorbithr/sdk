@@ -1,0 +1,8 @@
+{
+  "action": "iohr.upgrade",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "version": "1.0.0"
+  },
+  "effect": "Upgrades iohr."
+}
