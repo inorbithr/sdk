@@ -203,7 +203,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let set = effective(&ctx.config, s.profile.as_ref(), &flags)?;
             let signer = runner_signer(&ctx, &s, &account, false).await?;
             let local_key = signer.public_key();
-            let svc = HttpService::new(&s.api, account.clone(), Some(signer));
+            let svc = HttpService::new(&s.api, account.clone(), Some(signer)).holding();
             let all = svc.list_runners(true).await?;
             let host = set
                 .name
