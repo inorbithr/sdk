@@ -249,6 +249,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
+                report_host: true,
                 gate: Some(GateCheck {
                     // The pack names the checkout relative to the turns' working directory.
                     workdir: exec.workdir.clone(),
