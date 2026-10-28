@@ -991,7 +991,11 @@ pub(crate) fn title_from_paths(paths: &[String], job_id: &str) -> String {
     let Some(first) = paths.first() else {
         return format!("chore: job {job_id}");
     };
-    let ty = if paths.iter().all(|p| p.ends_with(".md")) {
+    let ty = if paths.iter().all(|p| {
+        std::path::Path::new(p)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    }) {
         "docs"
     } else if paths
         .iter()
@@ -1020,7 +1024,10 @@ pub(crate) fn title_from_paths(paths: &[String], job_id: &str) -> String {
         });
     let name = |p: &String| p.rsplit('/').next().unwrap_or(p).to_owned();
     let what = match paths.len() {
-        1..=3 => format!("update {}", paths.iter().map(name).collect::<Vec<_>>().join(", ")),
+        1..=3 => format!(
+            "update {}",
+            paths.iter().map(name).collect::<Vec<_>>().join(", ")
+        ),
         n => format!("update {n} files"),
     };
     let t = match scope {
@@ -1709,7 +1716,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_long_asked_title_is_cut_to_72_without_an_ellipsis() {
-        let long = "feat(cli): the runner now writes a pull request title from the change and keeps it";
+        let long =
+            "feat(cli): the runner now writes a pull request title from the change and keeps it";
         let a = json!({"kind": "open_pull_request", "payload": {"title": long}});
         let t = compose("job_5", "", &reply("chore: status line", vec![a])).title;
         assert!(t.chars().count() <= 72, "{t}");
@@ -1724,20 +1732,40 @@ pub(crate) mod tests {
             title_from_paths(&p(&["cli/crates/iohr/src/runner/workspace.rs"]), "j"),
             "chore(runner): update workspace.rs"
         );
-        assert_eq!(title_from_paths(&p(&["a.md", "docs/b.md"]), "j"), "docs: update a.md, b.md");
+        assert_eq!(
+            title_from_paths(&p(&["a.md", "docs/b.md"]), "j"),
+            "docs: update a.md, b.md"
+        );
         assert_eq!(title_from_paths(&p(&[]), "job_1"), "chore: job job_1");
         let many: Vec<String> = (0..9).map(|i| format!("go/pkg/f{i}.go")).collect();
         let t = title_from_paths(&many, "j");
         assert_eq!(t, "chore(pkg): update 9 files");
-        let long = p(&["x/averyveryverylongfilenamethatgoeson.rs", "x/anotherveryverylongfilename.rs", "x/third_long_file_name.rs"]);
+        let long = p(&[
+            "x/averyveryverylongfilenamethatgoeson.rs",
+            "x/anotherveryverylongfilename.rs",
+            "x/third_long_file_name.rs",
+        ]);
         let t = title_from_paths(&long, "j");
-        assert!(t.chars().count() <= 72 && is_conventional(&t) && !t.contains('…'), "{t}");
+        assert!(
+            t.chars().count() <= 72 && is_conventional(&t) && !t.contains('…'),
+            "{t}"
+        );
     }
 
     #[test]
     fn an_open_pull_requests_title_is_kept_unless_empty_or_cut() {
-        assert_eq!(title_to_set("fix(cli): set by the coordinator", "chore: x"), None);
-        assert_eq!(title_to_set("chore: Most of this was already on main, so the…", "feat: a").as_deref(), Some("feat: a"));
+        assert_eq!(
+            title_to_set("fix(cli): set by the coordinator", "chore: x"),
+            None
+        );
+        assert_eq!(
+            title_to_set(
+                "chore: Most of this was already on main, so the…",
+                "feat: a"
+            )
+            .as_deref(),
+            Some("feat: a")
+        );
         assert_eq!(title_to_set("", "feat: a").as_deref(), Some("feat: a"));
     }
 
@@ -1748,13 +1776,27 @@ pub(crate) mod tests {
         let w = spaces(&p, forge.clone());
         let got = w.prepare("job_8", "acme/app", &acc()).await.unwrap();
         identity(&p);
-        write(&got.path, "src/new.txt", "new\n");
-        let m = compose("job_8", "", &reply("chore: Most of this was already on main, so the change is small: three things", vec![]));
+        write(&got.path, "new.txt", "new\n");
+        let m = compose(
+            "job_8",
+            "",
+            &reply(
+                "chore: Most of this was already on main, so the change is small: three things",
+                vec![],
+            ),
+        );
         let s = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
         let subject = sh(&p.origin, &["log", "-1", "--format=%s", &s.head]);
         assert_eq!(subject, "chore: update new.txt");
-        assert_eq!(forge.asked.lock().unwrap()[0].title, "chore: update new.txt");
-        assert!(forge.asked.lock().unwrap()[0].body.contains("Most of this was already on main"));
+        assert_eq!(
+            forge.asked.lock().unwrap()[0].title,
+            "chore: update new.txt"
+        );
+        assert!(
+            forge.asked.lock().unwrap()[0]
+                .body
+                .contains("Most of this was already on main")
+        );
     }
 
     #[test]
