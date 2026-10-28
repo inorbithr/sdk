@@ -27,7 +27,7 @@ use tokio::time::Instant;
 use super::access::Access;
 use super::claude::Reply;
 use super::exec::{Exec, Finished};
-use super::gate::{self, Checked, Held, Skip};
+use super::gate::{self, Checked, Held, MainFrom, Skip};
 use super::service::{
     AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
     TurnReport, Usage,
@@ -801,26 +801,9 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 // The runner ships a replied turn of a checkout it owns: commit, push
                 // `job/<id>`, open or update the pull request; before the check, so the
                 // check sees the pushed head.
-                // The lease's access serves the push and the check's fetch of main, both
-                // of which reach GitHub. A token close to its end is minted again; one
-                // that cannot be is a ship that fails and a check that makes no report,
-                // said in the log.
-                let shipping = cfg.workspaces.is_some() && finished.parsed.is_some() && finished.outcome == "replied";
-                let access: Option<Result<Access, String>> = match &b.owned {
-                    Some(o) if shipping || cfg.gate.is_some() => Some(
-                        if o.access.fresh(time::OffsetDateTime::now_utc()) {
-                            Ok(o.access.clone())
-                        } else {
-                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
-                        },
-                    ),
-                    _ => None,
-                };
                 let ship = match (&b.owned, cfg.workspaces.as_ref(), &finished.parsed) {
-                    (Some(o), Some(w), Some(parsed)) if finished.outcome == "replied" => {
-                        let m = workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply);
-                        let access = access.clone().unwrap_or_else(|| Err("no access".into()));
-                        Some((Arc::clone(w), o.checkout.clone(), m, access))
+                    (Some(o), Some(_), Some(parsed)) if finished.outcome == "replied" => {
+                        Some(workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply))
                     }
                     (Some(_), Some(_), _) => {
                         log(&format!("lease {}: nothing shipped, the turn ended {}", b.lease.lease_id, finished.outcome));
@@ -839,10 +822,26 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     let repo = checkout_in(&g.workdir, &b.pack.checkout).ok()?;
                     (wanted && why.is_none()).then_some((g, repo))
                 });
+                // A checkout this runner owns, when the push or the check's fetch of main
+                // will reach GitHub: its workspaces, the checkout and the lease's access.
+                // A token close to its end is minted again, only now that one of them
+                // will run; one that cannot be is a ship that fails and a check that
+                // makes no report, said in the log.
+                let owned = match (&b.owned, cfg.workspaces.as_ref()) {
+                    (Some(o), Some(w)) if ship.is_some() || gate_run.is_some() => {
+                        let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
+                            Ok(o.access.clone())
+                        } else {
+                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
+                        };
+                        Some((Arc::clone(w), o.checkout.clone(), access))
+                    }
+                    _ => None,
+                };
                 if gate_run.is_some() || ship.is_some() {
                     let check = gate_run.map(|(g, repo)| {
                         log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
-                        (repo, g.command.clone(), g.timeout, g.env.clone(), access)
+                        (repo, g.command.clone(), g.timeout, g.env.clone())
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
                     gating.push(Gating {
@@ -850,18 +849,25 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         job_id,
                         report,
                         check: Some(tokio::spawn(async move {
-                            let shipped = match ship {
-                                Some((w, p, m, Ok(access))) => Some(w.ship(&p, &m, &access).await),
-                                Some((_, _, _, Err(e))) => Some(Err(format!("nothing pushed: {e}"))),
-                                None => None,
+                            let shipped = match (ship, &owned) {
+                                (Some(m), Some((w, p, Ok(access)))) => Some(w.ship(p, &m, access).await),
+                                (Some(_), Some((_, _, Err(e)))) => Some(Err(format!("nothing pushed: {e}"))),
+                                _ => None,
                             };
                             let checked = match check {
-                                // A checkout this runner does not own has no lease access:
-                                // its fetch is left to the host's own git configuration.
-                                Some((repo, command, timeout, env, access)) => Some(match access {
-                                    Some(Err(e)) => Err(Skip::Access(e)),
-                                    Some(Ok(a)) => gate::check(&repo, &command, timeout, env, Some(&a)).await,
-                                    None => gate::check(&repo, &command, timeout, env, None).await,
+                                Some((repo, command, timeout, env)) => Some(match &owned {
+                                    // A checkout this runner owns: main is fetched in its
+                                    // mirror, behind the guard, never in the checkout
+                                    // (whose configuration the turn can write); the
+                                    // checkout shares the mirror's refs.
+                                    Some((w, p, Ok(access))) => match w.fetch_main(p, access).await {
+                                        Ok(()) => gate::check(&repo, &command, timeout, env, MainFrom::Mirror).await,
+                                        Err(e) => Err(Skip::Git(e)),
+                                    },
+                                    Some((_, _, Err(e))) => Err(Skip::Access(e.clone())),
+                                    // One it does not own has no lease access: its fetch is
+                                    // left to the host's own git configuration, no token.
+                                    None => gate::check(&repo, &command, timeout, env, MainFrom::Checkout).await,
                                 }),
                                 None => None,
                             };
@@ -2795,6 +2801,57 @@ mod tests {
             "{:?}",
             r[0].evidence
         );
+    }
+
+    /// A turn that neither ships nor gets a gate check mints no token after it, even with
+    /// the gate on and the lease's token past its refresh point: the mint waits until the
+    /// push or the check's fetch of main will run.
+    #[tokio::test]
+    async fn a_turn_whose_gate_will_not_run_mints_no_token_after_it() {
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        let p = place();
+        let fake = Fake {
+            job: Some(JobInfo {
+                repository: "acme/app".into(),
+                document_id: "ldoc_1".into(),
+            }),
+            // Long past: every use after the accept would mint again.
+            minted: Some(crate::runner::access::Minted::token(
+                crate::runner::access::tests::FAKE,
+                "2000-01-01T00:00:00Z",
+                "acme/app",
+            )),
+            ..Fake::default()
+        };
+        offer(&fake, &[job_lease("lease_1", 7)]);
+        *fake.pack.lock().unwrap() = Some(Pack {
+            kind: "job".into(),
+            job_id: "job_1".into(),
+            checkout: "checkouts/job_1".into(),
+            ..good_pack()
+        });
+        let exec = FakeExec {
+            crash_turn: Some("turn_1".into()),
+            ..FakeExec::default()
+        };
+        let c = LoopConfig {
+            gate: Some(gate_cfg("exit 0", &p.workdir)),
+            workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+            ..cfg(8)
+        };
+        let (stats, lines) = go_logged(&fake, exec, c).await;
+        assert_eq!((stats.accepted, stats.turns, stats.reported), (1, 1, 1));
+        assert!(
+            lines.iter().any(|l| l.contains("no gate report")),
+            "{lines:?}"
+        );
+        let calls = fake.calls.lock().unwrap().clone();
+        let mints = calls
+            .iter()
+            .filter(|c| *c == "runner_token lease_1")
+            .count();
+        assert_eq!(mints, 1, "only the accept's mint: {calls:?}");
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -398,6 +398,8 @@ const UNSAFE_KEYS: &[&str] = &[
     "url.",
     "include.",
     "includeif.",
+    // On, git also reads the mirror's own `config.worktree`, which `--local` never lists.
+    "extensions.worktreeconfig",
     "protocol.",
     "gpg.",
     "push.gpgsign",
@@ -482,6 +484,22 @@ async fn remote_git_ok(
     }
 }
 
+/// Fetches origin's main into the mirror's `origin/main` through [`remote_git_ok`]: the
+/// one fetch of main there is (making the mirror, merging main before a push, and the
+/// gate check's [`Workspaces::fetch_main`]). Every checkout of the mirror is a linked
+/// worktree and shares its refs, so it sees the same `origin/main`.
+async fn fetch_base(mirror: &Path, url: &str, access: &Access) -> Result<(), String> {
+    let spec = format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}");
+    remote_git_ok(
+        mirror,
+        url,
+        access,
+        &["fetch", "--quiet", "--no-tags", "origin", &spec],
+    )
+    .await
+    .map(drop)
+}
+
 async fn git_ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     let o = git(dir, args).await?;
     if o.code == 0 {
@@ -553,14 +571,7 @@ impl Workspaces {
                 redact(&old.stderr_tail)
             ));
         }
-        let main = format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}");
-        remote_git_ok(
-            &dir,
-            &url,
-            access,
-            &["fetch", "--quiet", "--no-tags", "origin", &main],
-        )
-        .await?;
+        fetch_base(&dir, &url, access).await?;
         Ok((dir, url))
     }
 
@@ -680,6 +691,33 @@ impl Workspaces {
         })
     }
 
+    /// The mirror and origin this runner made for `p`'s repository, never ones the
+    /// checkout names (the model can write in the checkout), once `p` is checked to be
+    /// a linked worktree of that mirror on its job branch. `what` ends the refusal:
+    /// "nothing is {what}".
+    async fn ours(&self, p: &Prepared, what: &str) -> Result<(PathBuf, String), String> {
+        let (mirror, url) = self.mirror_of(&p.repository)?;
+        if !same_path(&mirror, &p.mirror) || url != p.url {
+            return Err(format!(
+                "{} is not this runner's checkout of {}; nothing is {what}",
+                p.path.display(),
+                p.repository
+            ));
+        }
+        verify(&p.path, &mirror, &p.branch).await?;
+        Ok((mirror, url))
+    }
+
+    /// Fetches main for the gate check of `p`: in this runner's mirror, after [`guard`],
+    /// as `access` says ([`fetch_base`]), never in the checkout, whose configuration the
+    /// turn's check command can write and which a token must never reach. The checkout
+    /// shares the mirror's refs, so it then sees the new `origin/main` without a fetch
+    /// of its own.
+    pub(crate) async fn fetch_main(&self, p: &Prepared, access: &Access) -> Result<(), String> {
+        let (mirror, url) = self.ours(p, "fetched").await?;
+        fetch_base(&mirror, &url, access).await
+    }
+
     /// Commits what the turn changed, pushes the job's branch and opens or updates its
     /// pull request. `Ok(None)`: the branch has nothing main does not, so there is no
     /// pull request to open. Only the push and the pull request reach GitHub, as
@@ -694,17 +732,7 @@ impl Workspaces {
             return Err(format!("refused to push {:?}: not a job branch", p.branch));
         }
         let dir = p.path.as_path();
-        // The mirror and origin this runner made for the repository, never ones the
-        // checkout names: the model can write in the checkout.
-        let (mirror, url) = self.mirror_of(&p.repository)?;
-        if !same_path(&mirror, &p.mirror) || url != p.url {
-            return Err(format!(
-                "{} is not this runner's checkout of {}; nothing is pushed",
-                dir.display(),
-                p.repository
-            ));
-        }
-        verify(dir, &mirror, &p.branch).await?;
+        let (mirror, url) = self.ours(p, "pushed").await?;
         // Untrimmed: the first entry's status may start with a space.
         let status = git(
             dir,
@@ -803,19 +831,7 @@ async fn merge_main(
     url: &str,
     access: &Access,
 ) -> Result<bool, String> {
-    remote_git_ok(
-        mirror,
-        url,
-        access,
-        &[
-            "fetch",
-            "--quiet",
-            "--no-tags",
-            "origin",
-            &format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}"),
-        ],
-    )
-    .await?;
+    fetch_base(mirror, url, access).await?;
     let main = format!("origin/{BASE}");
     let ancestor = git(dir, &["merge-base", "--is-ancestor", &main, "HEAD"]).await?;
     match ancestor.code {
@@ -1453,6 +1469,83 @@ pub(crate) mod tests {
         );
         let e = w.prepare("job_g3", "acme/app", &acc()).await.unwrap_err();
         assert!(e.contains("origin is not"), "{e}");
+    }
+
+    /// The gate check's fetch of main: a program the turn plants in its checkout's
+    /// configuration (shared with the mirror, or the mirror's own `config.worktree`)
+    /// never gets the token; the guard refuses and nothing is fetched. Clean, main is
+    /// fetched in the mirror and the checkout sees it with no fetch of its own.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_gate_fetch_of_main_never_hands_the_token_to_a_planted_program() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_f1", "acme/app", &acc()).await.unwrap();
+        let mirror = p.root.path().join("runner/mirrors/acme/app.git");
+        let seen = p.root.path().join("planted-saw.txt");
+        let planted = p.root.path().join("planted.sh");
+        std::fs::write(
+            &planted,
+            format!(
+                "#!/bin/sh\necho \"token=${}\" >> '{}'\nexec git-upload-pack \"$@\"\n",
+                crate::runner::access::TOKEN_VAR,
+                seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prog = planted.display().to_string();
+        for key in ["remote.origin.uploadpack", "core.sshCommand"] {
+            // Written from inside the checkout, as the check command would.
+            sh(&got.path, &["config", key, &prog]);
+            let e = w.fetch_main(&got, &acc()).await.unwrap_err();
+            assert!(e.contains(&key.to_ascii_lowercase()), "{e}");
+            assert!(!e.contains(&prog), "{e}");
+            sh(&got.path, &["config", "--unset", key]);
+        }
+        // The mirror's own `config.worktree`, which `--local` does not list.
+        sh(&got.path, &["config", "extensions.worktreeConfig", "true"]);
+        std::fs::write(
+            mirror.join("config.worktree"),
+            format!("[remote \"origin\"]\n\tuploadpack = {prog}\n"),
+        )
+        .unwrap();
+        // The next lease's checkout of the repository fetches in the mirror too.
+        let next = w.prepare("job_f2", "acme/app", &acc()).await;
+        assert_eq!(
+            std::fs::read_to_string(&seen).unwrap_or_default(),
+            "",
+            "a planted program ran in a fetch with the token"
+        );
+        let e = next.unwrap_err();
+        assert!(e.contains("extensions.worktreeconfig"), "{e}");
+        // The gate's fetch is refused too: the extension makes the shared `core.bare`
+        // apply to the checkout, so it is not this job's worktree before the guard runs.
+        let e = w.fetch_main(&got, &acc()).await.unwrap_err();
+        assert!(
+            e.contains("extensions.worktreeconfig") || e.contains("not this job's checkout"),
+            "{e}"
+        );
+        assert!(
+            !seen.exists(),
+            "a planted program ran in a fetch with the token"
+        );
+        std::fs::remove_file(mirror.join("config.worktree")).unwrap();
+        sh(
+            &got.path,
+            &["config", "--unset", "extensions.worktreeConfig"],
+        );
+        // Clean: fetched in the mirror, seen in the checkout.
+        let moved = advance_main(&p, "f.txt", "f\n");
+        w.fetch_main(&got, &acc()).await.unwrap();
+        assert_eq!(sh(&got.path, &["rev-parse", "origin/main"]), moved);
+        assert!(!seen.exists());
+        // A checkout that names another mirror is not fetched for.
+        let mut other = got.clone();
+        other.mirror = p.root.path().join("elsewhere.git");
+        let e = w.fetch_main(&other, &acc()).await.unwrap_err();
+        assert!(e.contains("nothing is fetched"), "{e}");
     }
 
     #[tokio::test]
