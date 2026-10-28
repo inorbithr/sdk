@@ -16,10 +16,12 @@ use sha2::{Digest as _, Sha256};
 use tokio::io::AsyncReadExt as _;
 use tokio::process::Command;
 
+use super::access::Access;
 use super::claude::hex;
 use super::env;
 use super::exec::GroupGuard;
 use super::service::{GateAnswer, GateReport, Service, ServiceError};
+use super::workspace::redact;
 
 /// The check a build job's PR is held to when nothing says otherwise.
 pub(crate) const DEFAULT_COMMAND: &str = "mise run ci:changed";
@@ -49,6 +51,8 @@ pub(crate) enum Skip {
     BadCommand,
     #[error("git failed: {0}")]
     Git(String),
+    #[error("no GitHub access to fetch main: {0}")]
+    Access(String),
     #[error("the checkout has uncommitted changes; the check would not describe its head")]
     Dirty,
     #[error(
@@ -140,6 +144,26 @@ async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
     Ok((o.code, o.stdout.trim().to_owned()))
 }
 
+/// `git fetch origin main`, with the credential helper and the token's variable of
+/// `access` on this one child only (the same two calls the workspaces make to GitHub,
+/// [`Access::git_args`] and [`Access::git_env`]).
+async fn fetch_main(repo: &Path, access: Option<&Access>) -> Result<(), Skip> {
+    let pre: Vec<String> = access.map(|a| a.git_args().to_vec()).unwrap_or_default();
+    let mut args: Vec<&str> = pre.iter().map(String::as_str).collect();
+    args.extend(["fetch", "--quiet", "origin", "main"]);
+    let env: Vec<(&str, &str)> = access.and_then(Access::git_env).into_iter().collect();
+    let o = git_in_with(repo, &args, GIT_TIMEOUT, &env).await?;
+    if o.code == 0 {
+        Ok(())
+    } else {
+        Err(Skip::Git(format!(
+            "git fetch exited {}: {}",
+            o.code,
+            redact(&o.stderr_tail)
+        )))
+    }
+}
+
 async fn git_ok(repo: &Path, args: &[&str]) -> Result<String, Skip> {
     match git(repo, args).await? {
         (0, out) => Ok(out),
@@ -177,17 +201,23 @@ fn shell(command: &str) -> Command {
 
 /// Fetches main, checks `repo` is clean and contains it, runs `command` and returns what
 /// to report. `env` is the runner's own environment; it is scrubbed here.
+///
+/// `access` is how the fetch signs in to GitHub: the lease's own token (or the host's
+/// sign-in) on that one git call, as for every other call that reaches GitHub. `None`
+/// leaves it to the host's own git configuration (`iohr runner gate-report`, run by a
+/// person on their machine).
 pub(crate) async fn check(
     repo: &Path,
     command: &str,
     limit: Duration,
     parent_env: Vec<(OsString, OsString)>,
+    access: Option<&Access>,
 ) -> Result<Checked, Skip> {
     let command = command.trim();
     if command.is_empty() || command.chars().count() > 500 {
         return Err(Skip::BadCommand);
     }
-    git_ok(repo, &["fetch", "--quiet", "origin", "main"]).await?;
+    fetch_main(repo, access).await?;
     if !git_ok(repo, &["status", "--porcelain"]).await?.is_empty() {
         return Err(Skip::Dirty);
     }
@@ -380,7 +410,9 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_branch_merged_with_main_is_checked_and_reported_with_the_hash_of_the_output() {
         let (_root, _o, work) = repos();
-        let got = check(&work, TWO_STREAMS, LIMIT, parent()).await.unwrap();
+        let got = check(&work, TWO_STREAMS, LIMIT, parent(), None)
+            .await
+            .unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.head, sh(&work, &["rev-parse", "HEAD"]));
         assert_eq!(got.main_commit, sh(&work, &["rev-parse", "origin/main"]));
@@ -396,7 +428,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_failing_check_is_reported_with_its_exit_code() {
         let (_root, _o, work) = repos();
-        let got = check(&work, "exit 3", LIMIT, parent()).await.unwrap();
+        let got = check(&work, "exit 3", LIMIT, parent(), None).await.unwrap();
         assert_eq!(got.exit_code, 3);
     }
 
@@ -410,7 +442,9 @@ pub(crate) mod tests {
         sh(&other, &["add", "c.txt"]);
         sh(&other, &["commit", "--quiet", "-m", "more main"]);
         sh(&other, &["push", "--quiet", "origin", "HEAD:main"]);
-        let err = check(&work, "true", LIMIT, parent()).await.unwrap_err();
+        let err = check(&work, "true", LIMIT, parent(), None)
+            .await
+            .unwrap_err();
         let Skip::NotMerged { head, main } = err else {
             panic!("expected NotMerged, got {err:?}");
         };
@@ -418,7 +452,7 @@ pub(crate) mod tests {
         assert_eq!(main, sh(&other, &["rev-parse", "HEAD"]));
         // After the merge it is checked, on main's new commit.
         sh(&work, &["merge", "--quiet", "--no-edit", "origin/main"]);
-        let got = check(&work, "true", LIMIT, parent()).await.unwrap();
+        let got = check(&work, "true", LIMIT, parent(), None).await.unwrap();
         assert_eq!(got.main_commit, main);
         assert_eq!(got.exit_code, 0);
     }
@@ -428,7 +462,9 @@ pub(crate) mod tests {
         let (_root, _o, work) = repos();
         write(&work, "b.txt", "changed\n");
         assert_eq!(
-            check(&work, "true", LIMIT, parent()).await.unwrap_err(),
+            check(&work, "true", LIMIT, parent(), None)
+                .await
+                .unwrap_err(),
             Skip::Dirty
         );
     }
@@ -439,7 +475,7 @@ pub(crate) mod tests {
         let mut env = parent();
         env.push(("GH_TOKEN".into(), "secret-value".into()));
         env.push(("FOO_SECRET".into(), "secret-value".into()));
-        let got = check(&work, SCRUBBED, LIMIT, env).await.unwrap();
+        let got = check(&work, SCRUBBED, LIMIT, env, None).await.unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.output_sha256, hex(&Sha256::digest(SCRUBBED_OUT)));
     }
@@ -447,7 +483,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_check_over_the_time_cap_is_stopped_and_makes_no_report() {
         let (_root, _o, work) = repos();
-        let err = check(&work, "sleep 30", Duration::from_secs(1), parent())
+        let err = check(&work, "sleep 30", Duration::from_secs(1), parent(), None)
             .await
             .unwrap_err();
         assert_eq!(err, Skip::TimedOut(1));
@@ -457,11 +493,11 @@ pub(crate) mod tests {
     async fn an_empty_or_long_command_is_refused_before_anything_runs() {
         let (_root, _o, work) = repos();
         assert_eq!(
-            check(&work, "  ", LIMIT, parent()).await.unwrap_err(),
+            check(&work, "  ", LIMIT, parent(), None).await.unwrap_err(),
             Skip::BadCommand
         );
         assert_eq!(
-            check(&work, &"x".repeat(501), LIMIT, parent())
+            check(&work, &"x".repeat(501), LIMIT, parent(), None)
                 .await
                 .unwrap_err(),
             Skip::BadCommand
@@ -472,8 +508,110 @@ pub(crate) mod tests {
     async fn a_directory_that_is_not_a_checkout_is_a_git_error() {
         let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            check(dir.path(), "true", LIMIT, parent()).await,
+            check(dir.path(), "true", LIMIT, parent(), None).await,
             Err(Skip::Git(_))
         ));
+    }
+
+    /// The fetch of main is where the check reaches GitHub: it gets the lease's token
+    /// variable and the lease's `-c` arguments (hooks off, so a hook never inherits the
+    /// token) on that one child, and the check's own command gets no token. The origin
+    /// here is local; its `uploadpack` program records what the fetch's child saw, and a
+    /// `reference-transaction` hook, which the fetch would run, records itself.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_fetch_of_main_gets_the_leases_arguments_and_token_only() {
+        use crate::runner::access::{TOKEN_VAR, tests::token_for};
+        use std::os::unix::fs::PermissionsExt as _;
+        let script = |path: &Path, body: &str| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let (root, _o, work) = repos();
+        let seen = root.path().join("saw.txt");
+        let hooked = root.path().join("hook-ran.txt");
+        script(
+            &root.path().join("upload.sh"),
+            &format!(
+                "echo \"token=${TOKEN_VAR}\" >> '{}'\nexec git-upload-pack \"$@\"",
+                seen.display()
+            ),
+        );
+        script(
+            &work.join(".git/hooks/reference-transaction"),
+            &format!("echo ran >> '{}'", hooked.display()),
+        );
+        sh(
+            &work,
+            &[
+                "config",
+                "remote.origin.uploadpack",
+                &root.path().join("upload.sh").display().to_string(),
+            ],
+        );
+        // A new commit on main, so the fetch has a reference to update.
+        let newer = |name: &str| {
+            let other = root.path().join(name);
+            sh(root.path(), &["clone", "--quiet", "origin", name]);
+            write(&other, "n.txt", name);
+            sh(&other, &["add", "n.txt"]);
+            sh(&other, &["commit", "--quiet", "-m", name]);
+            sh(&other, &["push", "--quiet", "origin", "HEAD:main"]);
+        };
+        newer("one");
+        // The check's command prints whether the token's variable reached it.
+        let command = format!("test -z \"${TOKEN_VAR}\"");
+        let access = token_for("acme/app");
+        // Not merged with the new main, so no command runs; the fetch is what is seen.
+        let err = check(&work, &command, LIMIT, parent(), Some(&access))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Skip::NotMerged { .. }), "{err:?}");
+        let saw = std::fs::read_to_string(&seen).unwrap();
+        assert_eq!(
+            saw,
+            format!("token={}\n", crate::runner::access::tests::FAKE)
+        );
+        assert!(
+            !hooked.exists(),
+            "a hook ran in the fetch that had the token"
+        );
+        // With the main merged, the check's command runs and sees no token.
+        sh(&work, &["merge", "--quiet", "--no-edit", "origin/main"]);
+        let got = check(&work, &command, LIMIT, parent(), Some(&access))
+            .await
+            .unwrap();
+        assert_eq!(
+            got.exit_code, 0,
+            "the check's command saw the token variable"
+        );
+        // No access: the fetch is left to the host's own configuration, no token and
+        // the host's hooks.
+        std::fs::remove_file(&seen).unwrap();
+        newer("two");
+        check(&work, "true", LIMIT, parent(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(std::fs::read_to_string(&seen).unwrap(), "token=\n");
+        assert!(
+            hooked.exists(),
+            "the fetch without access has the host's hooks"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_says_why_without_the_token() {
+        let (_root, _o, work) = repos();
+        sh(
+            &work,
+            &["remote", "set-url", "origin", "/nonexistent/origin.git"],
+        );
+        let access = crate::runner::access::tests::token_for("acme/app");
+        let Err(Skip::Git(why)) = check(&work, "true", LIMIT, parent(), Some(&access)).await else {
+            panic!("expected a git failure");
+        };
+        assert!(why.starts_with("git fetch exited"), "{why}");
+        assert!(!why.contains("ghs_"), "{why}");
     }
 }

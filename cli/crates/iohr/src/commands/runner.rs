@@ -308,7 +308,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             })?;
             let parent: Vec<(OsString, OsString)> = std::env::vars_os().collect();
             Out::note(&format!("checking {} in {}", command, repo.display()));
-            let checked = gate::check(&repo, &command, Duration::from_secs(timeout), parent)
+            let checked = gate::check(&repo, &command, Duration::from_secs(timeout), parent, None)
                 .await
                 .map_err(|e| Error::Failed(format!("no report was sent: {e}")))?;
             let report = gate::report_of(

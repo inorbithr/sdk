@@ -801,16 +801,25 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 // The runner ships a replied turn of a checkout it owns: commit, push
                 // `job/<id>`, open or update the pull request; before the check, so the
                 // check sees the pushed head.
-                let ship = match (&b.owned, cfg.workspaces.as_ref(), &finished.parsed) {
-                    (Some(o), Some(w), Some(parsed)) if finished.outcome == "replied" => {
-                        let m = workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply);
-                        // A token close to its end is minted again for the push; one that
-                        // cannot be is a ship that fails, said in the log.
-                        let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
+                // The lease's access serves the push and the check's fetch of main, both
+                // of which reach GitHub. A token close to its end is minted again; one
+                // that cannot be is a ship that fails and a check that makes no report,
+                // said in the log.
+                let shipping = cfg.workspaces.is_some() && finished.parsed.is_some() && finished.outcome == "replied";
+                let access: Option<Result<Access, String>> = match &b.owned {
+                    Some(o) if shipping || cfg.gate.is_some() => Some(
+                        if o.access.fresh(time::OffsetDateTime::now_utc()) {
                             Ok(o.access.clone())
                         } else {
                             github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
-                        };
+                        },
+                    ),
+                    _ => None,
+                };
+                let ship = match (&b.owned, cfg.workspaces.as_ref(), &finished.parsed) {
+                    (Some(o), Some(w), Some(parsed)) if finished.outcome == "replied" => {
+                        let m = workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply);
+                        let access = access.clone().unwrap_or_else(|| Err("no access".into()));
                         Some((Arc::clone(w), o.checkout.clone(), m, access))
                     }
                     (Some(_), Some(_), _) => {
@@ -833,7 +842,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 if gate_run.is_some() || ship.is_some() {
                     let check = gate_run.map(|(g, repo)| {
                         log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
-                        (repo, g.command.clone(), g.timeout, g.env.clone())
+                        (repo, g.command.clone(), g.timeout, g.env.clone(), access)
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
                     gating.push(Gating {
@@ -847,9 +856,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                 None => None,
                             };
                             let checked = match check {
-                                Some((repo, command, timeout, env)) => {
-                                    Some(gate::check(&repo, &command, timeout, env).await)
-                                }
+                                // A checkout this runner does not own has no lease access:
+                                // its fetch is left to the host's own git configuration.
+                                Some((repo, command, timeout, env, access)) => Some(match access {
+                                    Some(Err(e)) => Err(Skip::Access(e)),
+                                    Some(Ok(a)) => gate::check(&repo, &command, timeout, env, Some(&a)).await,
+                                    None => gate::check(&repo, &command, timeout, env, None).await,
+                                }),
                                 None => None,
                             };
                             Gated { shipped, checked }
