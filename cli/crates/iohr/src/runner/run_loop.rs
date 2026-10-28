@@ -75,6 +75,9 @@ pub(crate) struct LoopConfig {
     pub(crate) declared: Option<watch::Receiver<Declared>>,
     /// The build-disk guard; `None` turns it off.
     pub(crate) build_floor: Option<BuildFloor>,
+    /// Why git has no GitHub credential on this host (the startup self-check): no `build`
+    /// is declared while it is set.
+    pub(crate) git_refusal: Option<String>,
     /// The Checked gate's check, run in the job's checkout after a job turn finishes and
     /// sent as a signed gate report before the turn's own report; `None` turns it off.
     pub(crate) gate: Option<GateCheck>,
@@ -119,6 +122,7 @@ impl Default for LoopConfig {
             capacity: 1,
             declared: None,
             build_floor: None,
+            git_refusal: None,
             gate: None,
             workspaces: None,
         }
@@ -614,7 +618,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             }
             let floor = cfg.build_floor.clone();
+            let no_git = cfg.git_refusal.is_some();
             beating = Some(Box::pin(async move {
+                let declared = if no_git {
+                    declared.without_build()
+                } else {
+                    declared
+                };
                 let declared = match floor {
                     Some(f) => {
                         let free = settings::free_bytes(&f.volume).await;
@@ -660,7 +670,11 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             } => {
                 beating = None;
                 let (has_build, beat) = beat;
-                if declared_build == Some(true) && !has_build {
+                if let Some(why) = &cfg.git_refusal {
+                    if declared_build != Some(false) {
+                        log(&format!("no build turns are declared: {why}"));
+                    }
+                } else if declared_build == Some(true) && !has_build {
                     log("the build volume is under its free-space floor: no new build turn until it has room");
                 } else if declared_build == Some(false) && has_build {
                     log("the build volume has room again: build turns are taken");
@@ -1664,6 +1678,7 @@ mod tests {
             capacity: 1,
             declared: None,
             build_floor: None,
+            git_refusal: None,
             gate: None,
             workspaces: None,
         }
@@ -2306,6 +2321,20 @@ mod tests {
         let d = fake.declared.lock().unwrap();
         assert!(d.iter().all(|x| x.kinds == ["coordinate"]), "{d:?}");
         assert!(d.iter().all(|x| x.capacity.is_none()), "{d:?}");
+    }
+
+    #[tokio::test]
+    async fn without_a_git_credential_the_beat_declares_no_build() {
+        let fake = Fake::default();
+        let c = LoopConfig {
+            git_refusal: Some("gh gave no password".into()),
+            max_beats: Some(2),
+            ..declaring(None, &["coordinate", "build"]).1
+        };
+        let (_, stats) = go_with(&fake, FakeExec::default(), c).await;
+        assert_eq!(stats.beats, 2);
+        let d = fake.declared.lock().unwrap();
+        assert!(d.iter().all(|x| x.kinds == ["coordinate"]), "{d:?}");
     }
 
     #[tokio::test]

@@ -206,10 +206,17 @@ impl Declared {
     #[must_use]
     pub(crate) fn guarded(mut self, free: Option<u64>, floor: u64) -> Self {
         if free.is_some_and(|f| f < floor) {
-            self.kinds.retain(|k| k != BUILD);
-            if self.kinds.is_empty() {
-                self.kinds.push(NOTHING.to_owned());
-            }
+            self = self.without_build();
+        }
+        self
+    }
+
+    /// These kinds, without `build`.
+    #[must_use]
+    pub(crate) fn without_build(mut self) -> Self {
+        self.kinds.retain(|k| k != BUILD);
+        if self.kinds.is_empty() {
+            self.kinds.push(NOTHING.to_owned());
         }
         self
     }
