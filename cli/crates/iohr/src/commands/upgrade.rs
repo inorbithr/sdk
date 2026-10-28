@@ -135,14 +135,29 @@ pub(crate) fn target(os: &str, arch: &str) -> Option<String> {
 }
 
 /// The newest `iohr/v*` release in a GitHub release listing: not a draft, a valid
-/// semantic version, the highest by semver precedence (not by listing order).
-pub(crate) fn newest(listing: &[u8]) -> Option<semver::Version> {
+/// semantic version, the highest by semver precedence (not by listing order), and
+/// complete. Release-please publishes the release before the CLI job uploads its
+/// files, so a release counts only once `SHA256SUMS` and, when `triple` is given,
+/// `iohr-<version>-<triple>.tar.gz` are attached. Until then the previous release
+/// stays the newest and `iohr upgrade` does nothing instead of failing.
+pub(crate) fn newest(listing: &[u8], triple: Option<&str>) -> Option<semver::Version> {
     let items: Vec<Value> = serde_json::from_slice(listing).ok()?;
     items
         .iter()
         .filter(|r| r.get("draft").and_then(Value::as_bool) != Some(true))
-        .filter_map(|r| r.get("tag_name")?.as_str()?.strip_prefix("iohr/v"))
-        .filter_map(|v| semver::Version::parse(v).ok())
+        .filter_map(|r| {
+            let v = r.get("tag_name")?.as_str()?.strip_prefix("iohr/v")?;
+            let v = semver::Version::parse(v).ok()?;
+            let names: Vec<&str> = r
+                .get("assets")?
+                .as_array()?
+                .iter()
+                .filter_map(|a| a.get("name")?.as_str())
+                .collect();
+            let has = |n: &str| names.contains(&n);
+            let archive = triple.map(|t| format!("iohr-{v}-{t}.tar.gz"));
+            (has("SHA256SUMS") && archive.as_deref().is_none_or(has)).then_some(v)
+        })
         .max()
 }
 
@@ -265,8 +280,13 @@ pub(crate) async fn run(g: &Global, check: bool, out: Out) -> Result<(), Error> 
         MAX_LISTING,
     )
     .await?;
-    let latest =
-        newest(&listing).ok_or_else(|| Error::Failed("no iohr release found on GitHub".into()))?;
+    // Homebrew installs from the tap, so only the install script needs this host's archive.
+    let triple = match method {
+        Method::InstallScript { .. } => target(std::env::consts::OS, std::env::consts::ARCH),
+        _ => None,
+    };
+    let latest = newest(&listing, triple.as_deref())
+        .ok_or_else(|| Error::Failed("no complete iohr release found on GitHub".into()))?;
     let update = latest > current;
 
     if check {
@@ -584,21 +604,43 @@ mod tests {
 
     #[test]
     fn newest_is_by_version_not_by_order_and_skips_drafts_and_other_packages() {
+        let sums = serde_json::json!([{"name": "SHA256SUMS"}]);
         let listing = serde_json::json!([
-            {"tag_name": "go/v9.0.0"},
-            {"tag_name": "iohr/v0.1.0-alpha.9"},
-            {"tag_name": "iohr/v0.1.0-alpha.15"},
-            {"tag_name": "iohr/v0.1.0-alpha.14"},
-            {"tag_name": "iohr/v0.2.0", "draft": true},
-            {"tag_name": "iohr/vnot-a-version"}
+            {"tag_name": "go/v9.0.0", "assets": sums},
+            {"tag_name": "iohr/v0.1.0-alpha.9", "assets": sums},
+            {"tag_name": "iohr/v0.1.0-alpha.15", "assets": sums},
+            {"tag_name": "iohr/v0.1.0-alpha.14", "assets": sums},
+            {"tag_name": "iohr/v0.2.0", "draft": true, "assets": sums},
+            {"tag_name": "iohr/vnot-a-version", "assets": sums}
         ])
         .to_string();
         assert_eq!(
-            newest(listing.as_bytes()).unwrap().to_string(),
+            newest(listing.as_bytes(), None).unwrap().to_string(),
             "0.1.0-alpha.15"
         );
-        assert!(newest(b"[]").is_none());
-        assert!(newest(b"not json").is_none());
+        assert!(newest(b"[]", None).is_none());
+        assert!(newest(b"not json", None).is_none());
+    }
+
+    #[test]
+    fn newest_skips_a_release_whose_files_are_not_uploaded_yet() {
+        // 2026-10-28: alpha.27 was published with no files while release-cli waited,
+        // and every hourly upgrade on the runners failed on it.
+        let t = "x86_64-unknown-linux-musl";
+        let listing = serde_json::json!([
+            {"tag_name": "iohr/v0.1.0-alpha.26", "assets": [
+                {"name": "SHA256SUMS"}, {"name": format!("iohr-0.1.0-alpha.26-{t}.tar.gz")}
+            ]},
+            {"tag_name": "iohr/v0.1.0-alpha.27", "assets": []},
+            {"tag_name": "iohr/v0.1.0-alpha.28", "assets": [{"name": "SHA256SUMS"}]},
+            {"tag_name": "iohr/v0.1.0-alpha.29"}
+        ])
+        .to_string();
+        let l = listing.as_bytes();
+        // The install script needs this host's archive; alpha.28 has only the sums.
+        assert_eq!(newest(l, Some(t)).unwrap().to_string(), "0.1.0-alpha.26");
+        // Homebrew needs only a complete release.
+        assert_eq!(newest(l, None).unwrap().to_string(), "0.1.0-alpha.28");
     }
 
     #[test]
