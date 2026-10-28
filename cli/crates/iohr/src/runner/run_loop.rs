@@ -75,6 +75,10 @@ pub(crate) struct LoopConfig {
     pub(crate) declared: Option<watch::Receiver<Declared>>,
     /// The build-disk guard; `None` turns it off.
     pub(crate) build_floor: Option<BuildFloor>,
+    /// The `PATH` the gate tools ([`settings::GATE_TOOLS`]) must resolve on, checked before
+    /// every beat; while one is missing the beat declares no `build` and the log names it.
+    /// `None` turns the check off.
+    pub(crate) tools_path: Option<OsString>,
     /// The Checked gate's check, run in the job's checkout after a job turn finishes and
     /// sent as a signed gate report before the turn's own report; `None` turns it off.
     pub(crate) gate: Option<GateCheck>,
@@ -119,6 +123,7 @@ impl Default for LoopConfig {
             capacity: 1,
             declared: None,
             build_floor: None,
+            tools_path: None,
             gate: None,
             workspaces: None,
         }
@@ -502,6 +507,8 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut capacity = cfg.capacity.clamp(1, MAX_CAPACITY);
     // Whether the last beat declared `build`; the guard's changes are logged once each.
     let mut declared_build: Option<bool> = None;
+    // The gate tools missing on the last beat; a change is logged once.
+    let mut last_missing: Vec<String> = Vec::new();
     let mut busy: Vec<Busy> = Vec::new();
     // Accepts in flight: each answers with its lease when taken, else with its lease id.
     let mut accepting: Vec<Op<'_, Accepted>> = Vec::new();
@@ -614,6 +621,27 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             }
             let floor = cfg.build_floor.clone();
+            let missing = cfg
+                .tools_path
+                .as_ref()
+                .map(|p| settings::missing_tools(settings::GATE_TOOLS, p))
+                .unwrap_or_default();
+            if missing != last_missing {
+                if missing.is_empty() {
+                    log("the gate tools resolve on PATH again: build turns are taken");
+                } else {
+                    log(&format!(
+                        "runner missing {}: not on PATH, so no build turn is taken",
+                        missing.join(", ")
+                    ));
+                }
+                last_missing.clone_from(&missing);
+            }
+            let declared = if missing.is_empty() {
+                declared
+            } else {
+                declared.without_build()
+            };
             beating = Some(Box::pin(async move {
                 let declared = match floor {
                     Some(f) => {
@@ -661,9 +689,9 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 beating = None;
                 let (has_build, beat) = beat;
                 if declared_build == Some(true) && !has_build {
-                    log("the build volume is under its free-space floor: no new build turn until it has room");
+                    log("no build kind declared: no new build turn until the guard clears");
                 } else if declared_build == Some(false) && has_build {
-                    log("the build volume has room again: build turns are taken");
+                    log("build declared again: build turns are taken");
                 }
                 declared_build = Some(has_build);
                 match beat {
@@ -1664,6 +1692,7 @@ mod tests {
             capacity: 1,
             declared: None,
             build_floor: None,
+            tools_path: None,
             gate: None,
             workspaces: None,
         }
@@ -2306,6 +2335,38 @@ mod tests {
         let d = fake.declared.lock().unwrap();
         assert!(d.iter().all(|x| x.kinds == ["coordinate"]), "{d:?}");
         assert!(d.iter().all(|x| x.capacity.is_none()), "{d:?}");
+    }
+
+    #[tokio::test]
+    async fn without_cargo_on_path_the_beat_declares_no_build_and_the_log_names_it() {
+        let fake = Fake::default();
+        let empty = tempfile::tempdir().unwrap();
+        let c = LoopConfig {
+            tools_path: Some(empty.path().as_os_str().to_owned()),
+            max_beats: Some(2),
+            ..declaring(None, &["coordinate", "build"]).1
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert_eq!(stats.beats, 2);
+        let d = fake.declared.lock().unwrap();
+        assert!(d.iter().all(|x| x.kinds == ["coordinate"]), "{d:?}");
+        assert!(
+            lines.iter().any(|l| l.contains("missing cargo, mise, git")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn missing_tools_are_those_not_executable_on_the_path() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = tempfile::tempdir().unwrap();
+        let cargo = d.path().join("cargo");
+        std::fs::write(&cargo, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            settings::missing_tools(settings::GATE_TOOLS, d.path().as_os_str()),
+            ["mise", "git"]
+        );
     }
 
     #[tokio::test]

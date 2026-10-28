@@ -204,14 +204,49 @@ impl Declared {
     /// These kinds, without `build` while the build volume is under the floor. An
     /// unknown free space (no such volume, `df` failed) keeps them as they are.
     #[must_use]
-    pub(crate) fn guarded(mut self, free: Option<u64>, floor: u64) -> Self {
+    pub(crate) fn guarded(self, free: Option<u64>, floor: u64) -> Self {
         if free.is_some_and(|f| f < floor) {
-            self.kinds.retain(|k| k != BUILD);
-            if self.kinds.is_empty() {
-                self.kinds.push(NOTHING.to_owned());
-            }
+            self.without_build()
+        } else {
+            self
+        }
+    }
+
+    /// These kinds, without `build` (`none` when nothing else is left).
+    #[must_use]
+    pub(crate) fn without_build(mut self) -> Self {
+        self.kinds.retain(|k| k != BUILD);
+        if self.kinds.is_empty() {
+            self.kinds.push(NOTHING.to_owned());
         }
         self
+    }
+}
+
+/// The programs the gate and the workers run: a runner that cannot find one on its
+/// `PATH` takes no build turn.
+pub(crate) const GATE_TOOLS: &[&str] = &["cargo", "mise", "git"];
+
+/// The `tools` that do not resolve to an executable file in a directory of `path`.
+pub(crate) fn missing_tools(tools: &[&str], path: &std::ffi::OsStr) -> Vec<String> {
+    let dirs: Vec<PathBuf> = std::env::split_paths(path).collect();
+    tools
+        .iter()
+        .filter(|t| !dirs.iter().any(|d| is_executable(&d.join(t))))
+        .map(|t| (*t).to_owned())
+        .collect()
+}
+
+fn is_executable(p: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        p.metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        p.is_file() || p.with_extension("exe").is_file()
     }
 }
 

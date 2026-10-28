@@ -249,6 +249,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
+                // The PATH the workers and gates get (env.rs passes it through); an
+                // unset PATH finds nothing, so every tool is reported missing.
+                tools_path: Some(std::env::var_os("PATH").unwrap_or_default()),
                 gate: Some(GateCheck {
                     // The pack names the checkout relative to the turns' working directory.
                     workdir: exec.workdir.clone(),
