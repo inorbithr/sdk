@@ -198,10 +198,10 @@
       ],
       "properties": {
         "repo": {
-          "description": "The repository, owner/name, of the inorbithr organisation only.",
+          "description": "The repository, owner/name, of the inorbithr organisation only; the name is never . or ..",
           "type": "string",
           "maxLength": 110,
-          "pattern": "^inorbithr/[a-z0-9._-]{1,100}$"
+          "pattern": "^inorbithr/(?!\\.\\.?$)[a-z0-9._-]{1,100}$"
         },
         "run_id": {
           "description": "The workflow run's id: 1 to 2^53 - 1, so it is exact in every language.",

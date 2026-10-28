@@ -30,7 +30,49 @@ fn the_examples_validate_and_every_invalid_file_is_refused() {
         assert!(validate(&read(p.clone())).is_err(), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 22);
+    assert_eq!(n, 24);
+}
+
+/// Every vendored file is listed in `SOURCE` with the SHA-256 it was copied with, so a
+/// hand edit here, or a file copied without its line, fails.
+#[test]
+fn the_vendored_fixtures_match_their_source_hashes() {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(root, &p, out);
+            } else {
+                out.push(
+                    p.strip_prefix(root)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/host-action");
+    let source = std::fs::read_to_string(dir.join("SOURCE")).unwrap();
+    let listed: Vec<(&str, &str)> = source
+        .lines()
+        .filter_map(|l| l.split_once("  "))
+        .filter(|(sha, _)| sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()))
+        .collect();
+    for (sha, rel) in &listed {
+        let bytes = std::fs::read(dir.join(rel)).unwrap();
+        let got = super::super::claude::hex(&<sha2::Sha256 as sha2::Digest>::digest(&bytes));
+        assert_eq!(&got, sha, "{rel} differs from what SOURCE says was copied");
+    }
+    let mut on_disk = Vec::new();
+    for sub in ["schema", "vectors"] {
+        walk(&dir, &dir.join(sub), &mut on_disk);
+    }
+    on_disk.sort();
+    let mut names: Vec<String> = listed.iter().map(|(_, r)| (*r).to_owned()).collect();
+    names.sort();
+    assert_eq!(on_disk, names, "SOURCE must list every vendored file once");
 }
 
 #[test]
@@ -236,11 +278,11 @@ struct Leaky;
 )]
 impl ArgvRunner for Leaky {
     async fn run(&self, _tool: Tool, _argv: &[String]) -> Result<Output, String> {
-        Ok(Output {
-            success: false,
-            stdout: String::new(),
-            stderr: "Get https://10.1.2.3:6443/api: connection refused".to_owned(),
-        })
+        Ok(Output::new(
+            false,
+            "",
+            "Get https://10.1.2.3:6443/api: connection refused",
+        ))
     }
 }
 
@@ -288,6 +330,9 @@ fn the_new_patterns_hold_at_their_edges() {
     assert!(!is_repo("example/example"));
     assert!(!is_repo("inorbithr/core/x"));
     assert!(!is_repo("inorbithr/Core"));
+    assert!(!is_repo("inorbithr/."));
+    assert!(!is_repo("inorbithr/.."));
+    assert!(is_repo("inorbithr/.github"));
 }
 
 #[test]
@@ -505,12 +550,11 @@ async fn a_missing_tool_is_a_refusal_and_nothing_runs() {
 #[tokio::test]
 async fn the_prune_report_counts_images_and_space() {
     let mut k = fake("", false);
-    k.answer = Some(Output {
-        success: true,
-        stdout: "Deleted Images:\nuntagged: example:1\ndeleted: sha256:aaaa\ndeleted: sha256:bbbb\n\nTotal reclaimed space: 1.2GB\n"
-            .to_owned(),
-        stderr: String::new(),
-    });
+    k.answer = Some(Output::new(
+        true,
+        "Deleted Images:\nuntagged: example:1\ndeleted: sha256:aaaa\ndeleted: sha256:bbbb\n\nTotal reclaimed space: 1.2GB\n",
+        "",
+    ));
     let said = carry_out_on(&Action::PruneImages { until_hours: 24 }, &k, "linux")
         .await
         .unwrap();
@@ -536,13 +580,11 @@ async fn every_tool_s_output_is_redacted_and_capped() {
     for success in [true, false] {
         for a in &actions {
             let mut k = fake("", false);
-            k.answer = Some(Output {
+            k.answer = Some(Output::new(
                 success,
-                stdout:
-                    "fetched https://10.1.2.3:6443/x with ghp_abcdefghijklmnopqrstuvwxyz0123456789"
-                        .to_owned(),
-                stderr: "Bearer abcdef".to_owned(),
-            });
+                "fetched https://10.1.2.3:6443/x with ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+                "Bearer\tabcdef",
+            ));
             let said = match carry_out_on(a, &k, "linux").await {
                 Ok(s) | Err(s) => s,
             };
@@ -553,13 +595,85 @@ async fn every_tool_s_output_is_redacted_and_capped() {
         }
     }
     let mut k = fake("", false);
-    k.answer = Some(Output {
-        success: true,
-        stdout: "é".repeat(60 * 1024),
-        stderr: "x ".repeat(30 * 1024),
-    });
+    k.answer = Some(Output::new(
+        true,
+        &"é".repeat(60 * 1024),
+        &"x ".repeat(30 * 1024),
+    ));
     let said = carry_out_on(&Action::Upgrade, &k, "linux").await.unwrap();
     assert!(said.len() <= OUTPUT_CAP, "{}", said.len());
+}
+
+#[test]
+fn a_bearer_value_after_any_whitespace_is_redacted() {
+    for text in [
+        "Bearer\tabcdef",
+        "Bearer  abcdef",
+        "token:\u{a0}abcdef",
+        "x Bearer abcdef y",
+    ] {
+        let said = redact_output(text);
+        assert!(!said.contains("abcdef"), "{text:?}: {said}");
+        assert!(said.contains("[redacted]"), "{text:?}: {said}");
+    }
+    assert_eq!(redact_output("a\tb  c"), "a\tb  c");
+}
+
+#[test]
+fn a_cut_at_the_cap_never_leaves_half_a_word() {
+    // A token that crosses the cap is dropped whole, not left as a short fragment that
+    // no longer looks secret.
+    let pad = "a ".repeat((OUTPUT_CAP - 10) / 2);
+    let text = format!("{pad}ghp_abcdefghijklmnopqrstuvwxyz0123456789 end");
+    let out = Output::new(true, &text, "");
+    assert!(out.stdout.len() <= OUTPUT_CAP);
+    assert!(
+        out.stdout.ends_with("a "),
+        "{:?}",
+        &out.stdout[out.stdout.len() - 20..]
+    );
+    assert!(!out.stdout.contains("abcdef"));
+}
+
+/// A `docker` that prunes far more than [`OUTPUT_CAP`] of images, on both streams: the
+/// count and the total come from the whole output, the report stays capped.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_large_prune_is_counted_from_the_whole_output() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("docker");
+    std::fs::write(
+        &script,
+        concat!(
+            "#!/bin/sh\n",
+            "echo 'Deleted Images:'\n",
+            "i=0\n",
+            "while [ $i -lt 2000 ]; do\n",
+            "  printf 'untagged: example:%d\\ndeleted: sha256:%064d\\n' $i $i\n",
+            "  printf 'warning %d\\n' $i >&2\n",
+            "  i=$((i+1))\n",
+            "done\n",
+            "echo\n",
+            "echo 'Total reclaimed space: 9.9GB'\n",
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let h = host(dir.path(), Err("none".to_owned()));
+    let out = h
+        .run(
+            Tool::Docker,
+            &plan(&Action::PruneImages { until_hours: 24 }, "linux").unwrap()[0].1,
+        )
+        .await
+        .unwrap();
+    assert!(out.stdout.len() <= OUTPUT_CAP && out.stderr.len() <= OUTPUT_CAP);
+    assert_eq!(out.tally.deleted, 2000);
+    let said = carry_out_on(&Action::PruneImages { until_hours: 24 }, &h, "linux")
+        .await
+        .unwrap();
+    assert_eq!(said, "2000 images removed; Total reclaimed space: 9.9GB");
 }
 
 /// A `gh` that writes its environment to a file: it is asked never to prompt, and gets
