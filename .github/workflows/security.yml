@@ -62,13 +62,13 @@ jobs:
       # Go: the toolchain go.mod asks for, from mise.toml as in ci.yml. It must be on PATH
       # before init, which wraps `go` to trace the build.
       - if: steps.present.outputs.yes == 'true' && matrix.language == 'go'
-        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         env:
           MISE_YES: "1"
         with:
           install_args: "go"
       - if: steps.present.outputs.yes == 'true'
-        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -89,7 +89,7 @@ jobs:
             (cd "$dir" && go test -c -o "$out/" ./...)
           done
       - if: steps.present.outputs.yes == 'true'
-        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: /language:${{ matrix.language }}
 
