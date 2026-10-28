@@ -1001,6 +1001,241 @@ async fn a_person_signs_in_with_a_device_code_and_logout_revokes() {
     assert!(!dir.path().join("secrets/me.acc_test1").exists());
 }
 
+/// A server a person can sign in against with a device code, whose `/v1/accounts/me`
+/// answers `me`. Mounted again (after `server.reset()`) to change the answer.
+async fn mount_person_server(server: &MockServer, me: serde_json::Value) {
+    mock_provider(server).await;
+    let uri = server.uri();
+    Mock::given(method("POST"))
+        .and(path("/oauth2/device/auth"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "device_code": "dc", "user_code": "ABCD2345", "verification_uri": format!("{uri}/oauth2/device/verify"),
+            "expires_in": 600, "interval": 1
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(person_tokens(&uri)))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/accounts/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(me))
+        .mount(server)
+        .await;
+}
+
+/// What `GET /v1/accounts/me` answers for a person with two teams and, optionally, a
+/// default account (`preferences.default_account_id`).
+fn me_with_teams(default_account_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "account": {"id": ACCOUNT, "kind": "personal", "slug": "", "name": "Ana", "plan": "free"},
+        "teams": [
+            {"id": "acc_eng", "kind": "team", "slug": "engineering", "name": "Engineering", "plan": "team", "role": "owner"},
+            {"id": "acc_ops", "kind": "team", "slug": "ops", "name": "Ops", "plan": "team", "role": "member"},
+        ],
+        "preferences": {"default_account_id": default_account_id},
+    })
+}
+
+fn login_as_me(r: &Run<'_>, uri: &str, extra: &[&str]) -> Output {
+    let mut args = vec!["login", "--device", "--insecure-storage", "--profile", "me"];
+    args.extend_from_slice(extra);
+    r.cmd(&args)
+        .env("IOHR_ISSUER", uri)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn profile_of(dir: &Path) -> toml::Table {
+    let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+    text.parse::<toml::Table>().unwrap()["profiles"]["me"]
+        .as_table()
+        .unwrap()
+        .clone()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_takes_the_servers_default_account_when_the_person_belongs_to_it() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_person_server(&server, me_with_teams("acc_eng")).await;
+    let login = login_as_me(&r, &server.uri(), &[]);
+    assert_eq!(code(&login), 0, "{}", text(&login));
+    let shown = text(&login);
+    assert!(
+        shown.contains("account acc_eng") && shown.contains("Engineering"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("your default account") && shown.contains("iohr login --account"),
+        "it says why and how to change it: {shown}"
+    );
+    let p = profile_of(dir.path());
+    assert_eq!(p["account"].as_str(), Some("acc_eng"));
+    assert!(
+        p.get("account_pinned").is_none(),
+        "a server default is followed, not pinned: {p:?}"
+    );
+    // The session moved with the account: the entry is keyed by profile and account.
+    assert!(dir.path().join("secrets/me.acc_eng").exists());
+    assert!(!dir.path().join(format!("secrets/me.{ACCOUNT}")).exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_falls_back_to_the_personal_account_without_a_usable_default() {
+    for default in ["", "acc_not_mine"] {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let r = Run {
+            server: &server,
+            config: dir.path(),
+        };
+        mount_person_server(&server, me_with_teams(default)).await;
+        let login = login_as_me(&r, &server.uri(), &[]);
+        assert_eq!(code(&login), 0, "{}", text(&login));
+        assert!(
+            text(&login).contains(&format!("account {ACCOUNT}"))
+                && text(&login).contains("your own account"),
+            "{}",
+            text(&login)
+        );
+        assert_eq!(profile_of(dir.path())["account"].as_str(), Some(ACCOUNT));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_account_flag_picks_by_slug_or_id_over_the_default_and_is_kept() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_person_server(&server, me_with_teams("acc_eng")).await;
+    let login = login_as_me(&r, &server.uri(), &["--account", "ops", "--json"]);
+    assert_eq!(code(&login), 0, "{}", text(&login));
+    let json: serde_json::Value = serde_json::from_slice(&login.stdout).unwrap();
+    assert_eq!(json["account"], "acc_ops", "{json}");
+    assert_eq!(json["account_source"], "flag", "{json}");
+    let p = profile_of(dir.path());
+    assert_eq!(p["account"].as_str(), Some("acc_ops"));
+    assert_eq!(p["account_pinned"].as_bool(), Some(true));
+    // By id works too, and the personal account is a valid choice.
+    let again = login_as_me(&r, &server.uri(), &["--account", ACCOUNT]);
+    assert_eq!(code(&again), 0, "{}", text(&again));
+    assert_eq!(profile_of(dir.path())["account"].as_str(), Some(ACCOUNT));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_account_flag_for_an_account_the_person_is_not_in_fails_but_stays_signed_in() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_person_server(&server, me_with_teams("acc_eng")).await;
+    let login = login_as_me(&r, &server.uri(), &["--account", "nobody"]);
+    assert_eq!(code(&login), 2, "{}", text(&login));
+    let shown = text(&login);
+    assert!(
+        shown.contains("nobody is not an account you belong to")
+            && shown.contains("acc_eng (engineering)")
+            && shown.contains("iohr profile account me"),
+        "{shown}"
+    );
+    // The sign-in itself is kept, on the personal account, so the fix is one command.
+    assert_eq!(profile_of(dir.path())["account"].as_str(), Some(ACCOUNT));
+    assert!(dir.path().join(format!("secrets/me.{ACCOUNT}")).exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relogin_keeps_a_chosen_account_but_follows_the_server_default_otherwise() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let uri = server.uri();
+    // Not chosen: the profile follows the server's default, wherever it moves.
+    mount_person_server(&server, me_with_teams("acc_eng")).await;
+    assert_eq!(code(&login_as_me(&r, &uri, &[])), 0);
+    assert_eq!(profile_of(dir.path())["account"].as_str(), Some("acc_eng"));
+    server.reset().await;
+    mount_person_server(&server, me_with_teams("acc_ops")).await;
+    let moved = login_as_me(&r, &uri, &[]);
+    assert_eq!(code(&moved), 0, "{}", text(&moved));
+    assert_eq!(profile_of(dir.path())["account"].as_str(), Some("acc_ops"));
+
+    // Chosen with `iohr profile account`: a re-login never resets it.
+    let chose = r.run(&["profile", "account", "me", "engineering"]);
+    assert_eq!(code(&chose), 0, "{}", text(&chose));
+    assert_eq!(
+        profile_of(dir.path())["account_pinned"].as_bool(),
+        Some(true)
+    );
+    let relogin = login_as_me(&r, &uri, &[]);
+    assert_eq!(code(&relogin), 0, "{}", text(&relogin));
+    assert!(
+        text(&relogin).contains("account acc_eng")
+            && text(&relogin).contains("this profile's chosen account"),
+        "{}",
+        text(&relogin)
+    );
+    assert_eq!(profile_of(dir.path())["account"].as_str(), Some("acc_eng"));
+    assert!(dir.path().join("secrets/me.acc_eng").exists());
+    assert!(!dir.path().join("secrets/me.acc_ops").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_still_succeeds_on_the_personal_account_when_the_account_list_cannot_be_read() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_person_server(&server, me_with_teams("acc_eng")).await;
+    server.reset().await;
+    // Everything but the account list.
+    let uri = server.uri();
+    mock_provider(&server).await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/device/auth"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "device_code": "dc", "user_code": "ABCD2345", "verification_uri": format!("{uri}/oauth2/device/verify"),
+            "expires_in": 600, "interval": 1
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(person_tokens(&uri)))
+        .mount(&server)
+        .await;
+    Mock::given(path("/v1/accounts/me"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let login = login_as_me(&r, &uri, &[]);
+    assert_eq!(code(&login), 0, "{}", text(&login));
+    assert!(
+        text(&login).contains("could not read your accounts")
+            && text(&login).contains("iohr profile account me"),
+        "{}",
+        text(&login)
+    );
+    assert_eq!(profile_of(dir.path())["account"].as_str(), Some(ACCOUNT));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn logout_keeps_the_profile_when_revoking_fails() {
     let server = MockServer::start().await;

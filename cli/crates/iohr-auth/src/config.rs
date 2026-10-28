@@ -69,7 +69,14 @@ impl Eq for Source {}
 
 /// The keys of a profile table the command line owns; every other key is an SDK
 /// setting or a newer command line's, and is kept.
-const PROFILE_KEYS: [&str; 5] = ["kind", "account", "storage", "issuer", "client_id"];
+const PROFILE_KEYS: [&str; 6] = [
+    "kind",
+    "account",
+    "account_pinned",
+    "storage",
+    "issuer",
+    "client_id",
+];
 
 /// Reads `[profiles]`, keeping only the tables the command line made: those with a
 /// `kind`. A table without one holds SDK settings only (`docs/config.md` section 4.2).
@@ -163,6 +170,11 @@ pub struct Profile {
     pub kind: Kind,
     /// The account the calls count against.
     pub account: String,
+    /// Whether a person chose `account` (`iohr login --account`, `iohr profile account`):
+    /// a sign-in again keeps a chosen account. When not, it follows the account the person
+    /// made their default on the server, else their own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub account_pinned: bool,
     /// Where the profile's secret is kept.
     #[serde(default)]
     pub storage: Storage,
@@ -184,6 +196,7 @@ impl Profile {
         Self {
             kind,
             account: account.into(),
+            account_pinned: false,
             storage,
             issuer: None,
             client_id: None,
@@ -202,6 +215,7 @@ impl Profile {
         Self {
             kind: Kind::Person,
             account: account.into(),
+            account_pinned: false,
             storage,
             issuer: Some(issuer.into()),
             client_id: Some(client_id.into()),
@@ -411,6 +425,7 @@ impl Config {
                 };
                 set_str(t, "kind", Some(kind_str(p.kind)));
                 set_str(t, "account", Some(&p.account));
+                set_flag(t, "account_pinned", p.account_pinned);
                 set_str(t, "storage", Some(storage_str(p.storage)));
                 set_str(t, "issuer", p.issuer.as_deref());
                 set_str(t, "client_id", p.client_id.as_deref());
@@ -530,6 +545,15 @@ fn set_str(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<&str>) {
                 }
             }
         }
+    }
+}
+
+/// Sets `key` to `true`, or removes it when `on` is false (an absent key means false).
+fn set_flag(t: &mut dyn toml_edit::TableLike, key: &str, on: bool) {
+    if !on {
+        t.remove(key);
+    } else if t.get(key).and_then(toml_edit::Item::as_bool) != Some(true) {
+        t.insert(key, toml_edit::value(true));
     }
 }
 
@@ -664,6 +688,40 @@ capacity = 8
         assert!(saved.contains("capacity = 8"), "{saved}");
         assert!(!saved.contains("default ="), "{saved}");
         assert_eq!(Config::parse(&saved, path).unwrap(), c);
+    }
+
+    #[test]
+    fn a_chosen_account_is_written_only_when_set_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = Config::default();
+        c.profiles.insert(
+            name("me"),
+            Profile::person(
+                "acc_1",
+                Storage::Keyring,
+                "https://auth.inorbit.hr",
+                "iohr-cli",
+            ),
+        );
+        c.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(!text.contains("account_pinned"), "{text}");
+        assert!(!Config::load(dir.path()).unwrap().profiles[&name("me")].account_pinned);
+
+        c.profiles.get_mut(&name("me")).unwrap().account_pinned = true;
+        c.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(text.contains("account_pinned = true"), "{text}");
+        assert_eq!(Config::load(dir.path()).unwrap(), c);
+
+        // Unpinned again: the key goes, the rest stays.
+        c.profiles.get_mut(&name("me")).unwrap().account_pinned = false;
+        c.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(
+            !text.contains("account_pinned") && text.contains("account = \"acc_1\""),
+            "{text}"
+        );
     }
 
     #[test]
