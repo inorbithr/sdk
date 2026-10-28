@@ -2,7 +2,8 @@
 //! `config.toml`, a profile's `[profiles.<name>.runner]` over it, and the command-line
 //! flags over both. `iohr runner run` resolves them at start and again on SIGHUP, and
 //! sends capacity, version and kinds on every heartbeat (platform RFC 0120), so the slots
-//! a runner offers change without registering again.
+//! a runner offers change without registering again. Each beat also carries the machine
+//! (`runner::host`: cores, memory, disks, load and pressure) for placement (RFC 0197).
 //!
 //! The build-disk guard lives here too: while the build volume has less than
 //! [`BUILD_FLOOR_BYTES`] free, the runner declares itself without `build`, so the service
@@ -184,12 +185,15 @@ fn kinds_of(kinds: &[String]) -> Result<Vec<String>, String> {
 }
 
 /// What a heartbeat declares: sent on every beat.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Declared {
     /// `None`: the registered capacity stands, and none is sent.
     pub(crate) capacity: Option<u32>,
     pub(crate) version: String,
     pub(crate) kinds: Vec<String>,
+    /// The machine as read for this beat; `None` sends no resources or signals, and the
+    /// coordinator keeps what it had.
+    pub(crate) host: Option<super::host::Host>,
 }
 
 impl Declared {
@@ -198,6 +202,7 @@ impl Declared {
             capacity: e.capacity.as_ref().map(|c| c.value),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             kinds: e.kinds.value.clone(),
+            host: None,
         }
     }
 
@@ -231,9 +236,21 @@ impl Default for BuildFloor {
     }
 }
 
-/// Free bytes on the volume holding `path`, from `df -Pk` (POSIX output, Linux and
-/// macOS); `None` when the path does not exist or `df` does not answer in 5 s.
+/// Free and total bytes of one volume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiskSpace {
+    pub(crate) free: u64,
+    pub(crate) total: u64,
+}
+
+/// Free bytes on the volume holding `path`; `None` as [`disk_space`] gives it.
 pub(crate) async fn free_bytes(path: &Path) -> Option<u64> {
+    disk_space(path).await.map(|(_, s)| s.free)
+}
+
+/// The mount point and space of the volume holding `path`, from `df -Pk` (POSIX output,
+/// Linux and macOS); `None` when the path does not exist or `df` does not answer in 5 s.
+pub(crate) async fn disk_space(path: &Path) -> Option<(String, DiskSpace)> {
     if !path.exists() {
         return None;
     }
@@ -251,14 +268,19 @@ pub(crate) async fn free_bytes(path: &Path) -> Option<u64> {
     if !out.status.success() {
         return None;
     }
-    df_available(&String::from_utf8_lossy(&out.stdout))
+    df_line(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// The available bytes in `df -Pk` output: the fourth column of the last line, in KiB.
-fn df_available(text: &str) -> Option<u64> {
+/// The second line of `df -Pk` output: total (column 2) and available (column 4) in KiB,
+/// and the mount point (column 6 on, which may hold spaces). Free never exceeds total.
+fn df_line(text: &str) -> Option<(String, DiskSpace)> {
     let line = text.lines().filter(|l| !l.trim().is_empty()).nth(1)?;
-    let kib: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
-    kib.checked_mul(1024)
+    let cols: Vec<&str> = line.split_whitespace().collect();
+    let kib = |i: usize| cols.get(i)?.parse::<u64>().ok()?.checked_mul(1024);
+    let total = kib(1)?;
+    let free = kib(3)?.min(total);
+    let mount = cols.get(5..).filter(|m| !m.is_empty())?.join(" ");
+    Some((mount, DiskSpace { free, total }))
 }
 
 #[cfg(test)]
@@ -335,6 +357,7 @@ mod tests {
             capacity: Some(4),
             version: "v".into(),
             kinds: vec!["coordinate".into(), "build".into()],
+            host: None,
         };
         let floor = BUILD_FLOOR_BYTES;
         assert_eq!(
@@ -359,6 +382,7 @@ mod tests {
             capacity: None,
             version: "v".into(),
             kinds: vec!["build".into()],
+            host: None,
         };
         assert_eq!(only.guarded(Some(0), floor).kinds, [NOTHING]);
     }
@@ -367,12 +391,30 @@ mod tests {
     fn reads_the_available_column_of_df() {
         let linux = "Filesystem     1024-blocks      Used Available Capacity Mounted on\n\
                      /dev/nvme1n1   3844640564 2950015300 699253584      81% /mnt/build\n";
-        assert_eq!(df_available(linux), Some(699_253_584 * 1024));
+        assert_eq!(
+            df_line(linux),
+            Some((
+                "/mnt/build".into(),
+                DiskSpace {
+                    free: 699_253_584 * 1024,
+                    total: 3_844_640_564 * 1024
+                }
+            ))
+        );
         let mac = "Filesystem 1024-blocks Used Available Capacity  Mounted on\n\
                    /dev/disk3s1s1 971350180 10652320 72290648    13%    /\n";
-        assert_eq!(df_available(mac), Some(72_290_648 * 1024));
-        assert_eq!(df_available("Filesystem\n"), None);
-        assert_eq!(df_available(""), None);
+        assert_eq!(
+            df_line(mac).map(|(m, d)| (m, d.free)),
+            Some(("/".into(), 72_290_648 * 1024))
+        );
+        let spaced = "Filesystem 1024-blocks Used Available Capacity Mounted on\n\
+                      /dev/disk4s1 100 40 60 40% /Volumes/Build Disk\n";
+        assert_eq!(
+            df_line(spaced).map(|(m, _)| m),
+            Some("/Volumes/Build Disk".into())
+        );
+        assert_eq!(df_line("Filesystem\n"), None);
+        assert_eq!(df_line(""), None);
     }
 
     #[test]
