@@ -603,6 +603,11 @@ impl TurnReport {
 pub(crate) struct JobInfo {
     pub(crate) repository: String,
     pub(crate) document_id: String,
+    /// The job's kind (`bug`, `feature`, ...), which types a pull request title.
+    pub(crate) kind: String,
+    /// The queued ask's or brief's title: the job's `title`, else the first line of its
+    /// `brief`.
+    pub(crate) title: String,
 }
 
 impl JobInfo {
@@ -617,6 +622,20 @@ impl JobInfo {
         Self {
             repository: s("repository"),
             document_id: s("document_id"),
+            kind: s("kind"),
+            title: {
+                let t = s("title");
+                if t.is_empty() {
+                    s("brief")
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| !l.is_empty())
+                        .unwrap_or("")
+                        .to_owned()
+                } else {
+                    t
+                }
+            },
         }
     }
 }

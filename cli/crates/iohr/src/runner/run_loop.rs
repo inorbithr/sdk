@@ -199,6 +199,9 @@ type Accepted = Result<(Lease, Option<Owned>), String>;
 struct Owned {
     checkout: Prepared,
     document_id: String,
+    /// The job's kind and the ask's or brief's title, for the pull request's title.
+    kind: String,
+    title: String,
     /// How git and gh reach GitHub for this lease (RFC 0120): its own installation token,
     /// or this host's sign-in where the platform says the App is not installed.
     access: Access,
@@ -803,7 +806,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 // check sees the pushed head.
                 let ship = match (&b.owned, cfg.workspaces.as_ref(), &finished.parsed) {
                     (Some(o), Some(w), Some(parsed)) if finished.outcome == "replied" => {
-                        let m = workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply);
+                        let m = workspace::compose(&o.checkout.job_id, &o.document_id, &o.kind, &o.title, &parsed.reply);
                         // A token close to its end is minted again for the push; one that
                         // cannot be is a ship that fails, said in the log.
                         let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
@@ -1139,6 +1142,8 @@ async fn accept_lease<S: Service, X: Exec>(
                     owned = Some(Owned {
                         checkout: p,
                         document_id: job.document_id,
+                        kind: job.kind,
+                        title: job.title,
                         access,
                     });
                 }
@@ -2704,6 +2709,7 @@ mod tests {
             job: Some(JobInfo {
                 repository: "acme/app".into(),
                 document_id: "ldoc_1".into(),
+                ..JobInfo::default()
             }),
             minted: Some(crate::runner::access::Minted::token(
                 crate::runner::access::tests::FAKE,
@@ -2794,6 +2800,7 @@ mod tests {
                 job: Some(JobInfo {
                     repository: "acme/missing".into(),
                     document_id: String::new(),
+                    ..JobInfo::default()
                 }),
                 ..Fake::default()
             },
@@ -2846,6 +2853,7 @@ mod tests {
             Some(JobInfo {
                 repository: "acme/app".into(),
                 document_id: String::new(),
+                ..JobInfo::default()
             })
         };
         // Refused: the App lacks a permission, or the token is for another repository.

@@ -972,11 +972,33 @@ fn attribution(line: &str) -> bool {
     l.contains("co-authored-by") || l.contains("generated with")
 }
 
+/// The Conventional Commits type for a job's kind; `chore` for any other.
+fn type_of_kind(kind: &str) -> &'static str {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "bug" | "fix" | "bugfix" | "hotfix" => "fix",
+        "feature" | "feat" | "enhancement" => "feat",
+        "docs" | "doc" | "documentation" => "docs",
+        "refactor" => "refactor",
+        "perf" | "performance" => "perf",
+        "test" | "tests" => "test",
+        "build" => "build",
+        "ci" => "ci",
+        _ => "chore",
+    }
+}
+
 /// The commit and pull request text for a job's reply. The title is the reply's
 /// `open_pull_request` title when that is a Conventional Commit, else the first line of
-/// `say` when that is one, else `chore: ` and that line. The RFC, PRD and ADR lines are
+/// `say` when that is one, else a type from the job's `kind` and the ask's or brief's
+/// title (never the worker's words). The RFC, PRD and ADR lines are
 /// the ones the reply names, never made up: a missing one is said to be missing.
-pub(crate) fn compose(job_id: &str, document_id: &str, reply: &Reply) -> Message {
+pub(crate) fn compose(
+    job_id: &str,
+    document_id: &str,
+    kind: &str,
+    ask_title: &str,
+    reply: &Reply,
+) -> Message {
     let payload = pr_payload(reply).unwrap_or_default();
     let text = |k: &str| {
         payload
@@ -992,12 +1014,13 @@ pub(crate) fn compose(job_id: &str, document_id: &str, reply: &Reply) -> Message
     } else if is_conventional(&said) {
         said
     } else {
-        let what = if said.is_empty() {
+        let what = first_line(ask_title);
+        let what = if what.is_empty() {
             format!("job {job_id}")
         } else {
-            said
+            what.to_owned()
         };
-        truncate(&format!("chore: {what}"), 72)
+        truncate(&format!("{}: {what}", type_of_kind(kind)), 72)
     };
     let mut body = String::new();
     let given = text("body");
@@ -1601,7 +1624,7 @@ pub(crate) mod tests {
                 "implements": "RFC 0147", "prd": "0152", "adr": "0141"
             }})],
         );
-        let m = compose("job_1", "ldoc_1", &r);
+        let m = compose("job_1", "ldoc_1", "", "", &r);
         assert_eq!(m.title, "feat(cli): the runner owns the checkout");
         assert!(m.body.starts_with("What it does.\n"));
         for want in [
@@ -1622,20 +1645,60 @@ pub(crate) mod tests {
 
     #[test]
     fn the_message_never_invents_a_document_line_or_a_type() {
-        let m = compose("job_2", "", &reply("Added the thing\nmore", vec![]));
-        assert_eq!(m.title, "chore: Added the thing");
+        let m = compose(
+            "job_2",
+            "",
+            "bug",
+            "Crash on save",
+            &reply("Added the thing\nmore", vec![]),
+        );
+        assert_eq!(m.title, "fix: Crash on save");
         assert!(
             m.body
                 .contains("The turn named no Implements, PRD, ADR line")
         );
         assert!(!m.body.contains("Implements: "));
-        let m = compose("job_2", "", &reply("fix(core): the bug", vec![]));
+        let m = compose(
+            "job_2",
+            "",
+            "bug",
+            "x",
+            &reply("fix(core): the bug", vec![]),
+        );
         assert_eq!(m.title, "fix(core): the bug");
-        let m = compose("job_3", "", &reply("", vec![]));
+        let m = compose("job_3", "", "", "", &reply("", vec![]));
         assert_eq!(m.title, "chore: job job_3");
         // A payload sent as a JSON string is read too.
         let a = json!({"kind": "open_pull_request", "payload": "{\"title\":\"docs: x\"}"});
-        assert_eq!(compose("job_4", "", &reply("y", vec![a])).title, "docs: x");
+        assert_eq!(
+            compose("job_4", "", "", "", &reply("y", vec![a])).title,
+            "docs: x"
+        );
+    }
+
+    #[test]
+    fn the_fallback_title_is_typed_by_kind_and_cut_at_72() {
+        let t =
+            |kind: &str, ask: &str| compose("j", "", kind, ask, &reply("whatever", vec![])).title;
+        for (kind, ty) in [
+            ("bug", "fix"),
+            ("feature", "feat"),
+            ("docs", "docs"),
+            ("refactor", "refactor"),
+            ("perf", "perf"),
+            ("test", "test"),
+            ("build", "build"),
+            ("ci", "ci"),
+            ("question", "chore"),
+            ("", "chore"),
+        ] {
+            assert_eq!(t(kind, "Do it"), format!("{ty}: Do it"));
+        }
+        assert_eq!(t("bug", ""), "fix: job j");
+        let long = t("feature", &"a".repeat(100));
+        assert_eq!(long.chars().count(), 72);
+        assert!(long.starts_with("feat: aaa") && long.ends_with('…'));
+        assert!(is_conventional(&long));
     }
 
     #[test]
