@@ -412,6 +412,10 @@ pub enum RunnerCommand {
         /// Minutes to wait for your approval, 0 to 60; 0 files the ask and returns.
         #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=60))]
         wait: u64,
+        /// Only show this machine's run key and its enrolled runner id; make nothing,
+        /// ask nothing.
+        #[arg(long, conflicts_with_all = ["proof", "label"])]
+        show: bool,
         #[command(flatten)]
         account: AccountArg,
     },
