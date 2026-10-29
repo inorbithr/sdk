@@ -105,6 +105,20 @@ jobs:
       contents: read
       statuses: write
     steps:
+      # First step, before anything uses a tag: a manual run names one tag, in the form
+      # the publish jobs accept. The inputs reach the shell through env only. examples-gate
+      # runs only after this job passed, so it needs no second check.
+      - name: Check the tag
+        env:
+          PYTHON_TAG: ${{ inputs.python_tag }}
+          TYPESCRIPT_TAG: ${{ inputs.typescript_tag }}
+        run: |
+          if [[ -n "$PYTHON_TAG" && -n "$TYPESCRIPT_TAG" ]]; then
+            echo "python_tag and typescript_tag are both set; name one tag per run" >&2
+            exit 1
+          fi
+          [[ -z "$PYTHON_TAG" || "$PYTHON_TAG" =~ ^python/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a python release tag: $PYTHON_TAG" >&2; exit 1; }
+          [[ -z "$TYPESCRIPT_TAG" || "$TYPESCRIPT_TAG" =~ ^typescript/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a typescript release tag: $TYPESCRIPT_TAG" >&2; exit 1; }
       # The release commit on a push; the tag's commit on a manual run (as examples-gate
       # reads it), so `attest` posts on the commit the gate checks.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -115,6 +129,9 @@ jobs:
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: "go rust node pnpm python uv dotnet java maven"
+          # This job holds statuses: write and produces the evidence the publish jobs rely
+          # on: it installs the toolchains fresh rather than restore a cache.
+          cache: false
       - run: mise run examples:run
       - name: Post the examples-run status
         env:

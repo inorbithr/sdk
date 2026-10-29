@@ -210,7 +210,7 @@ packs the same tag again but does not stage it a second time.
 
 ## Examples gate (RFC 0165)
 
-A release needs the examples to have run green against the live API on its exact commit.
+A release needs the examples to have run green against the local replay server (the conformance server, no network) on its exact commit.
 `mise run examples:run` writes `examples-results.json`; `mise run examples:attest` posts
 the commit status `examples-run` on HEAD, and only when the file is for HEAD, the tree was
 clean, nothing failed and every language under `examples/` has a passing example.
@@ -219,10 +219,15 @@ without a person: on a macOS runner (the only one with the Swift toolchain, so a
 languages run) it runs `mise run examples:run` and then `mise run examples:attest`, with
 `statuses: write` on that job alone. The `examples-gate` job then runs
 `tools/examples-gate.py gate` and fails unless the status is `success` on the released
-commit (for a manual run, on the tag's commit; `examples-attest` checks out that tag), and
-every publish job waits for it. If an example fails, `examples-attest` fails, no status is
+commit (for a manual run, on the tag's commit; `examples-attest` checks out that tag) and
+was posted by `github-actions[bot]`: a status posted by hand, by a person, never satisfies
+it. Every publish job waits for it. A manual run names one tag: `examples-attest` fails
+first if `python_tag` and `typescript_tag` are both set or the tag is not a
+`python/v<semver>` or `typescript/v<semver>` tag, and the job installs its toolchains
+without the mise cache (it holds `statuses: write`). If an example fails, `examples-attest` fails, no status is
 posted, the gate is skipped and nothing is published: fix the example on main, or re-run
 the failed jobs if the cause was the runner. Nothing needs doing by hand on the release
-merge commit. `mise run examples:gate -- <ref>` checks the status by hand, and a Mac
-(`mise run examples:run && mise run examples:attest`) still works as a fallback. The release-train
+merge commit. `mise run examples:gate -- <ref>` checks the status by hand with the same rule, so a
+Mac run (`mise run examples:run && mise run examples:attest`) is evidence for a person but
+no longer a fallback for the gate: to re-attest, re-run the workflow's `examples-attest` job. The release-train
 agent refuses a roll of the SDK without it.
