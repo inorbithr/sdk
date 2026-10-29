@@ -400,7 +400,7 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 
-With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action.
+With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh` or `systemctl` on its `PATH`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On

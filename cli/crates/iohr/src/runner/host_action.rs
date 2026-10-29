@@ -318,6 +318,17 @@ impl Action {
             Self::Upgrade => UPGRADE,
         }
     }
+
+    /// The one tool every call of this action runs.
+    pub(crate) fn tool(&self) -> Tool {
+        match self {
+            Self::DeleteFailedPods { .. } | Self::RolloutRestart { .. } => Tool::Kubectl,
+            Self::UserRestart { .. } => Tool::Systemctl,
+            Self::PruneImages { .. } => Tool::Docker,
+            Self::CancelRun { .. } => Tool::Gh,
+            Self::Upgrade => Tool::Iohr,
+        }
+    }
 }
 
 /// The registry: the action `doc` names, from a document [`validate`] passed, on this
@@ -816,6 +827,13 @@ impl HostRunner {
 
 impl ArgvRunner for HostRunner {
     fn refuses(&self, action: &Action) -> Option<String> {
+        let tool = action.tool();
+        if let (Tool::Kubectl, Err(why)) = (tool, &self.kube) {
+            return Some(why.clone());
+        }
+        if let Err(why) = self.program(tool) {
+            return Some(why);
+        }
         match action {
             Action::UserRestart { unit } => self.unit_problem(unit),
             _ => None,

@@ -618,8 +618,10 @@ async fn a_user_restart_off_linux_is_refused_before_it_runs() {
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn only_the_user_units_the_runner_lists_are_restarted() {
     let dir = tempfile::tempdir().unwrap();
+    on_path(dir.path(), &["systemctl", "docker"]);
     let h = host(dir.path(), Err("none".to_owned()));
     let restart = |unit: &str| Action::UserRestart {
         unit: unit.to_owned(),
@@ -655,6 +657,60 @@ async fn a_failed_call_stops_the_action_with_its_words() {
     assert_eq!(why, "systemctl --user daemon-reload: failed\nforbidden");
     // The restart never ran after the reload failed.
     assert_eq!(k.calls().len(), 1);
+}
+
+/// Empty executables named `names` in `dir`, so a lookup on that PATH finds them.
+#[cfg(unix)]
+fn on_path(dir: &std::path::Path, names: &[&str]) {
+    use std::os::unix::fs::PermissionsExt as _;
+    for name in names {
+        let file = dir.join(name);
+        std::fs::write(&file, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+/// A runner without the tool an approved action needs refuses it in `check`, before the
+/// action is reported started, with the same words `run` would fail with.
+#[test]
+fn an_action_whose_tool_is_missing_is_refused_before_it_starts() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = host(dir.path(), Err("no kube context is configured".to_owned()));
+    for (action, want) in [
+        (
+            Action::DeleteFailedPods {
+                namespace: Some("tbd".to_owned()),
+            },
+            "no kube context is configured",
+        ),
+        (
+            Action::RolloutRestart {
+                namespace: "tbd".to_owned(),
+                deployment: "gateway".to_owned(),
+            },
+            "no kube context is configured",
+        ),
+        (
+            Action::UserRestart {
+                unit: "iohr-runner.service".to_owned(),
+            },
+            "systemctl is not on this runner's PATH",
+        ),
+        (
+            Action::PruneImages { until_hours: 24 },
+            "docker is not on this runner's PATH",
+        ),
+        (
+            Action::CancelRun {
+                repo: "inorbithr/core".to_owned(),
+                run_id: 1,
+            },
+            "gh is not on this runner's PATH",
+        ),
+        (Action::Upgrade, "this runner cannot tell where its iohr is"),
+    ] {
+        assert_eq!(h.refuses(&action).as_deref(), Some(want), "{}", action.id());
+    }
 }
 
 #[tokio::test]
