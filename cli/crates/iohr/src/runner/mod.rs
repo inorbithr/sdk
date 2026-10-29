@@ -5,6 +5,7 @@
 pub(crate) mod access;
 pub(crate) mod approvals;
 pub(crate) mod claude;
+pub(crate) mod drain;
 pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod gate;
@@ -13,7 +14,9 @@ pub(crate) mod host_action;
 pub(crate) mod private;
 pub(crate) mod provider;
 pub(crate) mod run_loop;
+pub(crate) mod self_upgrade;
 pub(crate) mod service;
 pub(crate) mod settings;
 pub(crate) mod signing;
+pub(crate) mod supervisor;
 pub(crate) mod workspace;

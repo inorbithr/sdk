@@ -896,6 +896,67 @@ async fn config_show_names_each_value_and_its_source_without_a_sign_in() {
 }
 
 #[tokio::test]
+async fn config_show_names_the_upgrade_settings_and_the_flag_turns_it_off() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    login(&server, dir.path(), &token()).await;
+    let show = |extra: &[&str]| {
+        let mut args = vec!["runner", "config", "show", "--json"];
+        args.extend_from_slice(extra);
+        let o = run(&mut iohr(&server, dir.path(), &args));
+        assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+        serde_json::from_slice::<Value>(&o.stdout).unwrap()
+    };
+    let v = show(&[]);
+    assert_eq!(
+        v["auto_upgrade"],
+        json!({"value": true, "source": "default"})
+    );
+    assert_eq!(
+        v["upgrade_interval_minutes"],
+        json!({"value": 60, "source": "default"})
+    );
+    assert_eq!(
+        v["upgrade_restart"],
+        json!({"value": "exec", "source": "default"})
+    );
+    add_to_config(
+        dir.path(),
+        "\n[runner]\nauto_upgrade = true\nupgrade_interval_minutes = 15\nupgrade_restart = \"exit\"\n",
+    );
+    let v = show(&[]);
+    assert_eq!(
+        v["auto_upgrade"],
+        json!({"value": true, "source": "[runner]"})
+    );
+    assert_eq!(
+        v["upgrade_interval_minutes"],
+        json!({"value": 15, "source": "[runner]"})
+    );
+    assert_eq!(
+        v["upgrade_restart"],
+        json!({"value": "exit", "source": "[runner]"})
+    );
+    let v = show(&["--no-auto-upgrade"]);
+    assert_eq!(v["auto_upgrade"], json!({"value": false, "source": "flag"}));
+    // A value out of range stops the start, before anything is sent.
+    let p = dir.path().join("config").join("config.toml");
+    let t = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, t.replace("= 15", "= 2")).unwrap();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(
+        text(&o).contains("upgrade_interval_minutes"),
+        "{}",
+        text(&o)
+    );
+}
+
+#[tokio::test]
 async fn run_needs_a_registered_runner() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();

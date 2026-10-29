@@ -26,6 +26,7 @@ use tokio::time::Instant;
 
 use super::access::Access;
 use super::claude::Reply;
+use super::drain::Drain;
 use super::exec::{Exec, Finished};
 use super::gate::{self, Checked, Held, MainFrom, Skip};
 use super::service::{
@@ -84,6 +85,8 @@ pub(crate) struct LoopConfig {
     /// The checkouts of job leases (RFC 0147 slice A): made before the accept, shipped
     /// as a pull request after a reply; `None` keeps the old behaviour (no checkout).
     pub(crate) workspaces: Option<Arc<Workspaces>>,
+    /// Lets the self-upgrade drain the loop; `None`: never drained.
+    pub(crate) drain: Option<Arc<Drain>>,
 }
 
 /// What the run loop runs for the Checked gate (RFC 0120); the same check and the same
@@ -125,6 +128,7 @@ impl Default for LoopConfig {
             report_host: false,
             gate: None,
             workspaces: None,
+            drain: None,
         }
     }
 }
@@ -150,7 +154,7 @@ pub(crate) fn backoff(failures: u32, min: Duration, max: Duration, jitter: f64) 
     capped.mul_f64(1.0 - 0.5 * jitter.clamp(0.0, 1.0))
 }
 
-fn jitter() -> f64 {
+pub(crate) fn jitter() -> f64 {
     let mut b = [0_u8; 2];
     let _ = getrandom::fill(&mut b);
     f64::from(u16::from_le_bytes(b)) / f64::from(u16::MAX)
@@ -530,10 +534,16 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut beat_started = start;
     let mut lease_beat_started = start;
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
+    let mut drain_watch = cfg.drain.as_ref().map(|d| d.watch());
 
     loop {
         let held = held_leases(&busy, &fetching, &gating, &outbox);
         let has_held = !held.is_empty();
+        if let Some(d) = &cfg.drain {
+            d.publish(
+                !has_held && accepting.is_empty() && reporting.is_none() && fetch_ops.is_empty(),
+            );
+        }
         let now = Instant::now();
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
             lease_beat_started = now;
@@ -608,7 +618,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 .clone();
             let id = runner.runner_id.clone();
             let limit = cfg.op_timeout;
-            let declared = declared_now(&cfg);
+            let mut declared = declared_now(&cfg);
+            if cfg.drain.as_ref().is_some_and(|d| d.is_wanted()) {
+                declared = declared.drained();
+            }
             if let Some(c) = declared.capacity {
                 let c = usize::try_from(c).unwrap_or(1).clamp(1, MAX_CAPACITY);
                 if c != capacity {
@@ -706,6 +719,11 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                     .any(|l| l.lease_id == lease.lease_id);
                             if held_already {
                                 // Offered again before the service saw the accept.
+                            } else if cfg.drain.as_ref().is_some_and(|d| d.is_wanted()) {
+                                log(&format!(
+                                    "lease {} left for another runner: the runner is draining to upgrade",
+                                    lease.lease_id
+                                ));
                             } else if taken >= capacity {
                                 log(&format!(
                                     "lease {} left for another runner: {taken} of {capacity} turns are taken",
@@ -972,6 +990,20 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     outbox.push_back(gating.remove(i).report);
                     next_report = Instant::now();
                 }
+            }
+            wanted = async {
+                match drain_watch.as_mut() {
+                    Some(w) => w.flipped().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                log(if wanted {
+                    "draining: no new lease until the upgrade is done"
+                } else {
+                    "the drain is over: leases are taken again"
+                });
+                // The next beat says so: with the drain wanted it declares nothing.
+                next_beat = Instant::now();
             }
             taken = first_of(&mut accepting) => {
                 match taken {
@@ -1696,6 +1728,7 @@ mod tests {
             build_floor: None,
             gate: None,
             workspaces: None,
+            drain: None,
             report_host: false,
         }
     }
@@ -2992,5 +3025,73 @@ mod tests {
                 "{lines:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn while_draining_the_beats_declare_none_and_an_offered_lease_is_left() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1)]);
+        let drain = Arc::new(Drain::default());
+        drain.want(true);
+        let c = LoopConfig {
+            drain: Some(drain.clone()),
+            max_beats: Some(5),
+            ..declaring(None, &["coordinate", "build"]).1
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert!(
+            lines.iter().any(|l| l.contains("drain")),
+            "it says why: {lines:?}"
+        );
+        assert_eq!(
+            (stats.accepted, stats.turns),
+            (0, 0),
+            "no lease while draining"
+        );
+        assert_eq!(calls_of(&fake, "accept"), 0);
+        {
+            let d = fake.declared.lock().unwrap();
+            assert!(
+                d.len() >= 5 && d.iter().all(|x| x.kinds == ["none"]),
+                "{d:?}"
+            );
+        }
+        tokio::time::timeout(Duration::from_secs(1), drain.until_drained())
+            .await
+            .expect("an idle loop reports a drain");
+    }
+
+    #[tokio::test]
+    async fn a_turn_in_progress_holds_the_drain_open_until_it_is_reported() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1)]);
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(400)),
+            ..FakeExec::default()
+        };
+        let drain = Arc::new(Drain::default());
+        let c = LoopConfig {
+            drain: Some(drain.clone()),
+            ..cfg(200)
+        };
+        let ask = async {
+            // Let the turn start, then ask for a drain.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            drain.want(true);
+            let early =
+                tokio::time::timeout(Duration::from_millis(100), drain.until_drained()).await;
+            assert!(early.is_err(), "drained while a turn was running");
+            tokio::time::timeout(Duration::from_secs(3), drain.until_drained())
+                .await
+                .expect("drained once the turn is done");
+            let reported = calls_of(&fake, "report ");
+            assert_eq!(
+                reported, 1,
+                "the report was delivered before the drain ended"
+            );
+            drain.want(false);
+        };
+        let (done, ()) = tokio::join!(go_with(&fake, exec, c), ask);
+        assert_eq!(done.1.reported, 1);
     }
 }
