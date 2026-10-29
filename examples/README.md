@@ -27,9 +27,10 @@ how each language is built and run.
 | `concurrent-calls`: Several calls at once on one client | [`concurrent-calls.rs`](rust/src/bin/concurrent-calls.rs) | [`concurrent-calls.ts`](typescript/src/concurrent-calls.ts) | [`concurrent-calls`](go/concurrent-calls/main.go) | [`concurrent_calls.py`](python/concurrent_calls.py) | [`ConcurrentCalls.java`](java/src/main/java/example/ConcurrentCalls.java) | [`ConcurrentCalls.cs`](csharp/Calls/ConcurrentCalls.cs) | [`ConcurrentCalls.swift`](swift/Sources/Calls/ConcurrentCalls.swift) |
 | `config-load`: A client from load, with where each setting came from | [`config-load.rs`](rust/src/bin/config-load.rs) | [`config-load.ts`](typescript/src/config-load.ts) | [`config-load`](go/config-load/main.go) | [`config_load.py`](python/config_load.py) | [`ConfigLoad.java`](java/src/main/java/example/ConfigLoad.java) | [`ConfigLoad.cs`](csharp/Calls/ConfigLoad.cs) | [`ConfigLoad.swift`](swift/Sources/Calls/ConfigLoad.swift) |
 
-Swift builds only on a Mac, so the Mac run (`python3 tools/run-examples.py --lang swift`)
-writes its own results file and uploads it for the same commit as the Linux run. The
-release gate takes both: `mise run examples:attest -- --results linux.json --results mac.json`
+Swift builds only on a Mac, so the release workflow runs all of it on a macOS runner and
+attests the commit itself (`examples-attest` in `release.yml`, docs/releasing.md). By hand, a
+Mac run (`python3 tools/run-examples.py --lang swift`) writes its own results file for the
+same commit as a Linux run, and the attest step takes both: `mise run examples:attest -- --results linux.json --results mac.json`
 (both must be for the same clean commit, and every language needs a passing example).
 The Python run uses `uv run --frozen`, so `examples/python/uv.lock` is not rewritten (uv
 bumps the `inorbithr` version in it otherwise, and a dirty tree fails the gate). If you run
