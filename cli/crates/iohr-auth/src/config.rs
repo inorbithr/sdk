@@ -160,6 +160,10 @@ pub struct RunnerConfig {
     /// with code 75 and let the supervisor start it; elsewhere it is `exec`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upgrade_restart: Option<String>,
+    /// The only user service units (`<name>.service`) an approved `systemd.user-restart`
+    /// may restart. Unset or empty, the runner refuses every one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_units: Option<Vec<String>>,
 }
 
 impl RunnerConfig {
@@ -175,6 +179,7 @@ impl RunnerConfig {
             && self.auto_upgrade.is_none()
             && self.upgrade_interval_minutes.is_none()
             && self.upgrade_restart.is_none()
+            && self.user_units.is_none()
     }
 }
 

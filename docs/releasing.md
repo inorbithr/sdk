@@ -213,8 +213,15 @@ A release needs the examples to have run green against the live API on its exact
 `mise run examples:run` writes `examples-results.json`; `mise run examples:attest` posts
 the commit status `examples-run` on HEAD, and only when the file is for HEAD, the tree was
 clean, nothing failed and every language under `examples/` has a passing example.
-The `examples-gate` job in `release.yml` runs before every publish job and fails unless
-that status is `success` on the released commit (for a manual run, on the tag's commit).
-The release PR's merge commit is new, so run and attest on it, then re-run the failed
-jobs. `mise run examples:gate -- <ref>` checks the same thing by hand. The release-train
+The `examples-attest` job in `release.yml` does both steps for the released commit
+without a person: on a macOS runner (the only one with the Swift toolchain, so all
+languages run) it runs `mise run examples:run` and then `mise run examples:attest`, with
+`statuses: write` on that job alone. The `examples-gate` job then runs
+`tools/examples-gate.py gate` and fails unless the status is `success` on the released
+commit (for a manual run, on the tag's commit; `examples-attest` checks out that tag), and
+every publish job waits for it. If an example fails, `examples-attest` fails, no status is
+posted, the gate is skipped and nothing is published: fix the example on main, or re-run
+the failed jobs if the cause was the runner. Nothing needs doing by hand on the release
+merge commit. `mise run examples:gate -- <ref>` checks the status by hand, and a Mac
+(`mise run examples:run && mise run examples:attest`) still works as a fallback. The release-train
 agent refuses a roll of the SDK without it.

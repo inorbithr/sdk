@@ -22,7 +22,7 @@ use crate::runner::claude;
 use crate::runner::drain::Drain;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
-use crate::runner::host_action::HostKubectl;
+use crate::runner::host_action::HostRunner;
 use crate::runner::provider::{self, AuthState};
 use crate::runner::run_loop::{self, GateCheck, LoopConfig, run_loop};
 use crate::runner::self_upgrade::{
@@ -538,7 +538,7 @@ async fn approvals_setup(
     svc: &HttpService<'_>,
     account: &str,
     set: &Effective,
-) -> Option<approvals::Asks<HostKubectl>> {
+) -> Option<approvals::Asks<HostRunner>> {
     let off = |why: &str| {
         Out::note(&format!("approved runs: off, {why}"));
         None
@@ -578,23 +578,31 @@ async fn approvals_setup(
         Ok(seen) => seen,
         Err(e) => return off(&e),
     };
-    let kubectl = HostKubectl::find(
+    let tools = HostRunner::find(
         set.kube_context.as_ref().map(|c| c.value.as_str()),
         set.kubeconfig.as_ref().map(|c| c.value.as_str()),
+        set.user_units
+            .as_ref()
+            .map_or(&[][..], |u| u.value.as_slice()),
     );
     Out::note(&format!(
-        "approved runs: on, as {runner_id}, {} device keys pinned{}",
+        "approved runs: on, as {runner_id}, {} device keys pinned{}; user units: {}",
         keys.len(),
-        match &kubectl {
-            Ok(_) => String::new(),
-            Err(why) => format!("; {why}, so every action will be refused"),
+        match tools.kube_problem() {
+            None => String::new(),
+            Some(why) => format!("; {why}, so every Kubernetes action will be refused"),
+        },
+        if tools.user_units.is_empty() {
+            "none".to_owned()
+        } else {
+            tools.user_units.join(", ")
         }
     ));
     let pin = approvals::Pin {
         runner_id,
         runner_public_key: public,
     };
-    Some(approvals::Asks::new(key, pin, keys, seen, kubectl))
+    Some(approvals::Asks::new(key, pin, keys, seen, tools))
 }
 
 /// The runner settings in effect: flags over `[profiles.<name>.runner]` over `[runner]`.
@@ -686,6 +694,10 @@ async fn show_settings(e: &Effective, out: Out) {
     };
     let (kube_context, kube_context_from) = kube(&e.kube_context);
     let (kubeconfig, kubeconfig_from) = kube(&e.kubeconfig);
+    let (user_units, user_units_from) = e.user_units.as_ref().map_or_else(
+        || ("not set".to_owned(), "default".to_owned()),
+        |u| (u.value.join(", "), u.source.to_string()),
+    );
     let volume = floor.volume.display().to_string();
     let free_text = free.map_or_else(|| "unknown".to_owned(), |f| format!("{} GB", gb(f)));
     if out.json {
@@ -699,6 +711,7 @@ async fn show_settings(e: &Effective, out: Out) {
             "auto_upgrade": { "value": e.auto_upgrade.value, "source": e.auto_upgrade.source.to_string() },
             "upgrade_interval_minutes": { "value": e.upgrade_interval.value.as_secs() / 60, "source": e.upgrade_interval.source.to_string() },
             "upgrade_restart": { "value": e.upgrade_restart.value.as_str(), "source": e.upgrade_restart.source.to_string() },
+            "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
         }));
         return;
@@ -718,6 +731,7 @@ async fn show_settings(e: &Effective, out: Out) {
         vec!["name".to_owned(), name, name_from],
         vec!["kube_context".to_owned(), kube_context, kube_context_from],
         vec!["kubeconfig".to_owned(), kubeconfig, kubeconfig_from],
+        vec!["user_units".to_owned(), user_units, user_units_from],
         vec![
             "auto_upgrade".to_owned(),
             e.auto_upgrade.value.to_string(),

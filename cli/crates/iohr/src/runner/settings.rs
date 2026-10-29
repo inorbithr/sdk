@@ -115,6 +115,8 @@ pub(crate) struct Effective {
     /// How long between looks for a newer release.
     pub(crate) upgrade_interval: Setting<Duration>,
     pub(crate) upgrade_restart: Setting<RestartMode>,
+    /// The user service units `systemd.user-restart` may restart; `None` or empty, none.
+    pub(crate) user_units: Option<Setting<Vec<String>>>,
 }
 
 /// The first of the flag, the profile's table and the file's table that sets a value.
@@ -150,7 +152,8 @@ fn pick<T: Clone>(
 ///
 /// A message naming the key and where the bad value came from: a capacity outside 1 to
 /// 32, an empty kinds list, a kind other than `coordinate` and `build`, an upgrade
-/// interval outside 5 to 10080 minutes, or a restart mode other than `exec` and `exit`.
+/// interval outside 5 to 10080 minutes, a restart mode other than `exec` and `exit`, or a
+/// `user_units` entry that is not a user service unit.
 pub(crate) fn resolve(
     file: &RunnerConfig,
     profile: Option<(&str, &RunnerConfig)>,
@@ -197,44 +200,20 @@ pub(crate) fn resolve(
         value: true,
         source: Source::Default,
     });
-    let upgrade_interval = match pick(None, profile, file, |c| c.upgrade_interval_minutes) {
-        Some(m) if !UPGRADE_INTERVAL_RANGE.contains(&m.value) => {
-            return Err(format!(
-                "runner upgrade_interval_minutes {} ({}) is outside {} to {}",
-                m.value,
-                m.source,
-                UPGRADE_INTERVAL_RANGE.start(),
-                UPGRADE_INTERVAL_RANGE.end()
-            ));
-        }
-        Some(m) => Setting {
-            value: Duration::from_secs(u64::from(m.value) * 60),
-            source: m.source,
-        },
-        None => Setting {
-            value: Duration::from_secs(u64::from(UPGRADE_INTERVAL_MINUTES) * 60),
-            source: Source::Default,
-        },
-    };
-    let upgrade_restart = match pick(None, profile, file, |c| c.upgrade_restart.clone()) {
-        Some(m) => Setting {
-            value: match m.value.trim() {
-                "exec" => RestartMode::Exec,
-                "exit" => RestartMode::Exit,
-                other => {
-                    return Err(format!(
-                        "runner upgrade_restart {other:?} ({}) is not exec or exit",
-                        m.source
-                    ));
-                }
-            },
-            source: m.source,
-        },
-        None => Setting {
-            value: RestartMode::Exec,
-            source: Source::Default,
-        },
-    };
+    let upgrade_interval = upgrade_interval_of(profile, file)?;
+    let upgrade_restart = restart_mode_of(profile, file)?;
+    let user_units = pick(None, profile, file, |c| c.user_units.clone());
+    if let Some(u) = &user_units
+        && let Some(bad) = u
+            .value
+            .iter()
+            .find(|n| !super::host_action::is_user_unit(n))
+    {
+        return Err(format!(
+            "runner user_units ({}): {bad:?} is not a user service unit (<name>.service)",
+            u.source
+        ));
+    }
     Ok(Effective {
         capacity,
         kinds,
@@ -245,7 +224,64 @@ pub(crate) fn resolve(
         auto_upgrade,
         upgrade_interval,
         upgrade_restart,
+        user_units,
     })
+}
+
+/// The upgrade interval, checked, from the profile, the file or the default.
+fn upgrade_interval_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<Duration>, String> {
+    Ok(
+        match pick(None, profile, file, |c| c.upgrade_interval_minutes) {
+            Some(m) if !UPGRADE_INTERVAL_RANGE.contains(&m.value) => {
+                return Err(format!(
+                    "runner upgrade_interval_minutes {} ({}) is outside {} to {}",
+                    m.value,
+                    m.source,
+                    UPGRADE_INTERVAL_RANGE.start(),
+                    UPGRADE_INTERVAL_RANGE.end()
+                ));
+            }
+            Some(m) => Setting {
+                value: Duration::from_secs(u64::from(m.value) * 60),
+                source: m.source,
+            },
+            None => Setting {
+                value: Duration::from_secs(u64::from(UPGRADE_INTERVAL_MINUTES) * 60),
+                source: Source::Default,
+            },
+        },
+    )
+}
+
+/// The restart mode, checked, from the profile, the file or the default.
+fn restart_mode_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<RestartMode>, String> {
+    Ok(
+        match pick(None, profile, file, |c| c.upgrade_restart.clone()) {
+            Some(m) => Setting {
+                value: match m.value.trim() {
+                    "exec" => RestartMode::Exec,
+                    "exit" => RestartMode::Exit,
+                    other => {
+                        return Err(format!(
+                            "runner upgrade_restart {other:?} ({}) is not exec or exit",
+                            m.source
+                        ));
+                    }
+                },
+                source: m.source,
+            },
+            None => Setting {
+                value: RestartMode::Exec,
+                source: Source::Default,
+            },
+        },
+    )
 }
 
 /// The kinds, checked and in the order given, once each.
@@ -603,5 +639,22 @@ mod tests {
             Source::Profile("work".into())
         );
         assert_eq!(e.kubeconfig.unwrap().source, Source::File);
+    }
+
+    #[test]
+    fn user_units_are_unset_by_default_and_a_bad_entry_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.user_units, None);
+        let mut file = RunnerConfig::default();
+        file.user_units = Some(vec!["iohr-runner.service".into()]);
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.user_units.map(|u| (u.value, u.source)),
+            Some((vec!["iohr-runner.service".to_owned()], Source::File))
+        );
+        let mut work = RunnerConfig::default();
+        work.user_units = Some(vec!["sshd".into()]);
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(err.contains("user_units") && err.contains("work"), "{err}");
     }
 }

@@ -401,8 +401,9 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
 | `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
 | `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
+| `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 
-With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved host action.
+With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh` or `systemctl` on its `PATH`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On
