@@ -283,7 +283,8 @@ mod tests {
     // reported 0 bytes of memory and sent no signals.
     #[test]
     fn sysctl_is_named_by_absolute_path() {
-        assert!(std::path::Path::new(SYSCTL).is_absolute());
+        // A POSIX path on every host: Windows reads "/usr/sbin" as not absolute.
+        assert!(SYSCTL.starts_with('/'));
     }
 
     #[cfg(target_os = "macos")]
