@@ -436,6 +436,11 @@ the file's own `--version` must say the new version, then the runner restarts:
   (launchd); with neither it uses `exec`. Use `exit` for a Homebrew install on Linux,
   where cleanup can remove the path the old binary ran from.
 
+The command line's exit codes are 0 success, 1 a failed call, 2 a usage error, 3 not
+signed in, 4 forbidden by scope, role or plan, and 75 (`EX_TEMPFAIL`) for a runner that
+installed a newer `iohr` and stopped for its supervisor to start it (`upgrade_restart =
+"exit"`); 75 prints nothing and is not a failure.
+
 A failed look, install, version check or restart is one line in the log, never a token.
 The old version keeps running and the runner waits 5 minutes, then 10, 20 and so on up to
 the interval (and never over 6 hours) before it tries again. `runner/last-upgrade` in the

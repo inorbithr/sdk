@@ -120,7 +120,9 @@ Every command takes `--profile` (or `IOHR_PROFILE`), `--json` and `--verbose`.
 a query value or a body.
 
 Exit codes: 0 success, 1 a failed call, 2 a usage error, 3 not signed in or the token
-was refused, 4 forbidden by scope, role or plan.
+was refused, 4 forbidden by scope, role or plan, 75 (`EX_TEMPFAIL`) `iohr runner run`
+stopped after installing a newer `iohr` so its launchd or systemd supervisor starts it
+(`upgrade_restart = "exit"`); that is not a failure.
 
 ## Your login in other programs
 

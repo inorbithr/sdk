@@ -26,12 +26,16 @@ struct Fake {
     method: Method,
     /// What the lookup answers.
     latest: Arc<Mutex<Result<Version, String>>>,
-    /// What the installer does.
+    /// What the download and its checks do.
+    prepare: Arc<Mutex<Result<(), Refused>>>,
+    /// What the swap does.
     install: Arc<Mutex<Result<(), String>>>,
     /// What the installed file then says.
     says: Arc<Mutex<Result<Version, String>>>,
     looks: Arc<AtomicUsize>,
-    /// When each install ran.
+    /// Whether the drain was wanted at each download.
+    wanted_at_prepare: Arc<Mutex<Vec<bool>>>,
+    /// When each swap ran.
     installs: Arc<Mutex<Vec<Instant>>>,
     /// Whether the drain was wanted at each install.
     wanted_at_install: Arc<Mutex<Vec<bool>>>,
@@ -43,9 +47,11 @@ impl Fake {
         Self {
             method,
             latest: Arc::new(Mutex::new(Ok(v(latest)))),
+            prepare: Arc::new(Mutex::new(Ok(()))),
             install: Arc::new(Mutex::new(Ok(()))),
             says: Arc::new(Mutex::new(Ok(v(latest)))),
             looks: Arc::default(),
+            wanted_at_prepare: Arc::default(),
             installs: Arc::default(),
             wanted_at_install: Arc::default(),
             drain: drain.clone(),
@@ -57,13 +63,19 @@ impl Fake {
     fn installs(&self) -> usize {
         self.installs.lock().unwrap().len()
     }
+    fn prepares(&self) -> usize {
+        self.wanted_at_prepare.lock().unwrap().len()
+    }
 }
 
 #[allow(
+    unknown_lints,
     clippy::unused_async_trait_impl,
     reason = "the trait's shape; a fake has nothing to await"
 )]
 impl Source for Fake {
+    type Staged = ();
+
     fn here(&self) -> Result<Here, String> {
         Ok(Here {
             exe: PathBuf::from("/home/u/.local/bin/iohr"),
@@ -75,7 +87,14 @@ impl Source for Fake {
         self.looks.fetch_add(1, Ordering::SeqCst);
         self.latest.lock().unwrap().clone()
     }
-    async fn install(&self, _: &Here, _: &Version) -> Result<(), String> {
+    async fn prepare(&self, _: &Here, _: &Version) -> Result<(), Refused> {
+        self.wanted_at_prepare
+            .lock()
+            .unwrap()
+            .push(self.drain.is_wanted());
+        self.prepare.lock().unwrap().clone()
+    }
+    async fn apply(&self, _: &Here, _: &Version, (): ()) -> Result<(), String> {
         self.installs.lock().unwrap().push(Instant::now());
         self.wanted_at_install
             .lock()
@@ -456,11 +475,143 @@ async fn an_install_that_says_another_version_is_not_restarted() {
     let (_, log) = lines();
     let got = r.up.upgrade(&ver, &here, r.stop.subscribe(), &log).await;
     assert!(got.unwrap_err().contains("the file says 0.1.0-alpha.27"));
+    assert_eq!(
+        *r.marks.last.lock().unwrap(),
+        Some(v("0.1.0-alpha.28")),
+        "another version came out: noted, so the guard holds the next rounds"
+    );
+    *r.marks.last.lock().unwrap() = None;
     *r.fake.says.lock().unwrap() = Err("does not run".into());
     let got = r.up.upgrade(&ver, &here, r.stop.subscribe(), &log).await;
     assert!(got.unwrap_err().contains("does not run"));
     assert_eq!(r.execs.0.load(Ordering::SeqCst), 0);
     assert_eq!(*r.marks.last.lock().unwrap(), None, "nothing was noted");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_download_never_stops_work_nor_waits_for_it() {
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
+    *r.fake.prepare.lock().unwrap() = Err(Refused::failed("checksum mismatch"));
+    // A run is in progress and never ends: a drain before the download would idle the
+    // runner for the whole DRAIN_LIMIT and only then find the failure.
+    let _hold = r.drain.hold().unwrap();
+    let Check::Newer(ver, here) = r.up.check().await else {
+        panic!("newer expected")
+    };
+    let (_, log) = lines();
+    let t0 = Instant::now();
+    let got = r.up.upgrade(&ver, &here, r.stop.subscribe(), &log).await;
+    assert!(got.unwrap_err().contains("checksum mismatch"));
+    assert!(
+        Instant::now() - t0 < MIN,
+        "waited {:?} for a drain before the download",
+        Instant::now() - t0
+    );
+    assert_eq!(*r.fake.wanted_at_prepare.lock().unwrap(), [false]);
+    assert!(!r.drain.is_wanted(), "work was never held back");
+    assert!(r.drain.hold().is_some(), "runs may start");
+    assert_eq!(r.fake.installs(), 0);
+    assert_eq!(
+        *r.marks.last.lock().unwrap(),
+        None,
+        "a plain failure is not noted"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_download_comes_before_the_drain_and_the_swap_after_it() {
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
+    let _idle = idle_loop(&r.drain);
+    let (_, log) = lines();
+    let out = r.up.run(r.stop.subscribe(), &log).await;
+    assert_eq!(out, Outcome::Exit);
+    assert_eq!(*r.fake.wanted_at_prepare.lock().unwrap(), [false]);
+    assert_eq!(*r.fake.wanted_at_install.lock().unwrap(), [true]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_tap_that_lags_the_release_is_noted_once_and_not_tried_every_round() {
+    // Before the install: the formula is older than the release.
+    let r = rig(
+        Method::Homebrew,
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
+    *r.fake.prepare.lock().unwrap() = Err(Refused {
+        why: "the tap still lists 0.1.0-alpha.27".into(),
+        hold: true,
+    });
+    let _idle = idle_loop(&r.drain);
+    let (all, log) = lines();
+    let run = r.up.run(r.stop.subscribe(), &log);
+    let _ = tokio::time::timeout(6 * HOUR, run).await;
+    assert_eq!(
+        r.fake.prepares(),
+        1,
+        "the guard holds after the first round"
+    );
+    assert_eq!(*r.marks.last.lock().unwrap(), Some(v("0.1.0-alpha.28")));
+    assert_eq!(r.fake.installs(), 0);
+    assert!(
+        all.lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("tried in the last 24 hours")),
+        "{:?}",
+        all.lock().unwrap()
+    );
+
+    // After the install: brew gave the formula's version, which is not the release.
+    let r = rig(
+        Method::Homebrew,
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.29",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
+    *r.fake.says.lock().unwrap() = Ok(v("0.1.0-alpha.28"));
+    let _idle = idle_loop(&r.drain);
+    let (_, log) = lines();
+    let run = r.up.run(r.stop.subscribe(), &log);
+    let _ = tokio::time::timeout(6 * HOUR, run).await;
+    assert_eq!(r.fake.installs(), 1, "one swap, then the guard holds");
+    assert_eq!(*r.marks.last.lock().unwrap(), Some(v("0.1.0-alpha.29")));
+    assert_eq!(r.execs.0.load(Ordering::SeqCst), 0, "never restarted");
+    assert!(!r.drain.is_wanted());
+}
+
+#[tokio::test(start_paused = true)]
+async fn on_exit_the_drain_stays_on_so_no_lease_is_taken_before_the_loop_ends() {
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
+    let _idle = idle_loop(&r.drain);
+    let Check::Newer(ver, here) = r.up.check().await else {
+        panic!("newer expected")
+    };
+    let (_, log) = lines();
+    let got = r.up.upgrade(&ver, &here, r.stop.subscribe(), &log).await;
+    assert_eq!(got, Ok(Some(Outcome::Exit)));
+    assert!(r.drain.is_wanted(), "want(false) would let a lease in");
+    assert!(r.drain.hold().is_none());
 }
 
 #[tokio::test(start_paused = true)]
@@ -516,8 +667,7 @@ async fn a_restart_that_fails_is_tried_once_and_the_version_is_not_installed_aga
         "{all:?}"
     );
     assert!(
-        all.iter()
-            .any(|l| l.contains("installed in the last 24 hours")),
+        all.iter().any(|l| l.contains("tried in the last 24 hours")),
         "{all:?}"
     );
 }

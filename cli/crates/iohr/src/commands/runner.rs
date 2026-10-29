@@ -342,7 +342,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             ));
             if renewed == Outcome::Exit {
                 // A new iohr is installed: the supervisor starts it.
-                return Err(Error::Child(supervisor::EXIT_RESTART));
+                return Err(Error::Restart);
             }
             Ok(())
         }

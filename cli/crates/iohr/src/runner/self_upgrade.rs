@@ -17,24 +17,35 @@
 //!   |          +-- newer, installed in the last 24 h, still old --+ (restart-loop guard)
 //!   |          +-- lookup failed -> failures + 1 ----------------+
 //!   |          v newer
+//!   |      Preparing -- no work is held back: download, checksum and attestation (install
+//!   |          |        script) or `brew` and the formula's version (Homebrew)
+//!   |          +-- fails -> failures + 1 (the runner never stopped working)
+//!   |          +-- the tap lags the release -> ledger records the version, failures + 1
+//!   |          +-- shutdown -> Stopped
+//!   |          v ready
 //!   |      Draining -- want(true): beats declare nothing, offers are left, no approved run
 //!   |          |        starts; waits until nothing is leased or running
 //!   |          +-- DRAIN_LIMIT passes, or shutdown -> want(false), failures + 1 / Stopped
 //!   |          v drained
-//!   |      Installing -- `iohr upgrade`'s verified install; then `--version` of the file
-//!   |          +-- fails or says another version -> want(false), failures + 1
+//!   |      Installing -- the swap (rename, or `brew upgrade`); then `--version` of the file
+//!   |          +-- fails -> want(false), failures + 1
+//!   |          +-- says another version -> ledger records the target version (a tap that
+//!   |          |   lags), want(false), failures + 1
 //!   |          v ledger records the version (a failure to record stops here, too)
 //!   |      Restarting -- exec: the process becomes the new binary and never comes back here
-//!   |          |         exit: Outcome::Exit, the caller stops the loop and exits 75
+//!   |          |         exit: Outcome::Exit, the caller stops the loop and exits 75; the
+//!   |          |         drain stays on, so no lease is taken in the last moments
 //!   |          +-- exec fails -> want(false), failures + 1
 //!   +----------+  every arrow back to Waiting waits `delay`: the interval after a success,
 //!                 5 min doubling to 6 h (never past the interval) after failures in a row
 //! ```
 //!
 //! Invariants: no lease is cut (drain first, and a run in flight holds the drain open);
-//! any failure leaves the old version running, logs one line, backs off and never retries
-//! in a loop; the same version is never installed twice in 24 hours while this process
-//! still runs an older one; shutdown ends the machine at every waiting point.
+//! the runner idles only for the swap itself, never for a download that can fail; any
+//! failure leaves the old version running, logs one line, backs off and never retries in
+//! a loop; the same version is not tried twice in 24 hours while this process still runs
+//! an older one (also when the install gave another version); shutdown ends the machine
+//! at every waiting point.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,6 +58,7 @@ use super::drain::Drain;
 use super::settings::RestartMode;
 use super::supervisor::{self, Restart, Supervisor};
 use crate::commands::upgrade::{self, Method, Upstream};
+use crate::error::Error;
 
 /// The first look comes this long after the runner starts (plus up to 10 percent).
 pub(crate) const FIRST_CHECK: Duration = Duration::from_secs(60);
@@ -92,18 +104,48 @@ pub(crate) struct Here {
 /// The releases and the installer; injected so tests need no network and no disk.
 /// Errors are the one line to log, without secrets.
 pub(crate) trait Source {
+    /// What [`Source::prepare`] hands to [`Source::apply`]: the verified download.
+    type Staged: Send + 'static;
     fn here(&self) -> Result<Here, String>;
     /// The newest complete release for a copy installed by `method`.
     async fn newest(&self, method: &Method) -> Result<Version, String>;
-    /// `iohr upgrade`'s verified install of `version`; the old binary stays on failure.
-    async fn install(&self, here: &Here, version: &Version) -> Result<(), String>;
+    /// `iohr upgrade`'s download and verification of `version` (or `brew` and the
+    /// formula's version), before the runner stops taking work; changes nothing.
+    async fn prepare(&self, here: &Here, version: &Version) -> Result<Self::Staged, Refused>;
+    /// The swap of what [`Source::prepare`] made ready; the old binary stays on failure.
+    async fn apply(
+        &self,
+        here: &Here,
+        version: &Version,
+        staged: Self::Staged,
+    ) -> Result<(), String>;
     /// What the file at `here.exe` says its version is.
     fn installed(&self, here: &Here) -> Result<Version, String>;
 }
 
-/// What was installed last, so a restart that does not take cannot loop.
+/// Why a release cannot be made ready.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Refused {
+    /// The one line to log, without secrets.
+    pub(crate) why: String,
+    /// Retrying this version before the guard window passes would fail the same way (the
+    /// Homebrew tap lags the release): the ledger notes the version.
+    pub(crate) hold: bool,
+}
+
+impl Refused {
+    pub(crate) fn failed(why: impl Into<String>) -> Self {
+        Self {
+            why: why.into(),
+            hold: false,
+        }
+    }
+}
+
+/// What was tried last, so a restart that does not take cannot loop.
 pub(crate) trait Ledger {
-    /// Whether `version` was installed within [`REINSTALL_GUARD`].
+    /// Whether `version` was installed (or found to be unavailable) within
+    /// [`REINSTALL_GUARD`].
     fn installed_recently(&self, version: &Version) -> bool;
     fn record(&self, version: &Version) -> Result<(), String>;
 }
@@ -205,7 +247,7 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
                     Check::Skipped(
                         latest.clone(),
                         format!(
-                            "iohr {latest} was installed in the last 24 hours and this runner still says {}: not installing it again, restart the runner",
+                            "iohr {latest} was tried in the last 24 hours and this runner still says {}: not trying it again, restart the runner or install it yourself",
                             self.current
                         ),
                     )
@@ -216,9 +258,10 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
         }
     }
 
-    /// Drains, installs `version` and restarts. `Ok(Some(Outcome::Exit))`: the caller
-    /// stops and exits; `Ok(None)`: shutdown came first; `Err`: the line to log, and the
-    /// old version still runs with leases taken again.
+    /// Prepares the install (download and checks), drains, swaps and restarts.
+    /// `Ok(Some(Outcome::Exit))`: the caller stops and exits; `Ok(None)`: shutdown came
+    /// first; `Err`: the line to log, and the old version still runs with leases taken
+    /// again (it never stopped taking them when the failure came before the drain).
     pub(crate) async fn upgrade(
         &self,
         version: &Version,
@@ -227,13 +270,43 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
         log: &dyn Fn(&str),
     ) -> Result<Option<Outcome>, String> {
         log(&format!(
-            "iohr {version} is out (this runner is {}): taking no new work until the running work is done",
+            "iohr {version} is out (this runner is {}): downloading and checking it",
             self.current
         ));
+        // Everything that can fail on the network or the machine happens while the runner
+        // still works: a failed download must not idle it.
+        let staged = tokio::select! {
+            r = self.source.prepare(here, version) => match r {
+                Ok(staged) => staged,
+                Err(refused) => {
+                    let note = if refused.hold {
+                        self.ledger.record(version).err().map_or_else(
+                            String::new,
+                            |e| format!(" (and cannot note it, so the next look repeats: {e})"),
+                        )
+                    } else {
+                        String::new()
+                    };
+                    return Err(format!(
+                        "iohr {version} cannot be installed, {} keeps running: {}{note}",
+                        self.current, refused.why
+                    ));
+                }
+            },
+            _ = stop.changed() => return Ok(None),
+        };
+        log(&format!(
+            "iohr {version} is ready: taking no new work until the running work is done"
+        ));
         self.drain.want(true);
-        let outcome = self.upgrade_drained(version, here, &mut stop, log).await;
-        // Any way out but a restart takes work again; an exec that worked never gets here.
-        self.drain.want(false);
+        let outcome = self
+            .upgrade_drained(version, here, staged, &mut stop, log)
+            .await;
+        // Any way out but an exit takes work again; an exec that worked never gets here,
+        // and on exit the caller ends the loop, so no lease is taken in between.
+        if !matches!(outcome, Ok(Some(Outcome::Exit))) {
+            self.drain.want(false);
+        }
         outcome
     }
 
@@ -241,6 +314,7 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
         &self,
         version: &Version,
         here: &Here,
+        staged: S::Staged,
         stop: &mut watch::Receiver<bool>,
         log: &dyn Fn(&str),
     ) -> Result<Option<Outcome>, String> {
@@ -254,19 +328,31 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
             }
             _ = stop.changed() => return Ok(None),
         }
-        self.source.install(here, version).await.map_err(|e| {
-            format!(
-                "installing iohr {version} failed, {} keeps running: {e}",
-                self.current
-            )
-        })?;
+        self.source
+            .apply(here, version, staged)
+            .await
+            .map_err(|e| {
+                format!(
+                    "installing iohr {version} failed, {} keeps running: {e}",
+                    self.current
+                )
+            })?;
         let said = self
             .source
             .installed(here)
             .map_err(|e| format!("iohr {version} was installed but does not run: {e}"))?;
         if said != *version {
+            // Homebrew installs the formula's version, and the tap can lag the release:
+            // note the version so the next look does not repeat this every round.
+            let note = self
+                .ledger
+                .record(version)
+                .err()
+                .map_or_else(String::new, |e| {
+                    format!(" (and cannot note it, so the next look repeats: {e})")
+                });
             return Err(format!(
-                "iohr {version} was installed but the file says {said}: not restarting"
+                "iohr {version} was installed but the file says {said}: not restarting{note}"
             ));
         }
         self.ledger
@@ -347,6 +433,8 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
 pub(crate) struct RealSource;
 
 impl Source for RealSource {
+    type Staged = upgrade::Staged;
+
     fn here(&self) -> Result<Here, String> {
         let (exe, real, method) = upgrade::detect_here().map_err(|e| e.to_string())?;
         Ok(Here { exe, real, method })
@@ -360,26 +448,39 @@ impl Source for RealSource {
             .map_err(|e| e.to_string())
     }
 
-    async fn install(&self, here: &Here, version: &Version) -> Result<(), String> {
+    async fn prepare(&self, here: &Here, version: &Version) -> Result<Self::Staged, Refused> {
         let (real, method, version) = (here.real.clone(), here.method.clone(), version.clone());
-        // `brew upgrade` and the file replacement block, and the runner's loop shares a
-        // thread with this: they run on the blocking pool, on a runtime of their own with
-        // their own HTTP client.
+        // `brew` blocks, and the runner's loop shares a thread with this: it runs on the
+        // blocking pool, on a runtime of its own with its own HTTP client.
         tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .map_err(|e| format!("cannot start: {e}"))?;
+                .map_err(|e| Refused::failed(format!("cannot start: {e}")))?;
             rt.block_on(async {
                 Upstream::from_process()
-                    .map_err(|e| e.to_string())?
-                    .install(&method, &real, &version, false)
+                    .map_err(|e| Refused::failed(e.to_string()))?
+                    .prepare(&method, &real, &version, false)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| match e {
+                        upgrade::Prepare::TapBehind { .. } => Refused {
+                            why: Error::from(e).to_string(),
+                            hold: true,
+                        },
+                        upgrade::Prepare::Failed(e) => Refused::failed(e.to_string()),
+                    })
             })
         })
         .await
-        .map_err(|e| format!("the install did not finish: {e}"))?
+        .map_err(|e| Refused::failed(format!("the download did not finish: {e}")))?
+    }
+
+    async fn apply(&self, _: &Here, version: &Version, staged: Self::Staged) -> Result<(), String> {
+        // `brew upgrade` and the file replacement block.
+        let version = version.clone();
+        tokio::task::spawn_blocking(move || staged.apply(&version).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("the install did not finish: {e}"))?
     }
 
     fn installed(&self, here: &Here) -> Result<Version, String> {
