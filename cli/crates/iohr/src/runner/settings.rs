@@ -117,6 +117,8 @@ pub(crate) struct Effective {
     pub(crate) upgrade_restart: Setting<RestartMode>,
     /// The user service units `systemd.user-restart` may restart; `None` or empty, none.
     pub(crate) user_units: Option<Setting<Vec<String>>>,
+    /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
+    pub(crate) core_checkout: Option<Setting<String>>,
 }
 
 /// The first of the flag, the profile's table and the file's table that sets a value.
@@ -214,6 +216,15 @@ pub(crate) fn resolve(
             u.source
         ));
     }
+    let core_checkout = pick(None, profile, file, |c| c.core_checkout.clone());
+    if let Some(c) = &core_checkout
+        && !std::path::Path::new(&c.value).is_absolute()
+    {
+        return Err(format!(
+            "runner core_checkout ({}) is not an absolute path",
+            c.source
+        ));
+    }
     Ok(Effective {
         capacity,
         kinds,
@@ -225,6 +236,7 @@ pub(crate) fn resolve(
         upgrade_interval,
         upgrade_restart,
         user_units,
+        core_checkout,
     })
 }
 
@@ -656,5 +668,26 @@ mod tests {
         work.user_units = Some(vec!["sshd".into()]);
         let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
         assert!(err.contains("user_units") && err.contains("work"), "{err}");
+    }
+
+    #[test]
+    fn core_checkout_is_unset_by_default_and_a_relative_path_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.core_checkout, None);
+        let mut file = RunnerConfig::default();
+        file.core_checkout = Some("/srv/example/core".into());
+        assert!(!file.is_empty());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.core_checkout.map(|c| (c.value, c.source)),
+            Some(("/srv/example/core".to_owned(), Source::File))
+        );
+        let mut work = RunnerConfig::default();
+        work.core_checkout = Some("development/core".into());
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(
+            err.contains("core_checkout") && err.contains("work"),
+            "{err}"
+        );
     }
 }

@@ -1,0 +1,8 @@
+{
+  "action": "build.sweep-targets",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "mode": "cap"
+  },
+  "effect": "Caps every Rust build target on the runner's host."
+}
