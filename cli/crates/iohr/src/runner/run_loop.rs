@@ -52,6 +52,62 @@ const PREPARE_TIMEOUT: Duration = Duration::from_secs(600);
 /// The most turns one runner holds at once; the service clamps to the same.
 pub(crate) const MAX_CAPACITY: usize = settings::MAX_CAPACITY as usize;
 
+/// The handshake between the loop and the self-upgrade (`runner::self_upgrade`): the
+/// upgrade asks the loop to drain, and the loop says when nothing is leased any more.
+///
+/// While `wanted`, every beat declares [`settings::NOTHING`] so the service offers no new
+/// lease, and an offered one is left to expire. `drained` is published by the loop only
+/// with `wanted` observed and every slot empty (nothing accepting, fetching, running,
+/// gating or waiting in the outbox), so a stale idle can never pass for a drain.
+#[derive(Debug)]
+pub(crate) struct Drain {
+    wanted: watch::Sender<bool>,
+    drained: watch::Sender<bool>,
+}
+
+impl Default for Drain {
+    fn default() -> Self {
+        Self {
+            wanted: watch::channel(false).0,
+            drained: watch::channel(false).0,
+        }
+    }
+}
+
+impl Drain {
+    /// Asks the loop to take no new lease (`true`), or to take them again (`false`).
+    pub(crate) fn want(&self, on: bool) {
+        self.wanted.send_replace(on);
+    }
+
+    pub(crate) fn is_wanted(&self) -> bool {
+        *self.wanted.borrow()
+    }
+
+    /// Waits until the loop has nothing leased while a drain is wanted; the loop ending
+    /// first (its sender never drops, so it is `shutdown` that stops the wait) is the
+    /// caller's to race against.
+    pub(crate) async fn until_drained(&self) {
+        let mut rx = self.drained.subscribe();
+        // `wait_for` checks the current value first, so an already drained loop returns.
+        let _ = rx.wait_for(|d| *d).await;
+    }
+
+    fn subscribe(&self) -> watch::Receiver<bool> {
+        self.wanted.subscribe()
+    }
+
+    /// Published by the loop at the top of each turn of it.
+    fn publish(&self, idle: bool) {
+        let drained = idle && self.is_wanted();
+        self.drained.send_if_modified(|d| {
+            let changed = *d != drained;
+            *d = drained;
+            changed
+        });
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LoopConfig {
     /// Pins the heartbeat interval (`--interval`); `None` follows what the service says
@@ -84,6 +140,8 @@ pub(crate) struct LoopConfig {
     /// The checkouts of job leases (RFC 0147 slice A): made before the accept, shipped
     /// as a pull request after a reply; `None` keeps the old behaviour (no checkout).
     pub(crate) workspaces: Option<Arc<Workspaces>>,
+    /// Lets the self-upgrade drain the loop; `None`: never drained.
+    pub(crate) drain: Option<Arc<Drain>>,
 }
 
 /// What the run loop runs for the Checked gate (RFC 0120); the same check and the same
@@ -125,6 +183,7 @@ impl Default for LoopConfig {
             report_host: false,
             gate: None,
             workspaces: None,
+            drain: None,
         }
     }
 }
@@ -530,10 +589,16 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut beat_started = start;
     let mut lease_beat_started = start;
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
+    let mut drain_changes = cfg.drain.as_ref().map(|d| d.subscribe());
 
     loop {
         let held = held_leases(&busy, &fetching, &gating, &outbox);
         let has_held = !held.is_empty();
+        if let Some(d) = &cfg.drain {
+            d.publish(
+                !has_held && accepting.is_empty() && reporting.is_none() && fetch_ops.is_empty(),
+            );
+        }
         let now = Instant::now();
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
             lease_beat_started = now;
@@ -608,7 +673,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 .clone();
             let id = runner.runner_id.clone();
             let limit = cfg.op_timeout;
-            let declared = declared_now(&cfg);
+            let mut declared = declared_now(&cfg);
+            if cfg.drain.as_ref().is_some_and(|d| d.is_wanted()) {
+                declared = declared.drained();
+            }
             if let Some(c) = declared.capacity {
                 let c = usize::try_from(c).unwrap_or(1).clamp(1, MAX_CAPACITY);
                 if c != capacity {
@@ -706,6 +774,11 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                     .any(|l| l.lease_id == lease.lease_id);
                             if held_already {
                                 // Offered again before the service saw the accept.
+                            } else if cfg.drain.as_ref().is_some_and(|d| d.is_wanted()) {
+                                log(&format!(
+                                    "lease {} left for another runner: the runner is draining to upgrade",
+                                    lease.lease_id
+                                ));
                             } else if taken >= capacity {
                                 log(&format!(
                                     "lease {} left for another runner: {taken} of {capacity} turns are taken",
@@ -972,6 +1045,21 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     outbox.push_back(gating.remove(i).report);
                     next_report = Instant::now();
                 }
+            }
+            () = async {
+                match drain_changes.as_mut() {
+                    Some(r) => {
+                        // A closed sender never changes again: wait for the other arms.
+                        if r.changed().await.is_err() {
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                    None => std::future::pending().await,
+                }
+            } => {
+                // The top of the loop publishes the new state and, while wanted, the
+                // next beat declares nothing.
+                next_beat = Instant::now();
             }
             taken = first_of(&mut accepting) => {
                 match taken {
@@ -1696,6 +1784,7 @@ mod tests {
             build_floor: None,
             gate: None,
             workspaces: None,
+            drain: None,
             report_host: false,
         }
     }

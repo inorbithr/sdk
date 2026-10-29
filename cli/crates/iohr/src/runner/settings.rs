@@ -67,7 +67,32 @@ pub(crate) struct Flags {
     /// `--always-on` given (it can only say yes).
     pub(crate) always_on: bool,
     pub(crate) name: Option<String>,
+    /// `--no-auto-upgrade` given (it can only say no).
+    pub(crate) no_auto_upgrade: bool,
 }
+
+/// How an upgraded runner restarts (`upgrade_restart`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RestartMode {
+    /// The same process becomes the new binary; the supervisor sees no stop.
+    Exec,
+    /// Under launchd or systemd, exit with code 75 and let the supervisor start it.
+    Exit,
+}
+
+impl RestartMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Exec => "exec",
+            Self::Exit => "exit",
+        }
+    }
+}
+
+/// Minutes between looks for a newer release, unless set.
+pub(crate) const UPGRADE_INTERVAL_MINUTES: u32 = 60;
+/// The bounds of `upgrade_interval_minutes`: 5 minutes to 7 days.
+pub(crate) const UPGRADE_INTERVAL_RANGE: std::ops::RangeInclusive<u32> = 5..=10_080;
 
 /// The settings in effect.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +109,12 @@ pub(crate) struct Effective {
     pub(crate) kube_context: Option<Setting<String>>,
     /// The kubeconfig file the pinned `kubectl` reads (absolute path), if any.
     pub(crate) kubeconfig: Option<Setting<String>>,
+    /// Whether the runner upgrades itself (default yes; `--no-auto-upgrade` or
+    /// `auto_upgrade = false` turns it off).
+    pub(crate) auto_upgrade: Setting<bool>,
+    /// How long between looks for a newer release.
+    pub(crate) upgrade_interval: Setting<Duration>,
+    pub(crate) upgrade_restart: Setting<RestartMode>,
 }
 
 /// Resolves each key: flag, then the profile's table, then `[runner]`, then the default.
@@ -91,7 +122,8 @@ pub(crate) struct Effective {
 /// # Errors
 ///
 /// A message naming the key and where the bad value came from: a capacity outside 1 to
-/// 32, an empty kinds list, or a kind other than `coordinate` and `build`.
+/// 32, an empty kinds list, a kind other than `coordinate` and `build`, an upgrade
+/// interval outside 5 to 10080 minutes, or a restart mode other than `exec` and `exit`.
 pub(crate) fn resolve(
     file: &RunnerConfig,
     profile: Option<(&str, &RunnerConfig)>,
@@ -156,6 +188,51 @@ pub(crate) fn resolve(
     }
     let kube_context = pick(None, profile, file, |c| c.kube_context.clone());
     let kubeconfig = pick(None, profile, file, |c| c.kubeconfig.clone());
+    let auto_upgrade = pick(flags.no_auto_upgrade.then_some(false), profile, file, |c| {
+        c.auto_upgrade
+    })
+    .unwrap_or(Setting {
+        value: true,
+        source: Source::Default,
+    });
+    let upgrade_interval = match pick(None, profile, file, |c| c.upgrade_interval_minutes) {
+        Some(m) if !UPGRADE_INTERVAL_RANGE.contains(&m.value) => {
+            return Err(format!(
+                "runner upgrade_interval_minutes {} ({}) is outside {} to {}",
+                m.value,
+                m.source,
+                UPGRADE_INTERVAL_RANGE.start(),
+                UPGRADE_INTERVAL_RANGE.end()
+            ));
+        }
+        Some(m) => Setting {
+            value: Duration::from_secs(u64::from(m.value) * 60),
+            source: m.source,
+        },
+        None => Setting {
+            value: Duration::from_secs(u64::from(UPGRADE_INTERVAL_MINUTES) * 60),
+            source: Source::Default,
+        },
+    };
+    let upgrade_restart = match pick(None, profile, file, |c| c.upgrade_restart.clone()) {
+        Some(m) => Setting {
+            value: match m.value.trim() {
+                "exec" => RestartMode::Exec,
+                "exit" => RestartMode::Exit,
+                other => {
+                    return Err(format!(
+                        "runner upgrade_restart {other:?} ({}) is not exec or exit",
+                        m.source
+                    ));
+                }
+            },
+            source: m.source,
+        },
+        None => Setting {
+            value: RestartMode::Exec,
+            source: Source::Default,
+        },
+    };
     Ok(Effective {
         capacity,
         kinds,
@@ -163,6 +240,9 @@ pub(crate) fn resolve(
         name,
         kube_context,
         kubeconfig,
+        auto_upgrade,
+        upgrade_interval,
+        upgrade_restart,
     })
 }
 
@@ -204,6 +284,14 @@ impl Declared {
             kinds: e.kinds.value.clone(),
             host: None,
         }
+    }
+
+    /// These kinds replaced by [`NOTHING`]: a runner that is draining for an upgrade is
+    /// offered no new lease.
+    #[must_use]
+    pub(crate) fn drained(mut self) -> Self {
+        self.kinds = vec![NOTHING.to_owned()];
+        self
     }
 
     /// These kinds, without `build` while the build volume is under the floor. An
