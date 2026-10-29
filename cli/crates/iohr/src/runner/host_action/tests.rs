@@ -23,14 +23,14 @@ fn the_examples_validate_and_every_invalid_file_is_refused() {
         assert_eq!(validate(&read(p.clone())), Ok(()), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 7);
+    assert_eq!(n, 11);
     let mut n = 0;
     for e in std::fs::read_dir(dir.join("schema/invalid")).unwrap() {
         let p = e.unwrap().path();
         assert!(validate(&read(p.clone())).is_err(), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 24);
+    assert_eq!(n, 34);
 }
 
 /// Every vendored file is listed in `SOURCE` with the SHA-256 it was copied with, so a
@@ -148,6 +148,31 @@ fn the_effect_is_the_catalog_sentence_for_each_action_and_its_params() {
             UPGRADE,
             json!({}),
             "Upgrades iohr on the runner's host to the newest release.",
+        ),
+        (
+            PREVIEW_TAKE,
+            json!({"branch": "feat/example"}),
+            "Takes branch feat/example into the Preview checkout and checks the Preview app.",
+        ),
+        (
+            ROLL_TASK,
+            json!({"rev": "a".repeat(40), "task": "roll:services", "services": "gateway web"}),
+            "Runs roll task roll:services at commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa on the deploy server.",
+        ),
+        (
+            SWEEP_TARGETS,
+            json!({"mode": "cap"}),
+            "Caps every Rust build target on the runner's host.",
+        ),
+        (
+            SWEEP_TARGETS,
+            json!({"mode": "guard"}),
+            "Sweeps the Rust build targets on the runner's host only where a disk is full enough.",
+        ),
+        (
+            RELEASE_RERUN,
+            json!({"run_id": 123_456}),
+            "Re-runs the failed jobs of sdk release run 123456.",
         ),
     ];
     for (id, params, want) in cases {
@@ -282,7 +307,11 @@ async fn a_refused_delete_is_a_failure_with_kubectl_s_words() {
 fn no_configured_cluster_is_refused_and_a_flag_is_not_a_context() {
     assert!(KubeTarget::new(None, None).is_err());
     assert!(KubeTarget::new(Some("  "), Some("")).is_err());
-    assert!(HostRunner::find(None, None, &[]).kube_problem().is_some());
+    assert!(
+        HostRunner::find(None, None, &[], None)
+            .kube_problem()
+            .is_some()
+    );
     assert!(KubeTarget::new(Some("--server=https://x"), None).is_err());
     assert!(KubeTarget::new(None, Some("relative/config")).is_err());
     assert!(KubeTarget::new(None, Some("-/etc/x")).is_err());
@@ -387,6 +416,8 @@ fn host(dir: &std::path::Path, kube: Result<KubeTarget, String>) -> HostRunner {
         iohr: None,
         install_env: Vec::new(),
         user_units: vec!["iohr-runner.service".to_owned()],
+        core_checkout: None,
+        ssh_env: Vec::new(),
     }
 }
 
@@ -433,6 +464,43 @@ fn the_new_patterns_hold_at_their_edges() {
 }
 
 #[test]
+fn the_preview_roll_and_sweep_patterns_hold_at_their_edges() {
+    assert!(is_preview_branch("feat/example"));
+    assert!(is_preview_branch("preview-int/a.b_c/d-e"));
+    assert!(is_preview_branch("fix/0"));
+    assert!(is_preview_branch(&format!("feat/{}", "a".repeat(100))));
+    assert!(!is_preview_branch(&format!("feat/{}", "a".repeat(101))));
+    assert!(!is_preview_branch("feat/"));
+    assert!(!is_preview_branch("feat/-x"));
+    assert!(!is_preview_branch("feat/.x"));
+    assert!(!is_preview_branch("feat/a..b"));
+    assert!(!is_preview_branch("feat/A"));
+    assert!(!is_preview_branch("feat/a b"));
+    assert!(!is_preview_branch("main"));
+    assert!(!is_preview_branch("chore/x"));
+    assert!(is_rev(&"0".repeat(40)));
+    assert!(!is_rev(&"0".repeat(39)));
+    assert!(!is_rev(&"A".repeat(40)));
+    assert!(!is_rev(&"g".repeat(40)));
+    assert!(is_services(""));
+    assert!(is_services("gateway"));
+    assert!(is_services("gateway web 0x"));
+    assert!(is_services(&vec!["a"; 32].join(" ")));
+    assert!(!is_services(&vec!["a"; 33].join(" ")));
+    assert!(is_services(&"a".repeat(40)));
+    assert!(!is_services(&"a".repeat(41)));
+    assert!(!is_services("--plan"));
+    assert!(!is_services("web -x"));
+    assert!(!is_services("web  api"));
+    assert!(!is_services(" web"));
+    assert!(!is_services("web;reboot"));
+    assert!(!is_services("Web"));
+    assert!(ROLL_TASKS.iter().all(|t| is_roll_task(t)));
+    assert!(!is_roll_task("edge:up"));
+    assert!(is_sweep_mode("cap") && is_sweep_mode("guard") && !is_sweep_mode("all"));
+}
+
+#[test]
 fn every_new_action_reads_its_typed_params() {
     let cases = [
         (
@@ -463,6 +531,33 @@ fn every_new_action_reads_its_typed_params() {
             },
         ),
         (action(UPGRADE, &json!({})), Action::Upgrade),
+        (
+            action(PREVIEW_TAKE, &json!({"branch": "fix/x"})),
+            Action::PreviewTake {
+                branch: "fix/x".to_owned(),
+            },
+        ),
+        (
+            action(
+                ROLL_TASK,
+                &json!({"rev": "b".repeat(40), "task": "db:migrate", "services": ""}),
+            ),
+            Action::RollTask {
+                rev: "b".repeat(40),
+                task: "db:migrate".to_owned(),
+                services: String::new(),
+            },
+        ),
+        (
+            action(SWEEP_TARGETS, &json!({"mode": "guard"})),
+            Action::SweepTargets {
+                mode: "guard".to_owned(),
+            },
+        ),
+        (
+            action(RELEASE_RERUN, &json!({"run_id": 100_000})),
+            Action::ReleaseRerun { run_id: 100_000 },
+        ),
     ];
     for (doc, want) in cases {
         assert_eq!(validate(&doc), Ok(()), "{doc}");
@@ -493,6 +588,37 @@ fn a_bad_integer_another_owner_or_an_extra_param_is_refused() {
         (
             ROLLOUT_RESTART,
             json!({"namespace": "tbd", "deployment": "a", "replicas": 1}),
+        ),
+        (PREVIEW_TAKE, json!({"branch": "main"})),
+        (PREVIEW_TAKE, json!({"branch": "feat/a..b"})),
+        (PREVIEW_TAKE, json!({"branch": "feat/x", "force": true})),
+        (PREVIEW_TAKE, json!({})),
+        (
+            ROLL_TASK,
+            json!({"rev": "abc", "task": "roll:check", "services": ""}),
+        ),
+        (
+            ROLL_TASK,
+            json!({"rev": "a".repeat(40), "task": "edge:up", "services": ""}),
+        ),
+        (
+            ROLL_TASK,
+            json!({"rev": "a".repeat(40), "task": "roll:check", "services": "--plan"}),
+        ),
+        (
+            ROLL_TASK,
+            json!({"rev": "a".repeat(40), "task": "roll:check", "services": "web;reboot"}),
+        ),
+        (
+            ROLL_TASK,
+            json!({"rev": "a".repeat(40), "task": "roll:check"}),
+        ),
+        (SWEEP_TARGETS, json!({"mode": "all"})),
+        (SWEEP_TARGETS, json!({})),
+        (RELEASE_RERUN, json!({"run_id": 99_999})),
+        (
+            RELEASE_RERUN,
+            json!({"run_id": 123_456, "repo": "example/example"}),
         ),
     ] {
         let doc = action(id, &params);
@@ -576,6 +702,61 @@ async fn each_action_runs_exactly_its_argv() {
     let said = carry_out_on(&Action::Upgrade, &k, "macos").await.unwrap();
     assert_eq!(k.calls(), [(Tool::Iohr, strs(&["upgrade"]))]);
     assert_eq!(said, "iohr upgrade: done");
+}
+
+#[tokio::test]
+async fn each_host_task_runs_exactly_its_argv() {
+    let cases: [(Action, Calls); 5] = [
+        (
+            Action::PreviewTake {
+                branch: "feat/example".to_owned(),
+            },
+            vec![
+                (Tool::Mise, strs(&["run", "preview:take", "feat/example"])),
+                (Tool::Mise, strs(&["run", "preview:up", "--check"])),
+            ],
+        ),
+        (
+            Action::RollTask {
+                rev: "c".repeat(40),
+                task: "roll:services".to_owned(),
+                services: "gateway web".to_owned(),
+            },
+            vec![(
+                Tool::RemoteRoll,
+                strs(&[&"c".repeat(40), "roll:services", "gateway", "web"]),
+            )],
+        ),
+        (
+            Action::RollTask {
+                rev: "c".repeat(40),
+                task: "db:migrate".to_owned(),
+                services: String::new(),
+            },
+            vec![(Tool::RemoteRoll, strs(&[&"c".repeat(40), "db:migrate"]))],
+        ),
+        (
+            Action::SweepTargets {
+                mode: "cap".to_owned(),
+            },
+            vec![(Tool::CoreMise, strs(&["run", "target:sweep"]))],
+        ),
+        (
+            Action::SweepTargets {
+                mode: "guard".to_owned(),
+            },
+            vec![(Tool::CoreMise, strs(&["run", "target:guard"]))],
+        ),
+    ];
+    for (a, want) in cases {
+        let k = fake("", false);
+        carry_out_on(&a, &k, "linux").await.unwrap();
+        assert_eq!(k.calls(), want, "{a:?}");
+        // No shell anywhere, and no service name that reads as an option.
+        for (_, argv) in &want {
+            assert!(argv.iter().all(|x| x != "sh" && x != "-c" && x != "--plan"));
+        }
+    }
 }
 
 #[tokio::test]
@@ -708,9 +889,175 @@ fn an_action_whose_tool_is_missing_is_refused_before_it_starts() {
             "gh is not on this runner's PATH",
         ),
         (Action::Upgrade, "this runner cannot tell where its iohr is"),
+        (
+            Action::PreviewTake {
+                branch: "feat/x".to_owned(),
+            },
+            "mise is not on this runner's PATH",
+        ),
+        (
+            Action::RollTask {
+                rev: "a".repeat(40),
+                task: "roll:check".to_owned(),
+                services: String::new(),
+            },
+            "this runner's host has no ~/.inorbit/roll/remote-roll.sh",
+        ),
+        (
+            Action::SweepTargets {
+                mode: "cap".to_owned(),
+            },
+            "mise is not on this runner's PATH",
+        ),
+        (
+            Action::ReleaseRerun { run_id: 100_000 },
+            "gh is not on this runner's PATH",
+        ),
     ] {
         assert_eq!(h.refuses(&action).as_deref(), Some(want), "{}", action.id());
     }
+}
+
+/// A sweep runs only in a core checkout the runner's config names; a home folder and a
+/// `remote-roll.sh` in it are what a roll needs.
+#[cfg(unix)]
+#[test]
+fn a_sweep_needs_a_named_core_checkout_and_a_roll_its_script() {
+    let dir = tempfile::tempdir().unwrap();
+    on_path(dir.path(), &["mise"]);
+    let mut h = host(dir.path(), Err("none".to_owned()));
+    let sweep = Action::SweepTargets {
+        mode: "guard".to_owned(),
+    };
+    let why = h.refuses(&sweep).unwrap();
+    assert!(why.contains("names no core_checkout"), "{why}");
+    let core = dir.path().join("core");
+    std::fs::create_dir(&core).unwrap();
+    h.core_checkout = Some(core.clone());
+    let why = h.refuses(&sweep).unwrap();
+    assert!(why.contains("is not a core checkout"), "{why}");
+    std::fs::write(core.join("mise.toml"), "").unwrap();
+    assert_eq!(h.refuses(&sweep), None);
+    let roll = Action::RollTask {
+        rev: "a".repeat(40),
+        task: "roll:check".to_owned(),
+        services: String::new(),
+    };
+    h.env = vec![("HOME".into(), dir.path().as_os_str().to_owned())];
+    assert!(h.refuses(&roll).is_some());
+    let script = dir.path().join(".inorbit/roll");
+    std::fs::create_dir_all(&script).unwrap();
+    on_path(&script, &["remote-roll.sh"]);
+    assert_eq!(h.refuses(&roll), None);
+}
+
+/// The scripted answers of a release run read, its examples-run read and the re-run.
+fn release_fake(run: &str, examples: &str) -> super::testing::Fake {
+    let k = fake("", false);
+    {
+        let mut s = k.script.lock().unwrap();
+        s.push_back(Output::new(true, run, ""));
+        s.push_back(Output::new(true, examples, ""));
+        s.push_back(Output::new(true, "", ""));
+    }
+    k
+}
+
+#[tokio::test]
+async fn a_failed_release_run_on_main_with_green_examples_has_its_failed_jobs_re_run() {
+    let sha = "d".repeat(40);
+    let k = release_fake(
+        &format!(".github/workflows/release.yml\tmain\tfailure\t{sha}\n"),
+        "success\n",
+    );
+    let said = carry_out_on(&Action::ReleaseRerun { run_id: 123_456 }, &k, "linux")
+        .await
+        .unwrap();
+    assert_eq!(
+        k.calls(),
+        [
+            (Tool::Gh, release_run_argv(123_456)),
+            (Tool::Gh, examples_status_argv(&sha)),
+            (
+                Tool::Gh,
+                strs(&["run", "rerun", "123456", "-R", "inorbithr/sdk", "--failed"]),
+            ),
+        ]
+    );
+    assert_eq!(k.calls()[0].1[1], "repos/inorbithr/sdk/actions/runs/123456");
+    assert!(
+        said.starts_with("inorbithr/sdk release run 123456 (commit dddddddddddd"),
+        "{said}"
+    );
+}
+
+#[tokio::test]
+async fn a_release_run_that_fails_a_check_is_never_re_run() {
+    let sha = "e".repeat(40);
+    for (run, examples, want) in [
+        (
+            format!(".github/workflows/ci.yml\tmain\tfailure\t{sha}"),
+            "success",
+            "is not a .github/workflows/release.yml run",
+        ),
+        (
+            format!(".github/workflows/release.yml\tfeat/x\tfailure\t{sha}"),
+            "success",
+            "is not on main",
+        ),
+        (
+            format!(".github/workflows/release.yml\tmain\tsuccess\t{sha}"),
+            "success",
+            "concluded success, not failure",
+        ),
+        (
+            format!(".github/workflows/release.yml\tmain\t$(reboot)\t{sha}"),
+            "success",
+            "concluded unknown, not failure",
+        ),
+        (
+            ".github/workflows/release.yml\tmain\tfailure\tnot-a-sha".to_owned(),
+            "success",
+            "did not say run 123456's commit",
+        ),
+        (
+            "garbled".to_owned(),
+            "success",
+            "did not say run 123456's workflow",
+        ),
+        (
+            format!(".github/workflows/release.yml\tmain\tfailure\t{sha}"),
+            "missing",
+            "examples-run on eeeeeeeeeeee is missing",
+        ),
+        (
+            format!(".github/workflows/release.yml\tmain\tfailure\t{sha}"),
+            "failure",
+            "examples-run on eeeeeeeeeeee is failure",
+        ),
+    ] {
+        let k = release_fake(&run, examples);
+        let why = carry_out_on(&Action::ReleaseRerun { run_id: 123_456 }, &k, "linux")
+            .await
+            .unwrap_err();
+        assert!(
+            why.starts_with("refused: ") && why.contains(want),
+            "{run}: {why}"
+        );
+        assert!(!why.contains("reboot") && !why.contains("garbled"), "{why}");
+        assert!(
+            k.calls().iter().all(|(_, argv)| argv[0] == "api"),
+            "{run}: {:?}",
+            k.calls()
+        );
+    }
+    // A read that fails stops it too.
+    let k = fake("", true);
+    let why = carry_out_on(&Action::ReleaseRerun { run_id: 123_456 }, &k, "linux")
+        .await
+        .unwrap_err();
+    assert!(why.starts_with("gh api: failed"), "{why}");
+    assert_eq!(k.calls().len(), 1);
 }
 
 #[tokio::test]
@@ -723,6 +1070,7 @@ async fn a_missing_tool_is_a_refusal_and_nothing_runs() {
         (Tool::Systemctl, "systemctl is not on this runner's PATH"),
         (Tool::Kubectl, "no kube context is configured"),
         (Tool::Iohr, "this runner cannot tell where its iohr is"),
+        (Tool::Mise, "mise is not on this runner's PATH"),
     ] {
         assert_eq!(h.run(tool, &strs(&["x"])).await, Err(want.to_owned()));
     }
@@ -906,6 +1254,65 @@ async fn gh_runs_without_prompts_and_without_the_runner_s_token() {
         got.ends_with("run\ncancel\n9\n-R\ninorbithr/core\n"),
         "{got}"
     );
+}
+
+/// A `mise` that writes its environment and folder to a file: the host's own tasks start
+/// in its home folder, core's in the core checkout, both with the SSH agent and never
+/// the runner's token; `gh` gets no SSH agent.
+#[cfg(unix)]
+#[tokio::test]
+async fn mise_starts_in_its_folder_with_the_ssh_agent_and_no_token() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("env");
+    for name in ["mise", "gh"] {
+        let script = dir.path().join(name);
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nenv >> '{o}'\necho \"pwd=$(pwd -P)\" >> '{o}'\n",
+                o = out.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let home = dir.path().canonicalize().unwrap();
+    let core = home.join("core");
+    std::fs::create_dir(&core).unwrap();
+    std::fs::write(core.join("mise.toml"), "").unwrap();
+    let mut h = host(dir.path(), Err("none".to_owned()));
+    h.env = env::scrub(
+        [
+            ("HOME", home.to_str().unwrap()),
+            ("GH_TOKEN", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (OsString::from(k), OsString::from(v))),
+    );
+    h.ssh_env = vec![("SSH_AUTH_SOCK".into(), "/tmp/example-agent".into())];
+    h.core_checkout = Some(core.clone());
+    let take = Action::PreviewTake {
+        branch: "feat/example".to_owned(),
+    };
+    carry_out_on(&take, &h, "macos").await.unwrap();
+    let got = std::fs::read_to_string(&out).unwrap();
+    assert!(got.contains(&format!("pwd={}\n", home.display())), "{got}");
+    assert!(got.contains("SSH_AUTH_SOCK=/tmp/example-agent"), "{got}");
+    assert!(got.contains("GH_PROMPT_DISABLED=1"), "{got}");
+    assert!(!got.contains("GH_TOKEN"), "{got}");
+    std::fs::remove_file(&out).unwrap();
+    let sweep = Action::SweepTargets {
+        mode: "cap".to_owned(),
+    };
+    carry_out_on(&sweep, &h, "macos").await.unwrap();
+    let got = std::fs::read_to_string(&out).unwrap();
+    assert!(got.contains(&format!("pwd={}\n", core.display())), "{got}");
+    assert!(got.contains("SSH_AUTH_SOCK=/tmp/example-agent"), "{got}");
+    std::fs::remove_file(&out).unwrap();
+    h.run(Tool::Gh, &strs(&["run", "list"])).await.unwrap();
+    let got = std::fs::read_to_string(&out).unwrap();
+    assert!(!got.contains("SSH_AUTH_SOCK"), "{got}");
 }
 
 /// A tool that leaves a child behind: dropping its run (as a timeout does) kills that child too,

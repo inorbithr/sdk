@@ -164,6 +164,10 @@ pub struct RunnerConfig {
     /// may restart. Unset or empty, the runner refuses every one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_units: Option<Vec<String>>,
+    /// The core checkout (absolute path) an approved `build.sweep-targets` runs core's
+    /// `target:sweep` or `target:guard` in. Unset, the runner refuses every sweep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_checkout: Option<String>,
 }
 
 impl RunnerConfig {
@@ -180,6 +184,7 @@ impl RunnerConfig {
             && self.upgrade_interval_minutes.is_none()
             && self.upgrade_restart.is_none()
             && self.user_units.is_none()
+            && self.core_checkout.is_none()
     }
 }
 

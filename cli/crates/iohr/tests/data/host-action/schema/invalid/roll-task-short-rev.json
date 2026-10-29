@@ -1,0 +1,10 @@
+{
+  "action": "roll.task",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "rev": "0000000",
+    "task": "roll:check",
+    "services": ""
+  },
+  "effect": "Runs roll task roll:check at commit 0000000 on the deploy server."
+}
