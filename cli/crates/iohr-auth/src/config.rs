@@ -147,6 +147,19 @@ pub struct RunnerConfig {
     /// absolute path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kubeconfig: Option<String>,
+    /// Whether `iohr runner run` upgrades itself to the newest complete release and
+    /// restarts (default true). `false` leaves upgrades to a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_upgrade: Option<bool>,
+    /// Minutes between looks for a newer release (5 to 10080; default 60, plus up to 10
+    /// percent of jitter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_interval_minutes: Option<u32>,
+    /// How an upgraded runner restarts: `exec` (default; the same process becomes the new
+    /// binary, so launchd or systemd see no stop) or `exit` (under launchd or systemd, exit
+    /// with code 75 and let the supervisor start it; elsewhere it is `exec`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_restart: Option<String>,
 }
 
 impl RunnerConfig {
@@ -159,6 +172,9 @@ impl RunnerConfig {
             && self.name.is_none()
             && self.kube_context.is_none()
             && self.kubeconfig.is_none()
+            && self.auto_upgrade.is_none()
+            && self.upgrade_interval_minutes.is_none()
+            && self.upgrade_restart.is_none()
     }
 }
 
