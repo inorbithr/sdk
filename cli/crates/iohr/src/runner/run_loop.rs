@@ -3049,12 +3049,13 @@ mod tests {
             "no lease while draining"
         );
         assert_eq!(calls_of(&fake, "accept"), 0);
-        let d = fake.declared.lock().unwrap();
-        assert!(
-            d.len() >= 5 && d.iter().all(|x| x.kinds == ["none"]),
-            "{d:?}"
-        );
-        drop(d);
+        {
+            let d = fake.declared.lock().unwrap();
+            assert!(
+                d.len() >= 5 && d.iter().all(|x| x.kinds == ["none"]),
+                "{d:?}"
+            );
+        }
         tokio::time::timeout(Duration::from_secs(1), drain.until_drained())
             .await
             .expect("an idle loop reports a drain");
