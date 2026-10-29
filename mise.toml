@@ -94,6 +94,7 @@ run = [
   "zizmor --min-severity low .github/workflows",
   "python3 tools/check-repo.py",
   "python3 tools/test_examples_gate.py",
+  "python3 tools/test_cli_policy.py",
 ]
 
 # ---------------------------------------------------------------- supply chain
@@ -470,6 +471,11 @@ esac
 shell = "bash -e -o pipefail -c"
 description = "Command line: propose a release's Homebrew formula to inorbithr/homebrew-tap (needs GH_TOKEN for the tap)"
 run = "bash cli/release/tap.sh"
+
+[tasks."cli:policy"]
+shell = "bash -e -o pipefail -c"
+description = "Command line: propose a release as the iohr `latest` in inorbithr/core's client policy (usage: cli:policy <version> [--dry-run]; needs GH_TOKEN for core)"
+run = "python3 cli/release/policy.py"
 
 [tasks."cli:tap-local"]
 shell = "bash -e -o pipefail -c"

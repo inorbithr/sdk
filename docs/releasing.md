@@ -76,6 +76,7 @@ Conventional Commits that touched it; nobody sets one by hand (no `release-as`, 
 | APT (`https://packages.inorbit.hr/apt`) | `iohr-apt`: reprepro, signed by the repository subkey, uploaded to R2, then installed in Debian | `APT_SIGNING_*`, `R2_*` (repository secrets) |
 | Installers (`https://packages.inorbit.hr/install.sh`, `.ps1`) | uploaded by `iohr-apt`; `iohr-install` runs them against the release | as above |
 | Homebrew (`inorbithr/homebrew-tap`) | `iohr-tap`: a formula PR the tap's CI installs and tests; a maintainer merges it | release GitHub App, token limited to the tap |
+| Client policy (`clients_versions`, the update headers) | `iohr-policy`: a pull request to `inorbithr/core` that moves `[clients.policy.cli] latest` to the release; a maintainer merges it and core rolls. `minimum`, grace and `enforce` stay an admin's call in the console | release GitHub App, token limited to core |
 | winget | `iohr-winget`: manifests generated and schema-checked, kept as an artifact; submitted to `microsoft/winget-pkgs` by hand from the first stable release | a maintainer's GitHub account with a fork of winget-pkgs |
 
 The Homebrew formula pins every archive by its checksum from the release's `SHA256SUMS`, so
