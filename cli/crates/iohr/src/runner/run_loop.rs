@@ -154,7 +154,7 @@ pub(crate) fn backoff(failures: u32, min: Duration, max: Duration, jitter: f64) 
     capped.mul_f64(1.0 - 0.5 * jitter.clamp(0.0, 1.0))
 }
 
-fn jitter() -> f64 {
+pub(crate) fn jitter() -> f64 {
     let mut b = [0_u8; 2];
     let _ = getrandom::fill(&mut b);
     f64::from(u16::from_le_bytes(b)) / f64::from(u16::MAX)

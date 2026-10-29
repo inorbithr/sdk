@@ -59,6 +59,10 @@ impl Fake {
     }
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "the trait's shape; a fake has nothing to await"
+)]
 impl Source for Fake {
     fn here(&self) -> Result<Here, String> {
         Ok(Here {
@@ -183,14 +187,30 @@ async fn only_a_strictly_newer_release_is_chosen() {
         ("0.1.0", "0.1.1", true),
     ];
     for (current, latest, newer) in cases {
-        let r = rig(script_dir(), current, latest, Supervisor::None, RestartMode::Exec);
+        let r = rig(
+            script_dir(),
+            current,
+            latest,
+            Supervisor::None,
+            RestartMode::Exec,
+        );
         let got = r.up.check().await;
-        assert_eq!(matches!(got, Check::Newer(..)), newer, "{current} -> {latest}: {got:?}");
+        assert_eq!(
+            matches!(got, Check::Newer(..)),
+            newer,
+            "{current} -> {latest}: {got:?}"
+        );
         if !newer {
             assert!(matches!(got, Check::Current(_)), "{got:?}");
         }
     }
-    let r = rig(script_dir(), "0.1.0", "0.1.1", Supervisor::None, RestartMode::Exec);
+    let r = rig(
+        script_dir(),
+        "0.1.0",
+        "0.1.1",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
     *r.fake.latest.lock().unwrap() = Err("GitHub says 503".into());
     assert_eq!(r.up.check().await, Check::Failed("GitHub says 503".into()));
 }
@@ -198,7 +218,13 @@ async fn only_a_strictly_newer_release_is_chosen() {
 #[tokio::test(start_paused = true)]
 async fn apt_and_foreign_copies_report_and_never_install() {
     for method in [Method::Apt, Method::Other] {
-        let r = rig(method, "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exec);
+        let r = rig(
+            method,
+            "0.1.0-alpha.27",
+            "0.1.0-alpha.28",
+            Supervisor::None,
+            RestartMode::Exec,
+        );
         assert!(matches!(r.up.check().await, Check::Skipped(..)));
         let (all, log) = lines();
         let _idle = idle_loop(&r.drain);
@@ -206,15 +232,29 @@ async fn apt_and_foreign_copies_report_and_never_install() {
         let _ = tokio::time::timeout(5 * HOUR, run).await;
         assert!(r.fake.looks() >= 4, "it kept looking: {}", r.fake.looks());
         assert_eq!(r.fake.installs(), 0);
-        assert!(!r.drain.is_wanted(), "no drain for a copy that cannot upgrade");
-        assert_eq!(all.lock().unwrap().len(), 1, "said once per version: {:?}", all.lock().unwrap());
+        assert!(
+            !r.drain.is_wanted(),
+            "no drain for a copy that cannot upgrade"
+        );
+        assert_eq!(
+            all.lock().unwrap().len(),
+            1,
+            "said once per version: {:?}",
+            all.lock().unwrap()
+        );
         assert!(all.lock().unwrap()[0].contains("0.1.0-alpha.28"));
     }
 }
 
 #[tokio::test(start_paused = true)]
 async fn nothing_is_installed_until_the_loop_says_nothing_is_leased() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exec);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
     let Check::Newer(ver, here) = r.up.check().await else {
         panic!("newer expected")
     };
@@ -234,17 +274,30 @@ async fn nothing_is_installed_until_the_loop_says_nothing_is_leased() {
     let (got, ()) = tokio::join!(r.up.upgrade(&ver, &here, r.stop.subscribe(), &log), driver);
     let _ = got;
     let at = r.fake.installs.lock().unwrap()[0];
-    assert!(at - started >= 20 * MIN, "installed after {:?}", at - started);
+    assert!(
+        at - started >= 20 * MIN,
+        "installed after {:?}",
+        at - started
+    );
     assert_eq!(*r.fake.wanted_at_install.lock().unwrap(), [true]);
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_run_in_progress_holds_the_drain_open_and_no_run_starts_while_wanted() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exec);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
     let Check::Newer(ver, here) = r.up.check().await else {
         panic!("newer expected")
     };
-    let hold = r.drain.hold().expect("a run may start before a drain is wanted");
+    let hold = r
+        .drain
+        .hold()
+        .expect("a run may start before a drain is wanted");
     let _idle = idle_loop(&r.drain);
     let (_, log) = lines();
     let started = Instant::now();
@@ -262,7 +315,13 @@ async fn a_run_in_progress_holds_the_drain_open_and_no_run_starts_while_wanted()
 
 #[tokio::test(start_paused = true)]
 async fn work_that_never_ends_gives_up_the_round_and_takes_work_again() {
-    let mut r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exec);
+    let mut r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
     r.up.drain_limit = HOUR;
     let Check::Newer(ver, here) = r.up.check().await else {
         panic!("newer expected")
@@ -276,7 +335,13 @@ async fn work_that_never_ends_gives_up_the_round_and_takes_work_again() {
 
 #[tokio::test(start_paused = true)]
 async fn shutdown_ends_the_wait_and_the_drain() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exec);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
     let (_, log) = lines();
     let stop = r.stop.subscribe();
     let ended = async {
@@ -287,7 +352,13 @@ async fn shutdown_ends_the_wait_and_the_drain() {
     let (out, ()) = tokio::join!(r.up.run(stop, &log), ended);
     assert_eq!(out, Outcome::Stopped);
     // During the drain.
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exec);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
     let Check::Newer(ver, here) = r.up.check().await else {
         panic!("newer expected")
     };
@@ -305,7 +376,13 @@ async fn shutdown_ends_the_wait_and_the_drain() {
 
 #[tokio::test(start_paused = true)]
 async fn a_failed_install_keeps_the_old_version_and_backs_off() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exec);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exec,
+    );
     *r.fake.install.lock().unwrap() = Err("attestation does not verify".into());
     let _idle = idle_loop(&r.drain);
     let (all, log) = lines();
@@ -326,7 +403,10 @@ async fn a_failed_install_keeps_the_old_version_and_backs_off() {
     assert_eq!(r.marks.last.lock().unwrap().clone(), None);
     assert!(!r.drain.is_wanted(), "leases are taken again between tries");
     let all = all.lock().unwrap();
-    let failures: Vec<&String> = all.iter().filter(|l| l.contains("upgrade failed")).collect();
+    let failures: Vec<&String> = all
+        .iter()
+        .filter(|l| l.contains("upgrade failed"))
+        .collect();
     assert_eq!(failures.len(), 6, "one line per failure: {all:?}");
     assert!(failures[0].contains("(1 in a row)") && failures[5].contains("(6 in a row)"));
     assert!(all.iter().all(|l| !l.to_lowercase().contains("token")));
@@ -335,19 +415,39 @@ async fn a_failed_install_keeps_the_old_version_and_backs_off() {
 #[tokio::test(start_paused = true)]
 async fn the_delay_is_the_interval_then_a_back_off_that_never_passes_it() {
     assert_eq!(delay(HOUR, 0, 0.0), HOUR);
-    assert_eq!(delay(HOUR, 0, 1.0), HOUR + 6 * MIN, "up to 10 percent of jitter");
+    assert_eq!(
+        delay(HOUR, 0, 1.0),
+        HOUR + 6 * MIN,
+        "up to 10 percent of jitter"
+    );
     assert_eq!(delay(HOUR, 0, 7.0), HOUR + 6 * MIN, "jitter is clamped");
-    let waits: Vec<u64> = (1..=6).map(|f| delay(HOUR, f, 0.0).as_secs() / 60).collect();
+    let waits: Vec<u64> = (1..=6)
+        .map(|f| delay(HOUR, f, 0.0).as_secs() / 60)
+        .collect();
     assert_eq!(waits, [5, 10, 20, 40, 60, 60]);
-    assert_eq!(delay(5 * MIN, 9, 0.0), 5 * MIN, "the shortest interval is the cap");
-    let week = Duration::from_secs(7 * 86_400);
-    assert_eq!(delay(week, 40, 0.0), FAIL_MAX, "the back-off tops out at 6 hours");
+    assert_eq!(
+        delay(5 * MIN, 9, 0.0),
+        5 * MIN,
+        "the shortest interval is the cap"
+    );
+    let week = Duration::from_hours(168);
+    assert_eq!(
+        delay(week, 40, 0.0),
+        FAIL_MAX,
+        "the back-off tops out at 6 hours"
+    );
     assert_eq!(delay(week, u32::MAX, 0.0), FAIL_MAX, "no overflow");
 }
 
 #[tokio::test(start_paused = true)]
 async fn an_install_that_says_another_version_is_not_restarted() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::Systemd, RestartMode::Exit);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
     *r.fake.says.lock().unwrap() = Ok(v("0.1.0-alpha.27"));
     let _idle = idle_loop(&r.drain);
     let Check::Newer(ver, here) = r.up.check().await else {
@@ -365,7 +465,13 @@ async fn an_install_that_says_another_version_is_not_restarted() {
 
 #[tokio::test(start_paused = true)]
 async fn a_ledger_that_cannot_be_written_stops_the_restart() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::Systemd, RestartMode::Exit);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
     *r.marks.refuse.lock().unwrap() = true;
     let _idle = idle_loop(&r.drain);
     let Check::Newer(ver, here) = r.up.check().await else {
@@ -378,24 +484,57 @@ async fn a_ledger_that_cannot_be_written_stops_the_restart() {
 
 #[tokio::test(start_paused = true)]
 async fn a_restart_that_fails_is_tried_once_and_the_version_is_not_installed_again() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::Launchd { label: "hr.inorbit.runner".into() }, RestartMode::Exec);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::Launchd {
+            label: "hr.inorbit.runner".into(),
+        },
+        RestartMode::Exec,
+    );
     let _idle = idle_loop(&r.drain);
     let (all, log) = lines();
     let run = r.up.run(r.stop.subscribe(), &log);
     let _ = tokio::time::timeout(6 * HOUR, run).await;
-    assert_eq!(r.execs.0.load(Ordering::SeqCst), 1, "exec once, then the guard holds");
-    assert_eq!(r.fake.installs(), 1, "the same version is not installed again");
+    assert_eq!(
+        r.execs.0.load(Ordering::SeqCst),
+        1,
+        "exec once, then the guard holds"
+    );
+    assert_eq!(
+        r.fake.installs(),
+        1,
+        "the same version is not installed again"
+    );
     assert_eq!(*r.marks.last.lock().unwrap(), Some(v("0.1.0-alpha.28")));
     assert!(!r.drain.is_wanted());
     let all = all.lock().unwrap();
-    assert!(all.iter().any(|l| l.contains("restarting in place (launchd (hr.inorbit.runner))")), "{all:?}");
-    assert!(all.iter().any(|l| l.contains("installed in the last 24 hours")), "{all:?}");
+    assert!(
+        all.iter()
+            .any(|l| l.contains("restarting in place (launchd (hr.inorbit.runner))")),
+        "{all:?}"
+    );
+    assert!(
+        all.iter()
+            .any(|l| l.contains("installed in the last 24 hours")),
+        "{all:?}"
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn exit_mode_exits_under_a_supervisor_and_execs_without_one() {
-    for sup in [Supervisor::Systemd, Supervisor::Launchd { label: "l".into() }] {
-        let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", sup, RestartMode::Exit);
+    for sup in [
+        Supervisor::Systemd,
+        Supervisor::Launchd { label: "l".into() },
+    ] {
+        let r = rig(
+            script_dir(),
+            "0.1.0-alpha.27",
+            "0.1.0-alpha.28",
+            sup,
+            RestartMode::Exit,
+        );
         let _idle = idle_loop(&r.drain);
         let (all, log) = lines();
         let out = r.up.run(r.stop.subscribe(), &log).await;
@@ -404,17 +543,33 @@ async fn exit_mode_exits_under_a_supervisor_and_execs_without_one() {
         assert!(all.lock().unwrap().iter().any(|l| l.contains("exiting 75")));
         assert_eq!(r.fake.installs(), 1);
     }
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::None, RestartMode::Exit);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::None,
+        RestartMode::Exit,
+    );
     let _idle = idle_loop(&r.drain);
     let (_, log) = lines();
     let run = r.up.run(r.stop.subscribe(), &log);
     let _ = tokio::time::timeout(10 * MIN, run).await;
-    assert_eq!(r.execs.0.load(Ordering::SeqCst), 1, "nobody would start it: exec");
+    assert_eq!(
+        r.execs.0.load(Ordering::SeqCst),
+        1,
+        "nobody would start it: exec"
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn the_switch_turns_the_upgrade_off_and_back_on_without_a_restart() {
-    let r = rig(script_dir(), "0.1.0-alpha.27", "0.1.0-alpha.28", Supervisor::Systemd, RestartMode::Exit);
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.27",
+        "0.1.0-alpha.28",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
     r.policy.send_modify(|p| p.enabled = false);
     assert_eq!(r.up.check().await, Check::Disabled);
     let _idle = idle_loop(&r.drain);
@@ -438,12 +593,21 @@ fn the_ledger_file_remembers_a_version_for_a_day() {
     let ledger = FileLedger {
         path: dir.path().join("runner").join("last-upgrade"),
     };
-    assert!(!ledger.installed_recently(&v("0.1.0-alpha.28")), "no file yet");
+    assert!(
+        !ledger.installed_recently(&v("0.1.0-alpha.28")),
+        "no file yet"
+    );
     ledger.record(&v("0.1.0-alpha.28")).unwrap();
     assert!(ledger.installed_recently(&v("0.1.0-alpha.28")));
-    assert!(!ledger.installed_recently(&v("0.1.0-alpha.29")), "another version");
+    assert!(
+        !ledger.installed_recently(&v("0.1.0-alpha.29")),
+        "another version"
+    );
     std::fs::write(&ledger.path, "0.1.0-alpha.28 1000\n").unwrap();
     assert!(!ledger.installed_recently(&v("0.1.0-alpha.28")), "long ago");
     std::fs::write(&ledger.path, "not a ledger").unwrap();
-    assert!(!ledger.installed_recently(&v("0.1.0-alpha.28")), "unreadable counts as never");
+    assert!(
+        !ledger.installed_recently(&v("0.1.0-alpha.28")),
+        "unreadable counts as never"
+    );
 }

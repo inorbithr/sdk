@@ -19,7 +19,7 @@ use std::path::Path;
 
 use super::settings::RestartMode;
 
-/// The exit code of a runner that stops to be restarted by its supervisor: EX_TEMPFAIL.
+/// The exit code of a runner that stops to be restarted by its supervisor: `EX_TEMPFAIL`.
 pub(crate) const EXIT_RESTART: u8 = 75;
 
 /// What supervises this process.
@@ -216,6 +216,9 @@ mod tests {
     #[test]
     fn a_program_that_is_not_there_comes_back_as_a_reason_not_a_crash() {
         let why = exec_in_place(Path::new("/nonexistent/iohr-for-test"));
-        assert!(why.starts_with("cannot start /nonexistent/iohr-for-test"), "{why}");
+        assert!(
+            why.starts_with("cannot start /nonexistent/iohr-for-test"),
+            "{why}"
+        );
     }
 }

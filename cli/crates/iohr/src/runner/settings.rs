@@ -117,6 +117,33 @@ pub(crate) struct Effective {
     pub(crate) upgrade_restart: Setting<RestartMode>,
 }
 
+/// The first of the flag, the profile's table and the file's table that sets a value.
+fn pick<T: Clone>(
+    flag: Option<T>,
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+    get: impl Fn(&RunnerConfig) -> Option<T>,
+) -> Option<Setting<T>> {
+    if let Some(value) = flag {
+        return Some(Setting {
+            value,
+            source: Source::Flag,
+        });
+    }
+    if let Some((name, p)) = profile
+        && let Some(value) = get(p)
+    {
+        return Some(Setting {
+            value,
+            source: Source::Profile(name.to_owned()),
+        });
+    }
+    get(file).map(|value| Setting {
+        value,
+        source: Source::File,
+    })
+}
+
 /// Resolves each key: flag, then the profile's table, then `[runner]`, then the default.
 ///
 /// # Errors
@@ -129,31 +156,6 @@ pub(crate) fn resolve(
     profile: Option<(&str, &RunnerConfig)>,
     flags: &Flags,
 ) -> Result<Effective, String> {
-    fn pick<T: Clone>(
-        flag: Option<T>,
-        profile: Option<(&str, &RunnerConfig)>,
-        file: &RunnerConfig,
-        get: impl Fn(&RunnerConfig) -> Option<T>,
-    ) -> Option<Setting<T>> {
-        if let Some(value) = flag {
-            return Some(Setting {
-                value,
-                source: Source::Flag,
-            });
-        }
-        if let Some((name, p)) = profile
-            && let Some(value) = get(p)
-        {
-            return Some(Setting {
-                value,
-                source: Source::Profile(name.to_owned()),
-            });
-        }
-        get(file).map(|value| Setting {
-            value,
-            source: Source::File,
-        })
-    }
     let capacity = pick(flags.capacity, profile, file, |c| c.capacity);
     if let Some(c) = &capacity
         && !(1..=MAX_CAPACITY).contains(&c.value)

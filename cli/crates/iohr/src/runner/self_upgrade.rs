@@ -51,13 +51,13 @@ use crate::commands::upgrade::{self, Method, Upstream};
 /// The first look comes this long after the runner starts (plus up to 10 percent).
 pub(crate) const FIRST_CHECK: Duration = Duration::from_secs(60);
 /// Back-off after a failure: from 5 minutes, doubling, to 6 hours.
-pub(crate) const FAIL_MIN: Duration = Duration::from_secs(5 * 60);
-pub(crate) const FAIL_MAX: Duration = Duration::from_secs(6 * 3600);
+pub(crate) const FAIL_MIN: Duration = Duration::from_mins(5);
+pub(crate) const FAIL_MAX: Duration = Duration::from_hours(6);
 /// How long to wait for leased work to finish before giving up on this round.
-pub(crate) const DRAIN_LIMIT: Duration = Duration::from_secs(4 * 3600);
+pub(crate) const DRAIN_LIMIT: Duration = Duration::from_hours(4);
 /// A version installed this recently is not installed again by a runner that still says
 /// it is older.
-pub(crate) const REINSTALL_GUARD: Duration = Duration::from_secs(24 * 3600);
+pub(crate) const REINSTALL_GUARD: Duration = Duration::from_hours(24);
 
 /// What the person set (`auto_upgrade`, `upgrade_interval_minutes`, `upgrade_restart`),
 /// read again on SIGHUP.
@@ -66,6 +66,17 @@ pub(crate) struct Policy {
     pub(crate) enabled: bool,
     pub(crate) interval: Duration,
     pub(crate) restart: RestartMode,
+}
+
+impl Policy {
+    /// What the settings in use say.
+    pub(crate) fn of(e: &super::settings::Effective) -> Self {
+        Self {
+            enabled: e.auto_upgrade.value,
+            interval: e.upgrade_interval.value,
+            restart: e.upgrade_restart.value,
+        }
+    }
 }
 
 /// Where this copy is and how it got there.
@@ -243,10 +254,12 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
             }
             _ = stop.changed() => return Ok(None),
         }
-        self.source
-            .install(here, version)
-            .await
-            .map_err(|e| format!("installing iohr {version} failed, {} keeps running: {e}", self.current))?;
+        self.source.install(here, version).await.map_err(|e| {
+            format!(
+                "installing iohr {version} failed, {} keeps running: {e}",
+                self.current
+            )
+        })?;
         let said = self
             .source
             .installed(here)
@@ -263,7 +276,8 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
             Restart::Exit => {
                 log(&format!(
                     "iohr {version} is installed: exiting {} for {} to start it",
-                    supervisor::EXIT_RESTART, self.supervisor
+                    supervisor::EXIT_RESTART,
+                    self.supervisor
                 ));
                 Ok(Some(Outcome::Exit))
             }
@@ -301,20 +315,26 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
                 Check::Skipped(v, what) => {
                     failures = 0;
                     if told.as_ref() != Some(&v) {
-                        log(&format!("iohr {v} is out; the runner does not upgrade itself: {what}"));
+                        log(&format!(
+                            "iohr {v} is out; the runner does not upgrade itself: {what}"
+                        ));
                         told = Some(v);
                     }
                 }
                 Check::Failed(e) => {
                     failures = failures.saturating_add(1);
-                    log(&format!("looking for a newer iohr failed ({failures} in a row): {e}"));
+                    log(&format!(
+                        "looking for a newer iohr failed ({failures} in a row): {e}"
+                    ));
                 }
                 Check::Newer(v, here) => match self.upgrade(&v, &here, stop.clone(), log).await {
                     Ok(Some(Outcome::Exit)) => return Outcome::Exit,
                     Ok(Some(Outcome::Stopped) | None) => return Outcome::Stopped,
                     Err(e) => {
                         failures = failures.saturating_add(1);
-                        log(&format!("upgrade failed ({failures} in a row), the old version runs on: {e}"));
+                        log(&format!(
+                            "upgrade failed ({failures} in a row), the old version runs on: {e}"
+                        ));
                     }
                 },
             }
@@ -378,8 +398,10 @@ impl Ledger for FileLedger {
             return false;
         };
         let mut parts = text.split_whitespace();
-        let (Some(v), Some(at)) = (parts.next(), parts.next().and_then(|a| a.parse::<u64>().ok()))
-        else {
+        let (Some(v), Some(at)) = (
+            parts.next(),
+            parts.next().and_then(|a| a.parse::<u64>().ok()),
+        ) else {
             return false;
         };
         let now = std::time::SystemTime::now()

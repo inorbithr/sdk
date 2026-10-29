@@ -31,7 +31,9 @@ pub(crate) struct Hold(Arc<Drain>);
 
 impl Drop for Hold {
     fn drop(&mut self) {
-        self.0.state.send_modify(|s| s.holds = s.holds.saturating_sub(1));
+        self.0
+            .state
+            .send_modify(|s| s.holds = s.holds.saturating_sub(1));
     }
 }
 
