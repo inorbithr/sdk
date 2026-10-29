@@ -2,7 +2,8 @@
 
   attest            read examples-results.json and post the commit status `examples-run`
                     on its commit, only when it is a pass (see `verdict`).
-  gate --ref REF    exit 1 unless REF's commit has the `examples-run` status `success`.
+  gate --ref REF    exit 1 unless REF's commit has the `examples-run` status `success`, posted by
+                    github-actions[bot] (a status posted by hand, by a person, does not count).
 
 results file (written by `mise run examples:run`):
   {"schema": 1, "commit": "<40 hex>", "dirty": false, "results":
@@ -23,6 +24,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTEXT = "examples-run"
+# The release workflow posts with its GITHUB_TOKEN, so the status's creator is this bot.
+CREATOR = "github-actions[bot]"
 
 
 def sh(*args: str) -> str:
@@ -77,21 +80,31 @@ def attest(paths: list[Path]) -> int:
     else:
         res = {"results": []}
     state = "failure" if why else "success"
-    desc = (why or f"{len(res['results'])} examples passed against the live API")[:140]
+    desc = (why or f"{len(res['results'])} examples passed against the local replay server")[:140]
     sh("gh", "api", f"repos/{repo()}/statuses/{head}", "-f", f"state={state}",
        "-f", f"context={CONTEXT}", "-f", f"description={desc}")
     print(f"{CONTEXT} {state} on {head}: {desc}")
     return 1 if why else 0
 
 
+def latest_state(statuses: list[dict]) -> str:
+    """The newest `examples-run` state among statuses (newest first, as the API lists them) that
+    github-actions[bot] posted, or "missing". A status from any other creator is ignored."""
+    for st in statuses:
+        if st.get("context") == CONTEXT and (st.get("creator") or {}).get("login") == CREATOR:
+            return st.get("state") or "missing"
+    return "missing"
+
+
 def gate(ref: str) -> int:
     sha = sh("gh", "api", f"repos/{repo()}/commits/{ref}", "-q", ".sha")
-    states = sh("gh", "api", f"repos/{repo()}/commits/{sha}/statuses", "--paginate",
-                "-q", f'[.[] | select(.context == "{CONTEXT}")] | .[0].state // "missing"')
-    state = states.splitlines()[0] if states else "missing"
+    # --slurp: one array of pages, so the newest-first order holds across pages.
+    pages = json.loads(sh("gh", "api", f"repos/{repo()}/commits/{sha}/statuses", "--paginate", "--slurp"))
+    state = latest_state([st for page in pages for st in page])
     print(f"{CONTEXT} on {sha} ({ref}): {state}")
     if state != "success":
-        print(f"refused: run `mise run examples:run && mise run examples:attest` on {sha}", file=sys.stderr)
+        print(f"refused: needs a {CONTEXT} `success` status posted by {CREATOR} on {sha}: run the "
+              "release workflow's examples-attest job (a status posted by hand does not count)", file=sys.stderr)
         return 1
     return 0
 

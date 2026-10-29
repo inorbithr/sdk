@@ -69,4 +69,29 @@ class Merge(unittest.TestCase):
         self.assertIsNone(self.joined([ok], L))
 
 
+def status(state, login, context="examples-run"):
+    return {"context": context, "state": state, "creator": {"login": login}}
+
+
+class LatestState(unittest.TestCase):
+    BOT = "github-actions[bot]"
+
+    def test_bot_success(self):
+        self.assertEqual("success", g.latest_state([status("success", self.BOT)]))
+
+    def test_hand_posted_success_does_not_count(self):
+        self.assertEqual("missing", g.latest_state([status("success", "0x19")]))
+
+    def test_newest_bot_status_wins_over_older_and_hand_posted(self):
+        rows = [status("success", "0x19"), status("failure", self.BOT), status("success", self.BOT)]
+        self.assertEqual("failure", g.latest_state(rows))
+
+    def test_other_context_and_no_creator_ignored(self):
+        rows = [status("success", self.BOT, "ci"), {"context": "examples-run", "state": "success"}]
+        self.assertEqual("missing", g.latest_state(rows))
+
+    def test_none(self):
+        self.assertEqual("missing", g.latest_state([]))
+
+
 unittest.main()
