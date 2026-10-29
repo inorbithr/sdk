@@ -282,7 +282,7 @@ async fn a_refused_delete_is_a_failure_with_kubectl_s_words() {
 fn no_configured_cluster_is_refused_and_a_flag_is_not_a_context() {
     assert!(KubeTarget::new(None, None).is_err());
     assert!(KubeTarget::new(Some("  "), Some("")).is_err());
-    assert!(HostRunner::find(None, None).kube_problem().is_some());
+    assert!(HostRunner::find(None, None, &[]).kube_problem().is_some());
     assert!(KubeTarget::new(Some("--server=https://x"), None).is_err());
     assert!(KubeTarget::new(None, Some("relative/config")).is_err());
     assert!(KubeTarget::new(None, Some("-/etc/x")).is_err());
@@ -386,6 +386,7 @@ fn host(dir: &std::path::Path, kube: Result<KubeTarget, String>) -> HostRunner {
         kube,
         iohr: None,
         install_env: Vec::new(),
+        user_units: vec!["iohr-runner.service".to_owned()],
     }
 }
 
@@ -614,6 +615,34 @@ async fn a_user_restart_off_linux_is_refused_before_it_runs() {
     };
     assert!(carry_out_on(&a, &k, "windows").await.is_err());
     assert!(k.ran_nothing());
+}
+
+#[tokio::test]
+async fn only_the_user_units_the_runner_lists_are_restarted() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = host(dir.path(), Err("none".to_owned()));
+    let restart = |unit: &str| Action::UserRestart {
+        unit: unit.to_owned(),
+    };
+    assert_eq!(h.refuses(&restart("iohr-runner.service")), None);
+    let why = h.refuses(&restart("sshd.service")).unwrap();
+    assert!(why.contains("not in this runner's user_units"), "{why}");
+    // `run` holds to the list too, whoever calls it.
+    let ran = h
+        .run(
+            Tool::Systemctl,
+            &strs(&["--user", "restart", "sshd.service"]),
+        )
+        .await;
+    assert_eq!(ran, Err(why));
+    // No list: every unit is refused.
+    let none = HostRunner {
+        user_units: Vec::new(),
+        ..h
+    };
+    let why = none.refuses(&restart("iohr-runner.service")).unwrap();
+    assert!(why.contains("lists no user_units"), "{why}");
+    assert_eq!(none.refuses(&Action::PruneImages { until_hours: 24 }), None);
 }
 
 #[tokio::test]

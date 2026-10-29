@@ -265,6 +265,8 @@ pub(crate) enum Refusal {
     Replay,
     /// A pinned run this runner does not carry out (a script or a roll train).
     NotHostAction(String),
+    /// A catalog action this runner's own configuration does not allow.
+    NotAllowedHere(String),
 }
 
 impl Refusal {
@@ -280,6 +282,7 @@ impl Refusal {
             Self::BadSignature(_) => "bad_signature",
             Self::Replay => "replay",
             Self::NotHostAction(_) => "not_host_action",
+            Self::NotAllowedHere(_) => "not_allowed_here",
         }
     }
 }
@@ -299,6 +302,7 @@ impl std::fmt::Display for Refusal {
             Self::BadSignature(w) => write!(f, "the decision's proof does not verify: {w}"),
             Self::Replay => f.write_str("this decision was acted on before; it is not run again"),
             Self::NotHostAction(w) => write!(f, "this runner carries out host actions only: {w}"),
+            Self::NotAllowedHere(w) => write!(f, "this runner does not allow it: {w}"),
         }
     }
 }
@@ -886,7 +890,11 @@ impl<K: ArgvRunner> Asks<K> {
         if !retry && self.seen.contains(&a.approval_id, &proof) {
             return Err(Refusal::Replay);
         }
-        host_action::lookup(&payload["action"]).map_err(Refusal::SchemaInvalid)
+        let action = host_action::lookup(&payload["action"]).map_err(Refusal::SchemaInvalid)?;
+        match self.tools.refuses(&action) {
+            Some(why) => Err(Refusal::NotAllowedHere(why)),
+            None => Ok(action),
+        }
     }
 
     /// One poll: every approved run pinned to this runner is checked, then refused or

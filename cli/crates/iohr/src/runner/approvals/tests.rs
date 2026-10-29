@@ -493,6 +493,24 @@ async fn an_unknown_action_is_refused_and_nothing_runs() {
 }
 
 #[tokio::test]
+async fn an_action_this_runner_does_not_allow_is_refused_before_anything_starts() {
+    let w = world();
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
+    let mut tools = fake("default", false);
+    tools.not_here = Some("the unit is not in this runner's user_units".to_owned());
+    let mut asks = asks(&w, Seen::default(), Some(tools));
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(t.refused, 1);
+    assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
+    let note = svc.note(0);
+    assert!(
+        note.starts_with("refused (not_allowed_here)") && note.contains("user_units"),
+        "{note}"
+    );
+    assert!(asks.tools.ran_nothing());
+}
+
+#[tokio::test]
 async fn a_cluster_namespace_is_refused_before_anything_starts() {
     let w = world();
     for ns in host_action::DENIED_NAMESPACES {

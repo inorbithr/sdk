@@ -658,6 +658,12 @@ async fn drain(
 /// process.
 pub(crate) trait ArgvRunner {
     async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String>;
+
+    /// Why this host does not allow `action` though the catalog does, asked before the run
+    /// is reported started.
+    fn refuses(&self, _action: &Action) -> Option<String> {
+        None
+    }
 }
 
 /// The cluster every `kubectl` call is pinned to: a context of the kubeconfig, a
@@ -734,11 +740,18 @@ pub(crate) struct HostRunner {
     /// What `iohr upgrade` reads to tell how it was installed (`IOHR_INSTALL_DIR`,
     /// `HOMEBREW_PREFIX`), outside the allowlist; never the upgrade source overrides.
     pub(crate) install_env: Vec<(OsString, OsString)>,
+    /// The only units `systemd.user-restart` may restart (the runner's `user_units`).
+    pub(crate) user_units: Vec<String>,
 }
 
 impl HostRunner {
-    /// The tools of this process's host, `kubectl` pinned to the configured cluster.
-    pub(crate) fn find(context: Option<&str>, kubeconfig: Option<&str>) -> Self {
+    /// The tools of this process's host, `kubectl` pinned to the configured cluster,
+    /// `systemctl --user restart` to the listed units.
+    pub(crate) fn find(
+        context: Option<&str>,
+        kubeconfig: Option<&str>,
+        user_units: &[String],
+    ) -> Self {
         let install_env = ["IOHR_INSTALL_DIR", "HOMEBREW_PREFIX"]
             .into_iter()
             .filter_map(|k| std::env::var_os(k).map(|v| (OsString::from(k), v)))
@@ -749,7 +762,19 @@ impl HostRunner {
             kube: KubeTarget::new(context, kubeconfig),
             iohr: std::env::current_exe().ok(),
             install_env,
+            user_units: user_units.to_vec(),
         }
+    }
+
+    /// Why `unit` may not be restarted here, if it may not.
+    fn unit_problem(&self, unit: &str) -> Option<String> {
+        (!self.user_units.iter().any(|u| u == unit)).then(|| {
+            if self.user_units.is_empty() {
+                "this runner lists no user_units, so it restarts none".to_owned()
+            } else {
+                "the unit is not in this runner's user_units".to_owned()
+            }
+        })
     }
 
     /// Why a Kubernetes action cannot run here, if it cannot.
@@ -790,7 +815,22 @@ impl HostRunner {
 }
 
 impl ArgvRunner for HostRunner {
+    fn refuses(&self, action: &Action) -> Option<String> {
+        match action {
+            Action::UserRestart { unit } => self.unit_problem(unit),
+            _ => None,
+        }
+    }
+
     async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
+        // Checked again here, so no caller restarts an unlisted unit.
+        if let (Tool::Systemctl, Some(i)) = (tool, argv.iter().position(|a| a == "restart"))
+            && let Some(why) = argv[i + 1..]
+                .iter()
+                .find_map(|unit| self.unit_problem(unit))
+        {
+            return Err(why);
+        }
         let mut full = match (tool, &self.kube) {
             (Tool::Kubectl, Ok(target)) => target.args(),
             (Tool::Kubectl, Err(why)) => return Err(why.clone()),
@@ -1049,7 +1089,7 @@ async fn delete_failed_pods(
 pub(crate) mod testing {
     use std::sync::Mutex;
 
-    use super::{ArgvRunner, Output, Tool};
+    use super::{Action, ArgvRunner, Output, Tool};
 
     pub(crate) struct Fake {
         /// What `kubectl get namespaces` answers.
@@ -1061,6 +1101,8 @@ pub(crate) mod testing {
         pub(crate) missing: Option<String>,
         /// What every other call answers instead of the default.
         pub(crate) answer: Option<Output>,
+        /// Why this host does not allow any action, asked before it starts.
+        pub(crate) not_here: Option<String>,
     }
 
     impl Fake {
@@ -1080,6 +1122,10 @@ pub(crate) mod testing {
         reason = "a fake answers at once; the trait is async for the real tools"
     )]
     impl ArgvRunner for Fake {
+        fn refuses(&self, _action: &Action) -> Option<String> {
+            self.not_here.clone()
+        }
+
         async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
             if let Some(why) = &self.missing {
                 return Err(why.clone());
@@ -1111,6 +1157,7 @@ pub(crate) mod testing {
             fail,
             missing: None,
             answer: None,
+            not_here: None,
         }
     }
 }

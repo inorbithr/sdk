@@ -84,6 +84,8 @@ pub(crate) struct Effective {
     pub(crate) kube_context: Option<Setting<String>>,
     /// The kubeconfig file the pinned `kubectl` reads (absolute path), if any.
     pub(crate) kubeconfig: Option<Setting<String>>,
+    /// The user service units `systemd.user-restart` may restart; `None` or empty, none.
+    pub(crate) user_units: Option<Setting<Vec<String>>>,
 }
 
 /// Resolves each key: flag, then the profile's table, then `[runner]`, then the default.
@@ -91,7 +93,8 @@ pub(crate) struct Effective {
 /// # Errors
 ///
 /// A message naming the key and where the bad value came from: a capacity outside 1 to
-/// 32, an empty kinds list, or a kind other than `coordinate` and `build`.
+/// 32, an empty kinds list, a kind other than `coordinate` and `build`, or a
+/// `user_units` entry that is not a user service unit.
 pub(crate) fn resolve(
     file: &RunnerConfig,
     profile: Option<(&str, &RunnerConfig)>,
@@ -156,6 +159,18 @@ pub(crate) fn resolve(
     }
     let kube_context = pick(None, profile, file, |c| c.kube_context.clone());
     let kubeconfig = pick(None, profile, file, |c| c.kubeconfig.clone());
+    let user_units = pick(None, profile, file, |c| c.user_units.clone());
+    if let Some(u) = &user_units
+        && let Some(bad) = u
+            .value
+            .iter()
+            .find(|n| !super::host_action::is_user_unit(n))
+    {
+        return Err(format!(
+            "runner user_units ({}): {bad:?} is not a user service unit (<name>.service)",
+            u.source
+        ));
+    }
     Ok(Effective {
         capacity,
         kinds,
@@ -163,6 +178,7 @@ pub(crate) fn resolve(
         name,
         kube_context,
         kubeconfig,
+        user_units,
     })
 }
 
@@ -432,5 +448,22 @@ mod tests {
             Source::Profile("work".into())
         );
         assert_eq!(e.kubeconfig.unwrap().source, Source::File);
+    }
+
+    #[test]
+    fn user_units_are_unset_by_default_and_a_bad_entry_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.user_units, None);
+        let mut file = RunnerConfig::default();
+        file.user_units = Some(vec!["iohr-runner.service".into()]);
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.user_units.map(|u| (u.value, u.source)),
+            Some((vec!["iohr-runner.service".to_owned()], Source::File))
+        );
+        let mut work = RunnerConfig::default();
+        work.user_units = Some(vec!["sshd".into()]);
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(err.contains("user_units") && err.contains("work"), "{err}");
     }
 }
