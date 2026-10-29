@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.28](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.27...iohr/v0.1.0-alpha.28) (2026-10-28)
+
+
+### Features
+
+* **cli:** the runner reports its cores, memory, disks and load on every beat ([#305](https://github.com/inorbithr/sdk/issues/305)) ([fc1c390](https://github.com/inorbithr/sdk/commit/fc1c39085dbae82fbeec4c7bea22d0570d5abda6))
+
+
+### Bug fixes
+
+* **cli:** the host probe test runs only where /proc or sysctl exist ([#308](https://github.com/inorbithr/sdk/issues/308)) ([5e4590f](https://github.com/inorbithr/sdk/commit/5e4590ff5375a5f34453258e5ad0a093d183c965))
+* **cli:** upgrade skips a release whose files are not uploaded yet ([#303](https://github.com/inorbithr/sdk/issues/303)) ([b0b7beb](https://github.com/inorbithr/sdk/commit/b0b7beb26464ef7c8cbe471880415b7c152b86f8))
+
 ## [0.1.0-alpha.27](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.26...iohr/v0.1.0-alpha.27) (2026-10-28)
 
 
