@@ -398,6 +398,9 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `name` | text | the host name | `register`, and `run` to find the runner |
 | `kube_context` | a kubeconfig context name | not set | `run`: the cluster approved host actions reach, passed to every `kubectl` call as `--context` |
 | `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
+| `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
+| `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
+| `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 
 With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh` or `systemctl` on its `PATH`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
@@ -414,6 +417,38 @@ the kinds it declares until the volume has room again (`none` when nothing is le
 the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
 value in effect, where it came from and the build volume's free space, without signing
 in.
+
+`iohr runner run` keeps itself on the latest released `iohr`. About a minute after it
+starts, and then every `upgrade_interval_minutes` plus up to 10 percent of jitter, it asks
+for the newest complete release (the same lookup and the same verified install as
+`iohr upgrade`). A release that is strictly newer by semver, prereleases ordered, starts
+a drain: the heartbeats declare `none`, an offered lease is left to expire, approved runs
+start nothing new, and nothing is installed until no job is leased or running. A drain
+that lasts 4 hours gives up, takes work again and counts as a failure. After the install
+the file's own `--version` must say the new version, then the runner restarts:
+
+- `exec` (default): the same process becomes the new binary, with the same arguments and
+  environment. The process id stays, so launchd and systemd see no stop and nothing can
+  be left stopped.
+- `exit`: the runner ends with code 75 (`EX_TEMPFAIL`) and the supervisor starts the new
+  binary. It needs launchd with `KeepAlive` true or `SuccessfulExit` false, or systemd
+  with `Restart=always` or `on-failure`. The runner finds its supervisor from
+  `INVOCATION_ID` (systemd) or `XPC_SERVICE_NAME` with a parent process id of 1
+  (launchd); with neither it uses `exec`. Use `exit` for a Homebrew install on Linux,
+  where cleanup can remove the path the old binary ran from.
+
+The command line's exit codes are 0 success, 1 a failed call, 2 a usage error, 3 not
+signed in, 4 forbidden by scope, role or plan, and 75 (`EX_TEMPFAIL`) for a runner that
+installed a newer `iohr` and stopped for its supervisor to start it (`upgrade_restart =
+"exit"`); 75 prints nothing and is not a failure.
+
+A failed look, install, version check or restart is one line in the log, never a token.
+The old version keeps running and the runner waits 5 minutes, then 10, 20 and so on up to
+the interval (and never over 6 hours) before it tries again. `runner/last-upgrade` in the
+config directory holds the version and the time of the last install, and the same version
+is not installed twice within 24 hours, so a binary that cannot start cannot loop. A copy
+installed by apt is reported once per version and skipped (use `apt upgrade`). A SIGHUP
+reads `auto_upgrade`, `upgrade_interval_minutes` and `upgrade_restart` again.
 
 ## 5. Credentials
 

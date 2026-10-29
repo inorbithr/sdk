@@ -345,6 +345,12 @@ pub enum RunnerCommand {
         /// 100 GB free.
         #[arg(long, value_delimiter = ',')]
         kinds: Option<Vec<String>>,
+        /// Never look for a newer iohr or restart into one (default: `[runner]
+        /// auto_upgrade` in config.toml, which is on). With it on, the runner checks
+        /// about hourly, drains, installs the newest release through `iohr upgrade`'s
+        /// verified path and restarts itself.
+        #[arg(long)]
+        no_auto_upgrade: bool,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -428,6 +434,9 @@ pub enum RunnerConfigCommand {
         /// As `iohr runner run --kinds`.
         #[arg(long, value_delimiter = ',')]
         kinds: Option<Vec<String>>,
+        /// As `iohr runner run --no-auto-upgrade`.
+        #[arg(long)]
+        no_auto_upgrade: bool,
     },
 }
 

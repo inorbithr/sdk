@@ -264,29 +264,191 @@ impl Sources {
     }
 }
 
-pub(crate) async fn run(g: &Global, check: bool, out: Out) -> Result<(), Error> {
+/// Where the releases are looked up and downloaded from, with the HTTP client that reads
+/// them: what `iohr upgrade` uses, and what the runner's own upgrade calls.
+pub(crate) struct Upstream {
+    client: reqwest::Client,
+    src: Sources,
+}
+
+impl Upstream {
+    /// The defaults, or the `IOHR_UPGRADE_*` overrides of [`Sources::from_process`].
+    pub(crate) fn from_process() -> Result<Self, Error> {
+        let src = Sources::from_process();
+        Ok(Self {
+            client: http(&src.api)?,
+            src,
+        })
+    }
+
+    /// The newest complete release for a copy installed by `method`.
+    ///
+    /// # Errors
+    /// The listing cannot be read, or it holds no complete release.
+    pub(crate) async fn newest(&self, method: &Method) -> Result<semver::Version, Error> {
+        let listing = get(
+            &self.client,
+            &format!("{}/releases?per_page=100", self.src.api),
+            MAX_LISTING,
+        )
+        .await?;
+        // Homebrew installs from the tap, so only the install script needs this host's archive.
+        let triple = match method {
+            Method::InstallScript { .. } => target(std::env::consts::OS, std::env::consts::ARCH),
+            _ => None,
+        };
+        newest(&listing, triple.as_deref())
+            .ok_or_else(|| Error::Failed("no complete iohr release found on GitHub".into()))
+    }
+
+    /// Installs `version` the way `method` says: [`Upstream::prepare`], then
+    /// [`Staged::apply`]. APT and unknown copies (`real` is where this one is) are
+    /// refused: they need a person, or root.
+    ///
+    /// # Errors
+    /// Whatever stopped the install; the old binary is untouched.
+    pub(crate) async fn install(
+        &self,
+        method: &Method,
+        real: &Path,
+        version: &semver::Version,
+        verbose: bool,
+    ) -> Result<(), Error> {
+        self.prepare(method, real, version, verbose)
+            .await
+            .map_err(Error::from)?
+            .apply(version)
+    }
+
+    /// Everything about an install that can fail for reasons of the network, the release
+    /// or the machine, and needs no change to it: the download, the checksum, the
+    /// attestation and the program in the archive (install script), or `brew` and the
+    /// formula's version (Homebrew). The runner does this before it stops taking work.
+    ///
+    /// # Errors
+    /// What stopped it; nothing was changed.
+    pub(crate) async fn prepare(
+        &self,
+        method: &Method,
+        real: &Path,
+        version: &semver::Version,
+        verbose: bool,
+    ) -> Result<Staged, Prepare> {
+        match method {
+            Method::Homebrew => {
+                brew_ready(version)?;
+                Ok(Staged::Brew)
+            }
+            Method::InstallScript { dir } => {
+                let program = fetch_program(&self.client, &self.src, version, verbose).await?;
+                Ok(Staged::Replace {
+                    dest: dir.join("iohr"),
+                    program,
+                })
+            }
+            Method::Apt => Err(Error::Failed(format!(
+                "iohr {version} is out. This copy came from the APT package; run: {}",
+                command_for(method)
+            ))
+            .into()),
+            Method::Other => Err(Error::Failed(format!(
+                "iohr {version} is out, but this copy ({}) is not one iohr installed. Install it again \
+                 with Homebrew (`brew install {TAP}/iohr`), the install script \
+                 (`curl -fsSL https://packages.inorbit.hr/install.sh | sh`), APT or winget.",
+                real.display()
+            ))
+            .into()),
+        }
+    }
+}
+
+/// An install that is ready: what is left changes the machine.
+pub(crate) enum Staged {
+    /// `brew upgrade` of the tap's formula.
+    Brew,
+    /// The verified program, to be renamed over `dest`.
+    Replace { dest: PathBuf, program: Vec<u8> },
+}
+
+impl Staged {
+    /// Does the change: `brew upgrade`, or the file replacement. Blocks.
+    ///
+    /// # Errors
+    /// What stopped it; the old binary is untouched.
+    pub(crate) fn apply(self, version: &semver::Version) -> Result<(), Error> {
+        match self {
+            Self::Brew => brew(version),
+            Self::Replace { dest, program } => replace(&dest, &program, version),
+        }
+    }
+}
+
+/// Why an install cannot be made ready.
+#[derive(Debug)]
+pub(crate) enum Prepare {
+    /// The Homebrew formula is older than the release the lookup found (the tap lags the
+    /// GitHub release); `brew upgrade` would install this version instead.
+    TapBehind {
+        formula: semver::Version,
+    },
+    Failed(Error),
+}
+
+impl From<Error> for Prepare {
+    fn from(e: Error) -> Self {
+        Self::Failed(e)
+    }
+}
+
+impl From<Prepare> for Error {
+    fn from(p: Prepare) -> Self {
+        match p {
+            Prepare::TapBehind { formula } => Self::Failed(format!(
+                "the Homebrew tap {TAP} still lists iohr {formula}, not the release on GitHub \
+                 yet; nothing was installed"
+            )),
+            Prepare::Failed(e) => e,
+        }
+    }
+}
+
+/// This process's executable as run and by real path, and how it was installed. Linux
+/// names a file replaced while it runs `<path> (deleted)`; that suffix is dropped.
+pub(crate) fn detect_here() -> Result<(PathBuf, PathBuf, Method), Error> {
     let exe = std::env::current_exe()
         .map_err(|e| Error::Failed(format!("cannot tell where iohr is: {e}")))?;
+    let exe = exe
+        .to_str()
+        .and_then(|p| p.strip_suffix(" (deleted)"))
+        .map_or(exe.clone(), PathBuf::from);
     let real = exe.canonicalize().unwrap_or_else(|_| exe.clone());
     let method = detect(&exe, &real, &Layout::from_process());
-    let src = Sources::from_process();
-    let client = http(&src.api)?;
+    Ok((exe, real, method))
+}
+
+/// The version the binary at `path` says it is (`iohr --version`).
+///
+/// # Errors
+/// The program does not run or does not say `iohr <version>`.
+pub(crate) fn installed_version(path: &Path) -> Result<semver::Version, Error> {
+    let said = std::process::Command::new(path)
+        .arg("--version")
+        .output()
+        .map_err(|e| Error::Failed(format!("{} does not run: {e}", path.display())))?;
+    let said = String::from_utf8_lossy(&said.stdout);
+    said.trim()
+        .strip_prefix("iohr ")
+        .and_then(|v| semver::Version::parse(v).ok())
+        .ok_or_else(|| Error::Failed(format!("{} does not say its version", path.display())))
+}
+
+pub(crate) async fn run(g: &Global, check: bool, out: Out) -> Result<(), Error> {
+    let (_, real, method) = detect_here()?;
+    let up = Upstream::from_process()?;
 
     let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|e| Error::Failed(format!("this build's version: {e}")))?;
-    let listing = get(
-        &client,
-        &format!("{}/releases?per_page=100", src.api),
-        MAX_LISTING,
-    )
-    .await?;
-    // Homebrew installs from the tap, so only the install script needs this host's archive.
-    let triple = match method {
-        Method::InstallScript { .. } => target(std::env::consts::OS, std::env::consts::ARCH),
-        _ => None,
-    };
-    let latest = newest(&listing, triple.as_deref())
-        .ok_or_else(|| Error::Failed("no complete iohr release found on GitHub".into()))?;
+    let latest = up.newest(&method).await?;
     let update = latest > current;
 
     if check {
@@ -323,28 +485,15 @@ pub(crate) async fn run(g: &Global, check: bool, out: Out) -> Result<(), Error> 
         return Ok(());
     }
 
-    match &method {
-        Method::Homebrew => brew(g, &latest),
-        Method::InstallScript { dir } => {
-            install_script(&client, &src, &latest, &dir.join("iohr"), g.verbose).await?;
-            Out::note(&format!("iohr is now {latest} (was {current})."));
-            Ok(())
-        }
-        Method::Apt => Err(Error::Failed(format!(
-            "iohr {latest} is out. This copy came from the APT package; run: {}",
-            command_for(&method)
-        ))),
-        Method::Other => Err(Error::Failed(format!(
-            "iohr {latest} is out, but this copy ({}) is not one iohr installed. Install it again \
-             with Homebrew (`brew install {TAP}/iohr`), the install script \
-             (`curl -fsSL https://packages.inorbit.hr/install.sh | sh`), APT or winget.",
-            real.display()
-        ))),
+    up.install(&method, &real, &latest, g.verbose).await?;
+    if matches!(method, Method::InstallScript { .. }) {
+        Out::note(&format!("iohr is now {latest} (was {current})."));
     }
+    Ok(())
 }
 
 /// `brew upgrade`, and the trust message when Homebrew refuses the tap.
-fn brew(_g: &Global, latest: &semver::Version) -> Result<(), Error> {
+fn brew(latest: &semver::Version) -> Result<(), Error> {
     Out::note(&format!(
         "Running: brew upgrade {TAP}/iohr (iohr {latest} is out)"
     ));
@@ -368,6 +517,52 @@ fn brew(_g: &Global, latest: &semver::Version) -> Result<(), Error> {
     Err(Error::Failed(brew_failure(&text)))
 }
 
+/// `brew` runs from this process's `PATH` (a launchd job has a short one), and the tap's
+/// formula is not older than `version`. A formula that looks old gets one `brew update`
+/// first, which `brew upgrade` would run itself.
+fn brew_ready(version: &semver::Version) -> Result<(), Prepare> {
+    let formula = format!("{TAP}/iohr");
+    let run = |args: &[&str]| {
+        std::process::Command::new("brew")
+            .args(args)
+            .output()
+            .map_err(|e| {
+                Error::Failed(format!(
+                    "cannot run brew ({e}): it is not on this process's PATH; run it yourself: \
+                     brew upgrade {formula}"
+                ))
+            })
+    };
+    let listed = || -> Result<Option<semver::Version>, Error> {
+        let o = run(&["info", "--json=v2", &formula])?;
+        Ok(formula_version(&String::from_utf8_lossy(&o.stdout)))
+    };
+    let Some(first) = listed()? else {
+        // Unreadable: leave the decision to `brew upgrade`.
+        return Ok(());
+    };
+    if first >= *version {
+        return Ok(());
+    }
+    run(&["update", "--quiet"])?;
+    match listed()? {
+        Some(now) if now < *version => Err(Prepare::TapBehind { formula: now }),
+        _ => Ok(()),
+    }
+}
+
+/// The stable version in `brew info --json=v2` output.
+pub(crate) fn formula_version(json: &str) -> Option<semver::Version> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let stable = v
+        .get("formulae")?
+        .get(0)?
+        .get("versions")?
+        .get("stable")?
+        .as_str()?;
+    semver::Version::parse(stable).ok()
+}
+
 /// What to tell the person when `brew upgrade` failed with `text`.
 pub(crate) fn brew_failure(text: &str) -> String {
     if text.contains("untrusted tap") || text.contains("brew trust") {
@@ -379,14 +574,14 @@ pub(crate) fn brew_failure(text: &str) -> String {
     }
 }
 
-/// Downloads, verifies and installs release `version` over `dest`.
-async fn install_script(
+/// Downloads release `version`, verifies its checksum and attestation and returns the
+/// program from the archive. Changes nothing on this machine.
+async fn fetch_program(
     client: &reqwest::Client,
     src: &Sources,
     version: &semver::Version,
-    dest: &Path,
     verbose: bool,
-) -> Result<(), Error> {
+) -> Result<Vec<u8>, Error> {
     let triple = target(std::env::consts::OS, std::env::consts::ARCH).ok_or_else(|| {
         Error::Failed(format!(
             "there is no iohr build for {} on {}",
@@ -430,9 +625,8 @@ async fn install_script(
             .unwrap_or("the release workflow")
     ));
 
-    let program = layer::program(&archive, &format!("{name}/iohr"))
-        .map_err(|e| Error::Failed(format!("{e}; nothing was installed")))?;
-    replace(dest, &program, version)
+    layer::program(&archive, &format!("{name}/iohr"))
+        .map_err(|e| Error::Failed(format!("{e}; nothing was installed")))
 }
 
 /// The bundles in an attestations API answer.
@@ -680,6 +874,29 @@ mod tests {
         let a = serde_json::json!({"attestations": [{"bundle": {"a": 1}}, {"nobundle": 1}]});
         assert_eq!(bundles_of(a.to_string().as_bytes()).len(), 1);
         assert_eq!(bundles_of(b"{}"), Vec::<Vec<u8>>::new());
+    }
+
+    #[test]
+    fn the_formula_version_is_read_from_brew_info() {
+        use super::{Error, Prepare, formula_version};
+        let ok = r#"{"formulae":[{"name":"iohr","versions":{"stable":"0.1.0-alpha.27","head":null}}],"casks":[]}"#;
+        assert_eq!(
+            formula_version(ok),
+            Some(semver::Version::parse("0.1.0-alpha.27").unwrap())
+        );
+        for bad in [
+            "",
+            "{}",
+            r#"{"formulae":[]}"#,
+            r#"{"formulae":[{"versions":{}}]}"#,
+        ] {
+            assert_eq!(formula_version(bad), None, "{bad}");
+        }
+        let lag = Prepare::TapBehind {
+            formula: semver::Version::parse("0.1.0-alpha.27").unwrap(),
+        };
+        let said = Error::from(lag).to_string();
+        assert!(said.contains("still lists iohr 0.1.0-alpha.27"), "{said}");
     }
 
     #[cfg(unix)]
