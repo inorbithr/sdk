@@ -3,9 +3,9 @@
 //! `HostSignals` (load, pressure, disk free). Placement reads the resources, and sheds
 //! build turns from a host whose disk is under its pool's floor.
 //!
-//! Read from the operating system with no new dependency: `/proc` on Linux, `sysctl` on
-//! macOS, `df` for disks. A value the host does not give is left out (zero for a
-//! resource, absent for a signal), never guessed.
+//! Read from the operating system with no new dependency: `/proc` on Linux,
+//! `/usr/sbin/sysctl` on macOS (by absolute path), `df` for disks. A value the host does
+//! not give is left out (zero for a resource, absent for a signal), never guessed.
 
 use std::path::Path;
 use std::time::Duration;
@@ -152,11 +152,15 @@ async fn read(path: &str) -> Option<String> {
     tokio::fs::read_to_string(path).await.ok()
 }
 
+/// macOS keeps `sysctl` in `/usr/sbin`, which a launchd agent's `PATH` often leaves
+/// out: by bare name the Mac runner sent no memory and no load (2026-10-29).
+const SYSCTL: &str = "/usr/sbin/sysctl";
+
 /// `sysctl -n <name>`, given 5 s.
 async fn sysctl(name: &str) -> Option<String> {
     let out = tokio::time::timeout(
         Duration::from_secs(5),
-        tokio::process::Command::new("sysctl")
+        tokio::process::Command::new(SYSCTL)
             .arg("-n")
             .arg(name)
             .kill_on_drop(true)
@@ -273,5 +277,24 @@ mod tests {
         assert!(h.memory_bytes > 0);
         assert!(h.disks.first().is_some_and(|d| d.space.total > 0));
         assert!(h.load_1m.is_some());
+    }
+
+    // A launchd agent's PATH often has no /usr/sbin: by bare name the Mac runner
+    // reported 0 bytes of memory and sent no signals.
+    #[test]
+    fn sysctl_is_named_by_absolute_path() {
+        assert!(std::path::Path::new(SYSCTL).is_absolute());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn sysctl_answers_with_an_empty_path() {
+        let out = tokio::process::Command::new(SYSCTL)
+            .arg("-n")
+            .arg("hw.memsize")
+            .env_clear()
+            .output()
+            .await;
+        assert!(out.is_ok_and(|o| o.status.success()));
     }
 }
