@@ -85,12 +85,51 @@ jobs:
 
   # RFC 0165: no publish job runs unless `mise run examples:run` passed on this exact
   # commit and `mise run examples:attest` posted the `examples-run` status (a green status
-  # is the only evidence; docs/releasing.md).
-  examples-gate:
-    name: examples ran green on this commit
+  # is the only evidence; docs/releasing.md). examples-attest does both on a macOS runner,
+  # the only one that has the Swift toolchain, so a release needs no hand-run step;
+  # examples-gate then reads the status back with the same `tools/examples-gate.py` verdict
+  # a person would check with `mise run examples:gate`.
+  examples-attest:
+    name: examples run and attest
     needs: release-please
     if: >-
       ${{ !cancelled() && (needs.release-please.outputs.go == 'true'
+      || needs.release-please.outputs.rust == 'true' || needs.release-please.outputs.ts == 'true'
+      || needs.release-please.outputs.py == 'true' || needs.release-please.outputs.iohr == 'true'
+      || (github.event_name == 'workflow_dispatch'
+      && (inputs.python_tag != '' || inputs.typescript_tag != ''))) }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    # statuses: write is only here: it posts the one `examples-run` status on HEAD.
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      # The release commit on a push; the tag's commit on a manual run (as examples-gate
+      # reads it), so `attest` posts on the commit the gate checks.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.python_tag || inputs.typescript_tag) || github.sha }}
+      # The toolchains examples.toml runs; Swift is Xcode's, already on the runner.
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: "go rust node pnpm python uv dotnet java maven"
+      - run: mise run examples:run
+      - name: Post the examples-run status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: mise run examples:attest
+
+  examples-gate:
+    name: examples ran green on this commit
+    needs: [release-please, examples-attest]
+    # Runs only when examples-attest passed: a failed attest must not fall back to an
+    # older green status on the same commit.
+    if: >-
+      ${{ !cancelled() && needs.examples-attest.result == 'success'
+      && (needs.release-please.outputs.go == 'true'
       || needs.release-please.outputs.rust == 'true' || needs.release-please.outputs.ts == 'true'
       || needs.release-please.outputs.py == 'true' || needs.release-please.outputs.iohr == 'true'
       || (github.event_name == 'workflow_dispatch'
