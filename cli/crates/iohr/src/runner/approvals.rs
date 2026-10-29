@@ -38,7 +38,7 @@ use inorbithr::Method;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
-use super::host_action::{self, HOST_ACTION, Kubectl};
+use super::host_action::{self, ArgvRunner, HOST_ACTION};
 use super::private;
 use super::service::{HttpService, ServiceError};
 use super::signing::{RunKey, h as sha256_hex, run_report_message};
@@ -265,6 +265,8 @@ pub(crate) enum Refusal {
     Replay,
     /// A pinned run this runner does not carry out (a script or a roll train).
     NotHostAction(String),
+    /// A catalog action this runner's own configuration does not allow.
+    NotAllowedHere(String),
 }
 
 impl Refusal {
@@ -280,6 +282,7 @@ impl Refusal {
             Self::BadSignature(_) => "bad_signature",
             Self::Replay => "replay",
             Self::NotHostAction(_) => "not_host_action",
+            Self::NotAllowedHere(_) => "not_allowed_here",
         }
     }
 }
@@ -299,6 +302,7 @@ impl std::fmt::Display for Refusal {
             Self::BadSignature(w) => write!(f, "the decision's proof does not verify: {w}"),
             Self::Replay => f.write_str("this decision was acted on before; it is not run again"),
             Self::NotHostAction(w) => write!(f, "this runner carries out host actions only: {w}"),
+            Self::NotAllowedHere(w) => write!(f, "this runner does not allow it: {w}"),
         }
     }
 }
@@ -312,7 +316,12 @@ fn has_float(v: &Value) -> bool {
     }
 }
 
-/// Whether `action` is a host action this run may carry (core `check_action`).
+/// The classes of a run's own `effect` (`approvals.proto`, `Run.effect`). Never the action's
+/// sentence: that one is the action's own `effect`, held to the catalogue by `validate`.
+const EFFECT_CLASSES: [&str; 4] = ["read_only", "local_write", "remote", "production"];
+
+/// Whether `action` is a host action this run may carry (core `check_action`), and `effect`,
+/// the run's own, is one of the [`EFFECT_CLASSES`].
 ///
 /// # Errors
 /// What is wrong, naming fields only.
@@ -322,6 +331,7 @@ pub(crate) fn check_action(
     script_sha256: &str,
     argv: &[String],
     runner_id: &str,
+    effect: &str,
 ) -> Result<(), String> {
     if schema_id != HOST_ACTION {
         return Err(format!("schema_id: only {HOST_ACTION}"));
@@ -333,6 +343,9 @@ pub(crate) fn check_action(
         .map_err(|at| format!("action: not a {HOST_ACTION} document (at {at})"))?;
     if payload_digest(action) != script_sha256 {
         return Err("script_sha256: not the SHA-256 of the action's canonical JSON".to_owned());
+    }
+    if !EFFECT_CLASSES.contains(&effect) {
+        return Err("effect: not read_only, local_write, remote or production".to_owned());
     }
     let id = action["action"].as_str().unwrap_or_default();
     if argv.len() != 1 || argv[0] != id {
@@ -402,6 +415,7 @@ pub(crate) fn verify(
                 &script,
                 &argv,
                 &runner,
+                &text(payload, "effect"),
             )
             .map_err(Refusal::SchemaInvalid)?;
         }
@@ -752,10 +766,10 @@ pub(crate) struct Asks<K> {
     pub(crate) pin: Pin,
     pub(crate) keys: DeviceKeys,
     pub(crate) seen: Seen,
-    /// The host's `kubectl`, pinned to the configured kube context; the reason when it
-    /// cannot be used (not installed, or no context configured): every action then
-    /// fails with it and nothing runs.
-    pub(crate) kubectl: Result<K, String>,
+    /// The host's tools (`kubectl` pinned to the configured kube context): a tool that
+    /// cannot be used (not installed, or no context configured) fails the action that
+    /// needs it, and nothing of that action runs.
+    pub(crate) tools: K,
     /// The time a report is signed at, read afresh for each report.
     clock: fn() -> i64,
     /// Approvals handled by this process: never reported twice.
@@ -772,15 +786,9 @@ pub(crate) fn unix_now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-impl<K: Kubectl> Asks<K> {
-    pub(crate) fn new(
-        key: RunKey,
-        pin: Pin,
-        keys: DeviceKeys,
-        seen: Seen,
-        kubectl: Result<K, String>,
-    ) -> Self {
-        Self::with_clock(key, pin, keys, seen, kubectl, unix_now)
+impl<K: ArgvRunner> Asks<K> {
+    pub(crate) fn new(key: RunKey, pin: Pin, keys: DeviceKeys, seen: Seen, tools: K) -> Self {
+        Self::with_clock(key, pin, keys, seen, tools, unix_now)
     }
 
     /// As [`Asks::new`], on a given clock.
@@ -789,7 +797,7 @@ impl<K: Kubectl> Asks<K> {
         pin: Pin,
         keys: DeviceKeys,
         seen: Seen,
-        kubectl: Result<K, String>,
+        tools: K,
         clock: fn() -> i64,
     ) -> Self {
         Self {
@@ -797,7 +805,7 @@ impl<K: Kubectl> Asks<K> {
             pin,
             keys,
             seen,
-            kubectl,
+            tools,
             clock,
             handled: HashSet::new(),
             pending_start: HashSet::new(),
@@ -882,7 +890,11 @@ impl<K: Kubectl> Asks<K> {
         if !retry && self.seen.contains(&a.approval_id, &proof) {
             return Err(Refusal::Replay);
         }
-        host_action::lookup(&payload["action"]).map_err(Refusal::SchemaInvalid)
+        let action = host_action::lookup(&payload["action"]).map_err(Refusal::SchemaInvalid)?;
+        match self.tools.refuses(&action) {
+            Some(why) => Err(Refusal::NotAllowedHere(why)),
+            None => Ok(action),
+        }
     }
 
     /// One poll: every approved run pinned to this runner is checked, then refused or
@@ -942,14 +954,13 @@ impl<K: Kubectl> Asks<K> {
                 continue;
             }
             self.pending_start.remove(&a.approval_id);
+            // The id only: the parameters are the requester's text.
             note(&format!(
-                "approval {}: carrying out {action:?}",
-                a.approval_id
+                "approval {}: carrying out {}",
+                a.approval_id,
+                action.id()
             ));
-            let result = match &self.kubectl {
-                Ok(k) => host_action::carry_out(&action, k).await,
-                Err(why) => Err(format!("{why}; nothing was run")),
-            };
+            let result = host_action::carry_out(&action, &self.tools).await;
             let (step, said) = match result {
                 Ok(out) => {
                     t.done += 1;

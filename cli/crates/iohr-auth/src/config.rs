@@ -147,6 +147,10 @@ pub struct RunnerConfig {
     /// absolute path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kubeconfig: Option<String>,
+    /// The only user service units (`<name>.service`) an approved `systemd.user-restart`
+    /// may restart. Unset or empty, the runner refuses every one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_units: Option<Vec<String>>,
 }
 
 impl RunnerConfig {
@@ -159,6 +163,7 @@ impl RunnerConfig {
             && self.name.is_none()
             && self.kube_context.is_none()
             && self.kubeconfig.is_none()
+            && self.user_units.is_none()
     }
 }
 
