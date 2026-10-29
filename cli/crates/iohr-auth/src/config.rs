@@ -664,6 +664,9 @@ mod tests {
 capacity = 4
 kinds = ["coordinate", "build"]
 always_on = true
+auto_upgrade = false
+upgrade_interval_minutes = 30
+upgrade_restart = "exit"
 
 [profiles.work]
 kind = "token"
@@ -682,6 +685,9 @@ capacity = 8
         );
         assert_eq!(c.runner.always_on, Some(true));
         assert_eq!(c.runner.name, None);
+        assert_eq!(c.runner.auto_upgrade, Some(false));
+        assert_eq!(c.runner.upgrade_interval_minutes, Some(30));
+        assert_eq!(c.runner.upgrade_restart.as_deref(), Some("exit"));
         let work = c.profile(&name("work")).unwrap();
         assert_eq!(
             work.runner,
@@ -702,6 +708,7 @@ capacity = 8
             "{saved}"
         );
         assert!(saved.contains("capacity = 8"), "{saved}");
+        assert!(saved.contains("upgrade_interval_minutes = 30"), "{saved}");
         assert!(!saved.contains("default ="), "{saved}");
         assert_eq!(Config::parse(&saved, path).unwrap(), c);
     }

@@ -442,6 +442,87 @@ mod tests {
     }
 
     #[test]
+    fn the_upgrade_settings_follow_the_same_order_and_default_to_on_hourly_exec() {
+        let e = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.auto_upgrade.value, e.auto_upgrade.source.clone()),
+            (true, Source::Default)
+        );
+        assert_eq!(e.upgrade_interval.value, Duration::from_hours(1));
+        assert_eq!(e.upgrade_restart.value, RestartMode::Exec);
+
+        let mut file = RunnerConfig::default();
+        file.auto_upgrade = Some(false);
+        file.upgrade_interval_minutes = Some(30);
+        file.upgrade_restart = Some("exit".into());
+        let mut work = RunnerConfig::default();
+        work.auto_upgrade = Some(true);
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.auto_upgrade.value, e.auto_upgrade.source),
+            (false, Source::File)
+        );
+        assert_eq!(e.upgrade_interval.value, Duration::from_mins(30));
+        assert_eq!(e.upgrade_restart.value, RestartMode::Exit);
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(
+            e.auto_upgrade,
+            Setting {
+                value: true,
+                source: Source::Profile("work".into())
+            }
+        );
+        // The flag turns it off over a file that turns it on, and never turns it on.
+        let flags = Flags {
+            no_auto_upgrade: true,
+            ..Flags::default()
+        };
+        let e = resolve(&file, Some(("work", &work)), &flags).unwrap();
+        assert_eq!(
+            e.auto_upgrade,
+            Setting {
+                value: false,
+                source: Source::Flag
+            }
+        );
+    }
+
+    #[test]
+    fn a_bad_upgrade_interval_or_restart_mode_is_refused_naming_its_source() {
+        for bad in [0, 4, 10_081] {
+            let mut c = RunnerConfig::default();
+            c.upgrade_interval_minutes = Some(bad);
+            let e = resolve(&c, None, &Flags::default()).unwrap_err();
+            assert!(
+                e.contains(&bad.to_string()) && e.contains("5 to 10080"),
+                "{e}"
+            );
+        }
+        for ok in [5, 10_080] {
+            let mut c = RunnerConfig::default();
+            c.upgrade_interval_minutes = Some(ok);
+            assert!(resolve(&c, None, &Flags::default()).is_ok());
+        }
+        let mut c = RunnerConfig::default();
+        c.upgrade_restart = Some("kickstart".into());
+        let e = resolve(&c, None, &Flags::default()).unwrap_err();
+        assert!(e.contains("kickstart") && e.contains("exec or exit"), "{e}");
+    }
+
+    #[test]
+    fn a_drained_declaration_names_no_kind_and_keeps_the_rest() {
+        let d = Declared {
+            capacity: Some(4),
+            version: "v".into(),
+            kinds: vec!["coordinate".into(), "build".into()],
+            host: None,
+        };
+        let drained = d.clone().drained();
+        assert_eq!(drained.kinds, [NOTHING]);
+        assert_eq!((drained.capacity, drained.version), (d.capacity, d.version));
+    }
+
+    #[test]
     fn under_the_build_floor_the_runner_declares_no_build() {
         let d = Declared {
             capacity: Some(4),

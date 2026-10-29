@@ -3026,4 +3026,71 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn while_draining_the_beats_declare_none_and_an_offered_lease_is_left() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1)]);
+        let drain = Arc::new(Drain::default());
+        drain.want(true);
+        let c = LoopConfig {
+            drain: Some(drain.clone()),
+            max_beats: Some(5),
+            ..declaring(None, &["coordinate", "build"]).1
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert!(
+            lines.iter().any(|l| l.contains("drain")),
+            "it says why: {lines:?}"
+        );
+        assert_eq!(
+            (stats.accepted, stats.turns),
+            (0, 0),
+            "no lease while draining"
+        );
+        assert_eq!(calls_of(&fake, "accept"), 0);
+        let d = fake.declared.lock().unwrap();
+        assert!(
+            d.len() >= 5 && d.iter().all(|x| x.kinds == ["none"]),
+            "{d:?}"
+        );
+        drop(d);
+        tokio::time::timeout(Duration::from_secs(1), drain.until_drained())
+            .await
+            .expect("an idle loop reports a drain");
+    }
+
+    #[tokio::test]
+    async fn a_turn_in_progress_holds_the_drain_open_until_it_is_reported() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1)]);
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(400)),
+            ..FakeExec::default()
+        };
+        let drain = Arc::new(Drain::default());
+        let c = LoopConfig {
+            drain: Some(drain.clone()),
+            ..cfg(200)
+        };
+        let ask = async {
+            // Let the turn start, then ask for a drain.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            drain.want(true);
+            let early =
+                tokio::time::timeout(Duration::from_millis(100), drain.until_drained()).await;
+            assert!(early.is_err(), "drained while a turn was running");
+            tokio::time::timeout(Duration::from_secs(3), drain.until_drained())
+                .await
+                .expect("drained once the turn is done");
+            let reported = calls_of(&fake, "report ");
+            assert_eq!(
+                reported, 1,
+                "the report was delivered before the drain ended"
+            );
+            drain.want(false);
+        };
+        let (done, ()) = tokio::join!(go_with(&fake, exec, c), ask);
+        assert_eq!(done.1.reported, 1);
+    }
 }
