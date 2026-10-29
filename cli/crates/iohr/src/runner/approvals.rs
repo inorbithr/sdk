@@ -29,6 +29,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use aws_lc_rs::signature::{ECDSA_P256_SHA256_ASN1, UnparsedPublicKey};
@@ -763,6 +764,9 @@ pub(crate) struct Asks<K> {
     /// Approvals recorded in `seen` whose `started` the service has not taken yet: the
     /// next poll sends it again without a second record.
     pending_start: HashSet<String>,
+    /// The self-upgrade's drain: while it is wanted no run starts, and a poll in progress
+    /// holds it open. `None`: never drained.
+    pub(crate) drain: Option<Arc<super::drain::Drain>>,
 }
 
 /// Unix seconds now.
@@ -801,6 +805,7 @@ impl<K: Kubectl> Asks<K> {
             clock,
             handled: HashSet::new(),
             pending_start: HashSet::new(),
+            drain: None,
         }
     }
 
@@ -989,13 +994,18 @@ impl<K: Kubectl> Asks<K> {
             if *stop.borrow() {
                 return;
             }
-            match self.tick(svc, note).await {
-                Ok(_) => wait = POLL,
-                Err(e) => {
-                    note(&format!("approved runs could not be read: {e}"));
-                    wait = (wait * 2).min(POLL_MAX);
+            // While the self-upgrade drains, no poll starts; one in progress is waited for.
+            let hold = self.drain.as_ref().map(super::drain::Drain::hold_of);
+            if hold.as_ref().is_none_or(Option::is_some) {
+                match self.tick(svc, note).await {
+                    Ok(_) => wait = POLL,
+                    Err(e) => {
+                        note(&format!("approved runs could not be read: {e}"));
+                        wait = (wait * 2).min(POLL_MAX);
+                    }
                 }
             }
+            drop(hold);
             tokio::select! {
                 () = tokio::time::sleep(wait) => {}
                 _ = stop.changed() => {}

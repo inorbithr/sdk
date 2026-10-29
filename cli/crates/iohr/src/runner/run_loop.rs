@@ -26,6 +26,7 @@ use tokio::time::Instant;
 
 use super::access::Access;
 use super::claude::Reply;
+use super::drain::Drain;
 use super::exec::{Exec, Finished};
 use super::gate::{self, Checked, Held, MainFrom, Skip};
 use super::service::{
@@ -51,62 +52,6 @@ const FETCH_TRIES: u32 = 10;
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(600);
 /// The most turns one runner holds at once; the service clamps to the same.
 pub(crate) const MAX_CAPACITY: usize = settings::MAX_CAPACITY as usize;
-
-/// The handshake between the loop and the self-upgrade (`runner::self_upgrade`): the
-/// upgrade asks the loop to drain, and the loop says when nothing is leased any more.
-///
-/// While `wanted`, every beat declares [`settings::NOTHING`] so the service offers no new
-/// lease, and an offered one is left to expire. `drained` is published by the loop only
-/// with `wanted` observed and every slot empty (nothing accepting, fetching, running,
-/// gating or waiting in the outbox), so a stale idle can never pass for a drain.
-#[derive(Debug)]
-pub(crate) struct Drain {
-    wanted: watch::Sender<bool>,
-    drained: watch::Sender<bool>,
-}
-
-impl Default for Drain {
-    fn default() -> Self {
-        Self {
-            wanted: watch::channel(false).0,
-            drained: watch::channel(false).0,
-        }
-    }
-}
-
-impl Drain {
-    /// Asks the loop to take no new lease (`true`), or to take them again (`false`).
-    pub(crate) fn want(&self, on: bool) {
-        self.wanted.send_replace(on);
-    }
-
-    pub(crate) fn is_wanted(&self) -> bool {
-        *self.wanted.borrow()
-    }
-
-    /// Waits until the loop has nothing leased while a drain is wanted; the loop ending
-    /// first (its sender never drops, so it is `shutdown` that stops the wait) is the
-    /// caller's to race against.
-    pub(crate) async fn until_drained(&self) {
-        let mut rx = self.drained.subscribe();
-        // `wait_for` checks the current value first, so an already drained loop returns.
-        let _ = rx.wait_for(|d| *d).await;
-    }
-
-    fn subscribe(&self) -> watch::Receiver<bool> {
-        self.wanted.subscribe()
-    }
-
-    /// Published by the loop at the top of each turn of it.
-    fn publish(&self, idle: bool) {
-        let drained = idle && self.is_wanted();
-        self.drained.send_if_modified(|d| {
-            let changed = *d != drained;
-            *d = drained;
-            changed
-        });
-    }
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct LoopConfig {
@@ -589,7 +534,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut beat_started = start;
     let mut lease_beat_started = start;
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
-    let mut drain_changes = cfg.drain.as_ref().map(|d| d.subscribe());
+    let mut drain_watch = cfg.drain.as_ref().map(|d| d.watch());
 
     loop {
         let held = held_leases(&busy, &fetching, &gating, &outbox);
@@ -1046,19 +991,18 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     next_report = Instant::now();
                 }
             }
-            () = async {
-                match drain_changes.as_mut() {
-                    Some(r) => {
-                        // A closed sender never changes again: wait for the other arms.
-                        if r.changed().await.is_err() {
-                            std::future::pending::<()>().await;
-                        }
-                    }
+            wanted = async {
+                match drain_watch.as_mut() {
+                    Some(w) => w.flipped().await,
                     None => std::future::pending().await,
                 }
             } => {
-                // The top of the loop publishes the new state and, while wanted, the
-                // next beat declares nothing.
+                log(if wanted {
+                    "draining: no new lease until the upgrade is done"
+                } else {
+                    "the drain is over: leases are taken again"
+                });
+                // The next beat says so: with the drain wanted it declares nothing.
                 next_beat = Instant::now();
             }
             taken = first_of(&mut accepting) => {

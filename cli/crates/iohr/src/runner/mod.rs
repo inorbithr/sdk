@@ -5,6 +5,7 @@
 pub(crate) mod access;
 pub(crate) mod approvals;
 pub(crate) mod claude;
+pub(crate) mod drain;
 pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod gate;
