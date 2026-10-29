@@ -674,13 +674,16 @@ mod tests {
     fn core_checkout_is_unset_by_default_and_a_relative_path_names_its_source() {
         let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
         assert_eq!(none.core_checkout, None);
+        // A platform-absolute path: "/srv/..." has no drive, so it is relative on Windows.
+        let dir = tempfile::tempdir().unwrap();
+        let core = dir.path().join("core").to_string_lossy().into_owned();
         let mut file = RunnerConfig::default();
-        file.core_checkout = Some("/srv/example/core".into());
+        file.core_checkout = Some(core.clone());
         assert!(!file.is_empty());
         let e = resolve(&file, None, &Flags::default()).unwrap();
         assert_eq!(
             e.core_checkout.map(|c| (c.value, c.source)),
-            Some(("/srv/example/core".to_owned(), Source::File))
+            Some((core, Source::File))
         );
         let mut work = RunnerConfig::default();
         work.core_checkout = Some("development/core".into());
