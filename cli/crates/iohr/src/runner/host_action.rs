@@ -24,6 +24,16 @@
 //! - `iohr.upgrade`: this runner's own executable with `upgrade`: the `iohr upgrade` path
 //!   (Homebrew, or the install script's archive checked against the release's checksums
 //!   and attestations), never a downloaded script.
+//! - `preview.take`: `mise run preview:take <branch>`, then `mise run preview:up --check`:
+//!   the host's own mise tasks, started in its home folder, with its `gh` and SSH sign-ins.
+//! - `roll.task`: `~/.inorbit/roll/remote-roll.sh <rev> <task> [services...]`, the host's
+//!   one route to the deploy server (it refuses a commit that is not on `origin/main`).
+//! - `build.sweep-targets`: `mise run target:sweep` (`cap`) or `mise run target:guard`
+//!   (`guard`) in the core checkout the runner's config names (`core_checkout` under
+//!   `[runner]`); with none named it is refused.
+//! - `gh.release-rerun`: reads the run and its commit's `examples-run` status with `gh
+//!   api`, refuses unless it is a failed `release.yml` run on `main` whose commit passed
+//!   its examples, then `gh run rerun <id> -R inorbithr/sdk --failed`.
 //!
 //! Every tool runs through one [`ArgvRunner`]: [`HostRunner`] starts the program from
 //! the runner's `PATH` directly (no shell) with the allowlisted environment, no standard
@@ -56,6 +66,29 @@ pub(crate) const USER_RESTART: &str = "systemd.user-restart";
 pub(crate) const PRUNE_IMAGES: &str = "docker.prune-images";
 pub(crate) const CANCEL_RUN: &str = "gh.cancel-run";
 pub(crate) const UPGRADE: &str = "iohr.upgrade";
+pub(crate) const PREVIEW_TAKE: &str = "preview.take";
+pub(crate) const ROLL_TASK: &str = "roll.task";
+pub(crate) const SWEEP_TARGETS: &str = "build.sweep-targets";
+pub(crate) const RELEASE_RERUN: &str = "gh.release-rerun";
+
+/// The roll tasks `roll.task` may run, a subset of what `remote-roll.sh` allows.
+pub(crate) const ROLL_TASKS: &[&str] = &[
+    "roll:check",
+    "roll:services",
+    "roll:ui",
+    "roll:running",
+    "roll:restart",
+    "roll:envoy",
+    "db:migrate",
+    "edge:gate-check",
+];
+
+/// The one repository `gh.release-rerun` reaches, and the one workflow it re-runs.
+const RELEASE_REPO: &str = "inorbithr/sdk";
+const RELEASE_WORKFLOW: &str = ".github/workflows/release.yml";
+
+/// The smallest release run id: six digits.
+const MIN_RELEASE_RUN_ID: u64 = 100_000;
 
 /// Namespaces no host action touches: the cluster's own.
 pub(crate) const DENIED_NAMESPACES: &[&str] = &["kube-system", "kube-public", "kube-node-lease"];
@@ -134,6 +167,52 @@ pub(crate) fn is_repo(s: &str) -> bool {
     })
 }
 
+/// A Preview branch: `^(preview-int|feat|fix)/(?!.*\.\.)[a-z0-9][a-z0-9._/-]{0,99}$`.
+pub(crate) fn is_preview_branch(s: &str) -> bool {
+    ["preview-int/", "feat/", "fix/"].iter().any(|prefix| {
+        s.strip_prefix(prefix).is_some_and(|rest| {
+            let b = rest.as_bytes();
+            (1..=100).contains(&b.len())
+                && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+                && b.iter().all(|&c| {
+                    c.is_ascii_lowercase()
+                        || c.is_ascii_digit()
+                        || matches!(c, b'.' | b'_' | b'/' | b'-')
+                })
+                && !rest.contains("..")
+        })
+    })
+}
+
+/// A full commit: `^[0-9a-f]{40}$`.
+pub(crate) fn is_rev(s: &str) -> bool {
+    s.len() == 40
+        && s.bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+fn is_roll_task(s: &str) -> bool {
+    ROLL_TASKS.contains(&s)
+}
+
+/// A roll task's arguments: `^$|^[a-z0-9][a-z0-9-]{0,39}( [a-z0-9][a-z0-9-]{0,39}){0,31}$`,
+/// so no name is read as an option (`--plan`, `--override`).
+pub(crate) fn is_services(s: &str) -> bool {
+    s.is_empty()
+        || (s.split(' ').count() <= 32
+            && s.split(' ').all(|name| {
+                let b = name.as_bytes();
+                (1..=40).contains(&b.len())
+                    && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+                    && b.iter()
+                        .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+            }))
+}
+
+fn is_sweep_mode(s: &str) -> bool {
+    matches!(s, "cap" | "guard")
+}
+
 /// The effect sentence: 1 to 200 characters, no control character.
 fn is_effect(s: &str) -> bool {
     let n = s.chars().count();
@@ -180,6 +259,26 @@ pub(crate) fn effect_of(action: &str, params: &Value) -> Option<String> {
             text("repo")?
         ),
         UPGRADE => "Upgrades iohr on the runner's host to the newest release.".to_owned(),
+        PREVIEW_TAKE => format!(
+            "Takes branch {} into the Preview checkout and checks the Preview app.",
+            text("branch")?
+        ),
+        // Not the services: 32 names of 40 would not fit the sentence's 200 characters.
+        ROLL_TASK => format!(
+            "Runs roll task {} at commit {} on the deploy server.",
+            text("task")?,
+            text("rev")?
+        ),
+        SWEEP_TARGETS => match text("mode")? {
+            "cap" => "Caps every Rust build target on the runner's host.".to_owned(),
+            "guard" => "Sweeps the Rust build targets on the runner's host only where a disk is full enough."
+                .to_owned(),
+            _ => return None,
+        },
+        RELEASE_RERUN => format!(
+            "Re-runs the failed jobs of sdk release run {}.",
+            int("run_id")?
+        ),
         _ => return None,
     })
 }
@@ -278,6 +377,24 @@ pub(crate) fn validate(action: &Value) -> Result<(), String> {
             integer_param(params, "run_id", 1, MAX_RUN_ID)?;
         }
         UPGRADE => closed(params, &[], "/params")?,
+        PREVIEW_TAKE => {
+            closed(params, &["branch"], "/params")?;
+            string_param(params, "branch", is_preview_branch, "a Preview branch")?;
+        }
+        ROLL_TASK => {
+            closed(params, &["rev", "task", "services"], "/params")?;
+            string_param(params, "rev", is_rev, "a full commit")?;
+            string_param(params, "task", is_roll_task, "a roll task of the catalog")?;
+            string_param(params, "services", is_services, "a list of service names")?;
+        }
+        SWEEP_TARGETS => {
+            closed(params, &["mode"], "/params")?;
+            string_param(params, "mode", is_sweep_mode, "cap or guard")?;
+        }
+        RELEASE_RERUN => {
+            closed(params, &["run_id"], "/params")?;
+            integer_param(params, "run_id", MIN_RELEASE_RUN_ID, MAX_RUN_ID)?;
+        }
         _ => return Err("/action: unknown action".to_owned()),
     }
     if effect_of(id, &m["params"]).as_deref() != Some(effect) {
@@ -304,6 +421,18 @@ pub(crate) enum Action {
     CancelRun { repo: String, run_id: u64 },
     /// `iohr.upgrade`.
     Upgrade,
+    /// `preview.take`.
+    PreviewTake { branch: String },
+    /// `roll.task`: `services` space-separated, empty for none.
+    RollTask {
+        rev: String,
+        task: String,
+        services: String,
+    },
+    /// `build.sweep-targets`: `cap` or `guard`.
+    SweepTargets { mode: String },
+    /// `gh.release-rerun`.
+    ReleaseRerun { run_id: u64 },
 }
 
 impl Action {
@@ -316,6 +445,10 @@ impl Action {
             Self::PruneImages { .. } => PRUNE_IMAGES,
             Self::CancelRun { .. } => CANCEL_RUN,
             Self::Upgrade => UPGRADE,
+            Self::PreviewTake { .. } => PREVIEW_TAKE,
+            Self::RollTask { .. } => ROLL_TASK,
+            Self::SweepTargets { .. } => SWEEP_TARGETS,
+            Self::ReleaseRerun { .. } => RELEASE_RERUN,
         }
     }
 
@@ -325,8 +458,11 @@ impl Action {
             Self::DeleteFailedPods { .. } | Self::RolloutRestart { .. } => Tool::Kubectl,
             Self::UserRestart { .. } => Tool::Systemctl,
             Self::PruneImages { .. } => Tool::Docker,
-            Self::CancelRun { .. } => Tool::Gh,
+            Self::CancelRun { .. } | Self::ReleaseRerun { .. } => Tool::Gh,
             Self::Upgrade => Tool::Iohr,
+            Self::PreviewTake { .. } => Tool::Mise,
+            Self::RollTask { .. } => Tool::RemoteRoll,
+            Self::SweepTargets { .. } => Tool::CoreMise,
         }
     }
 }
@@ -377,6 +513,20 @@ pub(crate) fn lookup_on(doc: &Value, os: &str) -> Result<Action, String> {
             run_id: int("run_id")?,
         },
         Some(UPGRADE) => Action::Upgrade,
+        Some(PREVIEW_TAKE) => Action::PreviewTake {
+            branch: text("branch")?,
+        },
+        Some(ROLL_TASK) => Action::RollTask {
+            rev: text("rev")?,
+            task: text("task")?,
+            services: text("services")?,
+        },
+        Some(SWEEP_TARGETS) => Action::SweepTargets {
+            mode: text("mode")?,
+        },
+        Some(RELEASE_RERUN) => Action::ReleaseRerun {
+            run_id: int("run_id")?,
+        },
         _ => return Err("unknown action".to_owned()),
     };
     plan(&action, os)?;
@@ -436,6 +586,12 @@ pub(crate) enum Tool {
     Gh,
     /// This runner's own executable.
     Iohr,
+    /// `mise`, started in the host's home folder: the host's own (global) tasks.
+    Mise,
+    /// `mise`, started in the configured core checkout: core's tasks.
+    CoreMise,
+    /// `~/.inorbit/roll/remote-roll.sh`, the host's one route to the deploy server.
+    RemoteRoll,
 }
 
 impl Tool {
@@ -446,16 +602,21 @@ impl Tool {
             Self::Docker => "docker",
             Self::Gh => "gh",
             Self::Iohr => "iohr",
+            Self::Mise | Self::CoreMise => "mise",
+            Self::RemoteRoll => "remote-roll.sh",
         }
     }
 
     /// How long one call may take: `rollout status` waits [`ROLLOUT_WAIT`] itself, a
-    /// prune or an upgrade may move a lot of data.
+    /// prune or an upgrade may move a lot of data, a sweep walks every build folder and a
+    /// roll task builds and rolls on the server.
     fn timeout(self) -> Duration {
         Duration::from_secs(match self {
             Self::Kubectl => 300,
             Self::Systemctl | Self::Gh => 120,
-            Self::Docker | Self::Iohr => 900,
+            Self::Docker | Self::Iohr | Self::Mise => 900,
+            Self::CoreMise => 1800,
+            Self::RemoteRoll => 3600,
         })
     }
 }
@@ -543,6 +704,60 @@ pub(crate) fn plan(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>
             )]
         }
         Action::Upgrade => vec![(Tool::Iohr, strings(["upgrade"]))],
+        Action::PreviewTake { .. }
+        | Action::RollTask { .. }
+        | Action::SweepTargets { .. }
+        | Action::ReleaseRerun { .. } => return plan_host_task(action),
+    })
+}
+
+/// The calls of the actions that run the host's own scripts and tasks, each param checked
+/// again. `gh.release-rerun` has none here: its last call depends on what the first two
+/// read, so [`carry_out_on`] builds them.
+fn plan_host_task(action: &Action) -> Result<Vec<(Tool, Vec<String>)>, String> {
+    Ok(match action {
+        Action::PreviewTake { branch } => {
+            if !is_preview_branch(branch) {
+                return Err("branch: not a Preview branch".to_owned());
+            }
+            vec![
+                (Tool::Mise, strings(["run", "preview:take", branch])),
+                (Tool::Mise, strings(["run", "preview:up", "--check"])),
+            ]
+        }
+        Action::RollTask {
+            rev,
+            task,
+            services,
+        } => {
+            if !is_rev(rev) {
+                return Err("rev: not a full commit".to_owned());
+            }
+            if !is_roll_task(task) {
+                return Err("task: not a roll task of the catalog".to_owned());
+            }
+            if !is_services(services) {
+                return Err("services: not a list of service names".to_owned());
+            }
+            let mut argv = strings([rev, task]);
+            argv.extend(services.split_whitespace().map(str::to_owned));
+            vec![(Tool::RemoteRoll, argv)]
+        }
+        Action::SweepTargets { mode } => {
+            let task = match mode.as_str() {
+                "cap" => "target:sweep",
+                "guard" => "target:guard",
+                _ => return Err("mode: not cap or guard".to_owned()),
+            };
+            vec![(Tool::CoreMise, strings(["run", task]))]
+        }
+        Action::ReleaseRerun { run_id } => {
+            if !(MIN_RELEASE_RUN_ID..=MAX_RUN_ID).contains(run_id) {
+                return Err("run_id: not a release run id".to_owned());
+            }
+            Vec::new()
+        }
+        _ => return Err("not a host task".to_owned()),
     })
 }
 
@@ -753,27 +968,64 @@ pub(crate) struct HostRunner {
     pub(crate) install_env: Vec<(OsString, OsString)>,
     /// The only units `systemd.user-restart` may restart (the runner's `user_units`).
     pub(crate) user_units: Vec<String>,
+    /// The core checkout `build.sweep-targets` runs in (the runner's `core_checkout`).
+    pub(crate) core_checkout: Option<PathBuf>,
+    /// What `ssh` reads to reach the deploy server and origin (`SSH_AUTH_SOCK`,
+    /// `INORBIT_SSH_HOST`), outside the allowlist; only for the tools that need it.
+    pub(crate) ssh_env: Vec<(OsString, OsString)>,
 }
 
 impl HostRunner {
     /// The tools of this process's host, `kubectl` pinned to the configured cluster,
-    /// `systemctl --user restart` to the listed units.
+    /// `systemctl --user restart` to the listed units, core's tasks to `core_checkout`.
     pub(crate) fn find(
         context: Option<&str>,
         kubeconfig: Option<&str>,
         user_units: &[String],
+        core_checkout: Option<&str>,
     ) -> Self {
-        let install_env = ["IOHR_INSTALL_DIR", "HOMEBREW_PREFIX"]
-            .into_iter()
-            .filter_map(|k| std::env::var_os(k).map(|v| (OsString::from(k), v)))
-            .collect();
+        let pass = |names: &[&str]| -> Vec<(OsString, OsString)> {
+            names
+                .iter()
+                .filter_map(|k| std::env::var_os(k).map(|v| (OsString::from(k), v)))
+                .collect()
+        };
         Self {
             path: std::env::var_os("PATH"),
             env: env::scrub(std::env::vars_os()),
             kube: KubeTarget::new(context, kubeconfig),
             iohr: std::env::current_exe().ok(),
-            install_env,
+            install_env: pass(&["IOHR_INSTALL_DIR", "HOMEBREW_PREFIX"]),
             user_units: user_units.to_vec(),
+            core_checkout: core_checkout.map(PathBuf::from),
+            ssh_env: pass(&["SSH_AUTH_SOCK", "INORBIT_SSH_HOST"]),
+        }
+    }
+
+    /// The host's home folder, from the allowlisted environment.
+    fn home(&self) -> Option<PathBuf> {
+        self.env
+            .iter()
+            .find(|(k, _)| k == "HOME")
+            .map(|(_, v)| PathBuf::from(v))
+            .filter(|h| h.is_absolute())
+    }
+
+    /// The folder `tool` starts in, if it needs one, or why it cannot start.
+    fn folder(&self, tool: Tool) -> Result<Option<PathBuf>, String> {
+        match tool {
+            Tool::Mise | Tool::RemoteRoll => self
+                .home()
+                .map(Some)
+                .ok_or_else(|| "this runner has no home folder".to_owned()),
+            Tool::CoreMise => match &self.core_checkout {
+                None => Err("this runner names no core_checkout, so it sweeps nothing".to_owned()),
+                Some(dir) if dir.is_absolute() && dir.join("mise.toml").is_file() => {
+                    Ok(Some(dir.clone()))
+                }
+                Some(_) => Err("the runner's core_checkout is not a core checkout".to_owned()),
+            },
+            _ => Ok(None),
         }
     }
 
@@ -799,6 +1051,13 @@ impl HostRunner {
                 .iohr
                 .clone()
                 .ok_or_else(|| "this runner cannot tell where its iohr is".to_owned()),
+            Tool::RemoteRoll => self
+                .home()
+                .map(|h| h.join(".inorbit/roll/remote-roll.sh"))
+                .filter(|p| p.is_file())
+                .ok_or_else(|| {
+                    "this runner's host has no ~/.inorbit/roll/remote-roll.sh".to_owned()
+                }),
             _ => provider::find_on_path(tool.name(), self.path.as_ref())
                 .ok_or_else(|| format!("{} is not on this runner's PATH", tool.name())),
         }
@@ -812,14 +1071,18 @@ impl HostRunner {
             .filter(|(k, _)| k != "KUBECONFIG")
             .cloned()
             .collect();
-        match tool {
-            Tool::Gh => {
-                for k in ["GH_PROMPT_DISABLED", "GH_NO_UPDATE_NOTIFIER"] {
-                    env.push((k.into(), "1".into()));
-                }
+        // preview:take pushes and opens pull requests with the host's own sign-ins.
+        if matches!(tool, Tool::Gh | Tool::Mise) {
+            for k in ["GH_PROMPT_DISABLED", "GH_NO_UPDATE_NOTIFIER"] {
+                env.push((k.into(), "1".into()));
             }
+        }
+        match tool {
             Tool::Iohr => env.extend(self.install_env.iter().cloned()),
-            Tool::Kubectl | Tool::Systemctl | Tool::Docker => {}
+            Tool::Mise | Tool::CoreMise | Tool::RemoteRoll => {
+                env.extend(self.ssh_env.iter().cloned());
+            }
+            Tool::Kubectl | Tool::Systemctl | Tool::Docker | Tool::Gh => {}
         }
         env
     }
@@ -831,7 +1094,7 @@ impl ArgvRunner for HostRunner {
         if let (Tool::Kubectl, Err(why)) = (tool, &self.kube) {
             return Some(why.clone());
         }
-        if let Err(why) = self.program(tool) {
+        if let Err(why) = self.program(tool).and_then(|_| self.folder(tool)) {
             return Some(why);
         }
         match action {
@@ -857,6 +1120,9 @@ impl ArgvRunner for HostRunner {
         full.extend_from_slice(argv);
         let name = tool.name();
         let mut c = tokio::process::Command::new(self.program(tool)?);
+        if let Some(dir) = self.folder(tool)? {
+            c.current_dir(dir);
+        }
         c.args(&full)
             .env_clear()
             .envs(self.env_for(tool))
@@ -999,6 +1265,8 @@ pub(crate) async fn carry_out_on(
     let calls = plan(action, os)?;
     let result = if let Action::DeleteFailedPods { namespace } = action {
         delete_failed_pods(namespace.as_deref(), tools).await
+    } else if let Action::ReleaseRerun { run_id } = action {
+        release_rerun(*run_id, tools).await
     } else {
         let mut done = Vec::new();
         for (tool, argv) in &calls {
@@ -1025,7 +1293,7 @@ pub(crate) async fn carry_out_on(
 /// and the tally of all its stdout.
 fn summary(action: &Action, what: &str, tally: &Tally) -> Option<String> {
     match action {
-        Action::DeleteFailedPods { .. } => None,
+        Action::DeleteFailedPods { .. } | Action::ReleaseRerun { .. } => None,
         Action::RolloutRestart {
             namespace,
             deployment,
@@ -1052,7 +1320,124 @@ fn summary(action: &Action, what: &str, tally: &Tally) -> Option<String> {
         } else {
             what.to_owned()
         }),
+        Action::PreviewTake { branch } => Some(if what.is_empty() {
+            format!("preview {branch}: done")
+        } else {
+            what.to_owned()
+        }),
+        Action::RollTask { rev, task, .. } => Some(if what.is_empty() {
+            format!("{task} at {}: done", &rev[..rev.len().min(12)])
+        } else {
+            what.to_owned()
+        }),
+        Action::SweepTargets { mode } => Some(if what.is_empty() {
+            format!("build targets ({mode}): done")
+        } else {
+            what.to_owned()
+        }),
     }
+}
+
+/// `gh api`'s arguments to read one sdk run: workflow file, branch, conclusion, commit.
+pub(crate) fn release_run_argv(run_id: u64) -> Vec<String> {
+    strings([
+        "api",
+        &format!("repos/{RELEASE_REPO}/actions/runs/{run_id}"),
+        "--jq",
+        "[.path, .head_branch, .conclusion, .head_sha] | @tsv",
+    ])
+}
+
+/// `gh api`'s arguments to read the newest `examples-run` status of one sdk commit.
+pub(crate) fn examples_status_argv(sha: &str) -> Vec<String> {
+    strings([
+        "api",
+        &format!("repos/{RELEASE_REPO}/commits/{sha}/statuses"),
+        "--jq",
+        "[.[] | select(.context==\"examples-run\")][0].state // \"missing\"",
+    ])
+}
+
+/// One `gh api` read: what it printed, trimmed, or what it said when it failed.
+async fn gh_read(tools: &impl ArgvRunner, argv: &[String]) -> Result<String, String> {
+    let out = tools.run(Tool::Gh, argv).await?;
+    if out.success {
+        Ok(out.stdout.trim().to_owned())
+    } else {
+        Err(format!("gh api: failed\n{}", said(&out))
+            .trim_end()
+            .to_owned())
+    }
+}
+
+/// A word GitHub answers with (`failure`, `success`), or `unknown` when it is not one, so
+/// a report never repeats other text.
+fn word(s: &str) -> &str {
+    if !s.is_empty() && s.len() <= 32 && s.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+        s
+    } else {
+        "unknown"
+    }
+}
+
+/// `gh.release-rerun`: the checks no schema can make, read at run time: the run is the
+/// release workflow on `main`, it failed, and its commit passed its examples; then the
+/// re-run of its failed jobs. Nothing is re-run when a check fails or cannot be read.
+async fn release_rerun(run_id: u64, tools: &impl ArgvRunner) -> Result<String, String> {
+    let info = gh_read(tools, &release_run_argv(run_id)).await?;
+    let fields: Vec<&str> = info.split('\t').collect();
+    let [path, branch, conclusion, sha] = fields[..] else {
+        return Err(format!(
+            "refused: GitHub did not say run {run_id}'s workflow, branch, conclusion and commit"
+        ));
+    };
+    if path != RELEASE_WORKFLOW {
+        return Err(format!(
+            "refused: run {run_id} is not a {RELEASE_WORKFLOW} run"
+        ));
+    }
+    if branch != "main" {
+        return Err(format!("refused: run {run_id} is not on main"));
+    }
+    if conclusion != "failure" {
+        return Err(format!(
+            "refused: run {run_id} concluded {}, not failure",
+            word(conclusion)
+        ));
+    }
+    if !is_rev(sha) {
+        return Err(format!("refused: GitHub did not say run {run_id}'s commit"));
+    }
+    let state = gh_read(tools, &examples_status_argv(sha)).await?;
+    if state != "success" {
+        return Err(format!(
+            "refused: examples-run on {} is {}; run examples:run and examples:attest first",
+            &sha[..12],
+            word(&state)
+        ));
+    }
+    let run = run_id.to_string();
+    let out = tools
+        .run(
+            Tool::Gh,
+            &strings(["run", "rerun", &run, "-R", RELEASE_REPO, "--failed"]),
+        )
+        .await?;
+    let what = said(&out);
+    if !out.success {
+        return Err(format!("gh run rerun: failed\n{what}")
+            .trim_end()
+            .to_owned());
+    }
+    Ok(format!(
+        "{RELEASE_REPO} release run {run_id} (commit {}, examples-run success): failed jobs re-run requested{}",
+        &sha[..12],
+        if what.is_empty() {
+            String::new()
+        } else {
+            format!("\n{what}")
+        }
+    ))
 }
 
 /// `k8s.delete-failed-pods`: one line per namespace.
@@ -1105,6 +1490,7 @@ async fn delete_failed_pods(
 /// A host whose tools record each call and answer from a script, for tests.
 #[cfg(test)]
 pub(crate) mod testing {
+    use std::collections::VecDeque;
     use std::sync::Mutex;
 
     use super::{Action, ArgvRunner, Output, Tool};
@@ -1121,6 +1507,8 @@ pub(crate) mod testing {
         pub(crate) answer: Option<Output>,
         /// Why this host does not allow any action, asked before it starts.
         pub(crate) not_here: Option<String>,
+        /// What the next calls answer, in order, before any of the above.
+        pub(crate) script: Mutex<VecDeque<Output>>,
     }
 
     impl Fake {
@@ -1149,6 +1537,9 @@ pub(crate) mod testing {
                 return Err(why.clone());
             }
             self.calls.lock().unwrap().push((tool, argv.to_vec()));
+            if let Some(out) = self.script.lock().unwrap().pop_front() {
+                return Ok(out);
+            }
             if tool == Tool::Kubectl && argv[0] == "get" {
                 return Ok(Output::new(true, self.namespaces, ""));
             }
@@ -1176,6 +1567,7 @@ pub(crate) mod testing {
             missing: None,
             answer: None,
             not_here: None,
+            script: Mutex::new(VecDeque::new()),
         }
     }
 }

@@ -584,6 +584,7 @@ async fn approvals_setup(
         set.user_units
             .as_ref()
             .map_or(&[][..], |u| u.value.as_slice()),
+        set.core_checkout.as_ref().map(|c| c.value.as_str()),
     );
     Out::note(&format!(
         "approved runs: on, as {runner_id}, {} device keys pinned{}; user units: {}",
@@ -694,6 +695,7 @@ async fn show_settings(e: &Effective, out: Out) {
     };
     let (kube_context, kube_context_from) = kube(&e.kube_context);
     let (kubeconfig, kubeconfig_from) = kube(&e.kubeconfig);
+    let (core_checkout, core_checkout_from) = kube(&e.core_checkout);
     let (user_units, user_units_from) = e.user_units.as_ref().map_or_else(
         || ("not set".to_owned(), "default".to_owned()),
         |u| (u.value.join(", "), u.source.to_string()),
@@ -712,6 +714,7 @@ async fn show_settings(e: &Effective, out: Out) {
             "upgrade_interval_minutes": { "value": e.upgrade_interval.value.as_secs() / 60, "source": e.upgrade_interval.source.to_string() },
             "upgrade_restart": { "value": e.upgrade_restart.value.as_str(), "source": e.upgrade_restart.source.to_string() },
             "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
+            "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
         }));
         return;
@@ -732,6 +735,11 @@ async fn show_settings(e: &Effective, out: Out) {
         vec!["kube_context".to_owned(), kube_context, kube_context_from],
         vec!["kubeconfig".to_owned(), kubeconfig, kubeconfig_from],
         vec!["user_units".to_owned(), user_units, user_units_from],
+        vec![
+            "core_checkout".to_owned(),
+            core_checkout,
+            core_checkout_from,
+        ],
         vec![
             "auto_upgrade".to_owned(),
             e.auto_upgrade.value.to_string(),
