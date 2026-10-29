@@ -822,3 +822,40 @@ async fn gh_runs_without_prompts_and_without_the_runner_s_token() {
         "{got}"
     );
 }
+
+/// A tool that leaves a child behind: dropping its run (as a timeout does) kills that child too,
+/// because the tool runs in its own process group.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_dropped_run_takes_what_its_tool_started() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let pidfile = dir.path().join("pid");
+    let script = dir.path().join("gh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\n/bin/sleep 30 &\necho $! > '{}'\nwait\n",
+            pidfile.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let k = host(dir.path(), Err("no cluster".to_owned()));
+    let run = tokio::spawn(async move { k.run(Tool::Gh, &strs(&["run", "list"])).await });
+    let mut pid = None;
+    for _ in 0..100 {
+        if let Some(p) = std::fs::read_to_string(&pidfile)
+            .ok()
+            .and_then(|t| t.trim().parse::<i32>().ok())
+        {
+            pid = Some(p);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let pid = pid.unwrap();
+    run.abort();
+    let _ = run.await;
+    assert!(crate::runner::exec::process_gone(pid).await);
+}

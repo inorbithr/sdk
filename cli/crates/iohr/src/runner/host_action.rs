@@ -44,6 +44,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::env;
+use super::exec::GroupGuard;
 use super::provider;
 
 /// The schema a run's `schema_id` names.
@@ -797,16 +798,21 @@ impl ArgvRunner for HostRunner {
         };
         full.extend_from_slice(argv);
         let name = tool.name();
-        let mut child = tokio::process::Command::new(self.program(tool)?)
-            .args(&full)
+        let mut c = tokio::process::Command::new(self.program(tool)?);
+        c.args(&full)
             .env_clear()
             .envs(self.env_for(tool))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        // Its own process group, so a timeout takes what the tool started with it.
+        #[cfg(unix)]
+        c.process_group(0);
+        let mut child = c
             .spawn()
             .map_err(|e| format!("{name} did not start: {}", e.kind()))?;
+        let mut group = GroupGuard::new(child.id());
         let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
         let all = async {
             let (out, err, status) = tokio::join!(drain(stdout), drain(stderr), child.wait());
@@ -816,6 +822,8 @@ impl ArgvRunner for HostRunner {
             .await
             .map_err(|_| format!("{name} took over {}s", tool.timeout().as_secs()))?
             .map_err(|e| format!("{name} failed: {}", e.kind()))?;
+        // Reaped: its pid may be reused, so nothing is left to kill.
+        group.disarm();
         Ok(Output {
             success: status.success(),
             stdout,
