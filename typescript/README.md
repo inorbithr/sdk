@@ -18,18 +18,11 @@ const { value: me } = await api.me();
 const { value: page } = await api.radar.listDigests({ limit: 3 });
 ```
 
-`load` finds credentials the way the [configuration contract](../docs/config.md) says,
-the first source that has any winning:
-
-1. code: `Public.load({ token })`, `{ keyId, keySecret, scopes }`, `{ tokenFile }` or a
-   `tokenProvider`;
-2. the environment: `INORBIT_TOKEN`, `INORBIT_TOKEN_FILE`, or `INORBIT_KEY_ID` with
-   `INORBIT_KEY_SECRET` (or `INORBIT_KEY_SECRET_FILE`, read before every token exchange)
-   and `INORBIT_SCOPES`;
-3. workload identity: reserved until the platform offers it;
-4. the profile's table in the `iohr` config file (`token_file`, or `key_id` with
-   `key_secret_file`);
-5. the developer's `iohr login`, through `iohr auth token` (Node, Deno and Bun).
+`load` takes each setting from code, then the environment, then the config file, then its
+default. In code, give a credential with `Public.load({ token })`, `{ keyId, keySecret, scopes }`,
+`{ tokenFile }` or a `tokenProvider`. Credentials come from the first source that has any: code, the environment, the `iohr`
+config file's profile, then your `iohr login` (`iohr auth token`; Node, Deno and Bun); the chain and every
+variable are in [docs/config.md](../docs/config.md) (section 5.1).
 
 After `iohr login`, a script needs nothing else. In production, pin the source:
 `INORBIT_CREDENTIAL_SOURCES=env`. Every other setting (timeouts, retries, proxy, CA

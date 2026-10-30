@@ -5,7 +5,7 @@ macOS, tvOS, watchOS, visionOS and server-side Swift apps. `async`/`await`, `Cod
 models, `URLSession` (FoundationNetworking on Linux), and no other dependency.
 
 Status: the first runtime, not released yet. It passes the shared conformance cases for
-authentication, errors, operations, retries and server-sent events (29 of 52). Configuration
+authentication, errors, operations, retries and server-sent events (30 of 53). Configuration
 files, the middleware pipeline, the TLS and proxy options and the `/v1/ws` socket come
 next ([#172](https://github.com/inorbithr/sdk/issues/172)).
 
@@ -47,7 +47,7 @@ do {
 ```
 
 `Client<Public>.fromEnv()` reads `INORBIT_TOKEN`, or `INORBIT_KEY_ID`,
-`INORBIT_KEY_SECRET` and `INORBIT_SCOPES`, and `INORBIT_BASE_URL` when set. From code,
+`INORBIT_KEY_SECRET` and `INORBIT_SCOPES`, and `INORBIT_BASE_URL` when set; it reads the environment only, with no config file yet. From code,
 `Client<Public>(ClientOptions(...))` takes a `token`, a key (`keyId`, `keySecret`,
 `scopes`), or a `tokenProvider` of your own: a type with one method,
 `token(refresh:) async throws -> Secret`, for a token from a PKCE sign-in or from your

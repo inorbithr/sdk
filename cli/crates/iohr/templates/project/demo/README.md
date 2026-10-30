@@ -44,6 +44,7 @@ agrees to when the project is installed, on this Mac or anywhere else.
 
 ## Next
 
-Code it in the app's Code page (it is an allowed repository, in its own sandbox). When it is
-good: `iohr ext version`, `pack`, `sign`, `install --target this-mac` (PRD 0084 slice 2), and one
-day publish it privately to the Marketplace from the app.
+Code it in the app's Code page (it is an allowed repository, in its own sandbox). Packaging
+and installing it on this Mac (`iohr ext version`, `pack`, `sign`, `install --target this-mac`,
+PRD 0084 slice 2) and publishing it privately to the Marketplace from the app are planned, not
+built yet.
