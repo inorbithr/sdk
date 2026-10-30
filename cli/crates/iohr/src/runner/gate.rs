@@ -394,6 +394,7 @@ async fn run(
 pub(crate) mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
+    use std::fmt::Write as _;
     use std::path::PathBuf;
 
     pub(crate) fn sh(dir: &Path, args: &[&str]) -> String {
@@ -551,7 +552,7 @@ pub(crate) mod tests {
         );
         let mut all = String::new();
         for i in 1..=2000 {
-            all.push_str(&format!("line-{i}\n"));
+            writeln!(all, "line-{i}").unwrap();
         }
         assert_eq!(got.output_sha256, hex(&Sha256::digest(all.as_bytes())));
     }
