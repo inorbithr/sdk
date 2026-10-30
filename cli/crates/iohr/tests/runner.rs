@@ -1314,6 +1314,102 @@ async fn gate_report_needs_the_runner_scopes_and_a_runner_key() {
     assert!(text(&o).contains("iohr runner register"), "{}", text(&o));
 }
 
+/// `runner run-key --show` only reads: with no key it fails and makes none, with one it
+/// prints the public key and the runner id the service enrolled it under, filing nothing.
+#[tokio::test]
+async fn run_key_show_reads_the_key_and_makes_and_asks_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    login(&server, dir.path(), &token_with(&["identity:read"])).await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show"],
+    ));
+    assert_eq!(o.status.code(), Some(1), "no key yet: {}", text(&o));
+    assert!(text(&o).contains("no run key"), "{}", text(&o));
+
+    // Make the key (an ask is filed, which this test then counts).
+    let ask = "apr_01M5Z1KKYQ16SMN4XFYS5K5RFA";
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": []})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/approvals"))
+        .respond_with(move |r: &wiremock::Request| {
+            let b: Value = serde_json::from_slice(&r.body).unwrap();
+            ResponseTemplate::new(200).set_body_json(json!({"approval": {
+                "approval_id": ask, "status": "pending", "payload": b["payload"],
+            }}))
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/approvals/{ask}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"approval": {"approval_id": ask, "status": "pending"}})),
+        )
+        .mount(&server)
+        .await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--json", "--wait", "0"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let made: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let public = made["public_key"].as_str().unwrap().to_owned();
+    let asks = bodies(&server, "/v1/approvals").await.len();
+
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let shown: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(shown["public_key"], public.as_str(), "the same key");
+    assert_eq!(shown["runner_id"], Value::Null, "not enrolled");
+
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "runners": [{"runner_id": "arn_1", "public_key": public, "label": "mac"}]
+        })))
+        .mount(&server)
+        .await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let shown: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(shown["runner_id"], "arn_1");
+    assert_eq!(shown["label"], "mac");
+    assert_eq!(asks, 1, "only the making filed an ask");
+    assert!(
+        bodies(&server, "/v1/approvals").await.is_empty(),
+        "--show files nothing"
+    );
+
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show", "--label", "x"],
+    ));
+    assert_eq!(
+        o.status.code(),
+        Some(2),
+        "--show conflicts with --label: {}",
+        text(&o)
+    );
+}
+
 /// `runner run-key` makes the approvals key once, keeps it in the profile's store, needs
 /// no coordinator scope, and enrols it with a device's proof plus a P-256 signature of
 /// possession over the enrolment message.
