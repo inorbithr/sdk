@@ -549,7 +549,10 @@ pub(crate) mod tests {
             first.starts_with("line-") && first[5..].parse::<u32>().is_ok(),
             "{first}"
         );
-        let all: String = (1..=2000).map(|i| format!("line-{i}\n")).collect();
+        let mut all = String::new();
+        for i in 1..=2000 {
+            all.push_str(&format!("line-{i}\n"));
+        }
         assert_eq!(got.output_sha256, hex(&Sha256::digest(all.as_bytes())));
     }
 
