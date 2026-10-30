@@ -430,9 +430,39 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             proof,
             label,
             wait,
+            show,
             account,
         } => {
             let account = resolve_account(&s, account.account)?;
+            if show {
+                // Read only: no key is made and no ask is filed.
+                let key = run_key(&ctx, &s, &account, false).await?.ok_or_else(|| {
+                    Error::Failed("this machine has no run key (`iohr runner run-key`)".into())
+                })?;
+                let public = key.public_key();
+                let svc = HttpService::new(&s.api, account.clone(), None);
+                let runners = svc.approval_runners().await?;
+                let found = approvals::enrolled(&runners, &public);
+                let field = |k: &str| {
+                    found
+                        .and_then(|r| r.get(k))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                };
+                let (id, label) = (field("runner_id"), field("label"));
+                if out.json {
+                    Out::print_json(&serde_json::json!({
+                        "public_key": public, "runner_id": id, "label": label,
+                    }));
+                    return Ok(());
+                }
+                Out::pairs(&[
+                    ("public_key", public),
+                    ("enrolled", id.unwrap_or_else(|| "no".to_owned())),
+                    ("label", label.unwrap_or_default()),
+                ]);
+                return Ok(());
+            }
             let key = run_key(&ctx, &s, &account, true)
                 .await?
                 .ok_or_else(|| Error::Failed("no run key could be made".into()))?;
