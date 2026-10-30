@@ -1,27 +1,24 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.png">
-    <img alt="sdk: SDKs for the InOrbit API: Rust, TypeScript, Python and Go, with C# and Java from source. (live)" src=".github/assets/hero-light.png" width="100%">
+    <img alt="sdk: the iohr command line and six SDKs for the InOrbit API: Rust, TypeScript, Python, Go, C# and Java" src=".github/assets/hero-light.png" width="100%">
   </picture>
 </p>
-
-<p align="center">SDKs and developer tooling for the InOrbit platform.</p>
 
 # InOrbit SDK
 
 The `iohr` command line and the official client libraries for the
-[InOrbit API](https://docs.inorbit.hr) in Rust, TypeScript, Go, Python, C#, Java and Swift.
+[InOrbit API](https://docs.inorbit.hr). Use them to call InOrbit from your own code and
+pipelines. Everything here is pre-1.0: `iohr` ships as a pre-release.
 
-The repository holds two things: the `iohr` command line, released as a pre-release,
-and seven client libraries. Each library is a hand-written runtime plus an API surface that
-`iohr sdk generate` writes, cut to what your credentials may call
-([ADR 0011](docs/adr/0011-runtime-and-surface.md)). The libraries pass the shared conformance
-suite, streams included (server-sent events or one `/v1/ws` socket, [design.md](docs/design.md)
-section 7). Rust, TypeScript, Python and Go are on their registries. C# and Java are not
-on NuGet or Maven Central yet: build them from source until their registry releases
-([roadmap](docs/roadmap.md), M4b). Swift is the newest: a SwiftPM package at this
-repository's root, not released yet, passing the conformance cases for authentication,
-errors, operations, retries and server-sent events ([swift/README.md](swift/README.md)).
+Each library is a hand-written runtime plus an API surface that `iohr sdk generate` writes,
+cut to what your credentials may call ([ADR 0011](docs/adr/0011-runtime-and-surface.md)).
+The released libraries pass the shared conformance suite, streams included (server-sent events or one
+`/v1/ws` socket, [design.md](docs/design.md) section 7).
+
+- On their registries: Rust, TypeScript, Python and Go.
+- Built from source until their registry releases: C# and Java ([roadmap](docs/roadmap.md), M4b).
+- Not released yet: Swift (a SwiftPM package at this repository's root, [swift/README.md](swift/README.md)) and Dart (the contract and its checker so far).
 
 The versions below are read live from each registry, or from the repository's release
 tags where there is no registry release, so the table does not go stale between releases:
@@ -134,7 +131,8 @@ See [docs/design.md](docs/design.md) for the library design.
 
 ## Security
 
-- Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
+- Report vulnerabilities privately: [SECURITY.md](SECURITY.md), or the contact in
+  [security.txt](https://inorbit.hr/.well-known/security.txt).
 - Supported versions: [SUPPORT.md](SUPPORT.md). Before 1.0 only the latest release gets
   fixes; the security support period starts with 1.0.
 - Requirements, threat model, controls and how to verify releases:
@@ -142,7 +140,7 @@ See [docs/design.md](docs/design.md) for the library design.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
