@@ -16,7 +16,7 @@ Edition 2024, Rust 1.94 or later.
 
 ## First call
 
-`Client::load()` finds its configuration the way the other five SDKs do: code first,
+`Client::load()` finds its configuration the way the other SDKs do: code first,
 then `INORBIT_*` variables, then the config file `iohr login` writes, then defaults, each
 setting on its own ([docs/config.md](../docs/config.md)). Credentials come from the first
 source that has any: code, the environment (`INORBIT_TOKEN`, `INORBIT_TOKEN_FILE`, or
