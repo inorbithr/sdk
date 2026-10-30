@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.1.0-alpha.29](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.28...iohr/v0.1.0-alpha.29) (2026-10-29)
+
+
+### Features
+
+* **cli:** add preview.take, roll.task, build.sweep-targets and gh.release-rerun host actions ([#316](https://github.com/inorbithr/sdk/issues/316)) ([e8c294f](https://github.com/inorbithr/sdk/commit/e8c294fba59f8abef777f84c4ffcdc6e033bba1b))
+* **cli:** run five more host actions through one argv runner ([#306](https://github.com/inorbithr/sdk/issues/306)) ([06d7d3e](https://github.com/inorbithr/sdk/commit/06d7d3ee02376b6478429a45894075f4d2261469))
+* **cli:** the runner upgrades itself and restarts ([#309](https://github.com/inorbithr/sdk/issues/309)) ([8f8b69a](https://github.com/inorbithr/sdk/commit/8f8b69a525062ca7e33f9499530bee3c1c42664d))
+
+
+### Bug fixes
+
+* **cli:** check the sysctl path as POSIX so the test passes on Windows ([#315](https://github.com/inorbithr/sdk/issues/315)) ([7c4e5ee](https://github.com/inorbithr/sdk/commit/7c4e5ee4003784404ab6a1cafa82346ff9d4d097))
+* **cli:** read macOS sysctl by absolute path so the Mac runner reports memory and load ([#314](https://github.com/inorbithr/sdk/issues/314)) ([ab2923c](https://github.com/inorbithr/sdk/commit/ab2923c91c336967ab16736a683a417f4764aa5e))
+* **cli:** settings tests use a platform-absolute path ([#317](https://github.com/inorbithr/sdk/issues/317)) ([636d33e](https://github.com/inorbithr/sdk/commit/636d33e4a1ad19db8ab86195ebe8a208d6f5ced6))
+* **runner:** settings tests use a platform-absolute path ([636d33e](https://github.com/inorbithr/sdk/commit/636d33e4a1ad19db8ab86195ebe8a208d6f5ced6))
+
+## [0.1.0-alpha.28](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.27...iohr/v0.1.0-alpha.28) (2026-10-28)
+
+
+### Features
+
+* **cli:** the runner reports its cores, memory, disks and load on every beat ([#305](https://github.com/inorbithr/sdk/issues/305)) ([fc1c390](https://github.com/inorbithr/sdk/commit/fc1c39085dbae82fbeec4c7bea22d0570d5abda6))
+
+
+### Bug fixes
+
+* **cli:** the host probe test runs only where /proc or sysctl exist ([#308](https://github.com/inorbithr/sdk/issues/308)) ([5e4590f](https://github.com/inorbithr/sdk/commit/5e4590ff5375a5f34453258e5ad0a093d183c965))
+* **cli:** upgrade skips a release whose files are not uploaded yet ([#303](https://github.com/inorbithr/sdk/issues/303)) ([b0b7beb](https://github.com/inorbithr/sdk/commit/b0b7beb26464ef7c8cbe471880415b7c152b86f8))
+
+## [0.1.0-alpha.27](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.26...iohr/v0.1.0-alpha.27) (2026-10-28)
+
+
+### Features
+
+* **cli:** enrol the run key through an ask approved on the phone ([#295](https://github.com/inorbithr/sdk/issues/295)) ([4be4686](https://github.com/inorbithr/sdk/commit/4be4686431c0750a52eef342c56c5a39fbba5c1b))
+* **cli:** sign in on the account you chose or made your default ([#299](https://github.com/inorbithr/sdk/issues/299)) ([5a4bc6d](https://github.com/inorbithr/sdk/commit/5a4bc6d323e0184807d1a840905105c19ab28ba5))
+
+
+### Bug fixes
+
+* **cli:** never title a runner PR from the status line; derive a Conventional Commit title and repair cut ones ([#283](https://github.com/inorbithr/sdk/issues/283)) ([3bf04f4](https://github.com/inorbithr/sdk/commit/3bf04f4df08989f18c725c7b457adfc6a2b6a6dd))
+* **cli:** runner gate check fetches main with the lease's token ([#302](https://github.com/inorbithr/sdk/issues/302)) ([3ad0655](https://github.com/inorbithr/sdk/commit/3ad06556e668f68b13eb0c6873a13c401bbaaa0c))
+
 ## [0.1.0-alpha.26](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.25...iohr/v0.1.0-alpha.26) (2026-10-27)
 
 

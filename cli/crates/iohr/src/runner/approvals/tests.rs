@@ -223,6 +223,9 @@ struct Ask<'a> {
     runner_id: &'a str,
     runner_key: Option<String>,
     signer: Option<&'a RunKey>,
+    /// The run's own `effect`: a class, `local_write` as core files it unless a test says
+    /// otherwise.
+    effect: &'a str,
 }
 
 /// A random nonce per name and test thread: the same name gives the same nonce within one test
@@ -250,6 +253,7 @@ fn ask<'a>(id: &'a str, nonce: &'a str) -> Ask<'a> {
         runner_id: RUNNER,
         runner_key: None,
         signer: None,
+        effect: "local_write",
     }
 }
 
@@ -261,7 +265,7 @@ fn approval(w: &World, a: Ask<'_>) -> Value {
         "cmd": id_word,
         "argv": [id_word],
         "script_sha256": payload_digest(&a.action),
-        "effect": "remote",
+        "effect": a.effect,
         "runner_id": a.runner_id,
         "runner_public_key": a.runner_key.unwrap_or_else(|| w.run.public_key()),
         "expires_at": a.expires_at,
@@ -351,8 +355,12 @@ fn asks(w: &World, seen: Seen, kubectl: Option<Fake>) -> Asks<Fake> {
         runner_public_key: w.run.public_key(),
     };
     let key = RunKey::from_pkcs8(&w.run_doc).unwrap();
-    let kubectl = kubectl.ok_or_else(|| "kubectl is not on this runner's PATH".to_owned());
-    Asks::with_clock(key, pin, keys, seen, kubectl, || NOW)
+    let tools = kubectl.unwrap_or_else(|| {
+        let mut f = fake("", false);
+        f.missing = Some("kubectl is not on this runner's PATH".to_owned());
+        f
+    });
+    Asks::with_clock(key, pin, keys, seen, tools, || NOW)
 }
 
 /// Whether `body` is signed by the world's run key over core's `run_report` message.
@@ -413,10 +421,13 @@ async fn an_approved_action_is_started_carried_out_and_done() {
         a["payload_sha256"].as_str().unwrap()
     );
     assert!(reports[1].1.get("observed").is_none());
-    let calls = asks.kubectl.as_ref().unwrap().calls.lock().unwrap().clone();
+    let calls = asks.tools.calls();
     assert_eq!(
         calls,
-        [host_action::delete_failed_pods_argv("example").unwrap()]
+        [(
+            host_action::Tool::Kubectl,
+            host_action::delete_failed_pods_argv("example").unwrap()
+        )]
     );
     // A second poll that still lists it reports nothing more.
     asks.tick(&svc, &|_| {}).await.unwrap();
@@ -452,16 +463,7 @@ async fn a_replayed_nonce_runs_nothing() {
         [(ID2.into(), "failed".into()), (ID1.into(), "failed".into())]
     );
     assert!(again.note(0).starts_with("refused (replay)"));
-    assert!(
-        asks2
-            .kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks2.tools.ran_nothing());
 }
 
 async fn refused_with(w: &World, a: Value, label: &str) {
@@ -474,16 +476,7 @@ async fn refused_with(w: &World, a: Value, label: &str) {
     assert!(note.starts_with(&format!("refused ({label})")), "{note}");
     let body = svc.reports.lock().unwrap()[0].1.clone();
     assert!(signed(w, &svc.approvals[0], &body));
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty(),
-        "{label}: something ran"
-    );
+    assert!(asks.tools.ran_nothing(), "{label}: something ran");
 }
 
 #[tokio::test]
@@ -496,15 +489,25 @@ async fn an_unknown_action_is_refused_and_nothing_runs() {
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
     assert!(svc.note(0).contains("unknown action"), "{}", svc.note(0));
+    assert!(asks.tools.ran_nothing());
+}
+
+#[tokio::test]
+async fn an_action_this_runner_does_not_allow_is_refused_before_anything_starts() {
+    let w = world();
+    let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
+    let mut tools = fake("default", false);
+    tools.not_here = Some("the unit is not in this runner's user_units".to_owned());
+    let mut asks = asks(&w, Seen::default(), Some(tools));
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(t.refused, 1);
+    assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
+    let note = svc.note(0);
     assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
+        note.starts_with("refused (not_allowed_here)") && note.contains("user_units"),
+        "{note}"
     );
+    assert!(asks.tools.ran_nothing());
 }
 
 #[tokio::test]
@@ -514,6 +517,71 @@ async fn a_cluster_namespace_is_refused_before_anything_starts() {
         let mut a = ask(ID1, nonce("nonce-1"));
         a.action = action(&json!({ "namespace": ns }));
         refused_with(&w, approval(&w, a), "schema_invalid").await;
+    }
+}
+
+#[tokio::test]
+async fn a_run_whose_effect_is_not_its_sentence_is_refused_before_anything_starts() {
+    let w = world();
+    // Signed and hashed correctly, params valid, but the words the owner saw are not the
+    // catalog's sentence for what would run.
+    let mut a = ask(ID1, nonce("nonce-1"));
+    a.action["effect"] = json!("Does one thing on the runner's host.");
+    refused_with(&w, approval(&w, a), "schema_invalid").await;
+
+    // The same words for other params: the sentence says one namespace, the run another.
+    let mut b = ask(ID1, nonce("nonce-1"));
+    b.action["params"] = json!({ "namespace": "other" });
+    refused_with(&w, approval(&w, b), "schema_invalid").await;
+}
+
+/// A run as core's coordinator files it (`host_action_ask.rs`): the run's own `effect` is the
+/// class `local_write` (`approvals.proto`, `Run.effect`), the action's is the catalogue's
+/// sentence from `effect_of`. It is accepted and carried out.
+#[tokio::test]
+async fn a_run_as_core_files_it_is_accepted() {
+    let w = world();
+    let a = ask(ID1, nonce("nonce-1"));
+    assert_eq!(
+        a.action["effect"],
+        host_action::effect_of("k8s.delete-failed-pods", &json!({ "namespace": "example" }))
+            .unwrap()
+    );
+    let run = approval(&w, a);
+    assert_eq!(run["payload"]["run"]["effect"], "local_write");
+    let svc = Mock::with(vec![run]);
+    let mut asks = asks(&w, Seen::default(), Some(fake("default", false)));
+    let t = asks.tick(&svc, &|_| {}).await.unwrap();
+    assert_eq!(t.refused, 0);
+    assert!(!asks.tools.ran_nothing());
+}
+
+/// The run's own `effect` is a class, never a sentence: a sentence there (the action's own,
+/// or any other) is refused and nothing runs, as is a class that does not exist.
+#[tokio::test]
+async fn a_run_whose_own_effect_is_not_a_class_is_refused_before_anything_starts() {
+    let w = world();
+    for effect in [
+        "Deletes every failed pod in namespace example.",
+        "Deletes every failed pod in every namespace.",
+        "Does one thing on the runner's host.",
+        "local",
+        "",
+    ] {
+        let mut a = ask(ID1, nonce("nonce-1"));
+        a.effect = effect;
+        refused_with(&w, approval(&w, a), "schema_invalid").await;
+    }
+    for effect in ["read_only", "local_write", "remote", "production"] {
+        let mut a = ask(ID1, nonce("nonce-1"));
+        a.effect = effect;
+        let svc = Mock::with(vec![approval(&w, a)]);
+        let mut asks = asks(&w, Seen::default(), Some(fake("default", false)));
+        assert_eq!(
+            asks.tick(&svc, &|_| {}).await.unwrap().refused,
+            0,
+            "{effect}"
+        );
     }
 }
 
@@ -534,7 +602,7 @@ async fn each_refusal_reports_failed_and_runs_nothing() {
     refused_with(&w, approval(&w, forged), "bad_signature").await;
 
     let mut tampered = approval(&w, ask(ID1, nonce("nonce-1")));
-    tampered["payload"]["run"]["effect"] = json!("local");
+    tampered["payload"]["run"]["effect"] = json!("Deletes every failed pod in every namespace.");
     refused_with(&w, tampered, "hash_mismatch").await;
 
     let mut by_service = approval(&w, ask(ID1, nonce("nonce-1")));
@@ -567,15 +635,7 @@ async fn a_start_the_service_did_not_take_runs_nothing_and_is_tried_again() {
     let mut asks = asks(&w, Seen::default(), Some(fake("", false)));
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps(), Vec::<(String, String)>::new());
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks.tools.ran_nothing());
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(
         svc.steps(),
@@ -789,25 +849,13 @@ async fn the_decision_is_recorded_before_started_is_reported() {
         [(ID1.into(), "started".into()), (ID1.into(), "done".into())]
     );
     assert_eq!(seen_lines(&path).len(), 1);
-    assert_eq!(
-        asks.kubectl.as_ref().unwrap().calls.lock().unwrap().len(),
-        1
-    );
+    assert_eq!(asks.tools.calls().len(), 1);
     // A new process after a restart finds it recorded and runs nothing.
     let svc2 = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks2 = asks_with(&w, &path);
     let t = asks2.tick(&svc2, &|_| {}).await.unwrap();
     assert_eq!(t.refused, 1);
-    assert!(
-        asks2
-            .kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks2.tools.ran_nothing());
 }
 
 fn asks_with(w: &World, path: &std::path::Path) -> Asks<Fake> {
@@ -829,15 +877,7 @@ async fn a_record_that_cannot_be_written_runs_nothing_and_says_so() {
     assert_eq!(t.failed, 1);
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
     assert!(svc.note(0).contains("nothing was run"));
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks.tools.ran_nothing());
 }
 
 #[test]
@@ -872,15 +912,7 @@ async fn a_replay_the_load_missed_is_caught_under_the_lock() {
     assert_eq!(t.refused, 1);
     assert_eq!(svc.steps(), [(ID1.into(), "failed".into())]);
     assert!(svc.note(0).starts_with("refused (replay)"));
-    assert!(
-        asks.kubectl
-            .as_ref()
-            .unwrap()
-            .calls
-            .lock()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(asks.tools.ran_nothing());
 }
 
 #[tokio::test]
@@ -888,7 +920,7 @@ async fn an_unconfigured_cluster_runs_nothing() {
     let w = world();
     let svc = Mock::with(vec![approval(&w, ask(ID1, nonce("nonce-1")))]);
     let mut asks = asks(&w, Seen::default(), None);
-    asks.kubectl = Err(host_action::KubeTarget::new(None, None).unwrap_err());
+    asks.tools.missing = Some(host_action::KubeTarget::new(None, None).unwrap_err());
     asks.tick(&svc, &|_| {}).await.unwrap();
     assert_eq!(svc.steps().last().unwrap().1, "failed");
     assert!(svc.note(1).contains("no kube context is configured"));

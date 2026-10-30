@@ -9,6 +9,7 @@ use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Duration;
 
+use semver::Version;
 use tokio::sync::watch;
 
 use crate::Env;
@@ -18,26 +19,37 @@ use crate::error::Error;
 use crate::output::Out;
 use crate::runner::approvals::{self, enrol};
 use crate::runner::claude;
+use crate::runner::drain::Drain;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
-use crate::runner::host_action::HostKubectl;
+use crate::runner::host_action::HostRunner;
 use crate::runner::provider::{self, AuthState};
-use crate::runner::run_loop::{GateCheck, LoopConfig, run_loop};
+use crate::runner::run_loop::{self, GateCheck, LoopConfig, run_loop};
+use crate::runner::self_upgrade::{
+    DRAIN_LIMIT, ExecRestarter, FileLedger, Outcome, Policy, RealSource, Upgrader,
+};
 use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
 use crate::runner::settings::{self, BuildFloor, Declared, Effective, Flags};
 use crate::runner::signing::{self, RunKey, Signer};
+use crate::runner::supervisor::{self, Surroundings};
 use crate::runner::workspace::Workspaces;
 use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
 pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> Result<(), Error> {
     // Reads only config.toml: no sign-in needed.
-    if let RunnerCommand::Config(RunnerConfigCommand::Show { capacity, kinds }) = cmd {
+    if let RunnerCommand::Config(RunnerConfigCommand::Show {
+        capacity,
+        kinds,
+        no_auto_upgrade,
+    }) = cmd
+    {
         let ctx = Ctx::load(g)?;
         let profile = run_profile(g, env, &ctx);
         let flags = Flags {
             capacity,
             kinds,
+            no_auto_upgrade,
             ..Flags::default()
         };
         let e = effective(&ctx.config, profile.as_ref(), &flags)?;
@@ -191,6 +203,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             max_beats,
             capacity,
             kinds,
+            no_auto_upgrade,
             account,
         } => {
             let account = resolve_account(&s, account.account)?;
@@ -198,6 +211,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let flags = Flags {
                 capacity,
                 kinds,
+                no_auto_upgrade,
                 ..Flags::default()
             };
             let set = effective(&ctx.config, s.profile.as_ref(), &flags)?;
@@ -225,9 +239,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             }
             exec.workdir = ctx.dir.join("runner").join("coordinate");
             let (tx, rx) = watch::channel(false);
+            let tx = Arc::new(tx);
+            let on_ctrl_c = tx.clone();
             tokio::spawn(async move {
                 let _ = tokio::signal::ctrl_c().await;
-                let _ = tx.send(true);
+                let _ = on_ctrl_c.send(true);
             });
             let declared = Declared::of(&set);
             let at_once = declared
@@ -241,14 +257,20 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 declared.kinds.join(", ")
             ));
             let (declare, declared) = watch::channel(declared);
-            reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare);
+            let (policy, policy_rx) = watch::channel(Policy::of(&set));
+            reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare, policy);
+            // One drain: the turn loop and the approved-run poller take no new work while
+            // an upgrade is waiting to install, and say when nothing is left running.
+            let drain = Arc::new(Drain::default());
             let cfg = LoopConfig {
+                drain: Some(drain.clone()),
                 interval: interval.map(Duration::from_secs),
                 max_beats,
                 // What it registered with, until a heartbeat declares another.
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
+                report_host: true,
                 gate: Some(GateCheck {
                     // The pack names the checkout relative to the turns' working directory.
                     workdir: exec.workdir.clone(),
@@ -262,7 +284,47 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             // Approved pinned runs (RFC 0153), beside the turns, when this machine is set
             // up for them; stopped once the turn loop ends.
             let mut asks = approvals_setup(&ctx, &s, &svc, &account, &set).await;
+            if let Some(a) = asks.as_mut() {
+                a.drain = Some(drain.clone());
+            }
             let (stop_asks, asks_stopped) = watch::channel(false);
+            let upgrader = Version::parse(env!("CARGO_PKG_VERSION")).ok().map(|current| {
+                let supervisor = supervisor::detect(&Surroundings::from_process());
+                Out::note(&format!(
+                    "auto-upgrade is {} ({}), looking every {} minutes, restart {} under {supervisor}",
+                    if set.auto_upgrade.value { "on" } else { "off" },
+                    set.auto_upgrade.source,
+                    set.upgrade_interval.value.as_secs() / 60,
+                    set.upgrade_restart.value.as_str(),
+                ));
+                Upgrader {
+                    source: RealSource,
+                    ledger: FileLedger {
+                        path: ctx.dir.join("runner").join("last-upgrade"),
+                    },
+                    restarter: ExecRestarter,
+                    supervisor,
+                    current,
+                    policy: policy_rx,
+                    drain: drain.clone(),
+                    drain_limit: DRAIN_LIMIT,
+                    jitter: run_loop::jitter,
+                }
+            });
+            let upgrade_stopped = asks_stopped.clone();
+            let renewal = async {
+                match upgrader {
+                    Some(u) => {
+                        let out = u.run(upgrade_stopped, &Out::note).await;
+                        if out == Outcome::Exit {
+                            // The turn loop ends; main exits with the restart code.
+                            let _ = tx.send(true);
+                        }
+                        out
+                    }
+                    None => Outcome::Stopped,
+                }
+            };
             let turns = async {
                 let ended = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
                 let _ = stop_asks.send(true);
@@ -273,11 +335,15 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     a.serve(&svc, asks_stopped, &Out::note).await;
                 }
             };
-            let ((end, stats), ()) = tokio::join!(turns, approved);
+            let ((end, stats), (), renewed) = tokio::join!(turns, approved, renewal);
             Out::note(&format!(
                 "stopped ({end:?}): {} heartbeats, {} failed, {} leases accepted, {} turns, {} replies delivered",
                 stats.beats, stats.failures, stats.accepted, stats.turns, stats.reported
             ));
+            if renewed == Outcome::Exit {
+                // A new iohr is installed: the supervisor starts it.
+                return Err(Error::Restart);
+            }
             Ok(())
         }
         RunnerCommand::GateReport {
@@ -308,9 +374,15 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             })?;
             let parent: Vec<(OsString, OsString)> = std::env::vars_os().collect();
             Out::note(&format!("checking {} in {}", command, repo.display()));
-            let checked = gate::check(&repo, &command, Duration::from_secs(timeout), parent)
-                .await
-                .map_err(|e| Error::Failed(format!("no report was sent: {e}")))?;
+            let checked = gate::check(
+                &repo,
+                &command,
+                Duration::from_secs(timeout),
+                parent,
+                gate::MainFrom::Checkout,
+            )
+            .await
+            .map_err(|e| Error::Failed(format!("no report was sent: {e}")))?;
             let report = gate::report_of(
                 gate::Held {
                     job_id: &job,
@@ -496,7 +568,7 @@ async fn approvals_setup(
     svc: &HttpService<'_>,
     account: &str,
     set: &Effective,
-) -> Option<approvals::Asks<HostKubectl>> {
+) -> Option<approvals::Asks<HostRunner>> {
     let off = |why: &str| {
         Out::note(&format!("approved runs: off, {why}"));
         None
@@ -536,23 +608,32 @@ async fn approvals_setup(
         Ok(seen) => seen,
         Err(e) => return off(&e),
     };
-    let kubectl = HostKubectl::find(
+    let tools = HostRunner::find(
         set.kube_context.as_ref().map(|c| c.value.as_str()),
         set.kubeconfig.as_ref().map(|c| c.value.as_str()),
+        set.user_units
+            .as_ref()
+            .map_or(&[][..], |u| u.value.as_slice()),
+        set.core_checkout.as_ref().map(|c| c.value.as_str()),
     );
     Out::note(&format!(
-        "approved runs: on, as {runner_id}, {} device keys pinned{}",
+        "approved runs: on, as {runner_id}, {} device keys pinned{}; user units: {}",
         keys.len(),
-        match &kubectl {
-            Ok(_) => String::new(),
-            Err(why) => format!("; {why}, so every action will be refused"),
+        match tools.kube_problem() {
+            None => String::new(),
+            Some(why) => format!("; {why}, so every Kubernetes action will be refused"),
+        },
+        if tools.user_units.is_empty() {
+            "none".to_owned()
+        } else {
+            tools.user_units.join(", ")
         }
     ));
     let pin = approvals::Pin {
         runner_id,
         runner_public_key: public,
     };
-    Some(approvals::Asks::new(key, pin, keys, seen, kubectl))
+    Some(approvals::Asks::new(key, pin, keys, seen, tools))
 }
 
 /// The runner settings in effect: flags over `[profiles.<name>.runner]` over `[runner]`.
@@ -577,6 +658,7 @@ fn reload_on_hangup(
     profile: Option<ProfileName>,
     flags: Flags,
     declare: watch::Sender<Declared>,
+    policy: watch::Sender<Policy>,
 ) {
     #[cfg(unix)]
     tokio::spawn(async move {
@@ -601,6 +683,14 @@ fn reload_on_hangup(
                         d.kinds.join(", ")
                     ));
                     let _ = declare.send(d);
+                    let now = Policy::of(&e);
+                    Out::note(&format!(
+                        "auto-upgrade {}, every {} minutes, restart {}",
+                        if now.enabled { "on" } else { "off" },
+                        now.interval.as_secs() / 60,
+                        now.restart.as_str()
+                    ));
+                    let _ = policy.send(now);
                 }
                 Err(why) => Out::note(&format!(
                     "config.toml was not taken, the settings in use stay: {why}"
@@ -610,7 +700,7 @@ fn reload_on_hangup(
     });
     #[cfg(not(unix))]
     {
-        let _ = (dir, profile, flags, declare);
+        let _ = (dir, profile, flags, declare, policy);
     }
 }
 
@@ -635,6 +725,11 @@ async fn show_settings(e: &Effective, out: Out) {
     };
     let (kube_context, kube_context_from) = kube(&e.kube_context);
     let (kubeconfig, kubeconfig_from) = kube(&e.kubeconfig);
+    let (core_checkout, core_checkout_from) = kube(&e.core_checkout);
+    let (user_units, user_units_from) = e.user_units.as_ref().map_or_else(
+        || ("not set".to_owned(), "default".to_owned()),
+        |u| (u.value.join(", "), u.source.to_string()),
+    );
     let volume = floor.volume.display().to_string();
     let free_text = free.map_or_else(|| "unknown".to_owned(), |f| format!("{} GB", gb(f)));
     if out.json {
@@ -645,6 +740,11 @@ async fn show_settings(e: &Effective, out: Out) {
             "name": { "value": name, "source": name_from },
             "kube_context": { "value": e.kube_context.as_ref().map(|k| &k.value), "source": kube_context_from },
             "kubeconfig": { "value": e.kubeconfig.as_ref().map(|k| &k.value), "source": kubeconfig_from },
+            "auto_upgrade": { "value": e.auto_upgrade.value, "source": e.auto_upgrade.source.to_string() },
+            "upgrade_interval_minutes": { "value": e.upgrade_interval.value.as_secs() / 60, "source": e.upgrade_interval.source.to_string() },
+            "upgrade_restart": { "value": e.upgrade_restart.value.as_str(), "source": e.upgrade_restart.source.to_string() },
+            "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
+            "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
         }));
         return;
@@ -664,6 +764,27 @@ async fn show_settings(e: &Effective, out: Out) {
         vec!["name".to_owned(), name, name_from],
         vec!["kube_context".to_owned(), kube_context, kube_context_from],
         vec!["kubeconfig".to_owned(), kubeconfig, kubeconfig_from],
+        vec!["user_units".to_owned(), user_units, user_units_from],
+        vec![
+            "core_checkout".to_owned(),
+            core_checkout,
+            core_checkout_from,
+        ],
+        vec![
+            "auto_upgrade".to_owned(),
+            e.auto_upgrade.value.to_string(),
+            e.auto_upgrade.source.to_string(),
+        ],
+        vec![
+            "upgrade_interval".to_owned(),
+            format!("{} minutes", e.upgrade_interval.value.as_secs() / 60),
+            e.upgrade_interval.source.to_string(),
+        ],
+        vec![
+            "upgrade_restart".to_owned(),
+            e.upgrade_restart.value.as_str().to_owned(),
+            e.upgrade_restart.source.to_string(),
+        ],
         vec![
             "build_floor".to_owned(),
             format!(

@@ -2,7 +2,8 @@
 //! `config.toml`, a profile's `[profiles.<name>.runner]` over it, and the command-line
 //! flags over both. `iohr runner run` resolves them at start and again on SIGHUP, and
 //! sends capacity, version and kinds on every heartbeat (platform RFC 0120), so the slots
-//! a runner offers change without registering again.
+//! a runner offers change without registering again. Each beat also carries the machine
+//! (`runner::host`: cores, memory, disks, load and pressure) for placement (RFC 0197).
 //!
 //! The build-disk guard lives here too: while the build volume has less than
 //! [`BUILD_FLOOR_BYTES`] free, the runner declares itself without `build`, so the service
@@ -66,7 +67,32 @@ pub(crate) struct Flags {
     /// `--always-on` given (it can only say yes).
     pub(crate) always_on: bool,
     pub(crate) name: Option<String>,
+    /// `--no-auto-upgrade` given (it can only say no).
+    pub(crate) no_auto_upgrade: bool,
 }
+
+/// How an upgraded runner restarts (`upgrade_restart`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RestartMode {
+    /// The same process becomes the new binary; the supervisor sees no stop.
+    Exec,
+    /// Under launchd or systemd, exit with code 75 and let the supervisor start it.
+    Exit,
+}
+
+impl RestartMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Exec => "exec",
+            Self::Exit => "exit",
+        }
+    }
+}
+
+/// Minutes between looks for a newer release, unless set.
+pub(crate) const UPGRADE_INTERVAL_MINUTES: u32 = 60;
+/// The bounds of `upgrade_interval_minutes`: 5 minutes to 7 days.
+pub(crate) const UPGRADE_INTERVAL_RANGE: std::ops::RangeInclusive<u32> = 5..=10_080;
 
 /// The settings in effect.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +109,43 @@ pub(crate) struct Effective {
     pub(crate) kube_context: Option<Setting<String>>,
     /// The kubeconfig file the pinned `kubectl` reads (absolute path), if any.
     pub(crate) kubeconfig: Option<Setting<String>>,
+    /// Whether the runner upgrades itself (default yes; `--no-auto-upgrade` or
+    /// `auto_upgrade = false` turns it off).
+    pub(crate) auto_upgrade: Setting<bool>,
+    /// How long between looks for a newer release.
+    pub(crate) upgrade_interval: Setting<Duration>,
+    pub(crate) upgrade_restart: Setting<RestartMode>,
+    /// The user service units `systemd.user-restart` may restart; `None` or empty, none.
+    pub(crate) user_units: Option<Setting<Vec<String>>>,
+    /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
+    pub(crate) core_checkout: Option<Setting<String>>,
+}
+
+/// The first of the flag, the profile's table and the file's table that sets a value.
+fn pick<T: Clone>(
+    flag: Option<T>,
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+    get: impl Fn(&RunnerConfig) -> Option<T>,
+) -> Option<Setting<T>> {
+    if let Some(value) = flag {
+        return Some(Setting {
+            value,
+            source: Source::Flag,
+        });
+    }
+    if let Some((name, p)) = profile
+        && let Some(value) = get(p)
+    {
+        return Some(Setting {
+            value,
+            source: Source::Profile(name.to_owned()),
+        });
+    }
+    get(file).map(|value| Setting {
+        value,
+        source: Source::File,
+    })
 }
 
 /// Resolves each key: flag, then the profile's table, then `[runner]`, then the default.
@@ -90,37 +153,14 @@ pub(crate) struct Effective {
 /// # Errors
 ///
 /// A message naming the key and where the bad value came from: a capacity outside 1 to
-/// 32, an empty kinds list, or a kind other than `coordinate` and `build`.
+/// 32, an empty kinds list, a kind other than `coordinate` and `build`, an upgrade
+/// interval outside 5 to 10080 minutes, a restart mode other than `exec` and `exit`, or a
+/// `user_units` entry that is not a user service unit.
 pub(crate) fn resolve(
     file: &RunnerConfig,
     profile: Option<(&str, &RunnerConfig)>,
     flags: &Flags,
 ) -> Result<Effective, String> {
-    fn pick<T: Clone>(
-        flag: Option<T>,
-        profile: Option<(&str, &RunnerConfig)>,
-        file: &RunnerConfig,
-        get: impl Fn(&RunnerConfig) -> Option<T>,
-    ) -> Option<Setting<T>> {
-        if let Some(value) = flag {
-            return Some(Setting {
-                value,
-                source: Source::Flag,
-            });
-        }
-        if let Some((name, p)) = profile
-            && let Some(value) = get(p)
-        {
-            return Some(Setting {
-                value,
-                source: Source::Profile(name.to_owned()),
-            });
-        }
-        get(file).map(|value| Setting {
-            value,
-            source: Source::File,
-        })
-    }
     let capacity = pick(flags.capacity, profile, file, |c| c.capacity);
     if let Some(c) = &capacity
         && !(1..=MAX_CAPACITY).contains(&c.value)
@@ -155,6 +195,36 @@ pub(crate) fn resolve(
     }
     let kube_context = pick(None, profile, file, |c| c.kube_context.clone());
     let kubeconfig = pick(None, profile, file, |c| c.kubeconfig.clone());
+    let auto_upgrade = pick(flags.no_auto_upgrade.then_some(false), profile, file, |c| {
+        c.auto_upgrade
+    })
+    .unwrap_or(Setting {
+        value: true,
+        source: Source::Default,
+    });
+    let upgrade_interval = upgrade_interval_of(profile, file)?;
+    let upgrade_restart = restart_mode_of(profile, file)?;
+    let user_units = pick(None, profile, file, |c| c.user_units.clone());
+    if let Some(u) = &user_units
+        && let Some(bad) = u
+            .value
+            .iter()
+            .find(|n| !super::host_action::is_user_unit(n))
+    {
+        return Err(format!(
+            "runner user_units ({}): {bad:?} is not a user service unit (<name>.service)",
+            u.source
+        ));
+    }
+    let core_checkout = pick(None, profile, file, |c| c.core_checkout.clone());
+    if let Some(c) = &core_checkout
+        && !std::path::Path::new(&c.value).is_absolute()
+    {
+        return Err(format!(
+            "runner core_checkout ({}) is not an absolute path",
+            c.source
+        ));
+    }
     Ok(Effective {
         capacity,
         kinds,
@@ -162,7 +232,68 @@ pub(crate) fn resolve(
         name,
         kube_context,
         kubeconfig,
+        auto_upgrade,
+        upgrade_interval,
+        upgrade_restart,
+        user_units,
+        core_checkout,
     })
+}
+
+/// The upgrade interval, checked, from the profile, the file or the default.
+fn upgrade_interval_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<Duration>, String> {
+    Ok(
+        match pick(None, profile, file, |c| c.upgrade_interval_minutes) {
+            Some(m) if !UPGRADE_INTERVAL_RANGE.contains(&m.value) => {
+                return Err(format!(
+                    "runner upgrade_interval_minutes {} ({}) is outside {} to {}",
+                    m.value,
+                    m.source,
+                    UPGRADE_INTERVAL_RANGE.start(),
+                    UPGRADE_INTERVAL_RANGE.end()
+                ));
+            }
+            Some(m) => Setting {
+                value: Duration::from_secs(u64::from(m.value) * 60),
+                source: m.source,
+            },
+            None => Setting {
+                value: Duration::from_secs(u64::from(UPGRADE_INTERVAL_MINUTES) * 60),
+                source: Source::Default,
+            },
+        },
+    )
+}
+
+/// The restart mode, checked, from the profile, the file or the default.
+fn restart_mode_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<RestartMode>, String> {
+    Ok(
+        match pick(None, profile, file, |c| c.upgrade_restart.clone()) {
+            Some(m) => Setting {
+                value: match m.value.trim() {
+                    "exec" => RestartMode::Exec,
+                    "exit" => RestartMode::Exit,
+                    other => {
+                        return Err(format!(
+                            "runner upgrade_restart {other:?} ({}) is not exec or exit",
+                            m.source
+                        ));
+                    }
+                },
+                source: m.source,
+            },
+            None => Setting {
+                value: RestartMode::Exec,
+                source: Source::Default,
+            },
+        },
+    )
 }
 
 /// The kinds, checked and in the order given, once each.
@@ -184,12 +315,15 @@ fn kinds_of(kinds: &[String]) -> Result<Vec<String>, String> {
 }
 
 /// What a heartbeat declares: sent on every beat.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Declared {
     /// `None`: the registered capacity stands, and none is sent.
     pub(crate) capacity: Option<u32>,
     pub(crate) version: String,
     pub(crate) kinds: Vec<String>,
+    /// The machine as read for this beat; `None` sends no resources or signals, and the
+    /// coordinator keeps what it had.
+    pub(crate) host: Option<super::host::Host>,
 }
 
 impl Declared {
@@ -198,7 +332,16 @@ impl Declared {
             capacity: e.capacity.as_ref().map(|c| c.value),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             kinds: e.kinds.value.clone(),
+            host: None,
         }
+    }
+
+    /// These kinds replaced by [`NOTHING`]: a runner that is draining for an upgrade is
+    /// offered no new lease.
+    #[must_use]
+    pub(crate) fn drained(mut self) -> Self {
+        self.kinds = vec![NOTHING.to_owned()];
+        self
     }
 
     /// These kinds, without `build` while the build volume is under the floor. An
@@ -231,9 +374,21 @@ impl Default for BuildFloor {
     }
 }
 
-/// Free bytes on the volume holding `path`, from `df -Pk` (POSIX output, Linux and
-/// macOS); `None` when the path does not exist or `df` does not answer in 5 s.
+/// Free and total bytes of one volume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiskSpace {
+    pub(crate) free: u64,
+    pub(crate) total: u64,
+}
+
+/// Free bytes on the volume holding `path`; `None` as [`disk_space`] gives it.
 pub(crate) async fn free_bytes(path: &Path) -> Option<u64> {
+    disk_space(path).await.map(|(_, s)| s.free)
+}
+
+/// The mount point and space of the volume holding `path`, from `df -Pk` (POSIX output,
+/// Linux and macOS); `None` when the path does not exist or `df` does not answer in 5 s.
+pub(crate) async fn disk_space(path: &Path) -> Option<(String, DiskSpace)> {
     if !path.exists() {
         return None;
     }
@@ -251,14 +406,19 @@ pub(crate) async fn free_bytes(path: &Path) -> Option<u64> {
     if !out.status.success() {
         return None;
     }
-    df_available(&String::from_utf8_lossy(&out.stdout))
+    df_line(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// The available bytes in `df -Pk` output: the fourth column of the last line, in KiB.
-fn df_available(text: &str) -> Option<u64> {
+/// The second line of `df -Pk` output: total (column 2) and available (column 4) in KiB,
+/// and the mount point (column 6 on, which may hold spaces). Free never exceeds total.
+fn df_line(text: &str) -> Option<(String, DiskSpace)> {
     let line = text.lines().filter(|l| !l.trim().is_empty()).nth(1)?;
-    let kib: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
-    kib.checked_mul(1024)
+    let cols: Vec<&str> = line.split_whitespace().collect();
+    let kib = |i: usize| cols.get(i)?.parse::<u64>().ok()?.checked_mul(1024);
+    let total = kib(1)?;
+    let free = kib(3)?.min(total);
+    let mount = cols.get(5..).filter(|m| !m.is_empty())?.join(" ");
+    Some((mount, DiskSpace { free, total }))
 }
 
 #[cfg(test)]
@@ -330,11 +490,93 @@ mod tests {
     }
 
     #[test]
+    fn the_upgrade_settings_follow_the_same_order_and_default_to_on_hourly_exec() {
+        let e = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.auto_upgrade.value, e.auto_upgrade.source.clone()),
+            (true, Source::Default)
+        );
+        assert_eq!(e.upgrade_interval.value, Duration::from_hours(1));
+        assert_eq!(e.upgrade_restart.value, RestartMode::Exec);
+
+        let mut file = RunnerConfig::default();
+        file.auto_upgrade = Some(false);
+        file.upgrade_interval_minutes = Some(30);
+        file.upgrade_restart = Some("exit".into());
+        let mut work = RunnerConfig::default();
+        work.auto_upgrade = Some(true);
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.auto_upgrade.value, e.auto_upgrade.source),
+            (false, Source::File)
+        );
+        assert_eq!(e.upgrade_interval.value, Duration::from_mins(30));
+        assert_eq!(e.upgrade_restart.value, RestartMode::Exit);
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(
+            e.auto_upgrade,
+            Setting {
+                value: true,
+                source: Source::Profile("work".into())
+            }
+        );
+        // The flag turns it off over a file that turns it on, and never turns it on.
+        let flags = Flags {
+            no_auto_upgrade: true,
+            ..Flags::default()
+        };
+        let e = resolve(&file, Some(("work", &work)), &flags).unwrap();
+        assert_eq!(
+            e.auto_upgrade,
+            Setting {
+                value: false,
+                source: Source::Flag
+            }
+        );
+    }
+
+    #[test]
+    fn a_bad_upgrade_interval_or_restart_mode_is_refused_naming_its_source() {
+        for bad in [0, 4, 10_081] {
+            let mut c = RunnerConfig::default();
+            c.upgrade_interval_minutes = Some(bad);
+            let e = resolve(&c, None, &Flags::default()).unwrap_err();
+            assert!(
+                e.contains(&bad.to_string()) && e.contains("5 to 10080"),
+                "{e}"
+            );
+        }
+        for ok in [5, 10_080] {
+            let mut c = RunnerConfig::default();
+            c.upgrade_interval_minutes = Some(ok);
+            assert!(resolve(&c, None, &Flags::default()).is_ok());
+        }
+        let mut c = RunnerConfig::default();
+        c.upgrade_restart = Some("kickstart".into());
+        let e = resolve(&c, None, &Flags::default()).unwrap_err();
+        assert!(e.contains("kickstart") && e.contains("exec or exit"), "{e}");
+    }
+
+    #[test]
+    fn a_drained_declaration_names_no_kind_and_keeps_the_rest() {
+        let d = Declared {
+            capacity: Some(4),
+            version: "v".into(),
+            kinds: vec!["coordinate".into(), "build".into()],
+            host: None,
+        };
+        let drained = d.clone().drained();
+        assert_eq!(drained.kinds, [NOTHING]);
+        assert_eq!((drained.capacity, drained.version), (d.capacity, d.version));
+    }
+
+    #[test]
     fn under_the_build_floor_the_runner_declares_no_build() {
         let d = Declared {
             capacity: Some(4),
             version: "v".into(),
             kinds: vec!["coordinate".into(), "build".into()],
+            host: None,
         };
         let floor = BUILD_FLOOR_BYTES;
         assert_eq!(
@@ -359,6 +601,7 @@ mod tests {
             capacity: None,
             version: "v".into(),
             kinds: vec!["build".into()],
+            host: None,
         };
         assert_eq!(only.guarded(Some(0), floor).kinds, [NOTHING]);
     }
@@ -367,12 +610,30 @@ mod tests {
     fn reads_the_available_column_of_df() {
         let linux = "Filesystem     1024-blocks      Used Available Capacity Mounted on\n\
                      /dev/nvme1n1   3844640564 2950015300 699253584      81% /mnt/build\n";
-        assert_eq!(df_available(linux), Some(699_253_584 * 1024));
+        assert_eq!(
+            df_line(linux),
+            Some((
+                "/mnt/build".into(),
+                DiskSpace {
+                    free: 699_253_584 * 1024,
+                    total: 3_844_640_564 * 1024
+                }
+            ))
+        );
         let mac = "Filesystem 1024-blocks Used Available Capacity  Mounted on\n\
                    /dev/disk3s1s1 971350180 10652320 72290648    13%    /\n";
-        assert_eq!(df_available(mac), Some(72_290_648 * 1024));
-        assert_eq!(df_available("Filesystem\n"), None);
-        assert_eq!(df_available(""), None);
+        assert_eq!(
+            df_line(mac).map(|(m, d)| (m, d.free)),
+            Some(("/".into(), 72_290_648 * 1024))
+        );
+        let spaced = "Filesystem 1024-blocks Used Available Capacity Mounted on\n\
+                      /dev/disk4s1 100 40 60 40% /Volumes/Build Disk\n";
+        assert_eq!(
+            df_line(spaced).map(|(m, _)| m),
+            Some("/Volumes/Build Disk".into())
+        );
+        assert_eq!(df_line("Filesystem\n"), None);
+        assert_eq!(df_line(""), None);
     }
 
     #[test]
@@ -390,5 +651,46 @@ mod tests {
             Source::Profile("work".into())
         );
         assert_eq!(e.kubeconfig.unwrap().source, Source::File);
+    }
+
+    #[test]
+    fn user_units_are_unset_by_default_and_a_bad_entry_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.user_units, None);
+        let mut file = RunnerConfig::default();
+        file.user_units = Some(vec!["iohr-runner.service".into()]);
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.user_units.map(|u| (u.value, u.source)),
+            Some((vec!["iohr-runner.service".to_owned()], Source::File))
+        );
+        let mut work = RunnerConfig::default();
+        work.user_units = Some(vec!["sshd".into()]);
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(err.contains("user_units") && err.contains("work"), "{err}");
+    }
+
+    #[test]
+    fn core_checkout_is_unset_by_default_and_a_relative_path_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.core_checkout, None);
+        // A platform-absolute path: "/srv/..." has no drive, so it is relative on Windows.
+        let dir = tempfile::tempdir().unwrap();
+        let core = dir.path().join("core").to_string_lossy().into_owned();
+        let mut file = RunnerConfig::default();
+        file.core_checkout = Some(core.clone());
+        assert!(!file.is_empty());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.core_checkout.map(|c| (c.value, c.source)),
+            Some((core, Source::File))
+        );
+        let mut work = RunnerConfig::default();
+        work.core_checkout = Some("development/core".into());
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(
+            err.contains("core_checkout") && err.contains("work"),
+            "{err}"
+        );
     }
 }

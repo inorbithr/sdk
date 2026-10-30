@@ -53,8 +53,10 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 const GH_TIMEOUT: Duration = Duration::from_secs(60);
 /// The longest pull request body sent (GitHub's own cap is 65,536 characters).
 const BODY_MAX: usize = 60_000;
-/// The longest title.
+/// The longest title accepted as a Conventional Commit.
 const TITLE_MAX: usize = 100;
+/// The longest title the runner writes.
+const TITLE_FIT: usize = 72;
 /// Paths given to one `git add`.
 const ADD_CHUNK: usize = 200;
 
@@ -241,32 +243,26 @@ impl Forge for GhForge {
                     "--state",
                     "open",
                     "--json",
-                    "number",
+                    "number,title",
                     "--jq",
-                    ".[0].number // empty",
+                    r#".[0] | select(.) | "\(.number)\t\(.title)""#,
                 ],
                 None,
                 access,
             )
             .await?;
-            if let Ok(number) = open.trim().parse::<u64>() {
+            let (num, current) = open.split_once('\t').unwrap_or((open.as_str(), ""));
+            if let Ok(number) = num.trim().parse::<u64>() {
                 let n = number.to_string();
-                Self::gh(
-                    &[
-                        "pr",
-                        "edit",
-                        &n,
-                        "-R",
-                        r,
-                        "--title",
-                        &pr.title,
-                        "--body-file",
-                        "-",
-                    ],
-                    Some(&pr.body),
-                    access,
-                )
-                .await?;
+                // The title already on the pull request is kept; only the body is
+                // refreshed.
+                let new = title_to_set(current, &pr.title);
+                let mut args = vec!["pr", "edit", &n, "-R", r];
+                if let Some(t) = new.as_deref() {
+                    args.extend(["--title", t]);
+                }
+                args.extend(["--body-file", "-"]);
+                Self::gh(&args, Some(&pr.body), access).await?;
                 return Ok(Opened {
                     number,
                     created: false,
@@ -323,18 +319,22 @@ pub(crate) fn redact(line: &str) -> String {
         .join(" ")
 }
 
-/// `owner/name`: letters, digits, `-`, `_` and `.`, never `.` or `..` alone.
+/// One part of `owner/name`: 1 to 100 letters, digits, `-`, `_` and `.`, never `.` or
+/// `..` alone. The one check for both the job's repository and a host action's.
+pub(crate) fn is_repository_part(p: &str) -> bool {
+    (1..=100).contains(&p.len())
+        && p != "."
+        && p != ".."
+        && p.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
+/// `owner/name`, each part [`is_repository_part`].
 fn valid_repository(r: &str) -> Result<(&str, &str), String> {
-    let part = |p: &str| {
-        !p.is_empty()
-            && p.len() <= 100
-            && p != "."
-            && p != ".."
-            && p.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-    };
     match r.split_once('/') {
-        Some((o, n)) if part(o) && part(n) => Ok((o, n.trim_end_matches(".git"))),
+        Some((o, n)) if is_repository_part(o) && is_repository_part(n) => {
+            Ok((o, n.trim_end_matches(".git")))
+        }
         _ => Err(format!("the job's repository {r:?} is not owner/name")),
     }
 }
@@ -402,6 +402,8 @@ const UNSAFE_KEYS: &[&str] = &[
     "url.",
     "include.",
     "includeif.",
+    // On, git also reads the mirror's own `config.worktree`, which `--local` never lists.
+    "extensions.worktreeconfig",
     "protocol.",
     "gpg.",
     "push.gpgsign",
@@ -486,6 +488,22 @@ async fn remote_git_ok(
     }
 }
 
+/// Fetches origin's main into the mirror's `origin/main` through [`remote_git_ok`]: the
+/// one fetch of main there is (making the mirror, merging main before a push, and the
+/// gate check's [`Workspaces::fetch_main`]). Every checkout of the mirror is a linked
+/// worktree and shares its refs, so it sees the same `origin/main`.
+async fn fetch_base(mirror: &Path, url: &str, access: &Access) -> Result<(), String> {
+    let spec = format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}");
+    remote_git_ok(
+        mirror,
+        url,
+        access,
+        &["fetch", "--quiet", "--no-tags", "origin", &spec],
+    )
+    .await
+    .map(drop)
+}
+
 async fn git_ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     let o = git(dir, args).await?;
     if o.code == 0 {
@@ -557,14 +575,7 @@ impl Workspaces {
                 redact(&old.stderr_tail)
             ));
         }
-        let main = format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}");
-        remote_git_ok(
-            &dir,
-            &url,
-            access,
-            &["fetch", "--quiet", "--no-tags", "origin", &main],
-        )
-        .await?;
+        fetch_base(&dir, &url, access).await?;
         Ok((dir, url))
     }
 
@@ -684,6 +695,33 @@ impl Workspaces {
         })
     }
 
+    /// The mirror and origin this runner made for `p`'s repository, never ones the
+    /// checkout names (the model can write in the checkout), once `p` is checked to be
+    /// a linked worktree of that mirror on its job branch. `what` ends the refusal:
+    /// "nothing is {what}".
+    async fn ours(&self, p: &Prepared, what: &str) -> Result<(PathBuf, String), String> {
+        let (mirror, url) = self.mirror_of(&p.repository)?;
+        if !same_path(&mirror, &p.mirror) || url != p.url {
+            return Err(format!(
+                "{} is not this runner's checkout of {}; nothing is {what}",
+                p.path.display(),
+                p.repository
+            ));
+        }
+        verify(&p.path, &mirror, &p.branch).await?;
+        Ok((mirror, url))
+    }
+
+    /// Fetches main for the gate check of `p`: in this runner's mirror, after [`guard`],
+    /// as `access` says ([`fetch_base`]), never in the checkout, whose configuration the
+    /// turn's check command can write and which a token must never reach. The checkout
+    /// shares the mirror's refs, so it then sees the new `origin/main` without a fetch
+    /// of its own.
+    pub(crate) async fn fetch_main(&self, p: &Prepared, access: &Access) -> Result<(), String> {
+        let (mirror, url) = self.ours(p, "fetched").await?;
+        fetch_base(&mirror, &url, access).await
+    }
+
     /// Commits what the turn changed, pushes the job's branch and opens or updates its
     /// pull request. `Ok(None)`: the branch has nothing main does not, so there is no
     /// pull request to open. Only the push and the pull request reach GitHub, as
@@ -698,17 +736,7 @@ impl Workspaces {
             return Err(format!("refused to push {:?}: not a job branch", p.branch));
         }
         let dir = p.path.as_path();
-        // The mirror and origin this runner made for the repository, never ones the
-        // checkout names: the model can write in the checkout.
-        let (mirror, url) = self.mirror_of(&p.repository)?;
-        if !same_path(&mirror, &p.mirror) || url != p.url {
-            return Err(format!(
-                "{} is not this runner's checkout of {}; nothing is pushed",
-                dir.display(),
-                p.repository
-            ));
-        }
-        verify(dir, &mirror, &p.branch).await?;
+        let (mirror, url) = self.ours(p, "pushed").await?;
         // Untrimmed: the first entry's status may start with a space.
         let status = git(
             dir,
@@ -731,11 +759,16 @@ impl Workspaces {
             args.extend(chunk.iter().map(String::as_str));
             git_ok(dir, &args).await?;
         }
+        let title = if m.title.trim().is_empty() {
+            title_from_paths(&paths, &p.job_id)
+        } else {
+            m.title.clone()
+        };
         let staged = git(dir, &["diff", "--cached", "--quiet"]).await?;
         match staged.code {
             0 => {}
             1 => {
-                git_ok(dir, &["commit", "--quiet", "-m", &m.title, "-m", &m.body]).await?;
+                git_ok(dir, &["commit", "--quiet", "-m", &title, "-m", &m.body]).await?;
             }
             c => return Err(format!("git diff --cached exited {c}")),
         }
@@ -772,7 +805,7 @@ impl Workspaces {
                     repository: p.repository.clone(),
                     head: p.branch.clone(),
                     base: BASE.to_owned(),
-                    title: m.title.clone(),
+                    title,
                     body: m.body.clone(),
                 },
                 access,
@@ -802,19 +835,7 @@ async fn merge_main(
     url: &str,
     access: &Access,
 ) -> Result<bool, String> {
-    remote_git_ok(
-        mirror,
-        url,
-        access,
-        &[
-            "fetch",
-            "--quiet",
-            "--no-tags",
-            "origin",
-            &format!("+refs/heads/{BASE}:refs/remotes/origin/{BASE}"),
-        ],
-    )
-    .await?;
+    fetch_base(mirror, url, access).await?;
     let main = format!("origin/{BASE}");
     let ancestor = git(dir, &["merge-base", "--is-ancestor", &main, "HEAD"]).await?;
     match ancestor.code {
@@ -966,6 +987,89 @@ fn truncate(s: &str, max: usize) -> String {
     t
 }
 
+/// Cuts a title to `max` characters at a word end after the colon when there is one,
+/// never with an ellipsis.
+fn fit_title(t: &str, max: usize) -> String {
+    if t.chars().count() <= max {
+        return t.to_owned();
+    }
+    let cut: String = t.chars().take(max).collect();
+    let floor = t.find(": ").map_or(0, |i| t[..i].chars().count() + 2);
+    let at = cut
+        .char_indices()
+        .filter(|&(i, c)| c == ' ' && cut[..i].chars().count() > floor)
+        .map(|(i, _)| i)
+        .next_back();
+    let cut = at.map_or(cut.as_str(), |i| &cut[..i]);
+    cut.trim_end_matches([' ', ',', ';', ':', '-', '.'])
+        .to_owned()
+}
+
+/// A Conventional Commit title for a change that named none: `type(scope): summary`
+/// from the files it touches, at most 72 characters.
+pub(crate) fn title_from_paths(paths: &[String], job_id: &str) -> String {
+    let Some(first) = paths.first() else {
+        return format!("chore: job {job_id}");
+    };
+    let ty = if paths.iter().all(|p| {
+        std::path::Path::new(p)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    }) {
+        "docs"
+    } else if paths
+        .iter()
+        .all(|p| p.contains("/tests/") || p.starts_with("tests/"))
+    {
+        "test"
+    } else {
+        "chore"
+    };
+    // The scope: the deepest directory every file shares that is not a generic one.
+    let mut common: Vec<&str> = first.split('/').collect();
+    common.pop();
+    for p in &paths[1..] {
+        let mut d: Vec<&str> = p.split('/').collect();
+        d.pop();
+        let n = common.iter().zip(&d).take_while(|(a, b)| a == b).count();
+        common.truncate(n);
+    }
+    let scope = common
+        .iter()
+        .rev()
+        .find(|d| !matches!(**d, "src" | "crates" | "lib" | "docs"))
+        .filter(|d| {
+            d.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        });
+    let name = |p: &String| p.rsplit('/').next().unwrap_or(p).to_owned();
+    let what = match paths.len() {
+        1..=3 => format!(
+            "update {}",
+            paths.iter().map(name).collect::<Vec<_>>().join(", ")
+        ),
+        n => format!("update {n} files"),
+    };
+    let t = match scope {
+        Some(s) => format!("{ty}({s}): {what}"),
+        None => format!("{ty}: {what}"),
+    };
+    let fitted = fit_title(&t, TITLE_FIT);
+    if is_conventional(&fitted) {
+        fitted
+    } else {
+        format!("{ty}: update {} files", paths.len())
+    }
+}
+
+/// The title an open pull request is given: none, so its own stays (a person or the
+/// coordinator may have set it), unless it is empty or an earlier turn left it cut with
+/// an ellipsis, in which case `new`.
+fn title_to_set(current: &str, new: &str) -> Option<String> {
+    let c = current.trim();
+    (c.is_empty() || c.ends_with('…') || c.ends_with("...")).then(|| new.to_owned())
+}
+
 /// A line that would credit a tool or a model with the commit: never written.
 fn attribution(line: &str) -> bool {
     let l = line.to_ascii_lowercase();
@@ -985,19 +1089,13 @@ pub(crate) fn compose(job_id: &str, document_id: &str, reply: &Reply) -> Message
             .map_or("", str::trim)
             .to_owned()
     };
+    // Only the turn's own `open_pull_request` title; the status line (`say`) is never a
+    // title. An empty one is filled in by `ship` from the files changed.
     let asked = first_line(&text("title")).to_owned();
-    let said = first_line(&reply.say).to_owned();
-    let title = if is_conventional(&asked) {
-        asked
-    } else if is_conventional(&said) {
-        said
+    let title = if is_conventional(&asked) && !attribution(&asked) {
+        fit_title(&asked, TITLE_FIT)
     } else {
-        let what = if said.is_empty() {
-            format!("job {job_id}")
-        } else {
-            said
-        };
-        truncate(&format!("chore: {what}"), 72)
+        String::new()
     };
     let mut body = String::new();
     let given = text("body");
@@ -1041,11 +1139,7 @@ pub(crate) fn compose(job_id: &str, document_id: &str, reply: &Reply) -> Message
         .collect::<Vec<_>>()
         .join("\n");
     Message {
-        title: if attribution(&title) {
-            format!("chore: job {job_id}")
-        } else {
-            title
-        },
+        title,
         body: truncate(body.trim(), BODY_MAX),
     }
 }
@@ -1381,6 +1475,83 @@ pub(crate) mod tests {
         assert!(e.contains("origin is not"), "{e}");
     }
 
+    /// The gate check's fetch of main: a program the turn plants in its checkout's
+    /// configuration (shared with the mirror, or the mirror's own `config.worktree`)
+    /// never gets the token; the guard refuses and nothing is fetched. Clean, main is
+    /// fetched in the mirror and the checkout sees it with no fetch of its own.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_gate_fetch_of_main_never_hands_the_token_to_a_planted_program() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let p = place();
+        let w = spaces(&p, Arc::new(FakeForge::default()));
+        let got = w.prepare("job_f1", "acme/app", &acc()).await.unwrap();
+        let mirror = p.root.path().join("runner/mirrors/acme/app.git");
+        let seen = p.root.path().join("planted-saw.txt");
+        let planted = p.root.path().join("planted.sh");
+        std::fs::write(
+            &planted,
+            format!(
+                "#!/bin/sh\necho \"token=${}\" >> '{}'\nexec git-upload-pack \"$@\"\n",
+                crate::runner::access::TOKEN_VAR,
+                seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prog = planted.display().to_string();
+        for key in ["remote.origin.uploadpack", "core.sshCommand"] {
+            // Written from inside the checkout, as the check command would.
+            sh(&got.path, &["config", key, &prog]);
+            let e = w.fetch_main(&got, &acc()).await.unwrap_err();
+            assert!(e.contains(&key.to_ascii_lowercase()), "{e}");
+            assert!(!e.contains(&prog), "{e}");
+            sh(&got.path, &["config", "--unset", key]);
+        }
+        // The mirror's own `config.worktree`, which `--local` does not list.
+        sh(&got.path, &["config", "extensions.worktreeConfig", "true"]);
+        std::fs::write(
+            mirror.join("config.worktree"),
+            format!("[remote \"origin\"]\n\tuploadpack = {prog}\n"),
+        )
+        .unwrap();
+        // The next lease's checkout of the repository fetches in the mirror too.
+        let next = w.prepare("job_f2", "acme/app", &acc()).await;
+        assert_eq!(
+            std::fs::read_to_string(&seen).unwrap_or_default(),
+            "",
+            "a planted program ran in a fetch with the token"
+        );
+        let e = next.unwrap_err();
+        assert!(e.contains("extensions.worktreeconfig"), "{e}");
+        // The gate's fetch is refused too: the extension makes the shared `core.bare`
+        // apply to the checkout, so it is not this job's worktree before the guard runs.
+        let e = w.fetch_main(&got, &acc()).await.unwrap_err();
+        assert!(
+            e.contains("extensions.worktreeconfig") || e.contains("not this job's checkout"),
+            "{e}"
+        );
+        assert!(
+            !seen.exists(),
+            "a planted program ran in a fetch with the token"
+        );
+        std::fs::remove_file(mirror.join("config.worktree")).unwrap();
+        sh(
+            &got.path,
+            &["config", "--unset", "extensions.worktreeConfig"],
+        );
+        // Clean: fetched in the mirror, seen in the checkout.
+        let moved = advance_main(&p, "f.txt", "f\n");
+        w.fetch_main(&got, &acc()).await.unwrap();
+        assert_eq!(sh(&got.path, &["rev-parse", "origin/main"]), moved);
+        assert!(!seen.exists());
+        // A checkout that names another mirror is not fetched for.
+        let mut other = got.clone();
+        other.mirror = p.root.path().join("elsewhere.git");
+        let e = w.fetch_main(&other, &acc()).await.unwrap_err();
+        assert!(e.contains("nothing is fetched"), "{e}");
+    }
+
     #[tokio::test]
     async fn no_hook_runs_with_the_token_and_the_push_comes_from_the_mirror() {
         let p = place();
@@ -1623,19 +1794,106 @@ pub(crate) mod tests {
     #[test]
     fn the_message_never_invents_a_document_line_or_a_type() {
         let m = compose("job_2", "", &reply("Added the thing\nmore", vec![]));
-        assert_eq!(m.title, "chore: Added the thing");
+        // The status line is never the title; `ship` derives one from the change.
+        assert_eq!(m.title, "");
+        assert!(m.body.starts_with("Added the thing"));
         assert!(
             m.body
                 .contains("The turn named no Implements, PRD, ADR line")
         );
         assert!(!m.body.contains("Implements: "));
         let m = compose("job_2", "", &reply("fix(core): the bug", vec![]));
-        assert_eq!(m.title, "fix(core): the bug");
+        assert_eq!(m.title, "");
         let m = compose("job_3", "", &reply("", vec![]));
-        assert_eq!(m.title, "chore: job job_3");
+        assert_eq!(m.title, "");
         // A payload sent as a JSON string is read too.
         let a = json!({"kind": "open_pull_request", "payload": "{\"title\":\"docs: x\"}"});
         assert_eq!(compose("job_4", "", &reply("y", vec![a])).title, "docs: x");
+    }
+
+    #[test]
+    fn a_long_asked_title_is_cut_to_72_without_an_ellipsis() {
+        let long =
+            "feat(cli): the runner now writes a pull request title from the change and keeps it";
+        let a = json!({"kind": "open_pull_request", "payload": {"title": long}});
+        let t = compose("job_5", "", &reply("chore: status line", vec![a])).title;
+        assert!(t.chars().count() <= 72, "{t}");
+        assert!(!t.contains('…') && !t.ends_with("..."), "{t}");
+        assert!(long.starts_with(&t) && is_conventional(&t), "{t}");
+    }
+
+    #[test]
+    fn a_title_from_the_change_is_conventional_and_short() {
+        let p = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            title_from_paths(&p(&["cli/crates/iohr/src/runner/workspace.rs"]), "j"),
+            "chore(runner): update workspace.rs"
+        );
+        assert_eq!(
+            title_from_paths(&p(&["a.md", "docs/b.md"]), "j"),
+            "docs: update a.md, b.md"
+        );
+        assert_eq!(title_from_paths(&p(&[]), "job_1"), "chore: job job_1");
+        let many: Vec<String> = (0..9).map(|i| format!("go/pkg/f{i}.go")).collect();
+        let t = title_from_paths(&many, "j");
+        assert_eq!(t, "chore(pkg): update 9 files");
+        let long = p(&[
+            "x/averyveryverylongfilenamethatgoeson.rs",
+            "x/anotherveryverylongfilename.rs",
+            "x/third_long_file_name.rs",
+        ]);
+        let t = title_from_paths(&long, "j");
+        assert!(
+            t.chars().count() <= 72 && is_conventional(&t) && !t.contains('…'),
+            "{t}"
+        );
+    }
+
+    #[test]
+    fn an_open_pull_requests_title_is_kept_unless_empty_or_cut() {
+        assert_eq!(
+            title_to_set("fix(cli): set by the coordinator", "chore: x"),
+            None
+        );
+        assert_eq!(
+            title_to_set(
+                "chore: Most of this was already on main, so the…",
+                "feat: a"
+            )
+            .as_deref(),
+            Some("feat: a")
+        );
+        assert_eq!(title_to_set("", "feat: a").as_deref(), Some("feat: a"));
+    }
+
+    #[tokio::test]
+    async fn shipping_with_no_asked_title_commits_a_title_from_the_files_not_the_status() {
+        let p = place();
+        let forge = Arc::new(FakeForge::default());
+        let w = spaces(&p, forge.clone());
+        let got = w.prepare("job_8", "acme/app", &acc()).await.unwrap();
+        identity(&p);
+        write(&got.path, "new.txt", "new\n");
+        let m = compose(
+            "job_8",
+            "",
+            &reply(
+                "chore: Most of this was already on main, so the change is small: three things",
+                vec![],
+            ),
+        );
+        let s = w.ship(&got, &m, &acc()).await.unwrap().unwrap();
+        let subject = sh(&p.origin, &["log", "-1", "--format=%s", &s.head]);
+        assert_eq!(subject, "chore: update new.txt");
+        assert_eq!(
+            forge.asked.lock().unwrap()[0].title,
+            "chore: update new.txt"
+        );
+        assert!(
+            forge.asked.lock().unwrap()[0]
+                .body
+                .contains("Most of this was already on main")
+        );
     }
 
     #[test]

@@ -23,7 +23,7 @@ mod sdk;
 mod sdk_add;
 mod token;
 mod tunnel;
-mod upgrade;
+pub(crate) mod upgrade;
 mod whoami;
 
 use clap::CommandFactory as _;
