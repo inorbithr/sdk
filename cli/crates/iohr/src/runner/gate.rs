@@ -5,7 +5,9 @@
 //! that has uncommitted changes (the report would not describe the PR's head), runs the
 //! check with the scrubbed environment under a time cap, and keeps only the command,
 //! its exit code, the head, main's commit and the SHA-256 of the output. The output
-//! itself never leaves the machine and is never kept here.
+//! itself never leaves the machine; of a failing check only a short redacted tail
+//! ([`TAIL_BYTES`]) is kept, for the runner's own log and `iohr runner gate-report`, so a
+//! job held at Checked says why. The signed report carries the hash only.
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -26,6 +28,8 @@ use super::workspace::redact;
 pub(crate) const DEFAULT_COMMAND: &str = "mise run ci:changed";
 /// How long that check may run: 30 minutes.
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 1800;
+/// How much of a failing check's output is kept: its last 4 KB.
+pub(crate) const TAIL_BYTES: usize = 4096;
 
 /// The branch the head must contain.
 const MAIN: &str = "origin/main";
@@ -40,6 +44,9 @@ pub(crate) struct Checked {
     pub(crate) head: String,
     pub(crate) main_commit: String,
     pub(crate) output_sha256: String,
+    /// The last [`TAIL_BYTES`] of the output of a failing check, whole lines only and
+    /// every line through [`redact`]; empty when the check passed. Never signed or sent.
+    pub(crate) output_tail: String,
 }
 
 /// Why no report can be made. Nothing here is a result: a job with no report holds at
@@ -240,7 +247,11 @@ pub(crate) async fn check(
         }
         (code, _) => return Err(Skip::Git(format!("git merge-base exited {code}"))),
     }
-    let (exit_code, output_sha256) = run(repo, command, limit, parent_env).await?;
+    let Ran {
+        exit_code,
+        output_sha256,
+        output_tail,
+    } = run(repo, command, limit, parent_env).await?;
     if git_ok(repo, &["rev-parse", "HEAD"]).await? != head {
         return Err(Skip::Moved);
     }
@@ -250,6 +261,7 @@ pub(crate) async fn check(
         head,
         main_commit,
         output_sha256,
+        output_tail,
     })
 }
 
@@ -290,14 +302,40 @@ pub(crate) async fn send<S: Service>(
     }
 }
 
+/// What one run of the check left: its exit code, the hash of all its output, and the
+/// tail of that output when it failed.
+struct Ran {
+    exit_code: i32,
+    output_sha256: String,
+    output_tail: String,
+}
+
+/// The last [`TAIL_BYTES`] of `bytes` as redacted whole lines: a cut that lands inside a
+/// line drops that partial line first (half a token would slip past [`redact`]).
+fn tail_of(bytes: &[u8]) -> String {
+    let cut = bytes.len() > TAIL_BYTES;
+    let mut text =
+        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(TAIL_BYTES)..]).into_owned();
+    if cut && let Some(nl) = text.find('\n') {
+        text.drain(..=nl);
+    }
+    text.lines()
+        .map(|l| redact(l.trim_end_matches('\r')))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_matches('\n')
+        .to_owned()
+}
+
 /// Runs `command` in `repo` with the scrubbed environment; streams its output into a
-/// hash (nothing is kept) and returns its exit code with the hash.
+/// hash and a bounded buffer of its last bytes, and returns its exit code, the hash and,
+/// when it failed, the redacted tail.
 async fn run(
     repo: &Path,
     command: &str,
     limit: Duration,
     parent_env: Vec<(OsString, OsString)>,
-) -> Result<(i32, String), Skip> {
+) -> Result<Ran, Skip> {
     let mut c = shell(command);
     c.current_dir(repo)
         .env_clear()
@@ -312,17 +350,34 @@ async fn run(
     let mut stdout = child.stdout.take();
     let work = async {
         let mut hash = Sha256::new();
+        let mut tail: Vec<u8> = Vec::new();
         if let Some(out) = stdout.as_mut() {
             let mut buf = vec![0_u8; 16 * 1024];
             loop {
                 match out.read(&mut buf).await {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => hash.update(&buf[..n]),
+                    Ok(n) => {
+                        hash.update(&buf[..n]);
+                        tail.extend_from_slice(&buf[..n]);
+                        // Bounded: at twice the tail, keep the last part.
+                        if tail.len() > 2 * TAIL_BYTES {
+                            tail.drain(..tail.len() - TAIL_BYTES);
+                        }
+                    }
                 }
             }
         }
         let status = child.wait().await.map_err(|e| Skip::Spawn(e.to_string()))?;
-        Ok::<_, Skip>((status.code().unwrap_or(-1), hex(&hash.finalize())))
+        let exit_code = status.code().unwrap_or(-1);
+        Ok::<_, Skip>(Ran {
+            exit_code,
+            output_sha256: hex(&hash.finalize()),
+            output_tail: if exit_code == 0 {
+                String::new()
+            } else {
+                tail_of(&tail)
+            },
+        })
     };
     let res = tokio::time::timeout(limit, work).await;
     match res {
@@ -339,6 +394,7 @@ async fn run(
 pub(crate) mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
+    use std::fmt::Write as _;
     use std::path::PathBuf;
 
     pub(crate) fn sh(dir: &Path, args: &[&str]) -> String {
@@ -439,6 +495,76 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(got.exit_code, 3);
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_failing_check_keeps_the_redacted_tail_of_its_output() {
+        let (_root, _o, work) = repos();
+        let cmd = "echo warning: too_many_lines; echo token ghp_abcdefghijklmnopqrstuvwxyz0123 leaked 1>&2; \
+                   echo clone https://user:pw@github.com/o/r; exit 101";
+        let got = check(&work, cmd, LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert_eq!(got.exit_code, 101);
+        assert_eq!(
+            got.output_tail,
+            "warning: too_many_lines\ntoken [redacted] leaked\nclone https://[redacted]@github.com/o/r"
+        );
+        assert!(!got.output_tail.contains("ghp_"));
+        assert!(!got.output_tail.contains("pw@"));
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_passing_check_keeps_no_output() {
+        let (_root, _o, work) = repos();
+        let got = check(&work, "echo fine", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert_eq!((got.exit_code, got.output_tail.as_str()), (0, ""));
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_long_output_keeps_only_its_last_whole_lines_within_four_kilobytes() {
+        let (_root, _o, work) = repos();
+        // 2000 numbered lines, far over the cap, the hash still covering all of it.
+        let cmd = "i=1; while [ $i -le 2000 ]; do echo line-$i; i=$((i+1)); done; exit 1";
+        let got = check(&work, cmd, LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert!(
+            got.output_tail.len() <= TAIL_BYTES,
+            "{}",
+            got.output_tail.len()
+        );
+        assert!(
+            got.output_tail.len() > TAIL_BYTES - 16,
+            "the tail fills the cap"
+        );
+        assert!(got.output_tail.ends_with("line-2000"));
+        // Whole lines only: the first one is a complete `line-N`.
+        let first = got.output_tail.lines().next().unwrap();
+        assert!(
+            first.starts_with("line-") && first[5..].parse::<u32>().is_ok(),
+            "{first}"
+        );
+        let mut all = String::new();
+        for i in 1..=2000 {
+            writeln!(all, "line-{i}").unwrap();
+        }
+        assert_eq!(got.output_sha256, hex(&Sha256::digest(all.as_bytes())));
+    }
+
+    #[test]
+    fn a_cut_inside_a_line_drops_that_partial_line_before_redacting() {
+        // A token split by the cut would not look like one: its half line goes.
+        let mut bytes = b"ghp_secrettokenpartxx".to_vec();
+        bytes.extend(std::iter::repeat_n(b'x', TAIL_BYTES - 20));
+        bytes.extend_from_slice(b"\nwhole line\nlast\n");
+        let t = tail_of(&bytes);
+        assert_eq!(t, "whole line\nlast");
     }
 
     #[tokio::test]

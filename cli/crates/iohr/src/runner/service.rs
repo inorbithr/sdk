@@ -1188,7 +1188,7 @@ mod tests {
             lease_id: "lse_1".into(),
             fencing_token: 9_007_199_254_740_993,
             runner_id: "rnr_1".into(),
-            command: "mise run ci:changed".into(),
+            command: crate::runner::gate::DEFAULT_COMMAND.into(),
             exit_code: 2,
             head: "a".repeat(40),
             main_commit: "b".repeat(40),

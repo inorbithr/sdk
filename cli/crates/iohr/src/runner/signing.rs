@@ -372,6 +372,8 @@ mod tests {
 
     /// The service's gate report vector (core `service/signing.rs`, README "Signatures"):
     /// the same key, the message's digest and the signature, Ed25519 being deterministic.
+    /// The command stays a literal (not `gate::DEFAULT_COMMAND`): the vector is the same
+    /// bytes in both repositories, so a change to the constant cannot move it unseen.
     #[test]
     fn the_gate_report_test_vector() {
         let r = GateReport {
