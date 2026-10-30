@@ -400,6 +400,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                             "exit_code": checked.exit_code, "head": checked.head,
                             "main_commit": checked.main_commit,
                             "output_sha256": checked.output_sha256,
+                            "output_tail": checked.output_tail,
                             "evidence_id": a.evidence_id, "duplicate": a.duplicate,
                             "stage": a.stage,
                         }));
@@ -413,6 +414,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                             ("duplicate", a.duplicate.to_string()),
                             ("job is now", a.stage.clone()),
                         ]);
+                        if !checked.output_tail.is_empty() {
+                            Out::note(&format!(
+                                "the check failed; last output (redacted, local only):\n{}",
+                                checked.output_tail
+                            ));
+                        }
                     }
                     Ok(())
                 }

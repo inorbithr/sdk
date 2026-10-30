@@ -941,6 +941,15 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         }
                     }
                     Ok(Some(Ok(checked))) => {
+                        if checked.exit_code != 0 {
+                            // The signed report carries the hash only: the reason the
+                            // job holds at Checked is read here, in the runner's log.
+                            log(&format!(
+                                "lease {id}: the check failed (exit {}); last output:\n{}",
+                                checked.exit_code,
+                                checked.output_tail.lines().map(|l| format!("  | {l}")).collect::<Vec<_>>().join("\n")
+                            ));
+                        }
                         let gr = gate::report_of(
                             Held {
                                 job_id: &g.job_id,

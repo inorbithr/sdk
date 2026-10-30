@@ -530,7 +530,9 @@ contain `origin/main`, runs `--command` (default `mise run ci:changed`) through 
 with the scrubbed environment above and a `--timeout` (default 1800 s, at most 21600 s), and
 sends the coordinator the command, its exit code, the head, main's commit and the SHA-256
 of the output, signed with the key this runner registered. The output itself stays on this
-machine. A non-zero exit is sent as it is: the job holds at Checked, which is the honest
+machine; when the check fails, its last 4 KB (whole lines, token-shaped words and URL
+credentials redacted) is also printed here (`output_tail` with `--json`) and written to the
+runner's log, so a job held at Checked says why. The tail is never signed or sent. A non-zero exit is sent as it is: the job holds at Checked, which is the honest
 answer. A coordinator that does not have the call yet (an older release) is reported as
 such and is not an error. `iohr runner run` does the same by itself: when a job turn ends
 with a reply, it runs this check (the same command, timeout and report) in the checkout the
