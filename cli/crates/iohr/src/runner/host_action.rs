@@ -34,6 +34,14 @@
 //! - `gh.release-rerun`: reads the run and its commit's `examples-run` status with `gh
 //!   api`, refuses unless it is a failed `release.yml` run on `main` whose commit passed
 //!   its examples, then `gh run rerun <id> -R inorbithr/sdk --failed`.
+//! - `agent.install-checks`: one block of core's checks (`contract`, `gates` or
+//!   `status-components`) at a commit that is on `origin/main`, read with `git show` in
+//!   the `core_checkout`, put between its `# BEGIN` and `# END` lines in the agent's
+//!   `~/.config/iohr-agent/checks.toml`, checked with `iohr agent checks lint` before
+//!   the file is replaced (the old one kept as `checks.toml.bak-<time>`), then the
+//!   agent's user service restarted and its status read until it is connected and holds
+//!   what the file declares (at most 100). Failing that, the old file comes back. Linux
+//!   only. See [`install_checks`].
 //!
 //! Every tool runs through one [`ArgvRunner`]: [`HostRunner`] starts the program from
 //! the runner's `PATH` directly (no shell) with the allowlisted environment, no standard
@@ -57,6 +65,8 @@ use super::env;
 use super::exec::GroupGuard;
 use super::provider;
 
+mod install_checks;
+
 /// The schema a run's `schema_id` names.
 pub(crate) const HOST_ACTION: &str = "runner/host-action/v0";
 
@@ -70,6 +80,7 @@ pub(crate) const PREVIEW_TAKE: &str = "preview.take";
 pub(crate) const ROLL_TASK: &str = "roll.task";
 pub(crate) const SWEEP_TARGETS: &str = "build.sweep-targets";
 pub(crate) const RELEASE_RERUN: &str = "gh.release-rerun";
+pub(crate) const INSTALL_CHECKS: &str = "agent.install-checks";
 
 /// The roll tasks `roll.task` may run, a subset of what `remote-roll.sh` allows.
 pub(crate) const ROLL_TASKS: &[&str] = &[
@@ -157,6 +168,11 @@ pub(crate) fn is_user_unit(s: &str) -> bool {
                     || matches!(c, b'@' | b'.' | b'_' | b'-')
             })
     })
+}
+
+/// A user service's name without `.service`: `^[a-z0-9][a-z0-9@._-]{0,62}$`.
+fn is_service_name(s: &str) -> bool {
+    is_user_unit(&format!("{s}.service"))
 }
 
 /// A repository of the one owner: `^inorbithr/(?!\.\.?$)[a-z0-9._-]{1,100}$`, the name
@@ -263,21 +279,36 @@ pub(crate) fn effect_of(action: &str, params: &Value) -> Option<String> {
             "Takes branch {} into the Preview checkout and checks the Preview app.",
             text("branch")?
         ),
-        // Not the services: 32 names of 40 would not fit the sentence's 200 characters.
-        ROLL_TASK => format!(
-            "Runs roll task {} at commit {} on the deploy server.",
-            text("task")?,
-            text("rev")?
-        ),
+        ROLL_TASK => match text("services")? {
+            "" => format!(
+                "Runs roll task {} at commit {} on the deploy server.",
+                text("task")?,
+                text("rev")?
+            ),
+            services => format!(
+                "Runs roll task {} for {services} at commit {} on the deploy server.",
+                text("task")?,
+                text("rev")?
+            ),
+        },
         SWEEP_TARGETS => match text("mode")? {
             "cap" => "Caps every Rust build target on the runner's host.".to_owned(),
-            "guard" => "Sweeps the Rust build targets on the runner's host only where a disk is full enough."
+            "guard" => "Sweeps the Rust build targets on the runner's host's nearly full volumes."
                 .to_owned(),
             _ => return None,
         },
         RELEASE_RERUN => format!(
             "Re-runs the failed jobs of sdk release run {}.",
             int("run_id")?
+        ),
+        INSTALL_CHECKS => format!(
+            "Installs the {} checks from core at commit {} into the agent's checks file and restarts {}.",
+            text("block")?,
+            text("commit")?,
+            match params.get("service") {
+                None => install_checks::DEFAULT_SERVICE,
+                Some(_) => text("service")?,
+            }
         ),
         _ => return None,
     })
@@ -395,6 +426,19 @@ pub(crate) fn validate(action: &Value) -> Result<(), String> {
             closed(params, &["run_id"], "/params")?;
             integer_param(params, "run_id", MIN_RELEASE_RUN_ID, MAX_RUN_ID)?;
         }
+        INSTALL_CHECKS => {
+            closed(params, &["block", "commit", "service"], "/params")?;
+            string_param(
+                params,
+                "block",
+                install_checks::is_block,
+                "a block of the catalog",
+            )?;
+            string_param(params, "commit", is_rev, "a full commit")?;
+            if params.contains_key("service") {
+                string_param(params, "service", is_service_name, "a service name")?;
+            }
+        }
         _ => return Err("/action: unknown action".to_owned()),
     }
     if effect_of(id, &m["params"]).as_deref() != Some(effect) {
@@ -433,6 +477,13 @@ pub(crate) enum Action {
     SweepTargets { mode: String },
     /// `gh.release-rerun`.
     ReleaseRerun { run_id: u64 },
+    /// `agent.install-checks`: one block of core's checks at `commit`, into the agent's
+    /// checks file, and a restart of `service` (without `.service`).
+    InstallChecks {
+        block: String,
+        commit: String,
+        service: String,
+    },
 }
 
 impl Action {
@@ -449,6 +500,7 @@ impl Action {
             Self::RollTask { .. } => ROLL_TASK,
             Self::SweepTargets { .. } => SWEEP_TARGETS,
             Self::ReleaseRerun { .. } => RELEASE_RERUN,
+            Self::InstallChecks { .. } => INSTALL_CHECKS,
         }
     }
 
@@ -463,6 +515,7 @@ impl Action {
             Self::PreviewTake { .. } => Tool::Mise,
             Self::RollTask { .. } => Tool::RemoteRoll,
             Self::SweepTargets { .. } => Tool::CoreMise,
+            Self::InstallChecks { .. } => Tool::Git,
         }
     }
 }
@@ -527,6 +580,14 @@ pub(crate) fn lookup_on(doc: &Value, os: &str) -> Result<Action, String> {
         Some(RELEASE_RERUN) => Action::ReleaseRerun {
             run_id: int("run_id")?,
         },
+        Some(INSTALL_CHECKS) => Action::InstallChecks {
+            block: text("block")?,
+            commit: text("commit")?,
+            service: match doc.pointer("/params/service") {
+                None => install_checks::DEFAULT_SERVICE.to_owned(),
+                Some(_) => text("service")?,
+            },
+        },
         _ => return Err("unknown action".to_owned()),
     };
     plan(&action, os)?;
@@ -545,6 +606,14 @@ pub(crate) fn namespace_allowed(ns: &str) -> Result<(), String> {
         return Err(format!("namespace {ns}: refused, it is the cluster's own"));
     }
     Ok(())
+}
+
+/// The two calls that restart a user service: reload the units, restart `unit`.
+fn user_restart_calls(unit: &str) -> Vec<(Tool, Vec<String>)> {
+    vec![
+        (Tool::Systemctl, strings(["--user", "daemon-reload"])),
+        (Tool::Systemctl, strings(["--user", "restart", unit])),
+    ]
 }
 
 fn strings<const N: usize>(argv: [&str; N]) -> Vec<String> {
@@ -592,6 +661,8 @@ pub(crate) enum Tool {
     CoreMise,
     /// `~/.inorbit/roll/remote-roll.sh`, the host's one route to the deploy server.
     RemoteRoll,
+    /// `git`, started in the configured core checkout: reads only (`agent.install-checks`).
+    Git,
 }
 
 impl Tool {
@@ -604,6 +675,7 @@ impl Tool {
             Self::Iohr => "iohr",
             Self::Mise | Self::CoreMise => "mise",
             Self::RemoteRoll => "remote-roll.sh",
+            Self::Git => "git",
         }
     }
 
@@ -613,7 +685,7 @@ impl Tool {
     fn timeout(self) -> Duration {
         Duration::from_secs(match self {
             Self::Kubectl => 300,
-            Self::Systemctl | Self::Gh => 120,
+            Self::Systemctl | Self::Gh | Self::Git => 120,
             Self::Docker | Self::Iohr | Self::Mise => 900,
             Self::CoreMise => 1800,
             Self::RemoteRoll => 3600,
@@ -671,10 +743,7 @@ pub(crate) fn plan(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>
             if !is_user_unit(unit) {
                 return Err("unit: not a user service unit".to_owned());
             }
-            vec![
-                (Tool::Systemctl, strings(["--user", "daemon-reload"])),
-                (Tool::Systemctl, strings(["--user", "restart", unit])),
-            ]
+            user_restart_calls(unit)
         }
         Action::PruneImages { until_hours } => {
             if !(1..=MAX_UNTIL_HOURS).contains(until_hours) {
@@ -704,6 +773,28 @@ pub(crate) fn plan(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>
             )]
         }
         Action::Upgrade => vec![(Tool::Iohr, strings(["upgrade"]))],
+        // Its calls depend on what the commit holds; install_checks builds them.
+        Action::InstallChecks {
+            block,
+            commit,
+            service,
+        } => {
+            if os != "linux" {
+                return Err(format!(
+                    "{INSTALL_CHECKS}: only a Linux runner has the agent's systemd unit; this one runs on {os}"
+                ));
+            }
+            if !install_checks::is_block(block) {
+                return Err("block: not a block of the catalog".to_owned());
+            }
+            if !is_rev(commit) {
+                return Err("commit: not a full commit".to_owned());
+            }
+            if !is_service_name(service) {
+                return Err("service: not a service name".to_owned());
+            }
+            Vec::new()
+        }
         Action::PreviewTake { .. }
         | Action::RollTask { .. }
         | Action::SweepTargets { .. }
@@ -890,6 +981,17 @@ pub(crate) trait ArgvRunner {
     fn refuses(&self, _action: &Action) -> Option<String> {
         None
     }
+
+    /// The agent's checks file, which `agent.install-checks` edits.
+    ///
+    /// # Errors
+    /// This host does not say where it is.
+    fn agent_checks_file(&self) -> Result<PathBuf, String>;
+
+    /// The pause between two reads of the restarted agent's status.
+    async fn settle(&self) {
+        tokio::time::sleep(install_checks::SETTLE).await;
+    }
 }
 
 /// The cluster every `kubectl` call is pinned to: a context of the kubeconfig, a
@@ -1018,7 +1120,7 @@ impl HostRunner {
                 .home()
                 .map(Some)
                 .ok_or_else(|| "this runner has no home folder".to_owned()),
-            Tool::CoreMise => match &self.core_checkout {
+            Tool::CoreMise | Tool::Git => match &self.core_checkout {
                 None => Err("this runner names no core_checkout, so it sweeps nothing".to_owned()),
                 Some(dir) if dir.is_absolute() && dir.join("mise.toml").is_file() => {
                     Ok(Some(dir.clone()))
@@ -1082,6 +1184,11 @@ impl HostRunner {
             Tool::Mise | Tool::CoreMise | Tool::RemoteRoll => {
                 env.extend(self.ssh_env.iter().cloned());
             }
+            // Reads origin over ssh, and never stops to ask a question.
+            Tool::Git => {
+                env.extend(self.ssh_env.iter().cloned());
+                env.push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
+            }
             Tool::Kubectl | Tool::Systemctl | Tool::Docker | Tool::Gh => {}
         }
         env
@@ -1099,8 +1206,18 @@ impl ArgvRunner for HostRunner {
         }
         match action {
             Action::UserRestart { unit } => self.unit_problem(unit),
+            Action::InstallChecks { service, .. } => self
+                .unit_problem(&format!("{service}.service"))
+                .or_else(|| self.agent_checks_file().err()),
             _ => None,
         }
+    }
+
+    fn agent_checks_file(&self) -> Result<PathBuf, String> {
+        self.home()
+            .map(|h| h.join(".config/iohr-agent/checks.toml"))
+            .filter(|p| p.is_file())
+            .ok_or_else(|| "this runner's host has no ~/.config/iohr-agent/checks.toml".to_owned())
     }
 
     async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
@@ -1267,6 +1384,8 @@ pub(crate) async fn carry_out_on(
         delete_failed_pods(namespace.as_deref(), tools).await
     } else if let Action::ReleaseRerun { run_id } = action {
         release_rerun(*run_id, tools).await
+    } else if matches!(action, Action::InstallChecks { .. }) {
+        install_checks::install(action, tools).await
     } else {
         let mut done = Vec::new();
         for (tool, argv) in &calls {
@@ -1293,7 +1412,9 @@ pub(crate) async fn carry_out_on(
 /// and the tally of all its stdout.
 fn summary(action: &Action, what: &str, tally: &Tally) -> Option<String> {
     match action {
-        Action::DeleteFailedPods { .. } | Action::ReleaseRerun { .. } => None,
+        Action::DeleteFailedPods { .. }
+        | Action::ReleaseRerun { .. }
+        | Action::InstallChecks { .. } => None,
         Action::RolloutRestart {
             namespace,
             deployment,
@@ -1509,6 +1630,8 @@ pub(crate) mod testing {
         pub(crate) not_here: Option<String>,
         /// What the next calls answer, in order, before any of the above.
         pub(crate) script: Mutex<VecDeque<Output>>,
+        /// The agent's checks file, for `agent.install-checks`.
+        pub(crate) checks_file: Option<std::path::PathBuf>,
     }
 
     impl Fake {
@@ -1531,6 +1654,14 @@ pub(crate) mod testing {
         fn refuses(&self, _action: &Action) -> Option<String> {
             self.not_here.clone()
         }
+
+        fn agent_checks_file(&self) -> Result<std::path::PathBuf, String> {
+            self.checks_file
+                .clone()
+                .ok_or_else(|| "no checks file".to_owned())
+        }
+
+        async fn settle(&self) {}
 
         async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
             if let Some(why) = &self.missing {
@@ -1568,6 +1699,7 @@ pub(crate) mod testing {
             answer: None,
             not_here: None,
             script: Mutex::new(VecDeque::new()),
+            checks_file: None,
         }
     }
 }

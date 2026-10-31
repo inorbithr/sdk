@@ -23,14 +23,14 @@ fn the_examples_validate_and_every_invalid_file_is_refused() {
         assert_eq!(validate(&read(p.clone())), Ok(()), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 11);
+    assert_eq!(n, 13);
     let mut n = 0;
     for e in std::fs::read_dir(dir.join("schema/invalid")).unwrap() {
         let p = e.unwrap().path();
         assert!(validate(&read(p.clone())).is_err(), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 34);
+    assert_eq!(n, 40);
 }
 
 /// Every vendored file is listed in `SOURCE` with the SHA-256 it was copied with, so a
@@ -157,7 +157,17 @@ fn the_effect_is_the_catalog_sentence_for_each_action_and_its_params() {
         (
             ROLL_TASK,
             json!({"rev": "a".repeat(40), "task": "roll:services", "services": "gateway web"}),
-            "Runs roll task roll:services at commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa on the deploy server.",
+            "Runs roll task roll:services for gateway web at commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa on the deploy server.",
+        ),
+        (
+            ROLL_TASK,
+            json!({"rev": "a".repeat(40), "task": "roll:check", "services": ""}),
+            "Runs roll task roll:check at commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa on the deploy server.",
+        ),
+        (
+            INSTALL_CHECKS,
+            json!({"block": "contract", "commit": "b".repeat(40)}),
+            "Installs the contract checks from core at commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb into the agent's checks file and restarts iohr-agent.",
         ),
         (
             SWEEP_TARGETS,
@@ -167,7 +177,7 @@ fn the_effect_is_the_catalog_sentence_for_each_action_and_its_params() {
         (
             SWEEP_TARGETS,
             json!({"mode": "guard"}),
-            "Sweeps the Rust build targets on the runner's host only where a disk is full enough.",
+            "Sweeps the Rust build targets on the runner's host's nearly full volumes.",
         ),
         (
             RELEASE_RERUN,
@@ -398,6 +408,10 @@ struct Leaky;
     reason = "a fake answers at once; the trait is async for the real tools"
 )]
 impl ArgvRunner for Leaky {
+    fn agent_checks_file(&self) -> Result<std::path::PathBuf, String> {
+        Err("no checks file".to_owned())
+    }
+
     async fn run(&self, _tool: Tool, _argv: &[String]) -> Result<Output, String> {
         Ok(Output::new(
             false,

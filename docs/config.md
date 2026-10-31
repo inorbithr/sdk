@@ -402,9 +402,9 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
 | `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
-| `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`; unset, every sweep is refused before it starts |
+| `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git`; unset, every sweep and install is refused before it starts |
 
-With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh`, `mise` or `systemctl` on its `PATH`, no `~/.inorbit/roll/remote-roll.sh` for `roll.task`, no `core_checkout` for `build.sweep-targets`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
+With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh`, `mise` or `systemctl` or `git` on its `PATH`, no `~/.inorbit/roll/remote-roll.sh` for `roll.task`, no `core_checkout` for `build.sweep-targets` or `agent.install-checks`, no `~/.config/iohr-agent/checks.toml` or an agent unit outside `user_units` for `agent.install-checks`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On

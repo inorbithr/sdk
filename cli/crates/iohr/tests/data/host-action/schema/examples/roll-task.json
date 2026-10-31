@@ -6,5 +6,5 @@
     "task": "roll:services",
     "services": "example other-example"
   },
-  "effect": "Runs roll task roll:services at commit 0000000000000000000000000000000000000000 on the deploy server."
+  "effect": "Runs roll task roll:services for example other-example at commit 0000000000000000000000000000000000000000 on the deploy server."
 }
