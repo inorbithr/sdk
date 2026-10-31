@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/inorbithr/sdk/compare/rust/v0.4.0...rust/v0.4.1) (2026-10-31)
+
+
+### Documentation
+
+* **docs:** READMEs match today's SDKs and CLI ([#323](https://github.com/inorbithr/sdk/issues/323)) ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+* **sdk:** READMEs match today's SDKs and CLI ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+
 ## [0.4.0](https://github.com/inorbithr/sdk/compare/rust/v0.3.0...rust/v0.4.0) (2026-10-24)
 
 
