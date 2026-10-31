@@ -394,7 +394,6 @@ async fn run(
 pub(crate) mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
-    use std::fmt::Write as _;
     use std::path::PathBuf;
 
     pub(crate) fn sh(dir: &Path, args: &[&str]) -> String {
@@ -528,6 +527,7 @@ pub(crate) mod tests {
     #[cfg(not(windows))]
     #[tokio::test]
     async fn a_long_output_keeps_only_its_last_whole_lines_within_four_kilobytes() {
+        use std::fmt::Write as _;
         let (_root, _o, work) = repos();
         // 2000 numbered lines, far over the cap, the hash still covering all of it.
         let cmd = "i=1; while [ $i -le 2000 ]; do echo line-$i; i=$((i+1)); done; exit 1";
