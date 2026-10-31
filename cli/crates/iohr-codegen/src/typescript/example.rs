@@ -14,18 +14,10 @@ use crate::ir::Type;
 pub(crate) fn example(call: &Call<'_>) -> String {
     let naming = TsNaming;
     let c = client::TYPESCRIPT;
-    let mut names: Vec<&str> = c.imports.to_vec();
-    names.push("ApiError");
-    names.sort_unstable();
-    names.dedup();
     let mut out = format!(
         "import {{ {} }} from \"@inorbithr/sdk\";\n\n",
-        names.join(", ")
+        c.imports.join(", ")
     );
-    for line in c.lines {
-        let _ = writeln!(out, "{line}");
-    }
-    out.push_str("\ntry {\n");
     let receiver = match call.tag {
         Some(tag) => format!("{}.{}", client::VAR, naming.method_name(tag)),
         None => client::VAR.to_owned(),
@@ -34,25 +26,19 @@ pub(crate) fn example(call: &Call<'_>) -> String {
         Flow::Pages(_) => format!("all{}", call.op.name.to_upper_camel_case()),
         _ => naming.method_name(&call.op.name),
     };
-    let args = arguments(call, "  ");
-    match &call.flow {
+    let args = arguments(call, "");
+    let body = match &call.flow {
         Flow::Unary => {
-            let _ = write!(
-                out,
-                "  const {{ value }} = await {receiver}.{method}({args});\n  console.log(value);\n"
-            );
+            format!("const {{ value }} = await {receiver}.{method}({args});\nconsole.log(value);")
         }
         Flow::Pages(_) | Flow::Stream => {
             let item = call.item().to_lower_camel_case();
-            let _ = write!(
-                out,
-                "  for await (const {item} of {receiver}.{method}({args})) {{\n    console.log({item});\n  }}\n"
-            );
+            format!(
+                "for await (const {item} of {receiver}.{method}({args})) {{\n  console.log({item});\n}}"
+            )
         }
-    }
-    out.push_str(
-        "} catch (e) {\n  if (!(e instanceof ApiError)) throw e;\n  console.error(`${e.code}: ${e.problem} (request id ${e.raw.requestId})`);\n}\n",
-    );
+    };
+    out.push_str(&c.frame(&body));
     out
 }
 
