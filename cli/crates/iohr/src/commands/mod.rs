@@ -78,7 +78,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,
-        Command::Runner(cmd) => runner::run(g, &env, cmd, out).await,
+        Command::Runner(cmd) => Box::pin(runner::run(g, &env, cmd, out)).await,
         Command::Browser(BrowserCommand::Install(args)) => {
             browser_ext::install(g, &args, out);
             Ok(())
