@@ -531,6 +531,37 @@ jobs:
           VERSION: ${{ needs.release-please.outputs.iohr_version }}
         run: mise run cli:tap "$VERSION" dist/cli/SHA256SUMS
 
+  # The platform's answer to "which iohr is the latest" (clients_versions, the update
+  # headers): a pull request to inorbithr/core that moves `[clients.policy.cli] latest`
+  # to this release. The token comes from the release GitHub App, limited to core.
+  iohr-policy:
+    name: client policy
+    needs: [release-please, iohr]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.iohr_tag }}
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install: false
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: inorbithr
+          repositories: core
+          permission-contents: write
+          permission-pull-requests: write
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ needs.release-please.outputs.iohr_version }}
+        run: mise run cli:policy "$VERSION"
+
   # APT: the signed repository at https://packages.inorbit.hr/apt (Cloudflare R2), with
   # the public key and the installers beside it, then an install from it as the docs say.
   iohr-apt:
