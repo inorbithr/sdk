@@ -55,6 +55,9 @@ func build(cfg *config, res *resolution, explicit bool) (*Client, error) {
 		streamIdle: dur("stream_idle_timeout"), tracer: cfg.telemetry.Tracer, meter: cfg.telemetry.Meter,
 		tracing: tracingOn, metrics: metricsOn, profile: res.profile,
 	}
+	if t, ok := hc.Transport.(*http.Transport); ok && cfg.http == nil && cfg.transport == nil {
+		c.owned = t
+	}
 	if boolean("retry_budget", true) {
 		capacity := cfg.budgetCapacity
 		if capacity <= 0 {
