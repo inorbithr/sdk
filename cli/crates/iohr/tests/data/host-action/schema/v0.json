@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.inorbit.hr/runner/host-action/v0.json",
   "title": "Runner host action",
-  "description": "One action a person approves for one enrolled runner to carry out on its host: the action's dotted id from the catalog, the runner that runs it, its parameters (typed per action) and what it does in one plain sentence. It travels inside a signed approval for a pinned run: the approval names this schema, carries the action as its canonical JSON (keys sorted, no whitespace), pins the SHA-256 of that JSON, and the action's runner_id is the run's own. Integers and strings only, so the canonical JSON is the same in every language. The object and every params object are closed: an action can do only what its params say. Catalog: k8s.delete-failed-pods (params.namespace; absent means every namespace); k8s.rollout-restart (params.namespace and params.deployment: restart one deployment and wait for its rollout; the cluster's own namespaces are refused); systemd.user-restart (params.unit: reload the user's systemd manager and restart one user service; Linux only); docker.prune-images (params.until_hours: remove the images unused and older than that many hours; never volumes); gh.cancel-run (params.repo and params.run_id: cancel one GitHub Actions run of an inorbithr repository); iohr.upgrade (no params: the runner upgrades its own iohr the way it was installed); preview.take (params.branch: take one preview-int/, feat/ or fix/ branch into the owner's Preview checkout, then check the Preview app); roll.task (params.rev, params.task and params.services: run one roll task at one commit of main on the deploy server); build.sweep-targets (params.mode: cap or guard the Rust build output of the core checkout and its worktrees); gh.release-rerun (params.run_id: re-run the failed jobs of one failed sdk release run whose commit passed its examples). Draft line: it may still be corrected.",
+  "description": "One action a person approves for one enrolled runner to carry out on its host: the action's dotted id from the catalog, the runner that runs it, its parameters (typed per action) and what it does in one plain sentence. It travels inside a signed approval for a pinned run: the approval names this schema, carries the action as its canonical JSON (keys sorted, no whitespace), pins the SHA-256 of that JSON, and the action's runner_id is the run's own. Integers and strings only, so the canonical JSON is the same in every language. The object and every params object are closed: an action can do only what its params say. Catalog: k8s.delete-failed-pods (params.namespace; absent means every namespace); k8s.rollout-restart (params.namespace and params.deployment: restart one deployment and wait for its rollout; the cluster's own namespaces are refused); systemd.user-restart (params.unit: reload the user's systemd manager and restart one user service; Linux only); docker.prune-images (params.until_hours: remove the images unused and older than that many hours; never volumes); gh.cancel-run (params.repo and params.run_id: cancel one GitHub Actions run of an inorbithr repository); iohr.upgrade (no params: the runner upgrades its own iohr the way it was installed); preview.take (params.branch: take one preview-int/, feat/ or fix/ branch into the owner's Preview checkout, then check the Preview app); roll.task (params.rev, params.task and params.services: run one roll task at one commit of main on the deploy server); build.sweep-targets (params.mode: cap or guard the Rust build output of the core checkout and its worktrees); gh.release-rerun (params.run_id: re-run the failed jobs of one failed sdk release run whose commit passed its examples). agent.install-checks (params.block, params.commit and params.service: install one block of monitor checks from core at one commit of main into the agent's checks file and restart the agent; Linux only). Draft line: it may still be corrected.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -165,6 +165,19 @@
       "required": [
         "action"
       ]
+    },
+    {
+      "properties": {
+        "action": {
+          "const": "agent.install-checks"
+        },
+        "params": {
+          "$ref": "#/$defs/agent-install-checks"
+        }
+      },
+      "required": [
+        "action"
+      ]
     }
   ],
   "$defs": {
@@ -287,7 +300,7 @@
       }
     },
     "roll-task": {
-      "description": "roll.task: run one roll task at one commit on the deploy server, through the runner host's roll script (it checks the commit is on origin/main, then runs mise run <task> <services> in a checkout of that commit on the server). services is the task's arguments, space-separated; empty means none. Effect, as a person reads it: Runs roll task roll:services at commit 0000000000000000000000000000000000000000 on the deploy server.",
+      "description": "roll.task: run one roll task at one commit on the deploy server, through the runner host's roll script (it checks the commit is on origin/main, then runs mise run <task> <services> in a checkout of that commit on the server). services is the task's arguments, space-separated; empty means none. Effect, as a person reads it: Runs roll task roll:services for example other-example at commit 0000000000000000000000000000000000000000 on the deploy server.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -356,6 +369,40 @@
           "type": "integer",
           "minimum": 100000,
           "maximum": 9007199254740991
+        }
+      }
+    },
+    "agent-install-checks": {
+      "description": "agent.install-checks: install one block of monitor checks into the runner host's agent checks file (~/.config/iohr-agent/checks.toml), then restart the agent. The block fixes the source in the core checkout, never a param: contract is devops/checks/generated/agent.toml, gates is devops/gates/gate-checks.toml and status-components is devops/checks/status-components.toml. The runner reads the source at the commit (which must be on origin/main), backs the file up with a timestamp, replaces or appends the block between its # BEGIN and # END markers (the BEGIN line names the commit), lints the file with iohr agent checks lint (a failure restores the backup), restarts the user service and checks the agent is connected again with at most 100 checks. Linux only; a runner on any other system refuses it. Effect, as a person reads it: Installs the contract checks from core at commit 0000000000000000000000000000000000000000 into the agent's checks file and restarts iohr-agent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "block",
+        "commit"
+      ],
+      "properties": {
+        "block": {
+          "description": "The block of checks, one of the catalog's; it fixes the source file.",
+          "type": "string",
+          "enum": [
+            "contract",
+            "gates",
+            "status-components"
+          ]
+        },
+        "commit": {
+          "description": "The core commit to read the source at: 40 lower-case hex digits, on origin/main.",
+          "type": "string",
+          "minLength": 40,
+          "maxLength": 40,
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "service": {
+          "description": "The agent's user service, without .service: lower-case letters, digits and @ . _ -, at most 63 characters. Absent means iohr-agent. The runner refuses a service its config does not list.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9][a-z0-9@._-]{0,62}$"
         }
       }
     }
