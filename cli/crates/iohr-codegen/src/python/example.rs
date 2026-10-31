@@ -14,47 +14,33 @@ pub(crate) fn example(call: &Call<'_>) -> String {
     let naming = PyNaming;
     let c = client::PYTHON;
     let mut names: Vec<String> = c.imports.iter().map(|s| (*s).to_owned()).collect();
-    names.push("ApiError".into());
     if let Some((model, _)) = &call.body {
         names.push(model.clone());
     }
     names.sort_unstable();
     names.dedup();
-    let mut out = format!("from inorbithr import {}\n\n", names.join(", "));
-    for line in c.lines {
-        let _ = writeln!(out, "{line}");
+    let mut out = String::new();
+    for s in c.std {
+        let _ = writeln!(out, "import {s}");
     }
-    out.push_str("\ntry:\n");
+    let _ = write!(out, "\nfrom inorbithr import {}\n\n", names.join(", "));
     let receiver = match call.tag {
         Some(tag) => format!("{}.{}", client::VAR, naming.method_name(tag)),
         None => client::VAR.to_owned(),
     };
     let method = naming.method_name(&call.op.name);
     let args = arguments(call);
-    match &call.flow {
-        Flow::Unary => {
-            let _ = write!(
-                out,
-                "    value = {receiver}.{method}({args}).value\n    print(value)\n"
-            );
-        }
+    let body = match &call.flow {
+        Flow::Unary => format!("value = {receiver}.{method}({args}).value\nprint(value)"),
         Flow::Pages(_) => {
             let item = call.item();
-            let _ = write!(
-                out,
-                "    for {item} in {receiver}.all_{method}({args}):\n        print({item})\n"
-            );
+            format!("for {item} in {receiver}.all_{method}({args}):\n    print({item})")
         }
-        Flow::Stream => {
-            let _ = write!(
-                out,
-                "    with {receiver}.{method}({args}) as stream:\n        for event in stream:\n            print(event)\n"
-            );
-        }
-    }
-    out.push_str(
-        "except ApiError as e:\n    print(f\"{e.code}: {e.problem} (request id {e.raw.request_id})\")\n",
-    );
+        Flow::Stream => format!(
+            "with {receiver}.{method}({args}) as stream:\n    for event in stream:\n        print(event)"
+        ),
+    };
+    out.push_str(&c.frame(&body));
     out
 }
 
@@ -74,9 +60,9 @@ fn arguments(call: &Call<'_>) -> String {
         if fields.len() > 1 {
             let mut text = format!("{model}(\n");
             for f in &fields {
-                let _ = writeln!(text, "        {f},");
+                let _ = writeln!(text, "    {f},");
             }
-            text.push_str("    )");
+            text.push(')');
             args.push(text);
         } else {
             args.push(format!("{model}({})", fields.join(", ")));

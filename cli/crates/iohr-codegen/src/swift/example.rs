@@ -20,42 +20,37 @@ pub(crate) fn example(call: &Call<'_>) -> String {
         let _ = writeln!(out, "import {i}");
     }
     out.push('\n');
-    for line in c.lines {
-        let _ = writeln!(out, "{line}");
-    }
-    out.push_str("do {\n");
     let receiver = match call.tag {
         Some(tag) => format!("{}.{}", client::VAR, naming.method_name(tag)),
         None => client::VAR.to_owned(),
     };
     let args = arguments(call);
+    let mut body = String::new();
     match &call.flow {
         Flow::Unary => {
             let _ = write!(
-                out,
-                "    let value = try await {receiver}.{}({args}).value\n    print(value)\n",
+                body,
+                "let value = try await {receiver}.{}({args}).value\nprint(value)\n",
                 naming.method_name(&call.op.name)
             );
         }
         Flow::Pages(_) => {
             let item = naming.escape(call.item().to_lower_camel_case());
             let _ = write!(
-                out,
-                "    for try await {item} in {receiver}.all{}({args}) {{\n        print({item})\n    }}\n",
+                body,
+                "for try await {item} in {receiver}.all{}({args}) {{\n    print({item})\n}}\n",
                 call.op.name.to_upper_camel_case()
             );
         }
         Flow::Stream => {
             let _ = write!(
-                out,
-                "    for try await event in {receiver}.{}({args}) {{\n        print(event)\n    }}\n",
+                body,
+                "for try await event in {receiver}.{}({args}) {{\n    print(event)\n}}\n",
                 naming.method_name(&call.op.name)
             );
         }
     }
-    out.push_str(
-        "} catch let e as APIError {\n    print(\"\\(e.code): \\(e.problem) (request id \\(e.raw.requestId))\")\n}\n",
-    );
+    out.push_str(&c.frame(&body));
     out
 }
 

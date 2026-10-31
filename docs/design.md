@@ -39,6 +39,7 @@ One entry type per language, constructed once and shared across threads or tasks
 | Type | `Client` | `Client`, `AsyncClient` | `inorbit.Client` | `hr.inorbit.sdk.Client` | `InOrbit.Sdk.Client<P>` | `inorbithr::Client<P>` | `InOrbit.Client<P>` |
 | Build | `new Client({...})` | `Client(...)` | `inorbit.NewClient(opts...)` | `Client.builder()...build()` | `new Client<P>(new ClientOptions {...})` | `Client::builder()...build()?` | `try Client<P>(ClientOptions(...))`, `try Client<P>.fromEnv()` |
 | Load (M6) | `Client.load()` | `Client.load()` | `inorbit.Load(ctx)` | `Client.load()` | `Client.Load()` | `Client::load()?` | not yet (#172) |
+| Close | nothing to close (fetch) | `with` / `close()`, `async with` / `aclose()`, on the client and each profile | `defer c.Close()`: the idle connections of a transport the client built (a given or shared one is left alone) | nothing to close (JDK 17 `HttpClient`) | `using` / `Dispose()` | `Drop` | nothing to close (`deinit`) |
 | Per call | `{ signal, timeout }` options | keyword `timeout=` | `ctx context.Context` first | a sync call, a `CompletableFuture` beside it | `async`, `CancellationToken` last | `.await` | `async throws`, `CallOptions` last, task cancellation |
 
 Configuration, same names everywhere (case adjusted). [config.md](config.md) is the full

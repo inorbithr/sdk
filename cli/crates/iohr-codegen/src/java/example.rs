@@ -19,7 +19,6 @@ pub(crate) fn example(call: &Call<'_>) -> String {
     let naming = JavaNaming;
     let c = client::JAVA;
     let mut imports: Vec<String> = c.imports.iter().map(|s| (*s).to_owned()).collect();
-    imports.push("hr.inorbit.sdk.errors.ApiException".into());
     let args = arguments(call, &mut imports);
     imports.sort_unstable();
     imports.dedup();
@@ -28,40 +27,35 @@ pub(crate) fn example(call: &Call<'_>) -> String {
         let _ = writeln!(out, "import {i};");
     }
     out.push('\n');
-    for line in c.lines {
-        let _ = writeln!(out, "{line}");
-    }
-    out.push_str("try {\n");
     let receiver = match call.tag {
         Some(tag) => format!("{}.{}()", client::VAR, naming.method_name(tag)),
         None => client::VAR.to_owned(),
     };
     let method = naming.method_name(&call.op.name);
+    let mut body = String::new();
     match &call.flow {
         Flow::Unary => {
             let _ = write!(
-                out,
-                "    var value = {receiver}.{method}({args}).value();\n    System.out.println(value);\n"
+                body,
+                "var value = {receiver}.{method}({args}).value();\nSystem.out.println(value);\n"
             );
         }
         Flow::Pages(_) => {
             let item = escape(&call.item().to_lower_camel_case());
             let all = format!("all{}", naming.type_name(&call.op.name));
             let _ = write!(
-                out,
-                "    for (var {item} : {receiver}.{all}({args})) {{\n        System.out.println({item});\n    }}\n"
+                body,
+                "for (var {item} : {receiver}.{all}({args})) {{\n    System.out.println({item});\n}}\n"
             );
         }
         Flow::Stream => {
             let _ = write!(
-                out,
-                "    try (var stream = {receiver}.{method}({args})) {{\n        for (var event : stream) {{\n            System.out.println(event);\n        }}\n    }}\n"
+                body,
+                "try (var stream = {receiver}.{method}({args})) {{\n    for (var event : stream) {{\n        System.out.println(event);\n    }}\n}}\n"
             );
         }
     }
-    out.push_str(
-        "} catch (ApiException e) {\n    System.err.println(e.code() + \": \" + e.problem() + \" (request id \" + e.raw().requestId() + \")\");\n}\n",
-    );
+    out.push_str(&c.frame(&body));
     out
 }
 
@@ -130,9 +124,9 @@ fn builder(ty: &str, setters: &[String]) -> String {
         _ => {
             let mut out = format!("{ty}.builder()\n");
             for s in setters {
-                let _ = writeln!(out, "            {s}");
+                let _ = writeln!(out, "        {s}");
             }
-            out.push_str("            .build()");
+            out.push_str("        .build()");
             out
         }
     }

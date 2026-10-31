@@ -16,8 +16,6 @@ pub(crate) fn example(call: &Call<'_>) -> String {
     let naming = CsNaming;
     let c = client::CSHARP;
     let mut usings: Vec<String> = c.imports.iter().map(|s| (*s).to_owned()).collect();
-    usings.push("System".into());
-    usings.push("InOrbit.Sdk.Api".into());
     usings.sort_by(|a, b| {
         (!a.starts_with("System"), a.as_str()).cmp(&(!b.starts_with("System"), b.as_str()))
     });
@@ -27,40 +25,35 @@ pub(crate) fn example(call: &Call<'_>) -> String {
         let _ = writeln!(out, "using {u};");
     }
     out.push('\n');
-    for line in c.lines {
-        let _ = writeln!(out, "{line}");
-    }
-    out.push_str("try\n{\n");
     let receiver = match call.tag {
         Some(tag) => format!("{}.{}()", client::VAR, naming.method_name(tag)),
         None => client::VAR.to_owned(),
     };
     let method = call.op.name.to_upper_camel_case();
     let args = arguments(call);
+    let mut body = String::new();
     match &call.flow {
         Flow::Unary => {
             let _ = write!(
-                out,
-                "    var value = (await {receiver}.{method}Async({args})).Value;\n    Console.WriteLine(value);\n"
+                body,
+                "var value = (await {receiver}.{method}Async({args})).Value;\nConsole.WriteLine(value);\n"
             );
         }
         Flow::Pages(_) => {
             let item = naming.escape(call.item().to_lower_camel_case());
             let _ = write!(
-                out,
-                "    await foreach (var {item} in {receiver}.All{method}Async({args}))\n    {{\n        Console.WriteLine({item});\n    }}\n"
+                body,
+                "await foreach (var {item} in {receiver}.All{method}Async({args}))\n{{\n    Console.WriteLine({item});\n}}\n"
             );
         }
         Flow::Stream => {
             let _ = write!(
-                out,
-                "    await foreach (var @event in {receiver}.{method}Async({args}))\n    {{\n        Console.WriteLine(@event);\n    }}\n"
+                body,
+                "await foreach (var @event in {receiver}.{method}Async({args}))\n{{\n    Console.WriteLine(@event);\n}}\n"
             );
         }
     }
-    out.push_str(
-        "}\ncatch (ApiException e)\n{\n    Console.Error.WriteLine($\"{e.Code}: {e.Problem} (request id {e.Raw.RequestId})\");\n}\n",
-    );
+    out.push_str(&c.frame(&body));
     out
 }
 
@@ -115,11 +108,11 @@ fn object(ty: &str, inits: &[String]) -> String {
         0 => format!("new {ty}()"),
         1 => format!("new {ty} {{ {} }}", inits[0]),
         _ => {
-            let mut out = format!("new {ty}\n    {{\n");
+            let mut out = format!("new {ty}\n{{\n");
             for i in inits {
-                let _ = writeln!(out, "        {i},");
+                let _ = writeln!(out, "    {i},");
             }
-            out.push_str("    }");
+            out.push('}');
             out
         }
     }
