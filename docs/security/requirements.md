@@ -310,11 +310,11 @@ replay; the record is written, under a file lock, before the run is reported sta
 refusal is reported `failed` and runs nothing. Actions come only from a fixed catalogue
 in the binary (`k8s.delete-failed-pods`, `k8s.rollout-restart`, `systemd.user-restart`,
 `docker.prune-images`, `gh.cancel-run`, `iohr.upgrade`, `preview.take`, `roll.task`,
-`build.sweep-targets`, `gh.release-rerun`); an action outside it is refused.
+`build.sweep-targets`, `gh.release-rerun`, `agent.install-checks`); an action outside it is refused.
 The run's `effect` must be the catalogue's one sentence for its action and params
 (core's `effect_of`, ported unchanged), so the words the owner approved are what runs; any
 other effect is refused. Each action is planned to fixed argument vectors, its params checked again, before
-anything runs. Each tool (`kubectl`, `systemctl --user`, `docker`, `gh`, `mise`, `remote-roll.sh`) runs from an
+anything runs. Each tool (`kubectl`, `systemctl --user`, `docker`, `gh`, `git`, `mise`, `remote-roll.sh`) runs from an
 absolute `PATH` entry with an argument vector, never a shell, with the scrubbed
 environment and a time limit; a missing tool is a refusal. No Kubernetes action runs in
 `kube-system`, `kube-public` or `kube-node-lease`, and a namespace or deployment must be
@@ -327,7 +327,12 @@ name may start with a hyphen, so none reads as an option. `build.sweep-targets` 
 `mise run target:sweep` or `target:guard` in the configured absolute `core_checkout`.
 `gh.release-rerun` reaches only `inorbithr/sdk`, and only re-runs the failed jobs of a
 `release.yml` run on `main` that concluded `failure` and whose commit has a green
-`examples-run` status, read again before it runs. Only `mise` and `remote-roll.sh` get
+`examples-run` status, read again before it runs. `agent.install-checks` names one of three
+blocks (never a path), reads its source from the `core_checkout` only at a 40-hex commit that is an
+ancestor of `origin/main` and no larger than the 16 KiB output cap, builds the new checks file beside
+the agent's `~/.config/iohr-agent/checks.toml`, replaces the file only after `iohr agent checks lint`
+accepts it and a timestamped backup exists, restarts only a unit in `user_units`, and puts the backup
+back when the agent does not reconnect holding what the file declares. Only `mise`, `git` and `remote-roll.sh` get
 `SSH_AUTH_SOCK` and `INORBIT_SSH_HOST` from the scrubbed-out environment. `iohr.upgrade` runs this
 executable's own `upgrade`, never a downloaded script. Every report is signed with the
 runner's own P-256 run key, kept in the credential store and never printed; the output it
