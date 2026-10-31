@@ -90,6 +90,18 @@ class AcmeCi:
         """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
         return cls(Client.load(load_options=load_options, profile_type="acme-ci", **options))
 
+    def close(self) -> None:
+        """Closes the client's connections."""
+        self.client.close()
+
+    def __enter__(self) -> AcmeCi:
+        """The profile, closed on exit."""
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        """Closes the profile's client."""
+        self.client.close()
+
     def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
         return self.client.request(
@@ -401,6 +413,18 @@ class AsyncAcmeCi:
         """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
         return cls(AsyncClient.load(load_options=load_options, profile_type="acme-ci", **options))
 
+    async def aclose(self) -> None:
+        """Closes the client's connections."""
+        await self.client.aclose()
+
+    async def __aenter__(self) -> AsyncAcmeCi:
+        """The profile, closed on exit."""
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        """Closes the profile's client."""
+        await self.client.aclose()
+
     async def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
         return await self.client.request(
@@ -706,6 +730,18 @@ class Personal:
         """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
         return cls(Client.load(load_options=load_options, profile_type="personal", **options))
 
+    def close(self) -> None:
+        """Closes the client's connections."""
+        self.client.close()
+
+    def __enter__(self) -> Personal:
+        """The profile, closed on exit."""
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        """Closes the profile's client."""
+        self.client.close()
+
     def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""
         return self.client.request(
@@ -787,6 +823,18 @@ class AsyncPersonal:
     def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[AsyncClientOptions]) -> AsyncPersonal:
         """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
         return cls(AsyncClient.load(load_options=load_options, profile_type="personal", **options))
+
+    async def aclose(self) -> None:
+        """Closes the client's connections."""
+        await self.client.aclose()
+
+    async def __aenter__(self) -> AsyncPersonal:
+        """The profile, closed on exit."""
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        """Closes the profile's client."""
+        await self.client.aclose()
 
     async def me(self, *, timeout: float | None = None) -> Response[Me]:
         """`GET /v1/me`; needs scope `identity:read`. A key needs scope `identity:read`."""

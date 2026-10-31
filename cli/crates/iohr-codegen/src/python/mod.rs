@@ -749,6 +749,18 @@ fn profile_class(
         out,
         "\n    @classmethod\n    def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[{options}]) -> {class}:\n        \"\"\"The profile with its settings and credential from code, the environment, the config file and the `iohr` login.\"\"\"\n        return cls({client}.load(load_options=load_options, {typed}**options))\n"
     );
+    // The profile owns its client's connections as the client does: `with` (or
+    // `async with`) closes them on leaving the block.
+    let _ = match form {
+        Form::Sync => write!(
+            out,
+            "\n    def close(self) -> None:\n        \"\"\"Closes the client's connections.\"\"\"\n        self.client.close()\n\n    def __enter__(self) -> {class}:\n        \"\"\"The profile, closed on exit.\"\"\"\n        return self\n\n    def __exit__(self, *_: object) -> None:\n        \"\"\"Closes the profile's client.\"\"\"\n        self.client.close()\n"
+        ),
+        Form::Async => write!(
+            out,
+            "\n    async def aclose(self) -> None:\n        \"\"\"Closes the client's connections.\"\"\"\n        await self.client.aclose()\n\n    async def __aenter__(self) -> {class}:\n        \"\"\"The profile, closed on exit.\"\"\"\n        return self\n\n    async def __aexit__(self, *_: object) -> None:\n        \"\"\"Closes the profile's client.\"\"\"\n        await self.client.aclose()\n"
+        ),
+    };
     for op in surface.flat.iter().filter(|o| o.profiles.contains(&p.name)) {
         out.push_str(&profile_method(op, models, "self.client", form, uses));
     }

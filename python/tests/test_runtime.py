@@ -17,11 +17,13 @@ from inorbithr import (
     ApiError,
     AsyncClient,
     AsyncClientCredentials,
+    AsyncPublic,
     Client,
     ClientCredentials,
     ConfigError,
     Int64,
     Operation,
+    Public,
     RetryDetail,
     StaticToken,
     TooLargeError,
@@ -290,3 +292,36 @@ def test_a_timestamp_reads_empty_as_no_value() -> None:
     for bad in ("yesterday", "2026-10-04", "2026-10-04T08:00:00"):
         with pytest.raises(ValueError, match="RFC 3339"):
             parse_timestamp(bad)
+
+
+def test_a_profile_closes_its_client_with_with(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INORBIT_TOKEN", "tok")
+    closed: list[Client] = []
+
+    def close(client: Client) -> None:
+        closed.append(client)
+
+    monkeypatch.setattr(Client, "close", close)
+    with Public.from_env() as api:
+        assert closed == []
+    assert closed == [api.client]
+
+
+def test_an_async_profile_closes_its_client_with_async_with(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INORBIT_TOKEN", "tok")
+    closed: list[AsyncClient] = []
+
+    async def aclose(client: AsyncClient) -> None:
+        closed.append(client)
+
+    monkeypatch.setattr(AsyncClient, "aclose", aclose)
+
+    async def run() -> AsyncPublic:
+        async with AsyncPublic.from_env() as api:
+            assert closed == []
+        return api
+
+    api = asyncio.run(run())
+    assert closed == [api.client]
