@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.1](https://github.com/inorbithr/sdk/compare/go/v0.3.0...go/v0.3.1) (2026-10-31)
+
+
+### Bug fixes
+
+* **cli:** idiomatic reference examples in every language, with Go Close and Python with ([#332](https://github.com/inorbithr/sdk/issues/332)) ([f2eeb74](https://github.com/inorbithr/sdk/commit/f2eeb74d38dba4071df1449f674f10b25ed49231))
+
+
+### Documentation
+
+* **docs:** READMEs match today's SDKs and CLI ([#323](https://github.com/inorbithr/sdk/issues/323)) ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+* **sdk:** READMEs match today's SDKs and CLI ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+
 ## [0.3.0](https://github.com/inorbithr/sdk/compare/go/v0.2.3...go/v0.3.0) (2026-10-12)
 
 
