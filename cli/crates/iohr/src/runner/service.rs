@@ -290,6 +290,11 @@ pub(crate) struct Pack {
     /// directory (`checkouts/<job_id>`, empty for a job with no repository); the run loop
     /// sends no gate report for a pack without one.
     pub(crate) checkout: String,
+    /// The provider the turn must run on; empty when any the runner runs will do. A
+    /// review turn (RFC 0150, the Critique) names the critic's.
+    pub(crate) provider: String,
+    /// For a review turn: the pull request's head the Critique is for.
+    pub(crate) critique_commit: String,
 }
 
 impl Pack {
@@ -335,6 +340,8 @@ impl Pack {
             checkout: Some(s("checkout_path"))
                 .filter(|c| !c.is_empty())
                 .unwrap_or_else(|| s("checkoutPath")),
+            provider: s("provider"),
+            critique_commit: s("critique_commit"),
         }
     }
 }
@@ -1216,9 +1223,14 @@ mod tests {
             "resume_session": "x", "resume_runner_id": "r", "thread_id": "th",
             "job_id": "j", "attempt": 2, "lease_id": "l", "fencing_token": "9",
             "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}",
-            "checkout_path": "checkouts/job_1"
+            "checkout_path": "checkouts/job_1",
+            "provider": "claude", "critique_commit": "abc1234"
         }));
         assert_eq!(p.checkout, "checkouts/job_1");
+        assert_eq!(
+            (p.provider.as_str(), p.critique_commit.as_str()),
+            ("claude", "abc1234")
+        );
         assert_eq!(
             (
                 p.thread_id.as_str(),
