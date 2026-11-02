@@ -23,14 +23,61 @@ fn the_examples_validate_and_every_invalid_file_is_refused() {
         assert_eq!(validate(&read(p.clone())), Ok(()), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 13);
+    assert_eq!(n, 18);
     let mut n = 0;
     for e in std::fs::read_dir(dir.join("schema/invalid")).unwrap() {
         let p = e.unwrap().path();
         assert!(validate(&read(p.clone())).is_err(), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 40);
+    assert_eq!(n, 54);
+}
+
+/// The two actions of RFC 0172: every example looks up to its action, and the rules a
+/// schema cannot say (`min_runners` above `max_runners`, `until_hours` against `target`)
+/// are refused here as core's `check_action` refuses them.
+#[test]
+fn disk_prune_and_runner_scale_examples_look_up_and_their_cross_field_rules_hold() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/host-action");
+    let read = |name: &str| -> Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(dir.join("schema/examples").join(name)).unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        lookup_on(&read("disk-prune-host.json"), "linux"),
+        Ok(Action::DiskPrune {
+            target: "host".to_owned(),
+            until_hours: None
+        })
+    );
+    assert_eq!(
+        lookup_on(&read("disk-prune-builder.json"), "linux")
+            .unwrap()
+            .id(),
+        DISK_PRUNE
+    );
+    assert!(lookup_on(&read("disk-prune-k3d.json"), "linux").is_ok());
+    assert!(lookup_on(&read("disk-prune-host.json"), "macos").is_err());
+    assert_eq!(
+        lookup_on(&read("runner-scale-no-min.json"), "linux")
+            .unwrap()
+            .id(),
+        RUNNER_SCALE
+    );
+    // Min above max: no sentence of the catalog fits, so the signed message is refused.
+    let mut d = read("runner-scale-images.json");
+    d["params"]["min_runners"] = json!(d["params"]["max_runners"].as_u64().unwrap() + 1);
+    assert!(validate(&d).is_err());
+    assert!(lookup_on(&d, "linux").is_err());
+    // until_hours with a target that has none, and a builder without it.
+    let mut d = read("disk-prune-host.json");
+    d["params"]["until_hours"] = json!(24);
+    assert!(validate(&d).is_err());
+    let mut d = read("disk-prune-builder.json");
+    d["params"].as_object_mut().unwrap().remove("until_hours");
+    assert!(validate(&d).is_err());
 }
 
 /// Every vendored file is listed in `SOURCE` with the SHA-256 it was copied with, so a

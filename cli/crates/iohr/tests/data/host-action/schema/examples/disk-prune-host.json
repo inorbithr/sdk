@@ -1,0 +1,8 @@
+{
+  "action": "disk.prune",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "target": "host"
+  },
+  "effect": "Prunes the runner's host's disk with the host prune: Docker's build cache and unused images, the k3d registry's old tags, unused k3d node images and stale shared build files."
+}
