@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.0-alpha.31](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.30...iohr/v0.1.0-alpha.31) (2026-11-03)
+
+
+### Features
+
+* **cli:** disk.prune and helm.runner-scale host actions ([#334](https://github.com/inorbithr/sdk/issues/334)) ([6908058](https://github.com/inorbithr/sdk/commit/6908058d20e2f487e11032b116134b71c8524043))
+* **cli:** iohr runner can sign in as Io (client credentials) ([#342](https://github.com/inorbithr/sdk/issues/342)) ([9965993](https://github.com/inorbithr/sdk/commit/9965993f81c82e75ca2b7876c43d1eec36668e1f))
+* **cli:** let iohr runner sign in as Io with client credentials ([9965993](https://github.com/inorbithr/sdk/commit/9965993f81c82e75ca2b7876c43d1eec36668e1f))
+
+
+### Dependencies
+
+* **cli:** bump yanked async-executor 1.14.0 to 1.14.1 ([#345](https://github.com/inorbithr/sdk/issues/345)) ([9dbd2ba](https://github.com/inorbithr/sdk/commit/9dbd2bac1d2269f36f1e4d11a18f4d4952c1b809))
+
 ## [0.1.0-alpha.30](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.29...iohr/v0.1.0-alpha.30) (2026-10-31)
 
 
