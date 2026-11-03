@@ -298,11 +298,15 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
     ] {
         assert!(
             named.iter().any(|(p, _)| p == path),
-            "{path} was not called: {named:?}"
+            "{path} was not called"
         );
     }
-    for (p, a) in &named {
-        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    for (_, a) in &named {
+        assert_eq!(
+            a.as_deref(),
+            Some("acc_1"),
+            "a coordinator call named no account"
+        );
     }
 
     // `--account` wins over the profile's, on register and on status.
@@ -316,8 +320,12 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
     }
     let named = accounts_named(&server).await;
     assert!(named.len() > before);
-    for (p, a) in &named[before..] {
-        assert_eq!(a.as_deref(), Some("team_9"), "{p}");
+    for (_, a) in &named[before..] {
+        assert_eq!(
+            a.as_deref(),
+            Some("team_9"),
+            "a coordinator call named the wrong account"
+        );
     }
 }
 
@@ -559,11 +567,15 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
     ] {
         assert!(
             named.iter().any(|(p, _)| p == path),
-            "{path} was not called: {named:?}"
+            "{path} was not called"
         );
     }
-    for (p, a) in &named {
-        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    for (_, a) in &named {
+        assert_eq!(
+            a.as_deref(),
+            Some("acc_1"),
+            "a coordinator call named no account"
+        );
     }
     let lease_beats = bodies(&server, "/v1/coordinator/leases/lease_1/heartbeat").await;
     assert_ne!(lease_beats.len(), 0, "no lease heartbeat during the turn");
