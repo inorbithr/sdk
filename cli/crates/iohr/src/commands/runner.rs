@@ -13,8 +13,9 @@ use semver::Version;
 use tokio::sync::watch;
 
 use crate::Env;
+use crate::cli::SignIn;
 use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
-use crate::context::{Ctx, account as resolve_account, blocking, run_profile, session};
+use crate::context::{Ctx, account as resolve_account, blocking, io_session, run_profile, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::runner::approvals::{self, enrol};
@@ -56,8 +57,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
         show_settings(&e, out).await;
         return Ok(());
     }
-    let s = session(g, env).await?;
     let ctx = Ctx::load(g)?;
+    let s = match g.sign_in {
+        Some(SignIn::Io) => io_session(g, &ctx).await?,
+        None => session(g, env).await?,
+    };
     // `run-key` calls only the approvals API, which checks the person account itself.
     if !matches!(
         cmd,
@@ -400,6 +404,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                             "exit_code": checked.exit_code, "head": checked.head,
                             "main_commit": checked.main_commit,
                             "output_sha256": checked.output_sha256,
+                            "output_tail": checked.output_tail,
                             "evidence_id": a.evidence_id, "duplicate": a.duplicate,
                             "stage": a.stage,
                         }));
@@ -413,6 +418,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                             ("duplicate", a.duplicate.to_string()),
                             ("job is now", a.stage.clone()),
                         ]);
+                        if !checked.output_tail.is_empty() {
+                            Out::note(&format!(
+                                "the check failed; last output (redacted, local only):\n{}",
+                                checked.output_tail
+                            ));
+                        }
                     }
                     Ok(())
                 }
@@ -430,9 +441,39 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             proof,
             label,
             wait,
+            show,
             account,
         } => {
             let account = resolve_account(&s, account.account)?;
+            if show {
+                // Read only: no key is made and no ask is filed.
+                let key = run_key(&ctx, &s, &account, false).await?.ok_or_else(|| {
+                    Error::Failed("this machine has no run key (`iohr runner run-key`)".into())
+                })?;
+                let public = key.public_key();
+                let svc = HttpService::new(&s.api, account.clone(), None);
+                let runners = svc.approval_runners().await?;
+                let found = approvals::enrolled(&runners, &public);
+                let field = |k: &str| {
+                    found
+                        .and_then(|r| r.get(k))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                };
+                let (id, label) = (field("runner_id"), field("label"));
+                if out.json {
+                    Out::print_json(&serde_json::json!({
+                        "public_key": public, "runner_id": id, "label": label,
+                    }));
+                    return Ok(());
+                }
+                Out::pairs(&[
+                    ("public_key", public),
+                    ("enrolled", id.unwrap_or_else(|| "no".to_owned())),
+                    ("label", label.unwrap_or_default()),
+                ]);
+                return Ok(());
+            }
             let key = run_key(&ctx, &s, &account, true)
                 .await?
                 .ok_or_else(|| Error::Failed("no run key could be made".into()))?;

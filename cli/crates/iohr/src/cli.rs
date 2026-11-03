@@ -56,12 +56,31 @@ pub struct Global {
     /// The OAuth client the command line signs in as.
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
+    /// Sign in as someone other than a person: `io`, the `OAuth2` client `iohr-io` with the
+    /// client credentials grant, so jobs Io files run on runners Io owns. `iohr runner` only;
+    /// the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
+    /// a Mac, from the keychain item the Mac bridge uses, never from an argument.
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_SIGN_IN",
+        value_enum,
+        value_name = "WHO"
+    )]
+    pub sign_in: Option<SignIn>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
     pub config_dir: Option<PathBuf>,
     /// Where extensions are kept (default: the platform's data directory).
     #[arg(long, global = true, env = "IOHR_DATA_DIR", hide = true)]
     pub data_dir: Option<PathBuf>,
+}
+
+/// Who signs in when it is not a person.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SignIn {
+    /// Io, the `OAuth2` client `iohr-io` (client credentials).
+    Io,
 }
 
 impl Global {
@@ -418,6 +437,10 @@ pub enum RunnerCommand {
         /// Minutes to wait for your approval, 0 to 60; 0 files the ask and returns.
         #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=60))]
         wait: u64,
+        /// Only show this machine's run key and its enrolled runner id; make nothing,
+        /// ask nothing.
+        #[arg(long, conflicts_with_all = ["proof", "label"])]
+        show: bool,
         #[command(flatten)]
         account: AccountArg,
     },

@@ -223,7 +223,7 @@ async fn exchange(
     })
 }
 
-fn loopback(url: &url::Url) -> bool {
+pub(crate) fn loopback(url: &url::Url) -> bool {
     match url.host() {
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
         Some(url::Host::Ipv6(ip)) => ip.is_loopback(),

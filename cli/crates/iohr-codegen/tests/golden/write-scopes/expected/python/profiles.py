@@ -56,6 +56,18 @@ class Hooks:
         """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
         return cls(Client.load(load_options=load_options, profile_type="hooks", **options))
 
+    def close(self) -> None:
+        """Closes the client's connections."""
+        self.client.close()
+
+    def __enter__(self) -> Hooks:
+        """The profile, closed on exit."""
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        """Closes the profile's client."""
+        self.client.close()
+
 
 class HooksEvents:
     """The `events` operations profile `hooks` may call."""
@@ -156,6 +168,18 @@ class AsyncHooks:
     def load(cls, *, load_options: LoadOptions | None = None, **options: Unpack[AsyncClientOptions]) -> AsyncHooks:
         """The profile with its settings and credential from code, the environment, the config file and the `iohr` login."""
         return cls(AsyncClient.load(load_options=load_options, profile_type="hooks", **options))
+
+    async def aclose(self) -> None:
+        """Closes the client's connections."""
+        await self.client.aclose()
+
+    async def __aenter__(self) -> AsyncHooks:
+        """The profile, closed on exit."""
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        """Closes the profile's client."""
+        await self.client.aclose()
 
 
 class AsyncHooksEvents:

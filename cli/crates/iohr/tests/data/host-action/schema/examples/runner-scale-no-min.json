@@ -1,0 +1,9 @@
+{
+  "action": "helm.runner-scale",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "release": "core-ci",
+    "max_runners": 8
+  },
+  "effect": "Sets the runner scale set core-ci to at most 8 and at least 0 runners."
+}

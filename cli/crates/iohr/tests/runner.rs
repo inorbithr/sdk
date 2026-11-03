@@ -298,11 +298,15 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
     ] {
         assert!(
             named.iter().any(|(p, _)| p == path),
-            "{path} was not called: {named:?}"
+            "{path} was not called"
         );
     }
-    for (p, a) in &named {
-        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    for (_, a) in &named {
+        assert_eq!(
+            a.as_deref(),
+            Some("acc_1"),
+            "a coordinator call named no account"
+        );
     }
 
     // `--account` wins over the profile's, on register and on status.
@@ -316,8 +320,12 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
     }
     let named = accounts_named(&server).await;
     assert!(named.len() > before);
-    for (p, a) in &named[before..] {
-        assert_eq!(a.as_deref(), Some("team_9"), "{p}");
+    for (_, a) in &named[before..] {
+        assert_eq!(
+            a.as_deref(),
+            Some("team_9"),
+            "a coordinator call named the wrong account"
+        );
     }
 }
 
@@ -559,11 +567,15 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
     ] {
         assert!(
             named.iter().any(|(p, _)| p == path),
-            "{path} was not called: {named:?}"
+            "{path} was not called"
         );
     }
-    for (p, a) in &named {
-        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    for (_, a) in &named {
+        assert_eq!(
+            a.as_deref(),
+            Some("acc_1"),
+            "a coordinator call named no account"
+        );
     }
     let lease_beats = bodies(&server, "/v1/coordinator/leases/lease_1/heartbeat").await;
     assert_ne!(lease_beats.len(), 0, "no lease heartbeat during the turn");
@@ -1314,6 +1326,102 @@ async fn gate_report_needs_the_runner_scopes_and_a_runner_key() {
     assert!(text(&o).contains("iohr runner register"), "{}", text(&o));
 }
 
+/// `runner run-key --show` only reads: with no key it fails and makes none, with one it
+/// prints the public key and the runner id the service enrolled it under, filing nothing.
+#[tokio::test]
+async fn run_key_show_reads_the_key_and_makes_and_asks_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    login(&server, dir.path(), &token_with(&["identity:read"])).await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show"],
+    ));
+    assert_eq!(o.status.code(), Some(1), "no key yet: {}", text(&o));
+    assert!(text(&o).contains("no run key"), "{}", text(&o));
+
+    // Make the key (an ask is filed, which this test then counts).
+    let ask = "apr_01M5Z1KKYQ16SMN4XFYS5K5RFA";
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": []})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/approvals"))
+        .respond_with(move |r: &wiremock::Request| {
+            let b: Value = serde_json::from_slice(&r.body).unwrap();
+            ResponseTemplate::new(200).set_body_json(json!({"approval": {
+                "approval_id": ask, "status": "pending", "payload": b["payload"],
+            }}))
+        })
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/approvals/{ask}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"approval": {"approval_id": ask, "status": "pending"}})),
+        )
+        .mount(&server)
+        .await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--json", "--wait", "0"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let made: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let public = made["public_key"].as_str().unwrap().to_owned();
+    let asks = bodies(&server, "/v1/approvals").await.len();
+
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let shown: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(shown["public_key"], public.as_str(), "the same key");
+    assert_eq!(shown["runner_id"], Value::Null, "not enrolled");
+
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "runners": [{"runner_id": "arn_1", "public_key": public, "label": "mac"}]
+        })))
+        .mount(&server)
+        .await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show", "--json"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let shown: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(shown["runner_id"], "arn_1");
+    assert_eq!(shown["label"], "mac");
+    assert_eq!(asks, 1, "only the making filed an ask");
+    assert!(
+        bodies(&server, "/v1/approvals").await.is_empty(),
+        "--show files nothing"
+    );
+
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "run-key", "--show", "--label", "x"],
+    ));
+    assert_eq!(
+        o.status.code(),
+        Some(2),
+        "--show conflicts with --label: {}",
+        text(&o)
+    );
+}
+
 /// `runner run-key` makes the approvals key once, keeps it in the profile's store, needs
 /// no coordinator scope, and enrols it with a device's proof plus a P-256 signature of
 /// possession over the enrolment message.
@@ -1431,4 +1539,93 @@ async fn run_key_is_made_once_and_enrolled_with_a_proof_of_possession() {
     )
     .verify(message.as_bytes(), &possession)
     .expect("the possession signature verifies with the run key");
+}
+
+const IO_SECRET: &str = "IOSECRETMARKER";
+
+/// The Io sign-in (RFC 0065.2): `--sign-in io` mints a token for `iohr-io` from a secret
+/// file, calls the coordinator with it and not with the profile's token, and a secret file
+/// that others can read stops the run before any call. The default sign-in is untouched.
+#[tokio::test]
+async fn sign_in_io_calls_the_coordinator_with_a_minted_token_and_guards_the_secret_file() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    login(&server, dir.path(), &token()).await;
+    let io_token = token_with(&[
+        "coordinator:runner",
+        "coordinator:read",
+        "coordinator:write",
+    ]);
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .and(body_string_contains("grant_type=client_credentials"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"access_token": io_token, "token_type": "bearer", "expires_in": 900}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/runners"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runners": []})))
+        .mount(&server)
+        .await;
+    let secret = dir.path().join("io-secret");
+    std::fs::write(&secret, format!("{IO_SECRET}\n")).unwrap();
+    let io = |server: &MockServer, args: &[&str]| {
+        let mut c = iohr(server, dir.path(), args);
+        c.env("IOHR_ISSUER", server.uri())
+            .env("IOHR_CLIENT_SECRET_FILE", &secret);
+        c
+    };
+
+    // A secret file group and world can read is refused before any sign-in call.
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let before = server.received_requests().await.unwrap().len();
+    let o = run(&mut io(&server, &["runner", "status", "--sign-in", "io"]));
+    assert_eq!(o.status.code(), Some(3), "{}", text(&o));
+    assert!(text(&o).contains("chmod 600"), "{}", text(&o));
+    assert!(!text(&o).contains(IO_SECRET));
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+
+    // Mode 0600: the token is minted for the client and the coordinator is called with it.
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let o = run(&mut io(&server, &["runner", "status", "--sign-in", "io"]));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(!text(&o).contains(IO_SECRET) && !text(&o).contains(&io_token));
+    let seen = server.received_requests().await.unwrap();
+    let mint = seen
+        .iter()
+        .rfind(|r| r.url.path() == "/oauth2/token")
+        .expect("a token was minted");
+    let basic = mint.headers.get("authorization").unwrap().to_str().unwrap();
+    assert_eq!(
+        basic,
+        format!("Basic {}", STANDARD.encode(format!("iohr-io:{IO_SECRET}")))
+    );
+    let call = seen
+        .iter()
+        .rfind(|r| r.url.path() == "/v1/coordinator/runners")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("authorization").unwrap().to_str().unwrap(),
+        format!("Bearer {io_token}")
+    );
+
+    // The environment names it too, and no other command takes it.
+    let o = run(&mut io(&server, &["whoami", "--sign-in", "io"]));
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+
+    // Without the flag the profile's own token is used, as before.
+    let o = run(&mut iohr(&server, dir.path(), &["runner", "status"]));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let seen = server.received_requests().await.unwrap();
+    let last = seen
+        .iter()
+        .rfind(|r| r.url.path() == "/v1/coordinator/runners")
+        .unwrap();
+    assert_eq!(
+        last.headers.get("authorization").unwrap().to_str().unwrap(),
+        format!("Bearer {}", token())
+    );
 }

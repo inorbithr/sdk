@@ -1,0 +1,10 @@
+{
+  "action": "agent.install-checks",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "block": "contract",
+    "commit": "0000000000000000000000000000000000000000",
+    "path": "/etc/passwd"
+  },
+  "effect": "Installs the contract checks from core at commit 0000000000000000000000000000000000000000 into the agent's checks file and restarts iohr-agent."
+}

@@ -12,8 +12,8 @@ import (
 	"github.com/inorbithr/sdk/go/codegen"
 )
 
-// The surface was generated for the runtime's contract 4: a runtime with another contract fails to build here, so run iohr sdk generate again.
-const _ = codegen.V4
+// The surface was generated for the runtime's contract 5: a runtime with another contract fails to build here, so run iohr sdk generate again.
+const _ = codegen.V5
 
 // Profile is the profile's name.
 const Profile = "hooks"
@@ -49,6 +49,11 @@ func Load(ctx context.Context, opts ...inorbit.Option) (*Client, error) {
 // Runtime returns the client underneath, for a raw call with Send.
 func (p *Client) Runtime() *inorbit.Client {
 	return p.c
+}
+
+// Close closes the idle connections of the transport the client built itself (inorbit.Client.Close); defer it once the client is no longer needed.
+func (p *Client) Close() error {
+	return p.c.Close()
 }
 
 // Events returns the events operations the profile may call.

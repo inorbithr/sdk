@@ -250,7 +250,7 @@ class ConformanceTest {
                     HttpResponse.BodyHandlers.ofString());
             JsonNode a = JSON.readTree(loaded.body());
             String https = a.path("https_url").asText();
-            String pin = match ? leafPin(https) : other;
+            String pin = match ? leafPin(https, Path.of(a.path("ca_file").asText())) : other;
             Client client = Client.builder()
                     .baseUrl(https)
                     .tokenUrl(https + "/oauth2/token")
@@ -271,31 +271,32 @@ class ConformanceTest {
         }
     }
 
-    /** The SPKI pin of the certificate the replay's TLS listener presents. */
-    private static String leafPin(String https) throws Exception {
+    /**
+     * The SPKI pin of the certificate the replay's TLS listener presents. The handshake verifies
+     * the chain against a trust store holding only the case's private CA, so it is never skipped.
+     */
+    private static String leafPin(String https, Path caFile) throws Exception {
         URI u = URI.create(https);
-        java.security.cert.Certificate[] seen = new java.security.cert.Certificate[1];
-        javax.net.ssl.TrustManager record = new javax.net.ssl.X509TrustManager() {
-            @Override
-            public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-
-            @Override
-            public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {
-                seen[0] = chain[0];
-            }
-
-            @Override
-            public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                return new java.security.cert.X509Certificate[0];
-            }
-        };
+        java.security.cert.X509Certificate ca;
+        try (java.io.InputStream in = Files.newInputStream(caFile)) {
+            ca = (java.security.cert.X509Certificate)
+                    java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(in);
+        }
+        java.security.KeyStore store = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType());
+        store.load(null, null);
+        store.setCertificateEntry("case-ca", ca);
+        javax.net.ssl.TrustManagerFactory tmf =
+                javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(store);
         javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
-        ctx.init(null, new javax.net.ssl.TrustManager[] {record}, null);
+        ctx.init(null, tmf.getTrustManagers(), null);
+        java.security.cert.Certificate leaf;
         try (javax.net.ssl.SSLSocket sock =
                 (javax.net.ssl.SSLSocket) ctx.getSocketFactory().createSocket(u.getHost(), u.getPort())) {
             sock.startHandshake();
+            leaf = sock.getSession().getPeerCertificates()[0];
         }
-        byte[] spki = seen[0].getPublicKey().getEncoded();
+        byte[] spki = leaf.getPublicKey().getEncoded();
         return java.util.Base64.getEncoder()
                 .encodeToString(
                         java.security.MessageDigest.getInstance("SHA-256").digest(spki));
