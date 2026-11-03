@@ -1,0 +1,9 @@
+{
+  "action": "gh.cancel-run",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "repo": "inorbithr/.",
+    "run_id": 1
+  },
+  "effect": "Cancels run 1."
+}

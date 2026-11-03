@@ -5,7 +5,9 @@
 //! that has uncommitted changes (the report would not describe the PR's head), runs the
 //! check with the scrubbed environment under a time cap, and keeps only the command,
 //! its exit code, the head, main's commit and the SHA-256 of the output. The output
-//! itself never leaves the machine and is never kept here.
+//! itself never leaves the machine; of a failing check only a short redacted tail
+//! ([`TAIL_BYTES`]) is kept, for the runner's own log and `iohr runner gate-report`, so a
+//! job held at Checked says why. The signed report carries the hash only.
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -20,11 +22,14 @@ use super::claude::hex;
 use super::env;
 use super::exec::GroupGuard;
 use super::service::{GateAnswer, GateReport, Service, ServiceError};
+use super::workspace::redact;
 
 /// The check a build job's PR is held to when nothing says otherwise.
 pub(crate) const DEFAULT_COMMAND: &str = "mise run ci:changed";
 /// How long that check may run: 30 minutes.
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 1800;
+/// How much of a failing check's output is kept: its last 4 KB.
+pub(crate) const TAIL_BYTES: usize = 4096;
 
 /// The branch the head must contain.
 const MAIN: &str = "origin/main";
@@ -39,6 +44,9 @@ pub(crate) struct Checked {
     pub(crate) head: String,
     pub(crate) main_commit: String,
     pub(crate) output_sha256: String,
+    /// The last [`TAIL_BYTES`] of the output of a failing check, whole lines only and
+    /// every line through [`redact`]; empty when the check passed. Never signed or sent.
+    pub(crate) output_tail: String,
 }
 
 /// Why no report can be made. Nothing here is a result: a job with no report holds at
@@ -49,6 +57,8 @@ pub(crate) enum Skip {
     BadCommand,
     #[error("git failed: {0}")]
     Git(String),
+    #[error("no GitHub access to fetch main: {0}")]
+    Access(String),
     #[error("the checkout has uncommitted changes; the check would not describe its head")]
     Dirty,
     #[error(
@@ -140,6 +150,35 @@ async fn git(repo: &Path, args: &[&str]) -> Result<(i32, String), Skip> {
     Ok((o.code, o.stdout.trim().to_owned()))
 }
 
+/// Where the check's `origin/main` comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MainFrom {
+    /// `git fetch origin main` in the checkout, as the host's own git configuration says,
+    /// with no token: a checkout the runner does not own, or `iohr runner gate-report`
+    /// run by a person on their machine.
+    Checkout,
+    /// The runner's mirror, already fetched behind its guard
+    /// ([`super::workspace::Workspaces::fetch_main`]): the checkout is a linked worktree
+    /// of it and shares its refs. Nothing is fetched in the checkout, whose configuration
+    /// the turn can write.
+    Mirror,
+}
+
+/// `git fetch origin main` in `repo`, with no token ([`MainFrom::Checkout`]); a failure
+/// says git's last stderr line, redacted.
+async fn fetch_main(repo: &Path) -> Result<(), Skip> {
+    let o = git_in(repo, &["fetch", "--quiet", "origin", "main"], GIT_TIMEOUT).await?;
+    if o.code == 0 {
+        Ok(())
+    } else {
+        Err(Skip::Git(format!(
+            "git fetch exited {}: {}",
+            o.code,
+            redact(&o.stderr_tail)
+        )))
+    }
+}
+
 async fn git_ok(repo: &Path, args: &[&str]) -> Result<String, Skip> {
     match git(repo, args).await? {
         (0, out) => Ok(out),
@@ -175,19 +214,24 @@ fn shell(command: &str) -> Command {
     c
 }
 
-/// Fetches main, checks `repo` is clean and contains it, runs `command` and returns what
-/// to report. `env` is the runner's own environment; it is scrubbed here.
+/// Fetches main (where `main` says), checks `repo` is clean and contains it, runs
+/// `command` and returns what to report. `env` is the runner's own environment; it is
+/// scrubbed here. No call here carries a token: a checkout the runner owns has main
+/// fetched in the runner's mirror first ([`MainFrom::Mirror`]).
 pub(crate) async fn check(
     repo: &Path,
     command: &str,
     limit: Duration,
     parent_env: Vec<(OsString, OsString)>,
+    main: MainFrom,
 ) -> Result<Checked, Skip> {
     let command = command.trim();
     if command.is_empty() || command.chars().count() > 500 {
         return Err(Skip::BadCommand);
     }
-    git_ok(repo, &["fetch", "--quiet", "origin", "main"]).await?;
+    if main == MainFrom::Checkout {
+        fetch_main(repo).await?;
+    }
     if !git_ok(repo, &["status", "--porcelain"]).await?.is_empty() {
         return Err(Skip::Dirty);
     }
@@ -203,7 +247,11 @@ pub(crate) async fn check(
         }
         (code, _) => return Err(Skip::Git(format!("git merge-base exited {code}"))),
     }
-    let (exit_code, output_sha256) = run(repo, command, limit, parent_env).await?;
+    let Ran {
+        exit_code,
+        output_sha256,
+        output_tail,
+    } = run(repo, command, limit, parent_env).await?;
     if git_ok(repo, &["rev-parse", "HEAD"]).await? != head {
         return Err(Skip::Moved);
     }
@@ -213,6 +261,7 @@ pub(crate) async fn check(
         head,
         main_commit,
         output_sha256,
+        output_tail,
     })
 }
 
@@ -253,14 +302,40 @@ pub(crate) async fn send<S: Service>(
     }
 }
 
+/// What one run of the check left: its exit code, the hash of all its output, and the
+/// tail of that output when it failed.
+struct Ran {
+    exit_code: i32,
+    output_sha256: String,
+    output_tail: String,
+}
+
+/// The last [`TAIL_BYTES`] of `bytes` as redacted whole lines: a cut that lands inside a
+/// line drops that partial line first (half a token would slip past [`redact`]).
+fn tail_of(bytes: &[u8]) -> String {
+    let cut = bytes.len() > TAIL_BYTES;
+    let mut text =
+        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(TAIL_BYTES)..]).into_owned();
+    if cut && let Some(nl) = text.find('\n') {
+        text.drain(..=nl);
+    }
+    text.lines()
+        .map(|l| redact(l.trim_end_matches('\r')))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_matches('\n')
+        .to_owned()
+}
+
 /// Runs `command` in `repo` with the scrubbed environment; streams its output into a
-/// hash (nothing is kept) and returns its exit code with the hash.
+/// hash and a bounded buffer of its last bytes, and returns its exit code, the hash and,
+/// when it failed, the redacted tail.
 async fn run(
     repo: &Path,
     command: &str,
     limit: Duration,
     parent_env: Vec<(OsString, OsString)>,
-) -> Result<(i32, String), Skip> {
+) -> Result<Ran, Skip> {
     let mut c = shell(command);
     c.current_dir(repo)
         .env_clear()
@@ -275,17 +350,34 @@ async fn run(
     let mut stdout = child.stdout.take();
     let work = async {
         let mut hash = Sha256::new();
+        let mut tail: Vec<u8> = Vec::new();
         if let Some(out) = stdout.as_mut() {
             let mut buf = vec![0_u8; 16 * 1024];
             loop {
                 match out.read(&mut buf).await {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => hash.update(&buf[..n]),
+                    Ok(n) => {
+                        hash.update(&buf[..n]);
+                        tail.extend_from_slice(&buf[..n]);
+                        // Bounded: at twice the tail, keep the last part.
+                        if tail.len() > 2 * TAIL_BYTES {
+                            tail.drain(..tail.len() - TAIL_BYTES);
+                        }
+                    }
                 }
             }
         }
         let status = child.wait().await.map_err(|e| Skip::Spawn(e.to_string()))?;
-        Ok::<_, Skip>((status.code().unwrap_or(-1), hex(&hash.finalize())))
+        let exit_code = status.code().unwrap_or(-1);
+        Ok::<_, Skip>(Ran {
+            exit_code,
+            output_sha256: hex(&hash.finalize()),
+            output_tail: if exit_code == 0 {
+                String::new()
+            } else {
+                tail_of(&tail)
+            },
+        })
     };
     let res = tokio::time::timeout(limit, work).await;
     match res {
@@ -380,7 +472,9 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_branch_merged_with_main_is_checked_and_reported_with_the_hash_of_the_output() {
         let (_root, _o, work) = repos();
-        let got = check(&work, TWO_STREAMS, LIMIT, parent()).await.unwrap();
+        let got = check(&work, TWO_STREAMS, LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.head, sh(&work, &["rev-parse", "HEAD"]));
         assert_eq!(got.main_commit, sh(&work, &["rev-parse", "origin/main"]));
@@ -396,8 +490,81 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_failing_check_is_reported_with_its_exit_code() {
         let (_root, _o, work) = repos();
-        let got = check(&work, "exit 3", LIMIT, parent()).await.unwrap();
+        let got = check(&work, "exit 3", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.exit_code, 3);
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_failing_check_keeps_the_redacted_tail_of_its_output() {
+        let (_root, _o, work) = repos();
+        let cmd = "echo warning: too_many_lines; echo token ghp_abcdefghijklmnopqrstuvwxyz0123 leaked 1>&2; \
+                   echo clone https://user:pw@github.com/o/r; exit 101";
+        let got = check(&work, cmd, LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert_eq!(got.exit_code, 101);
+        assert_eq!(
+            got.output_tail,
+            "warning: too_many_lines\ntoken [redacted] leaked\nclone https://[redacted]@github.com/o/r"
+        );
+        assert!(!got.output_tail.contains("ghp_"));
+        assert!(!got.output_tail.contains("pw@"));
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_passing_check_keeps_no_output() {
+        let (_root, _o, work) = repos();
+        let got = check(&work, "echo fine", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert_eq!((got.exit_code, got.output_tail.as_str()), (0, ""));
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_long_output_keeps_only_its_last_whole_lines_within_four_kilobytes() {
+        use std::fmt::Write as _;
+        let (_root, _o, work) = repos();
+        // 2000 numbered lines, far over the cap, the hash still covering all of it.
+        let cmd = "i=1; while [ $i -le 2000 ]; do echo line-$i; i=$((i+1)); done; exit 1";
+        let got = check(&work, cmd, LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert!(
+            got.output_tail.len() <= TAIL_BYTES,
+            "{}",
+            got.output_tail.len()
+        );
+        assert!(
+            got.output_tail.len() > TAIL_BYTES - 16,
+            "the tail fills the cap"
+        );
+        assert!(got.output_tail.ends_with("line-2000"));
+        // Whole lines only: the first one is a complete `line-N`.
+        let first = got.output_tail.lines().next().unwrap();
+        assert!(
+            first.starts_with("line-") && first[5..].parse::<u32>().is_ok(),
+            "{first}"
+        );
+        let mut all = String::new();
+        for i in 1..=2000 {
+            writeln!(all, "line-{i}").unwrap();
+        }
+        assert_eq!(got.output_sha256, hex(&Sha256::digest(all.as_bytes())));
+    }
+
+    #[test]
+    fn a_cut_inside_a_line_drops_that_partial_line_before_redacting() {
+        // A token split by the cut would not look like one: its half line goes.
+        let mut bytes = b"ghp_secrettokenpartxx".to_vec();
+        bytes.extend(std::iter::repeat_n(b'x', TAIL_BYTES - 20));
+        bytes.extend_from_slice(b"\nwhole line\nlast\n");
+        let t = tail_of(&bytes);
+        assert_eq!(t, "whole line\nlast");
     }
 
     #[tokio::test]
@@ -410,7 +577,9 @@ pub(crate) mod tests {
         sh(&other, &["add", "c.txt"]);
         sh(&other, &["commit", "--quiet", "-m", "more main"]);
         sh(&other, &["push", "--quiet", "origin", "HEAD:main"]);
-        let err = check(&work, "true", LIMIT, parent()).await.unwrap_err();
+        let err = check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap_err();
         let Skip::NotMerged { head, main } = err else {
             panic!("expected NotMerged, got {err:?}");
         };
@@ -418,7 +587,9 @@ pub(crate) mod tests {
         assert_eq!(main, sh(&other, &["rev-parse", "HEAD"]));
         // After the merge it is checked, on main's new commit.
         sh(&work, &["merge", "--quiet", "--no-edit", "origin/main"]);
-        let got = check(&work, "true", LIMIT, parent()).await.unwrap();
+        let got = check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.main_commit, main);
         assert_eq!(got.exit_code, 0);
     }
@@ -428,7 +599,9 @@ pub(crate) mod tests {
         let (_root, _o, work) = repos();
         write(&work, "b.txt", "changed\n");
         assert_eq!(
-            check(&work, "true", LIMIT, parent()).await.unwrap_err(),
+            check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+                .await
+                .unwrap_err(),
             Skip::Dirty
         );
     }
@@ -439,7 +612,9 @@ pub(crate) mod tests {
         let mut env = parent();
         env.push(("GH_TOKEN".into(), "secret-value".into()));
         env.push(("FOO_SECRET".into(), "secret-value".into()));
-        let got = check(&work, SCRUBBED, LIMIT, env).await.unwrap();
+        let got = check(&work, SCRUBBED, LIMIT, env, MainFrom::Checkout)
+            .await
+            .unwrap();
         assert_eq!(got.exit_code, 0);
         assert_eq!(got.output_sha256, hex(&Sha256::digest(SCRUBBED_OUT)));
     }
@@ -447,9 +622,15 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_check_over_the_time_cap_is_stopped_and_makes_no_report() {
         let (_root, _o, work) = repos();
-        let err = check(&work, "sleep 30", Duration::from_secs(1), parent())
-            .await
-            .unwrap_err();
+        let err = check(
+            &work,
+            "sleep 30",
+            Duration::from_secs(1),
+            parent(),
+            MainFrom::Checkout,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, Skip::TimedOut(1));
     }
 
@@ -457,11 +638,13 @@ pub(crate) mod tests {
     async fn an_empty_or_long_command_is_refused_before_anything_runs() {
         let (_root, _o, work) = repos();
         assert_eq!(
-            check(&work, "  ", LIMIT, parent()).await.unwrap_err(),
+            check(&work, "  ", LIMIT, parent(), MainFrom::Checkout)
+                .await
+                .unwrap_err(),
             Skip::BadCommand
         );
         assert_eq!(
-            check(&work, &"x".repeat(501), LIMIT, parent())
+            check(&work, &"x".repeat(501), LIMIT, parent(), MainFrom::Checkout)
                 .await
                 .unwrap_err(),
             Skip::BadCommand
@@ -472,8 +655,79 @@ pub(crate) mod tests {
     async fn a_directory_that_is_not_a_checkout_is_a_git_error() {
         let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            check(dir.path(), "true", LIMIT, parent()).await,
+            check(dir.path(), "true", LIMIT, parent(), MainFrom::Checkout).await,
             Err(Skip::Git(_))
         ));
+    }
+
+    /// A program planted in the checkout's configuration (the turn's check command can
+    /// write it) never runs when main comes from the runner's mirror: nothing is fetched
+    /// in the checkout. With [`MainFrom::Checkout`] the host's own fetch runs there, as
+    /// before, with no token.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn main_from_the_mirror_fetches_nothing_in_the_checkout() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (root, _o, work) = repos();
+        let seen = root.path().join("saw.txt");
+        let upload = root.path().join("upload.sh");
+        std::fs::write(
+            &upload,
+            format!(
+                "#!/bin/sh\necho \"token=${}\" >> '{}'\nexec git-upload-pack \"$@\"\n",
+                crate::runner::access::TOKEN_VAR,
+                seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&upload, std::fs::Permissions::from_mode(0o755)).unwrap();
+        sh(
+            &work,
+            &[
+                "config",
+                "remote.origin.uploadpack",
+                &upload.display().to_string(),
+            ],
+        );
+        sh(
+            &work,
+            &["config", "core.sshCommand", &upload.display().to_string()],
+        );
+        let got = check(&work, "true", LIMIT, parent(), MainFrom::Mirror)
+            .await
+            .unwrap();
+        assert_eq!(got.exit_code, 0);
+        assert!(!seen.exists(), "a fetch ran in the checkout");
+        // The host's own fetch in the checkout: the planted program runs, with no token.
+        check(&work, "true", LIMIT, parent(), MainFrom::Checkout)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&seen).unwrap(), "token=\n");
+    }
+
+    /// The fetch in the checkout fails with git's reason and no credential, from an
+    /// origin whose URL holds a token.
+    #[tokio::test]
+    async fn a_failed_fetch_says_why_without_the_token() {
+        let (_root, _o, work) = repos();
+        sh(
+            &work,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://x-access-token:ghs_test@127.0.0.1:1/",
+            ],
+        );
+        let Err(Skip::Git(why)) = check(&work, "true", LIMIT, parent(), MainFrom::Checkout).await
+        else {
+            panic!("expected a git failure");
+        };
+        assert!(why.starts_with("git fetch exited 128: "), "{why}");
+        assert!(why.contains("127.0.0.1"), "{why}");
+        assert!(
+            !why.contains("ghs_") && !why.contains("x-access-token"),
+            "{why}"
+        );
     }
 }

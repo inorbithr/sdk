@@ -1,0 +1,9 @@
+{
+  "action": "disk.prune",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "target": "docker-builder",
+    "until_hours": 0
+  },
+  "effect": "Does what the person approved."
+}

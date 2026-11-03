@@ -1,0 +1,10 @@
+{
+  "action": "k8s.rollout-restart",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "namespace": "example",
+    "deployment": "example",
+    "replicas": 2
+  },
+  "effect": "Restarts deployment example."
+}

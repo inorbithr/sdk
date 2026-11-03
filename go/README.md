@@ -1,6 +1,6 @@
 # InOrbit SDK for Go
 
-Released since 0.1.0, Go 1.26 or later. One dependency,
+Go module since 0.1.0, Go 1.26 or later. One dependency,
 [`github.com/BurntSushi/toml`](https://github.com/BurntSushi/toml) (no dependencies of
 its own), to read the `iohr` config file; everything else is the standard library.
 
@@ -26,18 +26,11 @@ if errors.As(err, &apiErr) && apiErr.Code == inorbit.CodeForbidden {
 }
 ```
 
-`Load` finds credentials the way the [configuration contract](../docs/config.md) says,
-the first source that has any winning:
-
-1. code: `inorbit.WithToken`, `WithKey` (or `WithKeyFile`) with `WithScopes`,
-   `WithTokenFile`, or `WithTokenProvider`;
-2. the environment: `INORBIT_TOKEN`, `INORBIT_TOKEN_FILE`, or `INORBIT_KEY_ID` with
-   `INORBIT_KEY_SECRET` (or `INORBIT_KEY_SECRET_FILE`, read before every token exchange)
-   and `INORBIT_SCOPES`;
-3. workload identity: reserved until the platform offers it;
-4. the profile's table in the `iohr` config file (`token_file`, or `key_id` with
-   `key_secret_file`);
-5. the developer's `iohr login`, through `iohr auth token`.
+`Load` takes each setting from code, then the environment, then the config file, then its
+default. In code, give a credential with `inorbit.WithToken`, `WithKey` (or `WithKeyFile`) with
+`WithScopes`, `WithTokenFile` or `WithTokenProvider`. Credentials come from the first source that has any: code, the environment, the `iohr`
+config file's profile, then your `iohr login` (`iohr auth token`); the chain and every
+variable are in [docs/config.md](../docs/config.md) (section 5.1).
 
 After `iohr login`, a program needs nothing else. In production, pin the source:
 `INORBIT_CREDENTIAL_SOURCES=env`. Every other setting (timeouts, retries, proxy, CA

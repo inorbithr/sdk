@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/inorbithr/sdk/compare/java/v0.3.0...java/v0.3.1) (2026-10-27)
+
+
+### Dependencies
+
+* **java:** bump com.fasterxml.jackson:jackson-bom ([5f559db](https://github.com/inorbithr/sdk/commit/5f559dba0aac52f6dee0214032e8a9bb0bbfa984))
+* **java:** bump com.fasterxml.jackson:jackson-bom from 2.22.3 to 2.22.4 in /java in the java group ([#275](https://github.com/inorbithr/sdk/issues/275)) ([5f559db](https://github.com/inorbithr/sdk/commit/5f559dba0aac52f6dee0214032e8a9bb0bbfa984))
+
 ## [0.3.0](https://github.com/inorbithr/sdk/compare/java/v0.2.2...java/v0.3.0) (2026-10-24)
 
 

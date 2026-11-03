@@ -1,0 +1,6 @@
+{
+  "action": "iohr.upgrade",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {},
+  "effect": "Upgrades iohr on the runner's host to the newest release."
+}

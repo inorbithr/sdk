@@ -837,6 +837,12 @@ impl Service for HttpService<'_> {
                     }
                     m.insert("version".into(), json!(declared.version));
                     m.insert("kinds".into(), json!(declared.kinds));
+                    if let Some(h) = &declared.host {
+                        m.insert("capabilities".into(), h.capabilities_json());
+                        if let Some(s) = h.signals_json() {
+                            m.insert("signals".into(), s);
+                        }
+                    }
                     if wait {
                         m.insert("wait_seconds".into(), json!(self.wait_seconds));
                     }
@@ -1253,7 +1259,7 @@ mod tests {
             lease_id: "lse_1".into(),
             fencing_token: 9_007_199_254_740_993,
             runner_id: "rnr_1".into(),
-            command: "mise run ci:changed".into(),
+            command: crate::runner::gate::DEFAULT_COMMAND.into(),
             exit_code: 2,
             head: "a".repeat(40),
             main_commit: "b".repeat(40),
@@ -1436,6 +1442,7 @@ mod tests {
             capacity: Some(2),
             version: "1".into(),
             kinds: vec!["coordinate".into()],
+            host: None,
         };
         let waits = |reqs: Vec<wiremock::Request>| {
             reqs.iter()
@@ -1461,6 +1468,61 @@ mod tests {
             waits(server.received_requests().await.unwrap()),
             [true, false, false, true, false, false]
         );
+    }
+
+    #[tokio::test]
+    async fn a_beat_carries_the_machine_only_when_it_was_read() {
+        use iohr_auth::{Redacted, StaticToken};
+        use std::sync::Arc;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::super::host::{Disk, Host};
+        use super::super::settings::{Declared, DiskSpace};
+        use crate::context::AnyCredential;
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/coordinator/runners/rnr_1/heartbeat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"offered": []})))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+            "person-token".to_owned(),
+        ))));
+        let api = Api::new(&server.uri(), person, false).unwrap();
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let mut declared = Declared {
+            capacity: Some(2),
+            version: "0.0.0".into(),
+            kinds: vec!["build".into()],
+            host: Some(Host {
+                cpu_cores: 8,
+                memory_bytes: 1 << 34,
+                disks: vec![Disk {
+                    mount: "/".into(),
+                    space: DiskSpace { free: 5, total: 9 },
+                }],
+                load_1m: Some(1.5),
+                ..Host::default()
+            }),
+        };
+        svc.heartbeat("rnr_1", &[], &declared).await.unwrap();
+        declared.host = None;
+        svc.heartbeat("rnr_1", &[], &declared).await.unwrap();
+
+        let got = server.received_requests().await.unwrap();
+        let bodies: Vec<Value> = got.iter().map(|r| r.body_json().unwrap()).collect();
+        assert_eq!(
+            bodies[0]["capabilities"]["resources"],
+            json!({"cpu_cores": 8, "memory_bytes": (1_u64 << 34).to_string(), "disk_bytes": "9"})
+        );
+        assert_eq!(
+            bodies[0]["signals"],
+            json!({"load_1m": 1.5, "disks": [{"mount": "/", "free_bytes": "5", "total_bytes": "9"}]})
+        );
+        assert!(bodies[1].get("capabilities").is_none() && bodies[1].get("signals").is_none());
     }
 
     #[test]

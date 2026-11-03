@@ -69,7 +69,14 @@ impl Eq for Source {}
 
 /// The keys of a profile table the command line owns; every other key is an SDK
 /// setting or a newer command line's, and is kept.
-const PROFILE_KEYS: [&str; 5] = ["kind", "account", "storage", "issuer", "client_id"];
+const PROFILE_KEYS: [&str; 6] = [
+    "kind",
+    "account",
+    "account_pinned",
+    "storage",
+    "issuer",
+    "client_id",
+];
 
 /// Reads `[profiles]`, keeping only the tables the command line made: those with a
 /// `kind`. A table without one holds SDK settings only (`docs/config.md` section 4.2).
@@ -132,6 +139,35 @@ pub struct RunnerConfig {
     /// The runner's name; default the host name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The kubectl context approved host actions run in (`kubectl --context`). With no
+    /// context and no `kubeconfig`, the runner refuses every host action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kube_context: Option<String>,
+    /// The kubeconfig file approved host actions run with (`kubectl --kubeconfig`), an
+    /// absolute path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kubeconfig: Option<String>,
+    /// Whether `iohr runner run` upgrades itself to the newest complete release and
+    /// restarts (default true). `false` leaves upgrades to a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_upgrade: Option<bool>,
+    /// Minutes between looks for a newer release (5 to 10080; default 60, plus up to 10
+    /// percent of jitter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_interval_minutes: Option<u32>,
+    /// How an upgraded runner restarts: `exec` (default; the same process becomes the new
+    /// binary, so launchd or systemd see no stop) or `exit` (under launchd or systemd, exit
+    /// with code 75 and let the supervisor start it; elsewhere it is `exec`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_restart: Option<String>,
+    /// The only user service units (`<name>.service`) an approved `systemd.user-restart`
+    /// may restart. Unset or empty, the runner refuses every one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_units: Option<Vec<String>>,
+    /// The core checkout (absolute path) an approved `build.sweep-targets` runs core's
+    /// `target:sweep` or `target:guard` in. Unset, the runner refuses every sweep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_checkout: Option<String>,
 }
 
 impl RunnerConfig {
@@ -142,6 +178,13 @@ impl RunnerConfig {
             && self.kinds.is_none()
             && self.always_on.is_none()
             && self.name.is_none()
+            && self.kube_context.is_none()
+            && self.kubeconfig.is_none()
+            && self.auto_upgrade.is_none()
+            && self.upgrade_interval_minutes.is_none()
+            && self.upgrade_restart.is_none()
+            && self.user_units.is_none()
+            && self.core_checkout.is_none()
     }
 }
 
@@ -153,6 +196,11 @@ pub struct Profile {
     pub kind: Kind,
     /// The account the calls count against.
     pub account: String,
+    /// Whether a person chose `account` (`iohr login --account`, `iohr profile account`):
+    /// a sign-in again keeps a chosen account. When not, it follows the account the person
+    /// made their default on the server, else their own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub account_pinned: bool,
     /// Where the profile's secret is kept.
     #[serde(default)]
     pub storage: Storage,
@@ -174,6 +222,7 @@ impl Profile {
         Self {
             kind,
             account: account.into(),
+            account_pinned: false,
             storage,
             issuer: None,
             client_id: None,
@@ -192,6 +241,7 @@ impl Profile {
         Self {
             kind: Kind::Person,
             account: account.into(),
+            account_pinned: false,
             storage,
             issuer: Some(issuer.into()),
             client_id: Some(client_id.into()),
@@ -401,6 +451,7 @@ impl Config {
                 };
                 set_str(t, "kind", Some(kind_str(p.kind)));
                 set_str(t, "account", Some(&p.account));
+                set_flag(t, "account_pinned", p.account_pinned);
                 set_str(t, "storage", Some(storage_str(p.storage)));
                 set_str(t, "issuer", p.issuer.as_deref());
                 set_str(t, "client_id", p.client_id.as_deref());
@@ -523,6 +574,15 @@ fn set_str(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<&str>) {
     }
 }
 
+/// Sets `key` to `true`, or removes it when `on` is false (an absent key means false).
+fn set_flag(t: &mut dyn toml_edit::TableLike, key: &str, on: bool) {
+    if !on {
+        t.remove(key);
+    } else if t.get(key).and_then(toml_edit::Item::as_bool) != Some(true) {
+        t.insert(key, toml_edit::value(true));
+    }
+}
+
 fn kind_str(k: Kind) -> &'static str {
     match k {
         Kind::Token => "token",
@@ -550,7 +610,11 @@ pub(crate) fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<
     fs::rename(&tmp, dir.join(name))
 }
 
-pub(crate) fn create_private_dir(dir: &Path) -> io::Result<()> {
+/// Creates `dir` (and its parents) with mode 0700 on Unix.
+///
+/// # Errors
+/// The directory could not be created.
+pub fn create_private_dir(dir: &Path) -> io::Result<()> {
     let mut b = fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]
@@ -610,6 +674,9 @@ mod tests {
 capacity = 4
 kinds = ["coordinate", "build"]
 always_on = true
+auto_upgrade = false
+upgrade_interval_minutes = 30
+upgrade_restart = "exit"
 
 [profiles.work]
 kind = "token"
@@ -628,6 +695,9 @@ capacity = 8
         );
         assert_eq!(c.runner.always_on, Some(true));
         assert_eq!(c.runner.name, None);
+        assert_eq!(c.runner.auto_upgrade, Some(false));
+        assert_eq!(c.runner.upgrade_interval_minutes, Some(30));
+        assert_eq!(c.runner.upgrade_restart.as_deref(), Some("exit"));
         let work = c.profile(&name("work")).unwrap();
         assert_eq!(
             work.runner,
@@ -648,8 +718,43 @@ capacity = 8
             "{saved}"
         );
         assert!(saved.contains("capacity = 8"), "{saved}");
+        assert!(saved.contains("upgrade_interval_minutes = 30"), "{saved}");
         assert!(!saved.contains("default ="), "{saved}");
         assert_eq!(Config::parse(&saved, path).unwrap(), c);
+    }
+
+    #[test]
+    fn a_chosen_account_is_written_only_when_set_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = Config::default();
+        c.profiles.insert(
+            name("me"),
+            Profile::person(
+                "acc_1",
+                Storage::Keyring,
+                "https://auth.inorbit.hr",
+                "iohr-cli",
+            ),
+        );
+        c.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(!text.contains("account_pinned"), "{text}");
+        assert!(!Config::load(dir.path()).unwrap().profiles[&name("me")].account_pinned);
+
+        c.profiles.get_mut(&name("me")).unwrap().account_pinned = true;
+        c.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(text.contains("account_pinned = true"), "{text}");
+        assert_eq!(Config::load(dir.path()).unwrap(), c);
+
+        // Unpinned again: the key goes, the rest stays.
+        c.profiles.get_mut(&name("me")).unwrap().account_pinned = false;
+        c.save(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(
+            !text.contains("account_pinned") && text.contains("account = \"acc_1\""),
+            "{text}"
+        );
     }
 
     #[test]

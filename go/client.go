@@ -90,6 +90,7 @@ type Client struct {
 	userAgent     string
 	hooks         []Hook
 	http          *http.Client
+	owned         *http.Transport // the transport the client built itself, which Close closes
 	streams       Streams
 	streamIdle    time.Duration
 	socket        *socketMgr
@@ -260,6 +261,18 @@ func (r *ResolvedConfig) Describe() Description {
 
 // MarshalJSON writes the Describe document.
 func (r *ResolvedConfig) MarshalJSON() ([]byte, error) { return json.Marshal(r.Describe()) }
+
+// Close closes the idle connections of the transport the client built itself (Load, or
+// transport settings in code), so a program that is done with a client does not leave
+// them open; the next call opens new ones. A shared or caller-supplied transport
+// (http.DefaultTransport, WithHTTPClient, WithTransport) is left as it is, and so is a
+// call in flight. It always returns nil, as io.Closer asks.
+func (c *Client) Close() error {
+	if c.owned != nil {
+		c.owned.CloseIdleConnections()
+	}
+	return nil
+}
 
 // BaseURL is the API's origin this client calls.
 func (c *Client) BaseURL() string { return c.base.String() }

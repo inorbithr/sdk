@@ -1,0 +1,10 @@
+{
+  "action": "agent.install-checks",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "block": "status-components",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "service": "example-agent"
+  },
+  "effect": "Installs the status-components checks from core at commit 0123456789abcdef0123456789abcdef01234567 into the agent's checks file and restarts example-agent."
+}

@@ -1,0 +1,6 @@
+{
+  "action": "k8s.delete-failed-pods",
+  "runner_id": "runner-1",
+  "params": {},
+  "effect": "Deletes every failed pod in every namespace."
+}

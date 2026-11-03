@@ -47,7 +47,8 @@ cli/
 ## Rules
 
 - `main.rs` holds no logic. Libraries return typed errors; only `Error::exit_code` maps
-  them to 0, 1, 2, 3 or 4, and those codes are a contract.
+  them to 0, 1, 2, 3, 4 or 75 (a runner that upgraded itself and stopped for its
+  supervisor), and those codes are a contract.
 - Every secret is a `Redacted<String>` from the moment it is read until the one place it
   is sent or stored. Never `Debug`-print, log or put a secret in an error message.
 - A token never comes from argv (`refuse_secrets_in_args` runs before parsing). New

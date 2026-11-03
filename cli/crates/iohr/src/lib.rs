@@ -16,6 +16,7 @@ mod browser;
 mod commands;
 mod context;
 mod error;
+mod io_signin;
 mod lock;
 mod output;
 mod prompt;
