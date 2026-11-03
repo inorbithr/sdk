@@ -9,7 +9,13 @@
 name: claude
 
 on:
-  issue_comment:
+  # zizmor flags every issue_comment trigger, because on a public repository anyone can comment
+  # and the run holds secrets. It is kept because @claude in a pull request's conversation is
+  # how it is asked, and it is safe here: the job `if` below admits only OWNER, MEMBER and
+  # COLLABORATOR authors, pull requests from forks are refused in the first step, the checkout
+  # is the default branch without credentials, and Claude may only read, edit and run
+  # read-only git, so no code from the comment or a pull request is run.
+  issue_comment: # zizmor: ignore[dangerous-triggers]
     types: [created]
   pull_request_review_comment:
     types: [created]
