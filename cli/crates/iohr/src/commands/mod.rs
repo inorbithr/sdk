@@ -50,6 +50,11 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     if !matches!(cli.command, Command::Tunnel(_)) {
         g.check_environment()?;
     }
+    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_)) {
+        return Err(Error::Usage(
+            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` only".into(),
+        ));
+    }
     match cli.command {
         Command::Login(args) => login::login(g, &env, &args, out).await,
         Command::Logout => login::logout(g, out).await,
