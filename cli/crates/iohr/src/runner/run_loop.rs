@@ -29,6 +29,7 @@ use super::claude::Reply;
 use super::drain::Drain;
 use super::exec::{Exec, Finished};
 use super::gate::{self, Checked, Held, MainFrom, Skip};
+use super::hygiene;
 use super::service::{
     AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
     TurnReport, Usage,
@@ -870,7 +871,12 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 if gate_run.is_some() || ship.is_some() {
                     let check = gate_run.map(|(g, repo)| {
                         log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
-                        (repo, g.command.clone(), g.timeout, g.env.clone())
+                        // Its `cargo` builds into the repository's shared directory (RFC 0189).
+                        let env = hygiene::with_target(
+                            g.env.clone(),
+                            hygiene::target_for(&g.workdir, &repo).as_deref(),
+                        );
+                        (repo, g.command.clone(), g.timeout, env)
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
                     gating.push(Gating {
