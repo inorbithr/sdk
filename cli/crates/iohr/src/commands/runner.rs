@@ -13,8 +13,9 @@ use semver::Version;
 use tokio::sync::watch;
 
 use crate::Env;
+use crate::cli::SignIn;
 use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
-use crate::context::{Ctx, account as resolve_account, blocking, run_profile, session};
+use crate::context::{Ctx, account as resolve_account, blocking, io_session, run_profile, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::runner::approvals::{self, enrol};
@@ -56,8 +57,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
         show_settings(&e, out).await;
         return Ok(());
     }
-    let s = session(g, env).await?;
     let ctx = Ctx::load(g)?;
+    let s = match g.sign_in {
+        Some(SignIn::Io) => io_session(g, &ctx).await?,
+        None => session(g, env).await?,
+    };
     // `run-key` calls only the approvals API, which checks the person account itself.
     if !matches!(
         cmd,

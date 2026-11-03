@@ -435,6 +435,17 @@ iohr runner run                         # until Ctrl-C
 iohr runner status
 ```
 
+To run as Io instead of a person (platform RFC 0065.2, so jobs Io files run on runners Io
+owns), add `--sign-in io` (or `IOHR_SIGN_IN=io`) to `iohr runner`. The runner then signs
+in as the OAuth2 client `iohr-io` with the client credentials grant, asks for
+`coordinator:runner coordinator:read coordinator:write approvals:read approvals:write`,
+keeps the 15-minute token in memory and mints a new one shortly before it ends. The secret
+is never an argument or an environment value: it comes from the file `IOHR_CLIENT_SECRET_FILE`
+names (it must be yours and mode 0600, or the runner stops) or, on a Mac, from the
+keychain item the Mac bridge uses (`iohr-mcp-bridge-io`). A profile (`--profile`, else the
+default) still holds the runner's keys and settings, and `--account` names the account.
+Nothing else changes: without the flag the runner signs in as your profile does.
+
 The runner is this machine's half of a coordinator turn. It signs in to InOrbit as your
 `iohr` profile does, which needs the scopes `coordinator:runner coordinator:read`
 (`iohr login --scope coordinator:runner,coordinator:read`), and calls the coordinator's
