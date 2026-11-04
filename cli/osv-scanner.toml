@@ -1,5 +1,7 @@
-# OSV-Scanner config for `mise run audit:osv`. Every ignore carries a reason and an expiry,
-# so it comes back for review (same three advisories as cli/deny.toml).
+# OSV-Scanner config for cli/Cargo.lock. OSV-Scanner, and OpenSSF Scorecard through it, read
+# only the osv-scanner.toml next to each lockfile, so cli/fuzz/osv-scanner.toml is a byte copy
+# of this file; `mise run audit:osv` fails when the two differ. Every ignore carries a reason
+# and an expiry, so it comes back for review (same three advisories as cli/deny.toml).
 
 # zbus 6 absorbed these three crates, so RustSec marks them unmaintained; no vulnerability and
 # no fixed version. They arrive through iohr-auth -> zbus-secret-service-keyring-store ->
