@@ -14,13 +14,13 @@
 //! - the client is closed when the runtime gives it a close: Go (`defer api.Close()`),
 //!   Python (`with`), C# (`using var`); TypeScript (fetch), Java (JDK 17 `HttpClient`),
 //!   Swift (the session ends in `deinit`) and Rust (`Drop`) hold nothing to close;
-//! - Ctrl-C stops the program cleanly: Go cancels its context with
-//!   `signal.NotifyContext`, Rust drops the call on `tokio::signal::ctrl_c`, so streams
-//!   and pages end and the client is closed; Python's `KeyboardInterrupt` leaves its `with`
-//!   blocks; the other runtimes end the process, which closes its connections;
+//! - Ctrl-C stops the program cleanly: Rust drops the call on `tokio::signal::ctrl_c`, so
+//!   streams and pages end and the client is closed; Python's `KeyboardInterrupt` leaves
+//!   its `with` blocks; the other runtimes, Go included, end the process, which closes
+//!   its connections;
 //! - an API error prints its code, problem and request id on standard error and the
-//!   program exits with status 1; any other error is left to the language's default,
-//!   which also exits non-zero.
+//!   program exits with status 1 (Go's `log.Fatal` prints `APIError.Error`, which carries
+//!   them); any other error is left to the language's default, which also exits non-zero.
 
 /// The variable the examples call the operations on.
 pub const VAR: &str = "api";
@@ -102,49 +102,24 @@ pub const PYTHON: Construction = Construction {
     ],
 };
 
-/// Go, on `github.com/inorbithr/sdk/go`: `run` returns the error, so its deferred calls
-/// run before `main` exits; Ctrl-C or SIGTERM cancels `ctx`, which ends the call and is
-/// not reported as a failure.
+/// Go, on `github.com/inorbithr/sdk/go`: one `main`. `log.Fatal` prints the error and
+/// exits with status 1; an `*inorbit.APIError` prints its problem, code, HTTP status and
+/// request id (`APIError.Error`). Ctrl-C ends the process, which closes its connections.
 pub const GO: Construction = Construction {
-    imports: &[
-        "inorbit \"github.com/inorbithr/sdk/go\"",
-        "\"github.com/inorbithr/sdk/go/public\"",
-    ],
-    std: &[
-        "context",
-        "errors",
-        "fmt",
-        "log",
-        "os",
-        "os/signal",
-        "syscall",
-    ],
+    imports: &["\"github.com/inorbithr/sdk/go/public\""],
+    std: &["context", "fmt", "log"],
     program: &[
         "func main() {",
-        "\terr := run()",
-        "\tif err == nil || errors.Is(err, context.Canceled) {",
-        "\t\treturn // done, or stopped with Ctrl-C",
-        "\t}",
-        "\tvar apiErr *inorbit.APIError",
-        "\tif errors.As(err, &apiErr) {",
-        "\t\tlog.Fatalf(\"%s: %s (request id %s)\", apiErr.Code, apiErr.Problem, apiErr.Raw.RequestID)",
-        "\t}",
-        "\tlog.Fatal(err)",
-        "}",
-        "",
-        "func run() error {",
-        "\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)",
-        "\tdefer stop()",
+        "\tctx := context.Background()",
         "",
         "\t// Reads INORBIT_TOKEN, or INORBIT_KEY_ID and INORBIT_KEY_SECRET.",
         "\tapi, err := public.FromEnv()",
         "\tif err != nil {",
-        "\t\treturn err",
+        "\t\tlog.Fatal(err)",
         "\t}",
         "\tdefer api.Close()",
         "",
         "\t{body}",
-        "\treturn nil",
         "}",
     ],
 };
