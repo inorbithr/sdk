@@ -110,7 +110,10 @@ shell = "bash -e -o pipefail -c"
 run = """
 locks=$(git ls-files '*go.sum' '*Cargo.lock' '*pnpm-lock.yaml' '*package-lock.json' '*uv.lock' | head -1)
 [ -n "$locks" ] || { echo "audit: no lockfiles yet, skipping OSV scan"; exit 0; }
-osv-scanner scan source --config osv-scanner.toml --recursive .
+# Each lockfile takes the osv-scanner.toml beside it, as Scorecard does; the fuzz lockfile
+# carries the same ignores as cli/, so its config must stay a byte copy.
+cmp -s cli/osv-scanner.toml cli/fuzz/osv-scanner.toml || { echo "audit: cli/fuzz/osv-scanner.toml differs from cli/osv-scanner.toml; copy it over"; exit 1; }
+osv-scanner scan source --recursive .
 """
 
 [tasks.sbom]

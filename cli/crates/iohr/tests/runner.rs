@@ -298,11 +298,15 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
     ] {
         assert!(
             named.iter().any(|(p, _)| p == path),
-            "{path} was not called: {named:?}"
+            "{path} was not called"
         );
     }
-    for (p, a) in &named {
-        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    for (_, a) in &named {
+        assert_eq!(
+            a.as_deref(),
+            Some("acc_1"),
+            "a coordinator call named no account"
+        );
     }
 
     // `--account` wins over the profile's, on register and on status.
@@ -316,8 +320,12 @@ async fn register_and_status_act_on_the_profiles_account_or_the_flags() {
     }
     let named = accounts_named(&server).await;
     assert!(named.len() > before);
-    for (p, a) in &named[before..] {
-        assert_eq!(a.as_deref(), Some("team_9"), "{p}");
+    for (_, a) in &named[before..] {
+        assert_eq!(
+            a.as_deref(),
+            Some("team_9"),
+            "a coordinator call named the wrong account"
+        );
     }
 }
 
@@ -559,11 +567,15 @@ async fn run_takes_the_pack_keeps_the_lease_alive_and_reports_a_signed_turn() {
     ] {
         assert!(
             named.iter().any(|(p, _)| p == path),
-            "{path} was not called: {named:?}"
+            "{path} was not called"
         );
     }
-    for (p, a) in &named {
-        assert_eq!(a.as_deref(), Some("acc_1"), "{p} named no account");
+    for (_, a) in &named {
+        assert_eq!(
+            a.as_deref(),
+            Some("acc_1"),
+            "a coordinator call named no account"
+        );
     }
     let lease_beats = bodies(&server, "/v1/coordinator/leases/lease_1/heartbeat").await;
     assert_ne!(lease_beats.len(), 0, "no lease heartbeat during the turn");
@@ -817,9 +829,12 @@ async fn an_older_coordinator_that_refuses_the_new_fields_gets_the_old_heartbeat
     ));
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
     let beats = bodies(&server, BEAT).await;
-    // The first beat tried the new body once; every beat after it is the old one.
+    // The first beat tried the new body twice (with the wait, then without it, RFC 0193);
+    // every beat after it is the old one.
     assert_eq!(beats[0]["capacity"], 4, "{beats:?}");
-    let old: Vec<&Value> = beats.iter().skip(1).collect();
+    assert_eq!(beats[0]["wait_seconds"], 4, "{beats:?}");
+    assert!(beats[1].get("wait_seconds").is_none(), "{beats:?}");
+    let old: Vec<&Value> = beats.iter().skip(2).collect();
     assert!(old.len() >= 2, "{beats:?}");
     for b in old {
         assert!(
@@ -829,6 +844,90 @@ async fn an_older_coordinator_that_refuses_the_new_fields_gets_the_old_heartbeat
         assert_eq!(b["runner_id"], "run_1");
     }
     assert!(text(&o).contains("0 failed"), "{}", text(&o));
+}
+
+#[tokio::test]
+async fn a_coordinator_that_knows_capacity_but_not_the_wait_is_beaten_without_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    // A coordinator from before RFC 0193: it takes `capacity` and `version` but its REST
+    // binding refuses `wait_seconds`.
+    Mock::given(method("POST"))
+        .and(path(BEAT))
+        .and(body_string_contains("\"wait_seconds\""))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "code": "bad_request",
+            "error": "body unrecognized field `wait_seconds`, expected one of runner_id, providers, capacity",
+            "details": []
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    add_to_config(dir.path(), "\n[runner]\ncapacity = 4\n");
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "1",
+            "--max-beats",
+            "3",
+        ],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let beats = bodies(&server, BEAT).await;
+    // One try with the wait; every beat after it keeps what it declares, without the wait.
+    assert_eq!(beats[0]["wait_seconds"], 4, "{beats:?}");
+    let rest: Vec<&Value> = beats.iter().skip(1).collect();
+    assert!(rest.len() >= 3, "{beats:?}");
+    for b in rest {
+        assert!(b.get("wait_seconds").is_none(), "{b}");
+        assert_eq!(b["capacity"], 4, "{b}");
+    }
+    assert!(text(&o).contains("0 failed"), "{}", text(&o));
+}
+
+#[tokio::test]
+async fn a_service_that_holds_the_beat_is_beaten_again_without_waiting_for_the_interval() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    // The service says it held each call (RFC 0193), so the loop does not wait 30 s.
+    Mock::given(method("POST"))
+        .and(path(BEAT))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "runner": runner_json(), "heartbeat_interval_seconds": 30, "waited_seconds": 4
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let started = std::time::Instant::now();
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "30",
+            "--max-beats",
+            "3",
+        ],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "{:?}",
+        started.elapsed()
+    );
+    let beats = bodies(&server, BEAT).await;
+    assert!(beats.len() >= 3, "{beats:?}");
+    assert!(beats.iter().all(|b| b["wait_seconds"] == 4), "{beats:?}");
 }
 
 #[tokio::test]
