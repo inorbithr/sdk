@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.0-alpha.32](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.31...iohr/v0.1.0-alpha.32) (2026-11-04)
+
+
+### Features
+
+* **cli:** runner holds its heartbeat so a Talk turn starts at once (RFC 0193) ([#281](https://github.com/inorbithr/sdk/issues/281)) ([61a8c39](https://github.com/inorbithr/sdk/commit/61a8c396a87f9d467e1531796321aaf7fe77cdf2))
+* **cli:** runner register sends the holder subject for Io's runners ([#356](https://github.com/inorbithr/sdk/issues/356)) ([7aabe3f](https://github.com/inorbithr/sdk/commit/7aabe3f31d12466a15d4d0f4cfaa1c41ff98568a))
+* **cli:** the runner builds every job of a repository into one shared target directory ([#349](https://github.com/inorbithr/sdk/issues/349)) ([c8dbf69](https://github.com/inorbithr/sdk/commit/c8dbf690a20d22149829e918d9f1c286b951d992))
+* **cli:** the runner writes the Critique's record_critique, never the model ([#218](https://github.com/inorbithr/sdk/issues/218)) ([f74a779](https://github.com/inorbithr/sdk/commit/f74a7798cd528df2d6cb2eacc683da6ea22a6c8f))
+
+
+### Bug fixes
+
+* **cli:** gate tail drops the partial first line after the bounded drain ([#354](https://github.com/inorbithr/sdk/issues/354)) ([508f7ce](https://github.com/inorbithr/sdk/commit/508f7ceb023afefa06d944f7a2e2c95e9b817da4))
+* **cli:** Go reference examples are one main with log.Fatal ([#348](https://github.com/inorbithr/sdk/issues/348)) ([9f0dc41](https://github.com/inorbithr/sdk/commit/9f0dc411fe571063f4744d6f5a7a3b1d287a0639))
+* **repo:** keep ids and account data out of test messages, verify TLS in the pin test ([#346](https://github.com/inorbithr/sdk/issues/346)) ([518f21e](https://github.com/inorbithr/sdk/commit/518f21ead46bba023fadd577b80537db23283f9c))
+* **security:** keep ids and account data out of test messages; verify TLS in the pin test ([518f21e](https://github.com/inorbithr/sdk/commit/518f21ead46bba023fadd577b80537db23283f9c))
+
 ## [0.1.0-alpha.31](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.30...iohr/v0.1.0-alpha.31) (2026-11-03)
 
 
