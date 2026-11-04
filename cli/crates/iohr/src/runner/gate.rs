@@ -327,6 +327,16 @@ fn tail_of(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+/// Bounded: at twice the tail, keep the last part, one byte over [`TAIL_BYTES`] so
+/// [`tail_of`] still sees the cut and drops the partial line it left. Keeping exactly
+/// [`TAIL_BYTES`] hid the cut when no more output followed, and half a line (half a
+/// token) reached the tail unredacted.
+fn bound(tail: &mut Vec<u8>) {
+    if tail.len() > 2 * TAIL_BYTES {
+        tail.drain(..tail.len() - TAIL_BYTES - 1);
+    }
+}
+
 /// Runs `command` in `repo` with the scrubbed environment; streams its output into a
 /// hash and a bounded buffer of its last bytes, and returns its exit code, the hash and,
 /// when it failed, the redacted tail.
@@ -359,10 +369,7 @@ async fn run(
                     Ok(n) => {
                         hash.update(&buf[..n]);
                         tail.extend_from_slice(&buf[..n]);
-                        // Bounded: at twice the tail, keep the last part.
-                        if tail.len() > 2 * TAIL_BYTES {
-                            tail.drain(..tail.len() - TAIL_BYTES);
-                        }
+                        bound(&mut tail);
                     }
                 }
             }
@@ -565,6 +572,22 @@ pub(crate) mod tests {
         bytes.extend_from_slice(b"\nwhole line\nlast\n");
         let t = tail_of(&bytes);
         assert_eq!(t, "whole line\nlast");
+    }
+
+    #[test]
+    fn a_tail_bounded_by_the_reader_still_drops_its_partial_first_line() {
+        // One read far over the cap, then nothing: the bound must not hide the cut.
+        let mut tail: Vec<u8> = (1..=2000)
+            .flat_map(|i| format!("line-{i}\n").into_bytes())
+            .collect();
+        bound(&mut tail);
+        let t = tail_of(&tail);
+        let first = t.lines().next().unwrap();
+        assert!(
+            first.starts_with("line-") && first[5..].parse::<u32>().is_ok(),
+            "{first}"
+        );
+        assert!(t.ends_with("line-2000"));
     }
 
     #[tokio::test]

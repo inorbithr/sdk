@@ -1,6 +1,6 @@
 //! One operation's example in Go, on `github.com/inorbithr/sdk/go` (see
-//! [`crate::examples`]). The program's `run` returns the error and `main` reports it,
-//! the API's code and request id first.
+//! [`crate::examples`]). One `main`: an error goes to `log.Fatal`, which prints it
+//! (an API error with its code and request id) and exits with status 1.
 
 use std::fmt::Write as _;
 
@@ -15,9 +15,34 @@ use crate::ir::Type;
 pub(crate) fn example(call: &Call<'_>) -> String {
     let naming = GoNaming;
     let c = client::GO;
-    let mut imports: Vec<String> = c.imports.iter().map(|s| (*s).to_owned()).collect();
-    if call.body.is_some() || !call.query.is_empty() {
-        imports.push("\"github.com/inorbithr/sdk/go/public/models\"".into());
+    let receiver = match call.tag {
+        Some(tag) => format!("{}.{}()", client::VAR, naming.type_name(tag)),
+        None => client::VAR.to_owned(),
+    };
+    let method = naming.method_name(&call.op.name);
+    let args = arguments(call);
+    let body = match &call.flow {
+        Flow::Unary => format!(
+            "res, err := {receiver}.{method}({args})\nif err != nil {{\n\tlog.Fatal(err)\n}}\nfmt.Printf(\"%+v\\n\", res.Value)"
+        ),
+        Flow::Pages(_) => {
+            let item = lower_camel(&call.item());
+            format!(
+                "for {item}, err := range {receiver}.All{method}({args}) {{\n\tif err != nil {{\n\t\tlog.Fatal(err)\n\t}}\n\tfmt.Printf(\"%+v\\n\", {item})\n}}"
+            )
+        }
+        Flow::Stream => format!(
+            "for event, err := range {receiver}.{method}({args}) {{\n\tif err != nil {{\n\t\tlog.Fatal(err)\n\t}}\n\tfmt.Printf(\"%+v\\n\", *event)\n}}"
+        ),
+    };
+    // Only the packages the body names: `models` for a body or query, `inorbit` for its
+    // pointer helpers.
+    let mut imports: Vec<&str> = c.imports.to_vec();
+    if body.contains("models.") || args.contains("models.") {
+        imports.push("\"github.com/inorbithr/sdk/go/public/models\"");
+    }
+    if body.contains("inorbit.") || args.contains("inorbit.") {
+        imports.push("inorbit \"github.com/inorbithr/sdk/go\"");
     }
     imports.sort_by(|a, b| unquoted(a).cmp(unquoted(b)));
     imports.dedup();
@@ -30,26 +55,6 @@ pub(crate) fn example(call: &Call<'_>) -> String {
         let _ = writeln!(out, "\t{i}");
     }
     out.push_str(")\n\n");
-    let receiver = match call.tag {
-        Some(tag) => format!("{}.{}()", client::VAR, naming.type_name(tag)),
-        None => client::VAR.to_owned(),
-    };
-    let method = naming.method_name(&call.op.name);
-    let args = arguments(call);
-    let body = match &call.flow {
-        Flow::Unary => format!(
-            "res, err := {receiver}.{method}({args})\nif err != nil {{\n\treturn err\n}}\nfmt.Printf(\"%+v\\n\", res.Value)"
-        ),
-        Flow::Pages(_) => {
-            let item = lower_camel(&call.item());
-            format!(
-                "for {item}, err := range {receiver}.All{method}({args}) {{\n\tif err != nil {{\n\t\treturn err\n\t}}\n\tfmt.Printf(\"%+v\\n\", {item})\n}}"
-            )
-        }
-        Flow::Stream => format!(
-            "for event, err := range {receiver}.{method}({args}) {{\n\tif err != nil {{\n\t\treturn err\n\t}}\n\tfmt.Printf(\"%+v\\n\", *event)\n}}"
-        ),
-    };
     out.push_str(&c.frame(&body));
     out
 }
