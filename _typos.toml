@@ -5,4 +5,4 @@ hr = "hr"
 flate = "flate"
 
 [files]
-extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**", "**/CHANGELOG.md"]
+extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**", "**/CHANGELOG.md", "cli/crates/iohr/tests/data/host-action/vectors/"]

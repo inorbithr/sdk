@@ -1,0 +1,8 @@
+{
+  "action": "helm.runner-scale",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "release": "core-ci"
+  },
+  "effect": "Does what the person approved."
+}

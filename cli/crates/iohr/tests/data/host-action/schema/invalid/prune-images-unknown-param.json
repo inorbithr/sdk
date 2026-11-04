@@ -1,0 +1,9 @@
+{
+  "action": "docker.prune-images",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "until_hours": 24,
+    "volumes": 1
+  },
+  "effect": "Removes unused images."
+}

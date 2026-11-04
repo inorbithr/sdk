@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use inorbithr::{
-    Attempt, Client, ConfigError, Hook, Method, Operation, RawResponse, Secret, Token,
-    TokenProvider,
+    Attempt, Client, ClientCredentials, ConfigError, Hook, Method, Operation, RawResponse, Secret,
+    Token, TokenProvider,
 };
 use iohr_auth::{
     AuthError, Bearer, Claims, Config, Credential, EntryKey, FileStore, KeyringStore, Kind,
@@ -79,6 +79,9 @@ where
 pub(crate) enum AnyCredential {
     Token(StaticToken),
     Person(Box<PersonSession>),
+    /// Io's own sign-in (`iohr-io`, client credentials): minted on first use and again
+    /// before each token ends, held in memory only (RFC 0065.2).
+    Io(Box<ClientCredentials>),
 }
 
 impl Credential for AnyCredential {
@@ -86,6 +89,13 @@ impl Credential for AnyCredential {
         match self {
             Self::Token(t) => t.bearer().await,
             Self::Person(p) => p.bearer().await,
+            Self::Io(c) => {
+                let token = c
+                    .token()
+                    .await
+                    .map_err(|e| AuthError::Http(format!("Io's sign-in failed: {e}")))?;
+                Ok(Bearer::new(Redacted::new(token.expose().to_owned())))
+            }
         }
     }
 }
@@ -94,6 +104,13 @@ impl Credential for AnyCredential {
 /// person's session refreshes on its own, so the runtime is handed a token that is
 /// valid now and never caches it.
 impl TokenProvider for AnyCredential {
+    async fn invalidate(&self) {
+        // Io's cached token goes when the API refuses it, so the next call mints again.
+        if let Self::Io(c) = self {
+            c.invalidate().await;
+        }
+    }
+
     async fn token(&self) -> Result<Token, inorbithr::AuthError> {
         let bearer = self
             .bearer()
@@ -396,6 +413,40 @@ pub(crate) async fn session_for(
         profile: Some(name),
         kind: profile.kind,
         account: profile.account,
+        claims,
+        api,
+        credential,
+    })
+}
+
+/// The session of a runner that signs in as Io (RFC 0065.2): the client credentials grant
+/// for `iohr-io`, minted on first use, held in memory, minted again before it ends.
+///
+/// The profile (`--profile`, else the default) still names where the runner's keys and
+/// settings live; only the credential differs. The account is the token's `org`, so a
+/// runner for a team passes `--account`.
+pub(crate) async fn io_session(global: &Global, ctx: &Ctx) -> Result<Session, Error> {
+    use crate::io_signin::{self, SecretSource};
+    let source = SecretSource::choose(std::env::var(io_signin::SECRET_FILE_VAR).ok().as_deref())?;
+    let secret = source.read().await?;
+    let provider = io_signin::credential(global.issuer(), secret)?;
+    let credential = Arc::new(AnyCredential::Io(Box::new(provider)));
+    // The first mint, so a wrong secret or an unreachable sign-in service stops here.
+    let bearer = credential
+        .bearer()
+        .await
+        .map_err(|e| Error::NotSignedIn(e.to_string()))?;
+    let claims = Claims::read(bearer.expose(), OffsetDateTime::now_utc())
+        .map_err(|e| Error::NotSignedIn(format!("Io's token is not usable: {e}")))?;
+    let api = Api::new(global.base_url(), Arc::clone(&credential), global.verbose)?;
+    Ok(Session {
+        label: format!("Io ({})", io_signin::IO_CLIENT_ID),
+        profile: global
+            .profile
+            .clone()
+            .or_else(|| ctx.config.default.clone()),
+        kind: Kind::Token,
+        account: claims.org.clone().unwrap_or_default(),
         claims,
         api,
         credential,

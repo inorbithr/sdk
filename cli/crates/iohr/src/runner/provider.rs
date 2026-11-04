@@ -115,19 +115,25 @@ mod tests {
 
     #[test]
     fn identity_is_a_lowercase_sha256() {
-        let h = identity_sha256("salt", "line\n");
+        // Salts are drawn at runtime, as the real one comes from the account.
+        let draw = || {
+            let mut b = [0_u8; 16];
+            getrandom::fill(&mut b).unwrap();
+            super::super::claude::hex(&b)
+        };
+        let (salt, other) = (draw(), draw());
+        assert_ne!(salt, other);
+        let h = identity_sha256(&salt, "line\n");
         assert_eq!(h.len(), 64);
         assert!(
             h.bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         );
-        assert_eq!(h, identity_sha256("salt", "line"));
-        // sha256("salt\nline"), and another salt is another hash.
-        assert_eq!(
-            h,
-            "2ddda023dfab174ef508faa656c099f1cd248fd6d23d514a7e5cf678bfaf92d3"
-        );
-        assert_ne!(h, identity_sha256("other", "line"));
+        assert_eq!(h, identity_sha256(&salt, "line"));
+        // sha256("<salt>\nline"), and another salt is another hash.
+        let want = super::super::claude::hex(&Sha256::digest(format!("{salt}\nline").as_bytes()));
+        assert_eq!(h, want);
+        assert_ne!(h, identity_sha256(&other, "line"));
     }
 
     #[test]

@@ -93,11 +93,13 @@ fn the_typescript_examples_type_check() {
   "compilerOptions": {{
     "target": "ES2023", "lib": ["ES2023", "DOM"], "module": "NodeNext", "moduleResolution": "NodeNext",
     "strict": true, "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true,
-    "verbatimModuleSyntax": true, "noEmit": true, "skipLibCheck": true, "types": [],
+    "verbatimModuleSyntax": true, "noEmit": true, "skipLibCheck": true,
+    "types": ["node"], "typeRoots": [{:?}],
     "paths": {{ "@inorbithr/sdk": [{:?}] }}
   }},
   "include": ["*.ts"]
 }}"#,
+            package.join("node_modules/@types").display().to_string(),
             package.join("src/index.ts").display().to_string()
         ),
     )
@@ -227,7 +229,7 @@ publish = false
 
 [dependencies]
 inorbithr = {{ path = {runtime:?} }}
-tokio = {{ version = "1", features = ["macros", "rt-multi-thread"] }}
+tokio = {{ version = "1", features = ["macros", "rt-multi-thread", "signal"] }}
 "#
         ),
     )

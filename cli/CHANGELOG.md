@@ -1,5 +1,98 @@
 # Changelog
 
+## [0.1.0-alpha.31](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.30...iohr/v0.1.0-alpha.31) (2026-11-03)
+
+
+### Features
+
+* **cli:** disk.prune and helm.runner-scale host actions ([#334](https://github.com/inorbithr/sdk/issues/334)) ([6908058](https://github.com/inorbithr/sdk/commit/6908058d20e2f487e11032b116134b71c8524043))
+* **cli:** iohr runner can sign in as Io (client credentials) ([#342](https://github.com/inorbithr/sdk/issues/342)) ([9965993](https://github.com/inorbithr/sdk/commit/9965993f81c82e75ca2b7876c43d1eec36668e1f))
+* **cli:** let iohr runner sign in as Io with client credentials ([9965993](https://github.com/inorbithr/sdk/commit/9965993f81c82e75ca2b7876c43d1eec36668e1f))
+
+
+### Dependencies
+
+* **cli:** bump yanked async-executor 1.14.0 to 1.14.1 ([#345](https://github.com/inorbithr/sdk/issues/345)) ([9dbd2ba](https://github.com/inorbithr/sdk/commit/9dbd2bac1d2269f36f1e4d11a18f4d4952c1b809))
+
+## [0.1.0-alpha.30](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.29...iohr/v0.1.0-alpha.30) (2026-10-31)
+
+
+### Features
+
+* **cli:** agent.install-checks host action ([#329](https://github.com/inorbithr/sdk/issues/329)) ([fb5ab69](https://github.com/inorbithr/sdk/commit/fb5ab698eeaf823f446f38e020bd05e2a1ec1a6a))
+* **cli:** iohr runner run-key --show prints this machine's run key and enrolment ([#300](https://github.com/inorbithr/sdk/issues/300)) ([9f4848a](https://github.com/inorbithr/sdk/commit/9f4848a716e6c0f99e8fde6d280c73a0d4d27056))
+
+
+### Bug fixes
+
+* **cli:** idiomatic reference examples in every language, with Go Close and Python with ([#332](https://github.com/inorbithr/sdk/issues/332)) ([f2eeb74](https://github.com/inorbithr/sdk/commit/f2eeb74d38dba4071df1449f674f10b25ed49231))
+* **cli:** keep a redacted tail of a failing gate check ([#328](https://github.com/inorbithr/sdk/issues/328)) ([dd26b41](https://github.com/inorbithr/sdk/commit/dd26b419dca3e3cacc2e5eef44dfee49d573501b))
+* **cli:** the gate tail test's import builds on Windows ([#331](https://github.com/inorbithr/sdk/issues/331)) ([28a8cda](https://github.com/inorbithr/sdk/commit/28a8cda0d6a69e7623f7133ff19fdf62d705c875))
+
+
+### Documentation
+
+* **docs:** READMEs match today's SDKs and CLI ([#323](https://github.com/inorbithr/sdk/issues/323)) ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+* **sdk:** READMEs match today's SDKs and CLI ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+
+## [0.1.0-alpha.29](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.28...iohr/v0.1.0-alpha.29) (2026-10-29)
+
+
+### Features
+
+* **cli:** add preview.take, roll.task, build.sweep-targets and gh.release-rerun host actions ([#316](https://github.com/inorbithr/sdk/issues/316)) ([e8c294f](https://github.com/inorbithr/sdk/commit/e8c294fba59f8abef777f84c4ffcdc6e033bba1b))
+* **cli:** run five more host actions through one argv runner ([#306](https://github.com/inorbithr/sdk/issues/306)) ([06d7d3e](https://github.com/inorbithr/sdk/commit/06d7d3ee02376b6478429a45894075f4d2261469))
+* **cli:** the runner upgrades itself and restarts ([#309](https://github.com/inorbithr/sdk/issues/309)) ([8f8b69a](https://github.com/inorbithr/sdk/commit/8f8b69a525062ca7e33f9499530bee3c1c42664d))
+
+
+### Bug fixes
+
+* **cli:** check the sysctl path as POSIX so the test passes on Windows ([#315](https://github.com/inorbithr/sdk/issues/315)) ([7c4e5ee](https://github.com/inorbithr/sdk/commit/7c4e5ee4003784404ab6a1cafa82346ff9d4d097))
+* **cli:** read macOS sysctl by absolute path so the Mac runner reports memory and load ([#314](https://github.com/inorbithr/sdk/issues/314)) ([ab2923c](https://github.com/inorbithr/sdk/commit/ab2923c91c336967ab16736a683a417f4764aa5e))
+* **cli:** settings tests use a platform-absolute path ([#317](https://github.com/inorbithr/sdk/issues/317)) ([636d33e](https://github.com/inorbithr/sdk/commit/636d33e4a1ad19db8ab86195ebe8a208d6f5ced6))
+* **runner:** settings tests use a platform-absolute path ([636d33e](https://github.com/inorbithr/sdk/commit/636d33e4a1ad19db8ab86195ebe8a208d6f5ced6))
+
+## [0.1.0-alpha.28](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.27...iohr/v0.1.0-alpha.28) (2026-10-28)
+
+
+### Features
+
+* **cli:** the runner reports its cores, memory, disks and load on every beat ([#305](https://github.com/inorbithr/sdk/issues/305)) ([fc1c390](https://github.com/inorbithr/sdk/commit/fc1c39085dbae82fbeec4c7bea22d0570d5abda6))
+
+
+### Bug fixes
+
+* **cli:** the host probe test runs only where /proc or sysctl exist ([#308](https://github.com/inorbithr/sdk/issues/308)) ([5e4590f](https://github.com/inorbithr/sdk/commit/5e4590ff5375a5f34453258e5ad0a093d183c965))
+* **cli:** upgrade skips a release whose files are not uploaded yet ([#303](https://github.com/inorbithr/sdk/issues/303)) ([b0b7beb](https://github.com/inorbithr/sdk/commit/b0b7beb26464ef7c8cbe471880415b7c152b86f8))
+
+## [0.1.0-alpha.27](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.26...iohr/v0.1.0-alpha.27) (2026-10-28)
+
+
+### Features
+
+* **cli:** enrol the run key through an ask approved on the phone ([#295](https://github.com/inorbithr/sdk/issues/295)) ([4be4686](https://github.com/inorbithr/sdk/commit/4be4686431c0750a52eef342c56c5a39fbba5c1b))
+* **cli:** sign in on the account you chose or made your default ([#299](https://github.com/inorbithr/sdk/issues/299)) ([5a4bc6d](https://github.com/inorbithr/sdk/commit/5a4bc6d323e0184807d1a840905105c19ab28ba5))
+
+
+### Bug fixes
+
+* **cli:** never title a runner PR from the status line; derive a Conventional Commit title and repair cut ones ([#283](https://github.com/inorbithr/sdk/issues/283)) ([3bf04f4](https://github.com/inorbithr/sdk/commit/3bf04f4df08989f18c725c7b457adfc6a2b6a6dd))
+* **cli:** runner gate check fetches main with the lease's token ([#302](https://github.com/inorbithr/sdk/issues/302)) ([3ad0655](https://github.com/inorbithr/sdk/commit/3ad06556e668f68b13eb0c6873a13c401bbaaa0c))
+
+## [0.1.0-alpha.26](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.25...iohr/v0.1.0-alpha.26) (2026-10-27)
+
+
+### Features
+
+* **cli:** execute approved pinned run asks (k8s.delete-failed-pods) ([#285](https://github.com/inorbithr/sdk/issues/285)) ([efe6e72](https://github.com/inorbithr/sdk/commit/efe6e72eaf60c1ae4532814c938f81b3c98220a1))
+
+
+### Bug fixes
+
+* **cli:** build the kubeconfig path in a test the way the platform spells an absolute one ([#294](https://github.com/inorbithr/sdk/issues/294)) ([5704ef7](https://github.com/inorbithr/sdk/commit/5704ef7a095071388b77a9c1da7eab7a118c07c7))
+* **cli:** bump sigstore-verify to 0.15 to drop block-buffer 0.10.4 (GHSA-qwgh-2vcv-g2f7) ([#282](https://github.com/inorbithr/sdk/issues/282)) ([b042f01](https://github.com/inorbithr/sdk/commit/b042f019ddacf430e020a0c532132e91098f09ae))
+* **cli:** keep the Windows private-file check clippy clean ([#293](https://github.com/inorbithr/sdk/issues/293)) ([49f385d](https://github.com/inorbithr/sdk/commit/49f385d62a1f45665186af63e4698e0ac9116f73))
+
 ## [0.1.0-alpha.25](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.24...iohr/v0.1.0-alpha.25) (2026-10-24)
 
 

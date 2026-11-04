@@ -1,0 +1,10 @@
+{
+  "action": "roll.task",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "rev": "0000000000000000000000000000000000000000",
+    "task": "db:migrate",
+    "services": "--plan"
+  },
+  "effect": "Runs roll task db:migrate at commit 0000000000000000000000000000000000000000 on the deploy server."
+}

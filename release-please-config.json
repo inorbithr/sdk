@@ -69,6 +69,7 @@
       "release-type": "simple",
       "component": "swift",
       "package-name": "InOrbit",
+      "initial-version": "0.1.0",
       "include-component-in-tag": false,
       "extra-files": ["Sources/InOrbit/Version.swift"]
     },

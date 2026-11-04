@@ -35,6 +35,14 @@ class Verdict(unittest.TestCase):
         self.assertIn("go", g.verdict(r, H, {"go"}))
 
 
+class Languages(unittest.TestCase):
+    def test_every_example_directory_is_run(self):
+        # The gate requires the languages in examples.toml; a directory missing there would
+        # never run and never be required.
+        dirs = {p.name for p in (g.ROOT / "examples").iterdir() if p.is_dir()}
+        self.assertEqual(set(), dirs - g.languages())
+
+
 def doc(lang, commit=H, **kw):
     return {"schema": 1, "commit": commit, "dirty": False, "results": [
         {"language": lang, "example": "x", "status": "pass"}], **kw}
@@ -59,6 +67,31 @@ class Merge(unittest.TestCase):
 
     def test_one_file_is_as_before(self):
         self.assertIsNone(self.joined([ok], L))
+
+
+def status(state, login, context="examples-run"):
+    return {"context": context, "state": state, "creator": {"login": login}}
+
+
+class LatestState(unittest.TestCase):
+    BOT = "github-actions[bot]"
+
+    def test_bot_success(self):
+        self.assertEqual("success", g.latest_state([status("success", self.BOT)]))
+
+    def test_hand_posted_success_does_not_count(self):
+        self.assertEqual("missing", g.latest_state([status("success", "0x19")]))
+
+    def test_newest_bot_status_wins_over_older_and_hand_posted(self):
+        rows = [status("success", "0x19"), status("failure", self.BOT), status("success", self.BOT)]
+        self.assertEqual("failure", g.latest_state(rows))
+
+    def test_other_context_and_no_creator_ignored(self):
+        rows = [status("success", self.BOT, "ci"), {"context": "examples-run", "state": "success"}]
+        self.assertEqual("missing", g.latest_state(rows))
+
+    def test_none(self):
+        self.assertEqual("missing", g.latest_state([]))
 
 
 unittest.main()

@@ -778,7 +778,7 @@ mod tests {
     #[test]
     fn new_session_ids_are_uuids_and_differ() {
         let a = new_session_id();
-        assert!(is_uuid(&a), "{a}");
+        assert!(is_uuid(&a), "a new session id is not a uuid");
         assert_ne!(a, new_session_id());
         assert_eq!(&a[14..15], "4");
     }

@@ -1,0 +1,9 @@
+{
+  "action": "systemd.user-restart",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "unit": "example.service",
+    "system": 1
+  },
+  "effect": "Restarts example.service."
+}

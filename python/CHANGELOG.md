@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/inorbithr/sdk/compare/python/v0.3.1...python/v0.3.2) (2026-10-31)
+
+
+### Bug fixes
+
+* **cli:** idiomatic reference examples in every language, with Go Close and Python with ([#332](https://github.com/inorbithr/sdk/issues/332)) ([f2eeb74](https://github.com/inorbithr/sdk/commit/f2eeb74d38dba4071df1449f674f10b25ed49231))
+
 ## [0.3.1](https://github.com/inorbithr/sdk/compare/python/v0.3.0...python/v0.3.1) (2026-10-24)
 
 

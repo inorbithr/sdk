@@ -43,7 +43,7 @@
     "check": "biome ci . && pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "devDependencies": {
-    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api": "1.10.0",
     "@types/node": "22.20.5",
     "typescript": "7.0.2",
     "yaml": "2.9.1"

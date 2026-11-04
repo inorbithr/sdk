@@ -85,12 +85,68 @@ jobs:
 
   # RFC 0165: no publish job runs unless `mise run examples:run` passed on this exact
   # commit and `mise run examples:attest` posted the `examples-run` status (a green status
-  # is the only evidence; docs/releasing.md).
-  examples-gate:
-    name: examples ran green on this commit
+  # is the only evidence; docs/releasing.md). examples-attest does both on a macOS runner,
+  # the only one that has the Swift toolchain, so a release needs no hand-run step;
+  # examples-gate then reads the status back with the same `tools/examples-gate.py` verdict
+  # a person would check with `mise run examples:gate`.
+  examples-attest:
+    name: examples run and attest
     needs: release-please
     if: >-
       ${{ !cancelled() && (needs.release-please.outputs.go == 'true'
+      || needs.release-please.outputs.rust == 'true' || needs.release-please.outputs.ts == 'true'
+      || needs.release-please.outputs.py == 'true' || needs.release-please.outputs.iohr == 'true'
+      || (github.event_name == 'workflow_dispatch'
+      && (inputs.python_tag != '' || inputs.typescript_tag != ''))) }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    # statuses: write is only here: it posts the one `examples-run` status on HEAD.
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      # First step, before anything uses a tag: a manual run names one tag, in the form
+      # the publish jobs accept. The inputs reach the shell through env only. examples-gate
+      # runs only after this job passed, so it needs no second check.
+      - name: Check the tag
+        env:
+          PYTHON_TAG: ${{ inputs.python_tag }}
+          TYPESCRIPT_TAG: ${{ inputs.typescript_tag }}
+        run: |
+          if [[ -n "$PYTHON_TAG" && -n "$TYPESCRIPT_TAG" ]]; then
+            echo "python_tag and typescript_tag are both set; name one tag per run" >&2
+            exit 1
+          fi
+          [[ -z "$PYTHON_TAG" || "$PYTHON_TAG" =~ ^python/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a python release tag: $PYTHON_TAG" >&2; exit 1; }
+          [[ -z "$TYPESCRIPT_TAG" || "$TYPESCRIPT_TAG" =~ ^typescript/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a typescript release tag: $TYPESCRIPT_TAG" >&2; exit 1; }
+      # The release commit on a push; the tag's commit on a manual run (as examples-gate
+      # reads it), so `attest` posts on the commit the gate checks.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.python_tag || inputs.typescript_tag) || github.sha }}
+      # The toolchains examples.toml runs; Swift is Xcode's, already on the runner.
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: "go rust node pnpm python uv dotnet java maven"
+          # This job holds statuses: write and produces the evidence the publish jobs rely
+          # on: it installs the toolchains fresh rather than restore a cache.
+          cache: false
+      - run: mise run examples:run
+      - name: Post the examples-run status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: mise run examples:attest
+
+  examples-gate:
+    name: examples ran green on this commit
+    needs: [release-please, examples-attest]
+    # Runs only when examples-attest passed: a failed attest must not fall back to an
+    # older green status on the same commit.
+    if: >-
+      ${{ !cancelled() && needs.examples-attest.result == 'success'
+      && (needs.release-please.outputs.go == 'true'
       || needs.release-please.outputs.rust == 'true' || needs.release-please.outputs.ts == 'true'
       || needs.release-please.outputs.py == 'true' || needs.release-please.outputs.iohr == 'true'
       || (github.event_name == 'workflow_dispatch'
@@ -127,7 +183,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.go_tag }}
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: "go go:github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod cyclonedx"
       - name: Warm the Go module proxy
@@ -165,7 +221,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.rust_tag }}
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: "rust cargo-binstall cargo:cargo-cyclonedx cyclonedx"
       - working-directory: rust
@@ -183,7 +239,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.rust_tag }}
         run: gh release upload "$TAG" rust/target/package/*.crate dist/sbom/rust.cdx.json --repo "$GITHUB_REPOSITORY" --clobber
-      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: auth
       - working-directory: rust
         env:
@@ -195,7 +251,8 @@ jobs:
     needs: [release-please, examples-gate]
     # On a manual run release-please is skipped, so the job asks not to be skipped with it.
     if: >-
-      ${{ !cancelled() && (needs.release-please.outputs.ts == 'true'
+      ${{ !cancelled() && needs.examples-gate.result == 'success'
+      && (needs.release-please.outputs.ts == 'true'
       || (github.event_name == 'workflow_dispatch' && inputs.typescript_tag != '')) }}
     runs-on: ubuntu-latest
     environment: release-npm
@@ -212,7 +269,7 @@ jobs:
         env:
           TAG: ${{ needs.release-please.outputs.ts_tag || inputs.typescript_tag }}
         run: '[[ "$TAG" =~ ^typescript/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "not a typescript release tag: $TAG" >&2; exit 1; }'
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: "node pnpm cyclonedx"
       - working-directory: typescript
@@ -262,7 +319,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.py_tag }}
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: "python uv cyclonedx"
       - working-directory: python
@@ -299,7 +356,7 @@ jobs:
         with:
           name: python-dist
           path: dist
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   py-existing:
     name: publish an existing python release
@@ -323,7 +380,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: for f in dist/*; do gh attestation verify "$f" --repo "$GITHUB_REPOSITORY"; done
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   # The command line (ADR 0010): build every target, then attest and attach in one job
   # that waits for a maintainer in the release-cli environment. Channels (APT, Homebrew,
@@ -354,7 +411,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: "rust cargo-binstall cargo:cargo-cyclonedx cyclonedx"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -429,7 +486,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
       # Only mise itself: the installers need nothing but the runner's shell.
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install: false
       - env:
@@ -452,7 +509,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install: false
       - name: Download SHA256SUMS
@@ -487,7 +544,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install: false
       - name: Download the Debian packages
@@ -523,7 +580,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.release-please.outputs.iohr_tag }}
-      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: "uv"
       - name: Download the installers and SHA256SUMS

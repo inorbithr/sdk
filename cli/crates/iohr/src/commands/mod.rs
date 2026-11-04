@@ -23,7 +23,7 @@ mod sdk;
 mod sdk_add;
 mod token;
 mod tunnel;
-mod upgrade;
+pub(crate) mod upgrade;
 mod whoami;
 
 use clap::CommandFactory as _;
@@ -49,6 +49,11 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     // A tunnel reaches an environment over ssh and calls no API, so a placeholder address is no bar.
     if !matches!(cli.command, Command::Tunnel(_)) {
         g.check_environment()?;
+    }
+    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_)) {
+        return Err(Error::Usage(
+            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` only".into(),
+        ));
     }
     match cli.command {
         Command::Login(args) => login::login(g, &env, &args, out).await,
@@ -78,7 +83,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,
-        Command::Runner(cmd) => runner::run(g, &env, cmd, out).await,
+        Command::Runner(cmd) => Box::pin(runner::run(g, &env, cmd, out)).await,
         Command::Browser(BrowserCommand::Install(args)) => {
             browser_ext::install(g, &args, out);
             Ok(())

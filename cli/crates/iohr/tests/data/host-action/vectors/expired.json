@@ -1,0 +1,48 @@
+{
+  "approval": {
+    "approval_id": "apr_00000000000000000000000001",
+    "decided_by": "person-0",
+    "decision_note": "",
+    "decision_proof": {
+      "key_id": "device-0",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+      "signature": "MEUCIHYRgswjOcng-nbyV1UW9S4H_sXnUEnP4ZGkeaKfCBIYAiEAm8360KqXkBnIXh7nbHlj6x9yUWc2UtQDr_PRpSfjK8A",
+      "signed_at": 1893450000
+    },
+    "kind": "run",
+    "payload": {
+      "action": {
+        "action": "k8s.delete-failed-pods",
+        "effect": "Deletes every failed pod in namespace example.",
+        "params": {
+          "namespace": "example"
+        },
+        "runner_id": "rnr_00000000000000000000000001"
+      },
+      "argv": [
+        "k8s.delete-failed-pods"
+      ],
+      "cmd": "k8s.delete-failed-pods",
+      "effect": "remote",
+      "expires_at": 1893456000,
+      "runner_id": "rnr_00000000000000000000000001",
+      "runner_public_key": "BCscsqcxpnQM-scrnSOS7h42nTjM8ZXIE_kALg3TTtmoLtRXNSBlDUqN41M3koz4wAQJKYwBp7PHESjLutSelCc",
+      "schema_id": "runner/host-action/v0",
+      "script_sha256": "897fdd056223b9b10cddad0b44706b64d7f11f024aa99f6984e9b1c656307fc2"
+    },
+    "payload_sha256": "294c10c8e1a2e6885e215cb16570156d28f4f941aa7dc02ddeac44a02022692c",
+    "status": "approved"
+  },
+  "description": "The same approval, checked at its expiry: expires_at must be after now. Keys are P-256; each private scalar is the SHA-256 of a UTF-8 seed: the device key (device-0) of \"inorbit host-action test vectors: device key\", the runner key of \"inorbit host-action test vectors: runner key\", the untrusted key of \"inorbit host-action test vectors: untrusted key\". Signatures are ECDSA over SHA-256 with RFC 6979 nonces, base64url DER; `message` is what the device key signs.",
+  "device_keys": {
+    "device-0": "BBmIyz5vteTVlIX61GbxGQaTUZU6HJbu3BVUDFFWX4a26Fvf1tXlzcBJVntju7jV0XIAdAMAv9mMzcPAkY4864k"
+  },
+  "expect": {
+    "runner_id": "rnr_00000000000000000000000001",
+    "runner_public_key": "BCscsqcxpnQM-scrnSOS7h42nTjM8ZXIE_kALg3TTtmoLtRXNSBlDUqN41M3koz4wAQJKYwBp7PHESjLutSelCc"
+  },
+  "message": "iohr-approval-decision-v1\napr_00000000000000000000000001\n294c10c8e1a2e6885e215cb16570156d28f4f941aa7dc02ddeac44a02022692c\napprove\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n1893450000\nAAAAAAAAAAAAAAAAAAAAAA\ndevice-0",
+  "name": "expired",
+  "now": 1893456000,
+  "verdict": "expired"
+}

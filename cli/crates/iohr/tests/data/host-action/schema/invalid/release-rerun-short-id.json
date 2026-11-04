@@ -1,0 +1,8 @@
+{
+  "action": "gh.release-rerun",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "run_id": 99999
+  },
+  "effect": "Re-runs the failed jobs of sdk release run 99999."
+}

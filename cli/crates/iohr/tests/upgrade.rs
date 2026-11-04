@@ -54,13 +54,29 @@ fn run(exe: &Path, install_dir: &Path, server: &MockServer, args: &[&str]) -> Ou
 async fn releases(server: &MockServer, tags: &[&str]) {
     let body: Vec<_> = tags
         .iter()
-        .map(|t| serde_json::json!({"tag_name": t}))
+        .map(|t| {
+            // A published release: the checksums and an archive for this host.
+            let v = t.strip_prefix("iohr/v").unwrap_or(t);
+            serde_json::json!({"tag_name": t, "assets": [
+                {"name": "SHA256SUMS"},
+                {"name": format!("iohr-{v}-{}.tar.gz", host_target())},
+            ]})
+        })
         .collect();
     Mock::given(method("GET"))
         .and(path("/releases"))
         .respond_with(ResponseTemplate::new(200).set_body_json(body))
         .mount(server)
         .await;
+}
+
+/// The archive target name of this host, for the release listing (any value on Windows,
+/// where no test installs).
+fn host_target() -> String {
+    #[cfg(not(windows))]
+    return target();
+    #[cfg(windows)]
+    return String::from("none");
 }
 
 /// The release target of this host; there is none for Windows yet, so the tests that

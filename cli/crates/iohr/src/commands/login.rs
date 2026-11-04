@@ -13,7 +13,9 @@ use zeroize::Zeroizing;
 use crate::Env;
 use crate::browser;
 use crate::cli::{Global, Login};
-use crate::context::{Ctx, blocking};
+use crate::commands::accounts::{Me, Why, choose};
+use crate::commands::profile::point_at;
+use crate::context::{Ctx, blocking, session_for};
 use crate::error::Error;
 use crate::output::Out;
 
@@ -75,6 +77,12 @@ async fn with_token(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
 async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
     let (name, storage) = target(&ctx, g, args)?;
+    // An account the person chose for this profile, before this sign-in replaces it.
+    let chosen_before = ctx
+        .config
+        .profile(&name)
+        .filter(|p| p.kind == Kind::Person && p.account_pinned)
+        .map(|p| p.account.clone());
     let provider = Provider::discover(g.issuer(), &g.client_id)
         .await?
         .with_scopes(&args.scopes);
@@ -125,18 +133,155 @@ async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
             g.client_id.clone(),
         ),
     )?;
+    // The token names the person's own account. Which account the profile acts for is
+    // decided now, with the API's list of the ones they belong to.
+    let settled = settle_account(
+        g,
+        &mut ctx,
+        &name,
+        args.account.as_deref(),
+        chosen_before.as_deref(),
+        &account,
+    )
+    .await?;
     if out.json {
         Out::print_json(&serde_json::json!({
-            "profile": name.as_str(), "kind": "person", "subject": subject, "account": account,
-            "storage": storage_name(storage),
+            "profile": name.as_str(), "kind": "person", "subject": subject,
+            "account": settled.id, "account_name": settled.name,
+            "account_source": settled.source, "storage": storage_name(storage),
         }));
     } else {
         Out::note(&format!(
-            "Signed in as profile {name}: account {account}, kept in {}.",
+            "Signed in as profile {name}: account {}{}, kept in {}.",
+            settled.id,
+            settled.label(),
             storage_name(storage)
+        ));
+        for note in &settled.notes {
+            Out::note(note);
+        }
+        Out::note(&format!(
+            "To change it: `iohr login --account <id|slug>` or `iohr profile account {name} <id|slug>` \
+             (either one is kept when you sign in again); `iohr accounts list` shows yours. To change \
+             your default account: `iohr api PUT /v1/accounts/me/preferences/default -f account_id=<id>`."
         ));
     }
     Ok(())
+}
+
+/// What a sign-in settled on for the profile's account.
+struct Settled {
+    id: String,
+    name: Option<String>,
+    /// `flag`, `profile`, `server_default` or `personal`; `unchecked` when the list of
+    /// accounts could not be read and a chosen account was kept as it was.
+    source: &'static str,
+    why: Option<Why>,
+    notes: Vec<String>,
+}
+
+impl Settled {
+    /// ` (Engineering, your default account)`.
+    fn label(&self) -> String {
+        let why = match self.why {
+            Some(Why::Flag) => Some("chosen with --account"),
+            Some(Why::Chosen) => Some("this profile's chosen account"),
+            Some(Why::ServerDefault) => Some("your default account"),
+            Some(Why::Personal) => Some("your own account"),
+            None => None,
+        };
+        match (self.name.as_deref().filter(|n| !n.is_empty()), why) {
+            (Some(n), Some(w)) => format!(" ({n}, {w})"),
+            (None, Some(w)) => format!(" ({w})"),
+            (Some(n), None) => format!(" ({n})"),
+            (None, None) => String::new(),
+        }
+    }
+}
+
+/// After a sign-in the profile acts for the person's own account (the token's). Points
+/// it at the one that wins in `accounts::choose`: `--account`, the profile's chosen
+/// account, the server's default account, the person's own. A list of accounts that
+/// cannot be read leaves the sign-in standing, on a chosen account when there was one and
+/// on the person's own otherwise; only an `--account` that cannot be checked fails, and
+/// the profile is then signed in on the person's own account.
+async fn settle_account(
+    g: &Global,
+    ctx: &mut Ctx,
+    name: &ProfileName,
+    flag: Option<&str>,
+    chosen_before: Option<&str>,
+    signed_in: &str,
+) -> Result<Settled, Error> {
+    let profile = ctx
+        .config
+        .profile(name)
+        .cloned()
+        .ok_or_else(|| Error::Failed(format!("profile {name} was not saved")))?;
+    let fix = format!(
+        "You are signed in on your own account ({signed_in}); \
+         `iohr profile account {name} <id|slug>` points the profile at the right one without signing in again."
+    );
+    // Never the process's tokens: the list is read with the session just made.
+    let listed: Result<Me, String> = async {
+        let s = session_for(g, &Env::default(), ctx, Some(name))
+            .await
+            .map_err(|e| e.to_string())?;
+        let me: serde_json::Value = s
+            .api
+            .get("/v1/accounts/me", &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        Me::read(&me).ok_or_else(|| "the API listed no account for you".to_owned())
+    }
+    .await;
+    let me = match listed {
+        Ok(me) => me,
+        Err(why) => {
+            if let Some(f) = flag {
+                return Err(Error::Failed(format!(
+                    "could not read your accounts to check {f}: {why}. {fix}"
+                )));
+            }
+            let mut notes = vec![format!(
+                "note: could not read your accounts ({why}), so the account was not checked."
+            )];
+            if let Some(c) = chosen_before {
+                point_at(ctx, name, profile, c, true).await?;
+                notes.push(format!("Kept this profile's chosen account {c}."));
+                return Ok(Settled {
+                    id: c.to_owned(),
+                    name: None,
+                    source: "unchecked",
+                    why: None,
+                    notes,
+                });
+            }
+            notes.push(format!(
+                "`iohr profile account {name} <id|slug>` sets it when the API is reachable."
+            ));
+            return Ok(Settled {
+                id: signed_in.to_owned(),
+                name: None,
+                source: "personal",
+                why: None,
+                notes,
+            });
+        }
+    };
+    let (known, why, skipped) = match choose(&me, flag, chosen_before) {
+        Ok(c) => c,
+        Err(Error::Usage(m)) => return Err(Error::Usage(format!("{m}. {fix}"))),
+        Err(e) => return Err(e),
+    };
+    point_at(ctx, name, profile, &known.id, why.is_chosen()).await?;
+    Ok(Settled {
+        id: known.id.clone(),
+        name: Some(known.name.clone()),
+        source: why.key(),
+        why: Some(why),
+        notes: skipped.map(|n| format!("note: {n}.")).into_iter().collect(),
+    })
 }
 
 /// The profile to write and where its secret goes.
