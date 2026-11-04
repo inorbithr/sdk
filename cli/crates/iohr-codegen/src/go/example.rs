@@ -15,52 +15,42 @@ use crate::ir::Type;
 pub(crate) fn example(call: &Call<'_>) -> String {
     let naming = GoNaming;
     let c = client::GO;
-    let uses_models = call.body.is_some() || !call.query.is_empty();
-    let mut imports: Vec<String> = c.imports.iter().map(|s| format!("{s:?}")).collect();
-    imports.push("inorbit \"github.com/inorbithr/sdk/go\"".into());
-    if uses_models {
+    let mut imports: Vec<String> = c.imports.iter().map(|s| (*s).to_owned()).collect();
+    if call.body.is_some() || !call.query.is_empty() {
         imports.push("\"github.com/inorbithr/sdk/go/public/models\"".into());
     }
     imports.sort_by(|a, b| unquoted(a).cmp(unquoted(b)));
     imports.dedup();
-    let mut out = String::from(
-        "package main\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"fmt\"\n\t\"log\"\n\n",
-    );
+    let mut out = String::from("package main\n\nimport (\n");
+    for s in c.std {
+        let _ = writeln!(out, "\t{s:?}");
+    }
+    out.push('\n');
     for i in &imports {
         let _ = writeln!(out, "\t{i}");
     }
-    out.push_str(")\n\nfunc main() {\n\tif err := run(context.Background()); err != nil {\n\t\tvar apiErr *inorbit.APIError\n\t\tif errors.As(err, &apiErr) {\n\t\t\tlog.Fatalf(\"%s: %s (request id %s)\", apiErr.Code, apiErr.Problem, apiErr.Raw.RequestID)\n\t\t}\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run(ctx context.Context) error {\n");
-    for line in c.lines {
-        let _ = writeln!(out, "\t{line}");
-    }
+    out.push_str(")\n\n");
     let receiver = match call.tag {
         Some(tag) => format!("{}.{}()", client::VAR, naming.type_name(tag)),
         None => client::VAR.to_owned(),
     };
     let method = naming.method_name(&call.op.name);
     let args = arguments(call);
-    match &call.flow {
-        Flow::Unary => {
-            let _ = write!(
-                out,
-                "\tres, err := {receiver}.{method}({args})\n\tif err != nil {{\n\t\treturn err\n\t}}\n\tfmt.Printf(\"%+v\\n\", res.Value)\n"
-            );
-        }
+    let body = match &call.flow {
+        Flow::Unary => format!(
+            "res, err := {receiver}.{method}({args})\nif err != nil {{\n\treturn err\n}}\nfmt.Printf(\"%+v\\n\", res.Value)"
+        ),
         Flow::Pages(_) => {
             let item = lower_camel(&call.item());
-            let _ = write!(
-                out,
-                "\tfor {item}, err := range {receiver}.All{method}({args}) {{\n\t\tif err != nil {{\n\t\t\treturn err\n\t\t}}\n\t\tfmt.Printf(\"%+v\\n\", {item})\n\t}}\n"
-            );
+            format!(
+                "for {item}, err := range {receiver}.All{method}({args}) {{\n\tif err != nil {{\n\t\treturn err\n\t}}\n\tfmt.Printf(\"%+v\\n\", {item})\n}}"
+            )
         }
-        Flow::Stream => {
-            let _ = write!(
-                out,
-                "\tfor event, err := range {receiver}.{method}({args}) {{\n\t\tif err != nil {{\n\t\t\treturn err\n\t\t}}\n\t\tfmt.Printf(\"%+v\\n\", *event)\n\t}}\n"
-            );
-        }
-    }
-    out.push_str("\treturn nil\n}\n");
+        Flow::Stream => format!(
+            "for event, err := range {receiver}.{method}({args}) {{\n\tif err != nil {{\n\t\treturn err\n\t}}\n\tfmt.Printf(\"%+v\\n\", *event)\n}}"
+        ),
+    };
+    out.push_str(&c.frame(&body));
     out
 }
 
@@ -149,9 +139,9 @@ fn composite(fields: &[(String, String)]) -> String {
             let mut out = "{\n".to_owned();
             for (k, v) in fields {
                 let pad = " ".repeat(width - k.len() + 1);
-                let _ = writeln!(out, "\t\t{k}:{pad}{v},");
+                let _ = writeln!(out, "\t{k}:{pad}{v},");
             }
-            out.push_str("\t}");
+            out.push('}');
             out
         }
     }

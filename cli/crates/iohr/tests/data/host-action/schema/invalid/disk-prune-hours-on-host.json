@@ -1,0 +1,9 @@
+{
+  "action": "disk.prune",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "target": "host",
+    "until_hours": 24
+  },
+  "effect": "Does what the person approved."
+}

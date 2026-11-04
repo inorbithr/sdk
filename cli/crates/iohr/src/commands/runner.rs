@@ -9,42 +9,64 @@ use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Duration;
 
+use semver::Version;
 use tokio::sync::watch;
 
 use crate::Env;
+use crate::cli::SignIn;
 use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
-use crate::context::{Ctx, account as resolve_account, blocking, run_profile, session};
+use crate::context::{Ctx, account as resolve_account, blocking, io_session, run_profile, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::runner::approvals::{self, enrol};
 use crate::runner::claude;
+use crate::runner::drain::Drain;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
+use crate::runner::host_action::HostRunner;
 use crate::runner::provider::{self, AuthState};
-use crate::runner::run_loop::{GateCheck, LoopConfig, run_loop};
+use crate::runner::run_loop::{self, GateCheck, LoopConfig, run_loop};
+use crate::runner::self_upgrade::{
+    DRAIN_LIMIT, ExecRestarter, FileLedger, Outcome, Policy, RealSource, Upgrader,
+};
 use crate::runner::service::{HttpService, Registration, RunnerInfo, Service as _};
 use crate::runner::settings::{self, BuildFloor, Declared, Effective, Flags};
-use crate::runner::signing::{self, Signer};
+use crate::runner::signing::{self, RunKey, Signer};
+use crate::runner::supervisor::{self, Surroundings};
 use crate::runner::workspace::Workspaces;
 use iohr_auth::{Config, EntryKey, ProfileName, Redacted};
 
 #[allow(clippy::too_many_lines, reason = "one arm per subcommand")]
 pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> Result<(), Error> {
     // Reads only config.toml: no sign-in needed.
-    if let RunnerCommand::Config(RunnerConfigCommand::Show { capacity, kinds }) = cmd {
+    if let RunnerCommand::Config(RunnerConfigCommand::Show {
+        capacity,
+        kinds,
+        no_auto_upgrade,
+    }) = cmd
+    {
         let ctx = Ctx::load(g)?;
         let profile = run_profile(g, env, &ctx);
         let flags = Flags {
             capacity,
             kinds,
+            no_auto_upgrade,
             ..Flags::default()
         };
         let e = effective(&ctx.config, profile.as_ref(), &flags)?;
         show_settings(&e, out).await;
         return Ok(());
     }
-    let s = session(g, env).await?;
     let ctx = Ctx::load(g)?;
-    if !matches!(cmd, RunnerCommand::Status { .. }) {
+    let s = match g.sign_in {
+        Some(SignIn::Io) => io_session(g, &ctx).await?,
+        None => session(g, env).await?,
+    };
+    // `run-key` calls only the approvals API, which checks the person account itself.
+    if !matches!(
+        cmd,
+        RunnerCommand::Status { .. } | RunnerCommand::RunKey { .. }
+    ) {
         require_scopes(&s)?;
     }
     match cmd {
@@ -185,6 +207,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             max_beats,
             capacity,
             kinds,
+            no_auto_upgrade,
             account,
         } => {
             let account = resolve_account(&s, account.account)?;
@@ -192,12 +215,13 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let flags = Flags {
                 capacity,
                 kinds,
+                no_auto_upgrade,
                 ..Flags::default()
             };
             let set = effective(&ctx.config, s.profile.as_ref(), &flags)?;
             let signer = runner_signer(&ctx, &s, &account, false).await?;
             let local_key = signer.public_key();
-            let svc = HttpService::new(&s.api, account.clone(), Some(signer));
+            let svc = HttpService::new(&s.api, account.clone(), Some(signer)).holding();
             let all = svc.list_runners(true).await?;
             let host = set
                 .name
@@ -219,9 +243,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             }
             exec.workdir = ctx.dir.join("runner").join("coordinate");
             let (tx, rx) = watch::channel(false);
+            let tx = Arc::new(tx);
+            let on_ctrl_c = tx.clone();
             tokio::spawn(async move {
                 let _ = tokio::signal::ctrl_c().await;
-                let _ = tx.send(true);
+                let _ = on_ctrl_c.send(true);
             });
             let declared = Declared::of(&set);
             let at_once = declared
@@ -235,14 +261,20 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 declared.kinds.join(", ")
             ));
             let (declare, declared) = watch::channel(declared);
-            reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare);
+            let (policy, policy_rx) = watch::channel(Policy::of(&set));
+            reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare, policy);
+            // One drain: the turn loop and the approved-run poller take no new work while
+            // an upgrade is waiting to install, and say when nothing is left running.
+            let drain = Arc::new(Drain::default());
             let cfg = LoopConfig {
+                drain: Some(drain.clone()),
                 interval: interval.map(Duration::from_secs),
                 max_beats,
                 // What it registered with, until a heartbeat declares another.
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
+                report_host: true,
                 gate: Some(GateCheck {
                     // The pack names the checkout relative to the turns' working directory.
                     workdir: exec.workdir.clone(),
@@ -253,11 +285,69 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 workspaces: Some(Arc::new(Workspaces::for_runner(exec.workdir.clone()))),
                 ..LoopConfig::default()
             };
-            let (end, stats) = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
+            // Approved pinned runs (RFC 0153), beside the turns, when this machine is set
+            // up for them; stopped once the turn loop ends.
+            let mut asks = approvals_setup(&ctx, &s, &svc, &account, &set).await;
+            if let Some(a) = asks.as_mut() {
+                a.drain = Some(drain.clone());
+            }
+            let (stop_asks, asks_stopped) = watch::channel(false);
+            let upgrader = Version::parse(env!("CARGO_PKG_VERSION")).ok().map(|current| {
+                let supervisor = supervisor::detect(&Surroundings::from_process());
+                Out::note(&format!(
+                    "auto-upgrade is {} ({}), looking every {} minutes, restart {} under {supervisor}",
+                    if set.auto_upgrade.value { "on" } else { "off" },
+                    set.auto_upgrade.source,
+                    set.upgrade_interval.value.as_secs() / 60,
+                    set.upgrade_restart.value.as_str(),
+                ));
+                Upgrader {
+                    source: RealSource,
+                    ledger: FileLedger {
+                        path: ctx.dir.join("runner").join("last-upgrade"),
+                    },
+                    restarter: ExecRestarter,
+                    supervisor,
+                    current,
+                    policy: policy_rx,
+                    drain: drain.clone(),
+                    drain_limit: DRAIN_LIMIT,
+                    jitter: run_loop::jitter,
+                }
+            });
+            let upgrade_stopped = asks_stopped.clone();
+            let renewal = async {
+                match upgrader {
+                    Some(u) => {
+                        let out = u.run(upgrade_stopped, &Out::note).await;
+                        if out == Outcome::Exit {
+                            // The turn loop ends; main exits with the restart code.
+                            let _ = tx.send(true);
+                        }
+                        out
+                    }
+                    None => Outcome::Stopped,
+                }
+            };
+            let turns = async {
+                let ended = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
+                let _ = stop_asks.send(true);
+                ended
+            };
+            let approved = async {
+                if let Some(a) = asks.as_mut() {
+                    a.serve(&svc, asks_stopped, &Out::note).await;
+                }
+            };
+            let ((end, stats), (), renewed) = tokio::join!(turns, approved, renewal);
             Out::note(&format!(
                 "stopped ({end:?}): {} heartbeats, {} failed, {} leases accepted, {} turns, {} replies delivered",
                 stats.beats, stats.failures, stats.accepted, stats.turns, stats.reported
             ));
+            if renewed == Outcome::Exit {
+                // A new iohr is installed: the supervisor starts it.
+                return Err(Error::Restart);
+            }
             Ok(())
         }
         RunnerCommand::GateReport {
@@ -288,9 +378,15 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             })?;
             let parent: Vec<(OsString, OsString)> = std::env::vars_os().collect();
             Out::note(&format!("checking {} in {}", command, repo.display()));
-            let checked = gate::check(&repo, &command, Duration::from_secs(timeout), parent)
-                .await
-                .map_err(|e| Error::Failed(format!("no report was sent: {e}")))?;
+            let checked = gate::check(
+                &repo,
+                &command,
+                Duration::from_secs(timeout),
+                parent,
+                gate::MainFrom::Checkout,
+            )
+            .await
+            .map_err(|e| Error::Failed(format!("no report was sent: {e}")))?;
             let report = gate::report_of(
                 gate::Held {
                     job_id: &job,
@@ -308,6 +404,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                             "exit_code": checked.exit_code, "head": checked.head,
                             "main_commit": checked.main_commit,
                             "output_sha256": checked.output_sha256,
+                            "output_tail": checked.output_tail,
                             "evidence_id": a.evidence_id, "duplicate": a.duplicate,
                             "stage": a.stage,
                         }));
@@ -321,6 +418,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                             ("duplicate", a.duplicate.to_string()),
                             ("job is now", a.stage.clone()),
                         ]);
+                        if !checked.output_tail.is_empty() {
+                            Out::note(&format!(
+                                "the check failed; last output (redacted, local only):\n{}",
+                                checked.output_tail
+                            ));
+                        }
                     }
                     Ok(())
                 }
@@ -334,8 +437,214 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 Err(e) => Err(e.into()),
             }
         }
+        RunnerCommand::RunKey {
+            proof,
+            label,
+            wait,
+            show,
+            account,
+        } => {
+            let account = resolve_account(&s, account.account)?;
+            if show {
+                // Read only: no key is made and no ask is filed.
+                let key = run_key(&ctx, &s, &account, false).await?.ok_or_else(|| {
+                    Error::Failed("this machine has no run key (`iohr runner run-key`)".into())
+                })?;
+                let public = key.public_key();
+                let svc = HttpService::new(&s.api, account.clone(), None);
+                let runners = svc.approval_runners().await?;
+                let found = approvals::enrolled(&runners, &public);
+                let field = |k: &str| {
+                    found
+                        .and_then(|r| r.get(k))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                };
+                let (id, label) = (field("runner_id"), field("label"));
+                if out.json {
+                    Out::print_json(&serde_json::json!({
+                        "public_key": public, "runner_id": id, "label": label,
+                    }));
+                    return Ok(());
+                }
+                Out::pairs(&[
+                    ("public_key", public),
+                    ("enrolled", id.unwrap_or_else(|| "no".to_owned())),
+                    ("label", label.unwrap_or_default()),
+                ]);
+                return Ok(());
+            }
+            let key = run_key(&ctx, &s, &account, true)
+                .await?
+                .ok_or_else(|| Error::Failed("no run key could be made".into()))?;
+            let public = key.public_key();
+            let label = label.unwrap_or_else(|| format!("iohr runner on {}", host_name()));
+            let label = label.trim().to_owned();
+            if label.is_empty() || label.chars().count() > 100 {
+                return Err(Error::Usage("--label: 1 to 100 characters".into()));
+            }
+            let svc = HttpService::new(&s.api, account.clone(), None);
+            let by_proof = proof.is_some();
+            if let Some(path) = proof {
+                let text = std::fs::read_to_string(&path).map_err(|e| {
+                    Error::Failed(format!("cannot read {}: {}", path.display(), e.kind()))
+                })?;
+                let v: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|_| Error::Failed(format!("{} is not JSON", path.display())))?;
+                let p = approvals::proof_from_json(&v).map_err(Error::Failed)?;
+                let message =
+                    signing::run_enroll_message(&public, &label, p.signed_at, &p.nonce, &p.key_id);
+                let possession = key.sign(message.as_bytes()).map_err(Error::Failed)?;
+                svc.enroll_run_key(&public, &label, &p, &possession).await?;
+            }
+            let runners = svc.approval_runners().await?;
+            let mut enrolled = approvals::enrolled(&runners, &public)
+                .and_then(|r| r.get("runner_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            // RFC 0172, amendment 1: not enrolled yet, so ask on the phone and wait.
+            let mut asked = None;
+            if enrolled.is_none() && !by_proof {
+                let a = enrol::ask(&svc, &key, &label)
+                    .await
+                    .map_err(Error::Failed)?;
+                Out::note(&format!(
+                    "approve this run key on your phone: {label} \u{b7} {} (ask {})",
+                    a.short, a.approval_id
+                ));
+                Out::note(&format!(
+                    "check the phone shows the same fingerprint before you approve; waiting up to {wait} minutes"
+                ));
+                let wait = std::time::Duration::from_mins(wait);
+                match enrol::wait_and_enroll(&svc, &key, &label, &a, wait, enrol::POLL)
+                    .await
+                    .map_err(Error::Failed)?
+                {
+                    enrol::Outcome::Enrolled(id) => enrolled = Some(id),
+                    enrol::Outcome::Closed(state) => {
+                        return Err(Error::Failed(format!(
+                            "the enrolment ask {} is {state}; nothing was enrolled",
+                            a.approval_id
+                        )));
+                    }
+                    enrol::Outcome::Waiting => {}
+                }
+                asked = Some(a);
+            }
+            let keys_file = approvals::state_dir(&ctx.dir, &account)
+                .map_err(Error::Failed)?
+                .join("device-keys");
+            let keys = approvals::load_device_keys(&keys_file).map_err(Error::Failed)?;
+            if out.json {
+                Out::print_json(&serde_json::json!({
+                    "public_key": public,
+                    "label": label,
+                    "runner_id": enrolled,
+                    "fingerprint": asked.as_ref().map(|a| &a.fingerprint),
+                    "approval_id": asked.as_ref().map(|a| &a.approval_id),
+                    "device_keys": keys.len(),
+                    "device_keys_file": keys_file.display().to_string(),
+                }));
+                return Ok(());
+            }
+            Out::pairs(&[
+                ("public_key", public),
+                ("label", label),
+                (
+                    "enrolled",
+                    enrolled.clone().unwrap_or_else(|| "no".to_owned()),
+                ),
+                (
+                    "device_keys",
+                    format!("{} in {}", keys.len(), keys_file.display()),
+                ),
+            ]);
+            if enrolled.is_none() {
+                Out::note(
+                    "not enrolled yet: the ask is still open on your phone; run this again to keep waiting",
+                );
+            }
+            Ok(())
+        }
         RunnerCommand::Config(RunnerConfigCommand::Show { .. }) => Ok(()),
     }
+}
+
+/// The approvals half of `iohr runner run`, when this machine has a run key the
+/// approvals service has enrolled and pins at least one device key; otherwise a note
+/// says what is missing and the runner takes turns only.
+async fn approvals_setup(
+    ctx: &Ctx,
+    s: &crate::context::Session,
+    svc: &HttpService<'_>,
+    account: &str,
+    set: &Effective,
+) -> Option<approvals::Asks<HostRunner>> {
+    let off = |why: &str| {
+        Out::note(&format!("approved runs: off, {why}"));
+        None
+    };
+    let key = match run_key(ctx, s, account, false).await {
+        Ok(Some(k)) => k,
+        Ok(None) => return off("this machine has no run key (`iohr runner run-key`)"),
+        Err(e) => return off(&e.to_string()),
+    };
+    let dir = match approvals::state_dir(&ctx.dir, account) {
+        Ok(d) => d,
+        Err(e) => return off(&e),
+    };
+    let keys = match approvals::load_device_keys(&dir.join("device-keys")) {
+        Ok(k) if !k.is_empty() => k,
+        Ok(_) => {
+            return off(&format!(
+                "no device key is pinned in {}",
+                dir.join("device-keys").display()
+            ));
+        }
+        Err(e) => return off(&e),
+    };
+    let public = key.public_key();
+    let runner_id = match svc.approval_runners().await {
+        Ok(all) => match approvals::enrolled(&all, &public) {
+            Some(r) => r
+                .get("runner_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            None => return off("the run key is not enrolled (`iohr runner run-key --proof`)"),
+        },
+        Err(e) => return off(&format!("the approvals runners could not be read: {e}")),
+    };
+    let seen = match approvals::Seen::load(&dir.join("seen")) {
+        Ok(seen) => seen,
+        Err(e) => return off(&e),
+    };
+    let tools = HostRunner::find(
+        set.kube_context.as_ref().map(|c| c.value.as_str()),
+        set.kubeconfig.as_ref().map(|c| c.value.as_str()),
+        set.user_units
+            .as_ref()
+            .map_or(&[][..], |u| u.value.as_slice()),
+        set.core_checkout.as_ref().map(|c| c.value.as_str()),
+    );
+    Out::note(&format!(
+        "approved runs: on, as {runner_id}, {} device keys pinned{}; user units: {}",
+        keys.len(),
+        match tools.kube_problem() {
+            None => String::new(),
+            Some(why) => format!("; {why}, so every Kubernetes action will be refused"),
+        },
+        if tools.user_units.is_empty() {
+            "none".to_owned()
+        } else {
+            tools.user_units.join(", ")
+        }
+    ));
+    let pin = approvals::Pin {
+        runner_id,
+        runner_public_key: public,
+    };
+    Some(approvals::Asks::new(key, pin, keys, seen, tools))
 }
 
 /// The runner settings in effect: flags over `[profiles.<name>.runner]` over `[runner]`.
@@ -360,6 +669,7 @@ fn reload_on_hangup(
     profile: Option<ProfileName>,
     flags: Flags,
     declare: watch::Sender<Declared>,
+    policy: watch::Sender<Policy>,
 ) {
     #[cfg(unix)]
     tokio::spawn(async move {
@@ -384,6 +694,14 @@ fn reload_on_hangup(
                         d.kinds.join(", ")
                     ));
                     let _ = declare.send(d);
+                    let now = Policy::of(&e);
+                    Out::note(&format!(
+                        "auto-upgrade {}, every {} minutes, restart {}",
+                        if now.enabled { "on" } else { "off" },
+                        now.interval.as_secs() / 60,
+                        now.restart.as_str()
+                    ));
+                    let _ = policy.send(now);
                 }
                 Err(why) => Out::note(&format!(
                     "config.toml was not taken, the settings in use stay: {why}"
@@ -393,7 +711,7 @@ fn reload_on_hangup(
     });
     #[cfg(not(unix))]
     {
-        let _ = (dir, profile, flags, declare);
+        let _ = (dir, profile, flags, declare, policy);
     }
 }
 
@@ -410,6 +728,19 @@ async fn show_settings(e: &Effective, out: Out) {
         || (host_name(), "host name".to_owned()),
         |n| (n.value.clone(), n.source.to_string()),
     );
+    let kube = |v: &Option<settings::Setting<String>>| {
+        v.as_ref().map_or_else(
+            || ("not set".to_owned(), "default".to_owned()),
+            |k| (k.value.clone(), k.source.to_string()),
+        )
+    };
+    let (kube_context, kube_context_from) = kube(&e.kube_context);
+    let (kubeconfig, kubeconfig_from) = kube(&e.kubeconfig);
+    let (core_checkout, core_checkout_from) = kube(&e.core_checkout);
+    let (user_units, user_units_from) = e.user_units.as_ref().map_or_else(
+        || ("not set".to_owned(), "default".to_owned()),
+        |u| (u.value.join(", "), u.source.to_string()),
+    );
     let volume = floor.volume.display().to_string();
     let free_text = free.map_or_else(|| "unknown".to_owned(), |f| format!("{} GB", gb(f)));
     if out.json {
@@ -418,6 +749,13 @@ async fn show_settings(e: &Effective, out: Out) {
             "kinds": { "value": e.kinds.value, "source": e.kinds.source.to_string() },
             "always_on": { "value": e.always_on.value, "source": e.always_on.source.to_string() },
             "name": { "value": name, "source": name_from },
+            "kube_context": { "value": e.kube_context.as_ref().map(|k| &k.value), "source": kube_context_from },
+            "kubeconfig": { "value": e.kubeconfig.as_ref().map(|k| &k.value), "source": kubeconfig_from },
+            "auto_upgrade": { "value": e.auto_upgrade.value, "source": e.auto_upgrade.source.to_string() },
+            "upgrade_interval_minutes": { "value": e.upgrade_interval.value.as_secs() / 60, "source": e.upgrade_interval.source.to_string() },
+            "upgrade_restart": { "value": e.upgrade_restart.value.as_str(), "source": e.upgrade_restart.source.to_string() },
+            "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
+            "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
         }));
         return;
@@ -435,6 +773,29 @@ async fn show_settings(e: &Effective, out: Out) {
             e.always_on.source.to_string(),
         ],
         vec!["name".to_owned(), name, name_from],
+        vec!["kube_context".to_owned(), kube_context, kube_context_from],
+        vec!["kubeconfig".to_owned(), kubeconfig, kubeconfig_from],
+        vec!["user_units".to_owned(), user_units, user_units_from],
+        vec![
+            "core_checkout".to_owned(),
+            core_checkout,
+            core_checkout_from,
+        ],
+        vec![
+            "auto_upgrade".to_owned(),
+            e.auto_upgrade.value.to_string(),
+            e.auto_upgrade.source.to_string(),
+        ],
+        vec![
+            "upgrade_interval".to_owned(),
+            format!("{} minutes", e.upgrade_interval.value.as_secs() / 60),
+            e.upgrade_interval.source.to_string(),
+        ],
+        vec![
+            "upgrade_restart".to_owned(),
+            e.upgrade_restart.value.as_str().to_owned(),
+            e.upgrade_restart.source.to_string(),
+        ],
         vec![
             "build_floor".to_owned(),
             format!(
@@ -481,27 +842,9 @@ async fn runner_signer(
     account: &str,
     create: bool,
 ) -> Result<Signer, Error> {
-    use base64::Engine as _;
-    let name = s.profile.clone().ok_or_else(|| {
-        Error::Failed(
-            "the runner's key is kept in your profile's credential store: sign in with `iohr login`, not with IOHR_TOKEN alone".into(),
-        )
-    })?;
-    let storage = ctx
-        .config
-        .profile(&name)
-        .map(|p| p.storage)
-        .ok_or_else(|| Error::Failed(format!("there is no profile {name}")))?;
-    let key = EntryKey::new(name, &format!("{account}_runner_key"))?;
-    let store = ctx.store(storage)?;
-    let k = key.clone();
-    let seed: Option<Redacted<String>> = blocking(Arc::clone(&store), move |st| st.get(&k)).await?;
-    let b64 = base64::engine::general_purpose::STANDARD;
-    if let Some(seed) = seed {
-        let bytes = b64
-            .decode(seed.expose())
-            .map_err(|_| Error::Failed("the stored runner key is damaged".into()))?;
-        return Signer::from_seed(&bytes).map_err(Error::Failed);
+    let stored = StoredKey::open(ctx, s, account, "runner_key").await?;
+    if let Some(seed) = stored.read("the stored runner key is damaged")? {
+        return Signer::from_seed(&seed).map_err(Error::Failed);
     }
     if !create {
         return Err(Error::Failed(
@@ -509,9 +852,84 @@ async fn runner_signer(
         ));
     }
     let (signer, seed) = Signer::generate().map_err(Error::Failed)?;
-    let secret = Redacted::new(b64.encode(seed));
-    blocking(store, move |st| st.set(&key, &secret)).await?;
+    stored.write(&seed).await?;
     Ok(signer)
+}
+
+/// This machine's run key (RFC 0153): the P-256 key that signs its reports on approved
+/// pinned runs, kept beside the runner key under `{account}_approvals_runner_key`. The
+/// approvals service keeps its own registry of these, apart from the coordinator's
+/// runners (two registries, to fold into one later).
+async fn run_key(
+    ctx: &Ctx,
+    s: &crate::context::Session,
+    account: &str,
+    create: bool,
+) -> Result<Option<RunKey>, Error> {
+    let stored = StoredKey::open(ctx, s, account, "approvals_runner_key").await?;
+    if let Some(doc) = stored.read("the stored run key is damaged")? {
+        return RunKey::from_pkcs8(&doc).map(Some).map_err(Error::Failed);
+    }
+    if !create {
+        return Ok(None);
+    }
+    let (key, doc) = RunKey::generate().map_err(Error::Failed)?;
+    stored.write(&doc).await?;
+    Ok(Some(key))
+}
+
+/// A key this machine keeps in the profile's credential store, base64, under
+/// `{account}_{name}`; read once on open.
+struct StoredKey {
+    store: Arc<dyn iohr_auth::Store>,
+    key: EntryKey,
+    value: Option<Redacted<String>>,
+}
+
+impl StoredKey {
+    async fn open(
+        ctx: &Ctx,
+        s: &crate::context::Session,
+        account: &str,
+        name: &str,
+    ) -> Result<Self, Error> {
+        let profile = s.profile.clone().ok_or_else(|| {
+            Error::Failed(
+                "the runner's keys are kept in your profile's credential store: sign in with `iohr login`, not with IOHR_TOKEN alone".into(),
+            )
+        })?;
+        let storage = ctx
+            .config
+            .profile(&profile)
+            .map(|p| p.storage)
+            .ok_or_else(|| Error::Failed(format!("there is no profile {profile}")))?;
+        let key = EntryKey::new(profile, &format!("{account}_{name}"))?;
+        let store = ctx.store(storage)?;
+        let k = key.clone();
+        let value = blocking(Arc::clone(&store), move |st| st.get(&k)).await?;
+        Ok(Self { store, key, value })
+    }
+
+    /// The stored bytes, if any.
+    fn read(&self, damaged: &str) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>, Error> {
+        use base64::Engine as _;
+        self.value
+            .as_ref()
+            .map(|v| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(v.expose())
+                    .map(zeroize::Zeroizing::new)
+                    .map_err(|_| Error::Failed(damaged.to_owned()))
+            })
+            .transpose()
+    }
+
+    async fn write(self, bytes: &[u8]) -> Result<(), Error> {
+        use base64::Engine as _;
+        let secret = Redacted::new(base64::engine::general_purpose::STANDARD.encode(bytes));
+        let key = self.key;
+        blocking(self.store, move |st| st.set(&key, &secret)).await
+    }
 }
 
 /// `claude` as installed: the first one on the user's `PATH`.

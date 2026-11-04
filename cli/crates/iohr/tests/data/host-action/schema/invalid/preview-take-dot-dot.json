@@ -1,0 +1,8 @@
+{
+  "action": "preview.take",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "branch": "feat/a..b"
+  },
+  "effect": "Takes branch feat/a..b into the Preview checkout and checks the Preview app."
+}

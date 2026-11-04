@@ -23,8 +23,8 @@ failures.
 - **No `pull_request_target` and no `workflow_run` on fork code.** Fork PRs get read-only
   tokens and no secrets.
 - **Static checks on the workflows themselves**: zizmor on every PR touching
-  `.github/`; CodeQL for Go, Rust, JavaScript/TypeScript, Python and Actions; OpenSSF
-  Scorecard weekly; dependency review on PRs.
+  `.github/`; CodeQL for Go, Rust, JavaScript/TypeScript, Python, Java, C# and Actions;
+  OpenSSF Scorecard weekly; dependency review on PRs.
 - **Releases**: OIDC trusted publishing, build provenance attestations, an SBOM per
   release, environments with required reviewers (0003).
 - **Claude in CI**: `@claude` answers only users with write access; automatic review runs

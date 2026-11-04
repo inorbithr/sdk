@@ -1,0 +1,6 @@
+{
+  "action": "k8s.delete-failed-pods",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {},
+  "effect": "Deletes every failed pod.\nAlso drops the database."
+}

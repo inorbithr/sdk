@@ -26,8 +26,10 @@ use tokio::time::Instant;
 
 use super::access::Access;
 use super::claude::Reply;
+use super::drain::Drain;
 use super::exec::{Exec, Finished};
-use super::gate::{self, Checked, Held, Skip};
+use super::gate::{self, Checked, Held, MainFrom, Skip};
+use super::hygiene;
 use super::service::{
     AcceptFacts, Action, Beat, Lease, LeaseBeat, Pack, RunnerInfo, Service, ServiceError,
     TurnReport, Usage,
@@ -38,6 +40,35 @@ use super::workspace::{self, Prepared, Shipped, Workspaces};
 /// The RFC's runner heartbeat. The service's proto does not carry an interval yet, so
 /// this is the default and `--interval` changes it.
 pub(crate) const DEFAULT_INTERVAL: Duration = Duration::from_secs(20);
+/// RFC 0193: a service that holds the beat for an offer is beaten again this soon after
+/// it answered without one, so one beat is always waiting for a turn to start.
+const REBEAT_AFTER_HOLD: Duration = Duration::from_millis(250);
+/// And this soon after it answered with an offer, to let the accept land first.
+const REBEAT_AFTER_OFFER: Duration = Duration::from_secs(1);
+/// RFC 0193: after this many beats in a row that were offered a lease the runner had
+/// already been offered (taken by nothing: at capacity, or the accept failing), the loop
+/// stops beating again after each offer and goes back to the interval. An offer that stands
+/// is the service's to re-offer; beating once a second for it is up to 20 times the writes.
+const OFFER_REPEATS_BEFORE_BACKOFF: u32 = 3;
+/// How soon the next beat follows an answer, or `None` for the interval (RFC 0193): at
+/// once after a call the service held, a second after an offer to let the accept land,
+/// and the interval for a service that does not hold or for an offer that keeps standing.
+fn rebeat_after(
+    server_holds: bool,
+    waited: bool,
+    offered: bool,
+    offer_repeats: u32,
+) -> Option<Duration> {
+    if !server_holds || !(waited || offered) || offer_repeats >= OFFER_REPEATS_BEFORE_BACKOFF {
+        return None;
+    }
+    Some(if offered {
+        REBEAT_AFTER_OFFER
+    } else {
+        REBEAT_AFTER_HOLD
+    })
+}
+
 /// Reconnect backoff bounds (RFC: 1 s to 60 s, with jitter).
 pub(crate) const BACKOFF_MIN: Duration = Duration::from_secs(1);
 pub(crate) const BACKOFF_MAX: Duration = Duration::from_secs(60);
@@ -75,12 +106,17 @@ pub(crate) struct LoopConfig {
     pub(crate) declared: Option<watch::Receiver<Declared>>,
     /// The build-disk guard; `None` turns it off.
     pub(crate) build_floor: Option<BuildFloor>,
+    /// Read the machine (`runner::host`) for every beat and send it as resources and
+    /// signals; off in tests, where the beat stays free of `df` and `sysctl`.
+    pub(crate) report_host: bool,
     /// The Checked gate's check, run in the job's checkout after a job turn finishes and
     /// sent as a signed gate report before the turn's own report; `None` turns it off.
     pub(crate) gate: Option<GateCheck>,
     /// The checkouts of job leases (RFC 0147 slice A): made before the accept, shipped
     /// as a pull request after a reply; `None` keeps the old behaviour (no checkout).
     pub(crate) workspaces: Option<Arc<Workspaces>>,
+    /// Lets the self-upgrade drain the loop; `None`: never drained.
+    pub(crate) drain: Option<Arc<Drain>>,
 }
 
 /// What the run loop runs for the Checked gate (RFC 0120); the same check and the same
@@ -119,8 +155,10 @@ impl Default for LoopConfig {
             capacity: 1,
             declared: None,
             build_floor: None,
+            report_host: false,
             gate: None,
             workspaces: None,
+            drain: None,
         }
     }
 }
@@ -132,6 +170,7 @@ fn declared_now(cfg: &LoopConfig) -> Declared {
             capacity: None,
             version: env!("CARGO_PKG_VERSION").to_owned(),
             kinds: settings::CLASSES.iter().map(|c| (*c).to_owned()).collect(),
+            host: None,
         },
         |rx| rx.borrow().clone(),
     )
@@ -145,7 +184,7 @@ pub(crate) fn backoff(failures: u32, min: Duration, max: Duration, jitter: f64) 
     capped.mul_f64(1.0 - 0.5 * jitter.clamp(0.0, 1.0))
 }
 
-fn jitter() -> f64 {
+pub(crate) fn jitter() -> f64 {
     let mut b = [0_u8; 2];
     let _ = getrandom::fill(&mut b);
     f64::from(u16::from_le_bytes(b)) / f64::from(u16::MAX)
@@ -516,6 +555,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut lease_beating: Option<Op<'_, LeaseAnswers>> = None;
     let mut reporting: Option<Op<'_, (String, Result<(), OpErr>)>> = None;
     let mut service_interval: Option<Duration> = None;
+    // Set once a beat's answer said the service held it for an offer (RFC 0193): then the
+    // loop keeps one beat waiting instead of one every interval. An older service never
+    // says so, and keeps the interval.
+    let mut server_holds = false;
+    // The leases the last beat offered, and how many beats in a row offered one of them
+    // again: an offer nobody takes.
+    let mut last_offered: Vec<String> = Vec::new();
+    let mut offer_repeats: u32 = 0;
     let mut outbox: VecDeque<TurnReport> = VecDeque::new();
     // Delivery attempts since the last success.
     let mut tries: u32 = 0;
@@ -525,10 +572,16 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut beat_started = start;
     let mut lease_beat_started = start;
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
+    let mut drain_watch = cfg.drain.as_ref().map(|d| d.watch());
 
     loop {
         let held = held_leases(&busy, &fetching, &gating, &outbox);
         let has_held = !held.is_empty();
+        if let Some(d) = &cfg.drain {
+            d.publish(
+                !has_held && accepting.is_empty() && reporting.is_none() && fetch_ops.is_empty(),
+            );
+        }
         let now = Instant::now();
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
             lease_beat_started = now;
@@ -603,7 +656,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 .clone();
             let id = runner.runner_id.clone();
             let limit = cfg.op_timeout;
-            let declared = declared_now(&cfg);
+            let mut declared = declared_now(&cfg);
+            if cfg.drain.as_ref().is_some_and(|d| d.is_wanted()) {
+                declared = declared.drained();
+            }
             if let Some(c) = declared.capacity {
                 let c = usize::try_from(c).unwrap_or(1).clamp(1, MAX_CAPACITY);
                 if c != capacity {
@@ -614,7 +670,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 }
             }
             let floor = cfg.build_floor.clone();
+            let report_host = cfg.report_host;
             beating = Some(Box::pin(async move {
+                let mut declared = declared;
+                if report_host {
+                    let volume = floor.as_ref().map(|f| f.volume.as_path());
+                    declared.host = Some(super::host::probe(volume).await);
+                }
                 let declared = match floor {
                     Some(f) => {
                         let free = settings::free_bytes(&f.volume).await;
@@ -681,7 +743,22 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                             service_interval =
                                 Some(Duration::from_secs(beat.heartbeat_interval_seconds));
                         }
-                        next_beat = (beat_started + interval(service_interval)).max(Instant::now());
+                        server_holds |= beat.waited_seconds > 0;
+                        offer_repeats = if beat.offered.iter().any(|l| last_offered.contains(&l.lease_id)) {
+                            offer_repeats.saturating_add(1)
+                        } else {
+                            0
+                        };
+                        last_offered = beat.offered.iter().map(|l| l.lease_id.clone()).collect();
+                        next_beat = match rebeat_after(
+                            server_holds,
+                            beat.waited_seconds > 0,
+                            !beat.offered.is_empty(),
+                            offer_repeats,
+                        ) {
+                            Some(after) => Instant::now() + after,
+                            None => (beat_started + interval(service_interval)).max(Instant::now()),
+                        };
                         if beat.runner.status == "revoked" {
                             log("the service revoked this runner");
                             stop(std::mem::take(&mut busy), refresher.take()).await;
@@ -695,6 +772,11 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                     .any(|l| l.lease_id == lease.lease_id);
                             if held_already {
                                 // Offered again before the service saw the accept.
+                            } else if cfg.drain.as_ref().is_some_and(|d| d.is_wanted()) {
+                                log(&format!(
+                                    "lease {} left for another runner: the runner is draining to upgrade",
+                                    lease.lease_id
+                                ));
                             } else if taken >= capacity {
                                 log(&format!(
                                     "lease {} left for another runner: {taken} of {capacity} turns are taken",
@@ -802,16 +884,8 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                 // `job/<id>`, open or update the pull request; before the check, so the
                 // check sees the pushed head.
                 let ship = match (&b.owned, cfg.workspaces.as_ref(), &finished.parsed) {
-                    (Some(o), Some(w), Some(parsed)) if finished.outcome == "replied" => {
-                        let m = workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply);
-                        // A token close to its end is minted again for the push; one that
-                        // cannot be is a ship that fails, said in the log.
-                        let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
-                            Ok(o.access.clone())
-                        } else {
-                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
-                        };
-                        Some((Arc::clone(w), o.checkout.clone(), m, access))
+                    (Some(o), Some(_), Some(parsed)) if finished.outcome == "replied" => {
+                        Some(workspace::compose(&o.checkout.job_id, &o.document_id, &parsed.reply))
                     }
                     (Some(_), Some(_), _) => {
                         log(&format!("lease {}: nothing shipped, the turn ended {}", b.lease.lease_id, finished.outcome));
@@ -830,10 +904,31 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     let repo = checkout_in(&g.workdir, &b.pack.checkout).ok()?;
                     (wanted && why.is_none()).then_some((g, repo))
                 });
+                // A checkout this runner owns, when the push or the check's fetch of main
+                // will reach GitHub: its workspaces, the checkout and the lease's access.
+                // A token close to its end is minted again, only now that one of them
+                // will run; one that cannot be is a ship that fails and a check that
+                // makes no report, said in the log.
+                let owned = match (&b.owned, cfg.workspaces.as_ref()) {
+                    (Some(o), Some(w)) if ship.is_some() || gate_run.is_some() => {
+                        let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
+                            Ok(o.access.clone())
+                        } else {
+                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
+                        };
+                        Some((Arc::clone(w), o.checkout.clone(), access))
+                    }
+                    _ => None,
+                };
                 if gate_run.is_some() || ship.is_some() {
                     let check = gate_run.map(|(g, repo)| {
                         log(&format!("lease {}: checking {} in {}", b.lease.lease_id, g.command, repo.display()));
-                        (repo, g.command.clone(), g.timeout, g.env.clone())
+                        // Its `cargo` builds into the repository's shared directory (RFC 0189).
+                        let env = hygiene::with_target(
+                            g.env.clone(),
+                            hygiene::target_for(&g.workdir, &repo).as_deref(),
+                        );
+                        (repo, g.command.clone(), g.timeout, env)
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
                     gating.push(Gating {
@@ -841,15 +936,26 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         job_id,
                         report,
                         check: Some(tokio::spawn(async move {
-                            let shipped = match ship {
-                                Some((w, p, m, Ok(access))) => Some(w.ship(&p, &m, &access).await),
-                                Some((_, _, _, Err(e))) => Some(Err(format!("nothing pushed: {e}"))),
-                                None => None,
+                            let shipped = match (ship, &owned) {
+                                (Some(m), Some((w, p, Ok(access)))) => Some(w.ship(p, &m, access).await),
+                                (Some(_), Some((_, _, Err(e)))) => Some(Err(format!("nothing pushed: {e}"))),
+                                _ => None,
                             };
                             let checked = match check {
-                                Some((repo, command, timeout, env)) => {
-                                    Some(gate::check(&repo, &command, timeout, env).await)
-                                }
+                                Some((repo, command, timeout, env)) => Some(match &owned {
+                                    // A checkout this runner owns: main is fetched in its
+                                    // mirror, behind the guard, never in the checkout
+                                    // (whose configuration the turn can write); the
+                                    // checkout shares the mirror's refs.
+                                    Some((w, p, Ok(access))) => match w.fetch_main(p, access).await {
+                                        Ok(()) => gate::check(&repo, &command, timeout, env, MainFrom::Mirror).await,
+                                        Err(e) => Err(Skip::Git(e)),
+                                    },
+                                    Some((_, _, Err(e))) => Err(Skip::Access(e.clone())),
+                                    // One it does not own has no lease access: its fetch is
+                                    // left to the host's own git configuration, no token.
+                                    None => gate::check(&repo, &command, timeout, env, MainFrom::Checkout).await,
+                                }),
                                 None => None,
                             };
                             Gated { shipped, checked }
@@ -893,6 +999,15 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         }
                     }
                     Ok(Some(Ok(checked))) => {
+                        if checked.exit_code != 0 {
+                            // The signed report carries the hash only: the reason the
+                            // job holds at Checked is read here, in the runner's log.
+                            log(&format!(
+                                "lease {id}: the check failed (exit {}); last output:\n{}",
+                                checked.exit_code,
+                                checked.output_tail.lines().map(|l| format!("  | {l}")).collect::<Vec<_>>().join("\n")
+                            ));
+                        }
                         let gr = gate::report_of(
                             Held {
                                 job_id: &g.job_id,
@@ -942,6 +1057,20 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     outbox.push_back(gating.remove(i).report);
                     next_report = Instant::now();
                 }
+            }
+            wanted = async {
+                match drain_watch.as_mut() {
+                    Some(w) => w.flipped().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                log(if wanted {
+                    "draining: no new lease until the upgrade is done"
+                } else {
+                    "the drain is over: leases are taken again"
+                });
+                // The next beat says so: with the drain wanted it declares nothing.
+                next_beat = Instant::now();
             }
             taken = first_of(&mut accepting) => {
                 match taken {
@@ -1364,6 +1493,9 @@ mod tests {
         job: Option<JobInfo>,
         /// `GetJob` fails, transiently.
         job_down: bool,
+        /// Seconds each heartbeat says the service held it (RFC 0193); 0 is a service that
+        /// does not hold.
+        held_seconds: u64,
         /// What `MintRunnerGithubToken` answers; `None` is an older platform without it.
         minted: Option<crate::runner::access::Minted>,
     }
@@ -1447,8 +1579,7 @@ mod tests {
                 };
                 return Ok(Beat {
                     runner,
-                    offered: vec![],
-                    heartbeat_interval_seconds: 0,
+                    ..Beat::default()
                 });
             }
             let after_accept = self
@@ -1469,11 +1600,14 @@ mod tests {
             match self.beats.lock().unwrap().pop_front() {
                 Some(Err(())) => Err(down()),
                 Some(Ok(offered)) => Ok(Beat {
-                    runner: RunnerInfo::default(),
                     offered,
-                    heartbeat_interval_seconds: 0,
+                    waited_seconds: self.held_seconds,
+                    ..Beat::default()
                 }),
-                None => Ok(Beat::default()),
+                None => Ok(Beat {
+                    waited_seconds: self.held_seconds,
+                    ..Beat::default()
+                }),
             }
         }
         async fn accept(&self, l: &Lease, f: AcceptFacts) -> Result<(), ServiceError> {
@@ -1820,6 +1954,8 @@ mod tests {
             build_floor: None,
             gate: None,
             workspaces: None,
+            drain: None,
+            report_host: false,
         }
     }
 
@@ -1865,6 +2001,124 @@ mod tests {
         let calls = fake.calls.lock().unwrap();
         assert_eq!(calls.len(), 4);
         assert!(calls.iter().all(|c| c == "heartbeat run_1 providers=1"));
+    }
+
+    #[tokio::test]
+    async fn a_service_that_holds_the_beat_is_beaten_again_at_once() {
+        // RFC 0193: the interval is 30 s, but each answer says the service held the call,
+        // so the next beat does not wait for it: six beats fit well inside the timeout.
+        let fake = Fake {
+            held_seconds: 4,
+            ..Fake::default()
+        };
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            ..cfg(6)
+        };
+        let (end, stats) = tokio::time::timeout(Duration::from_secs(5), go(&fake, c))
+            .await
+            .expect("beats followed one another instead of waiting for the interval");
+        assert_eq!((end, stats.beats), (End::MaxBeats, 6));
+    }
+
+    #[test]
+    fn the_next_beat_follows_a_held_call_at_once_and_an_offer_nobody_takes_backs_off() {
+        let secs = |s| Some(Duration::from_secs(s));
+        // (server_holds, waited, offered, repeats)
+        assert_eq!(rebeat_after(true, true, false, 0), Some(REBEAT_AFTER_HOLD));
+        assert_eq!(rebeat_after(true, false, true, 0), secs(1));
+        // The same offer standing: a second apart for a few beats, then the interval.
+        for repeats in 1..OFFER_REPEATS_BEFORE_BACKOFF {
+            assert_eq!(
+                rebeat_after(true, false, true, repeats),
+                secs(1),
+                "{repeats}"
+            );
+        }
+        assert_eq!(
+            rebeat_after(true, false, true, OFFER_REPEATS_BEFORE_BACKOFF),
+            None
+        );
+        assert_eq!(rebeat_after(true, false, true, 50), None);
+        // A service that does not hold, or has nothing to say, keeps the interval.
+        assert_eq!(rebeat_after(false, true, true, 0), None);
+        assert_eq!(rebeat_after(true, false, false, 0), None);
+    }
+
+    #[tokio::test]
+    async fn an_offer_nobody_takes_does_not_keep_the_runner_beating_every_second() {
+        // The service offers the same lease on every beat and the runner is at capacity,
+        // so it is never taken. With a 30 s interval the loop beats each second for a few
+        // beats, then waits the interval: it never reaches ten beats.
+        let fake = Fake {
+            held_seconds: 1,
+            ..Fake::default()
+        };
+        for _ in 0..10 {
+            fake.beats
+                .lock()
+                .unwrap()
+                .push_back(Ok(vec![lease("lease_1", 7)]));
+        }
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            capacity: 0,
+            ..cfg(10)
+        };
+        let done = tokio::time::timeout(Duration::from_secs(8), go(&fake, c)).await;
+        assert!(
+            done.is_err(),
+            "ten beats a second apart for one standing offer"
+        );
+        let beats = fake
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c.starts_with("heartbeat"))
+            .count();
+        assert!(
+            (2..=6).contains(&beats),
+            "a few quick beats and then the interval: {beats}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_service_that_does_not_hold_keeps_the_interval() {
+        // An older service says nothing of waiting: beats stay on the interval.
+        let fake = Fake::default();
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            ..cfg(3)
+        };
+        let waited = tokio::time::timeout(Duration::from_millis(400), go(&fake, c)).await;
+        assert!(waited.is_err(), "the second beat came before the interval");
+        assert_eq!(fake.calls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_offer_from_a_holding_service_is_accepted_and_the_next_beat_waits_for_it() {
+        let fake = Fake {
+            held_seconds: 1,
+            ..Fake::default()
+        };
+        fake.beats
+            .lock()
+            .unwrap()
+            .push_back(Ok(vec![lease("lease_1", 7)]));
+        *fake.pack.lock().unwrap() = Some(Pack {
+            turn_id: "turn_1".into(),
+            pack_sha256: "ab".repeat(32),
+            ..good_pack()
+        });
+        let c = LoopConfig {
+            interval: Some(Duration::from_secs(30)),
+            ..cfg(3)
+        };
+        let (_, stats) = tokio::time::timeout(Duration::from_secs(8), go(&fake, c))
+            .await
+            .expect("the loop beat again after the offer");
+        assert_eq!((stats.accepted, stats.reported), (1, 1));
     }
 
     #[tokio::test]
@@ -2375,6 +2629,7 @@ mod tests {
             capacity,
             version: "9.9.9".into(),
             kinds: kinds.iter().map(|k| (*k).to_owned()).collect(),
+            host: None,
         });
         let c = LoopConfig {
             declared: Some(rx),
@@ -2937,6 +3192,57 @@ mod tests {
         );
     }
 
+    /// A turn that neither ships nor gets a gate check mints no token after it, even with
+    /// the gate on and the lease's token past its refresh point: the mint waits until the
+    /// push or the check's fetch of main will run.
+    #[tokio::test]
+    async fn a_turn_whose_gate_will_not_run_mints_no_token_after_it() {
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        let p = place();
+        let fake = Fake {
+            job: Some(JobInfo {
+                repository: "acme/app".into(),
+                document_id: "ldoc_1".into(),
+            }),
+            // Long past: every use after the accept would mint again.
+            minted: Some(crate::runner::access::Minted::token(
+                crate::runner::access::tests::FAKE,
+                "2000-01-01T00:00:00Z",
+                "acme/app",
+            )),
+            ..Fake::default()
+        };
+        offer(&fake, &[job_lease("lease_1", 7)]);
+        *fake.pack.lock().unwrap() = Some(Pack {
+            kind: "job".into(),
+            job_id: "job_1".into(),
+            checkout: "checkouts/job_1".into(),
+            ..good_pack()
+        });
+        let exec = FakeExec {
+            crash_turn: Some("turn_1".into()),
+            ..FakeExec::default()
+        };
+        let c = LoopConfig {
+            gate: Some(gate_cfg("exit 0", &p.workdir)),
+            workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+            ..cfg(8)
+        };
+        let (stats, lines) = go_logged(&fake, exec, c).await;
+        assert_eq!((stats.accepted, stats.turns, stats.reported), (1, 1, 1));
+        assert!(
+            lines.iter().any(|l| l.contains("no gate report")),
+            "{lines:?}"
+        );
+        let calls = fake.calls.lock().unwrap().clone();
+        let mints = calls
+            .iter()
+            .filter(|c| *c == "runner_token lease_1")
+            .count();
+        assert_eq!(mints, 1, "only the accept's mint: {calls:?}");
+        assert!(fake.gate_reports.lock().unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn a_job_lease_whose_checkout_cannot_be_made_is_not_accepted() {
         use crate::runner::workspace::tests::{FakeForge, place, spaces};
@@ -3062,5 +3368,73 @@ mod tests {
                 "{lines:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn while_draining_the_beats_declare_none_and_an_offered_lease_is_left() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1)]);
+        let drain = Arc::new(Drain::default());
+        drain.want(true);
+        let c = LoopConfig {
+            drain: Some(drain.clone()),
+            max_beats: Some(5),
+            ..declaring(None, &["coordinate", "build"]).1
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert!(
+            lines.iter().any(|l| l.contains("drain")),
+            "it says why: {lines:?}"
+        );
+        assert_eq!(
+            (stats.accepted, stats.turns),
+            (0, 0),
+            "no lease while draining"
+        );
+        assert_eq!(calls_of(&fake, "accept"), 0);
+        {
+            let d = fake.declared.lock().unwrap();
+            assert!(
+                d.len() >= 5 && d.iter().all(|x| x.kinds == ["none"]),
+                "{d:?}"
+            );
+        }
+        tokio::time::timeout(Duration::from_secs(1), drain.until_drained())
+            .await
+            .expect("an idle loop reports a drain");
+    }
+
+    #[tokio::test]
+    async fn a_turn_in_progress_holds_the_drain_open_until_it_is_reported() {
+        let fake = Fake::default();
+        offer(&fake, &[lease("lease_1", 1)]);
+        let exec = FakeExec {
+            turn_time: Some(Duration::from_millis(400)),
+            ..FakeExec::default()
+        };
+        let drain = Arc::new(Drain::default());
+        let c = LoopConfig {
+            drain: Some(drain.clone()),
+            ..cfg(200)
+        };
+        let ask = async {
+            // Let the turn start, then ask for a drain.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            drain.want(true);
+            let early =
+                tokio::time::timeout(Duration::from_millis(100), drain.until_drained()).await;
+            assert!(early.is_err(), "drained while a turn was running");
+            tokio::time::timeout(Duration::from_secs(3), drain.until_drained())
+                .await
+                .expect("drained once the turn is done");
+            let reported = calls_of(&fake, "report ");
+            assert_eq!(
+                reported, 1,
+                "the report was delivered before the drain ended"
+            );
+            drain.want(false);
+        };
+        let (done, ()) = tokio::join!(go_with(&fake, exec, c), ask);
+        assert_eq!(done.1.reported, 1);
     }
 }

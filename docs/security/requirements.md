@@ -300,6 +300,59 @@ credential helpers cleared and its prompts off (RFC 0147 containment).
   environment is signed out and git there asks no helper.
 - Refs: CRA I.2(d); least privilege.
 
+**SR-34. A runner carries out only an approved, pinned run ask, once, from its catalogue.**
+`iohr runner run` acts on a run ask (platform RFC 0172, RFC 0153) only after every check
+the platform's verifier makes, in its order: approved and pinned, the payload's SHA-256
+equal to the approved one, decided by a person, the action valid against
+`runner/host-action/v0`, this runner's id and key, not expired, and a decision signature
+by a device key pinned on this machine. A decision already carried out is refused as a
+replay; the record is written, under a file lock, before the run is reported started, and an ask that cannot be recorded is not run. The pinned device keys and the record must belong to the user and not be writable by group or world, and a malformed line in the record is an error; both live in a directory per account. Every `kubectl` call is pinned to the configured kube context or kubeconfig, and with none configured every Kubernetes action is refused. Any
+refusal is reported `failed` and runs nothing. Actions come only from a fixed catalogue
+in the binary (`k8s.delete-failed-pods`, `k8s.rollout-restart`, `systemd.user-restart`,
+`docker.prune-images`, `gh.cancel-run`, `iohr.upgrade`, `preview.take`, `roll.task`,
+`build.sweep-targets`, `gh.release-rerun`, `agent.install-checks`, `disk.prune`,
+`helm.runner-scale`); an action outside it is refused.
+The run's `effect` must be the catalogue's one sentence for its action and params
+(core's `effect_of`, ported unchanged), so the words the owner approved are what runs; any
+other effect is refused. Each action is planned to fixed argument vectors, its params checked again, before
+anything runs. Each tool (`kubectl`, `systemctl --user`, `docker`, `gh`, `git`, `mise`, `df`, `helm`, `remote-roll.sh`) runs from an
+absolute `PATH` entry with an argument vector, never a shell, with the scrubbed
+environment and a time limit; a missing tool is a refusal. No Kubernetes action runs in
+`kube-system`, `kube-public` or `kube-node-lease`, and a namespace or deployment must be
+a DNS label. `systemd.user-restart` runs on Linux only. `docker.prune-images` prunes
+images only, never volumes or the system. `gh.cancel-run` reaches only `inorbithr/`
+repositories, with prompts and the update check off. `preview.take` takes only a
+`preview-int/`, `feat/` or `fix/` branch with no `..`. `roll.task` runs one of eight
+named tasks through `~/.inorbit/roll/remote-roll.sh` at a 40-hex commit, and no service
+name may start with a hyphen, so none reads as an option. `build.sweep-targets` runs only
+`mise run target:sweep` or `target:guard` in the configured absolute `core_checkout`.
+`gh.release-rerun` reaches only `inorbithr/sdk`, and only re-runs the failed jobs of a
+`release.yml` run on `main` that concluded `failure` and whose commit has a green
+`examples-run` status, read again before it runs. `agent.install-checks` names one of three
+blocks (never a path), reads its source from the `core_checkout` only at a 40-hex commit that is an
+ancestor of `origin/main` and no larger than the 16 KiB output cap, builds the new checks file beside
+the agent's `~/.config/iohr-agent/checks.toml`, replaces the file only after `iohr agent checks lint`
+accepts it and a timestamped backup exists, restarts only a unit in `user_units`, and puts the backup
+back when the agent does not reconnect holding what the file declares. `disk.prune` names one of three targets (never a path) and so cannot reach `/mnt/fast` or any
+directory outside what core's `host:prune`, `docker builder prune` and `crictl rmi --prune` clean; it runs on
+Linux only, reads the free bytes of the Docker data root's disk before and after, reports both, and fails a
+run that freed nothing. `helm.runner-scale` changes only `maxRunners` (1 to 32) and `minRunners` (0 to the
+most) of `core-ci` or `core-images` in `arc-runners`, with `--reuse-values` at the chart version the release
+already runs and only when `helm get metadata` says it is the `gha-runner-scale-set` chart; it fails unless the
+values read back as set, and every `helm` call is pinned to the configured kube context or kubeconfig. Only `mise`, `git` and `remote-roll.sh` get
+`SSH_AUTH_SOCK` and `INORBIT_SSH_HOST` from the scrubbed-out environment. `iohr.upgrade` runs this
+executable's own `upgrade`, never a downloaded script. Every report is signed with the
+runner's own P-256 run key, kept in the credential store and never printed; the output it
+carries is capped and redacted of URLs, addresses and tokens.
+- Why: an approved ask is a command run on the owner's machines; one that was changed,
+  replayed, meant for another runner or signed by no device of the owner's must not run.
+- Verify: the platform's verdict vectors, copied with their source and checked to give
+  the same verdict; tests that a replayed nonce, an unknown action and a cluster
+  namespace run nothing and report `failed`; that each action runs exactly its argument
+vectors; that a missing tool, a bad param or systemd off Linux runs nothing;
+  that each report verifies with the run key.
+- Refs: CRA I.2(d); least privilege.
+
 ## Reliability and traceability
 
 **SR-17. Request ids both ways.** Every request carries a client-generated request id

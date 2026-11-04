@@ -56,12 +56,31 @@ pub struct Global {
     /// The OAuth client the command line signs in as.
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
+    /// Sign in as someone other than a person: `io`, the `OAuth2` client `iohr-io` with the
+    /// client credentials grant, so jobs Io files run on runners Io owns. `iohr runner` only;
+    /// the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
+    /// a Mac, from the keychain item the Mac bridge uses, never from an argument.
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_SIGN_IN",
+        value_enum,
+        value_name = "WHO"
+    )]
+    pub sign_in: Option<SignIn>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
     pub config_dir: Option<PathBuf>,
     /// Where extensions are kept (default: the platform's data directory).
     #[arg(long, global = true, env = "IOHR_DATA_DIR", hide = true)]
     pub data_dir: Option<PathBuf>,
+}
+
+/// Who signs in when it is not a person.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SignIn {
+    /// Io, the `OAuth2` client `iohr-io` (client credentials).
+    Io,
 }
 
 impl Global {
@@ -345,6 +364,12 @@ pub enum RunnerCommand {
         /// 100 GB free.
         #[arg(long, value_delimiter = ',')]
         kinds: Option<Vec<String>>,
+        /// Never look for a newer iohr or restart into one (default: `[runner]
+        /// auto_upgrade` in config.toml, which is on). With it on, the runner checks
+        /// about hourly, drains, installs the newest release through `iohr upgrade`'s
+        /// verified path and restarts itself.
+        #[arg(long)]
+        no_auto_upgrade: bool,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -392,6 +417,33 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// This machine's run key: the P-256 key that signs what it reports on approved
+    /// pinned runs (RFC 0153), and whether the approvals service has it enrolled.
+    ///
+    /// Makes the key the first time and keeps it in the credential store beside the
+    /// runner key. Not enrolled yet, it asks you on your phone (a `runner_enrollment`
+    /// ask showing the key's label and fingerprint), waits up to `--wait` minutes (15)
+    /// for your approval and enrols the key; run it again to keep waiting on the same ask.
+    /// `--proof` still enrols from a file holding your device's proof (`key_id`,
+    /// `signed_at`, `nonce`, `signature`) over the enrolment message.
+    RunKey {
+        /// A JSON file with your device's proof over the enrolment message.
+        #[arg(long)]
+        proof: Option<std::path::PathBuf>,
+        /// The enrolment's label, up to 100 characters (default: `iohr runner on` and
+        /// this machine's host name).
+        #[arg(long)]
+        label: Option<String>,
+        /// Minutes to wait for your approval, 0 to 60; 0 files the ask and returns.
+        #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=60))]
+        wait: u64,
+        /// Only show this machine's run key and its enrolled runner id; make nothing,
+        /// ask nothing.
+        #[arg(long, conflicts_with_all = ["proof", "label"])]
+        show: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -405,6 +457,9 @@ pub enum RunnerConfigCommand {
         /// As `iohr runner run --kinds`.
         #[arg(long, value_delimiter = ',')]
         kinds: Option<Vec<String>>,
+        /// As `iohr runner run --no-auto-upgrade`.
+        #[arg(long)]
+        no_auto_upgrade: bool,
     },
 }
 
@@ -1126,6 +1181,11 @@ pub struct Login {
     /// sign-in service refuses a scope the command line's client may not ask for.
     #[arg(long = "scope", value_delimiter = ',')]
     pub scopes: Vec<String>,
+    /// The account this profile acts for, by id or slug, among the ones you belong to.
+    /// It is kept when you sign in again. Without it: the account this profile was last
+    /// pointed at, else the one you made your default, else your own.
+    #[arg(long, value_name = "ID|SLUG", conflicts_with = "with_token")]
+    pub account: Option<String>,
 }
 
 /// How to sign in; at most one. Without any, a browser when this machine can open

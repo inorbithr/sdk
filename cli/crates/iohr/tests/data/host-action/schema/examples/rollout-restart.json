@@ -1,0 +1,9 @@
+{
+  "action": "k8s.rollout-restart",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "namespace": "example",
+    "deployment": "example"
+  },
+  "effect": "Restarts deployment example in namespace example and waits for the new pods."
+}

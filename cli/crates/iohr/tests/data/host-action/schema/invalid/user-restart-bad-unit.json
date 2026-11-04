@@ -1,0 +1,8 @@
+{
+  "action": "systemd.user-restart",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "unit": "example.timer"
+  },
+  "effect": "Restarts example.timer."
+}

@@ -1,0 +1,8 @@
+{
+  "action": "disk.prune",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "target": "/mnt/fast"
+  },
+  "effect": "Does what the person approved."
+}

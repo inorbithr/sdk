@@ -1,0 +1,8 @@
+{
+  "action": "docker.prune-images",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "until_hours": 24
+  },
+  "effect": "Removes the unused Docker images older than 24 hours on the runner's host."
+}

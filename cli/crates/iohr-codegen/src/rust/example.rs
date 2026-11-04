@@ -30,27 +30,24 @@ pub(crate) fn example(call: &Call<'_>) -> String {
     }
     public.sort_by_key(|s| s.to_lowercase());
     let mut uses: Vec<String> = c.imports.iter().map(|s| (*s).to_owned()).collect();
-    uses.push("inorbithr::Error".into());
     uses.push(format!("inorbithr::public::{{{}}}", public.join(", ")));
     let mut out = String::new();
     for u in group(uses) {
         let _ = writeln!(out, "use {u};");
     }
-    out.push_str("\n#[tokio::main]\nasync fn main() {\n    if let Err(err) = run().await {\n        match err {\n            Error::Api(e) => eprintln!(\"{}: {} (request id {})\", e.code, e.message, e.raw.request_id),\n            e => eprintln!(\"{e}\"),\n        }\n        std::process::exit(1);\n    }\n}\n\nasync fn run() -> Result<(), Error> {\n");
-    for line in c.lines {
-        let _ = writeln!(out, "    {line}");
-    }
+    out.push('\n');
     let receiver = match call.tag {
         Some(tag) => format!("{}.{}()", client::VAR, tag.to_snake_case()),
         None => client::VAR.to_owned(),
     };
     let method = &call.op.name;
     let args = arguments(call);
+    let mut body = String::new();
     match &call.flow {
         Flow::Unary => {
             let _ = write!(
-                out,
-                "    let res = {receiver}.{method}({args}).await?;\n    println!(\"{{:?}}\", res.value);\n"
+                body,
+                "let res = {receiver}.{method}({args}).await?;\nprintln!(\"{{:?}}\", res.value);\n"
             );
         }
         Flow::Pages(_) => {
@@ -58,34 +55,34 @@ pub(crate) fn example(call: &Call<'_>) -> String {
             // The walk borrows the parameters, so they live in a variable.
             let (bind, args) = match args.split_once('&') {
                 Some((path, params)) if call.op.params_type.is_some() => (
-                    format!("    let params = {params};\n"),
+                    format!("let params = {params};\n"),
                     format!("{path}&params"),
                 ),
                 _ => (String::new(), args),
             };
-            out.push_str(&bind);
+            body.push_str(&bind);
             // The handle too.
             let receiver = match call.tag {
                 Some(tag) => {
                     let name = tag.to_snake_case();
-                    let _ = writeln!(out, "    let {name} = {receiver};");
+                    let _ = writeln!(body, "let {name} = {receiver};");
                     name
                 }
                 None => receiver.clone(),
             };
             let _ = write!(
-                out,
-                "    let mut pages = {receiver}.all_{method}({args});\n    while let Some({item}) = pages.next().await {{\n        println!(\"{{:?}}\", {item}?);\n    }}\n"
+                body,
+                "let mut pages = {receiver}.all_{method}({args});\nwhile let Some({item}) = pages.next().await {{\n    println!(\"{{:?}}\", {item}?);\n}}\n"
             );
         }
         Flow::Stream => {
             let _ = write!(
-                out,
-                "    let mut events = {receiver}.{method}({args}).await?;\n    while let Some(event) = events.next().await {{\n        println!(\"{{:?}}\", event?);\n    }}\n"
+                body,
+                "let mut events = {receiver}.{method}({args}).await?;\nwhile let Some(event) = events.next().await {{\n    println!(\"{{:?}}\", event?);\n}}\n"
             );
         }
     }
-    out.push_str("    Ok(())\n}\n");
+    out.push_str(&c.frame(&body));
     out
 }
 
@@ -178,7 +175,7 @@ fn setter(field: &str, ty: &Type, value: &Value) -> String {
 fn strukt(ty: &str, fields: &[String]) -> String {
     let mut out = format!("{ty}::default()");
     for f in fields {
-        let _ = write!(out, "\n        .{f}");
+        let _ = write!(out, "\n    .{f}");
     }
     out
 }

@@ -343,6 +343,7 @@ ca_bundle = "~/certs/corp-root.pem"
 [profiles.work]                     # written by iohr login
 kind = "person"
 account = "acc_8d2e"
+account_pinned = true               # set by `iohr login --account` or `iohr profile account`
 storage = "keyring"
 
 [profiles.ci]                       # written by hand or by configuration management
@@ -364,8 +365,11 @@ Rules:
 
 - The file layer for a profile is its `[profiles.<name>]` table over the `[sdk]` table.
   With no profile chosen, only `[sdk]` applies.
-- The command line's keys (`kind`, `account`, `storage`, `issuer`, `client_id`, and the
+- The command line's keys (`kind`, `account`, `account_pinned`, `storage`, `issuer`, `client_id`, and the
   top-level `ext`) are read by the `cli` credential source and otherwise left alone.
+- `account_pinned = true` means the account was chosen (by `iohr login --account` or
+  `iohr profile account`) and a later `iohr login` keeps it. Absent, a sign-in picks the
+  account again: the `default_account_id` preference when you belong to it, else your own.
 - **Secrets are never in the file.** `key_secret`, `token`, `client_key_password` and a
   `proxy` URL with user-info are a `ConfigError` naming the file and the table, with the
   way out: `key_secret_file`, `token_file`, the environment, or `iohr login`. A secret
@@ -376,7 +380,7 @@ Rules:
 - A value of the wrong type is a `ConfigError`, the same as a bad environment value.
 
 The command line keeps what it does not own. It changes only `default`, its own profile
-keys (`kind`, `account`, `storage`, `issuer`, `client_id`) and the `[ext]` table, and keeps
+keys (`kind`, `account`, `account_pinned`, `storage`, `issuer`, `client_id`) and the `[ext]` table, and keeps
 every other key, table and comment (`toml_edit`). A profile without `kind` holds SDK keys
 only: `iohr` does not list it as one of its profiles. `iohr logout` removes the profile's
 command-line keys and leaves its SDK keys; the table goes when nothing is left.
@@ -392,6 +396,15 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `kinds` | `coordinate`, `build` | both | `register` and `run`: the turn classes the runner takes |
 | `always_on` | true or false | false | `register` |
 | `name` | text | the host name | `register`, and `run` to find the runner |
+| `kube_context` | a kubeconfig context name | not set | `run`: the cluster approved host actions reach, passed to every `kubectl` call as `--context` |
+| `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
+| `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
+| `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
+| `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
+| `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
+| `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
+
+With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh`, `mise`, `systemctl`, `git`, `df` or `helm` on its `PATH`, no `~/.inorbit/roll/remote-roll.sh` for `roll.task`, no `core_checkout` for `build.sweep-targets`, `agent.install-checks` or `disk.prune` with the target `host`, no cluster for `helm.runner-scale`, a system that is not Linux for `disk.prune`, no `~/.config/iohr-agent/checks.toml` or an agent unit outside `user_units` for `agent.install-checks`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On
@@ -405,6 +418,38 @@ the kinds it declares until the volume has room again (`none` when nothing is le
 the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
 value in effect, where it came from and the build volume's free space, without signing
 in.
+
+`iohr runner run` keeps itself on the latest released `iohr`. About a minute after it
+starts, and then every `upgrade_interval_minutes` plus up to 10 percent of jitter, it asks
+for the newest complete release (the same lookup and the same verified install as
+`iohr upgrade`). A release that is strictly newer by semver, prereleases ordered, starts
+a drain: the heartbeats declare `none`, an offered lease is left to expire, approved runs
+start nothing new, and nothing is installed until no job is leased or running. A drain
+that lasts 4 hours gives up, takes work again and counts as a failure. After the install
+the file's own `--version` must say the new version, then the runner restarts:
+
+- `exec` (default): the same process becomes the new binary, with the same arguments and
+  environment. The process id stays, so launchd and systemd see no stop and nothing can
+  be left stopped.
+- `exit`: the runner ends with code 75 (`EX_TEMPFAIL`) and the supervisor starts the new
+  binary. It needs launchd with `KeepAlive` true or `SuccessfulExit` false, or systemd
+  with `Restart=always` or `on-failure`. The runner finds its supervisor from
+  `INVOCATION_ID` (systemd) or `XPC_SERVICE_NAME` with a parent process id of 1
+  (launchd); with neither it uses `exec`. Use `exit` for a Homebrew install on Linux,
+  where cleanup can remove the path the old binary ran from.
+
+The command line's exit codes are 0 success, 1 a failed call, 2 a usage error, 3 not
+signed in, 4 forbidden by scope, role or plan, and 75 (`EX_TEMPFAIL`) for a runner that
+installed a newer `iohr` and stopped for its supervisor to start it (`upgrade_restart =
+"exit"`); 75 prints nothing and is not a failure.
+
+A failed look, install, version check or restart is one line in the log, never a token.
+The old version keeps running and the runner waits 5 minutes, then 10, 20 and so on up to
+the interval (and never over 6 hours) before it tries again. `runner/last-upgrade` in the
+config directory holds the version and the time of the last install, and the same version
+is not installed twice within 24 hours, so a binary that cannot start cannot loop. A copy
+installed by apt is reported once per version and skipped (use `apt upgrade`). A SIGHUP
+reads `auto_upgrade`, `upgrade_interval_minutes` and `upgrade_restart` again.
 
 ## 5. Credentials
 

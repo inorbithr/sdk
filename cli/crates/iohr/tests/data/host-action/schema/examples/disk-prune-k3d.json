@@ -1,0 +1,8 @@
+{
+  "action": "disk.prune",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {
+    "target": "k3d-images"
+  },
+  "effect": "Removes the images no pod uses from each k3d node on the runner's host."
+}

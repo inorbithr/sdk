@@ -3,7 +3,7 @@
 
 use std::ffi::OsString;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 use std::time::Duration;
@@ -13,6 +13,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 use super::claude::{self, Outcome, Parsed, Session, TurnSpec};
 use super::env;
+use super::hygiene;
 use super::provider::{self, AuthState};
 use super::service::{Pack, ProviderState};
 
@@ -153,6 +154,24 @@ impl ClaudeExec {
             .unwrap_or_default()
     }
 
+    /// The turn's command: its model's `cargo` builds into its repository's shared
+    /// directory, not into a `target/` of the job's checkout (RFC 0189). `checkout` is
+    /// relative to the working directory.
+    fn turn_command(&self, args: &[String], checkout: &str) -> Command {
+        let mut cmd = self.command(args);
+        cmd.current_dir(&self.workdir);
+        let rel = Path::new(checkout);
+        if !checkout.is_empty()
+            && rel
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+            && let Some(t) = hygiene::target_for(&self.workdir, &self.workdir.join(rel))
+        {
+            cmd.env(hygiene::TARGET_VAR, t);
+        }
+        cmd
+    }
+
     /// Why this turn may not start here, if it may not: another person's seat, another
     /// provider's turn, or a `claude` that is not signed in on a subscription.
     async fn refusal(&self, pack: &Pack) -> Option<Finished> {
@@ -225,8 +244,7 @@ impl ClaudeExec {
         if let Err(e) = tokio::fs::create_dir_all(&self.workdir).await {
             return fail(format!("the working directory: {e}"));
         }
-        let mut cmd = self.command(&args);
-        cmd.current_dir(&self.workdir);
+        let mut cmd = self.turn_command(&args, &pack.checkout);
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return fail(format!("claude did not start: {e}")),
@@ -547,6 +565,49 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             ME.into(),
             "usr_me".into(),
         )
+    }
+
+    /// RFC 0189: the model's `cargo` builds into its repository's shared directory, so
+    /// jobs of one repository do not each keep a `target/` of their own.
+    #[tokio::test]
+    async fn a_turn_in_a_worktree_builds_into_its_repository_shared_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().canonicalize().unwrap();
+        let e = exec(&state, SUB);
+        let checkout = state.join("work/o/r/job_1");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let gitdir = state.join("mirrors/o/r.git/worktrees/job_1");
+        std::fs::write(
+            checkout.join(".git"),
+            format!("gitdir: {}\n", gitdir.display()),
+        )
+        .unwrap();
+        let mut p = pack("usr_me");
+        p.checkout = "o/r/job_1".into();
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "replied", "{}", f.detail);
+        let env = std::fs::read_to_string(state.join("env.txt")).unwrap();
+        let want = format!("CARGO_TARGET_DIR={}", state.join("target/o/r").display());
+        assert!(
+            env.lines().any(|l| l == want),
+            "{want} not in the child's environment"
+        );
+    }
+
+    /// A pack with no checkout, or one that climbs out of the working directory, gets no
+    /// shared directory.
+    #[tokio::test]
+    async fn a_turn_with_no_worktree_gets_no_shared_build_directory() {
+        for checkout in ["", "../x"] {
+            let dir = tempfile::tempdir().unwrap();
+            let e = exec(dir.path(), SUB);
+            let mut p = pack("usr_me");
+            p.checkout = checkout.into();
+            let f = e.execute(p).await;
+            assert_eq!(f.outcome, "replied", "{}", f.detail);
+            let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
+            assert!(!env.contains("CARGO_TARGET_DIR"), "{checkout:?}");
+        }
     }
 
     #[tokio::test]
