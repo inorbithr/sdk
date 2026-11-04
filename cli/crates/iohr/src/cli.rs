@@ -336,6 +336,12 @@ pub enum RunnerCommand {
         /// (default: `[runner] always_on`).
         #[arg(long)]
         always_on: bool,
+        /// An agent's runner only (with `--sign-in io`): the subject of the person whose
+        /// provider sign-in it holds, the agent's seat holder. That person must already
+        /// hold the same sign-in on a runner of their own, and the runner then takes only
+        /// their verified work.
+        #[arg(long, value_name = "SUBJECT", value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        holder: Option<String>,
         #[command(flatten)]
         account: AccountArg,
     },
