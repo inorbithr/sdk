@@ -37,13 +37,7 @@ fn the_public_examples_match_the_golden_file() {
 const PROGRAM: &[(&str, &[&str])] = &[
     (
         "go",
-        &[
-            "signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)",
-            "defer stop()",
-            "defer api.Close()",
-            "errors.Is(err, context.Canceled)",
-            "log.Fatalf(",
-        ],
+        &["func main() {", "defer api.Close()", "log.Fatal(err)"],
     ),
     (
         "python",
@@ -80,6 +74,12 @@ fn every_example_closes_its_client_and_exits_non_zero_on_an_api_error() {
                     missing.push(format!("{id} {lang}: {mark}"));
                 }
             }
+        }
+    }
+    for (id, op) in doc["operations"].as_object().unwrap() {
+        let go = op["code"]["go"].as_str().unwrap();
+        if go.contains("func run(") {
+            missing.push(format!("{id} go: one main, no run()"));
         }
     }
     assert!(

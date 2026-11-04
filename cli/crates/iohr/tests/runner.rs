@@ -250,6 +250,8 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     assert_eq!(post["kinds"], json!(["coordinate", "build"]));
     assert_eq!(post["capacity"], 1);
     assert_eq!(post["providers"][0]["method"], "subscription");
+    // A person's own runner names no holder.
+    assert!(post.get("holder_subject").is_none());
     // The identity hash is sha256(salt + "\n" + line).
     assert_eq!(
         post["identity_sha256"]["claude"],
@@ -272,6 +274,36 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
             .unwrap()
             .count()
             >= 2
+    );
+}
+
+#[tokio::test]
+async fn register_with_a_holder_names_that_person() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    login(&server, dir.path(), &token()).await;
+    mount_register(&server).await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "register",
+            "--name",
+            "mac",
+            "--holder",
+            " person-1 ",
+        ],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let sent = bodies(&server, "/v1/coordinator/runners").await;
+    let post = sent.iter().find(|b| b.get("name").is_some()).unwrap();
+    assert_eq!(post["holder_subject"], "person-1");
+    // The holder is checked against the sign-in the runner holds, so it goes with it.
+    assert_eq!(
+        post["identity_sha256"]["claude"],
+        sha(&format!("{SALT}\n{SUB}"))
     );
 }
 

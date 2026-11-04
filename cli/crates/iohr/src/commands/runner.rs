@@ -74,8 +74,13 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             name,
             capacity,
             always_on,
+            holder,
             account,
         } => {
+            let holder_subject = holder.map(|h| h.trim().to_owned());
+            if holder_subject.as_deref() == Some("") {
+                return Err(Error::Usage("--holder names a subject".into()));
+            }
             let account = resolve_account(&s, account.account)?;
             let flags = Flags {
                 capacity,
@@ -141,6 +146,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 public_key,
                 challenge: challenge.challenge,
                 signature,
+                holder_subject,
             };
             let r = svc.register(&reg).await?;
             show_runner(&r, out, "registered");

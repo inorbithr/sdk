@@ -126,6 +126,28 @@ pub(crate) struct Registration {
     pub(crate) challenge: String,
     /// Ed25519 over `RegisterRunner\n<challenge>\n<public_key>`.
     pub(crate) signature: Vec<u8>,
+    /// An agent's runner only: the subject of the person whose provider sign-in it
+    /// holds, its seat holder. `None` for a runner holding its own subject's sign-in.
+    pub(crate) holder_subject: Option<String>,
+}
+
+impl Registration {
+    /// The request body; `holder_subject` only when the runner names a holder.
+    fn to_json(&self) -> Value {
+        let mut body = json!({
+            "name": self.name, "os": self.os, "arch": self.arch, "version": self.version,
+            "kinds": self.kinds, "capacity": self.capacity, "always_on": self.always_on,
+            "providers": self.providers.iter().map(ProviderState::to_json).collect::<Vec<_>>(),
+            "identity_sha256": self.identity_sha256,
+            "public_key": self.public_key,
+            "challenge": self.challenge,
+            "signature": B64.encode(&self.signature),
+        });
+        if let Some(h) = &self.holder_subject {
+            body["holder_subject"] = json!(h);
+        }
+        body
+    }
 }
 
 /// `CreateRunnerChallengeResponse`: what a registration is signed over, and the salt the
@@ -295,6 +317,11 @@ pub(crate) struct Pack {
     /// directory (`checkouts/<job_id>`, empty for a job with no repository); the run loop
     /// sends no gate report for a pack without one.
     pub(crate) checkout: String,
+    /// The provider the turn must run on; empty when any the runner runs will do. A
+    /// review turn (RFC 0150, the Critique) names the critic's.
+    pub(crate) provider: String,
+    /// For a review turn: the pull request's head the Critique is for.
+    pub(crate) critique_commit: String,
 }
 
 impl Pack {
@@ -340,6 +367,8 @@ impl Pack {
             checkout: Some(s("checkout_path"))
                 .filter(|c| !c.is_empty())
                 .unwrap_or_else(|| s("checkoutPath")),
+            provider: s("provider"),
+            critique_commit: s("critique_commit"),
         }
     }
 }
@@ -778,18 +807,13 @@ impl Service for HttpService<'_> {
     }
 
     async fn register(&self, r: &Registration) -> Result<RunnerInfo, ServiceError> {
-        let body = json!({
-            "name": r.name, "os": r.os, "arch": r.arch, "version": r.version,
-            "kinds": r.kinds, "capacity": r.capacity, "always_on": r.always_on,
-            "providers": r.providers.iter().map(ProviderState::to_json).collect::<Vec<_>>(),
-            "identity_sha256": r.identity_sha256,
-            "public_key": r.public_key,
-            "challenge": r.challenge,
-            "signature": B64.encode(&r.signature),
-        });
         let v: Value = self
             .api
-            .send_body(Method::Post, "/v1/coordinator/runners", &self.scoped(body))
+            .send_body(
+                Method::Post,
+                "/v1/coordinator/runners",
+                &self.scoped(r.to_json()),
+            )
             .await?
             .json()?;
         Ok(RunnerInfo::from_json(
@@ -1048,6 +1072,35 @@ mod tests {
     use super::*;
     type Break = Box<dyn Fn(&mut super::TurnReport)>;
 
+    fn registration(holder: Option<&str>) -> Registration {
+        Registration {
+            name: "box".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            version: "1.0.0".into(),
+            kinds: vec!["build".into()],
+            capacity: 2,
+            always_on: true,
+            providers: vec![],
+            identity_sha256: BTreeMap::from([("claude".to_owned(), "ab".to_owned())]),
+            public_key: "pk".into(),
+            challenge: "c".into(),
+            signature: vec![1, 2, 3],
+            holder_subject: holder.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_registration_names_its_holder_only_when_it_has_one() {
+        let j = registration(Some("person-1")).to_json();
+        assert_eq!(j["holder_subject"], "person-1");
+        assert_eq!(j["identity_sha256"]["claude"], "ab");
+        assert_eq!(j["signature"], "AQID");
+        let own = registration(None).to_json();
+        assert!(own.get("holder_subject").is_none(), "{own}");
+        assert_eq!(own["always_on"], true);
+    }
+
     #[test]
     fn a_report_goes_on_the_wire_with_the_contracts_shapes() {
         let r = TurnReport {
@@ -1287,9 +1340,14 @@ mod tests {
             "resume_session": "x", "resume_runner_id": "r", "thread_id": "th",
             "job_id": "j", "attempt": 2, "lease_id": "l", "fencing_token": "9",
             "token_budget": 4000, "context_ceiling": 120_000, "reply_shape": "{}",
-            "checkout_path": "checkouts/job_1"
+            "checkout_path": "checkouts/job_1",
+            "provider": "claude", "critique_commit": "abc1234"
         }));
         assert_eq!(p.checkout, "checkouts/job_1");
+        assert_eq!(
+            (p.provider.as_str(), p.critique_commit.as_str()),
+            ("claude", "abc1234")
+        );
         assert_eq!(
             (
                 p.thread_id.as_str(),
