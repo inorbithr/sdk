@@ -11,6 +11,7 @@ pub(crate) mod exec;
 pub(crate) mod gate;
 pub(crate) mod host;
 pub(crate) mod host_action;
+pub(crate) mod hygiene;
 pub(crate) mod private;
 pub(crate) mod provider;
 pub(crate) mod run_loop;
