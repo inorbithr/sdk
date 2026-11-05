@@ -352,11 +352,13 @@ pub(crate) fn link_of(answer: &str, cwd: &std::path::Path) -> Option<String> {
             && real.is_file()
             && real.starts_with(root)
         {
+            // Written with `/` on every system, as the answer wrote it: the hook's record
+            // and `actions::open` read the same form on Windows.
             return real
                 .strip_prefix(root)
                 .ok()
-                .and_then(|r| r.to_str())
-                .map(str::to_owned);
+                .filter(|r| r.to_str().is_some())
+                .map(crate::paths::slashed);
         }
     }
     None

@@ -275,6 +275,10 @@ fn make_executable(p: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same signature as the unix variant"
+)]
 fn make_executable(_: &Path) -> Result<(), String> {
     Ok(())
 }
@@ -624,6 +628,29 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
     smoke_heartbeat(&words(&runner.run), runner, dir, (&st, &cache), &find)
 }
 
+/// What the demo child may inherit: the runner's own allowlist (`PATH`, the temp directory,
+/// and on Windows `SYSTEMROOT` and the rest Node and Winsock need to start), without the
+/// XDG directories, which would point the demo at the real configuration. The unix `PATH`
+/// stays the fixed system one.
+fn demo_base_env() -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    // The fixed system path on unix; Windows keeps the runner's own, where its tools live.
+    let fixed = cfg!(unix);
+    let mut env: Vec<_> = crate::runner::env::scrub(std::env::vars_os())
+        .into_iter()
+        .filter(|(k, _)| {
+            let up = k.to_string_lossy().to_ascii_uppercase();
+            !(up.starts_with("XDG_") || fixed && up == "PATH")
+        })
+        .collect();
+    if fixed {
+        env.push((
+            "PATH".into(),
+            "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".into(),
+        ));
+    }
+    env
+}
+
 /// The service path of the smoke test: run the project once and read its heartbeat back.
 fn smoke_heartbeat(
     run: &[String],
@@ -645,11 +672,14 @@ fn smoke_heartbeat(
     cmd.args(args)
         .current_dir(dir)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")
+        .envs(demo_base_env())
         .env("HOME", cache)
         .env("STATE", st)
         .env("CACHE", cache)
         .env("IOHR_EXT_ONCE", "1");
+    // Windows reads the home from USERPROFILE, not HOME.
+    #[cfg(windows)]
+    cmd.env("USERPROFILE", cache);
     for (k, v) in &runner.env {
         cmd.env(k, paths_in(v, dir, st, cache));
     }
@@ -942,6 +972,12 @@ mod tests {
             for word in ["macos", "service", "panel", "extension.toml"] {
                 assert!(!prompt.contains(word), "the prompt says {word}");
             }
+            // The Rust demo talks to the host over a unix socket (`std::os::unix`), so it
+            // cannot be built on Windows; the macOS service it stands for is not there either.
+            if cfg!(windows) && v.id == "rust" {
+                eprintln!("rust: the demo uses a unix socket: not run on Windows");
+                continue;
+            }
             let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
             if !missing.is_empty() {
                 eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
@@ -1002,6 +1038,10 @@ mod tests {
         let tpl =
             template::load(&Spec::Id("demo".into()), Path::new("/no-such-iohr-root")).unwrap();
         for v in tpl.live_variants() {
+            if cfg!(windows) && v.id == "rust" {
+                eprintln!("rust: the demo uses a unix socket: not run on Windows");
+                continue;
+            }
             let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
             if !missing.is_empty() {
                 eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
