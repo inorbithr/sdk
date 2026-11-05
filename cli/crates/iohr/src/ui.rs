@@ -30,6 +30,133 @@ pub(crate) fn fancy_for(
         && term.is_some_and(|t| !t.is_empty() && t != "dumb")
 }
 
+/// The help look: the one palette of this file (cyan headings, bold commands and flags, dim
+/// placeholders) given to clap, so `--help` and the drawn output agree. `const`, so a derive
+/// can take it as `styles = ui::clap_styles()`. Colour itself is clap's call: it follows
+/// `NO_COLOR` and the terminal, and [`crate::cli::command`] turns it off for `--json`.
+#[must_use]
+pub(crate) const fn clap_styles() -> clap::builder::Styles {
+    use clap::builder::styling::{AnsiColor, Effects, Style};
+    let heading = Style::new()
+        .fg_color(Some(clap::builder::styling::Color::Ansi(AnsiColor::Cyan)))
+        .effects(Effects::BOLD);
+    clap::builder::Styles::styled()
+        .header(heading)
+        .usage(heading)
+        .literal(Style::new().effects(Effects::BOLD))
+        .placeholder(Style::new().effects(Effects::DIMMED))
+}
+
+/// What kind of terminal stdout is, for the data commands print (tables, `show`): colour
+/// from the same rule as the drawn look ([`fancy_for`], on stdout rather than stderr), and
+/// whether a person is reading (hints are for them; a pipe gets data only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Paint {
+    color: bool,
+    tty: bool,
+}
+
+impl Paint {
+    /// For this run's stdout: a terminal, `--json` off, `NO_COLOR` and `TERM` honoured.
+    #[must_use]
+    pub(crate) fn stdout(json: bool) -> Self {
+        use std::io::IsTerminal as _;
+        let tty = io::stdout().is_terminal() && !json;
+        Self::from_parts(
+            tty,
+            json,
+            std::env::var("NO_COLOR").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+        )
+    }
+
+    /// Pure, for tests: the same rules as [`Paint::stdout`] with the facts given.
+    #[must_use]
+    pub(crate) fn from_parts(
+        tty: bool,
+        json: bool,
+        no_color: Option<&str>,
+        term: Option<&str>,
+    ) -> Self {
+        Self {
+            color: fancy_for(tty, json, no_color, term),
+            tty: tty && !json,
+        }
+    }
+
+    /// No colour, not a terminal: what a pipe gets.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn plain() -> Self {
+        Self {
+            color: false,
+            tty: false,
+        }
+    }
+
+    /// Whether a person is reading stdout (next-step hints are printed only then).
+    #[must_use]
+    pub(crate) const fn tty(self) -> bool {
+        self.tty
+    }
+
+    fn apply(
+        self,
+        text: &str,
+        f: impl FnOnce(console::StyledObject<String>) -> console::StyledObject<String>,
+    ) -> String {
+        if self.color {
+            f(console::style(text.to_owned()).force_styling(true)).to_string()
+        } else {
+            text.to_owned()
+        }
+    }
+
+    /// A column header or section title: bold cyan, as in help.
+    #[must_use]
+    pub(crate) fn head(self, text: &str) -> String {
+        self.apply(text, |s| s.cyan().bold())
+    }
+
+    /// A name to act on: bold.
+    #[must_use]
+    pub(crate) fn name(self, text: &str) -> String {
+        self.apply(text, console::StyledObject::bold)
+    }
+
+    /// Context that can be skipped: dim.
+    #[must_use]
+    pub(crate) fn dim(self, text: &str) -> String {
+        self.apply(text, console::StyledObject::dim)
+    }
+
+    /// A mark that matters, such as the default's `*`: bold yellow.
+    #[must_use]
+    pub(crate) fn mark(self, text: &str) -> String {
+        self.apply(text, |s| s.yellow().bold())
+    }
+
+    /// A status: a green dot for live, a dim ring for coming, red for anything wrong. With no
+    /// colour it is the word alone, so a pipe and a screen reader get plain text.
+    #[must_use]
+    pub(crate) fn status(self, word: &str) -> String {
+        if !self.color {
+            return word.to_owned();
+        }
+        match word {
+            "live" => format!(
+                "{} {word}",
+                self.apply("\u{25cf}", console::StyledObject::green)
+            ),
+            "coming" => self.apply(&format!("\u{25cb} {word}"), console::StyledObject::dim),
+            _ => format!(
+                "{} {word}",
+                self.apply("\u{25cf}", console::StyledObject::red)
+            ),
+        }
+    }
+}
+
 /// One menu entry: the value returned, its label, a one-line hint, and whether it can be
 /// chosen. An entry that cannot be chosen is shown dimmed, marked "coming", and refused.
 #[derive(Debug, Clone)]
@@ -265,7 +392,7 @@ impl Step {
 
 #[cfg(test)]
 mod tests {
-    use super::fancy_for;
+    use super::{Paint, fancy_for};
 
     #[test]
     fn the_look_needs_a_terminal_and_a_colour_capable_term() {
@@ -293,5 +420,30 @@ mod tests {
         assert!(!fancy_for(true, false, None, Some("dumb")));
         assert!(!fancy_for(true, false, None, Some("")));
         assert!(!fancy_for(true, false, None, None));
+    }
+
+    #[test]
+    fn paint_is_plain_without_a_terminal_colour_or_with_json() {
+        for p in [
+            Paint::from_parts(false, false, None, Some("xterm")),
+            Paint::from_parts(true, false, Some("1"), Some("xterm")),
+            Paint::from_parts(true, true, None, Some("xterm")),
+            Paint::plain(),
+        ] {
+            assert_eq!(p.head("NAME"), "NAME");
+            assert_eq!(p.status("live"), "live");
+            assert_eq!(p.dim("x"), "x");
+        }
+    }
+
+    #[test]
+    fn paint_colours_on_a_terminal_and_marks_status() {
+        let p = Paint::from_parts(true, false, None, Some("xterm-256color"));
+        assert!(p.tty());
+        assert!(p.head("NAME").contains('\u{1b}'));
+        let strip = |s: String| console::strip_ansi_codes(&s).into_owned();
+        assert_eq!(strip(p.status("live")), "\u{25cf} live");
+        assert_eq!(strip(p.status("coming")), "\u{25cb} coming");
+        assert_eq!(strip(p.status("invalid")), "\u{25cf} invalid");
     }
 }
