@@ -44,7 +44,7 @@ label = "TypeScript on Node 22.18 or newer"
 status = "live"
 needs = ["node"]
 run = ["node", "src/main.ts"]
-test = ["node", "--test", "tests/"]
+test = ["node", "--test", "tests/**/*.test.ts"]
 [variants.vars]
 SOURCE = "src/"
 NEEDS = '"node"'
@@ -56,10 +56,10 @@ LAYOUT = '''- `src/`: the service. `main.ts` heartbeats and serves the panel; `c
   as it is (22.18 or newer), so there is nothing to build and nothing to install.
 - `tests/selftest.test.ts`: the self-test. One heartbeat, nothing written outside its state.'''
 RUN_DEV = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache node src/main.ts
-STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache node --test tests/'''
+STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache node --test "tests/**/*.test.ts"'''
 RUN_ONCE = '''STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
 IOHR_EXT_ONCE=1 node src/main.ts'''
-RUN_TEST = "`node --test tests/` with STATE and CACHE set"
+RUN_TEST = "`node --test 'tests/**/*.test.ts'` with STATE and CACHE set"
 
 [[variants]]
 id = "go"
