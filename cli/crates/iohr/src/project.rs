@@ -14,6 +14,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ext::init::fill;
 use crate::ext::lint::lint;
 use crate::ext::manifest::{SOURCE_FILE, check_name as check_ext_name};
 
@@ -148,12 +149,6 @@ fn files_of(id: &str) -> Vec<&'static TemplateFile> {
         .filter(|f| !own.iter().any(|o| o.path == f.path))
         .chain(own.iter())
         .collect()
-}
-
-fn fill(text: &str, values: &[(&str, String)]) -> String {
-    values
-        .iter()
-        .fold(text.to_owned(), |t, (k, v)| t.replace(k, v))
 }
 
 /// The template's files for `name`, rendered: (relative path, text).

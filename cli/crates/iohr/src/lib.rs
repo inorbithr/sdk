@@ -22,6 +22,7 @@ mod lock;
 mod output;
 mod prompt;
 mod runner;
+mod ui;
 
 pub use args::refuse_secrets_in_args;
 pub use commands::run;

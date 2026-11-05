@@ -193,7 +193,8 @@ fn values(id: &str, name: &str, lang: Lang) -> Vec<(&'static str, String)> {
     ]
 }
 
-fn fill(text: &str, values: &[(&str, String)]) -> String {
+/// Replaces each placeholder with its value; the one renderer of `ext init` and `project init`.
+pub(crate) fn fill(text: &str, values: &[(&str, String)]) -> String {
     values
         .iter()
         .fold(text.to_owned(), |t, (k, v)| t.replace(k, v))
