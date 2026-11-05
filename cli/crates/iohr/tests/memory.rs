@@ -247,8 +247,27 @@ fn a_secret_is_refused_and_the_user_scope_lives_in_the_home() {
     // Outside any project the default falls back to the user scope, said on stderr.
     let o = iohr(h.path(), h.path(), None, &["memory", "list", "--json"]);
     assert!(o.status.success(), "{}", text(&o));
-    let diag: Vec<String> = h.path().ancestors().map(|d| format!("{} git={} inorbit={} atlas={}", d.display(), d.join(".git").exists(), d.join(".inorbit").is_dir(), d.join("atlas").is_dir())).collect();
-    assert_eq!(json(&o)["scope"], "user", "DIAG home={:?} canon={:?} {:#?}", h.path(), h.path().canonicalize(), diag);
+    let diag: Vec<String> = h
+        .path()
+        .ancestors()
+        .map(|d| {
+            format!(
+                "{} git={} inorbit={} atlas={}",
+                d.display(),
+                d.join(".git").exists(),
+                d.join(".inorbit").is_dir(),
+                d.join("atlas").is_dir()
+            )
+        })
+        .collect();
+    assert_eq!(
+        json(&o)["scope"],
+        "user",
+        "DIAG home={:?} canon={:?} {:#?}",
+        h.path(),
+        h.path().canonicalize(),
+        diag
+    );
     assert!(String::from_utf8_lossy(&o.stderr).contains("not inside a project"));
     // Asked for by name, a project is required.
     let o = iohr(
