@@ -135,6 +135,27 @@ fn headless_wanted(h: &HeadlessArgs, json: bool) -> Result<bool, Error> {
         || !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()))
 }
 
+/// What the shell hook told this call, as the context the prompt is built from.
+fn context_of(h: &HeadlessArgs) -> Result<Context, Error> {
+    Ok(Context {
+        cwd: match &h.cwd {
+            Some(c) => c.clone(),
+            None => std::env::current_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_default(),
+        },
+        command: h.last_command.clone().unwrap_or_default(),
+        exit_code: h.exit_code,
+        output: match &h.output_file {
+            // Only the kind of failure: the path is the person's, what is in it is not said.
+            Some(f) => std::fs::read_to_string(f)
+                .map_err(|e| Error::Usage(format!("cannot read --output-file: {}", e.kind())))?,
+            None => String::new(),
+        },
+        prior: h.prior_question.clone().zip(h.prior_answer.clone()),
+    })
+}
+
 /// What the settings and flags settled for one call.
 struct Chosen<'a> {
     bin: &'a Path,
@@ -161,23 +182,7 @@ async fn headless(
         hints,
         dir,
     } = *chosen;
-    let ctx = Context {
-        cwd: match &h.cwd {
-            Some(c) => c.clone(),
-            None => std::env::current_dir()
-                .map(|d| d.display().to_string())
-                .unwrap_or_default(),
-        },
-        command: h.last_command.clone().unwrap_or_default(),
-        exit_code: h.exit_code,
-        output: match &h.output_file {
-            // Only the kind of failure: the path is the person's, what is in it is not said.
-            Some(f) => std::fs::read_to_string(f)
-                .map_err(|e| Error::Usage(format!("cannot read --output-file: {}", e.kind())))?,
-            None => String::new(),
-        },
-        prior: h.prior_question.clone().zip(h.prior_answer.clone()),
-    };
+    let ctx = context_of(h)?;
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
     let read = headless::read_line(&ctx);
     let fancy = Ui::detect(out.json).fancy();
