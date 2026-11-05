@@ -457,8 +457,10 @@ pub enum RunnerCommand {
     /// Register this machine as one of your runners: its name, system and what it can run.
     ///
     /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
-    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
-    /// `claude auth status` prints. Run it again and it says the runner exists.
+    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the seat
+    /// `claude auth status` names (organisation and email). Run it again and it says the runner exists; with
+    /// `--refresh` it sends the registration again with the key this machine holds, so
+    /// the runner keeps its id and the coordinator records its current sign-in.
     Register {
         /// The runner's name (default: `[runner] name` in config.toml, else this
         /// machine's host name).
@@ -479,6 +481,11 @@ pub enum RunnerCommand {
         /// their verified work.
         #[arg(long, value_name = "SUBJECT", value_parser = clap::builder::NonEmptyStringValueParser::new())]
         holder: Option<String>,
+        /// Register again a runner this machine already holds the key of: its name,
+        /// system, capacity and the hash of its current provider sign-in are sent anew
+        /// (after signing in to another account, or to update a registration).
+        #[arg(long)]
+        refresh: bool,
         #[command(flatten)]
         account: AccountArg,
     },
