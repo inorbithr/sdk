@@ -656,6 +656,8 @@ mod tests {
         assert!(!none.contains("<files>"));
     }
 
+    // Windows refuses a file name with a control character, so only unix can hold one.
+    #[cfg(unix)]
     #[test]
     fn a_name_with_a_control_character_is_not_listed() {
         let d = folder(&[("ok.txt", false)], None);
