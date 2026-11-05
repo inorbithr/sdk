@@ -3372,7 +3372,6 @@ const IO_SECRET: &str = "IOSECRETMARKER";
 
 /// A mode 0600 secret file, and the mock sign-in service that mints `io_token` for it.
 async fn io_setup(server: &MockServer, dir: &Path, io_token: &str) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt as _;
     Mock::given(method("POST"))
         .and(path("/oauth2/token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(
@@ -3382,7 +3381,12 @@ async fn io_setup(server: &MockServer, dir: &Path, io_token: &str) -> std::path:
         .await;
     let secret = dir.join("io-secret");
     std::fs::write(&secret, format!("{IO_SECRET}\n")).unwrap();
-    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    // The mode check is Unix-only (io_signin::read_private_file), so is setting it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     secret
 }
 
