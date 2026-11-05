@@ -43,14 +43,31 @@ Global options:
           [env: IOHR_BASE_URL=]
 
       --sign-in <WHO>
-          Sign in as someone other than a person (`iohr runner` only).
+          Sign in as someone other than a person (`iohr runner` and `iohr coordinator` only).
           
           `io` is the `OAuth2` client `iohr-io` with the client credentials grant, so jobs Io files
-          run on runners Io owns. `iohr runner` only; the secret is read from the file
-          `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on a Mac, from the keychain item the Mac
-          bridge uses, never from an argument.
+          run on runners Io owns. `iohr runner` and `iohr coordinator` only; the secret is read from
+          the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on a Mac, from the keychain item
+          the Mac bridge uses, never from an argument.
 
           Possible values:
           - io: Io, the `OAuth2` client `iohr-io` (client credentials)
           
           [env: IOHR_SIGN_IN=]
+
+      --via-personality <NAME>
+          With `--sign-in io`: the personality named in the `x-iohr-via` attribution header (RFC
+          0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr
+          ask` uses for where an answer comes from
+          
+          [env: IOHR_VIA_PERSONALITY=]
+
+      --via-session <ID>
+          With `--sign-in io`: the agent session named in `x-iohr-via`
+          
+          [env: IOHR_VIA_SESSION=]
+
+      --via-job <ID>
+          With `--sign-in io`: the coordinator job named in `x-iohr-via`
+          
+          [env: IOHR_VIA_JOB=]

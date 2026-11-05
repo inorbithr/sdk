@@ -1,6 +1,7 @@
 //! `iohr coordinator`: the coordinator's jobs and queued asks over the public API
 //! (RFC 0120, RFC 0138). The coordinator serves signed-in people, so these need a
-//! person's profile (`iohr login`), not an API key.
+//! person's profile (`iohr login`), not an API key, or Io with `--sign-in io` (RFC 0065.2),
+//! so jobs an agent files are Io's, attributed to a personality by `--via-personality`.
 
 use std::io::Read as _;
 
@@ -8,8 +9,10 @@ use inorbithr::Method;
 use serde_json::{Value, json};
 
 use crate::Env;
-use crate::cli::{CoordinatorAsksCommand, CoordinatorCommand, CoordinatorJobsCommand, Global};
-use crate::context::{Session, session};
+use crate::cli::{
+    CoordinatorAsksCommand, CoordinatorCommand, CoordinatorJobsCommand, Global, SignIn,
+};
+use crate::context::{Ctx, Session, io_session, session};
 use crate::error::Error;
 use crate::output::Out;
 
@@ -21,7 +24,10 @@ pub(crate) async fn run(
     cmd: CoordinatorCommand,
     out: Out,
 ) -> Result<(), Error> {
-    let s = session(g, env).await?;
+    let s = match g.sign_in {
+        Some(SignIn::Io) => io_session(g, &Ctx::load(g)?).await?,
+        None => session(g, env).await?,
+    };
     match cmd {
         CoordinatorCommand::Jobs(CoordinatorJobsCommand::List {
             state,

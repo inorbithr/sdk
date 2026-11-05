@@ -478,6 +478,9 @@ thinks (dim, italic, in a quiet block under a `thinking` header), each tool it u
 turns, cost and the AI label. A spinner shows until the first event. It reads `[ask]`; the
 flags win over it for one call. `iohr` never writes it, and never stores or logs the question
 or the answer.
+The `?` prompt of `iohr shell hook zsh` (and `--headless`, `--card` or a context flag such as
+`--cwd` or `--last-command`) uses one capped, read-only `claude -p` run instead, answered once
+and drawn as a card.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|

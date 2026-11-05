@@ -99,7 +99,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr sdk add [rust\|typescript\|python\|go] [--version V] [--dry-run]` | Add the published SDK to the project here with the package manager it already uses; the language comes from the project's files when left out (below) |
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to; a later `iohr login` keeps it |
-| `iohr coordinator jobs list \| create`, `asks list \| create` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks, queue an ask (`asks create --kind K --body -`; the kind is required so the planner can file it); `--account <id>` on `jobs list|create` and `asks list` acts on a team you belong to (default: your own account; needs the coordinator release that accepts `account_id`). `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key |
+| `iohr coordinator jobs list \| create`, `asks list \| create` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks, queue an ask (`asks create --kind K --body -`; the kind is required so the planner can file it); `--account <id>` on `jobs list|create` and `asks list` acts on a team you belong to (default: your own account; needs the coordinator release that accepts `account_id`). `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key, or `--sign-in io` to file as Io (below) |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s for up to `--timeout` seconds (600) |
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
@@ -115,6 +115,8 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
 | `iohr ext packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (`iohr packages` still works, hidden from the help) |
+| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--allow-edits] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, no MCP, no tools, no write access, a scrubbed environment, the question on stdin), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, agent, via, label, model, exit_code, duration_ms}`. `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
+| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"`: a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--env production|local`
@@ -573,6 +575,32 @@ admin's say becomes an ask. Every step is re-runnable, and nothing is overwritte
 `iohr ext lint --preview`, `iohr ext dev` and `iohr ext dev --test` work in the folder as for
 any extension, and InOrbit Desktop's Code opens it after asking you.
 
+## The `?` prompt
+
+`iohr ask` and `iohr shell hook zsh` put a question prompt in your terminal. Add this to `~/.zshrc`:
+
+```sh
+eval "$(iohr shell hook zsh)"
+```
+
+Then type `? why did that fail` at the prompt. The line is never run by the shell and is not
+kept in its history; the answer prints under it, after the label `Io · AI answer -- Io running
+on Claude Code (local), an AI model, under your own subscription; ...` and a line that says
+what was read. `?? and the second one` asks a follow-up with the last question and answer as
+context. A line such as `?.txt` or `? ` alone runs as it always did. An accept-line widget you
+already have is kept and called for every other line. `INORBIT_ASK=0` turns it off for the
+session. Inside the InOrbit app (`INORBIT_TERM`) the hook asks the app to draw the answer
+(an OSC `7727;ask` escape) instead of printing it.
+
+What goes to your provider: the question, the folder's path, the last command and its exit
+status, and, when a caller passes `--output-file`, the last 8 KiB (200 lines) of that file;
+the whole message is capped at 16 KiB. A plain zsh hook cannot read a command's output, so
+it sends no output; a program that has it can call `iohr ask --output-file`. Io runs on
+Claude Code only: it signs in with your own `claude` login, never an API key, and `iohr`
+stores neither question nor answer. Only zsh is built; `iohr shell hook bash` and `fish`
+exit 1 with "not built yet", and so do `--via io` and `--headless` with `--agent codex`. An answer is an AI
+answer: check it before you rely on it.
+
 ## Runner
 
 ```sh
@@ -592,6 +620,14 @@ names (it must be yours and mode 0600, or the runner stops) or, on a Mac, from t
 keychain item the Mac bridge uses (`iohr-mcp-bridge-io`). A profile (`--profile`, else the
 default) still holds the runner's keys and settings, and `--account` names the account.
 Nothing else changes: without the flag the runner signs in as your profile does.
+`--sign-in io` also works on `iohr coordinator ...` (every other command refuses it), so an
+agent's jobs and asks are Io's, not the person's who runs it. To say which personality made
+the call, add `--via-personality NAME` (`IOHR_VIA_PERSONALITY`), and optionally
+`--via-session ID` (`IOHR_VIA_SESSION`) and `--via-job ID` (`IOHR_VIA_JOB`): they set the
+`x-iohr-via` header (`personality=improver; session=...; job=...`), which is attribution only and
+grants nothing. Each value is 1 to 64 of `A-Z a-z 0-9 . _ : -`, else the call is refused. (`--via` is
+taken: `iohr ask --via` says where an answer comes from.) These flags need `--sign-in io`.
+Example: `iohr --sign-in io --via-personality improver coordinator jobs create --kind chore --brief -`.
 A runner of Io's that holds a person's provider sign-in (the person signed in to `claude`
 on that machine) names that person at registration:
 `iohr --sign-in io runner register --holder <subject>`. The person must be Io's seat

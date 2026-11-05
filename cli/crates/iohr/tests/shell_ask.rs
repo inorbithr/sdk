@@ -1,0 +1,532 @@
+//! The headless `iohr ask` and `iohr shell hook zsh` (PRD 0187, PRD 0088.1, RFC 0203): the
+//! binary with a private HOME and a PATH holding a fake `claude`, so no real agent starts.
+
+#![allow(
+    clippy::unwrap_used,
+    reason = "test helpers fail the test by panicking"
+)]
+#![cfg(unix)]
+
+use std::fmt::Write as _;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::PathBuf;
+use std::process::{Command, Output, Stdio};
+
+const SECRET: &str = "the-secret-question";
+
+/// A fake `claude`: records its arguments (one per line), its stdin and whether a provider
+/// key or token variable reached it, then prints `$FAKE_JSON`.
+const FAKE_CLAUDE: &str = r#"#!/bin/sh
+# The run's environment is scrubbed, so what the fake needs is in files under $HOME.
+O="$HOME/out"
+printf '%s\n' "$@" > "$O/claude.args"
+cat > "$O/claude.stdin"
+env | grep -E '^(ANTHROPIC_|IOHR_TOKEN|OPENAI_)' > "$O/claude.leaked"
+cat "$O/json"
+exit "$(cat "$O/exit")"
+"#;
+
+const OK_JSON: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"It is Rayleigh scattering.","duration_ms":321,"num_turns":1}"#;
+
+struct Rig {
+    home: tempfile::TempDir,
+}
+
+impl Rig {
+    fn new() -> Self {
+        let r = Self {
+            home: tempfile::tempdir().unwrap(),
+        };
+        std::fs::create_dir_all(r.out()).unwrap();
+        std::fs::create_dir_all(r.bin()).unwrap();
+        std::fs::create_dir_all(r.work()).unwrap();
+        r
+    }
+    fn bin(&self) -> PathBuf {
+        self.home.path().join("bin")
+    }
+    fn out(&self) -> PathBuf {
+        self.home.path().join("out")
+    }
+    fn work(&self) -> PathBuf {
+        self.home.path().join("work")
+    }
+    fn fake(&self, name: &str, script: &str) {
+        let p = self.bin().join(name);
+        std::fs::write(&p, script).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    fn run(&self, args: &[&str], json: &str, exit: &str) -> Output {
+        std::fs::write(self.out().join("json"), json).unwrap();
+        std::fs::write(self.out().join("exit"), exit).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_iohr"))
+            .args(args)
+            .current_dir(self.work())
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", self.bin().display()))
+            .env("HOME", self.home.path())
+            .env("IOHR_CONFIG_DIR", self.home.path().join("config"))
+            // Reaches the fake agent only if the scrub is broken.
+            .env("ANTHROPIC_API_KEY", "sk-test-must-not-leak")
+            .env("IOHR_TOKEN", "tok-test-must-not-leak")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    }
+    fn saw(&self, file: &str) -> String {
+        std::fs::read_to_string(self.out().join(file)).unwrap_or_default()
+    }
+}
+
+fn text(o: &Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr)
+    )
+}
+
+// ---------------------------------------------------------------- iohr ask, headless
+
+#[test]
+fn json_is_the_documented_shape_and_never_the_question() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let out = r.run(&["--json", "ask", "--headless", SECRET], OK_JSON, "0");
+    assert!(out.status.success(), "{}", text(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "agent",
+            "answer",
+            "duration_ms",
+            "exit_code",
+            "label",
+            "model",
+            "via"
+        ]
+    );
+    assert_eq!(v["answer"], "It is Rayleigh scattering.");
+    assert_eq!(v["agent"], "claude");
+    assert_eq!(v["via"], "local");
+    assert_eq!(v["model"], "haiku");
+    assert_eq!(v["exit_code"], 0);
+    assert_eq!(v["duration_ms"], 321);
+    // The AI label (AI Act Art. 50) travels with the answer.
+    let label = v["label"].as_str().unwrap();
+    assert!(
+        label.contains("Io · AI answer -- Io running on Claude Code (local)"),
+        "{label}"
+    );
+    assert!(
+        label.contains("Read: your question, the folder's path"),
+        "{label}"
+    );
+    // The question went to the agent on stdin, and nowhere else.
+    assert!(r.saw("claude.stdin").contains(SECRET));
+    assert!(!text(&out).contains(SECRET));
+    assert!(!r.saw("claude.args").contains(SECRET), "never an argument");
+}
+
+#[test]
+fn text_mode_prints_the_label_then_the_answer() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    // Not a terminal, no flag: the answer is printed, the agent is not opened.
+    let out = r.run(
+        &["ask", "--headless", "why", "is", "the", "sky", "blue"],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "It is Rayleigh scattering.\n"
+    );
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.starts_with("Io · AI answer -- Io running on Claude Code (local)"));
+    assert!(
+        r.saw("claude.stdin")
+            .contains("Question: why is the sky blue")
+    );
+}
+
+#[test]
+fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_stdout() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let out = r.run(
+        &["ask", "--headless", "--card", "why", "blue"],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "It is Rayleigh scattering.\n"
+    );
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(!err.contains('\u{1b}'), "{err:?}");
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(lines.len(), 2, "{err}");
+    assert!(lines[0].starts_with("Io · AI answer -- Io running on Claude Code (local)"));
+    assert!(lines[0].ends_with("nothing was run."), "{err}");
+    assert_eq!(lines[1], "It is Rayleigh scattering.");
+    // A failure is a card too: exit 1, the reason, never the question or the agent's text.
+    let login =
+        format!(r#"{{"type":"result","is_error":true,"result":"Not logged in /login {SECRET}"}}"#);
+    let out = r.run(&["ask", "--headless", "--card", SECRET], &login, "1");
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert_eq!(out.stdout, b"");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("no answer: ") && err.contains("not signed in"),
+        "{err}"
+    );
+    assert!(!err.contains(SECRET), "{err}");
+}
+
+#[test]
+fn the_run_is_bounded_scrubbed_and_never_has_a_forbidden_flag() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let out = r.run(&["ask", "--headless", "q"], OK_JSON, "0");
+    assert!(out.status.success(), "{}", text(&out));
+    let args: Vec<String> = r.saw("claude.args").lines().map(str::to_owned).collect();
+    for bad in [
+        "--bare",
+        "--api-key",
+        "--auth-token",
+        "--base-url",
+        "--settings",
+        "--resume",
+        "--continue",
+        "--dangerously-skip-permissions",
+        "--mcp-config",
+        "--allowedTools",
+    ] {
+        assert!(!args.iter().any(|a| a == bad), "{bad} in {args:?}");
+    }
+    let at = |f: &str| args.iter().position(|a| a == f).unwrap();
+    assert_eq!(args[at("--model") + 1], "haiku");
+    assert_eq!(args[at("--max-turns") + 1], "4");
+    assert_eq!(args[at("--tools") + 1], "");
+    assert!(args.contains(&"--no-session-persistence".to_owned()));
+    assert!(args.contains(&"--strict-mcp-config".to_owned()));
+    assert_eq!(
+        r.saw("claude.leaked"),
+        "",
+        "no key or token reaches the agent"
+    );
+}
+
+#[test]
+fn context_flags_reach_the_agent_and_the_output_is_cut_to_its_end() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let long = (0..2000).fold(String::new(), |mut s, i| {
+        writeln!(s, "line {i}").unwrap();
+        s
+    });
+    let f = r.home.path().join("out.txt");
+    std::fs::write(&f, long).unwrap();
+    let out = r.run(
+        &[
+            "ask",
+            "--cwd",
+            "/work/api",
+            "--last-command",
+            "cargo test",
+            "--exit-code",
+            "101",
+            "--output-file",
+            f.to_str().unwrap(),
+            "--prior-question",
+            "earlier q",
+            "--prior-answer",
+            "earlier a",
+            "--",
+            "what failed?",
+        ],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let m = r.saw("claude.stdin");
+    assert!(m.contains("<cwd>/work/api</cwd>"), "{m}");
+    assert!(
+        m.contains("<command exit=\"101\">cargo test</command>"),
+        "{m}"
+    );
+    assert!(
+        m.contains("line 1999") && !m.contains("line 100\n"),
+        "tail only"
+    );
+    assert!(m.contains("Earlier question: earlier q\nEarlier answer: earlier a"));
+    assert!(m.ends_with("Question: what failed?\n"));
+    assert!(m.len() <= 16 * 1024);
+    // A missing file is a usage error that does not say what it held.
+    let out = r.run(
+        &["ask", "--output-file", "/nonexistent/x", "q"],
+        OK_JSON,
+        "0",
+    );
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+}
+
+#[test]
+fn a_failed_run_exits_1_and_never_quotes_the_question_or_the_agents_text() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let login =
+        format!(r#"{{"type":"result","is_error":true,"result":"Not logged in /login {SECRET}"}}"#);
+    let out = r.run(&["ask", "--headless", SECRET], &login, "1");
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains("not signed in"), "{}", text(&out));
+    assert!(!text(&out).contains(SECRET), "{}", text(&out));
+    let out = r.run(&["ask", "--headless", SECRET], "", "1");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!text(&out).contains(SECRET), "{}", text(&out));
+}
+
+#[test]
+fn io_and_codex_still_say_not_built_yet_and_start_nothing() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    for args in [
+        vec!["--json", "ask", "--headless", "--via", "io", "q"],
+        vec!["--json", "ask", "--headless", "--agent", "codex", "q"],
+    ] {
+        let out = r.run(&args, OK_JSON, "0");
+        assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+        assert!(text(&out).contains("not built yet"), "{}", text(&out));
+    }
+    assert_eq!(r.saw("claude.args"), "");
+}
+
+// ---------------------------------------------------------------- iohr shell hook
+
+fn hook(shell: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .args(["shell", "hook", shell])
+        .env_clear()
+        .env("HOME", std::env::temp_dir())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn the_zsh_hook_has_its_key_lines() {
+    let o = hook("zsh");
+    assert!(o.status.success());
+    let t = String::from_utf8(o.stdout).unwrap();
+    // The widget: a `?` or `??` line, a space, a word; the shell is handed an empty line.
+    assert!(t.contains(r"'^[[:space:]]*\?\??[[:space:]]+[^[:space:]]'"));
+    assert!(t.contains("BUFFER=\"\""));
+    // It chains to the accept-line that was there before, never replaces it.
+    assert!(t.contains("zle -A accept-line _iohr_ask_prev_accept"));
+    assert!(t.contains("zle _iohr_ask_prev_accept"));
+    assert!(t.contains("zle -N accept-line _iohr_ask_accept"));
+    // The answer comes from `iohr ask`, headless, drawn as a card, with the question after `--`.
+    assert!(t.contains("command iohr ask --headless --card --cwd"));
+    assert!(t.contains("-- \"$q\""));
+    // Inside the InOrbit app it speaks the app's OSC 7727 ask protocol.
+    assert!(t.contains(r"\e]7727;ask;"));
+    assert!(t.contains("INORBIT_TERM"));
+    assert!(t.contains("INORBIT_ASK"));
+    // It never runs the answer.
+    assert!(!t.contains("eval \"$answer\"") && !t.contains("eval $answer"));
+    // Evaluated twice, or beside the app's own hook, it installs once.
+    assert!(t.contains("${+widgets[_iohr_ask_prev_accept]}") && t.contains("_inorbit_accept"));
+}
+
+// Installed under another name (the preview channel's `iohr-preview`), the hook asks that
+// binary, not whatever `iohr` is first on the PATH.
+#[test]
+fn the_hook_asks_the_binary_that_printed_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("iohr-preview");
+    std::fs::copy(env!("CARGO_BIN_EXE_iohr"), &copy).unwrap();
+    let o = Command::new(&copy)
+        .args(["shell", "hook", "zsh"])
+        .env_clear()
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    let t = String::from_utf8(o.stdout).unwrap();
+    assert!(
+        t.contains("command iohr-preview ask --headless --card --cwd"),
+        "{t}"
+    );
+    assert!(!t.contains("__IOHR_BIN__"));
+}
+
+#[test]
+fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
+    if Command::new("zsh").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let n = Command::new("zsh").arg("-n").arg(&file).output().unwrap();
+    assert!(n.status.success(), "{}", String::from_utf8_lossy(&n.stderr));
+    // The precmd, with a fake `iohr` that prints its arguments.
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let fake = bin.join("iohr");
+    std::fs::write(&fake, "#!/bin/sh\necho \"ARGS: $*\" >&2\necho the answer\n").unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let zsh = |script: &str| {
+        Command::new("zsh")
+            .args(["-f", "-i", "-c", script])
+            .current_dir(dir.path())
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("HOME", dir.path())
+            .output()
+            .unwrap()
+    };
+    let o = zsh(&format!(
+        "source {f}; _iohr_ask_q='?? and red'; _iohr_ask_pq=first _iohr_ask_pa=reply; \
+         _iohr_ask_precmd; _iohr_ask_q='? plain'; _iohr_ask_precmd; print -r -- \"kept: $_iohr_ask_pa\"",
+        f = file.display()
+    ));
+    let out = String::from_utf8_lossy(&o.stdout);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        err.contains("--prior-question first --prior-answer reply -- and red"),
+        "{err}"
+    );
+    assert!(
+        err.contains("-- plain") && !err.contains("-- plain --prior"),
+        "{err}"
+    );
+    // `iohr ask --card` draws the answer on stderr; the hook only keeps stdout for `??`.
+    assert!(err.contains("--headless --card --cwd"), "{err}");
+    assert_eq!(out.trim(), "kept: the answer", "{out}");
+    // Inside the app: the OSC, not a call to iohr.
+    let o = zsh(&format!(
+        "source {f}; INORBIT_TERM=1; _iohr_ask_q='? hi'; _iohr_ask_precmd",
+        f = file.display()
+    ));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.starts_with("\u{1b}]7727;ask;6;"), "{out:?}");
+    assert!(!String::from_utf8_lossy(&o.stderr).contains("ARGS:"));
+}
+
+/// Drives a real interactive zsh on a pty (python3's `pty`; the test is skipped where zsh
+/// or python3 is missing). `lines` are typed one by one; the screen after each is returned.
+fn drive_zsh(hook_file: &std::path::Path, bin: &std::path::Path, lines: &[String]) -> Vec<String> {
+    const DRIVER: &str = r#"
+import os, pty, select, sys, time
+bindir, home = sys.argv[1], sys.argv[2]
+lines = sys.argv[3:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ.clear()
+    os.environ.update(PATH=bindir + ":/usr/bin:/bin", HOME=home, PS1="PROMPT> ", TERM="dumb")
+    os.chdir(home)
+    os.execvp("zsh", ["zsh", "-f", "-i"])
+def rd(t):
+    out = b""
+    end = time.time() + t
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], 0.1)
+        if r:
+            try:
+                out += os.read(fd, 4096)
+            except OSError:
+                break
+    return out
+rd(1.0)
+shown = []
+for l in lines:
+    os.write(fd, l.encode() + b"\n")
+    shown.append(rd(1.2).decode(errors="replace"))
+os.write(fd, b"exit\n")
+rd(0.3)
+sys.stdout.write("\x00".join(shown))
+"#;
+    let _ = hook_file;
+    let o = Command::new("python3")
+        .args(["-I", "-c", DRIVER])
+        .arg(bin)
+        .arg(bin.parent().unwrap())
+        .args(lines)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8_lossy(&o.stdout)
+        .split('\0')
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn evaluating_the_hook_twice_keeps_enter_working_and_wires_accept_line_once() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer >&2\necho the answer\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let f = file.display();
+    // A second `source ~/.zshrc`, then once more with a shell variable of the old guard
+    // unset (state a plugin may reset): the wiring must not copy our own widget into the one
+    // accept-line calls, or Enter loops until FUNCNEST.
+    let out = drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {f}"),
+            format!("source {f}"),
+            format!("unset _iohr_ask_hooked; source {f}"),
+            "echo AFTER-$((1+1))".to_owned(),
+            "? still a question".to_owned(),
+            "echo LAST-$((2+2))".to_owned(),
+        ],
+    );
+    for o in &out {
+        assert!(
+            !o.contains("FUNCNEST") && !o.contains("nested function"),
+            "{o:?}"
+        );
+    }
+    assert!(out[3].contains("AFTER-2"), "{:?}", out[3]);
+    assert_eq!(
+        out[4].matches("ASKED:").count(),
+        1,
+        "a ? line still reaches the ask path: {:?}",
+        out[4]
+    );
+    assert!(out[4].contains("the answer"), "{:?}", out[4]);
+    assert!(out[5].contains("LAST-4"), "{:?}", out[5]);
+}
+
+#[test]
+fn bash_and_fish_say_not_built_yet_and_exit_1() {
+    for shell in ["bash", "fish"] {
+        let o = hook(shell);
+        assert_eq!(o.status.code(), Some(1), "{shell}");
+        assert_eq!(o.stdout, b"");
+        let e = String::from_utf8_lossy(&o.stderr);
+        assert!(e.contains("not built yet") && e.contains("zsh"), "{e}");
+    }
+    assert_eq!(hook("nushell").status.code(), Some(2));
+}

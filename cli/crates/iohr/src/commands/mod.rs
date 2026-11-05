@@ -23,6 +23,7 @@ mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
+mod shell;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -52,9 +53,16 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     if !matches!(cli.command, Command::Tunnel(_)) {
         g.check_environment()?;
     }
-    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_)) {
+    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_) | Command::Coordinator(_)) {
         return Err(Error::Usage(
-            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` only".into(),
+            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` and `iohr coordinator` only".into(),
+        ));
+    }
+    if g.sign_in.is_none()
+        && (g.via_personality.is_some() || g.via_session.is_some() || g.via_job.is_some())
+    {
+        return Err(Error::Usage(
+            "--via-personality, --via-session and --via-job need --sign-in io".into(),
         ));
     }
     match cli.command {
@@ -82,6 +90,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, check, out).await,
         Command::Ask(args) => ask::run(g, args, out).await,
+        Command::Shell(cmd) => shell::run(&cmd),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
