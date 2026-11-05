@@ -88,6 +88,39 @@ pub(crate) fn choose_agent(flag: Option<&str>, configured: Option<&str>) -> Resu
     }
 }
 
+/// The model a quick question uses when none is named: the small, fast tier, the cheapest that
+/// answers.
+pub(crate) const DEFAULT_MODEL: &str = "haiku";
+
+/// The model: the flag (or `IOHR_ASK_MODEL`), else `[ask] model`, else for Claude `haiku`. Codex
+/// has no default here: with none named it uses its own configured model. The one reading of
+/// the setting, for the card and for the streamed answer alike.
+///
+/// # Errors
+/// A value that has a space or starts with `-` (it would read as a flag).
+pub(crate) fn choose_model(
+    agent: Agent,
+    flag: Option<&str>,
+    configured: Option<&str>,
+) -> Result<Option<String>, String> {
+    let named = [flag, configured]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|v| !v.is_empty());
+    let model = match (named, agent) {
+        (Some(m), _) => m,
+        (None, Agent::Claude) => DEFAULT_MODEL,
+        (None, Agent::Codex) => return Ok(None),
+    };
+    if model.starts_with('-') || model.contains(char::is_whitespace) {
+        return Err(format!(
+            "`model` is `{model}`; give a model name such as haiku"
+        ));
+    }
+    Ok(Some(model.to_owned()))
+}
+
 fn pick<'a>(flag: Option<&'a str>, configured: Option<&'a str>, default: &'a str) -> &'a str {
     [flag, configured]
         .into_iter()
@@ -135,6 +168,37 @@ pub(crate) fn label(agent: Agent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_model_is_the_flag_then_the_config_then_haiku() {
+        let m = choose_model;
+        assert_eq!(
+            m(Agent::Claude, None, None).unwrap().as_deref(),
+            Some("haiku")
+        );
+        assert_eq!(
+            m(Agent::Claude, None, Some(" opus ")).unwrap().as_deref(),
+            Some("opus")
+        );
+        assert_eq!(
+            m(Agent::Claude, Some("sonnet"), Some("opus"))
+                .unwrap()
+                .as_deref(),
+            Some("sonnet")
+        );
+        assert_eq!(
+            m(Agent::Claude, Some(""), Some("opus")).unwrap().as_deref(),
+            Some("opus"),
+            "an empty flag is not a choice"
+        );
+        assert_eq!(m(Agent::Codex, None, None).unwrap(), None);
+        assert_eq!(
+            m(Agent::Codex, None, Some("gpt-5")).unwrap().as_deref(),
+            Some("gpt-5")
+        );
+        assert!(m(Agent::Claude, Some("--help"), None).is_err());
+        assert!(m(Agent::Claude, None, Some("two words")).is_err());
+    }
 
     #[test]
     fn flag_then_config_then_default() {

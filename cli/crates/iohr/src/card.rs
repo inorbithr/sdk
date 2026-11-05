@@ -99,11 +99,14 @@ pub(crate) struct Card<'a> {
     pub(crate) follows: Option<&'a str>,
     /// What was read and that nothing was run ([`crate::headless::read_line`]).
     pub(crate) read: &'a str,
-    /// The disclosure sentences that close the card.
+    /// The disclosure sentences that close a full footer.
     pub(crate) notice: &'a str,
+    /// Whether the footer is the full disclosure (`read` and `notice`), or only `hint`. The
+    /// "AI answer" label in the header is on every card either way.
+    pub(crate) full: bool,
     /// The one-line label printed instead of a card when the look is plain.
     pub(crate) label: &'a str,
-    /// A hint at the end of the footer, such as "`??` follows up".
+    /// The short footer, such as "`??` follows up"; none closes the frame bare.
     pub(crate) hint: Option<&'a str>,
     pub(crate) body: Body<'a>,
 }
@@ -216,12 +219,16 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
 }
 
 fn footer(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
-    let text = format!("{} {}", card.read, card.notice);
     let inner = width - 3;
-    let mut lines = wrap(&spans(&text), inner, look, Kind::Dim);
-    // The hint is a line of its own, so it is never cut in half by the notice's wrap.
-    if let Some(h) = card.hint {
-        lines.extend(wrap(&spans(h), inner, look, Kind::Dim));
+    let lines = if card.full {
+        let text = format!("{} {}", card.read, card.notice);
+        wrap(&spans(&text), inner, look, Kind::Dim)
+    } else {
+        card.hint
+            .map_or_else(Vec::new, |h| wrap(&spans(h), inner, look, Kind::Dim))
+    };
+    if lines.is_empty() {
+        let _ = writeln!(out, "{}", look.violet().apply_to("╰─"));
     }
     for (i, l) in lines.iter().enumerate() {
         let lead = if i == 0 {
@@ -602,6 +609,7 @@ mod tests {
             read: "Read: your question, the folder's path; nothing was run.",
             notice: "An AI model under your own subscription. Check it before you rely on it.",
             label: "Io · AI answer -- Io running on Claude Code (local).",
+            full: true,
             hint: Some("`??` follows up."),
             body: Body::Answer(text),
         }
@@ -636,14 +644,32 @@ mod tests {
             out.contains("│  ❯ cargo nextest run -p iohr --test project\n"),
             "{out}"
         );
-        assert!(
-            lines.last().is_some_and(|l| l.contains("follows up")),
-            "{out}"
-        );
         assert!(out.contains("╰─ Read: your question"), "{out}");
+        assert!(
+            !out.contains("follows up"),
+            "a full footer carries no hint: {out}"
+        );
         for l in &lines[1..] {
             assert!(measure_text_width(l) <= 60, "too wide: {l:?}");
         }
+    }
+
+    #[test]
+    fn a_short_footer_is_one_line_and_the_label_stays_in_the_header() {
+        let mut c = card("Hi.");
+        c.full = false;
+        let out = strip(&render(&c, 60, FANCY));
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[0].contains("AI answer"), "{out}");
+        assert_eq!(lines.last(), Some(&"╰─ ?? follows up."), "{out}");
+        assert!(
+            !out.contains("Read:") && !out.contains("subscription"),
+            "{out}"
+        );
+        c.hint = None;
+        let bare = strip(&render(&c, 60, FANCY));
+        assert_eq!(bare.lines().last(), Some("╰─"), "{bare}");
+        assert!(bare.lines().next().is_some_and(|l| l.contains("AI answer")));
     }
 
     #[test]

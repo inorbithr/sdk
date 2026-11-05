@@ -365,6 +365,8 @@ template = "coordinated"
 
 [ask]                               # iohr ask (section 4.5)
 agent = "claude"
+model = "haiku"
+hints = "sometimes"
 ```
 
 Rules:
@@ -472,13 +474,29 @@ The SDK does not read it, and `iohr` never writes it: a person edits it.
 it starts the agent in the current folder with the question; with `--json`, a context flag
 (`--cwd`, `--last-command`, `--exit-code`, `--output-file`), `--headless` or no terminal it
 makes one capped, read-only `claude -p` run instead (the `?` prompt of `iohr shell hook zsh`
-uses it); `--interactive` keeps the agent session. It reads `[ask]`; `--via` and `--agent`
-win over it for one call. `iohr` never writes it, and never stores the question or the answer.
+uses it); `--interactive` keeps the agent session. It reads `[ask]`; `--via`, `--agent` and
+`--model` win over it for one call. `iohr` never writes it, and never stores the question or
+the answer.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `via` | `local` (your own agent); `io` is reserved and says "not built yet" | `local` | `iohr ask` |
 | `agent` | `claude` (Claude Code); `codex` is reserved and says "not built yet" | `claude` | `iohr ask` |
+| `model` | A Claude alias such as `haiku`, `sonnet` or `opus`, or a full model name; a space or a leading `-` is refused. `--model` and `IOHR_ASK_MODEL` win over it. One reading for the `?` card and the answer printed to a pipe, and the card's meta line shows it | `haiku`, the small fast tier | `iohr ask` |
+| `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
+
+The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
+read, that nothing was run, that an AI model under your own subscription got the folder, and
+to check the answer) on the first card ever, whenever that text changes, and about once a
+day; every other card closes with one short hint, taken in turn from "`??` follows up",
+"`iohr ask --help` for flags", "`[ask] model` in config picks the model" and "`INORBIT_ASK=0`
+turns `?` off". `hints = "always"` shows the full disclosure every time; `"never"` shows it
+on the first card and when the text changes, and nothing otherwise. The one small file it
+keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),
+holds a fingerprint of the disclosure text, when it was last shown and a counter, never a
+question or an answer; delete it and the next card is the first again. A pipe, `--json`,
+`NO_COLOR` or a terminal that cannot draw the card print the one-line label instead, which
+carries the disclosure itself.
 
 ## 5. Credentials
 

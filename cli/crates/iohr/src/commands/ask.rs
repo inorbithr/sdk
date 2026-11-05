@@ -12,11 +12,13 @@ use crate::cli::{AskArgs, Global, HeadlessArgs};
 use crate::context::Ctx;
 use crate::error::Error;
 use crate::headless::{self, Answer, Context};
+use crate::hints;
 use crate::output::Out;
 use crate::ui::Ui;
 
 pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error> {
-    let cfg = Ctx::load(g)?.config.ask;
+    let ctx = Ctx::load(g)?;
+    let cfg = ctx.config.ask;
     let via = ask::choose_via(args.via.as_deref(), cfg.via.as_deref()).map_err(Error::Usage)?;
     let agent =
         ask::choose_agent(args.agent.as_deref(), cfg.agent.as_deref()).map_err(Error::Usage)?;
@@ -30,6 +32,11 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
             "`--agent codex` is not built yet; use `--agent claude`".to_owned(),
         ));
     }
+    // One reading of the model for the card and the run alike; Codex returned above.
+    let model = ask::choose_model(agent, args.model.as_deref(), cfg.model.as_deref())
+        .map_err(Error::Usage)?
+        .unwrap_or_else(|| ask::DEFAULT_MODEL.to_owned());
+    let hints = hints::Mode::parse(cfg.hints.as_deref()).map_err(Error::Usage)?;
     let path = std::env::var_os("PATH").unwrap_or_default();
     let Some(bin) = ask::find_on_path(agent.name(), &path) else {
         return Err(Error::Failed(format!(
@@ -41,7 +48,20 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
     // The question is only ever an argument of the agent; nothing below prints or stores it.
     let question = args.question.join(" ");
     if headless_wanted(&args.headless, out.json)? {
-        return headless(&bin, agent, via, &question, &args.headless, out).await;
+        return headless(
+            &Chosen {
+                bin: &bin,
+                agent,
+                via,
+                model: &model,
+                hints,
+                dir: &ctx.dir,
+            },
+            &question,
+            &args.headless,
+            out,
+        )
+        .await;
     }
     Out::note(&ask::label(agent));
     let started = Instant::now();
@@ -115,16 +135,32 @@ fn headless_wanted(h: &HeadlessArgs, json: bool) -> Result<bool, Error> {
         || !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()))
 }
 
+/// What the settings and flags settled for one call.
+struct Chosen<'a> {
+    bin: &'a Path,
+    agent: Agent,
+    via: Via,
+    model: &'a str,
+    hints: hints::Mode,
+    dir: &'a Path,
+}
+
 /// One capped `claude -p` run (see [`headless`]). The label goes first on stderr so a pipe
 /// of the answer stays clean; under `--json` it is a field instead.
 async fn headless(
-    bin: &Path,
-    agent: Agent,
-    via: Via,
+    chosen: &Chosen<'_>,
     question: &str,
     h: &HeadlessArgs,
     out: Out,
 ) -> Result<(), Error> {
+    let Chosen {
+        bin,
+        agent,
+        via,
+        model,
+        hints,
+        dir,
+    } = *chosen;
     let ctx = Context {
         cwd: match &h.cwd {
             Some(c) => c.clone(),
@@ -150,7 +186,7 @@ async fn headless(
     if !out.json && (h.card || (stdout_tty && fancy)) {
         let look = Look::detect(fancy);
         let started = Instant::now();
-        let run = headless::run(bin, &message, started);
+        let run = headless::run(bin, &message, model, started);
         let done = if look.fancy {
             spin_while(run, agent, look, started).await?
         } else {
@@ -158,15 +194,26 @@ async fn headless(
         };
         let label = ask::label(agent);
         let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
+        // Only a card that is drawn moves the footer on.
+        // A plain look has no footer (its label carries the disclosure), so it moves nothing.
+        let footer = if look.fancy {
+            hints::next(dir, hints, &notice, hints::now())
+        } else {
+            hints::Footer::Full
+        };
         let mut shown = Card {
             agent: agent.display(),
-            model: headless::MODEL,
+            model,
             elapsed: None,
             follows: h.prior_question.as_deref(),
             read: &read,
             notice: &notice,
+            full: footer == hints::Footer::Full,
             label: &label,
-            hint: h.card.then_some("`??` follows up."),
+            hint: match footer {
+                hints::Footer::Short(h) => h,
+                hints::Footer::Full => None,
+            },
             body: Body::Failed(""),
         };
         let width = card::stderr_width();
@@ -193,7 +240,7 @@ async fn headless(
         Out::note(&label);
     }
     let started = Instant::now();
-    let (text, duration_ms) = headless::run(bin, &message, started)
+    let (text, duration_ms) = headless::run(bin, &message, model, started)
         .await
         .map_err(Error::Failed)?;
     if out.json {
@@ -202,7 +249,7 @@ async fn headless(
             agent: agent.name(),
             via: via.name(),
             label,
-            model: headless::MODEL,
+            model: model.to_owned(),
             exit_code: 0,
             duration_ms,
         });

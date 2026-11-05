@@ -219,8 +219,9 @@ pub enum Command {
     Project(ProjectCommand),
     /// Ask a question in this folder: starts your own AI agent here (Claude Code, `claude`)
     /// with the question, under your own subscription. The agent's own prompts confirm every
-    /// change; iohr never stores the question or the answer. Defaults come from `[ask]` in
-    /// config.toml; the flags win for one call.
+    /// change; iohr never stores the question or the answer. The model is `haiku` unless
+    /// `--model`, `IOHR_ASK_MODEL` or `[ask] model` says otherwise, for the card and the run
+    /// alike. Defaults come from `[ask]` in config.toml; the flags win for one call.
     Ask(AskArgs),
     /// Shell integration: `iohr shell hook zsh` prints what makes `? question` at your
     /// prompt ask your own AI agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
@@ -1149,6 +1150,11 @@ pub struct AskArgs {
     /// The agent to start: `claude` (default; `[ask] agent`).
     #[arg(long, value_name = "AGENT")]
     pub agent: Option<String>,
+    /// The model that answers: a Claude alias such as `haiku` or a full model name. Default
+    /// `[ask] model`, else `haiku`, the small fast tier. With `--agent codex` it is passed on
+    /// only when you name one.
+    #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

@@ -19,8 +19,6 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use crate::runner::claude::assert_honest;
 use crate::runner::env::scrub;
 
-/// The one model a quick question uses. Small on purpose: the cheapest that answers.
-pub(crate) const MODEL: &str = "haiku";
 /// Turns the run may take. With no tools one is enough; the rest is slack.
 pub(crate) const MAX_TURNS: u32 = 4;
 /// Seconds before the run is stopped.
@@ -62,7 +60,7 @@ pub(crate) struct Answer {
     pub(crate) agent: &'static str,
     pub(crate) via: &'static str,
     pub(crate) label: String,
-    pub(crate) model: &'static str,
+    pub(crate) model: String,
     pub(crate) exit_code: i32,
     pub(crate) duration_ms: u64,
 }
@@ -177,13 +175,14 @@ pub(crate) fn assemble(question: &str, ctx: &Context) -> Result<String, String> 
 
 /// The fixed arguments: a small model, no tools, no MCP, none of the user's settings
 /// (hooks, plugins), no session file, a turn cap, and never `--bare`, a key or another
-/// endpoint. The prompt goes in on stdin, never as an argument.
-pub(crate) fn args() -> Result<Vec<String>, String> {
+/// endpoint. The prompt goes in on stdin, never as an argument. `model` is
+/// [`crate::ask::choose_model`]'s answer.
+pub(crate) fn args(model: &str) -> Result<Vec<String>, String> {
     let turns = MAX_TURNS.to_string();
     let v: Vec<String> = [
         "-p",
         "--model",
-        MODEL,
+        model,
         "--output-format",
         "json",
         "--max-turns",
@@ -264,9 +263,10 @@ pub(crate) fn read(stdout: &str, exited_ok: bool) -> Reading {
 pub(crate) async fn run(
     bin: &std::path::Path,
     message: &str,
+    model: &str,
     started: Instant,
 ) -> Result<(String, u64), String> {
-    let args = args()?;
+    let args = args(model)?;
     let mut child = tokio::process::Command::new(bin)
         .args(&args)
         .env_clear()
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn the_args_are_bounded_and_never_hold_a_forbidden_flag() {
-        let a = args().unwrap();
+        let a = args("haiku").unwrap();
         for f in FORBIDDEN {
             assert!(
                 !a.iter().any(|x| x == f || x.starts_with(&format!("{f}="))),
@@ -351,7 +351,8 @@ mod tests {
             );
         }
         let at = |flag: &str| a.iter().position(|x| x == flag).unwrap();
-        assert_eq!(a[at("--model") + 1], MODEL);
+        assert_eq!(a[at("--model") + 1], "haiku");
+        assert_eq!(args("opus").unwrap()[at("--model") + 1], "opus");
         assert_eq!(a[at("--max-turns") + 1], MAX_TURNS.to_string());
         assert_eq!(a[at("--tools") + 1], "", "no tools at all");
         assert_eq!(
@@ -426,7 +427,7 @@ mod tests {
 
     #[test]
     fn the_prompt_is_not_an_argument() {
-        let a = args().unwrap();
+        let a = args("haiku").unwrap();
         assert!(a.iter().all(|x| !x.contains("Question:")));
     }
 

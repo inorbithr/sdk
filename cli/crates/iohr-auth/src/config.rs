@@ -156,13 +156,24 @@ pub struct AskConfig {
     /// With `via = "local"`, which agent to start: `claude` (the default) or `codex`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// The model the agent answers with: a Claude alias such as `haiku` (the default, the
+    /// small fast tier) or a full model name. `--model` (or `IOHR_ASK_MODEL`) wins over it.
+    /// For `codex` it is passed as `--model` only when set; Codex otherwise uses its own
+    /// configured model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// How often the footer of the `?` card is the full notice instead of one short hint:
+    /// `sometimes` (the default: the first card, when the notice changes and about once a
+    /// day), `always` or `never` (the first card and a changed notice still show it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hints: Option<String>,
 }
 
 impl AskConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.via.is_none() && self.agent.is_none()
+        self.via.is_none() && self.agent.is_none() && self.model.is_none() && self.hints.is_none()
     }
 }
 

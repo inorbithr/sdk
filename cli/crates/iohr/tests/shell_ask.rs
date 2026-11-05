@@ -220,6 +220,41 @@ fn the_run_is_bounded_scrubbed_and_never_has_a_forbidden_flag() {
     );
 }
 
+fn model_sent(r: &Rig, args: &[&str]) -> String {
+    let out = r.run(args, OK_JSON, "0");
+    assert!(out.status.success(), "{}", text(&out));
+    let sent: Vec<String> = r.saw("claude.args").lines().map(str::to_owned).collect();
+    let at = sent.iter().position(|a| a == "--model").unwrap();
+    sent[at + 1].clone()
+}
+
+#[test]
+fn the_model_is_the_flag_then_the_config_then_haiku_and_the_json_says_which() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    assert_eq!(model_sent(&r, &["ask", "--headless", "q"]), "haiku");
+    std::fs::create_dir_all(r.home.path().join("config")).unwrap();
+    std::fs::write(
+        r.home.path().join("config").join("config.toml"),
+        "[ask]\nmodel = \"sonnet\"\n",
+    )
+    .unwrap();
+    assert_eq!(model_sent(&r, &["ask", "--headless", "q"]), "sonnet");
+    assert_eq!(
+        model_sent(&r, &["ask", "--headless", "--model", "opus", "q"]),
+        "opus"
+    );
+    let out = r.run(&["--json", "ask", "--model", "opus", "q"], OK_JSON, "0");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["model"], "opus");
+    let bad = r.run(
+        &["ask", "--headless", "--model", "--help", "q"],
+        OK_JSON,
+        "0",
+    );
+    assert!(!bad.status.success());
+}
+
 #[test]
 fn context_flags_reach_the_agent_and_the_output_is_cut_to_its_end() {
     let r = Rig::new();
