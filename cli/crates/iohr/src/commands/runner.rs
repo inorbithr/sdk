@@ -108,15 +108,19 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 Ok(k) => Some(k.public_key()),
                 Err(_) => None,
             };
-            let held = mine.iter().find(|r| {
-                r.name == name
-                    && !r.public_key.is_empty()
-                    && local_key.as_deref() == Some(&r.public_key)
-            });
+            // The key alone says this machine already has a runner, whatever name it was
+            // registered under: a second one for the same key is never made. A pinned id
+            // (`--runner`, `id` in the settings) picks among several.
+            let held = held_runner(
+                &mine,
+                local_key.as_deref(),
+                set.id.as_ref().map(|i| i.value.as_str()),
+            );
             if let Some(r) = held
                 && !refresh
             {
                 show_runner(r, out, "already registered");
+                pin_note(&r.runner_id, s.profile.as_ref());
                 return Ok(());
             }
             let held = held.map(|r| r.runner_id.clone());
@@ -159,14 +163,20 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             };
             let r = svc.register(&reg).await?;
             match held {
-                Some(id) if id == r.runner_id => show_runner(&r, out, "refreshed"),
+                Some(id) if id == r.runner_id => {
+                    show_runner(&r, out, "refreshed");
+                    pin_note(&r.runner_id, s.profile.as_ref());
+                }
                 Some(id) => {
                     show_runner(&r, out, "registered");
                     Out::note(&format!(
                         "the service made a new runner rather than refreshing {id}: revoke {id} once this one runs"
                     ));
                 }
-                None => show_runner(&r, out, "registered"),
+                None => {
+                    show_runner(&r, out, "registered");
+                    pin_note(&r.runner_id, s.profile.as_ref());
+                }
             }
             Ok(())
         }
@@ -251,8 +261,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 .name
                 .as_ref()
                 .map_or_else(host_name, |n| n.value.clone());
+            let pinned = runner.or_else(|| set.id.as_ref().map(|i| i.value.clone()));
             let me: RunnerInfo =
-                pick_runner(all, runner.as_deref(), name.as_deref(), &local_key, &host)?
+                pick_runner(all, pinned.as_deref(), name.as_deref(), &local_key, &host)?
                     .ok_or_else(|| {
                         Error::Failed(
                             "no such runner of yours: run `iohr runner register` first".into(),
@@ -390,9 +401,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let local_key = signer.public_key();
             let svc = HttpService::new(&s.api, account.clone(), Some(signer));
             let all = svc.list_runners(true).await?;
+            let set = effective(&ctx.config, s.profile.as_ref(), &Flags::default())?;
+            let pinned = runner.or_else(|| set.id.as_ref().map(|i| i.value.clone()));
             let me: RunnerInfo = pick_runner(
                 all,
-                runner.as_deref(),
+                pinned.as_deref(),
                 name.as_deref(),
                 &local_key,
                 &host_name(),
@@ -1028,13 +1041,43 @@ fn pick_runner(
                 .map(|r| r.runner_id.as_str())
                 .collect();
             return Err(Error::Failed(format!(
-                "this machine's key matches more than one runner ({}): pass --runner <id> or --name",
+                "this machine's key matches more than one runner ({}): pin one with `id = \"rnr_...\"` under [profiles.<name>.runner] in config.toml, or pass --runner <id> (IOHR_RUNNER_ID) or --name; then revoke the extra ones",
                 ids.join(", ")
             )));
         }
         return Ok(all.into_iter().nth(first));
     }
     Ok(all.into_iter().find(|r| r.name == host))
+}
+
+/// The runner this machine's key already holds, whatever its name: the pinned id when
+/// it is one of them, else the first (a pin this key does not hold never makes a second
+/// runner for the key). `None` without a key or without a match.
+fn held_runner<'a>(
+    mine: &'a [RunnerInfo],
+    local_key: Option<&str>,
+    pinned: Option<&str>,
+) -> Option<&'a RunnerInfo> {
+    let key = local_key?;
+    let held = || {
+        mine.iter()
+            .filter(move |r| !r.public_key.is_empty() && r.public_key == key)
+    };
+    pinned
+        .and_then(|id| held().find(|r| r.runner_id == id))
+        .or_else(|| held().next())
+}
+
+/// Says how to pin the runner in config.toml. Nothing here writes `[runner]` settings
+/// (the config writer keeps them as read), so the line is given for the person to add.
+fn pin_note(id: &str, profile: Option<&ProfileName>) {
+    let table = profile.map_or_else(
+        || "[runner]".to_owned(),
+        |p| format!("[profiles.{p}.runner]"),
+    );
+    Out::note(&format!(
+        "to pin this runner, set id = \"{id}\" under {table} in config.toml"
+    ));
 }
 
 fn host_name() -> String {
@@ -1129,11 +1172,40 @@ mod tests {
     }
 
     #[test]
+    fn register_finds_the_runner_by_key_whatever_its_name() {
+        let mine = vec![r("a", "other", "KEY_B"), r("b", "io-name", "KEY_A")];
+        assert_eq!(
+            held_runner(&mine, Some("KEY_A"), None).unwrap().runner_id,
+            "b"
+        );
+        assert!(held_runner(&mine, None, None).is_none());
+        let two = vec![r("a", "x", "KEY_A"), r("b", "x", "KEY_A")];
+        assert_eq!(
+            held_runner(&two, Some("KEY_A"), Some("b"))
+                .unwrap()
+                .runner_id,
+            "b"
+        );
+        // A pin this key does not hold falls back to the key's runner, never a new one.
+        assert_eq!(
+            held_runner(&two, Some("KEY_A"), Some("zz"))
+                .unwrap()
+                .runner_id,
+            "a"
+        );
+    }
+
+    #[test]
     fn a_key_held_by_more_than_one_runner_is_an_error_not_a_pick() {
         let all = vec![r("a", "one", "KEY_A"), r("b", "two", "KEY_A")];
         let e = pick_runner(all.clone(), None, None, "KEY_A", &host_name()).unwrap_err();
         let msg = format!("{e}");
-        assert!(msg.contains("more than one runner") && msg.contains('a') && msg.contains('b'));
+        assert!(
+            msg.contains("more than one runner")
+                && msg.contains("[profiles.<name>.runner]")
+                && msg.contains("revoke the extra ones")
+                && msg.contains("a, b")
+        );
         // An explicit id still resolves it.
         assert_eq!(
             pick_runner(all, Some("b"), None, "KEY_A", &host_name())
