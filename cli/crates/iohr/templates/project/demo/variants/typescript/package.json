@@ -1,0 +1,12 @@
+{
+  "name": "@@NAME@@",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "@@ID@@: the demo project's private macOS service (Node, no dependencies).",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test tests/"
+  }
+}

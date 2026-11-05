@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::ask;
 use crate::error::Error;
 use crate::output::{Out, table_text};
 use crate::template::{self, Answer, Kind, Origin, Row, Spec, StepName, Template};
@@ -83,6 +84,8 @@ pub(crate) struct Shown {
     pub steps: Vec<String>,
     pub agent: Option<ShownAgent>,
     pub questions: Vec<ShownQuestion>,
+    /// The languages `--lang` takes (none for a template without variants).
+    pub languages: Vec<ShownLanguage>,
     /// The paths it renders, placeholders as written (`src/@@NAME@@/main.py`).
     pub files: Vec<String>,
 }
@@ -103,6 +106,21 @@ pub(crate) struct ShownAgent {
     pub step_prompt: Option<String>,
     /// What `init --describe` tells the agent.
     pub describe_prompt: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ShownLanguage {
+    pub id: String,
+    pub label: String,
+    pub status: &'static str,
+    /// The programs it needs on `PATH`.
+    pub needs: Vec<String>,
+    /// Whether every one of them is on this machine's `PATH`.
+    pub ready: bool,
+    /// The one `--yes` takes.
+    pub default: bool,
+    /// The paths it lays over the common files, placeholders as written.
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -204,6 +222,35 @@ pub(crate) fn describe(t: &Template, is_default: bool) -> Shown {
                 help: q.help.clone(),
             })
             .collect(),
+        languages: {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            let default = t.default_variant().map(|v| v.id.clone());
+            t.meta
+                .variants
+                .iter()
+                .map(|v| ShownLanguage {
+                    id: v.id.clone(),
+                    label: v.label.clone(),
+                    status: if v.status == template::Status::Live {
+                        "live"
+                    } else {
+                        "coming"
+                    },
+                    needs: v.needs.clone(),
+                    ready: v
+                        .needs
+                        .iter()
+                        .all(|n| ask::find_on_path(n, &path).is_some()),
+                    default: default.as_deref() == Some(v.id.as_str()),
+                    files: t
+                        .variant_files
+                        .iter()
+                        .filter(|(id, _, _)| *id == v.id)
+                        .map(|(_, p, _)| p.clone())
+                        .collect(),
+                })
+                .collect()
+        },
         files: t.files.iter().map(|(p, _)| p.clone()).collect(),
     }
 }
@@ -230,6 +277,41 @@ fn render_answer(a: &Answer) -> String {
     match a {
         Answer::Text(t) => format!("\"{t}\""),
         other => other.text(),
+    }
+}
+
+/// The languages `--lang` takes: id, status, what it is, the default and the toolchain.
+fn render_languages(text: &mut String, s: &Shown, p: Paint) {
+    if s.languages.is_empty() {
+        return;
+    }
+    section(text, p, "Languages");
+    let rows: Vec<Vec<String>> = s
+        .languages
+        .iter()
+        .map(|l| {
+            let found = if l.needs.is_empty() || l.ready {
+                "ready"
+            } else {
+                "needs"
+            };
+            vec![
+                p.name(&l.id),
+                p.status(l.status),
+                l.label.clone(),
+                if l.default { "default" } else { "" }.to_owned(),
+                if l.needs.is_empty() {
+                    found.to_owned()
+                } else {
+                    format!("{found}: {}", l.needs.join(", "))
+                },
+            ]
+        })
+        .collect();
+    let head = ["ID", "STATUS", "LANGUAGE", "", "TOOLCHAIN"].map(|h| p.dim(h));
+    let head: Vec<&str> = head.iter().map(String::as_str).collect();
+    for line in table_text(&head, &rows).lines() {
+        let _ = writeln!(text, "  {line}");
     }
 }
 
@@ -290,6 +372,8 @@ pub(crate) fn render_show(s: &Shown, p: Paint) -> String {
             let _ = writeln!(text, "  {line}");
         }
     }
+
+    render_languages(&mut text, s, p);
 
     section(&mut text, p, "Files");
     if s.files.is_empty() {

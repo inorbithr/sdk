@@ -17,8 +17,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::ext::lint::lint;
 use crate::ext::manifest::{SOURCE_FILE, check_name as check_ext_name};
+use crate::template::Runner;
 
 /// The template used when neither `--template` nor `[project] template` names one.
+pub mod folder;
+
 pub const DEFAULT_TEMPLATE: &str = "demo";
 
 /// The name rule: the folder, the Python module and the extension's name all come from it, so
@@ -185,8 +188,13 @@ pub fn cloud_steps(name: &str) -> Vec<Step> {
     ]
 }
 
-/// Writes the rendered files under `dir`, making it first; the paths written, in order.
-fn write_files(dir: &Path, files: &[(String, String)]) -> Result<Vec<String>, String> {
+/// Writes the rendered files under `dir`, making it first; the paths written, in order. A path
+/// in `programs` gets the executable bit.
+fn write_files(
+    dir: &Path,
+    files: &[(String, String)],
+    programs: &[String],
+) -> Result<Vec<String>, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let mut written = Vec::new();
     for (rel, text) in files {
@@ -196,24 +204,39 @@ fn write_files(dir: &Path, files: &[(String, String)]) -> Result<Vec<String>, St
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
         }
         std::fs::write(&p, text).map_err(|e| format!("cannot write {}: {e}", p.display()))?;
+        if programs.contains(rel) {
+            make_executable(&p)?;
+        }
         written.push(rel.clone());
     }
     Ok(written)
 }
 
-/// The folder must not exist or must be empty: nothing is overwritten. A read, so a dry run
-/// checks it too.
+#[cfg(unix)]
+fn make_executable(p: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| format!("cannot make {} executable: {e}", p.display()))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+/// The folder must not exist or must hold nothing but dotfiles (an empty folder, or the one a
+/// person is standing in), and no file the template writes may already be there: nothing is
+/// overwritten. A read, so a dry run checks it too.
 ///
 /// # Errors
 ///
 /// A busy folder.
-pub fn check_target(dir: &Path) -> Result<(), String> {
-    if dir.exists()
-        && std::fs::read_dir(dir)
-            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
-            .next()
-            .is_some()
-    {
+pub fn check_target(dir: &Path, files: &[(String, String)]) -> Result<(), String> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    let busy = !folder::only_dotfiles(dir) || files.iter().any(|(p, _)| dir.join(p).exists());
+    if busy {
         return Err(format!(
             "{} is not empty; choose another name or --dir",
             dir.display()
@@ -256,11 +279,12 @@ pub fn check_manifest(files: &[(String, String)]) -> Result<(), String> {
 pub fn scaffold(
     dir: &Path,
     files: &[(String, String)],
+    programs: &[String],
     template: &str,
 ) -> Result<(Vec<String>, Step), String> {
-    check_target(dir)?;
+    check_target(dir, files)?;
     check_manifest(files)?;
-    let written = write_files(dir, files)?;
+    let written = write_files(dir, files, programs)?;
     let s = step(
         "scaffold",
         "Scaffold from the template",
@@ -373,46 +397,141 @@ pub struct Smoke {
     pub output: String,
 }
 
+/// `$DIR`, `$STATE` and `$CACHE` in a runner word.
+fn paths_in(word: &str, dir: &Path, state: &Path, cache: &Path) -> String {
+    word.replace("$DIR", &dir.to_string_lossy())
+        .replace("$STATE", &state.to_string_lossy())
+        .replace("$CACHE", &cache.to_string_lossy())
+}
+
+fn failed(said: String, output: String) -> Smoke {
+    Smoke {
+        ok: false,
+        said,
+        heartbeat: None,
+        output,
+    }
+}
+
+/// What ran before languages were variants: the Python module of the project.
+fn legacy_runner(name: &str) -> Runner {
+    Runner {
+        label: "Python".into(),
+        build: Vec::new(),
+        run: vec!["python3".into(), "-m".into(), name.replace('-', "_")],
+        env: std::collections::BTreeMap::from([
+            ("PYTHONDONTWRITEBYTECODE".to_owned(), "1".to_owned()),
+            ("PYTHONPATH".to_owned(), "$DIR/src".to_owned()),
+        ]),
+    }
+}
+
+/// The language's build, in the caller's own environment (a toolchain keeps its home there),
+/// writing only under `$CACHE`. `Some` is the failure.
+fn build_step(
+    build: &[String],
+    label: &str,
+    dir: &Path,
+    st: &Path,
+    cache: &Path,
+    find: &dyn Fn(&str) -> Option<PathBuf>,
+) -> Option<Smoke> {
+    let (prog, args) = build.split_first()?;
+    let Some(bin) = find(prog) else {
+        return Some(failed(
+            format!("{prog} was not found on your PATH"),
+            String::new(),
+        ));
+    };
+    match Command::new(&bin)
+        .args(args)
+        .current_dir(dir)
+        .env("CACHE", cache)
+        .env("STATE", st)
+        .output()
+    {
+        Ok(o) if o.status.success() => None,
+        Ok(o) => Some(failed(
+            format!("{label} did not build: it exited with {}", o.status),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            ),
+        )),
+        Err(e) => Some(failed(
+            format!("{prog} could not be started: {e}"),
+            String::new(),
+        )),
+    }
+}
+
 /// Runs the project once (`IOHR_EXT_ONCE=1`) with `STATE` and `CACHE` under its own folder, the
 /// way `iohr ext dev --test` does, and reads the heartbeat back. No token channel is given, so
 /// the project's token ask is refused: that refusal is the proof the channel is its only
-/// credential. Nothing of the caller's environment reaches the child.
+/// credential.
+///
+/// What runs is the language's own `runner` (`$DIR`, `$STATE` and `$CACHE` filled in): its
+/// `build` first, in your environment but writing only under `$CACHE`, then its `run` with
+/// nothing of your environment but a fixed `PATH`, so the program is found by its full path.
+/// A template without languages runs as Python: `python3 -m NAME`.
 #[must_use]
-pub fn smoke(dir: &Path, state: &Path, name: &str) -> Smoke {
+pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> Smoke {
     let st = state.join("state");
     let cache = state.join("cache");
     if private_dir(&st).and(private_dir(&cache)).is_err() {
-        return Smoke {
-            ok: false,
-            said: "the project's state folder could not be made".into(),
-            heartbeat: None,
-            output: String::new(),
-        };
+        return failed(
+            "the project's state folder could not be made".into(),
+            String::new(),
+        );
     }
-    let module = name.replace('-', "_");
-    let out = Command::new("python3")
-        .arg("-m")
-        .arg(&module)
+    let legacy = legacy_runner(name);
+    let runner = runner.filter(|r| !r.run.is_empty()).unwrap_or(&legacy);
+    let words =
+        |v: &[String]| -> Vec<String> { v.iter().map(|w| paths_in(w, dir, &st, &cache)).collect() };
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let find = |prog: &str| -> Option<PathBuf> {
+        if prog.contains('/') {
+            Some(PathBuf::from(prog))
+        } else {
+            crate::ask::find_on_path(prog, &path)
+        }
+    };
+    if let Some(fail) = build_step(
+        &words(&runner.build),
+        &runner.label,
+        dir,
+        &st,
+        &cache,
+        &find,
+    ) {
+        return fail;
+    }
+    let run = words(&runner.run);
+    let Some((prog, args)) = run.split_first() else {
+        return failed("the language has nothing to run".into(), String::new());
+    };
+    let Some(bin) = find(prog) else {
+        return failed(
+            format!("{prog} was not found on your PATH: install it, or pick another language"),
+            String::new(),
+        );
+    };
+    let mut cmd = Command::new(&bin);
+    cmd.args(args)
         .current_dir(dir)
         .env_clear()
         .env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")
         .env("HOME", &cache)
         .env("STATE", &st)
         .env("CACHE", &cache)
-        .env("IOHR_EXT_ONCE", "1")
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env("PYTHONPATH", dir.join("src"))
-        .output();
-    let out = match out {
+        .env("IOHR_EXT_ONCE", "1");
+    for (k, v) in &runner.env {
+        cmd.env(k, paths_in(v, dir, &st, &cache));
+    }
+    let out = match cmd.output() {
         Ok(o) => o,
-        Err(e) => {
-            return Smoke {
-                ok: false,
-                said: format!("python3 could not be started: {e}"),
-                heartbeat: None,
-                output: String::new(),
-            };
-        }
+        Err(e) => return failed(format!("{prog} could not be started: {e}"), String::new()),
     };
     let text = format!(
         "{}{}",
@@ -509,9 +628,20 @@ mod tests {
     use crate::template::{self, Answers, Spec};
 
     fn rendered(id: &str, name: &str) -> Vec<(String, String)> {
+        rendered_in(id, name, "python").0
+    }
+
+    /// The files and the runner of template `id` in language `lang`.
+    fn rendered_in(id: &str, name: &str, lang: &str) -> (Vec<(String, String)>, Option<Runner>) {
         let t = template::load(&Spec::Id(id.into()), Path::new("/no-such-iohr-root")).unwrap();
-        let vals = template::values(name, "local", "2026-10-12T10:00:00Z", &Answers::new());
-        template::render(&t, &vals).unwrap()
+        let mut given = Answers::new();
+        if !t.meta.variants.is_empty() {
+            given.insert("language".into(), template::Answer::Text(lang.into()));
+        }
+        let answers = template::answer(&t, &given, None).unwrap();
+        let vals = template::all_values(&t, name, "local", "2026-10-12T10:00:00Z", &answers);
+        let tv = t.with_variant(lang).unwrap_or_else(|_| t.clone());
+        (template::render(&tv, &vals).unwrap(), t.runner(lang, &vals))
     }
 
     #[test]
@@ -586,7 +716,7 @@ mod tests {
         let dir = d.path().join("development/demo");
         let st = d.path().join("projects");
         let files = rendered("demo", "demo");
-        let (written, s) = scaffold(&dir, &files, "demo").unwrap();
+        let (written, s) = scaffold(&dir, &files, &[], "demo").unwrap();
         assert_eq!(s.id, "scaffold");
         assert_eq!(written.len(), files.len());
         assert!(dir.join("src/demo/__main__.py").is_file());
@@ -600,7 +730,7 @@ mod tests {
                 .all(|s| s.state != "not-yet" || !s.needs.is_empty())
         );
         assert!(
-            scaffold(&dir, &files, "demo")
+            scaffold(&dir, &files, &[], "demo")
                 .unwrap_err()
                 .contains("not empty")
         );
@@ -623,22 +753,24 @@ mod tests {
         assert!(p.contains("- flavour: fancy") && p.contains("sell hats"));
     }
 
+    /// The program a variant needs, on this machine's PATH?
+    fn have(program: &str) -> bool {
+        crate::ask::find_on_path(program, &std::env::var_os("PATH").unwrap_or_default()).is_some()
+    }
+
     #[test]
     fn the_smoke_test_runs_the_project_once_and_reads_one_heartbeat() {
-        if Command::new("python3")
-            .arg("--version")
-            .output()
-            .map_or(true, |o| !o.status.success())
-        {
+        if !have("python3") {
             eprintln!("no python3 here: the smoke test is not run");
             return;
         }
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("development/my-shop");
         let st = d.path().join("projects");
-        scaffold(&dir, &rendered("demo", "my-shop"), "demo").unwrap();
+        let (files, runner) = rendered_in("demo", "my-shop", "python");
+        scaffold(&dir, &files, &[], "demo").unwrap();
         let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
-        let s = smoke(&dir, &state, "my-shop");
+        let s = smoke(&dir, &state, "my-shop", runner.as_ref());
         assert!(s.ok, "{} / {}", s.said, s.output);
         let b = s.heartbeat.unwrap();
         assert_eq!(b["id"], "local/my-shop");
@@ -646,5 +778,61 @@ mod tests {
         assert_eq!(b["token"], "refused");
         assert!(!dir.join("heartbeat.json").exists());
         assert!(!dir.join("src/my_shop/__pycache__").exists());
+    }
+
+    /// Every live language of the demo: its files render, its manifest passes the lint, its
+    /// smoke test reads one heartbeat, and its own self-test passes. Skipped (said on stderr)
+    /// when the toolchain is not on this machine.
+    #[test]
+    fn every_live_demo_language_renders_runs_and_passes_its_own_test() {
+        let tpl =
+            template::load(&Spec::Id("demo".into()), Path::new("/no-such-iohr-root")).unwrap();
+        for v in tpl.live_variants() {
+            let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
+            if !missing.is_empty() {
+                eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
+                continue;
+            }
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("my-shop");
+            let (files, runner) = rendered_in("demo", "my-shop", &v.id);
+            assert!(check_manifest(&files).is_ok(), "{}", v.id);
+            for (p, x) in &files {
+                assert!(!p.contains("@@") && !x.contains("@@"), "{}: {p}", v.id);
+            }
+            let tv = tpl.with_variant(&v.id).unwrap();
+            let programs = template::programs(&tv, &[]);
+            scaffold(&dir, &files, &programs, "demo").unwrap();
+            let st = tmp.path().join("projects");
+            let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
+            let said = smoke(&dir, &state, "my-shop", runner.as_ref());
+            assert!(said.ok, "{}: {} / {}", v.id, said.said, said.output);
+            let b = said.heartbeat.unwrap();
+            assert_eq!(b["id"], "local/my-shop", "{}", v.id);
+            assert_eq!(b["beats"], 1, "{}", v.id);
+            assert_eq!(b["token"], "refused", "{}", v.id);
+            // The project's own test, the way its README says.
+            let test = &v.test;
+            let (prog, args) = test.split_first().unwrap();
+            std::fs::create_dir_all(tmp.path().join("tstate")).unwrap();
+            std::fs::create_dir_all(tmp.path().join("tcache")).unwrap();
+            let out = Command::new(prog)
+                .args(args)
+                .current_dir(&dir)
+                .env("CARGO_TARGET_DIR", tmp.path().join("tt"))
+                .env("STATE", tmp.path().join("tstate"))
+                .env("CACHE", tmp.path().join("tcache"))
+                .env("PYTHONDONTWRITEBYTECODE", "1")
+                .env("PYTHONPATH", dir.join("src"))
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{} self-test: {}{}",
+                v.id,
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
     }
 }

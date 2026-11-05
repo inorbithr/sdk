@@ -1380,14 +1380,22 @@ pub enum ProjectCommand {
         /// Answer the questions with their defaults: no menu, no confirmation.
         #[arg(short = 'y', long)]
         yes: bool,
-        /// The folder to write (default: ~/development/NAME); it must not exist or be empty.
+        /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
+        /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
+        /// when you are inside a git repository, or a path of your own. It must not exist
+        /// or be empty.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
+        /// The language, for a template that offers several (the same as `--set
+        /// language=ID`); `iohr project template show ID` lists them. At a terminal,
+        /// leaving it out offers a menu that marks the toolchains you have.
+        #[arg(long, value_name = "ID")]
+        lang: Option<String>,
         /// The publisher half of the extension id (default: your account's slug, else
         /// "local"); the private listing takes it when that step lands.
         #[arg(long)]
         publisher: Option<String>,
-        /// Skip the smoke test (it runs the project once with python3).
+        /// Skip the smoke test (it runs the project once with the language's own runtime).
         #[arg(long)]
         no_smoke: bool,
     },

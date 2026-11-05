@@ -442,7 +442,7 @@ iohr project init demo
 iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
 iohr project template list        # name, status, origin, the default (*) and what it is
 iohr project template list --json
-iohr project template show demo   # what it asks, which files it writes, its steps
+iohr project template show demo   # what it asks, its languages, which files it writes, its steps
 cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 ```
 
