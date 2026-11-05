@@ -368,6 +368,7 @@ agent = "claude"
 model = "haiku"
 allow_edits = false
 thinking = "show"
+hints = "sometimes"
 ```
 
 Rules:
@@ -489,6 +490,7 @@ and drawn as a card.
 | `model` | any model name the agent knows; may not start with `-` | `haiku` for `claude`, the agent's own for `codex` | `iohr ask` |
 | `allow_edits` | `true` lets the agent edit files: `--permission-mode acceptEdits` for `claude`, `--sandbox workspace-write` for `codex` | `false` | `iohr ask` |
 | `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
+| `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
 
 Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--thinking`, `--dry-run`. Running a
 shell command is never allowed, with or without `--allow-edits`; the agent's default
@@ -500,6 +502,19 @@ the answer is printed, on stdout; the thinking, tool rows, footer and spinner ar
 With `--json` the agent's own event lines are passed through untouched, one per line, followed
 by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
 command exits with the agent's code, and with 1 when the agent reports a failed run.
+
+The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
+read, that nothing was run, that an AI model under your own subscription got the folder, and
+to check the answer) on the first card ever, whenever that text changes, and about once a
+day; every other card closes with one short hint, taken in turn from "`??` follows up",
+"`iohr ask --help` for flags", "`[ask] model` in config picks the model" and "`INORBIT_ASK=0`
+turns `?` off". `hints = "always"` shows the full disclosure every time; `"never"` shows it
+on the first card and when the text changes, and nothing otherwise. The one small file it
+keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),
+holds a fingerprint of the disclosure text, when it was last shown and a counter, never a
+question or an answer; delete it and the next card is the first again. A pipe, `--json`,
+`NO_COLOR` or a terminal that cannot draw the card print the one-line label instead, which
+carries the disclosure itself.
 
 ## 5. Credentials
 

@@ -339,7 +339,7 @@ pub enum Command {
     ///
     /// Ask a question in this folder: your own AI agent (Claude Code, or Codex) answers once,
     /// right here in the terminal, under your own subscription. No session opens: the agent
-    /// runs in print mode with the small fast model (`haiku`) and iohr draws what it thinks
+    /// runs in print mode with the small fast model (`haiku`, or `--model`, `IOHR_ASK_MODEL`, `[ask] model`) and iohr draws what it thinks
     /// (dim, in a quiet block), each tool it uses (one row each) and the answer as it arrives,
     /// then a footer with the time, turns and cost. Without a terminal, with `NO_COLOR` or
     /// TERM=dumb it prints only the answer; `--json` passes the agent's own events through as
@@ -1349,7 +1349,7 @@ pub struct AskArgs {
     /// The model that answers: a Claude alias such as `haiku` or a full model name. Default
     /// `[ask] model`, else `haiku`, the small fast tier. With `--agent codex` it is passed on
     /// only when you name one.
-    #[arg(long, value_name = "MODEL")]
+    #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
     pub model: Option<String>,
     /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
     /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits

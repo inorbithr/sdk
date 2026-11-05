@@ -20,6 +20,7 @@ mod commands;
 mod context;
 mod error;
 mod headless;
+mod hints;
 mod io_signin;
 mod lock;
 mod output;

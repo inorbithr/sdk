@@ -99,19 +99,25 @@ pub(crate) struct Card<'a> {
     pub(crate) follows: Option<&'a str>,
     /// What was read and that nothing was run ([`crate::headless::read_line`]).
     pub(crate) read: &'a str,
-    /// The disclosure sentences that close the card.
+    /// The disclosure sentences that close a full footer.
     pub(crate) notice: &'a str,
+    /// Whether the footer is the full disclosure (`read` and `notice`), or only `hint`. The
+    /// "AI answer" label in the header is on every card either way.
+    pub(crate) full: bool,
     /// The one-line label printed instead of a card when the look is plain.
     pub(crate) label: &'a str,
-    /// A hint at the end of the footer, such as "`??` follows up".
+    /// The short footer, such as "`??` follows up"; none closes the frame bare.
     pub(crate) hint: Option<&'a str>,
     pub(crate) body: Body<'a>,
 }
 
-/// The width to draw at for a terminal `cols` wide (unknown: 80).
+/// The width to draw at for a terminal `cols` wide (unknown: 80): one column less than the
+/// terminal, so no line ever fills the last column (a terminal that wraps eagerly, or one
+/// that counts a glyph wider than we do, would break it and drop the rail).
 #[must_use]
 pub(crate) fn width_for(cols: Option<usize>) -> usize {
-    cols.unwrap_or(80).clamp(WIDTH_MIN, WIDTH_MAX)
+    cols.map_or(80, |c| c.saturating_sub(1))
+        .clamp(WIDTH_MIN, WIDTH_MAX)
 }
 
 /// The width of stderr's terminal, as [`width_for`] draws it.
@@ -213,12 +219,16 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
 }
 
 fn footer(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
-    let text = format!("{} {}", card.read, card.notice);
     let inner = width - 3;
-    let mut lines = wrap(&spans(&text), inner, look, Kind::Dim);
-    // The hint is a line of its own, so it is never cut in half by the notice's wrap.
-    if let Some(h) = card.hint {
-        lines.extend(wrap(&spans(h), inner, look, Kind::Dim));
+    let lines = if card.full {
+        let text = format!("{} {}", card.read, card.notice);
+        wrap(&spans(&text), inner, look, Kind::Dim)
+    } else {
+        card.hint
+            .map_or_else(Vec::new, |h| wrap(&spans(h), inner, look, Kind::Dim))
+    };
+    if lines.is_empty() {
+        let _ = writeln!(out, "{}", look.violet().apply_to("╰─"));
     }
     for (i, l) in lines.iter().enumerate() {
         let lead = if i == 0 {
@@ -599,6 +609,7 @@ mod tests {
             read: "Read: your question, the folder's path; nothing was run.",
             notice: "An AI model under your own subscription. Check it before you rely on it.",
             label: "Io · AI answer -- Io running on Claude Code (local).",
+            full: true,
             hint: Some("`??` follows up."),
             body: Body::Answer(text),
         }
@@ -633,14 +644,32 @@ mod tests {
             out.contains("│  ❯ cargo nextest run -p iohr --test project\n"),
             "{out}"
         );
-        assert!(
-            lines.last().is_some_and(|l| l.contains("follows up")),
-            "{out}"
-        );
         assert!(out.contains("╰─ Read: your question"), "{out}");
+        assert!(
+            !out.contains("follows up"),
+            "a full footer carries no hint: {out}"
+        );
         for l in &lines[1..] {
             assert!(measure_text_width(l) <= 60, "too wide: {l:?}");
         }
+    }
+
+    #[test]
+    fn a_short_footer_is_one_line_and_the_label_stays_in_the_header() {
+        let mut c = card("Hi.");
+        c.full = false;
+        let out = strip(&render(&c, 60, FANCY));
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[0].contains("AI answer"), "{out}");
+        assert_eq!(lines.last(), Some(&"╰─ ?? follows up."), "{out}");
+        assert!(
+            !out.contains("Read:") && !out.contains("subscription"),
+            "{out}"
+        );
+        c.hint = None;
+        let bare = strip(&render(&c, 60, FANCY));
+        assert_eq!(bare.lines().last(), Some("╰─"), "{bare}");
+        assert!(bare.lines().next().is_some_and(|l| l.contains("AI answer")));
     }
 
     #[test]
@@ -710,6 +739,49 @@ mod tests {
         assert_eq!(width_for(None), 80);
         assert_eq!(width_for(Some(300)), WIDTH_MAX);
         assert_eq!(width_for(Some(10)), WIDTH_MIN);
-        assert_eq!(width_for(Some(72)), 72);
+        assert_eq!(width_for(Some(72)), 71);
+    }
+
+    /// A line as wide as the terminal leaves the cursor in the pending-wrap state, and a
+    /// terminal that wraps eagerly (or counts one glyph wider than we do) then breaks the
+    /// line: the rest lands on a line of its own with no rail. So the card never draws a
+    /// line as wide as the terminal, whatever its width and whatever the text.
+    #[test]
+    fn no_line_is_as_wide_as_the_terminal_and_every_body_line_has_its_rail() {
+        // Words sized so that, at some terminal width, a body line fills the inner width
+        // exactly (the case behind the blank, rail-less line in a 100-column card).
+        let filler = |n: usize| "x".repeat(n);
+        for cols in [40usize, 41, 60, 79, 80, 99, 100, 101, 120, 300] {
+            let width = width_for(Some(cols));
+            let inner = width - measure_text_width(RAIL);
+            for first in 1..inner {
+                let rest = inner - first - 1;
+                if rest == 0 {
+                    continue;
+                }
+                let text = format!(
+                    "{} {} tail of the paragraph, so a project, or an API.",
+                    filler(first),
+                    filler(rest)
+                );
+                let out = strip(&render(&card(&text), width, FANCY));
+                for l in out.lines() {
+                    assert!(
+                        measure_text_width(l) < cols.max(WIDTH_MIN + 1),
+                        "{cols} columns, line of {}: {l}",
+                        measure_text_width(l)
+                    );
+                }
+                let body: Vec<&str> = out
+                    .lines()
+                    .skip(1)
+                    .take_while(|l| !l.starts_with('╰'))
+                    .collect();
+                assert!(
+                    body.iter().all(|l| l.starts_with('│')),
+                    "{cols} columns, first {first}: {out}"
+                );
+            }
+        }
     }
 }

@@ -162,7 +162,7 @@ pub struct AskConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     /// The model the agent answers with: a Claude alias such as `haiku` (the default, the
-    /// small fast tier) or a full model name. `--model` wins over it. For `codex` it is passed
+    /// small fast tier) or a full model name. `--model` (or `IOHR_ASK_MODEL`) wins over it. For `codex` it is passed
     /// as `--model` only when set; Codex otherwise uses its own configured model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -175,6 +175,11 @@ pub struct AskConfig {
     /// default) or `collapse` (one line). `--thinking` wins over it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
+    /// How often the footer of the `?` card is the full notice instead of one short hint:
+    /// `sometimes` (the default: the first card, when the notice changes and about once a
+    /// day), `always` or `never` (the first card and a changed notice still show it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hints: Option<String>,
 }
 
 impl AskConfig {
@@ -186,6 +191,7 @@ impl AskConfig {
             && self.model.is_none()
             && self.allow_edits.is_none()
             && self.thinking.is_none()
+            && self.hints.is_none()
     }
 }
 

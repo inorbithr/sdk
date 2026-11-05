@@ -90,6 +90,10 @@ pub(crate) fn choose_agent(flag: Option<&str>, configured: Option<&str>) -> Resu
     }
 }
 
+/// The model a quick question uses when none is named: the small, fast tier, the cheapest that
+/// answers.
+pub(crate) const DEFAULT_MODEL: &str = "haiku";
+
 fn pick<'a>(flag: Option<&'a str>, configured: Option<&'a str>, default: &'a str) -> &'a str {
     [flag, configured]
         .into_iter()
@@ -99,7 +103,8 @@ fn pick<'a>(flag: Option<&'a str>, configured: Option<&'a str>, default: &'a str
         .unwrap_or(default)
 }
 
-/// The model: the flag, else `[ask] model`, else for Claude `haiku` (the small, fast tier). Codex
+/// The model: the flag (or `IOHR_ASK_MODEL`), else `[ask] model`, else for Claude `haiku` (the
+/// small, fast tier). The one reading of the setting, for the card and the streamed answer alike. Codex
 /// has no default here: with none named it uses its own configured model.
 ///
 /// # Errors
@@ -116,7 +121,7 @@ pub(crate) fn choose_model(
         .find(|v| !v.is_empty());
     let model = match (named, agent) {
         (Some(m), _) => m,
-        (None, Agent::Claude) => "haiku",
+        (None, Agent::Claude) => DEFAULT_MODEL,
         (None, Agent::Codex) => return Ok(None),
     };
     if model.starts_with('-') || model.contains(char::is_whitespace) {
