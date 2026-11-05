@@ -1,6 +1,8 @@
 //! `iohr shell hook`: what a shell evaluates to get the `? question` prompt (PRD 0187).
 
-use crate::cli::{HookShell, ShellCommand};
+use crate::actions::MenuKey;
+use crate::cli::{Global, HookShell, ShellCommand};
+use crate::context::Ctx;
 use crate::error::Error;
 use crate::output::Out;
 
@@ -22,14 +24,27 @@ fn bin_name(arg0: Option<&std::ffi::OsStr>) -> &str {
     if plain { name } else { "iohr" }
 }
 
-pub(crate) fn run(cmd: &ShellCommand) -> Result<(), Error> {
+/// The menu key's `bindkey` strings as zsh words, each in single quotes (they hold `^` and `[`).
+fn key_words(key: MenuKey) -> String {
+    key.sequences()
+        .iter()
+        .map(|s| format!("'{s}'"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub(crate) fn run(g: &Global, cmd: &ShellCommand) -> Result<(), Error> {
     let ShellCommand::Hook { shell } = cmd;
     match *shell {
         HookShell::Zsh => {
             // Text that is evaluated: printed as it is, also under `--json`. It calls back the
             // binary that printed it, so `iohr-preview shell hook zsh` asks `iohr-preview`.
             let name = std::env::args_os().next();
-            let hook = ZSH_HOOK.replace("__IOHR_BIN__", bin_name(name.as_deref()));
+            let key = MenuKey::parse(Ctx::load(g)?.config.ask.menu_key.as_deref())
+                .map_err(Error::Usage)?;
+            let hook = ZSH_HOOK
+                .replace("__IOHR_BIN__", bin_name(name.as_deref()))
+                .replace("__IOHR_MENU_KEYS__", &key_words(key));
             Out::raw(hook.as_bytes());
             Ok(())
         }

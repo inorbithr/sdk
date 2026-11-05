@@ -1140,10 +1140,21 @@ pub enum ExtCommand {
 #[derive(Debug, Args)]
 pub struct AskArgs {
     /// The question or the job, in words (quotes are optional).
-    #[arg(required = true, num_args = 1..)]
+    #[arg(required_unless_present = "menu", conflicts_with = "menu", num_args = 1..)]
     pub question: Vec<String>,
     #[command(flatten)]
     pub headless: HeadlessArgs,
+    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain
+    /// or Open with a letter or the arrows. It asks no model, runs nothing, and prints the one
+    /// line to put on the prompt (or nothing) on stdout.
+    #[arg(long, conflicts_with_all = ["interactive", "headless", "card", "hook"])]
+    pub menu: bool,
+    /// With `--menu`: the command the answer suggested.
+    #[arg(long, value_name = "COMMAND", requires = "menu")]
+    pub command: Option<String>,
+    /// With `--menu`: the file (relative to `--cwd`) or `https://` link the answer named.
+    #[arg(long, value_name = "LINK", requires = "menu")]
+    pub link: Option<String>,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,
@@ -1181,6 +1192,7 @@ pub enum HookShell {
 /// shell prompt, a script or the InOrbit app asks (PRD 0187). Without a terminal, and
 /// under `--json`, it is always this.
 #[derive(Debug, Args, Default)]
+#[allow(clippy::struct_excessive_bools)] // independent command-line switches, not a state
 pub struct HeadlessArgs {
     /// Answer once and print (a small model, a turn cap, no tools), even at a terminal.
     #[arg(long, conflicts_with = "interactive")]
@@ -1191,6 +1203,10 @@ pub struct HeadlessArgs {
     /// Draw the answer for a person on stderr; stdout still gets the plain answer.
     #[arg(long, conflicts_with = "interactive")]
     pub card: bool,
+    /// For the shell hook: draw the card on stderr, with the action row, and print on stdout
+    /// the answer, the suggested command and the link, separated by the 0x1e character.
+    #[arg(long, conflicts_with = "interactive")]
+    pub hook: bool,
     /// The folder the question is about (default: this one). Sent to the agent as text.
     #[arg(long, value_name = "DIR", conflicts_with = "interactive")]
     pub cwd: Option<String>,

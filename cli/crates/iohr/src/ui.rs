@@ -32,12 +32,15 @@ pub(crate) fn fancy_for(
 
 /// One menu entry: the value returned, its label, a one-line hint, and whether it can be
 /// chosen. An entry that cannot be chosen is shown dimmed, marked "coming", and refused.
+/// `key` is a letter that picks it at once; a menu where any entry has one is drawn by
+/// [`Ui::select_keyed`].
 #[derive(Debug, Clone)]
 pub(crate) struct Choice {
     pub(crate) value: String,
     pub(crate) label: String,
     pub(crate) hint: String,
     pub(crate) available: bool,
+    pub(crate) key: Option<char>,
 }
 
 /// The look, decided once per command.
@@ -148,6 +151,10 @@ impl Ui {
                 "{prompt}: there is no terminal to ask on; pass the choice as a flag"
             )));
         }
+        if choices.iter().any(|c| c.key.is_some()) {
+            return Self::select_keyed(prompt, choices, initial)?
+                .ok_or_else(|| Error::Failed("cancelled".into()));
+        }
         loop {
             let mut menu = cliclack::select::<String>(prompt);
             for c in choices {
@@ -169,6 +176,64 @@ impl Ui {
                 _ => {
                     let _ = cliclack::log::warning(format!("{picked} is coming; pick a live one"));
                 }
+            }
+        }
+    }
+
+    /// A menu of entries with a letter each: the letter picks, the arrows and Enter pick the
+    /// highlighted one, Esc, `q` and Ctrl-C leave (`None`). `cliclack`'s menu has no hotkeys,
+    /// so this one is drawn on stderr with `console` and works on any terminal, with or
+    /// without colour (`console` honours `NO_COLOR`). Entries that are not available are left
+    /// out by the caller.
+    ///
+    /// # Errors
+    ///
+    /// No terminal on stderr, or the terminal cannot be read.
+    pub(crate) fn select_keyed(
+        prompt: &str,
+        choices: &[Choice],
+        initial: &str,
+    ) -> Result<Option<String>, Error> {
+        use console::{Key, Term, style};
+        if !prompt::interactive() || choices.is_empty() {
+            return Err(Error::Usage(format!(
+                "{prompt}: there is no terminal to ask on"
+            )));
+        }
+        let term = Term::stderr();
+        let mut at = choices.iter().position(|c| c.value == initial).unwrap_or(0);
+        let io_err = |e: io::Error| cancelled(&e);
+        loop {
+            term.write_line(&style(prompt).bold().to_string())
+                .map_err(io_err)?;
+            for (i, c) in choices.iter().enumerate() {
+                let key = c.key.map_or_else(String::new, |k| format!("{k}"));
+                let line = format!(
+                    "{} {} {}  {}",
+                    if i == at { "\u{203a}" } else { " " },
+                    style(key).cyan(),
+                    c.label,
+                    style(&c.hint).dim()
+                );
+                term.write_line(&line).map_err(io_err)?;
+            }
+            let key = term.read_key();
+            term.clear_last_lines(choices.len() + 1).map_err(io_err)?;
+            match key {
+                Ok(Key::ArrowDown | Key::Tab) => at = (at + 1) % choices.len(),
+                Ok(Key::ArrowUp | Key::BackTab) => at = (at + choices.len() - 1) % choices.len(),
+                Ok(Key::Enter) => return Ok(Some(choices[at].value.clone())),
+                Ok(Key::Escape | Key::CtrlC) | Err(_) => return Ok(None),
+                Ok(Key::Char(k)) => {
+                    let k = k.to_ascii_lowercase();
+                    if k == 'q' {
+                        return Ok(None);
+                    }
+                    if let Some(c) = choices.iter().find(|c| c.key == Some(k)) {
+                        return Ok(Some(c.value.clone()));
+                    }
+                }
+                Ok(_) => {}
             }
         }
     }

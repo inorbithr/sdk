@@ -175,6 +175,7 @@ fn ask(
                     label: (*id).to_owned(),
                     hint: what.replace("; coming after the demo", ""),
                     available: *live,
+                    key: None,
                 })
                 .collect();
             ui.select("Which template?", &choices, &default)?

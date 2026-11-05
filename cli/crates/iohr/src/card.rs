@@ -108,6 +108,8 @@ pub(crate) struct Card<'a> {
     pub(crate) label: &'a str,
     /// The short footer, such as "`??` follows up"; none closes the frame bare.
     pub(crate) hint: Option<&'a str>,
+    /// The action row under the answer ([`crate::actions::row`]); drawn only by a fancy look.
+    pub(crate) row: Option<&'a str>,
     pub(crate) body: Body<'a>,
 }
 
@@ -164,6 +166,10 @@ pub(crate) fn render(card: &Card<'_>, width: usize, look: Look) -> String {
         }
     }
     let _ = writeln!(out, "{rail_end}");
+    if let Some(row) = card.row {
+        let row = console::truncate_str(row, inner, "…");
+        let _ = writeln!(out, "{rail}{}", look.cyan().apply_to(row));
+    }
     footer(&mut out, card, width, look);
     out
 }
@@ -265,12 +271,134 @@ enum Block {
     Code(Vec<String>),
 }
 
-/// Shell fences: what is in them is a command to show, not code to read.
+/// Shell fences: what is in them is a command to show, not code to read. The same list as the
+/// Mac app's and as [`command_of`]'s (RFC 0203.1): the menu puts a command on a zsh line, so a
+/// fish fence is shown as code and never offered.
 fn is_shell(lang: &str) -> bool {
-    matches!(
-        lang,
-        "" | "sh" | "bash" | "zsh" | "shell" | "console" | "fish"
-    )
+    matches!(lang, "" | "sh" | "bash" | "zsh" | "shell" | "console")
+}
+
+/// The longest command the menu puts on the prompt line, in bytes (the Mac app's
+/// `LIMITS.command`).
+pub(crate) const COMMAND_MAX: usize = 1024;
+
+/// How many words of an answer [`link_of`] looks at, so a long answer costs a bounded number
+/// of file lookups.
+const LINK_WORDS: usize = 400;
+
+/// The answer's first link (RFC 0203.1 section 4), in the order written: an `https://` URL
+/// with a host, or a file under `cwd` that exists. A file is kept as a path relative to the
+/// real `cwd`, with no control character; nothing else is a link (no `http`, no `file:`, no
+/// path that leaves the folder).
+#[must_use]
+pub(crate) fn link_of(answer: &str, cwd: &std::path::Path) -> Option<String> {
+    let root = cwd.canonicalize().ok();
+    for word in answer.split_whitespace().take(LINK_WORDS) {
+        let w = word.trim_matches(|c: char| {
+            matches!(
+                c,
+                '`' | '"' | '\'' | '(' | ')' | '<' | '>' | '[' | ']' | ',' | ';' | '*'
+            )
+        });
+        let w = w.trim_end_matches(['.', ':']);
+        if w.is_empty() || w.chars().any(char::is_control) {
+            continue;
+        }
+        if let Some(rest) = w.strip_prefix("https://") {
+            if rest.is_empty() {
+                continue;
+            }
+            if url::Url::parse(w).is_ok_and(|u| u.has_host()) {
+                return Some(w.to_owned());
+            }
+            continue;
+        }
+        if w.contains("://") || !(w.contains('/') || w.contains('.')) {
+            continue;
+        }
+        // "src/main.rs:42" is the file.
+        let name = w.rsplit_once(':').map_or(w, |(f, n)| {
+            if n.chars().all(|c| c.is_ascii_digit()) {
+                f
+            } else {
+                w
+            }
+        });
+        let Some(root) = root.as_deref() else {
+            continue;
+        };
+        if let Ok(real) = root.join(name).canonicalize()
+            && real.is_file()
+            && real.starts_with(root)
+        {
+            return real
+                .strip_prefix(root)
+                .ok()
+                .and_then(|r| r.to_str())
+                .map(str::to_owned);
+        }
+    }
+    None
+}
+
+/// A piece of an answer: a line of prose, or a fenced block (its language, lower case, and its
+/// lines). An unclosed fence runs to the end.
+enum Seg<'a> {
+    Line(&'a str),
+    Fence(String, Vec<String>),
+}
+
+/// The answer as [`Seg`]s. The one fence reader: [`blocks`] and [`command_of`] both use it, so
+/// the card shows a command exactly when the menu offers it.
+fn segments(text: &str) -> Vec<Seg<'_>> {
+    let mut out = Vec::new();
+    let mut cur: Option<(String, Vec<String>)> = None;
+    for raw in text.lines() {
+        if let Some(rest) = raw.trim().strip_prefix("```") {
+            match cur.take() {
+                Some((lang, body)) => out.push(Seg::Fence(lang, body)),
+                None => cur = Some((rest.trim().to_ascii_lowercase(), Vec::new())),
+            }
+        } else if let Some((_, body)) = cur.as_mut() {
+            body.push(raw.trim_end().to_owned());
+        } else {
+            out.push(Seg::Line(raw));
+        }
+    }
+    if let Some((lang, body)) = cur {
+        out.push(Seg::Fence(lang, body));
+    }
+    out
+}
+
+/// What may be put on a prompt line: one line with no control character (no Enter, no escape,
+/// no tab, no U+2028/U+2029), so it can never run by itself or carry a second command, and at
+/// most [`COMMAND_MAX`] bytes. The Mac app's `insertable`.
+#[must_use]
+pub(crate) fn insertable(command: &str) -> Option<&str> {
+    let c = command.trim();
+    let bad = |ch: char| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}');
+    (!c.is_empty() && c.len() <= COMMAND_MAX && !c.chars().any(bad)).then_some(c)
+}
+
+/// The command an answer suggests (RFC 0203.1 section 1): the last fenced block in a shell
+/// language whose body is one line (blank lines around it are ignored, a leading `$ ` is
+/// removed) and that is [`insertable`]. Anything else is none.
+#[must_use]
+pub(crate) fn command_of(answer: &str) -> Option<String> {
+    let one_line = |body: &[String]| {
+        let joined = body.join("\n");
+        let one = joined.trim();
+        (!one.contains('\n')).then(|| one.strip_prefix("$ ").unwrap_or(one).to_owned())
+    };
+    let last = segments(answer)
+        .into_iter()
+        .rev()
+        .find_map(|seg| match seg {
+            Seg::Fence(lang, body) if is_shell(&lang) => one_line(&body),
+            _ => None,
+        })?;
+    insertable(&last).map(str::to_owned)
 }
 
 /// "- x", "* x", "• x" → ("•", "x"); "1. x", "2) x" → ("1.", "x").
@@ -293,40 +421,31 @@ fn item(line: &str) -> Option<(String, String)> {
 fn blocks(text: &str) -> Vec<Block> {
     let mut out = Vec::new();
     let mut cur: Option<Block> = None;
-    let mut fence: Option<(String, Vec<String>)> = None;
     let flush = |cur: &mut Option<Block>, out: &mut Vec<Block>| {
         if let Some(b) = cur.take() {
             out.push(b);
         }
     };
-    let close = |lang: &str, body: Vec<String>, out: &mut Vec<Block>| {
-        if is_shell(lang) {
-            for l in body {
-                let l = l.trim();
-                let l = l.strip_prefix("$ ").unwrap_or(l).trim();
-                if !l.is_empty() {
-                    out.push(Block::Command(l.to_owned()));
-                }
-            }
-        } else if body.iter().any(|l| !l.trim().is_empty()) {
-            out.push(Block::Code(body));
-        }
-    };
-    for raw in text.lines() {
-        let line = raw.trim();
-        if let Some(rest) = line.strip_prefix("```") {
-            if let Some((lang, body)) = fence.take() {
-                close(&lang, body, &mut out);
-            } else {
+    for seg in segments(text) {
+        let raw = match seg {
+            Seg::Fence(lang, body) => {
                 flush(&mut cur, &mut out);
-                fence = Some((rest.trim().to_ascii_lowercase(), Vec::new()));
+                if is_shell(&lang) {
+                    for l in body {
+                        let l = l.trim();
+                        let l = l.strip_prefix("$ ").unwrap_or(l).trim();
+                        if !l.is_empty() {
+                            out.push(Block::Command(l.to_owned()));
+                        }
+                    }
+                } else if body.iter().any(|l| !l.trim().is_empty()) {
+                    out.push(Block::Code(body));
+                }
+                continue;
             }
-            continue;
-        }
-        if let Some((_, body)) = fence.as_mut() {
-            body.push(raw.trim_end().to_owned());
-            continue;
-        }
+            Seg::Line(raw) => raw,
+        };
+        let line = raw.trim();
         if line.is_empty() {
             flush(&mut cur, &mut out);
         } else if line.starts_with('#') {
@@ -346,9 +465,6 @@ fn blocks(text: &str) -> Vec<Block> {
         }
     }
     flush(&mut cur, &mut out);
-    if let Some((lang, body)) = fence {
-        close(&lang, body, &mut out);
-    }
     out
 }
 
@@ -611,6 +727,7 @@ mod tests {
             label: "Io · AI answer -- Io running on Claude Code (local).",
             full: true,
             hint: Some("`??` follows up."),
+            row: None,
             body: Body::Answer(text),
         }
     }
@@ -782,6 +899,93 @@ mod tests {
                     "{cols} columns, first {first}: {out}"
                 );
             }
+        }
+    }
+
+    // The one rule for the suggested command (RFC 0203.1 section 1); the Mac app's cases first.
+    #[test]
+    fn the_command_is_the_last_one_line_shell_fence() {
+        let fence = |lang: &str, body: &str| format!("Do this:\n```{lang}\n{body}\n```\n");
+        assert_eq!(
+            command_of(&fence("bash", "git status")).as_deref(),
+            Some("git status")
+        );
+        assert_eq!(command_of(&fence("", "ls -la")).as_deref(), Some("ls -la"));
+        assert_eq!(command_of(&fence("sh", "$ ls")).as_deref(), Some("ls"));
+        assert_eq!(
+            command_of(&fence("zsh", "\ncd ..\n")).as_deref(),
+            Some("cd ..")
+        );
+        // The last of several.
+        let two = format!("{}{}", fence("bash", "one"), fence("console", "two"));
+        assert_eq!(command_of(&two).as_deref(), Some("two"));
+        // Code, fish, a second line, nothing, a prose line: no command.
+        assert_eq!(command_of(&fence("rust", "fn main() {}")), None);
+        assert_eq!(command_of(&fence("fish", "set x 1")), None);
+        assert_eq!(command_of(&fence("bash", "cd a\nls")), None);
+        assert_eq!(command_of(&fence("bash", "")), None);
+        assert_eq!(command_of("Run `ls` now."), None);
+        // Never a line that could run by itself or hide a second command.
+        assert_eq!(command_of(&fence("bash", "ls\u{1b}[2J")), None);
+        assert_eq!(command_of(&fence("bash", "ls\u{7}")), None);
+        assert_eq!(command_of(&fence("bash", "ls\u{2028}rm x")), None);
+        assert_eq!(command_of(&fence("bash", "ls\tx")), None);
+        let longest = "a".repeat(COMMAND_MAX);
+        assert_eq!(
+            command_of(&fence("bash", &longest)).as_deref(),
+            Some(longest.as_str())
+        );
+        assert_eq!(
+            command_of(&fence("bash", &"a".repeat(COMMAND_MAX + 1))),
+            None
+        );
+        // The card shows a command exactly when the menu offers it.
+        let shown = strip(&render(&card(&fence("bash", "ls\u{7}")), 80, PLAIN));
+        assert!(shown.contains("ls"), "{shown}");
+    }
+
+    #[test]
+    fn a_link_is_an_https_url_or_a_file_in_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("proj");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "x").unwrap();
+        std::fs::write(dir.path().join("outside.txt"), "x").unwrap();
+        let l = |a: &str| link_of(a, &root);
+        assert_eq!(
+            l("See https://example.com/a?b=1."),
+            Some("https://example.com/a?b=1".into())
+        );
+        assert_eq!(
+            l("See `src/main.rs:42`, it is there"),
+            Some("src/main.rs".into())
+        );
+        // The first one, in the order written.
+        assert_eq!(
+            l("src/main.rs then https://x.dev"),
+            Some("src/main.rs".into())
+        );
+        // Not links: http, file:, a missing file, a path out of the folder, a bare host.
+        assert_eq!(l("http://example.com"), None);
+        assert_eq!(l("file:///etc/passwd"), None);
+        assert_eq!(l("src/gone.rs"), None);
+        assert_eq!(l("../outside.txt"), None);
+        assert_eq!(l("https://"), None);
+        assert_eq!(l("javascript:alert(1)"), None);
+    }
+
+    #[test]
+    fn the_action_row_is_drawn_under_the_body_and_only_when_given() {
+        let mut c = card("It is **fine**.");
+        let without = strip(&render(&c, 80, FANCY));
+        assert!(!without.contains("to choose"), "{without}");
+        c.row = Some("Run \u{b7} Copy   \u{2193} to choose");
+        let with = strip(&render(&c, 80, FANCY));
+        let at = |needle: &str| with.lines().position(|l| l.contains(needle));
+        assert!(at("to choose") > at("fine"), "{with}");
+        assert!(at("to choose") < at("Check it"), "{with}");
+        for l in with.lines() {
+            assert!(measure_text_width(l) <= 80, "{l}");
         }
     }
 }

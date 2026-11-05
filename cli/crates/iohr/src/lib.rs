@@ -11,6 +11,7 @@ pub mod environments;
 pub mod ext;
 pub mod project;
 
+mod actions;
 mod args;
 mod ask;
 mod browser;

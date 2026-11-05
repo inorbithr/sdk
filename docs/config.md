@@ -367,6 +367,7 @@ template = "coordinated"
 agent = "claude"
 model = "haiku"
 hints = "sometimes"
+menu_key = "down"
 ```
 
 Rules:
@@ -484,6 +485,7 @@ the answer.
 | `agent` | `claude` (Claude Code); `codex` is reserved and says "not built yet" | `claude` | `iohr ask` |
 | `model` | A Claude alias such as `haiku`, `sonnet` or `opus`, or a full model name; a space or a leading `-` is refused. `--model` and `IOHR_ASK_MODEL` win over it. One reading for the `?` card and the answer printed to a pipe, and the card's meta line shows it | `haiku`, the small fast tier | `iohr ask` |
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
+| `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
 
 The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
 read, that nothing was run, that an AI model under your own subscription got the folder, and
@@ -497,6 +499,17 @@ holds a fingerprint of the disclosure text, when it was last shown and a counter
 question or an answer; delete it and the next card is the first again. A pipe, `--json`,
 `NO_COLOR` or a terminal that cannot draw the card print the one-line label instead, which
 carries the disclosure itself.
+
+Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open",
+with only what the answer has: Run and Copy when it suggested one command, Open when it named
+an https link or a file in the folder. The key in `menu_key` opens the menu (`iohr ask
+--menu`, letters `r c f e o`, Esc leaves it). Run puts the command on the prompt line and
+nothing else: Enter still runs it, and iohr never does. Copy sends it to the clipboard
+through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside
+tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener and refuses an
+executable, a file that runs when opened, and a path outside the folder. The suggested
+command is the last single-line fence of the answer in a shell language; `iohr --json ask`
+carries it as `command` (null when there is none). A pipe or `NO_COLOR` gets no row.
 
 ## 5. Credentials
 
