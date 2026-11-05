@@ -257,6 +257,7 @@ impl Box_ {
         let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
         c.args(args)
             .env_clear()
+            .env("IOHR_NO_BROWSER", "1")
             .env("IOHR_BASE_URL", "http://127.0.0.1:9")
             .env("IOHR_CONFIG_DIR", self.dir.path().join("config"))
             .env("IOHR_DATA_DIR", self.dir.path().join("data"))

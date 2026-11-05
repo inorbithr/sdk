@@ -18,7 +18,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn run(args: &[&str], extra: &[(&str, &str)]) -> Output {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
-    c.args(args).env_clear().env("IOHR_CONFIG_DIR", dir.path());
+    c.args(args)
+        .env_clear()
+        .env("IOHR_NO_BROWSER", "1")
+        .env("IOHR_CONFIG_DIR", dir.path());
     for k in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"] {
         if let Some(v) = std::env::var_os(k) {
             c.env(k, v);

@@ -34,9 +34,11 @@ fn token(scopes: &[&str]) -> String {
 /// What a child process needs to run at all; `SYSTEMROOT` is required for sockets on
 /// Windows. Nothing that could hold a credential is passed on.
 fn kept_env() -> Vec<(String, std::ffi::OsString)> {
+    // `IOHR_NO_BROWSER`: a test never opens a real tab on the developer's machine.
     ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
         .into_iter()
         .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
+        .chain([("IOHR_NO_BROWSER".to_owned(), "1".into())])
         .collect()
 }
 
@@ -1524,6 +1526,7 @@ fn a_language_iohr_does_not_know_is_a_usage_error_and_writes_nothing() {
     let out_dir = dir.path().join("gen");
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_iohr"))
         .env_clear()
+        .env("IOHR_NO_BROWSER", "1")
         .env("IOHR_CONFIG_DIR", dir.path())
         .args(["sdk", "generate", "--lang", "cobol", "--from"])
         .arg(format!("public={}", doc.display()))

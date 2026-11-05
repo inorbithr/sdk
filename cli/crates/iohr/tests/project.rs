@@ -14,6 +14,7 @@ fn iohr(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_iohr"))
         .args(args)
         .env_clear()
+        .env("IOHR_NO_BROWSER", "1")
         .env("PATH", path)
         // The home directory is HOME on unix and USERPROFILE on Windows.
         .env("HOME", home)

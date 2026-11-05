@@ -61,6 +61,7 @@ impl Rig {
             .current_dir(self.work())
             .env_clear()
             .env("PATH", self.bin())
+            .env("IOHR_NO_BROWSER", "1")
             .env("HOME", self.home.path())
             .env("IOHR_CONFIG_DIR", self.home.path().join("config"))
             .env("FAKE_OUT", self.out())

@@ -40,6 +40,7 @@ fn run(exe: &Path, install_dir: &Path, server: &MockServer, args: &[&str]) -> Ou
     Command::new(exe)
         .args(args)
         .env_clear()
+        .env("IOHR_NO_BROWSER", "1")
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", install_dir)
         .env("USERPROFILE", install_dir)
