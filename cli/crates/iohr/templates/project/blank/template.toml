@@ -32,11 +32,11 @@ label = "TypeScript on Node 22.18 or newer"
 status = "live"
 needs = ["node"]
 smoke = "test"
-test = ["node", "--test", "tests/"]
+test = ["node", "--test", "tests/**/*.test.ts"]
 [variants.vars]
 SOURCE = "src/index.ts, tests in tests/"
 IGNORE = "node_modules/"
-RUN_TEST = "`node --test tests/`"
+RUN_TEST = "`node --test 'tests/**/*.test.ts'`"
 LAYOUT = "- `src/index.ts`: the code. Node runs the TypeScript as it is (22.18 or newer), so there is nothing to build or install.\n- `tests/index.test.ts`: one test."
 
 [[variants]]

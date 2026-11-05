@@ -6,6 +6,6 @@
   "description": "@@ID@@",
   "engines": { "node": ">=22.18" },
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test \"tests/**/*.test.ts\""
   }
 }
