@@ -374,8 +374,8 @@ pub enum RunnerCommand {
         /// The runner's name (default: this machine's host name).
         #[arg(long, conflicts_with = "runner")]
         name: Option<String>,
-        /// The runner's id, from `iohr runner status`.
-        #[arg(long)]
+        /// The runner's id, from `iohr runner status` (or `id` in `[profiles.<name>.runner]`).
+        #[arg(long, env = "IOHR_RUNNER_ID")]
         runner: Option<String>,
         /// Seconds between heartbeats (default: what the service says, the RFC's 20).
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
@@ -435,8 +435,8 @@ pub enum RunnerCommand {
         /// The runner's name (default: the one whose key this machine holds).
         #[arg(long, conflicts_with = "runner")]
         name: Option<String>,
-        /// The runner's id, from `iohr runner status`.
-        #[arg(long)]
+        /// The runner's id, from `iohr runner status` (or `id` in `[profiles.<name>.runner]`).
+        #[arg(long, env = "IOHR_RUNNER_ID")]
         runner: Option<String>,
         #[command(flatten)]
         account: AccountArg,
