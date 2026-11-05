@@ -46,14 +46,13 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
       return 0
     fi
     # __IOHR_BIN__ is the name of the binary that printed this hook (iohr, iohr-preview).
-    local -a a=(command __IOHR_BIN__ ask --headless --cwd "$PWD")
+    local -a a=(command __IOHR_BIN__ ask --headless --card --cwd "$PWD")
     [[ -n $last ]] && a+=(--last-command "${last[1,1024]}" --exit-code "$rc")
     (( follow )) && [[ -n $_iohr_ask_pq ]] && a+=(--prior-question "$_iohr_ask_pq" --prior-answer "$_iohr_ask_pa")
     local answer
-    # The label and any error go to the terminal on stderr; the answer is kept for `??`.
+    # The card goes to the terminal on stderr; the plain answer is kept for `??`.
     if answer=$("${a[@]}" -- "$q"); then
       _iohr_ask_pq=$q _iohr_ask_pa=$answer
-      print -r -- "$answer"
     else
       _iohr_ask_pq= _iohr_ask_pa=
     fi

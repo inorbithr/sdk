@@ -117,12 +117,17 @@ fn is_executable(p: &Path) -> bool {
     p.is_file() || p.with_extension("exe").is_file() || p.with_extension("cmd").is_file()
 }
 
+/// Where the question goes, said on every surface that shows an answer.
+pub(crate) const PROVIDER: &str = "under your own subscription; the folder goes to that provider.";
+/// The last word of every label.
+pub(crate) const CHECK: &str = "Check it before you rely on it.";
+
 /// The one line printed on stderr before the agent starts (AI Act Art. 50). The wording
 /// follows the `ext-ask` example's label.
 #[must_use]
 pub(crate) fn label(agent: Agent) -> String {
     format!(
-        "Io · AI answer -- Io running on {}, an AI model, under your own subscription; the folder goes to that provider. Check it before you rely on it.",
+        "Io · AI answer -- Io running on {}, an AI model, {PROVIDER} {CHECK}",
         agent.display()
     )
 }

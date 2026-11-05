@@ -1,17 +1,19 @@
 //! `iohr ask`: run the developer's own agent in this folder with the question.
 
 use std::process::Stdio;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use std::io::IsTerminal as _;
 use std::path::Path;
 
 use crate::ask::{self, Agent, Via};
+use crate::card::{self, Body, Card, Look};
 use crate::cli::{AskArgs, Global, HeadlessArgs};
 use crate::context::Ctx;
 use crate::error::Error;
 use crate::headless::{self, Answer, Context};
 use crate::output::Out;
+use crate::ui::Ui;
 
 pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error> {
     let cfg = Ctx::load(g)?.config.ask;
@@ -107,6 +109,7 @@ fn headless_wanted(h: &HeadlessArgs, json: bool) -> Result<bool, Error> {
         return Ok(false);
     }
     Ok(h.headless
+        || h.card
         || h.has_context()
         || json
         || !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()))
@@ -140,7 +143,52 @@ async fn headless(
         prior: h.prior_question.clone().zip(h.prior_answer.clone()),
     };
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
-    let label = format!("{} {}", ask::label(agent), headless::read_line(&ctx));
+    let read = headless::read_line(&ctx);
+    let fancy = Ui::detect(out.json).fancy();
+    let stdout_tty = std::io::stdout().is_terminal();
+    // A person reads a card; a pipe, a script and `--json` read the plain answer.
+    if !out.json && (h.card || (stdout_tty && fancy)) {
+        let look = Look::detect(fancy);
+        let started = Instant::now();
+        let run = headless::run(bin, &message, started);
+        let done = if look.fancy {
+            spin_while(run, agent, look, started).await?
+        } else {
+            run.await
+        };
+        let label = ask::label(agent);
+        let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
+        let mut shown = Card {
+            agent: agent.display(),
+            model: headless::MODEL,
+            elapsed: None,
+            follows: h.prior_question.as_deref(),
+            read: &read,
+            notice: &notice,
+            label: &label,
+            hint: h.card.then_some("`??` follows up."),
+            body: Body::Failed(""),
+        };
+        let width = card::stderr_width();
+        return match &done {
+            Ok((text, duration_ms)) => {
+                shown.elapsed = Some(Duration::from_millis(*duration_ms));
+                shown.body = Body::Answer(text);
+                card::draw(&card::render(&shown, width, look));
+                if !stdout_tty {
+                    Out::raw(format!("{text}\n").as_bytes());
+                }
+                Ok(())
+            }
+            Err(why) => {
+                shown.elapsed = Some(started.elapsed());
+                shown.body = Body::Failed(why);
+                card::draw(&card::render(&shown, width, look));
+                Err(Error::Child(1))
+            }
+        };
+    }
+    let label = format!("{} {read}", ask::label(agent));
     if !out.json {
         Out::note(&label);
     }
@@ -162,4 +210,35 @@ async fn headless(
         Out::raw(format!("{text}\n").as_bytes());
     }
     Ok(())
+}
+
+/// Waits for `work` with a spinner on stderr. Ctrl-C clears the line and stops the run
+/// (dropping `work` kills the agent) with the shell's 130.
+async fn spin_while<T>(
+    work: impl std::future::Future<Output = T>,
+    agent: Agent,
+    look: Look,
+    started: Instant,
+) -> Result<T, Error> {
+    tokio::pin!(work);
+    let stop = tokio::signal::ctrl_c();
+    tokio::pin!(stop);
+    let mut tick = tokio::time::interval(Duration::from_millis(90));
+    let mut frame = 0usize;
+    loop {
+        tokio::select! {
+            done = &mut work => {
+                card::spin_clear();
+                return Ok(done);
+            }
+            _ = &mut stop => {
+                card::spin_clear();
+                return Err(Error::Child(130));
+            }
+            _ = tick.tick() => {
+                card::spin(frame, started.elapsed(), agent.display(), look);
+                frame += 1;
+            }
+        }
+    }
 }

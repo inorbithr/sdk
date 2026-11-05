@@ -1182,6 +1182,9 @@ pub struct HeadlessArgs {
     /// Open the agent with the question, even when nothing is on a terminal.
     #[arg(long)]
     pub interactive: bool,
+    /// Draw the answer for a person on stderr; stdout still gets the plain answer.
+    #[arg(long, conflicts_with = "interactive")]
+    pub card: bool,
     /// The folder the question is about (default: this one). Sent to the agent as text.
     #[arg(long, value_name = "DIR", conflicts_with = "interactive")]
     pub cwd: Option<String>,

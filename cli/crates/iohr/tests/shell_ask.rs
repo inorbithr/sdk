@@ -152,6 +152,41 @@ fn text_mode_prints_the_label_then_the_answer() {
 }
 
 #[test]
+fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_stdout() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let out = r.run(
+        &["ask", "--headless", "--card", "why", "blue"],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "It is Rayleigh scattering.\n"
+    );
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(!err.contains('\u{1b}'), "{err:?}");
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(lines.len(), 2, "{err}");
+    assert!(lines[0].starts_with("Io · AI answer -- Io running on Claude Code (local)"));
+    assert!(lines[0].ends_with("nothing was run."), "{err}");
+    assert_eq!(lines[1], "It is Rayleigh scattering.");
+    // A failure is a card too: exit 1, the reason, never the question or the agent's text.
+    let login =
+        format!(r#"{{"type":"result","is_error":true,"result":"Not logged in /login {SECRET}"}}"#);
+    let out = r.run(&["ask", "--headless", "--card", SECRET], &login, "1");
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert_eq!(out.stdout, b"");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("no answer: ") && err.contains("not signed in"),
+        "{err}"
+    );
+    assert!(!err.contains(SECRET), "{err}");
+}
+
+#[test]
 fn the_run_is_bounded_scrubbed_and_never_has_a_forbidden_flag() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
@@ -295,8 +330,8 @@ fn the_zsh_hook_has_its_key_lines() {
     assert!(t.contains("zle -A accept-line _iohr_ask_prev_accept"));
     assert!(t.contains("zle _iohr_ask_prev_accept"));
     assert!(t.contains("zle -N accept-line _iohr_ask_accept"));
-    // The answer comes from `iohr ask`, headless, with the question after `--`.
-    assert!(t.contains("command iohr ask --headless --cwd"));
+    // The answer comes from `iohr ask`, headless, drawn as a card, with the question after `--`.
+    assert!(t.contains("command iohr ask --headless --card --cwd"));
     assert!(t.contains("-- \"$q\""));
     // Inside the InOrbit app it speaks the app's OSC 7727 ask protocol.
     assert!(t.contains(r"\e]7727;ask;"));
@@ -324,7 +359,7 @@ fn the_hook_asks_the_binary_that_printed_it() {
     assert!(o.status.success());
     let t = String::from_utf8(o.stdout).unwrap();
     assert!(
-        t.contains("command iohr-preview ask --headless --cwd"),
+        t.contains("command iohr-preview ask --headless --card --cwd"),
         "{t}"
     );
     assert!(!t.contains("__IOHR_BIN__"));
@@ -358,7 +393,7 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     };
     let o = zsh(&format!(
         "source {f}; _iohr_ask_q='?? and red'; _iohr_ask_pq=first _iohr_ask_pa=reply; \
-         _iohr_ask_precmd; _iohr_ask_q='? plain'; _iohr_ask_precmd",
+         _iohr_ask_precmd; _iohr_ask_q='? plain'; _iohr_ask_precmd; print -r -- \"kept: $_iohr_ask_pa\"",
         f = file.display()
     ));
     let out = String::from_utf8_lossy(&o.stdout);
@@ -371,7 +406,9 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
         err.contains("-- plain") && !err.contains("-- plain --prior"),
         "{err}"
     );
-    assert_eq!(out.matches("the answer").count(), 2, "{out}");
+    // `iohr ask --card` draws the answer on stderr; the hook only keeps stdout for `??`.
+    assert!(err.contains("--headless --card --cwd"), "{err}");
+    assert_eq!(out.trim(), "kept: the answer", "{out}");
     // Inside the app: the OSC, not a call to iohr.
     let o = zsh(&format!(
         "source {f}; INORBIT_TERM=1; _iohr_ask_q='? hi'; _iohr_ask_precmd",
@@ -444,7 +481,7 @@ fn evaluating_the_hook_twice_keeps_enter_working_and_wires_accept_line_once() {
     let fake = bin.join("iohr");
     std::fs::write(
         &fake,
-        "#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer\n",
+        "#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer >&2\necho the answer\n",
     )
     .unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
