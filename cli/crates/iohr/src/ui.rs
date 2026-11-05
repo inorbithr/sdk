@@ -46,7 +46,8 @@ pub(crate) struct Ui {
     fancy: bool,
 }
 
-/// A running step: a spinner on a terminal, a plain line when it ends otherwise.
+/// A running step: a spinner on a terminal. Plain, it is silent: the command's own plain
+/// report (the stable lines scripts read) says how each step went.
 pub(crate) struct Step {
     bar: Option<cliclack::ProgressBar>,
 }
@@ -216,28 +217,23 @@ impl Ui {
 impl Step {
     /// The step worked.
     pub(crate) fn ok(self, said: &str) {
-        match self.bar {
-            Some(b) => b.stop(said),
-            None => plain(&format!("done: {said}")),
+        if let Some(b) = self.bar {
+            b.stop(said);
         }
     }
 
     /// The step did not fully happen, and the reason is short.
     pub(crate) fn warn(self, said: &str) {
-        match self.bar {
-            Some(b) => {
-                b.clear();
-                let _ = cliclack::log::warning(said);
-            }
-            None => plain(&format!("not yet: {said}")),
+        if let Some(b) = self.bar {
+            b.clear();
+            let _ = cliclack::log::warning(said);
         }
     }
 
     /// The step failed, with a short reason.
     pub(crate) fn fail(self, said: &str) {
-        match self.bar {
-            Some(b) => b.error(said),
-            None => plain(&format!("failed: {said}")),
+        if let Some(b) = self.bar {
+            b.error(said);
         }
     }
 }
