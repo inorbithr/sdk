@@ -305,7 +305,7 @@ fn the_zsh_hook_has_its_key_lines() {
     // It never runs the answer.
     assert!(!t.contains("eval \"$answer\"") && !t.contains("eval $answer"));
     // Evaluated twice, or beside the app's own hook, it installs once.
-    assert!(t.contains("_iohr_ask_hooked") && t.contains("_inorbit_accept"));
+    assert!(t.contains("${+widgets[_iohr_ask_prev_accept]}") && t.contains("_inorbit_accept"));
 }
 
 #[test]
@@ -358,6 +358,105 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.starts_with("\u{1b}]7727;ask;6;"), "{out:?}");
     assert!(!String::from_utf8_lossy(&o.stderr).contains("ARGS:"));
+}
+
+/// Drives a real interactive zsh on a pty (python3's `pty`; the test is skipped where zsh
+/// or python3 is missing). `lines` are typed one by one; the screen after each is returned.
+fn drive_zsh(hook_file: &std::path::Path, bin: &std::path::Path, lines: &[String]) -> Vec<String> {
+    const DRIVER: &str = r#"
+import os, pty, select, sys, time
+bindir, home = sys.argv[1], sys.argv[2]
+lines = sys.argv[3:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ.clear()
+    os.environ.update(PATH=bindir + ":/usr/bin:/bin", HOME=home, PS1="PROMPT> ", TERM="dumb")
+    os.chdir(home)
+    os.execvp("zsh", ["zsh", "-f", "-i"])
+def rd(t):
+    out = b""
+    end = time.time() + t
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], 0.1)
+        if r:
+            try:
+                out += os.read(fd, 4096)
+            except OSError:
+                break
+    return out
+rd(1.0)
+shown = []
+for l in lines:
+    os.write(fd, l.encode() + b"\n")
+    shown.append(rd(1.2).decode(errors="replace"))
+os.write(fd, b"exit\n")
+rd(0.3)
+sys.stdout.write("\x00".join(shown))
+"#;
+    let _ = hook_file;
+    let o = Command::new("python3")
+        .args(["-I", "-c", DRIVER])
+        .arg(bin)
+        .arg(bin.parent().unwrap())
+        .args(lines)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8_lossy(&o.stdout)
+        .split('\0')
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn evaluating_the_hook_twice_keeps_enter_working_and_wires_accept_line_once() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let f = file.display();
+    // A second `source ~/.zshrc`, then once more with a shell variable of the old guard
+    // unset (state a plugin may reset): the wiring must not copy our own widget into the one
+    // accept-line calls, or Enter loops until FUNCNEST.
+    let out = drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {f}"),
+            format!("source {f}"),
+            format!("unset _iohr_ask_hooked; source {f}"),
+            "echo AFTER-$((1+1))".to_owned(),
+            "? still a question".to_owned(),
+            "echo LAST-$((2+2))".to_owned(),
+        ],
+    );
+    for o in &out {
+        assert!(
+            !o.contains("FUNCNEST") && !o.contains("nested function"),
+            "{o:?}"
+        );
+    }
+    assert!(out[3].contains("AFTER-2"), "{:?}", out[3]);
+    assert_eq!(
+        out[4].matches("ASKED:").count(),
+        1,
+        "a ? line still reaches the ask path: {:?}",
+        out[4]
+    );
+    assert!(out[4].contains("the answer"), "{:?}", out[4]);
+    assert!(out[5].contains("LAST-4"), "{:?}", out[5]);
 }
 
 #[test]

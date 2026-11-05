@@ -7,8 +7,7 @@
 # under your own subscription and says so; nothing in it is ever run. INORBIT_ASK=0 turns
 # this off for a shell. The folder and the last command (with its exit status) are sent as
 # context; a plain shell cannot see that command's output.
-if [[ -o interactive && -z ${_iohr_ask_hooked-} && -z ${functions[_inorbit_accept]-} ]]; then
-  typeset -g _iohr_ask_hooked=1
+if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa
   typeset -g _iohr_ask_re='^[[:space:]]*\?\??[[:space:]]+[^[:space:]]'
 
@@ -63,7 +62,14 @@ if [[ -o interactive && -z ${_iohr_ask_hooked-} && -z ${functions[_inorbit_accep
   # First, so the exit status it reads is the last command's.
   add-zsh-hook precmd _iohr_ask_precmd
   precmd_functions=(_iohr_ask_precmd ${precmd_functions:#_iohr_ask_precmd})
-  # Chain to whatever accept-line was before (the shell's own, or the user's widget).
-  zle -A accept-line _iohr_ask_prev_accept
-  zle -N accept-line _iohr_ask_accept
+  # Wired once: sourcing this again (a second `source ~/.zshrc`, or a plugin such as
+  # zsh-autosuggestions that re-wraps widgets) would copy our own widget into
+  # _iohr_ask_prev_accept, and accept-line would call itself until FUNCNEST. The functions
+  # above are safe to redefine; only the wiring is guarded, by the widget that holds the
+  # previous accept-line (a shell variable can be reset, the widget table is the truth).
+  if (( ! ${+widgets[_iohr_ask_prev_accept]} )); then
+    # Chain to whatever accept-line was before (the shell's own, or the user's widget).
+    zle -A accept-line _iohr_ask_prev_accept
+    zle -N accept-line _iohr_ask_accept
+  fi
 fi
