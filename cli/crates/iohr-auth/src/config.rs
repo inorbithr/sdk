@@ -229,6 +229,12 @@ pub struct RunnerConfig {
     /// with code 75 and let the supervisor start it; elsewhere it is `exec`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upgrade_restart: Option<String>,
+    /// On macOS, the identity an upgrade signs the new binary with when the release is
+    /// signed ad hoc, so the keychain's "Always Allow" holds from one release to the next:
+    /// `auto` (the first Developer ID Application identity, else the first Apple
+    /// Development one), a name or SHA-1 hash `codesign` takes, or `-` (off, the default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_sign_identity: Option<String>,
     /// The only user service units (`<name>.service`) an approved `systemd.user-restart`
     /// may restart. Unset or empty, the runner refuses every one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +259,7 @@ impl RunnerConfig {
             && self.auto_upgrade.is_none()
             && self.upgrade_interval_minutes.is_none()
             && self.upgrade_restart.is_none()
+            && self.upgrade_sign_identity.is_none()
             && self.user_units.is_none()
             && self.core_checkout.is_none()
     }
@@ -764,6 +771,7 @@ always_on = true
 auto_upgrade = false
 upgrade_interval_minutes = 30
 upgrade_restart = "exit"
+upgrade_sign_identity = "auto"
 
 [profiles.work]
 kind = "token"
@@ -785,6 +793,7 @@ capacity = 8
         assert_eq!(c.runner.auto_upgrade, Some(false));
         assert_eq!(c.runner.upgrade_interval_minutes, Some(30));
         assert_eq!(c.runner.upgrade_restart.as_deref(), Some("exit"));
+        assert_eq!(c.runner.upgrade_sign_identity.as_deref(), Some("auto"));
         let work = c.profile(&name("work")).unwrap();
         assert_eq!(
             work.runner,
@@ -806,6 +815,10 @@ capacity = 8
         );
         assert!(saved.contains("capacity = 8"), "{saved}");
         assert!(saved.contains("upgrade_interval_minutes = 30"), "{saved}");
+        assert!(
+            saved.contains("upgrade_sign_identity = \"auto\""),
+            "{saved}"
+        );
         assert!(!saved.contains("default ="), "{saved}");
         assert_eq!(Config::parse(&saved, path).unwrap(), c);
     }
