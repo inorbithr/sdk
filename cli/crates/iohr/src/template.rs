@@ -162,7 +162,82 @@ pub struct TemplateToml {
     /// Steps run after the files are written, in order. None listed: `git` and `register`.
     #[serde(default)]
     pub steps: Vec<StepDef>,
+    /// Languages: the files of `variants/<id>/` over the common ones. With any, a `language`
+    /// question is asked (`--lang <id>` is the same as `--set language=<id>`).
+    #[serde(default)]
+    pub variants: Vec<VariantDef>,
+    /// The variant `--yes` and a terminal-less run take (default: the first live one).
+    #[serde(default)]
+    pub default_variant: Option<String>,
+    /// Files written as programs (executable); paths, placeholders allowed.
+    #[serde(default)]
+    pub programs: Vec<String>,
 }
+
+/// What the smoke test of a language does: `heartbeat` (default) runs the project once and reads
+/// the heartbeat it wrote; `test` runs the language's own `test` command, for a project that is
+/// not a service.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SmokeBy {
+    #[default]
+    Heartbeat,
+    Test,
+}
+
+/// One language of a template: the files of `variants/<id>/` are laid over the common files,
+/// and the commands say how the smoke test and the self-test run it. In `build`, `run` and
+/// `test`, `$DIR` is the project folder, `$STATE` and `$CACHE` its state folders; a build writes
+/// under `$CACHE`, never into the project.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VariantDef {
+    /// The id `--lang` takes: lowercase letters and digits, 2 to 16 (`python`, `go`).
+    pub id: String,
+    /// What the menu shows: the language and what it needs, in a few words.
+    pub label: String,
+    /// `live` (default) or `coming`: a coming one is listed and refuses.
+    #[serde(default)]
+    pub status: Status,
+    /// Programs that must be on `PATH` to build and run it (`python3`, `node`, `go`, `cargo`);
+    /// the menu marks the ones that are there.
+    #[serde(default)]
+    pub needs: Vec<String>,
+    /// Run once before the smoke test, in your environment (a compiler needs its toolchain).
+    #[serde(default)]
+    pub build: Vec<String>,
+    /// How the smoke test runs the project once, in a scrubbed environment.
+    #[serde(default)]
+    pub run: Vec<String>,
+    /// How the self-test runs, as the README says.
+    #[serde(default)]
+    pub test: Vec<String>,
+    /// What the smoke test does: `heartbeat` (default) or `test` (run `test`, in your
+    /// environment, writing only under `$CACHE` when `env` says so).
+    #[serde(default)]
+    pub smoke: SmokeBy,
+    /// Extra environment for `run`, `$DIR`, `$STATE` and `$CACHE` allowed.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Text per language: each `KEY` fills `@@KEY@@` (upper case letters, digits, underscores).
+    #[serde(default)]
+    pub vars: BTreeMap<String, String>,
+}
+
+/// What the smoke test runs for one language, placeholders and `$DIR` filled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Runner {
+    pub label: String,
+    pub build: Vec<String>,
+    pub run: Vec<String>,
+    /// The language's own test command, run by the smoke test when `by_test`.
+    pub test: Vec<String>,
+    pub by_test: bool,
+    pub env: BTreeMap<String, String>,
+}
+
+/// The key of the language question every template with variants has.
+pub const LANGUAGE: &str = "language";
 
 /// Where a template came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,10 +267,124 @@ pub struct Template {
     pub meta: TemplateToml,
     /// Relative path (placeholders allowed) and text.
     pub files: Vec<(String, String)>,
+    /// The files of `variants/<id>/`: variant id, relative path and text.
+    pub variant_files: Vec<(String, String, String)>,
     pub origin: Origin,
 }
 
 impl Template {
+    /// The variant with this id.
+    #[must_use]
+    pub fn variant(&self, id: &str) -> Option<&VariantDef> {
+        self.meta.variants.iter().find(|v| v.id == id)
+    }
+
+    /// The variants that can be used.
+    #[must_use]
+    pub fn live_variants(&self) -> Vec<&VariantDef> {
+        self.meta
+            .variants
+            .iter()
+            .filter(|v| v.status == Status::Live)
+            .collect()
+    }
+
+    /// The variant taken without asking: `default_variant` when it is live, else the first live.
+    #[must_use]
+    pub fn default_variant(&self) -> Option<&VariantDef> {
+        self.meta
+            .default_variant
+            .as_deref()
+            .and_then(|d| self.variant(d))
+            .filter(|v| v.status == Status::Live)
+            .or_else(|| self.live_variants().into_iter().next())
+    }
+
+    /// Every question in order: the `language` question first when there are variants.
+    #[must_use]
+    pub fn all_questions(&self) -> Vec<Question> {
+        let live = self.live_variants();
+        if live.is_empty() {
+            return self.meta.questions.clone();
+        }
+        let mut q = vec![Question {
+            key: LANGUAGE.into(),
+            prompt: "Which language?".into(),
+            kind: Kind::Choice,
+            choices: live.iter().map(|v| v.id.clone()).collect(),
+            default: self.default_variant().map(|v| Answer::Text(v.id.clone())),
+            when: None,
+            regex: None,
+            help: Some("The files of that language are laid over the common ones".into()),
+        }];
+        q.extend(self.meta.questions.clone());
+        q
+    }
+
+    /// The template with one variant laid over the common files (a file of the same path
+    /// replaces the common one); the variant files are gone from the result.
+    ///
+    /// # Errors
+    ///
+    /// An unknown variant, or one that is still coming.
+    pub fn with_variant(&self, id: &str) -> Result<Self, String> {
+        let v = self.variant(id).ok_or_else(|| {
+            format!(
+                "no language `{id}` in the `{}` template; it has {}",
+                self.meta.id,
+                self.language_list()
+            )
+        })?;
+        if v.status != Status::Live {
+            return Err(format!(
+                "`{id}` is coming, not built yet; the `{}` template has {}",
+                self.meta.id,
+                self.language_list()
+            ));
+        }
+        let own: Vec<&(String, String, String)> = self
+            .variant_files
+            .iter()
+            .filter(|(i, _, _)| i == id)
+            .collect();
+        let mut files: Vec<(String, String)> = self
+            .files
+            .iter()
+            .filter(|(p, _)| !own.iter().any(|(_, c, _)| c == p))
+            .cloned()
+            .collect();
+        files.extend(own.into_iter().map(|(_, p, x)| (p.clone(), x.clone())));
+        Ok(Self {
+            files,
+            variant_files: Vec::new(),
+            ..self.clone()
+        })
+    }
+
+    fn language_list(&self) -> String {
+        let live: Vec<_> = self.live_variants().iter().map(|v| v.id.clone()).collect();
+        if live.is_empty() {
+            "no languages".into()
+        } else {
+            live.join(", ")
+        }
+    }
+
+    /// The variant's build, run and env with the values filled.
+    #[must_use]
+    pub fn runner(&self, id: &str, vals: &[(String, String)]) -> Option<Runner> {
+        let v = self.variant(id)?;
+        let f = |s: &String| filled(s, vals);
+        Some(Runner {
+            label: v.label.clone(),
+            build: v.build.iter().map(f).collect(),
+            run: v.run.iter().map(f).collect(),
+            test: v.test.iter().map(f).collect(),
+            by_test: v.smoke == SmokeBy::Test,
+            env: v.env.iter().map(|(k, x)| (k.clone(), f(x))).collect(),
+        })
+    }
+
     /// The steps init runs.
     #[must_use]
     pub fn steps(&self) -> Vec<StepDef> {
@@ -301,18 +490,103 @@ const DEMO: Embedded = &[
     bf!("template.toml", "demo/template.toml"),
     bf!("extension.toml", "demo/extension.toml"),
     bf!("README.md", "demo/README.md"),
-    bf!("inorbit-project.toml", "demo/inorbit-project.toml"),
+    bf!("inorbit.toml", "demo/inorbit.toml"),
     bf!(".gitignore", "demo/gitignore"),
-    bf!("src/@@MODULE@@/__init__.py", "demo/src/module/__init__.py"),
-    bf!("src/@@MODULE@@/__main__.py", "demo/src/module/__main__.py"),
-    bf!("src/@@MODULE@@/channel.py", "demo/src/module/channel.py"),
     bf!("panel/index.html", "demo/panel/index.html"),
-    bf!("tests/test_selftest.py", "demo/tests/test_selftest.py"),
+    bf!(
+        "variants/python/src/@@MODULE@@/__init__.py",
+        "demo/variants/python/src/module/__init__.py"
+    ),
+    bf!(
+        "variants/python/src/@@MODULE@@/__main__.py",
+        "demo/variants/python/src/module/__main__.py"
+    ),
+    bf!(
+        "variants/python/src/@@MODULE@@/channel.py",
+        "demo/variants/python/src/module/channel.py"
+    ),
+    bf!(
+        "variants/python/tests/test_selftest.py",
+        "demo/variants/python/tests/test_selftest.py"
+    ),
+    bf!(
+        "variants/typescript/package.json",
+        "demo/variants/typescript/package.json"
+    ),
+    bf!(
+        "variants/typescript/src/channel.ts",
+        "demo/variants/typescript/src/channel.ts"
+    ),
+    bf!(
+        "variants/typescript/src/main.ts",
+        "demo/variants/typescript/src/main.ts"
+    ),
+    bf!(
+        "variants/typescript/tests/selftest.test.ts",
+        "demo/variants/typescript/tests/selftest.test.ts"
+    ),
+    bf!("variants/go/go.mod", "demo/variants/go/go.mod"),
+    bf!("variants/go/channel.go", "demo/variants/go/channel.go"),
+    bf!("variants/go/main.go", "demo/variants/go/main.go"),
+    bf!("variants/go/main_test.go", "demo/variants/go/main_test.go"),
+    bf!("variants/rust/Cargo.toml", "demo/variants/rust/Cargo.toml"),
+    bf!("variants/rust/Cargo.lock", "demo/variants/rust/Cargo.lock"),
+    bf!(
+        "variants/rust/src/channel.rs",
+        "demo/variants/rust/src/channel.rs"
+    ),
+    bf!(
+        "variants/rust/src/main.rs",
+        "demo/variants/rust/src/main.rs"
+    ),
+    bf!(
+        "variants/rust/tests/selftest.rs",
+        "demo/variants/rust/tests/selftest.rs"
+    ),
+];
+const BLANK: Embedded = &[
+    bf!("template.toml", "blank/template.toml"),
+    bf!("README.md", "blank/README.md"),
+    bf!("inorbit.toml", "blank/inorbit.toml"),
+    bf!(".gitignore", "blank/gitignore"),
+    bf!(
+        "variants/python/pyproject.toml",
+        "blank/variants/python/pyproject.toml"
+    ),
+    bf!(
+        "variants/python/src/@@MODULE@@/__init__.py",
+        "blank/variants/python/src/module/__init__.py"
+    ),
+    bf!(
+        "variants/python/tests/test_basic.py",
+        "blank/variants/python/tests/test_basic.py"
+    ),
+    bf!(
+        "variants/typescript/package.json",
+        "blank/variants/typescript/package.json"
+    ),
+    bf!(
+        "variants/typescript/src/index.ts",
+        "blank/variants/typescript/src/index.ts"
+    ),
+    bf!(
+        "variants/typescript/tests/index.test.ts",
+        "blank/variants/typescript/tests/index.test.ts"
+    ),
+    bf!("variants/go/go.mod", "blank/variants/go/go.mod"),
+    bf!("variants/go/main.go", "blank/variants/go/main.go"),
+    bf!("variants/go/main_test.go", "blank/variants/go/main_test.go"),
+    bf!("variants/rust/Cargo.toml", "blank/variants/rust/Cargo.toml"),
+    bf!("variants/rust/Cargo.lock", "blank/variants/rust/Cargo.lock"),
+    bf!(
+        "variants/rust/src/main.rs",
+        "blank/variants/rust/src/main.rs"
+    ),
 ];
 const COORDINATED: Embedded = &[
     bf!("template.toml", "coordinated/template.toml"),
     bf!("README.md", "coordinated/README.md"),
-    bf!("inorbit-project.toml", "coordinated/inorbit-project.toml"),
+    bf!("inorbit.toml", "coordinated/inorbit.toml"),
     bf!("coordination.toml", "coordinated/coordination.toml"),
 ];
 const MACOS_APP: Embedded = &[bf!("template.toml", "macos-app/template.toml")];
@@ -320,6 +594,7 @@ const UI_PANEL: Embedded = &[bf!("template.toml", "ui-panel/template.toml")];
 
 /// The built-ins, in the order they are listed.
 const BUILT_INS: &[(&str, Embedded)] = &[
+    ("blank", BLANK),
     ("demo", DEMO),
     ("coordinated", COORDINATED),
     ("macos-app", MACOS_APP),
@@ -330,19 +605,39 @@ fn parse_meta(text: &str, from: &str) -> Result<TemplateToml, String> {
     toml::from_str(text).map_err(|e| format!("{from}/{FILE}: {}", e.message()))
 }
 
+/// The files of one variant: `(variant, path, text)`.
+type VariantFiles = Vec<(String, String, String)>;
+
+/// Splits `variants/<id>/path` files from the common ones.
+fn split_variants(all: Vec<(String, String)>) -> (VariantFiles, Vec<(String, String)>) {
+    let mut variant = Vec::new();
+    let mut common = Vec::new();
+    for (p, text) in all {
+        match p.strip_prefix("variants/").and_then(|r| r.split_once('/')) {
+            Some((id, rest)) => variant.push((id.to_owned(), rest.to_owned(), text)),
+            None => common.push((p, text)),
+        }
+    }
+    (variant, common)
+}
+
 fn built_in(id: &str) -> Option<Template> {
     let (_, files) = BUILT_INS.iter().find(|(i, _)| *i == id)?;
     let meta = files
         .iter()
         .find(|(p, _)| *p == FILE)
         .and_then(|(_, t)| toml::from_str(t).ok())?;
-    Some(Template {
-        meta,
-        files: files
+    let (variant_files, files) = split_variants(
+        files
             .iter()
             .filter(|(p, _)| *p != FILE)
             .map(|(p, t)| ((*p).to_owned(), (*t).to_owned()))
             .collect(),
+    );
+    Some(Template {
+        meta,
+        files,
+        variant_files,
         origin: Origin::BuiltIn,
     })
 }
@@ -390,11 +685,13 @@ fn from_dir(dir: &Path, origin: Origin) -> Result<Template, String> {
     let text = std::fs::read_to_string(dir.join(FILE))
         .map_err(|_| format!("{} has no {FILE}", dir.display()))?;
     let meta = parse_meta(&text, &dir.display().to_string())?;
-    let mut files = Vec::new();
-    walk(dir, dir, &mut files)?;
+    let mut all = Vec::new();
+    walk(dir, dir, &mut all)?;
+    let (variant_files, files) = split_variants(all);
     Ok(Template {
         meta,
         files,
+        variant_files,
         origin,
     })
 }
@@ -413,8 +710,36 @@ fn merge(parent: Template, child: Template) -> Template {
         .filter(|(p, _)| !child.files.iter().any(|(c, _)| c == p))
         .collect();
     files.extend(child.files);
+    let mut variants = parent.meta.variants;
+    for v in child.meta.variants {
+        match variants.iter().position(|p| p.id == v.id) {
+            Some(i) => variants[i] = v,
+            None => variants.push(v),
+        }
+    }
+    let mut variant_files: Vec<_> = parent
+        .variant_files
+        .into_iter()
+        .filter(|(i, p, _)| {
+            !child
+                .variant_files
+                .iter()
+                .any(|(ci, cp, _)| ci == i && cp == p)
+        })
+        .collect();
+    variant_files.extend(child.variant_files);
+    let mut programs = parent.meta.programs;
+    for p in child.meta.programs {
+        if !programs.contains(&p) {
+            programs.push(p);
+        }
+    }
     Template {
+        variant_files,
         meta: TemplateToml {
+            variants,
+            programs,
+            default_variant: child.meta.default_variant.or(parent.meta.default_variant),
             questions,
             steps: if child.meta.steps.is_empty() {
                 parent.meta.steps
@@ -823,6 +1148,35 @@ pub fn fill_text(text: &str, vals: &[(String, String)]) -> String {
     filled(text, vals)
 }
 
+/// [`values`] plus what the chosen language adds: `@@LANGUAGE_LABEL@@` and the variant's own
+/// `vars`, first, so a text that holds other placeholders is filled by the later ones.
+#[must_use]
+pub fn all_values(
+    t: &Template,
+    name: &str,
+    publisher: &str,
+    created_at: &str,
+    answers: &Answers,
+) -> Vec<(String, String)> {
+    let mut v = Vec::new();
+    if let Some(var) = answers.get(LANGUAGE).and_then(|a| t.variant(&a.text())) {
+        v.push(("@@LANGUAGE_LABEL@@".to_owned(), var.label.clone()));
+        v.extend(
+            var.vars
+                .iter()
+                .map(|(k, x)| (format!("@@{k}@@"), x.clone())),
+        );
+    }
+    v.extend(values(name, publisher, created_at, answers));
+    v
+}
+
+/// The paths of the template's `programs`, placeholders filled.
+#[must_use]
+pub fn programs(t: &Template, vals: &[(String, String)]) -> Vec<String> {
+    t.meta.programs.iter().map(|p| filled(p, vals)).collect()
+}
+
 /// The template's files with placeholders filled in text and paths. A question that was
 /// skipped by its `when` fills as empty.
 ///
@@ -831,7 +1185,10 @@ pub fn fill_text(text: &str, vals: &[(String, String)]) -> String {
 /// A filled path that leaves the folder.
 pub fn render(t: &Template, vals: &[(String, String)]) -> Result<Vec<(String, String)>, String> {
     let mut vals = vals.to_vec();
-    for q in &t.meta.questions {
+    if !vals.iter().any(|(x, _)| x == "@@DESCRIPTION@@") {
+        vals.push(("@@DESCRIPTION@@".to_owned(), String::new()));
+    }
+    for q in &t.all_questions() {
         let k = format!("@@{}@@", q.key.to_ascii_uppercase());
         if !vals.iter().any(|(x, _)| *x == k) {
             vals.push((k, String::new()));
@@ -868,16 +1225,20 @@ pub fn answer(
     given: &Answers,
     mut ask: Option<&mut Asker<'_>>,
 ) -> Result<Answers, Error> {
+    let questions = t.all_questions();
     for k in given.keys() {
-        if !t.meta.questions.iter().any(|q| &q.key == k) {
+        if !questions.iter().any(|q| &q.key == k) {
             return Err(Error::Usage(format!(
                 "no question named `{k}` in the `{}` template",
                 t.meta.id
             )));
         }
     }
+    if let Some(l) = given.get(LANGUAGE).map(Answer::text) {
+        t.with_variant(&l).map_err(Error::Usage)?;
+    }
     let mut out = Answers::new();
-    for q in &t.meta.questions {
+    for q in &questions {
         if let Some(w) = &q.when
             && !when_holds(w, &out).map_err(Error::Usage)?
         {
@@ -934,6 +1295,108 @@ fn placeholders(text: &str) -> Vec<String> {
         }
     }
     out
+}
+
+fn lint_variants(t: &Template, f: &mut Vec<String>) {
+    let m = &t.meta;
+    if m.variants.is_empty() {
+        if let Some((i, p, _)) = t.variant_files.first() {
+            f.push(format!(
+                "variants/{i}/{p}: no [[variants]] entry, so no language has files"
+            ));
+        }
+        if m.default_variant.is_some() {
+            f.push("default_variant names no variant: there are no [[variants]]".into());
+        }
+        return;
+    }
+    if m.questions.iter().any(|q| q.key == LANGUAGE) {
+        f.push(format!(
+            "question `{LANGUAGE}`: that key is the language question of the variants"
+        ));
+    }
+    let mut ids: Vec<&str> = Vec::new();
+    for v in &m.variants {
+        let id = v.id.as_str();
+        let ok = (2..=16).contains(&id.len())
+            && id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+        if !ok {
+            f.push(format!(
+                "variant `{id}`: lowercase letters and digits, 2 to 16, starting with a letter"
+            ));
+        }
+        if ids.contains(&id) {
+            f.push(format!("variant `{id}` is listed twice"));
+        }
+        ids.push(id);
+        if v.label.trim().is_empty() {
+            f.push(format!("variant `{id}` has no label"));
+        }
+        if v.status == Status::Live && m.steps.iter().any(|s| s.name == StepName::Smoke) {
+            if v.smoke == SmokeBy::Test && v.test.is_empty() {
+                f.push(format!(
+                    "variant `{id}` smokes by `test` and is live, but it has no `test`"
+                ));
+            } else if v.smoke == SmokeBy::Heartbeat && v.run.is_empty() {
+                f.push(format!(
+                    "variant `{id}` is live and the template has a smoke step, but it has no `run`"
+                ));
+            }
+        }
+        if v.needs
+            .iter()
+            .any(|n| n.is_empty() || n.contains(['/', ' ', '\\']))
+        {
+            f.push(format!(
+                "variant `{id}`: `needs` lists program names, not paths"
+            ));
+        }
+        for k in v.vars.keys() {
+            let key_ok = !k.is_empty()
+                && k.chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+            if !key_ok {
+                f.push(format!(
+                    "variant `{id}`: var `{k}` is upper case letters, digits and underscores"
+                ));
+            } else if [
+                "NAME",
+                "ID",
+                "MODULE",
+                "CREATED_AT",
+                "PUBLISHER",
+                "LANGUAGE",
+                "LANGUAGE_LABEL",
+            ]
+            .contains(&k.as_str())
+            {
+                f.push(format!(
+                    "variant `{id}`: var `{k}` is a built-in placeholder"
+                ));
+            }
+        }
+    }
+    if let Some(d) = &m.default_variant
+        && !m
+            .variants
+            .iter()
+            .any(|v| &v.id == d && v.status == Status::Live)
+    {
+        f.push(format!("default_variant `{d}` is not a live variant"));
+    }
+    for (i, p, _) in &t.variant_files {
+        if !ids.contains(&i.as_str()) {
+            f.push(format!("variants/{i}/{p}: no [[variants]] entry `{i}`"));
+        }
+    }
+    for p in &m.programs {
+        if Path::new(p).is_absolute() || p.contains("..") {
+            f.push(format!("programs: `{p}` must be a path inside the project"));
+        }
+    }
 }
 
 /// Checks a template folder: the file parses, ids and keys are well formed, defaults fit
@@ -1017,6 +1480,7 @@ pub fn lint_dir(path: &Path, root: &Path) -> LintReport {
         }
         seen.push(k);
     }
+    lint_variants(&t, &mut f);
     if m.steps.iter().filter(|s| s.name == StepName::Agent).count() > 1 {
         f.push("more than one agent step".into());
     }
@@ -1032,14 +1496,22 @@ pub fn lint_dir(path: &Path, root: &Path) -> LintReport {
     match extend(t.clone(), root, 0) {
         Err(e) => f.push(e),
         Ok(full) => {
-            let known: Vec<String> = ["NAME", "ID", "MODULE", "CREATED_AT"]
+            let known: Vec<String> = ["NAME", "ID", "MODULE", "CREATED_AT", "DESCRIPTION"]
                 .iter()
                 .map(|s| (*s).to_owned())
                 .chain(
-                    full.meta
-                        .questions
+                    full.all_questions()
                         .iter()
                         .map(|q| q.key.to_ascii_uppercase()),
+                )
+                .chain(
+                    full.meta
+                        .variants
+                        .iter()
+                        .flat_map(|v| v.vars.keys().cloned())
+                        .chain(
+                            (!full.meta.variants.is_empty()).then(|| "LANGUAGE_LABEL".to_owned()),
+                        ),
                 )
                 .collect();
             let prompts = full
@@ -1052,6 +1524,20 @@ pub fn lint_dir(path: &Path, root: &Path) -> LintReport {
                 .files
                 .iter()
                 .flat_map(|(p, x)| [p.as_str(), x.as_str()])
+                .chain(
+                    t.variant_files
+                        .iter()
+                        .flat_map(|(_, p, x)| [p.as_str(), x.as_str()]),
+                )
+                .chain(m.variants.iter().flat_map(|v| {
+                    v.vars
+                        .values()
+                        .chain(&v.build)
+                        .chain(&v.run)
+                        .chain(&v.test)
+                        .chain(v.env.values())
+                        .map(String::as_str)
+                }))
                 .chain(prompts);
             for p in own.flat_map(placeholders) {
                 if !known.contains(&p) {
@@ -1061,9 +1547,10 @@ pub fn lint_dir(path: &Path, root: &Path) -> LintReport {
                     }
                 }
             }
-            // A sample render: defaults where there are some, `sample` where not.
+            // A sample render of every language (or of the one set of files): defaults where
+            // there are some, `sample` where not.
             let mut sample = Answers::new();
-            for q in &full.meta.questions {
+            for q in &full.all_questions() {
                 let a = q.default.clone().unwrap_or_else(|| match q.kind {
                     Kind::Bool => Answer::Flag(false),
                     Kind::Choice => Answer::Text(q.choices.first().cloned().unwrap_or_default()),
@@ -1072,17 +1559,48 @@ pub fn lint_dir(path: &Path, root: &Path) -> LintReport {
                 });
                 sample.insert(q.key.clone(), a);
             }
-            let vals = values("sample", "local", "2026-01-01T00:00:00Z", &sample);
-            match render(&full, &vals) {
-                Err(e) => f.push(e),
-                Ok(files) => {
-                    if let Some((_, manifest)) = files.iter().find(|(p, _)| p == SOURCE_FILE) {
-                        let r = lint(manifest);
-                        f.extend(
-                            r.findings
-                                .iter()
-                                .map(|x| format!("{SOURCE_FILE}: {}", x.message)),
-                        );
+            let languages: Vec<Option<String>> = if full.meta.variants.is_empty() {
+                vec![None]
+            } else {
+                full.live_variants()
+                    .iter()
+                    .map(|v| Some(v.id.clone()))
+                    .collect()
+            };
+            for lang in languages {
+                let mut answers = sample.clone();
+                let mut tpl = full.clone();
+                let tag = lang.as_ref().map_or(String::new(), |l| format!("{l}: "));
+                if let Some(l) = &lang {
+                    answers.insert(LANGUAGE.into(), Answer::Text(l.clone()));
+                    match full.with_variant(l) {
+                        Ok(x) => tpl = x,
+                        Err(e) => {
+                            f.push(e);
+                            continue;
+                        }
+                    }
+                }
+                let vals = all_values(&tpl, "sample", "local", "2026-01-01T00:00:00Z", &answers);
+                match render(&tpl, &vals) {
+                    Err(e) => f.push(format!("{tag}{e}")),
+                    Ok(files) => {
+                        for (p, x) in &files {
+                            for left in placeholders(p).into_iter().chain(placeholders(x)) {
+                                let msg = format!("{tag}@@{left}@@ is left unfilled in {p}");
+                                if !tpl.meta.variants.is_empty() && !f.contains(&msg) {
+                                    f.push(msg);
+                                }
+                            }
+                        }
+                        if let Some((_, manifest)) = files.iter().find(|(p, _)| p == SOURCE_FILE) {
+                            let r = lint(manifest);
+                            f.extend(
+                                r.findings
+                                    .iter()
+                                    .map(|x| format!("{tag}{SOURCE_FILE}: {}", x.message)),
+                            );
+                        }
                     }
                 }
             }
@@ -1181,5 +1699,68 @@ mod tests {
         assert_eq!(c.files.len(), d.files.len() + 1);
         assert!(c.meta.agent_prompt.is_some());
         assert_eq!(c.steps().len(), 3);
+    }
+
+    fn demo() -> Template {
+        load(
+            &Spec::Id("demo".into()),
+            Path::new("/nonexistent-iohr-test"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn demo_has_four_live_languages_and_asks_for_one_first() {
+        let d = demo();
+        let ids: Vec<&str> = d.live_variants().iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(ids, ["python", "typescript", "go", "rust"]);
+        assert_eq!(d.default_variant().unwrap().id, "python");
+        let q = d.all_questions();
+        assert_eq!(q[0].key, LANGUAGE);
+        assert_eq!(q[0].choices, ids);
+    }
+
+    #[test]
+    fn a_variant_replaces_the_common_files_it_names_and_leaves_the_rest() {
+        let d = demo();
+        let go = d.with_variant("go").unwrap();
+        let paths: Vec<&str> = go.files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains(&"main.go"), "{paths:?}");
+        assert!(paths.contains(&"extension.toml"), "{paths:?}");
+        assert!(
+            !paths
+                .iter()
+                .any(|p| Path::new(p).extension().is_some_and(|e| e == "py")),
+            "{paths:?}"
+        );
+        assert_eq!(go.variant_files.len(), 0);
+    }
+
+    #[test]
+    fn an_unknown_or_coming_language_is_refused_and_the_live_ones_are_named() {
+        let d = demo();
+        let e = d.with_variant("cobol").unwrap_err();
+        assert!(e.contains("python, typescript, go, rust"), "{e}");
+        let mut c = d.clone();
+        c.meta.variants[2].status = Status::Coming;
+        let e = c.with_variant("go").unwrap_err();
+        assert!(e.contains("coming"), "{e}");
+        assert!(!e.contains("go,"), "{e}");
+        assert!(!c.all_questions()[0].choices.contains(&"go".to_owned()));
+    }
+
+    #[test]
+    fn the_runner_has_its_values_filled_in() {
+        let d = demo();
+        let vals = all_values(
+            &d,
+            "my-shop",
+            "acme",
+            "2026-01-01",
+            &Answers::from([(LANGUAGE.to_owned(), Answer::Text("go".into()))]),
+        );
+        let r = d.runner("go", &vals).unwrap();
+        assert!(r.build.iter().any(|w| w.contains("my-shop")), "{r:?}");
+        assert!(d.runner("cobol", &vals).is_none());
     }
 }

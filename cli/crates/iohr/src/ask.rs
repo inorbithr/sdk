@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub(crate) mod stream;
+
 /// Where the answer comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Via {
@@ -88,6 +90,129 @@ fn pick<'a>(flag: Option<&'a str>, configured: Option<&'a str>, default: &'a str
         .unwrap_or(default)
 }
 
+/// The model: the flag, else `[ask] model`, else for Claude `haiku` (the small, fast tier). Codex
+/// has no default here: with none named it uses its own configured model.
+///
+/// # Errors
+/// A value that is empty after trimming, has a space, or starts with `-` (it would read as a flag).
+pub(crate) fn choose_model(
+    agent: Agent,
+    flag: Option<&str>,
+    configured: Option<&str>,
+) -> Result<Option<String>, String> {
+    let named = [flag, configured]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|v| !v.is_empty());
+    let model = match (named, agent) {
+        (Some(m), _) => m,
+        (None, Agent::Claude) => "haiku",
+        (None, Agent::Codex) => return Ok(None),
+    };
+    if model.starts_with('-') || model.contains(char::is_whitespace) {
+        return Err(format!(
+            "`model` is `{model}`; give a model name such as haiku"
+        ));
+    }
+    Ok(Some(model.to_owned()))
+}
+
+/// How the thinking is drawn: the flag, else `[ask] thinking`, else `show`.
+///
+/// # Errors
+/// A value that is not `show` or `collapse`.
+pub(crate) fn choose_thinking(
+    flag: Option<&str>,
+    configured: Option<&str>,
+) -> Result<stream::Thinking, String> {
+    match pick(flag, configured, "show") {
+        "show" => Ok(stream::Thinking::Show),
+        "collapse" => Ok(stream::Thinking::Collapse),
+        other => Err(format!("`thinking` is `{other}`; one of: show, collapse")),
+    }
+}
+
+/// The arguments that run `agent` once on `question`, streamed as JSON lines, with no session
+/// kept. One list for the real start and for `--dry-run`, so the dry run shows exactly what
+/// would run. The question is the last argument, after `--`, so it can never read as a flag.
+///
+/// Claude (flags checked against `claude --help`): `-p` prints and exits, `--output-format
+/// stream-json` needs `--verbose`, `--include-partial-messages` streams pieces as they
+/// arrive, `--no-session-persistence` keeps nothing on disk, `--permission-mode acceptEdits`
+/// lets it edit (and `--disallowedTools Bash` keeps the shell out even when the person's own
+/// settings would allow it), `--max-turns` bounds the run. Codex (<https://developers.openai.com/codex/cli/reference>): `exec --json`
+/// prints JSON lines, `--ephemeral` keeps no session, `--sandbox` is `read-only` unless edits
+/// are allowed, `--skip-git-repo-check` lets it answer in any folder.
+#[must_use]
+pub(crate) fn argv(
+    agent: Agent,
+    model: Option<&str>,
+    allow_edits: bool,
+    max_turns: Option<u32>,
+    question: &str,
+) -> Vec<String> {
+    let mut a: Vec<String> = match agent {
+        Agent::Claude => [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--no-session-persistence",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+        Agent::Codex => ["exec", "--json", "--ephemeral", "--skip-git-repo-check"]
+            .map(str::to_owned)
+            .to_vec(),
+    };
+    if let Some(m) = model {
+        a.extend(["--model".to_owned(), m.to_owned()]);
+    }
+    match (agent, allow_edits) {
+        (Agent::Claude, true) => {
+            a.extend(["--permission-mode".to_owned(), "acceptEdits".to_owned()]);
+            a.extend(["--disallowedTools".to_owned(), "Bash".to_owned()]);
+        }
+        (Agent::Claude, false) => {}
+        (Agent::Codex, edits) => a.extend([
+            "--sandbox".to_owned(),
+            if edits {
+                "workspace-write"
+            } else {
+                "read-only"
+            }
+            .to_owned(),
+        ]),
+    }
+    // Codex has no turn limit; the caller's time limit is its only bound.
+    if let (Agent::Claude, Some(n)) = (agent, max_turns) {
+        a.extend(["--max-turns".to_owned(), n.to_string()]);
+    }
+    a.extend(["--".to_owned(), question.to_owned()]);
+    a
+}
+
+/// `program` and `args` as one line a shell reads back the same way.
+#[must_use]
+pub(crate) fn shell_line(program: &str, args: &[String]) -> String {
+    std::iter::once(program)
+        .chain(args.iter().map(String::as_str))
+        .map(|w| {
+            if !w.is_empty()
+                && w.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c))
+            {
+                w.to_owned()
+            } else {
+                format!("'{}'", w.replace('\'', "'\\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The executable `name` on the `PATH` value `path`, if any.
 #[must_use]
 pub(crate) fn find_on_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
@@ -158,6 +283,56 @@ mod tests {
         assert_eq!(choose_via(Some("io"), Some("local")), Ok(Via::Io));
         assert!(choose_via(Some("cloud"), None).is_err());
         assert!(choose_agent(None, Some("x")).is_err());
+    }
+
+    #[test]
+    fn the_model_defaults_to_haiku_for_claude_and_to_nothing_for_codex() {
+        let m = |a, f, c| choose_model(a, f, c);
+        assert_eq!(m(Agent::Claude, None, None), Ok(Some("haiku".into())));
+        assert_eq!(
+            m(Agent::Claude, None, Some("sonnet")),
+            Ok(Some("sonnet".into()))
+        );
+        assert_eq!(
+            m(Agent::Claude, Some("opus"), Some("sonnet")),
+            Ok(Some("opus".into()))
+        );
+        assert_eq!(m(Agent::Codex, None, None), Ok(None));
+        assert!(m(Agent::Claude, Some("--x"), None).is_err());
+        assert!(m(Agent::Claude, Some("a b"), None).is_err());
+    }
+
+    #[test]
+    fn the_argv_has_no_session_and_no_edits_unless_asked() {
+        let a = argv(Agent::Claude, Some("haiku"), false, None, "q");
+        assert!(a.contains(&"--no-session-persistence".to_owned()));
+        assert!(!a.contains(&"--permission-mode".to_owned()));
+        assert_eq!(a[a.len() - 2..], ["--", "q"]);
+        let e = argv(Agent::Claude, Some("haiku"), true, Some(7), "q");
+        assert!(
+            e.windows(2)
+                .any(|w| w == ["--permission-mode", "acceptEdits"])
+        );
+        // Edits never include the shell, and the turn bound reaches Claude only.
+        assert!(e.windows(2).any(|w| w == ["--disallowedTools", "Bash"]));
+        assert!(e.windows(2).any(|w| w == ["--max-turns", "7"]));
+        assert!(
+            !a.contains(&"--max-turns".to_owned()) && !a.contains(&"--disallowedTools".to_owned())
+        );
+        assert!(!argv(Agent::Codex, None, false, Some(7), "q").contains(&"--max-turns".to_owned()));
+        assert!(
+            argv(Agent::Codex, None, false, Some(7), "q")
+                .windows(2)
+                .any(|w| w == ["--sandbox", "read-only"])
+        );
+    }
+
+    #[test]
+    fn the_shell_line_quotes_what_a_shell_would_split() {
+        assert_eq!(
+            shell_line("claude", &["-p".into(), "it's a b".into()]),
+            "claude -p 'it'\\''s a b'"
+        );
     }
 
     #[test]

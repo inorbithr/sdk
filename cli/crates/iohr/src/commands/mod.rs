@@ -2,6 +2,7 @@
 
 mod accounts;
 mod ask;
+mod atlas;
 mod auth;
 mod browser_ext;
 mod call;
@@ -16,6 +17,7 @@ mod ext_catalogue;
 mod ext_packages;
 mod lab;
 mod login;
+mod memory;
 mod openapi;
 mod profile;
 mod project;
@@ -83,6 +85,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sdk(SdkCommand::Add(args)) => sdk_add::add(&args, out),
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
         Command::Coordinator(cmd) => coordinator::run(g, &env, cmd, out).await,
+        Command::Memory(cmd) => memory::run(g, &env, cmd, out).await,
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
@@ -90,6 +93,8 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Upgrade { check } => upgrade::run(g, check, out).await,
         Command::Ask(args) => ask::run(g, args, out).await,
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
+        Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
+        Command::Sync(args) => atlas::sync(g, &env, &args, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,

@@ -22,6 +22,8 @@ Account:
 
 Build:
   project      Create projects and manage project templates
+  atlas        Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder
+  sync         Send the project's atlas documents to its Decisions space
   ext          Install, verify and run extensions
   sdk          Generate an SDK cut to what your credentials may call, and check it later
   api          Make one authenticated call and print the answer
@@ -33,6 +35,7 @@ Agents:
   ask          Ask your own AI agent a question in this folder
   runner       Run coordinator turns on this machine
   coordinator  List and file the coordinator's jobs and asks
+  memory       Keep what a project knows as files, check it, and sync it when you choose
 
 Operate:
   tunnel       Open a loopback pipe to an environment's edge

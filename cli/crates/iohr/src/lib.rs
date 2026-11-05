@@ -6,10 +6,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod atlas;
 pub mod cli;
 pub mod environments;
 pub mod ext;
+pub mod front;
+pub mod memory;
 pub mod project;
+pub mod roles;
 pub mod template;
 
 mod args;

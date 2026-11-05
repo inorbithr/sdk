@@ -164,6 +164,8 @@ pub const GROUPS: &[(&str, &[&str])] = &[
         "Build",
         &[
             "project",
+            "atlas",
+            "sync",
             "ext",
             "sdk",
             "api",
@@ -172,7 +174,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "decisions",
         ],
     ),
-    ("Agents", &["ask", "runner", "coordinator"]),
+    ("Agents", &["ask", "runner", "coordinator", "memory"]),
     (
         "Operate",
         &["tunnel", "browser", "upgrade", "completion", "help"],
@@ -277,6 +279,14 @@ pub enum Command {
     /// The coordinator's jobs and queued asks: list and file work.
     #[command(subcommand)]
     Coordinator(CoordinatorCommand),
+    /// Keep what a project knows as files, check it, and sync it when you choose.
+    ///
+    /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
+    /// the code) or in your own notes, with no sign-in and no network. `check` finds what is
+    /// wrong, `drift` what moved in the code, and `sync` shares it with your InOrbit account
+    /// only when you turn that on in `[memory]` or run it.
+    #[command(subcommand)]
+    Memory(MemoryCommand),
     /// Browse the apps a connection can be made from.
     ///
     /// The apps a connection can be made from: incident tools, chat, observability, AI models.
@@ -334,12 +344,30 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder.
+    ///
+    /// The atlas: plain files in the project's `atlas/` folder (PRDs, RFCs, ADRs and studies as
+    /// Markdown, a canvas, a folder for 3D models). They stay on your machine until you run
+    /// `iohr sync`.
+    #[command(subcommand)]
+    Atlas(AtlasCommand),
+    /// Send the project's atlas documents to its Decisions space.
+    ///
+    /// The same as `iohr atlas sync`: creates what is new, saves a new version of what changed,
+    /// and never overwrites a document that changed in Decisions. Nothing else leaves
+    /// the machine.
+    Sync(SyncArgs),
     /// Ask your own AI agent a question in this folder.
     ///
-    /// Ask a question in this folder: starts your own AI agent here (Claude Code, `claude`)
-    /// with the question, under your own subscription. The agent's own prompts confirm every
-    /// change; iohr never stores the question or the answer. Defaults come from `[ask]` in
-    /// config.toml; the flags win for one call.
+    /// Ask a question in this folder: your own AI agent (Claude Code, or Codex) answers once,
+    /// right here in the terminal, under your own subscription. No session opens: the agent
+    /// runs in print mode with the small fast model (`haiku`) and iohr draws what it thinks
+    /// (dim, in a quiet block), each tool it uses (one row each) and the answer as it arrives,
+    /// then a footer with the time, turns and cost. Without a terminal, with `NO_COLOR` or
+    /// TERM=dumb it prints only the answer; `--json` passes the agent's own events through as
+    /// JSON lines. Nothing is changed unless you pass `--allow-edits` (files only); shell
+    /// commands are never allowed. iohr never stores the question or the answer. Defaults
+    /// come from `[ask]` in config.toml; the flags win for one call.
     Ask(AskArgs),
     /// Run coordinator turns on this machine.
     ///
@@ -1332,6 +1360,207 @@ pub struct AskArgs {
     /// The agent to start: `claude` (default; `[ask] agent`).
     #[arg(long, value_name = "AGENT")]
     pub agent: Option<String>,
+    /// The model that answers: a Claude alias such as `haiku` or a full model name. Default
+    /// `[ask] model`, else `haiku`, the small fast tier. With `--agent codex` it is passed on
+    /// only when you name one.
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+    /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
+    /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits
+    /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
+    #[arg(long)]
+    pub allow_edits: bool,
+    /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block;
+    /// default) or `collapse` (one line). `[ask] thinking`.
+    #[arg(long, value_name = "HOW")]
+    pub thinking: Option<String>,
+    /// Print the exact command line the agent would run and start nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// The atlas kinds a document can be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum AtlasKind {
+    Prd,
+    Rfc,
+    Adr,
+    Study,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AtlasCommand {
+    /// Add the atlas folder to a project that has none.
+    ///
+    /// Writes the folders and starters `iohr project init` writes, for a project made without
+    /// them. Only what is missing: a file or folder you already have is left as it is.
+    Init {
+        /// The project folder. Default: the folder you are in.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Add a new PRD, RFC, ADR or study with the next free number.
+    New {
+        /// What kind of document.
+        #[arg(value_enum)]
+        kind: AtlasKind,
+        /// Its title, a few words: it becomes the file name.
+        title: String,
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Send the atlas documents to the project's Decisions space.
+    Sync(SyncArgs),
+    /// The built-in roles of this project.
+    #[command(subcommand, alias = "personalities")]
+    Roles(RolesCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RolesCommand {
+    /// Show the project's roles and whether InOrbit has them.
+    ///
+    /// The built-in roles in `atlas/roles/`: their size and sources, and, when
+    /// you are signed in, the version InOrbit holds.
+    List {
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Import the project's roles into your InOrbit account.
+    ///
+    /// The same import `iohr sync` does. A role already in your account that did not
+    /// come from this project, or that changed in InOrbit since, is left alone.
+    Import {
+        /// Say what would be sent and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MemoryCommand {
+    /// Keep a fact or a preference.
+    Remember {
+        /// What to keep, one short sentence. No secrets or personal data.
+        text: String,
+        /// Why it holds, so it can be checked later. `iohr memory check` flags a memory without.
+        #[arg(long, value_name = "WHY")]
+        why: Option<String>,
+        /// A file or folder it is about (relative to the project), or `cmd:<command>`. Repeat it.
+        #[arg(long = "ref", value_name = "PATH", action = clap::ArgAction::Append)]
+        refs: Vec<String>,
+        /// Keep it as a preference (how you want to be answered), not a fact.
+        #[arg(long, conflicts_with = "kind")]
+        preference: bool,
+        /// The kind: fact, preference or episode. Default: fact.
+        #[arg(long, value_name = "KIND", value_parser = ["fact", "preference", "episode"])]
+        kind: Option<String>,
+        /// Never call it stale, however long since it was confirmed.
+        #[arg(long)]
+        pin: bool,
+        /// Where to keep it: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// Find what is known about a topic.
+    Recall {
+        /// The topic, in words.
+        query: String,
+        /// At most this many entries.
+        #[arg(long, default_value_t = 10, value_name = "N")]
+        limit: u32,
+        /// Where to look: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// List what is kept.
+    List {
+        /// At most this many entries.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// Where to look: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// Forget one entry by id.
+    Forget {
+        /// The entry's id, from `iohr memory list`.
+        id: String,
+        /// Where it is kept: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// Find memories that are wrong, stale, repeated or missing.
+    ///
+    /// Reads the memories on this machine, with no network: refs that no longer exist, no
+    /// reason given, not confirmed for a long time, no `checked:` date or an old one, the same thing twice, and what a
+    /// role expects a project to remember (language, how to build and test, owners).
+    Check {
+        /// Where to look: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Exit non-zero when anything is found.
+        #[arg(long)]
+        strict: bool,
+        /// Days without a confirmation after which a memory is stale.
+        #[arg(long, default_value_t = 180, value_name = "DAYS")]
+        stale_days: u32,
+        /// Days after which a memory's `checked:` date is too old. Default: `[memory]
+        /// check_days`, else 180.
+        #[arg(long, value_name = "DAYS")]
+        checked_days: Option<u32>,
+    },
+    /// Compare memories with the code, and with the service when sync is on.
+    ///
+    /// Asks git whether the files a memory is about changed after it was last confirmed. With
+    /// `[memory] sync = true` or `--remote`, also compares the files with the memory service:
+    /// only here, only there, changed on both sides. It only reads; nothing is changed.
+    Drift {
+        /// Where to look: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Compare with the memory service too, even when sync is off.
+        #[arg(long)]
+        remote: bool,
+        /// Exit non-zero when anything drifted.
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Sync memories with your InOrbit account.
+    ///
+    /// Off unless `[memory] sync = true` or you run this. Sends new and changed memories, links
+    /// ones the service already has, and stops on a memory changed on both sides: nothing is
+    /// overwritten. The service keeps no versions, so a change is detected here by hash and
+    /// replaced as create-then-delete.
+    Sync {
+        /// What to sync: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Say what would be sent and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also write the service's entries that have no file here as new files.
+        #[arg(long)]
+        pull: bool,
+    },
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SyncArgs {
+    /// Say what would be created or saved and send nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// The Decisions space id (`lab_...`). Default: the one in `.inorbit/space`.
+    #[arg(long, value_name = "ID")]
+    pub space: Option<String>,
+    /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1363,9 +1592,19 @@ pub enum ProjectCommand {
         #[arg(long, value_name = "FILE")]
         answers: Option<PathBuf>,
         /// Describe the project and your own agent (claude or codex, on your PATH) builds it
-        /// in the new folder, from the template's agent prompt. Its output is labelled AI.
+        /// in the new folder, from the template's agent prompt. It runs in the background of
+        /// this command, in print mode (no session opens): it may edit files, never run shell
+        /// commands, and iohr draws its progress. The smoke test runs after it. Its output is
+        /// labelled AI. `--json` passes the agent's events through as JSON lines.
         #[arg(long, value_name = "TEXT")]
         describe: Option<String>,
+        /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
+        /// 40, init's own: `[ask]` in config.toml has no bound.
+        #[arg(long, value_name = "N")]
+        agent_turns: Option<u32>,
+        /// The most seconds the agent may run before iohr stops it. Default 600, init's own.
+        #[arg(long, value_name = "SECONDS")]
+        agent_timeout: Option<u64>,
         /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
         /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
         /// agent is not started (its command and prompt are printed). Every step shows as
@@ -1375,14 +1614,22 @@ pub enum ProjectCommand {
         /// Answer the questions with their defaults: no menu, no confirmation.
         #[arg(short = 'y', long)]
         yes: bool,
-        /// The folder to write (default: ~/development/NAME); it must not exist or be empty.
+        /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
+        /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
+        /// when you are inside a git repository, or a path of your own. It must not exist
+        /// or be empty.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
+        /// The language, for a template that offers several (the same as `--set
+        /// language=ID`); `iohr project template show ID` lists them. At a terminal,
+        /// leaving it out offers a menu that marks the toolchains you have.
+        #[arg(long, value_name = "ID")]
+        lang: Option<String>,
         /// The publisher half of the extension id (default: your account's slug, else
         /// "local"); the private listing takes it when that step lands.
         #[arg(long)]
         publisher: Option<String>,
-        /// Skip the smoke test (it runs the project once with python3).
+        /// Skip the smoke test (it runs the project once with the language's own runtime).
         #[arg(long)]
         no_smoke: bool,
     },
