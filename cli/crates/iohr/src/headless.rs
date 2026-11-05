@@ -34,11 +34,12 @@ pub(crate) const OUTPUT_MAX: usize = 8 * 1024;
 pub(crate) const OUTPUT_LINES: usize = 200;
 pub(crate) const MESSAGE_MAX: usize = 16 * 1024;
 
-const BRIEF: &str = "You are Io, InOrbit's assistant, running on the person's own Claude Code (local) and answering one question typed at a terminal prompt. \
+const BRIEF_HEAD: &str = "You are Io, InOrbit's assistant, running on the person's own Claude Code (local) and answering one question typed at a terminal prompt. \
 Answer in plain words, short and direct. \
 If the person only greets you, reply with one short friendly line and ask what they are working on. \
 Use the folder and the last command only when the question is about them; otherwise do not mention them. \
-Format for a terminal: short paragraphs or a short list, `code` for names, no headings or tables, at most about 8 lines unless asked for more. \
+Format for a terminal: short paragraphs or a short list, `code` for names, no headings or tables, at most about ";
+const BRIEF_TAIL: &str = " lines unless asked for more. \
 Say what you do not know. \
 If one command would help, give exactly one, on a single line, in a final fenced ```sh block and nothing after it. \
 You cannot run anything and must never say you did. \
@@ -277,8 +278,15 @@ pub(crate) fn assemble(question: &str, ctx: &Context) -> Result<String, String> 
 /// (hooks, plugins), no session file, a turn cap, and never `--bare`, a key or another
 /// endpoint. The prompt goes in on stdin, never as an argument. `model` is
 /// [`crate::ask::choose_model`]'s answer.
+/// The system prompt, with an answer as long as `lines` (the terminal's height less the
+/// card, [`crate::card::lines_for`]).
+pub(crate) fn brief(lines: usize) -> String {
+    format!("{BRIEF_HEAD}{lines}{BRIEF_TAIL}")
+}
+
 pub(crate) fn args(model: &str) -> Result<Vec<String>, String> {
     let turns = MAX_TURNS.to_string();
+    let brief = brief(crate::card::stderr_lines());
     let v: Vec<String> = [
         "-p",
         "--model",
@@ -294,7 +302,7 @@ pub(crate) fn args(model: &str) -> Result<Vec<String>, String> {
         "--tools",
         "",
         "--system-prompt",
-        BRIEF,
+        &brief,
     ]
     .iter()
     .map(|s| (*s).to_owned())
@@ -511,7 +519,12 @@ mod tests {
 
     #[test]
     fn the_assistant_is_io_on_claude_code_and_the_label_says_what_was_read() {
-        assert!(BRIEF.starts_with("You are Io,") && BRIEF.contains("Claude Code (local)"));
+        let b = brief(30);
+        assert!(b.starts_with("You are Io,") && b.contains("Claude Code (local)"));
+        assert!(
+            b.contains("at most about 30 lines unless asked for more."),
+            "{b}"
+        );
         let bare = read_line(&Context::default());
         assert_eq!(
             bare,
@@ -606,7 +619,7 @@ mod tests {
             read_line(&ctx)
                 .starts_with("Read: your question, the folder's path, its top-level file names;")
         );
-        assert!(BRIEF.contains("<files>"));
+        assert!(brief(8).contains("<files>"));
         let none = assemble("q", &Context::default()).unwrap();
         assert!(!none.contains("<files>"));
     }
