@@ -142,15 +142,16 @@ mod tests {
         }
     }
 
+    /// A salt drawn at runtime, as the real one comes from the account.
+    fn salt() -> String {
+        let mut b = [0_u8; 16];
+        getrandom::fill(&mut b).unwrap();
+        super::super::claude::hex(&b)
+    }
+
     #[test]
     fn identity_is_a_lowercase_sha256() {
-        // Salts are drawn at runtime, as the real one comes from the account.
-        let draw = || {
-            let mut b = [0_u8; 16];
-            getrandom::fill(&mut b).unwrap();
-            super::super::claude::hex(&b)
-        };
-        let (salt, other) = (draw(), draw());
+        let (salt, other) = (salt(), salt());
         assert_ne!(salt, other);
         let h = identity_sha256(&salt, "line\n");
         assert_eq!(h.len(), 64);
@@ -205,8 +206,8 @@ mod tests {
 
     #[test]
     fn identity_hash_is_stable_across_refresh_and_hosts() {
-        let salt = "5a17";
-        let hash = |text: &str| identity_sha256(salt, &identity_line(text).unwrap());
+        let salt = salt();
+        let hash = |text: &str| identity_sha256(&salt, &identity_line(text).unwrap());
         let base = hash(&status(
             "seat@example.com",
             ORG,
