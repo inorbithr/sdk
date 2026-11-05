@@ -17,11 +17,10 @@ const FILE: &str = "ask-card.json";
 const FULL_EVERY: u64 = 24 * 60 * 60;
 
 /// The short hints, shown in turn.
-pub(crate) const HINTS: [&str; 4] = [
+pub(crate) const HINTS: [&str; 3] = [
     "`??` follows up.",
     "`iohr ask --help` for flags.",
     "`[ask] model` in config picks the model.",
-    "Set `INORBIT_ASK=0` to turn `?` off.",
 ];
 
 /// `[ask] hints`.
@@ -196,11 +195,11 @@ mod tests {
     fn the_hints_go_round_in_turn() {
         let mut s = None;
         step(&mut s, Mode::Sometimes, N, T0);
-        let seen: Vec<_> = (1..=5)
+        let seen: Vec<_> = (1..=4)
             .map(|i| step(&mut s, Mode::Sometimes, N, T0 + i))
             .collect();
-        assert_eq!(seen[3], Footer::Short(Some(HINTS[3])));
-        assert_eq!(seen[4], Footer::Short(Some(HINTS[0])), "back to the first");
+        assert_eq!(seen[2], Footer::Short(Some(HINTS[2])));
+        assert_eq!(seen[3], Footer::Short(Some(HINTS[0])), "back to the first");
     }
 
     #[test]
@@ -283,6 +282,11 @@ mod tests {
         assert_eq!(next(d.path(), Mode::Sometimes, N, T0 + 3), Footer::Full);
         // A folder that cannot exist is not an error.
         let _ = next(Path::new("/proc/none/x"), Mode::Sometimes, N, T0);
+    }
+
+    #[test]
+    fn no_hint_names_the_off_switch() {
+        assert!(HINTS.iter().all(|h| !h.contains("INORBIT_ASK")));
     }
 
     #[test]
