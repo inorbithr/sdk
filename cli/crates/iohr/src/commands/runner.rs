@@ -1041,7 +1041,7 @@ fn pick_runner(
                 .map(|r| r.runner_id.as_str())
                 .collect();
             return Err(Error::Failed(format!(
-                "this machine's key matches more than one runner ({}): pin one with `id = \"rnr_...\"` under [profiles.<name>.runner] in config.toml, or pass --runner <id> (IOHR_RUNNER_ID) or --name; then `iohr runner revoke <id>` the extra ones",
+                "this machine's key matches more than one runner ({}): pin one with `id = \"rnr_...\"` under [profiles.<name>.runner] in config.toml, or pass --runner <id> (IOHR_RUNNER_ID) or --name; then revoke the extra ones",
                 ids.join(", ")
             )));
         }
@@ -1051,20 +1051,21 @@ fn pick_runner(
 }
 
 /// The runner this machine's key already holds, whatever its name: the pinned id when
-/// it is one of them, else the first. `None` without a key or without a match.
+/// it is one of them, else the first (a pin this key does not hold never makes a second
+/// runner for the key). `None` without a key or without a match.
 fn held_runner<'a>(
     mine: &'a [RunnerInfo],
     local_key: Option<&str>,
     pinned: Option<&str>,
 ) -> Option<&'a RunnerInfo> {
     let key = local_key?;
-    let mut held = mine
-        .iter()
-        .filter(|r| !r.public_key.is_empty() && r.public_key == key);
-    match pinned {
-        Some(id) => held.find(|r| r.runner_id == id),
-        None => held.next(),
-    }
+    let held = || {
+        mine.iter()
+            .filter(move |r| !r.public_key.is_empty() && r.public_key == key)
+    };
+    pinned
+        .and_then(|id| held().find(|r| r.runner_id == id))
+        .or_else(|| held().next())
 }
 
 /// Says how to pin the runner in config.toml. Nothing here writes `[runner]` settings
@@ -1185,7 +1186,13 @@ mod tests {
                 .runner_id,
             "b"
         );
-        assert!(held_runner(&two, Some("KEY_A"), Some("zz")).is_none());
+        // A pin this key does not hold falls back to the key's runner, never a new one.
+        assert_eq!(
+            held_runner(&two, Some("KEY_A"), Some("zz"))
+                .unwrap()
+                .runner_id,
+            "a"
+        );
     }
 
     #[test]
@@ -1196,7 +1203,7 @@ mod tests {
         assert!(
             msg.contains("more than one runner")
                 && msg.contains("[profiles.<name>.runner]")
-                && msg.contains("iohr runner revoke")
+                && msg.contains("revoke the extra ones")
                 && msg.contains("a, b")
         );
         // An explicit id still resolves it.

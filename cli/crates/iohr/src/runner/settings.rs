@@ -104,7 +104,7 @@ pub(crate) struct Effective {
     pub(crate) always_on: Setting<bool>,
     /// `None` when set nowhere: register uses the host name, run the key this machine holds.
     pub(crate) name: Option<Setting<String>>,
-    /// `None` when set nowhere: `run` and `check` pick by key. The runner id they drive.
+    /// `None` when set nowhere: `run` and `gate-report` pick by key. The runner id they drive.
     pub(crate) id: Option<Setting<String>>,
     /// `None` when set nowhere: with no kube context either, approved host actions are
     /// refused (every `kubectl` call is pinned to the configured cluster).

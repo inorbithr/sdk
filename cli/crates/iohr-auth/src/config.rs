@@ -185,7 +185,7 @@ pub struct RunnerConfig {
     /// The runner's name; default the host name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// The runner's id (`rnr_...`): pins which runner `run` and `check` drive when this
+    /// The runner's id (`rnr_...`): pins which runner `run` and `gate-report` drive when this
     /// machine's key matches more than one. The `--runner` flag wins over it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
