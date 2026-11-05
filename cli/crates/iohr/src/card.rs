@@ -108,10 +108,13 @@ pub(crate) struct Card<'a> {
     pub(crate) body: Body<'a>,
 }
 
-/// The width to draw at for a terminal `cols` wide (unknown: 80).
+/// The width to draw at for a terminal `cols` wide (unknown: 80): one column less than the
+/// terminal, so no line ever fills the last column (a terminal that wraps eagerly, or one
+/// that counts a glyph wider than we do, would break it and drop the rail).
 #[must_use]
 pub(crate) fn width_for(cols: Option<usize>) -> usize {
-    cols.unwrap_or(80).clamp(WIDTH_MIN, WIDTH_MAX)
+    cols.map_or(80, |c| c.saturating_sub(1))
+        .clamp(WIDTH_MIN, WIDTH_MAX)
 }
 
 /// The width of stderr's terminal, as [`width_for`] draws it.
@@ -710,6 +713,49 @@ mod tests {
         assert_eq!(width_for(None), 80);
         assert_eq!(width_for(Some(300)), WIDTH_MAX);
         assert_eq!(width_for(Some(10)), WIDTH_MIN);
-        assert_eq!(width_for(Some(72)), 72);
+        assert_eq!(width_for(Some(72)), 71);
+    }
+
+    /// A line as wide as the terminal leaves the cursor in the pending-wrap state, and a
+    /// terminal that wraps eagerly (or counts one glyph wider than we do) then breaks the
+    /// line: the rest lands on a line of its own with no rail. So the card never draws a
+    /// line as wide as the terminal, whatever its width and whatever the text.
+    #[test]
+    fn no_line_is_as_wide_as_the_terminal_and_every_body_line_has_its_rail() {
+        // Words sized so that, at some terminal width, a body line fills the inner width
+        // exactly (the case behind the blank, rail-less line in a 100-column card).
+        let filler = |n: usize| "x".repeat(n);
+        for cols in [40usize, 41, 60, 79, 80, 99, 100, 101, 120, 300] {
+            let width = width_for(Some(cols));
+            let inner = width - measure_text_width(RAIL);
+            for first in 1..inner {
+                let rest = inner - first - 1;
+                if rest == 0 {
+                    continue;
+                }
+                let text = format!(
+                    "{} {} tail of the paragraph, so a project, or an API.",
+                    filler(first),
+                    filler(rest)
+                );
+                let out = strip(&render(&card(&text), width, FANCY));
+                for l in out.lines() {
+                    assert!(
+                        measure_text_width(l) < cols.max(WIDTH_MIN + 1),
+                        "{cols} columns, line of {}: {l}",
+                        measure_text_width(l)
+                    );
+                }
+                let body: Vec<&str> = out
+                    .lines()
+                    .skip(1)
+                    .take_while(|l| !l.starts_with('╰'))
+                    .collect();
+                assert!(
+                    body.iter().all(|l| l.starts_with('│')),
+                    "{cols} columns, first {first}: {out}"
+                );
+            }
+        }
     }
 }
