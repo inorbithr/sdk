@@ -130,6 +130,7 @@ pub const RESERVED: &[&str] = &[
     "lab",
     "login",
     "logout",
+    "memory",
     "openapi",
     "packages",
     "profile",

@@ -17,6 +17,7 @@ mod ext_catalogue;
 mod ext_packages;
 mod lab;
 mod login;
+mod memory;
 mod openapi;
 mod profile;
 mod project;
@@ -77,6 +78,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sdk(SdkCommand::Add(args)) => sdk_add::add(&args, out),
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
         Command::Coordinator(cmd) => coordinator::run(g, &env, cmd, out).await,
+        Command::Memory(cmd) => memory::run(g, &env, cmd, out).await,
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,

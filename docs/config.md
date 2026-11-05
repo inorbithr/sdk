@@ -515,6 +515,10 @@ Today the key is read and nothing else: `iohr` has no background process to hang
 on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
 background loop is the next slice (RFC 0205).
 
+`iohr atlas init` and `iohr project init` also add a `[personalities]` table to the project's
+`inorbit.toml` (`names`, the built-ins the project uses). `iohr` writes it once and never reads
+anything else back from the pack files; the import is made from the catalogue in the binary.
+
 ## 5. Credentials
 
 ### 5.1 The chain

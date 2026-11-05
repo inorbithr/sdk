@@ -1,0 +1,80 @@
+name = "python-engineer"
+parent = "base-engineer"
+title = "Python engineer"
+version = 1
+language = "python"
+domain = ["python", "asyncio", "pip", "mypy", "ruff"]
+aliases = ["python"]
+model = "sonnet"
+
+[[line]]
+place = "core"
+section = "Errors and logs"
+text = "Name the exception you catch: a bare except also catches SystemExit and KeyboardInterrupt."
+cites = ["https://peps.python.org/pep-0008/"]
+
+[[line]]
+place = "core"
+section = "Errors and logs"
+text = "Hand arguments to the logger (logger.warning with a %s format and the value) and call logger.exception inside an except block to keep the traceback."
+cites = ["https://docs.python.org/3/library/logging.html#logging.Logger.exception"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "Group related tasks in asyncio.TaskGroup and bound waits with asyncio.timeout. Keep a reference to every task you create: the event loop holds only weak ones."
+cites = ["https://docs.python.org/3/library/asyncio-task.html"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "When you catch asyncio.CancelledError, propagate it once clean-up is done."
+cites = ["https://docs.python.org/3/library/asyncio-task.html"]
+
+[[line]]
+place = "core"
+section = "Safety"
+text = "With subprocess and shell=True, quoting every metacharacter is your job (shlex.quote). Without a shell, arguments reach the child as they are."
+cites = ["https://docs.python.org/3/library/subprocess.html#security-considerations"]
+
+[[line]]
+place = "core"
+section = "Tooling"
+text = "Type check with mypy --strict, and scan dependencies with pip-audit."
+cites = ["https://mypy.readthedocs.io/en/stable/command_line.html#cmdoption-mypy-strict", "https://pypi.org/project/pip-audit/"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "asyncio.CancelledError subclasses BaseException. A coroutine that swallows it can break TaskGroup and timeout."
+cites = ["https://docs.python.org/3/library/asyncio-task.html"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "When a task in a TaskGroup fails, the others are cancelled and the failures are raised together as an ExceptionGroup. The TimeoutError from asyncio.timeout can only be caught outside the context manager."
+cites = ["https://docs.python.org/3/library/asyncio-task.html"]
+
+[[line]]
+place = "recall"
+section = "Tooling"
+text = "ruff is a fast linter and formatter written in Rust, with native re-implementations of flake8 plugins such as flake8-bugbear."
+cites = ["https://docs.astral.sh/ruff/"]
+
+[[line]]
+place = "recall"
+section = "Tooling"
+text = "pip-audit reads vulnerability data from PyPI by default, or from OSV with -s osv, and can attempt fixes with --fix."
+cites = ["https://pypi.org/project/pip-audit/"]
+
+[[line]]
+place = "recall"
+section = "Style"
+text = "PEP 8: 79 characters a line (72 for comments and docstrings), lowercase_with_underscores for functions, CapWords for classes. Consistency within a module matters most."
+cites = ["https://peps.python.org/pep-0008/"]
+
+[[line]]
+place = "recall"
+section = "Distributed systems"
+text = "Put a timeout on every remote call and retry in one layer, with a limit and backoff with jitter."
+cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]

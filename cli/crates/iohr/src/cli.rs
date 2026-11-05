@@ -164,7 +164,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "decisions",
         ],
     ),
-    ("Agents", &["ask", "runner", "coordinator"]),
+    ("Agents", &["ask", "runner", "coordinator", "memory"]),
     (
         "Operate",
         &["tunnel", "browser", "upgrade", "completion", "help"],
@@ -269,6 +269,13 @@ pub enum Command {
     /// The coordinator's jobs and queued asks: list and file work.
     #[command(subcommand)]
     Coordinator(CoordinatorCommand),
+    /// Remember and recall facts in your InOrbit memory, scoped to a project.
+    ///
+    /// Your memory in InOrbit: keep a short fact or preference, find what is known by topic,
+    /// list and forget entries. Inside a project, entries are tagged `project:<name>` and these
+    /// commands show only that project's; `--all` shows everything. Needs `iohr login`.
+    #[command(subcommand)]
+    Memory(MemoryCommand),
     /// Browse the apps a connection can be made from.
     ///
     /// The apps a connection can be made from: incident tools, chat, observability, AI models.
@@ -1394,6 +1401,80 @@ pub enum AtlasCommand {
     },
     /// Send the atlas documents to the project's Decisions space.
     Sync(SyncArgs),
+    /// The built-in personalities of this project.
+    #[command(subcommand)]
+    Personalities(PersonalitiesCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PersonalitiesCommand {
+    /// Show the project's personalities and whether InOrbit has them.
+    ///
+    /// The built-in personalities in `atlas/personalities/`: their size and sources, and, when
+    /// you are signed in, the version InOrbit holds.
+    List {
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Import the project's personalities into your InOrbit account.
+    ///
+    /// The same import `iohr sync` does. A personality already in your account that did not
+    /// come from this project, or that changed in InOrbit since, is left alone.
+    Import {
+        /// Say what would be sent and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MemoryCommand {
+    /// Keep a fact or a preference.
+    Remember {
+        /// What to keep, one short sentence. No secrets or personal data.
+        text: String,
+        /// Keep it as a preference (how you want to be answered), not a fact.
+        #[arg(long)]
+        preference: bool,
+        /// The source tag. Default: `project:<name>` inside a project.
+        #[arg(long, value_name = "TAG")]
+        source: Option<String>,
+    },
+    /// Find what is known about a topic.
+    Recall {
+        /// The topic, in words.
+        query: String,
+        /// At most this many entries.
+        #[arg(long, default_value_t = 10, value_name = "N")]
+        limit: u32,
+        /// Show entries of every source, not only this project's.
+        #[arg(long)]
+        all: bool,
+        /// Only entries with this source tag. Default: `project:<name>` inside a project.
+        #[arg(long, value_name = "TAG")]
+        source: Option<String>,
+    },
+    /// List what is kept.
+    List {
+        /// At most this many entries.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// Show entries of every source, not only this project's.
+        #[arg(long)]
+        all: bool,
+        /// Only entries with this source tag. Default: `project:<name>` inside a project.
+        #[arg(long, value_name = "TAG")]
+        source: Option<String>,
+    },
+    /// Forget one entry by id.
+    Forget {
+        /// The entry's id, from `iohr memory list`.
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Args)]

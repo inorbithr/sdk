@@ -93,6 +93,8 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr token create --name N --scope S,... [--days 30] \| list [--status S] [--query Q] \| revoke ID` | API tokens for an account (a signed-in person only) |
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`, `-i` the status and request id before the body; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
+| `iohr memory remember TEXT [--preference] [--source S] \| recall QUERY [--limit N] [--all] [--source S] \| list [--limit N] [--all] [--source S] \| forget ID` | Your InOrbit memory (`iohr.memory.v1.MemoryService`): inside a project the entries are tagged `project:<slug>` and recall and list show that project's; `--all` shows every source. Needs a sign-in; nothing is kept on this machine |
+| `iohr atlas personalities list \| import [--dry-run]` | The built-in personalities in `atlas/personalities/` and whether each is in your InOrbit account; `import` sends them (`--dry-run` prints the body and sends nothing) |
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp\|swift --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline, `--package` names the surface's package or namespace (Go, Java, C#), `--runtime` the runtime's name in your project, `--force` replaces a non-empty directory |
 | `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
 | `iohr sdk check [--lock FILE] [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
@@ -576,6 +578,33 @@ conflict (the document changed in Decisions) re-reads, says so and overwrites no
 keys stay local. The canvas and the 3D folder are never sent, and the output says so. No document
 text reaches a log. The `[sync]` `background` key in `config.toml` is read (default `false`); no
 background loop exists yet, so only `iohr sync` sends anything.
+
+### Personalities and memory
+
+`iohr project init` and `iohr atlas init` also write the built-in personalities into
+`atlas/personalities/`: `security`, which every project gets whatever its language, and one
+engineer for the project's language (`rust-engineer`, `python-engineer`, `typescript-engineer`
+or `go-engineer`; `atlas init` reads the language from `inorbit.toml` or the build file). Each
+file has front matter (`name`, `parent`, `domain`, the catalogue it came from) and its lines, a
+core of at most 700 tokens and recall lines found by topic, each with the primary source it
+comes from (NIST SSDF, OWASP ASVS, the Rust API guidelines, the PEPs and the like). The
+catalogue is data in the binary, labelled origin `doctrine`, and `inorbit.toml` records the
+names in `[personalities]`.
+
+Signed in, init imports them through `POST /v1/coordinator/personalities/import` and prints one
+line each (`written v1`, `unchanged`, `left alone`). A personality already in your account that
+this project did not import, or one you changed in InOrbit since, is left alone; the catalogue
+only replaces what it wrote itself. When the account has no root personality, `base-engineer`
+comes with them. Only the account owner or an admin may import. Signed out, offline or refused,
+init still succeeds, says so once and keeps the files; `iohr sync` (or
+`iohr atlas personalities import`) imports later. `--json` reports each personality.
+
+`atlas/memory/README.md` explains the project's memory, and the agent-instructions file
+(`AGENTS.md` or `CLAUDE.md`) gets a short section that tells agents to run
+`iohr memory recall` and `iohr memory remember`. Entries are tagged `project:<slug>`. The service
+cannot filter by source yet, so `recall` and `list` pick the project's entries from the answer
+(a recall asks for up to five times the limit, at most 100). Signed out, `iohr memory` says
+so; nothing is kept locally as a substitute.
 
 ### Try it without changing anything
 
