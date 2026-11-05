@@ -17,6 +17,7 @@ mod browser;
 mod commands;
 mod context;
 mod error;
+mod headless;
 mod io_signin;
 mod lock;
 mod output;

@@ -468,9 +468,12 @@ The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 ### 4.5 The ask table
 
-`iohr ask "..."` starts your own agent in the current folder with the question. It reads
-`[ask]`; `--via` and `--agent` win over it for one call. `iohr` never writes it, and never
-stores the question or the answer.
+`iohr ask "..."` asks Io, which runs on your own agent (Claude Code, local). At a terminal
+it starts the agent in the current folder with the question; with `--json`, a context flag
+(`--cwd`, `--last-command`, `--exit-code`, `--output-file`), `--headless` or no terminal it
+makes one capped, read-only `claude -p` run instead (the `?` prompt of `iohr shell hook zsh`
+uses it); `--interactive` keeps the agent session. It reads `[ask]`; `--via` and `--agent`
+win over it for one call. `iohr` never writes it, and never stores the question or the answer.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|

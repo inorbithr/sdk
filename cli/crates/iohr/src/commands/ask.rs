@@ -3,10 +3,14 @@
 use std::process::Stdio;
 use std::time::Instant;
 
+use std::io::IsTerminal as _;
+use std::path::Path;
+
 use crate::ask::{self, Agent, Via};
-use crate::cli::{AskArgs, Global};
+use crate::cli::{AskArgs, Global, HeadlessArgs};
 use crate::context::Ctx;
 use crate::error::Error;
+use crate::headless::{self, Answer, Context};
 use crate::output::Out;
 
 pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error> {
@@ -34,6 +38,9 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
     };
     // The question is only ever an argument of the agent; nothing below prints or stores it.
     let question = args.question.join(" ");
+    if headless_wanted(&args.headless, out.json)? {
+        return headless(&bin, agent, via, &question, &args.headless, out).await;
+    }
     Out::note(&ask::label(agent));
     let started = Instant::now();
     let mut child = tokio::process::Command::new(bin)
@@ -84,4 +91,75 @@ fn exit_code(s: std::process::ExitStatus) -> i32 {
 #[cfg(not(unix))]
 fn exit_code(s: std::process::ExitStatus) -> i32 {
     s.code().unwrap_or(1)
+}
+
+/// Answer once and print, or open the agent? Printing is what a prompt hook, a script or
+/// the app needs, so it is the answer to `--headless`, any context flag, `--json`, and a
+/// stdin or stdout that is not a terminal; only a person at a terminal gets the agent.
+fn headless_wanted(h: &HeadlessArgs, json: bool) -> Result<bool, Error> {
+    if h.interactive {
+        if json {
+            return Err(Error::Usage(
+                "`--json` prints one answer and never opens the agent; drop `--interactive`"
+                    .to_owned(),
+            ));
+        }
+        return Ok(false);
+    }
+    Ok(h.headless
+        || h.has_context()
+        || json
+        || !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()))
+}
+
+/// One capped `claude -p` run (see [`headless`]). The label goes first on stderr so a pipe
+/// of the answer stays clean; under `--json` it is a field instead.
+async fn headless(
+    bin: &Path,
+    agent: Agent,
+    via: Via,
+    question: &str,
+    h: &HeadlessArgs,
+    out: Out,
+) -> Result<(), Error> {
+    let ctx = Context {
+        cwd: match &h.cwd {
+            Some(c) => c.clone(),
+            None => std::env::current_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_default(),
+        },
+        command: h.last_command.clone().unwrap_or_default(),
+        exit_code: h.exit_code,
+        output: match &h.output_file {
+            // Only the kind of failure: the path is the person's, what is in it is not said.
+            Some(f) => std::fs::read_to_string(f)
+                .map_err(|e| Error::Usage(format!("cannot read --output-file: {}", e.kind())))?,
+            None => String::new(),
+        },
+        prior: h.prior_question.clone().zip(h.prior_answer.clone()),
+    };
+    let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
+    let label = format!("{} {}", ask::label(agent), headless::read_line(&ctx));
+    if !out.json {
+        Out::note(&label);
+    }
+    let started = Instant::now();
+    let (text, duration_ms) = headless::run(bin, &message, started)
+        .await
+        .map_err(Error::Failed)?;
+    if out.json {
+        Out::print_json(&Answer {
+            text,
+            agent: agent.name(),
+            via: via.name(),
+            label,
+            model: headless::MODEL,
+            exit_code: 0,
+            duration_ms,
+        });
+    } else {
+        Out::raw(format!("{text}\n").as_bytes());
+    }
+    Ok(())
 }

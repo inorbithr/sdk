@@ -211,6 +211,10 @@ pub enum Command {
     /// change; iohr never stores the question or the answer. Defaults come from `[ask]` in
     /// config.toml; the flags win for one call.
     Ask(AskArgs),
+    /// Shell integration: `iohr shell hook zsh` prints what makes `? question` at your
+    /// prompt ask your own AI agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
+    #[command(subcommand)]
+    Shell(ShellCommand),
     /// The coordinator's runner (RFC 0120): this machine runs coordinator turns on your own
     /// installed `claude`, on your own subscription.
     #[command(subcommand)]
@@ -1119,12 +1123,92 @@ pub struct AskArgs {
     /// The question or the job, in words (quotes are optional).
     #[arg(required = true, num_args = 1..)]
     pub question: Vec<String>,
+    #[command(flatten)]
+    pub headless: HeadlessArgs,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,
     /// The agent to start: `claude` (default; `[ask] agent`).
     #[arg(long, value_name = "AGENT")]
     pub agent: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ShellCommand {
+    /// Print the hook for a shell, to be evaluated by it: `? question` (and `?? follow-up`)
+    /// at the prompt asks `iohr ask` with the folder and the last command, and the shell
+    /// never runs that line. Only zsh is built; bash and fish say so and exit 1.
+    Hook {
+        /// The shell: `zsh` (`bash` and `fish` are not built yet).
+        #[arg(value_enum)]
+        shell: HookShell,
+    },
+}
+
+/// A shell `iohr shell hook` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum HookShell {
+    Zsh,
+    Bash,
+    Fish,
+}
+
+/// What makes `iohr ask` answer once and print, instead of opening the agent: the way a
+/// shell prompt, a script or the InOrbit app asks (PRD 0187). Without a terminal, and
+/// under `--json`, it is always this.
+#[derive(Debug, Args, Default)]
+pub struct HeadlessArgs {
+    /// Answer once and print (a small model, a turn cap, no tools), even at a terminal.
+    #[arg(long, conflicts_with = "interactive")]
+    pub headless: bool,
+    /// Open the agent with the question, even when nothing is on a terminal.
+    #[arg(long)]
+    pub interactive: bool,
+    /// The folder the question is about (default: this one). Sent to the agent as text.
+    #[arg(long, value_name = "DIR", conflicts_with = "interactive")]
+    pub cwd: Option<String>,
+    /// The last command the person ran, as context (cut to 1 KiB).
+    #[arg(long, value_name = "COMMAND", conflicts_with = "interactive")]
+    pub last_command: Option<String>,
+    /// That command's exit status.
+    #[arg(
+        long,
+        value_name = "N",
+        allow_hyphen_values = true,
+        conflicts_with = "interactive"
+    )]
+    pub exit_code: Option<i32>,
+    /// A file with that command's output; only its last 200 lines or 8 KiB are used.
+    #[arg(long, value_name = "FILE", conflicts_with = "interactive")]
+    pub output_file: Option<std::path::PathBuf>,
+    /// An earlier question this one follows up (with `--prior-answer`).
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "prior_answer",
+        conflicts_with = "interactive"
+    )]
+    pub prior_question: Option<String>,
+    /// The earlier question's answer.
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "prior_question",
+        conflicts_with = "interactive"
+    )]
+    pub prior_answer: Option<String>,
+}
+
+impl HeadlessArgs {
+    /// True when a context flag was given: only a headless run reads them.
+    #[must_use]
+    pub fn has_context(&self) -> bool {
+        self.cwd.is_some()
+            || self.last_command.is_some()
+            || self.exit_code.is_some()
+            || self.output_file.is_some()
+            || self.prior_question.is_some()
+    }
 }
 
 #[derive(Debug, Subcommand)]
