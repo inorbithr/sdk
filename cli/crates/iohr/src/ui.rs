@@ -170,6 +170,30 @@ pub(crate) struct Choice {
     pub(crate) key: Option<char>,
 }
 
+/// What a step of a wizard answers: the value, or "go back one step".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Nav<T> {
+    Next(T),
+    Back,
+}
+
+impl<T> Nav<T> {
+    /// The value, turned into another; "back" stays "back".
+    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Nav<U> {
+        match self {
+            Self::Next(v) => Nav::Next(f(v)),
+            Self::Back => Nav::Back,
+        }
+    }
+}
+
+/// The value of the "Back" row of a menu (no real choice starts with `@`).
+const BACK: &str = "@back";
+
+/// What typed into a text step goes back one step. cliclack 0.5 reports Esc and Ctrl-C as the
+/// same `Interrupted` error, so Esc cannot be the way back: this is, and the prompt says so.
+const BACK_WORD: &str = "<";
+
 /// The look, decided once per command.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Ui {
@@ -182,9 +206,15 @@ pub(crate) struct Step {
     bar: Option<cliclack::ProgressBar>,
 }
 
+/// What a person who said "no, stop" gets: the same error whether they pressed Esc or Ctrl-C
+/// (cliclack tells the two apart nowhere) or picked a "Cancel" row.
+pub(crate) fn cancel() -> Error {
+    Error::Failed("cancelled".into())
+}
+
 fn cancelled(e: &io::Error) -> Error {
     if e.kind() == io::ErrorKind::Interrupted {
-        Error::Failed("cancelled".into())
+        cancel()
     } else {
         Error::Failed(format!("cannot ask on the terminal: {e}"))
     }
@@ -327,27 +357,61 @@ impl Ui {
         choices: &[Choice],
         initial: &str,
     ) -> Result<String, Error> {
+        match self.select_step(prompt, choices, initial, false)? {
+            Nav::Next(v) => Ok(v),
+            Nav::Back => Err(cancel()),
+        }
+    }
+
+    /// A menu of a wizard: [`Ui::select`] with a last row "Back" when `back` is set (every step
+    /// but the first).
+    ///
+    /// # Errors
+    ///
+    /// No terminal, or the person cancelled.
+    pub(crate) fn select_step(
+        self,
+        prompt: &str,
+        choices: &[Choice],
+        initial: &str,
+        back: bool,
+    ) -> Result<Nav<String>, Error> {
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass the choice as a flag"
             )));
         }
-        if choices.iter().any(|c| c.key.is_some()) {
-            return Self::select_keyed(prompt, choices, initial)?
-                .ok_or_else(|| Error::Failed("cancelled".into()));
+        let mut all = choices.to_vec();
+        if back {
+            all.push(back_row());
         }
-        let rows = menu_rows(choices, terminal_width());
+        if all.iter().any(|c| c.key.is_some()) {
+            let picked = Self::select_keyed(prompt, &all, initial)?
+                .ok_or_else(|| Error::Failed("cancelled".into()))?;
+            return Ok(if back && picked == BACK {
+                Nav::Back
+            } else {
+                Nav::Next(picked)
+            });
+        }
+        let rows = menu_rows(&all, terminal_width());
         loop {
             let mut menu = cliclack::select::<String>(prompt);
-            for (c, label) in choices.iter().zip(&rows) {
+            for (c, label) in all.iter().zip(&rows) {
                 menu = menu.item(c.value.clone(), label.clone(), "");
             }
             let picked = menu
                 .initial_value(initial.to_owned())
                 .interact()
                 .map_err(|e| cancelled(&e))?;
-            match choices.iter().find(|c| c.value == picked) {
-                Some(c) if c.available => return Ok(picked),
+            match all.iter().find(|c| c.value == picked) {
+                Some(c) if c.available => {
+                    return Ok(if back && picked == BACK {
+                        Nav::Back
+                    } else {
+                        Nav::Next(picked)
+                    });
+                }
                 _ => {
                     let _ = cliclack::log::warning(format!("{picked} is coming; pick a live one"));
                 }
@@ -418,24 +482,65 @@ impl Ui {
     /// # Errors
     ///
     /// No terminal, or the person cancelled.
+    #[allow(
+        dead_code,
+        reason = "the plain form of input_step: other commands (and the card-actions work) ask with it"
+    )]
     pub(crate) fn input(
         self,
         prompt: &str,
         default: &str,
         check: impl Fn(&str) -> Result<(), String> + 'static,
     ) -> Result<String, Error> {
+        match self.input_step(prompt, default, check, false)? {
+            Nav::Next(v) => Ok(v),
+            Nav::Back => Err(cancel()),
+        }
+    }
+
+    /// A question of a wizard: [`Ui::input`], and when `back` is set typing `<` alone goes back
+    /// one step (the prompt says so; it is read before the check).
+    ///
+    /// # Errors
+    ///
+    /// No terminal, or the person cancelled.
+    pub(crate) fn input_step(
+        self,
+        prompt: &str,
+        default: &str,
+        check: impl Fn(&str) -> Result<(), String> + 'static,
+        back: bool,
+    ) -> Result<Nav<String>, Error> {
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass it as an argument"
             )));
         }
-        let mut q = cliclack::input(prompt).validate(move |v: &String| check(v.trim()));
+        let shown = if back {
+            format!("{prompt}  {}", console::style("(< goes back)").dim())
+        } else {
+            prompt.to_owned()
+        };
+        let mut q = cliclack::input(shown).validate(move |v: &String| {
+            let v = v.trim();
+            if back && v == BACK_WORD {
+                Ok(())
+            } else {
+                check(v)
+            }
+        });
         if !default.is_empty() {
             q = q.default_input(default);
         }
-        q.interact::<String>()
+        let typed = q
+            .interact::<String>()
             .map(|s| s.trim().to_owned())
-            .map_err(|e| cancelled(&e))
+            .map_err(|e| cancelled(&e))?;
+        Ok(if back && typed == BACK_WORD {
+            Nav::Back
+        } else {
+            Nav::Next(typed)
+        })
     }
 
     /// Any of the choices, as a list; `initial` are ticked first.
@@ -449,14 +554,25 @@ impl Ui {
         choices: &[String],
         initial: &[String],
     ) -> Result<Vec<String>, Error> {
+        let items: Vec<(String, String)> = choices.iter().map(|c| (c.clone(), c.clone())).collect();
+        self.multiselect_items(prompt, &items, initial)
+    }
+
+    /// The list of [`Ui::multiselect`] with a label apart from each value.
+    fn multiselect_items(
+        self,
+        prompt: &str,
+        items: &[(String, String)],
+        initial: &[String],
+    ) -> Result<Vec<String>, Error> {
         if !self.fancy {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on; pass it with --set"
             )));
         }
         let mut menu = cliclack::multiselect::<String>(prompt).required(false);
-        for c in choices {
-            menu = menu.item(c.clone(), c.clone(), "");
+        for (value, label) in items {
+            menu = menu.item(value.clone(), label.clone(), "");
         }
         menu.initial_values(initial.to_vec())
             .interact()
@@ -476,6 +592,78 @@ impl Ui {
             .initial_value(default)
             .interact()
             .map_err(|e| cancelled(&e))
+    }
+}
+
+impl Ui {
+    /// [`Ui::multiselect`] for a wizard: with `back` set the list ends with a "Back" entry, and
+    /// ticking it goes back one step (a list has no row to pick, so it is an entry to tick).
+    ///
+    /// # Errors
+    ///
+    /// No terminal, or the person cancelled.
+    pub(crate) fn multiselect_step(
+        self,
+        prompt: &str,
+        choices: &[String],
+        initial: &[String],
+        back: bool,
+    ) -> Result<Nav<Vec<String>>, Error> {
+        if !back {
+            return self.multiselect(prompt, choices, initial).map(Nav::Next);
+        }
+        let mut items: Vec<(String, String)> =
+            choices.iter().map(|c| (c.clone(), c.clone())).collect();
+        items.push((
+            BACK.to_owned(),
+            "Back (tick it to go to the step before)".to_owned(),
+        ));
+        let mut picked = self.multiselect_items(prompt, &items, initial)?;
+        if picked.iter().any(|p| p == BACK) {
+            return Ok(Nav::Back);
+        }
+        picked.retain(|p| p != BACK);
+        Ok(Nav::Next(picked))
+    }
+
+    /// [`Ui::confirm`] for a wizard: with `back` set it is a menu of Yes, No and Back.
+    ///
+    /// # Errors
+    ///
+    /// The person cancelled.
+    pub(crate) fn confirm_step(
+        self,
+        prompt: &str,
+        default: bool,
+        back: bool,
+    ) -> Result<Nav<bool>, Error> {
+        if !back || !self.fancy {
+            return self.confirm(prompt, default).map(Nav::Next);
+        }
+        let yes_no = |value: &str, label: &str| Choice {
+            value: value.into(),
+            label: label.into(),
+            hint: String::new(),
+            available: true,
+            key: None,
+        };
+        let rows = [yes_no("yes", "Yes"), yes_no("no", "No")];
+        Ok(
+            match self.select_step(prompt, &rows, if default { "yes" } else { "no" }, true)? {
+                Nav::Next(v) => Nav::Next(v == "yes"),
+                Nav::Back => Nav::Back,
+            },
+        )
+    }
+}
+
+fn back_row() -> Choice {
+    Choice {
+        value: BACK.into(),
+        label: "Back".into(),
+        hint: "to the step before".into(),
+        available: true,
+        key: None,
     }
 }
 
