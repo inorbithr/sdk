@@ -397,7 +397,8 @@ command-line keys and leaves its SDK keys; the table goes when nothing is left.
 ### 4.3 The runner tables
 
 `iohr runner` reads `[runner]` and the chosen profile's `[profiles.<name>.runner]` (the
-profile's keys win), and its flags win over both. The SDK does not read them.
+profile's keys win), and its flags win over both. `iohr upgrade` reads
+`upgrade_sign_identity` from the same two tables. The SDK does not read them.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
@@ -411,6 +412,7 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
 | `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
 | `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
+| `upgrade_sign_identity` | `auto`, a code-signing identity, or `-` | not set (off) | `run` and `iohr upgrade`, macOS only: sign each new `iohr` with this identity before it is installed (below); `IOHR_SIGN_IDENTITY` wins over it |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 | `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
 
@@ -466,7 +468,26 @@ the interval (and never over 6 hours) before it tries again. `runner/last-upgrad
 config directory holds the version and the time of the last install, and the same version
 is not installed twice within 24 hours, so a binary that cannot start cannot loop. A copy
 installed by apt is reported once per version and skipped (use `apt upgrade`). A SIGHUP
-reads `auto_upgrade`, `upgrade_interval_minutes` and `upgrade_restart` again.
+reads `auto_upgrade`, `upgrade_interval_minutes`, `upgrade_restart` and
+`upgrade_sign_identity` again.
+
+On macOS the keychain ties an "Always Allow" grant to the signature of the program it
+was given to. A released `iohr` is signed ad hoc, so that signature is the binary's own
+hash, and every upgrade makes macOS ask for the keychain password again. With
+`upgrade_sign_identity` set, `iohr upgrade` and the runner sign the new binary with that
+identity and the fixed identifier `hr.inorbit.iohr` before its `--version` check and
+before it replaces the old file. The signature then names the identifier and the
+certificate, which stay the same from one release to the next, so the grant holds: the
+first signed install asks once more, the next ones do not. `auto` takes the first valid
+`Developer ID Application` identity that `security find-identity -v -p codesigning`
+lists, else the first `Apple Development` one; any other value names an identity as
+`codesign --sign` takes it; not set, empty or `-` signs nothing. `IOHR_SIGN_IDENTITY`
+takes the same values and wins over both tables. Only a binary signed ad hoc or not at
+all is signed; one already signed with a certificate is installed as released. A
+signature that fails, takes more than 30 seconds, or leaves a binary that does not run
+keeps the release as downloaded and prints one note; the upgrade never fails because of
+it. `codesign` may ask once for access to the signing key. A Homebrew install is
+upgraded by `brew` and keeps the signature it ships with. Other systems ignore the key.
 
 ### 4.4 The project table
 
