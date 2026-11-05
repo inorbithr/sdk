@@ -21,7 +21,11 @@ use sha2::{Digest as _, Sha256};
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#;
+const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"seat@example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example","subscriptionType":"max","loginExpiresAt":"2026-11-05T10:00:00Z","configDirectory":"/home/a/.claude","projectsDirectory":"/home/a/.claude/projects"}"#;
+/// The same seat after a token refresh, on another host, with the email in another case.
+const SUB_REFRESHED: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Seat@Example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example Renamed","subscriptionType":"pro","loginExpiresAt":"2026-11-06T22:00:00Z","configDirectory":"/Users/b/.config/claude","projectsDirectory":"/srv/projects"}"#;
+/// The canonical identity line of `SUB` and `SUB_REFRESHED`.
+const SUB_LINE: &str = "authMethod=claude.ai apiProvider=firstParty orgId=00000000-0000-4000-8000-00000000000a email=seat@example.com";
 const TURN: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"{\"say\":\"hello\",\"state\":\"s\",\"actions\":[{\"kind\":\"ask\",\"payload\":{\"q\":1}}],\"evidence\":[\"e1\"],\"left\":[]}","session_id":"s1","num_turns":2,"duration_ms":5,"total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}"#;
 const API_KEY: &str = r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty"}"#;
 
@@ -252,10 +256,10 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     assert_eq!(post["providers"][0]["method"], "subscription");
     // A person's own runner names no holder.
     assert!(post.get("holder_subject").is_none());
-    // The identity hash is sha256(salt + "\n" + line).
+    // The identity hash is sha256(salt + "\n" + the canonical identity line).
     assert_eq!(
         post["identity_sha256"]["claude"],
-        sha(&format!("{SALT}\n{SUB}"))
+        sha(&format!("{SALT}\n{SUB_LINE}"))
     );
     // A standard, padded base64 key; the challenge; a signature over the registration lines.
     let key = post["public_key"].as_str().unwrap();
@@ -265,6 +269,7 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     assert!(verify(key, &message, post["signature"].as_str().unwrap()));
     let all = serde_json::to_string(&sent).unwrap();
     assert!(!all.contains("SECRETKEY") && !all.contains("firstParty"));
+    assert!(!all.contains("example.com") && !all.contains("00000000-0000"));
     assert_no_secrets(dir.path());
     // The key is in the profile's store, not a file of the runner's own.
     assert!(
@@ -303,7 +308,7 @@ async fn register_with_a_holder_names_that_person() {
     // The holder is checked against the sign-in the runner holds, so it goes with it.
     assert_eq!(
         post["identity_sha256"]["claude"],
-        sha(&format!("{SALT}\n{SUB}"))
+        sha(&format!("{SALT}\n{SUB_LINE}"))
     );
 }
 
@@ -1180,6 +1185,142 @@ async fn register_with_the_matching_key_is_already_registered_and_sends_nothing(
     assert!(text(&o).contains("already registered"), "{}", text(&o));
     let sent = bodies(&second, "/v1/coordinator/runners").await;
     assert!(sent.iter().all(|b| b.get("public_key").is_none()));
+}
+
+/// The identity hash one `claude auth status` answer registers with.
+async fn registered_identity(auth: &str) -> Value {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), auth);
+    login(&server, dir.path(), &token()).await;
+    mount_register(&server).await;
+    let o = run(&mut iohr(
+        &server,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    bodies(&server, "/v1/coordinator/runners")
+        .await
+        .into_iter()
+        .find_map(|b| b.get("identity_sha256").cloned())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn identity_hash_is_stable_across_token_refresh() {
+    let want = json!({"claude": sha(&format!("{SALT}\n{SUB_LINE}"))});
+    assert_eq!(registered_identity(SUB).await, want);
+    // Another expiry, other directories, another plan and organisation name, the
+    // email's case: the same seat, the same hash.
+    assert_eq!(registered_identity(SUB_REFRESHED).await, want);
+    // Another email, or the same email in another organisation: another seat.
+    let other_email = SUB.replace("seat@example.com", "other@example.com");
+    let other_org = SUB.replace("00000000000a", "00000000000b");
+    for other in [other_email, other_org] {
+        assert_ne!(registered_identity(&other).await, want, "{other}");
+    }
+}
+
+#[tokio::test]
+async fn register_refuses_a_sign_in_that_names_no_seat() {
+    for auth in [
+        r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#,
+        r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"seat@example.com"}"#,
+        r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","orgId":"00000000-0000-4000-8000-00000000000a"}"#,
+        "Logged in",
+    ] {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        fake_claude(dir.path(), auth);
+        login(&server, dir.path(), &token()).await;
+        mount_register(&server).await;
+        let o = run(&mut iohr(
+            &server,
+            dir.path(),
+            &["runner", "register", "--name", "mac"],
+        ));
+        assert_eq!(o.status.code(), Some(1), "{auth}: {}", text(&o));
+        let sent = bodies(&server, "/v1/coordinator/runners").await;
+        assert!(
+            sent.iter().all(|b| b.get("public_key").is_none()),
+            "{auth}: nothing registered"
+        );
+    }
+}
+
+#[tokio::test]
+async fn register_refresh_sends_the_held_key_and_the_current_sign_in() {
+    let dir = tempfile::tempdir().unwrap();
+    fake_claude(dir.path(), SUB);
+    let first = MockServer::start().await;
+    login(&first, dir.path(), &token()).await;
+    mount_register(&first).await;
+    let o = run(&mut iohr(
+        &first,
+        dir.path(),
+        &["runner", "register", "--name", "mac"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let key = bodies(&first, "/v1/coordinator/runners")
+        .await
+        .iter()
+        .find_map(|b| b["public_key"].as_str().map(str::to_owned))
+        .unwrap();
+
+    // The sign-in changed seat since: the refresh sends the new seat's hash.
+    let moved = SUB.replace("seat@example.com", "moved@example.com");
+    fake_claude(dir.path(), &moved);
+    let moved_line = SUB_LINE.replace("seat@example.com", "moved@example.com");
+    let mut mine = runner_json();
+    mine["public_key"] = json!(key);
+    for (answer, says) in [
+        (runner_json(), "refreshed"),
+        (
+            json!({"runner_id": "run_2", "user": "usr_me", "name": "mac", "status": "online",
+                   "last_seen_at": "2026-10-12T08:00:00Z", "providers": []}),
+            "revoke run_1",
+        ),
+    ] {
+        let second = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/coordinator/runners"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"runners": [mine.clone()]})),
+            )
+            .mount(&second)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/coordinator/runners/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"challenge": CHALLENGE, "identity_salt": SALT, "account_id": "acc_1"}),
+            ))
+            .mount(&second)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/coordinator/runners"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"runner": answer})))
+            .mount(&second)
+            .await;
+        let o = run(&mut iohr(
+            &second,
+            dir.path(),
+            &["runner", "register", "--name", "mac", "--refresh"],
+        ));
+        assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+        assert!(text(&o).contains(says), "{}", text(&o));
+        assert!(!text(&o).contains("already registered"), "{}", text(&o));
+        let sent = bodies(&second, "/v1/coordinator/runners").await;
+        let post = sent.iter().find(|b| b.get("public_key").is_some()).unwrap();
+        // The key this machine holds, a fresh signature over the new challenge.
+        assert_eq!(post["public_key"], json!(key));
+        let message = format!("iohr.coordinator.v1.RegisterRunner\n{CHALLENGE}\n{key}");
+        assert!(verify(&key, &message, post["signature"].as_str().unwrap()));
+        assert_eq!(
+            post["identity_sha256"]["claude"],
+            sha(&format!("{SALT}\n{moved_line}"))
+        );
+    }
 }
 
 // ---- `iohr runner gate-report` (platform RFC 0120, the Checked gate) ----
