@@ -21,6 +21,7 @@ use crate::template::Runner;
 
 /// The template used when neither `--template` nor `[project] template` names one.
 pub mod folder;
+pub(crate) mod wizard;
 
 pub const DEFAULT_TEMPLATE: &str = "demo";
 

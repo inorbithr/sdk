@@ -16,9 +16,10 @@ use std::fmt::Write as _;
 
 use super::project_template;
 use crate::project::folder::{self, Kind as Place, Proposal, Where};
+use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
-use crate::ui::{Choice, Ui};
+use crate::ui::{Choice, Nav, Ui, cancel};
 
 /// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
 fn state_root() -> Result<PathBuf, Error> {
@@ -295,32 +296,70 @@ fn folder_choices(list: &[Proposal]) -> Vec<Choice> {
 }
 
 /// The folder menu at a terminal: the free proposals, then "Somewhere else..." asks for a path.
-fn pick_folder(ui: Ui, w: &Where, list: &[Proposal]) -> Result<Proposal, Error> {
+/// `prev` is the folder picked before (going back, or changing the step): the cursor starts there.
+fn pick_folder(
+    ui: Ui,
+    w: &Where,
+    list: &[Proposal],
+    prev: Option<&Proposal>,
+    back: bool,
+) -> Result<Nav<Proposal>, Error> {
     let free: Vec<&Proposal> = list.iter().filter(|p| !p.busy).collect();
     for p in list.iter().filter(|p| p.busy) {
         ui.info(&format!("{} is not empty, so it is not offered", p.shown));
     }
     let choices = folder_choices(list);
-    let picked = ui.select("Where should it go?", &choices, "0")?;
-    let idx: usize = picked.parse().unwrap_or(0);
-    let p = free
-        .get(idx)
-        .map_or_else(|| list[0].clone(), |p| (*p).clone());
-    if p.kind != Place::Elsewhere {
-        return Ok(p);
-    }
-    let typed = ui.input("Which folder?", "", |s| {
-        if s.trim().is_empty() {
-            Err("type a folder".to_owned())
-        } else {
-            Ok(())
+    // A typed path is not a row of the menu: it was the "Somewhere else" row.
+    let typed_before = prev.filter(|p| p.kind == Place::Given);
+    let initial = match prev {
+        _ if typed_before.is_some() => free
+            .iter()
+            .position(|p| p.kind == Place::Elsewhere)
+            .map_or_else(|| "0".to_owned(), |i| i.to_string()),
+        Some(p) => free
+            .iter()
+            .position(|f| f.kind == p.kind && f.dir == p.dir)
+            .map_or_else(|| "0".to_owned(), |i| i.to_string()),
+        None => "0".to_owned(),
+    };
+    loop {
+        let picked = match ui.select_step("Where should it go?", &choices, &initial, back)? {
+            Nav::Back => return Ok(Nav::Back),
+            Nav::Next(v) => v,
+        };
+        let idx: usize = picked.parse().unwrap_or(0);
+        let p = free
+            .get(idx)
+            .map_or_else(|| list[0].clone(), |p| (*p).clone());
+        if p.kind != Place::Elsewhere {
+            return Ok(Nav::Next(p));
         }
-    })?;
-    Ok(folder::given(
-        w,
-        std::path::Path::new(typed.trim()),
-        "the folder you typed",
-    ))
+        let before = typed_before
+            .map(|p| p.dir.display().to_string())
+            .unwrap_or_default();
+        // The menu is the step before the typed path: back from it returns there.
+        match ui.input_step(
+            "Which folder?",
+            &before,
+            |s| {
+                if s.trim().is_empty() {
+                    Err("type a folder".to_owned())
+                } else {
+                    Ok(())
+                }
+            },
+            true,
+        )? {
+            Nav::Back => {}
+            Nav::Next(typed) => {
+                return Ok(Nav::Next(folder::given(
+                    w,
+                    std::path::Path::new(typed.trim()),
+                    "the folder you typed",
+                )));
+            }
+        }
+    }
 }
 
 /// What the user chose, for the dry run's report.
@@ -365,21 +404,89 @@ fn is_extension(report: &project::Report) -> bool {
     report.files.iter().any(|f| f == "extension.toml")
 }
 
-/// One question at the terminal, drawn from the schema: the kind picks the control.
-fn ask_question(ui: Ui, tpl: &Template, q: &Question) -> Result<Answer, Error> {
+/// The template's questions at a terminal, in order, each with its earlier answer (`kept`) as
+/// the default. A question after the first can go back to the one before; the first goes back
+/// out of the step when `back` says there is a step before it. Returns the answers and whether
+/// anything was asked.
+fn ask_questions(
+    ui: Ui,
+    tpl: &Template,
+    given: &Answers,
+    kept: &Answers,
+    back: bool,
+) -> Result<Nav<(Answers, bool)>, Error> {
+    use std::cell::{Cell, RefCell};
+    let mut defaults = kept.clone();
+    // The answers fixed before the question being asked again, in the order they were asked.
+    let mut keep: Vec<(String, Answer)> = Vec::new();
+    loop {
+        let mut pre = given.clone();
+        pre.extend(keep.iter().cloned());
+        let base = keep.len();
+        let asked: RefCell<Vec<(String, Answer)>> = RefCell::new(Vec::new());
+        let went_back = Cell::new(false);
+        let done = {
+            let mut put = |q: &Question| {
+                let at = base + asked.borrow().len();
+                match ask_question(ui, tpl, q, defaults.get(&q.key), back || at > 0)? {
+                    Nav::Next(a) => {
+                        asked.borrow_mut().push((q.key.clone(), a.clone()));
+                        Ok(a)
+                    }
+                    Nav::Back => {
+                        went_back.set(true);
+                        Err(cancel())
+                    }
+                }
+            };
+            template::answer(tpl, &pre, Some(&mut put))
+        };
+        let asked = asked.into_inner();
+        match done {
+            Ok(answers) => return Ok(Nav::Next((answers, base + asked.len() > 0))),
+            Err(_) if went_back.get() => {
+                // The question that said "back" was never answered: it is index `at`.
+                let at = base + asked.len();
+                keep.extend(asked);
+                defaults.extend(keep.iter().cloned());
+                let Some(n) = wizard::back_in_questions(at) else {
+                    return Ok(Nav::Back);
+                };
+                keep.truncate(n);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// One question at the terminal, drawn from the schema: the kind picks the control. `prev` is
+/// the answer given before, the default when the question is asked again.
+fn ask_question(
+    ui: Ui,
+    tpl: &Template,
+    q: &Question,
+    prev: Option<&Answer>,
+    back: bool,
+) -> Result<Nav<Answer>, Error> {
+    let default = prev.cloned().or_else(|| q.default.clone());
     if q.key == LANGUAGE && !tpl.meta.variants.is_empty() {
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let (choices, initial) = language_choices(tpl, |n| ask::find_on_path(n, &path).is_some());
-        return Ok(Answer::Text(ui.select(&q.prompt, &choices, &initial)?));
+        let (choices, mut initial) =
+            language_choices(tpl, |n| ask::find_on_path(n, &path).is_some());
+        if let Some(p) = prev {
+            initial = p.text();
+        }
+        return Ok(ui
+            .select_step(&q.prompt, &choices, &initial, back)?
+            .map(Answer::Text));
     }
     if let Some(h) = &q.help {
         ui.info(h);
     }
-    let default = q.default.clone();
     match q.kind {
-        Kind::Bool => Ok(Answer::Flag(
-            ui.confirm(&q.prompt, matches!(default, Some(Answer::Flag(true))))?,
-        )),
+        Kind::Bool => Ok(ui
+            .confirm_step(&q.prompt, matches!(default, Some(Answer::Flag(true))), back)?
+            .map(Answer::Flag)),
         Kind::Choice => {
             let choices: Vec<Choice> = q
                 .choices
@@ -395,24 +502,29 @@ fn ask_question(ui: Ui, tpl: &Template, q: &Question) -> Result<Answer, Error> {
                 .map(|d| d.text())
                 .or_else(|| q.choices.first().cloned())
                 .unwrap_or_default();
-            Ok(Answer::Text(ui.select(&q.prompt, &choices, &initial)?))
+            Ok(ui
+                .select_step(&q.prompt, &choices, &initial, back)?
+                .map(Answer::Text))
         }
         Kind::Multi => {
             let initial = match default {
                 Some(Answer::List(l)) => l,
                 _ => vec![],
             };
-            Ok(Answer::List(
-                ui.multiselect(&q.prompt, &q.choices, &initial)?,
-            ))
+            Ok(ui
+                .multiselect_step(&q.prompt, &q.choices, &initial, back)?
+                .map(Answer::List))
         }
         Kind::String => {
             let check = q.clone();
-            Ok(Answer::Text(ui.input(
-                &q.prompt,
-                &default.map(|d| d.text()).unwrap_or_default(),
-                move |v| template::coerce(&check, &Answer::Text(v.to_owned())).map(|_| ()),
-            )?))
+            Ok(ui
+                .input_step(
+                    &q.prompt,
+                    &default.map(|d| d.text()).unwrap_or_default(),
+                    move |v| template::coerce(&check, &Answer::Text(v.to_owned())).map(|_| ()),
+                    back,
+                )?
+                .map(Answer::Text))
         }
     }
 }
@@ -475,151 +587,513 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         });
     }
 
-    // The name, and the template (a menu at a terminal).
-    let name = match a.name {
-        Some(n) => n,
-        None if interactive => {
-            let cwd = std::env::current_dir().unwrap_or_default();
-            let props = folder::name_proposals(&cwd);
-            if props.is_empty() {
-                ui.input("What is the project called?", "", check_name)?
-            } else {
-                const OTHER: &str = "@other";
-                let mut choices: Vec<Choice> = props
-                    .iter()
-                    .map(|(n, why)| Choice {
-                        value: n.clone(),
-                        label: n.clone(),
-                        hint: why.clone(),
-                        available: true,
-                    })
-                    .collect();
-                choices.push(Choice {
-                    value: OTHER.into(),
-                    label: "Another name...".into(),
-                    hint: "type it".into(),
-                    available: true,
-                });
-                let picked = ui.select("What is the project called?", &choices, &props[0].0)?;
-                if picked == OTHER {
-                    ui.input("What is the project called?", "", check_name)?
-                } else {
-                    picked
-                }
-            }
+    let here = Where::here(cfg.project.root.clone());
+    let cx = Exec {
+        g,
+        env,
+        a: &a,
+        ui,
+        interactive,
+        agent: &agent,
+        ask_model: cfg.ask.model.clone(),
+        ask_thinking: cfg.ask.thinking.clone(),
+        out,
+    };
+    let mut wiz = Wizard {
+        ui,
+        a: &a,
+        interactive,
+        agent: &agent,
+        root,
+        configured,
+        here,
+        draft: Draft::from_flags(a.name.clone(), None, a.describe.clone()),
+        tpl: None,
+        given: None,
+        at: Walk::new(),
+    };
+    loop {
+        wiz.run_to_the_end()?;
+        // Without a terminal, with `--yes` and in a dry run there is no review: the dry run is
+        // the plan, and the flags are the answers.
+        if !interactive || dry {
+            return execute(&cx, &wiz.resolved()?, false).await;
         }
-        None => {
+        let r = wiz.resolved()?;
+        let planned = execute(&cx, &r, true).await;
+        wiz.draft.agent_ok = r.agent_ok.get();
+        match review(ui, &wiz, planned.err())? {
+            Review::Create => return execute(&cx, &wiz.resolved()?, false).await,
+            Review::Change(stage) => wiz.at.jump(stage),
+        }
+    }
+}
+
+/// The wizard of `init` at a terminal: the steps of [`Stage`], each asked with its earlier
+/// answer as the default, so going back (or changing a step from the review) loses nothing.
+/// Without a terminal each step takes its answer from the flags, as `init` always did.
+struct Wizard<'a> {
+    ui: Ui,
+    a: &'a InitArgs,
+    interactive: bool,
+    agent: &'a Option<(Agent, PathBuf)>,
+    root: PathBuf,
+    configured: Option<String>,
+    here: Where,
+    draft: Draft,
+    /// The template the pick (or the flag) names, once loaded.
+    tpl: Option<Template>,
+    /// What `--set`, `--answers` and `--lang` already answered, once read.
+    given: Option<Answers>,
+    at: Walk,
+}
+
+impl Wizard<'_> {
+    /// Whether a step puts a question to the person: the walk goes back only to those.
+    fn asks(&self, stage: Stage) -> bool {
+        self.interactive
+            && match stage {
+                Stage::Name => self.a.name.is_none(),
+                Stage::Template => self.a.template.is_none(),
+                Stage::Describe => self.draft.pick.as_deref() == Some(DESCRIBE),
+                Stage::Questions => self.tpl.as_ref().is_some_and(|t| {
+                    self.given
+                        .as_ref()
+                        .is_none_or(|g| t.all_questions().iter().any(|q| !g.contains_key(&q.key)))
+                }),
+                Stage::Folder => self.a.dir.is_none(),
+            }
+    }
+
+    /// Runs the steps from where the walk stands to the end.
+    fn run_to_the_end(&mut self) -> Result<(), Error> {
+        while let Some(stage) = self.at.at() {
+            let back = self.at.can_back(&|s| self.asks(s));
+            let went = match stage {
+                Stage::Name => self.name_step(back)?,
+                Stage::Template => self.template_step(back)?,
+                Stage::Describe => self.describe_step(back)?,
+                Stage::Questions => self.questions_step(back)?,
+                Stage::Folder => self.folder_step(back)?,
+            };
+            let mut walk = self.at;
+            walk.apply(went, &|s| self.asks(s));
+            self.at = walk;
+        }
+        Ok(())
+    }
+
+    /// The settled answers, once every step is done.
+    fn resolved(&self) -> Result<Resolved, Error> {
+        let missing = |what: &str| Error::Failed(format!("the {what} step has no answer"));
+        Ok(Resolved {
+            name: self.draft.name.clone().ok_or_else(|| missing("name"))?,
+            tpl: self.tpl.clone().ok_or_else(|| missing("template"))?,
+            answers: self.draft.answers.clone(),
+            describe: self.draft.describe.clone(),
+            place: self.draft.folder.clone().ok_or_else(|| missing("folder"))?,
+            here: self.here.clone(),
+            agent_ok: std::cell::Cell::new(self.draft.agent_ok),
+        })
+    }
+
+    fn name_step(&mut self, back: bool) -> Result<Went, Error> {
+        const PROMPT: &str = "What is the project called?";
+        if let Some(n) = &self.a.name {
+            check_name(n).map_err(Error::Usage)?;
+            self.draft.set_name(n.clone());
+            return Ok(Went::Skip);
+        }
+        if !self.interactive {
             return Err(Error::Usage(
                 "a project name is needed: iohr project init NAME (there is no terminal to ask on)"
                     .into(),
             ));
         }
-    };
-    check_name(&name).map_err(Error::Usage)?;
-    let mut describe = a.describe;
-    let mut spec_text = a.template;
-    if spec_text.is_none() && interactive {
-        let default = choose_template(None, configured.as_deref());
-        let rows = template::list(&root, &default);
-        let mut choices = vec![Choice {
-            value: DESCRIBE.into(),
-            label: "Describe it, your agent builds it".into(),
-            hint: match &agent {
-                Some((ag, _)) => format!("starts {} in the new folder with your words", ag.name()),
-                None => no_agent_help(),
-            },
-            available: true,
-        }];
-        choices.extend(rows.iter().map(|r| Choice {
-            value: r.name.clone(),
-            label: r.name.clone(),
-            hint: format!(
-                "{} [{}]",
-                r.description.replace("; coming after the demo", ""),
-                r.origin
-            ),
-            available: r.status == "live",
-        }));
-        let picked = ui.select("Which template?", &choices, &default)?;
-        if picked == DESCRIBE {
-            if agent.is_none() {
-                return Err(Error::Failed(no_agent_help()));
+        let ui = self.ui;
+        let before = self.draft.name.clone().unwrap_or_default();
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let props = folder::name_proposals(&cwd);
+        let typed = if props.is_empty() {
+            ui.input_step(PROMPT, &before, check_name, back)?
+        } else {
+            const OTHER: &str = "@other";
+            let mut choices: Vec<Choice> = props
+                .iter()
+                .map(|(n, why)| Choice {
+                    value: n.clone(),
+                    label: n.clone(),
+                    hint: why.clone(),
+                    available: true,
+                })
+                .collect();
+            choices.push(Choice {
+                value: OTHER.into(),
+                label: "Another name...".into(),
+                hint: "type it".into(),
+                available: true,
+            });
+            let initial = if before.is_empty() {
+                props[0].0.clone()
+            } else if props.iter().any(|(n, _)| *n == before) {
+                before.clone()
+            } else {
+                OTHER.to_owned()
+            };
+            loop {
+                match ui.select_step(PROMPT, &choices, &initial, back)? {
+                    Nav::Back => break Nav::Back,
+                    Nav::Next(p) if p != OTHER => break Nav::Next(p),
+                    // The menu is the step before the typed name: back from it returns there.
+                    Nav::Next(_) => match ui.input_step(PROMPT, &before, check_name, true)? {
+                        Nav::Back => {}
+                        n @ Nav::Next(_) => break n,
+                    },
+                }
             }
-            describe = Some(ui.input("Describe the project", "", nonempty)?);
-            spec_text = Some(DESCRIBE_TEMPLATE.to_owned());
-        } else {
-            spec_text = Some(picked);
+        };
+        match typed {
+            Nav::Back => Ok(Went::Back),
+            Nav::Next(name) => {
+                check_name(&name).map_err(Error::Usage)?;
+                self.draft.set_name(name);
+                Ok(Went::Next)
+            }
         }
     }
-    // A described project is a normal new project: `blank`, unless `--template` (or the menu)
-    // named another one. `[project] template` is for projects you did not describe.
-    if describe.is_some() && spec_text.is_none() {
-        spec_text = Some(DESCRIBE_TEMPLATE.to_owned());
+
+    /// The text of the template spec: the flag, else the menu's pick, else a described
+    /// project's `blank`; `None` leaves it to `[project] template`.
+    fn spec_text(&self) -> Option<String> {
+        if let Some(t) = &self.a.template {
+            return Some(t.clone());
+        }
+        match self.draft.pick.as_deref() {
+            Some(DESCRIBE) => Some(DESCRIBE_TEMPLATE.to_owned()),
+            Some(p) => Some(p.to_owned()),
+            None => self
+                .draft
+                .describe
+                .as_ref()
+                .map(|_| DESCRIBE_TEMPLATE.to_owned()),
+        }
     }
-    let spec = template::parse_spec(&choose_template(
-        spec_text.as_deref(),
-        configured.as_deref(),
-    ));
-    if dry && matches!(spec, Spec::Git { .. }) {
-        return Err(Error::Usage(
-            "a dry run makes no network call, so it cannot clone that template: clone it yourself and pass its folder with --template PATH".into(),
+
+    fn template_step(&mut self, back: bool) -> Result<Went, Error> {
+        let mut went = Went::Skip;
+        if self.a.template.is_none() && self.interactive {
+            let default = choose_template(None, self.configured.as_deref());
+            let rows = template::list(&self.root, &default);
+            let mut choices = vec![Choice {
+                value: DESCRIBE.into(),
+                label: "Describe it, your agent builds it".into(),
+                hint: match self.agent {
+                    Some((ag, _)) => {
+                        format!("starts {} in the new folder with your words", ag.name())
+                    }
+                    None => no_agent_help(),
+                },
+                available: true,
+            }];
+            choices.extend(rows.iter().map(|r| Choice {
+                value: r.name.clone(),
+                label: r.name.clone(),
+                hint: format!(
+                    "{} [{}]",
+                    r.description.replace("; coming after the demo", ""),
+                    r.origin
+                ),
+                available: r.status == "live",
+            }));
+            let initial = self.draft.pick.clone().unwrap_or(default);
+            match self
+                .ui
+                .select_step("Which template?", &choices, &initial, back)?
+            {
+                Nav::Back => return Ok(Went::Back),
+                Nav::Next(picked) => {
+                    let described = picked == DESCRIBE;
+                    if described && self.agent.is_none() {
+                        return Err(Error::Failed(no_agent_help()));
+                    }
+                    self.draft.set_pick(picked, described);
+                    went = Went::Next;
+                }
+            }
+        }
+        self.load_template()?;
+        Ok(went)
+    }
+
+    /// Loads the template the answers so far name. A template given by flag is loaded once
+    /// (a git one is cloned once).
+    fn load_template(&mut self) -> Result<(), Error> {
+        if self.a.template.is_some() && self.tpl.is_some() {
+            return Ok(());
+        }
+        let spec = template::parse_spec(&choose_template(
+            self.spec_text().as_deref(),
+            self.configured.as_deref(),
         ));
-    }
-    let tpl: Template = template::load(&spec, &root).map_err(Error::Usage)?;
-    if tpl.meta.status == template::Status::Coming {
-        let rows = template::list(&root, "");
-        return Err(Error::Usage(format!(
-            "the `{}` template is coming; live today: {}",
-            tpl.meta.id,
-            live_names(&rows)
-        )));
+        if self.a.dry_run && matches!(spec, Spec::Git { .. }) {
+            return Err(Error::Usage(
+                "a dry run makes no network call, so it cannot clone that template: clone it yourself and pass its folder with --template PATH".into(),
+            ));
+        }
+        let tpl: Template = template::load(&spec, &self.root).map_err(Error::Usage)?;
+        if tpl.meta.status == template::Status::Coming {
+            let rows = template::list(&self.root, "");
+            return Err(Error::Usage(format!(
+                "the `{}` template is coming; live today: {}",
+                tpl.meta.id,
+                live_names(&rows)
+            )));
+        }
+        self.tpl = Some(tpl);
+        self.given = None;
+        Ok(())
     }
 
-    // The answers: --set, then --answers, then the questions at a terminal, then defaults.
-    let mut given = match &a.answers {
-        Some(f) => template::read_answers(f).map_err(Error::Usage)?,
-        None => Answers::new(),
+    fn describe_step(&mut self, back: bool) -> Result<Went, Error> {
+        if !self.asks(Stage::Describe) {
+            return Ok(Went::Skip);
+        }
+        let before = self.draft.describe.clone().unwrap_or_default();
+        Ok(
+            match self
+                .ui
+                .input_step("Describe the project", &before, nonempty, back)?
+            {
+                Nav::Back => Went::Back,
+                Nav::Next(words) => {
+                    self.draft.describe = Some(words);
+                    Went::Next
+                }
+            },
+        )
+    }
+
+    /// `--answers`, then `--set`, then `--lang`: what the flags answered.
+    fn flag_answers(&self, tpl: &Template) -> Result<Answers, Error> {
+        let a = self.a;
+        let mut given = match &a.answers {
+            Some(f) => template::read_answers(f).map_err(Error::Usage)?,
+            None => Answers::new(),
+        };
+        given.extend(template::parse_set(&a.set).map_err(Error::Usage)?);
+        if let Some(l) = a.lang.as_deref().map(str::trim) {
+            if tpl.meta.variants.is_empty() {
+                return Err(Error::Usage(format!(
+                    "the `{}` template has one set of files, so --lang does not apply",
+                    tpl.meta.id
+                )));
+            }
+            if let Some(set) = given.get(LANGUAGE).map(Answer::text)
+                && set != l
+            {
+                return Err(Error::Usage(format!(
+                    "--lang {l} and --set language={set} disagree: --lang is the same as --set language=ID"
+                )));
+            }
+            given.insert(LANGUAGE.into(), Answer::Text(l.to_owned()));
+        }
+        Ok(given)
+    }
+
+    fn questions_step(&mut self, back: bool) -> Result<Went, Error> {
+        let tpl = self
+            .tpl
+            .clone()
+            .ok_or_else(|| Error::Failed("the template step has no answer".into()))?;
+        let given = self.flag_answers(&tpl)?;
+        self.given = Some(given.clone());
+        if !self.interactive {
+            self.draft.answers = template::answer(&tpl, &given, None)?;
+            return Ok(Went::Skip);
+        }
+        match ask_questions(self.ui, &tpl, &given, &self.draft.answers, back)? {
+            Nav::Back => Ok(Went::Back),
+            Nav::Next((answers, asked)) => {
+                self.draft.answers = answers;
+                Ok(if asked { Went::Next } else { Went::Skip })
+            }
+        }
+    }
+
+    /// Where it goes: `--dir`, else a menu at a terminal, else `./NAME`.
+    fn folder_step(&mut self, back: bool) -> Result<Went, Error> {
+        let name = self
+            .draft
+            .name
+            .clone()
+            .ok_or_else(|| Error::Failed("the name step has no answer".into()))?;
+        if let Some(d) = &self.a.dir {
+            self.draft.folder = Some(folder::given(&self.here, d, "you passed --dir"));
+            return Ok(Went::Skip);
+        }
+        let list = folder::proposals(&self.here, &name);
+        if !self.interactive {
+            self.draft.folder = Some(folder::headless(&list));
+            return Ok(Went::Skip);
+        }
+        Ok(
+            match pick_folder(self.ui, &self.here, &list, self.draft.folder.as_ref(), back)? {
+                Nav::Back => Went::Back,
+                Nav::Next(p) => {
+                    self.draft.folder = Some(p);
+                    Went::Next
+                }
+            },
+        )
+    }
+
+    /// What a step holds now, for the "Change a step" menu.
+    fn answer_text(&self, stage: Stage) -> String {
+        let short = |s: &str| {
+            let mut t: String = s.chars().take(48).collect();
+            if s.chars().count() > 48 {
+                t.push_str("...");
+            }
+            t
+        };
+        match stage {
+            Stage::Name => self.draft.name.clone().unwrap_or_default(),
+            Stage::Template => match self.draft.pick.as_deref() {
+                Some(DESCRIBE) => "describe it, your agent builds it".to_owned(),
+                _ => self
+                    .tpl
+                    .as_ref()
+                    .map(|t| t.meta.id.clone())
+                    .unwrap_or_default(),
+            },
+            Stage::Describe => short(self.draft.describe.as_deref().unwrap_or_default()),
+            Stage::Questions => short(
+                &self
+                    .draft
+                    .answers
+                    .iter()
+                    .map(|(k, v)| format!("{k}={}", v.text()))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            Stage::Folder => self
+                .draft
+                .folder
+                .as_ref()
+                .map(|f| f.shown.clone())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// What the person decided on the review page.
+enum Review {
+    Create,
+    Change(Stage),
+}
+
+/// The review page, under the plan: create it, change a step, or cancel. `problem` is why the
+/// plan could not be made (the folder is taken, say): then there is nothing to create yet.
+fn review(ui: Ui, wiz: &Wizard<'_>, problem: Option<Error>) -> Result<Review, Error> {
+    let ready = problem.is_none();
+    if let Some(e) = problem {
+        ui.warn(&e.to_string());
+    }
+    let row = |value: &str, label: &str, hint: &str| Choice {
+        value: value.into(),
+        label: label.into(),
+        hint: hint.into(),
+        available: true,
     };
-    given.extend(template::parse_set(&a.set).map_err(Error::Usage)?);
-    if let Some(l) = a.lang.as_deref().map(str::trim) {
-        if tpl.meta.variants.is_empty() {
-            return Err(Error::Usage(format!(
-                "the `{}` template has one set of files, so --lang does not apply",
-                tpl.meta.id
-            )));
+    loop {
+        let mut choices = Vec::new();
+        if ready {
+            choices.push(row(
+                "create",
+                "Create it",
+                "write the files and run what the plan says",
+            ));
         }
-        if let Some(set) = given.get(LANGUAGE).map(Answer::text)
-            && set != l
-        {
-            return Err(Error::Usage(format!(
-                "--lang {l} and --set language={set} disagree: --lang is the same as --set language=ID"
-            )));
+        choices.push(row(
+            "change",
+            "Change a step",
+            "go to one and come on from there",
+        ));
+        choices.push(row("cancel", "Cancel", "nothing is written"));
+        let initial = if ready { "create" } else { "change" };
+        match ui.select("Ready?", &choices, initial)?.as_str() {
+            "create" => return Ok(Review::Create),
+            "change" => {
+                let steps: Vec<Choice> = Stage::ALL
+                    .into_iter()
+                    .filter(|s| wiz.asks(*s))
+                    .map(|s| row(s.key(), s.label(), &wiz.answer_text(s)))
+                    .collect();
+                let first = steps.first().map(|c| c.value.clone()).unwrap_or_default();
+                if let Nav::Next(key) = ui.select_step("Which step?", &steps, &first, true)?
+                    && let Some(stage) = Stage::from_key(&key)
+                {
+                    return Ok(Review::Change(stage));
+                }
+            }
+            _ => return Err(cancel()),
         }
-        given.insert(LANGUAGE.into(), Answer::Text(l.to_owned()));
     }
-    let mut asker = |q: &Question| ask_question(ui, &tpl, q);
-    let answers = template::answer(
-        &tpl,
-        &given,
-        if interactive { Some(&mut asker) } else { None },
-    )?;
+}
 
-    // Where it goes: --dir, else a menu at a terminal, else `./NAME`.
+/// Everything `init` needs besides the answers.
+struct Exec<'a> {
+    g: &'a Global,
+    env: &'a Env,
+    a: &'a InitArgs,
+    ui: Ui,
+    interactive: bool,
+    agent: &'a Option<(Agent, PathBuf)>,
+    ask_model: Option<String>,
+    ask_thinking: Option<String>,
+    out: Out,
+}
+
+/// What the person answered, settled: the input of the plan.
+struct Resolved {
+    name: String,
+    tpl: Template,
+    answers: Answers,
+    describe: Option<String>,
+    place: Proposal,
+    here: Where,
+    /// Whether the agent step was confirmed (asked once, however often the plan is built).
+    agent_ok: std::cell::Cell<Option<bool>>,
+}
+
+/// Plans the project from the answers and, unless this is a dry run, makes it. With `preview`
+/// it is the dry run the review page shows: the same plan, nothing changed, no ending.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one flow, top to bottom, every action through the gate"
+)]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "g, a, out are the repo's names for globals, args and output"
+)]
+async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error> {
+    let (g, env, a, ui, interactive, agent, out) =
+        (cx.g, cx.env, cx.a, cx.ui, cx.interactive, cx.agent, cx.out);
+    let dry = a.dry_run || preview;
+    // The plan: everything below is derived from the answers, and changes nothing but through `flow`.
     let publisher = publisher_of(a.publisher.as_deref(), None);
-    let here = Where::here(cfg.project.root.clone());
-    let place = if let Some(d) = &a.dir {
-        folder::given(&here, d, "you passed --dir")
-    } else {
-        let list = folder::proposals(&here, &name);
-        if interactive {
-            pick_folder(ui, &here, &list)?
-        } else {
-            folder::headless(&list)
-        }
-    };
+    let Resolved {
+        name,
+        tpl,
+        answers,
+        describe,
+        place,
+        here,
+        ..
+    } = r;
     let dir = place.dir.clone();
     let mut warnings: Vec<String> = Vec::new();
-    if let Some(w) = folder::nest_warning(&here, &dir) {
+    if let Some(w) = folder::nest_warning(here, &dir) {
         ui.warn(&w);
         warnings.push(w);
     }
@@ -629,7 +1103,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         Some(l) => tpl.with_variant(l).map_err(Error::Usage)?,
         None => tpl.clone(),
     };
-    let mut vals = template::all_values(&tpl, &name, &publisher, &created_at, &answers);
+    let mut vals = template::all_values(tpl, name, &publisher, &created_at, answers);
     if !vals.iter().any(|(k, _)| k == "@@DESCRIPTION@@") {
         vals.push((
             "@@DESCRIPTION@@".to_owned(),
@@ -643,14 +1117,14 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
     atlas::add_atlas(
         &mut files,
         &atlas::Meta {
-            name: &name,
+            name,
             template: &tpl.meta.id,
             lang: lang.as_deref(),
             describe: describe.as_deref(),
             created_at: &created_at,
         },
     );
-    let programs = template::programs(&tpl, &vals);
+    let programs = template::programs(tpl, &vals);
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
     // Reads only, so a dry run finds the same problems a real one would.
     project::check_target(&dir, &files).map_err(Error::Failed)?;
@@ -696,13 +1170,19 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         let wanted = if describe.is_some() {
             true
         } else if has_agent_step && interactive {
-            ui.confirm(
-                &format!(
-                    "Start {} in the new folder with the template's prompt?",
-                    ag.name()
-                ),
-                true,
-            )?
+            if let Some(v) = r.agent_ok.get() {
+                v
+            } else {
+                let v = ui.confirm(
+                    &format!(
+                        "Start {} in the new folder with the template's prompt?",
+                        ag.name()
+                    ),
+                    true,
+                )?;
+                r.agent_ok.set(Some(v));
+                v
+            }
         } else {
             false
         };
@@ -710,16 +1190,16 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             let prompt = project::agent_prompt(
                 prompt_text.as_deref(),
                 describe.as_deref(),
-                &name,
+                name,
                 &tpl.meta.id,
-                &answers,
+                answers,
                 &vals,
                 &crate::front::today(),
             );
             // The `[ask]` model (else the small fast tier), edits to files only, never shell,
             // and init's own bounds: nothing the agent is told or says is stored here.
             let model =
-                ask::choose_model(*ag, None, cfg.ask.model.as_deref()).map_err(Error::Usage)?;
+                ask::choose_model(*ag, None, cx.ask_model.as_deref()).map_err(Error::Usage)?;
             let max_turns = a.agent_turns.unwrap_or(AGENT_TURNS);
             agent_run = Some(AgentRun {
                 agent: *ag,
@@ -729,7 +1209,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                 model,
                 max_turns,
                 timeout: Duration::from_secs(a.agent_timeout.unwrap_or(AGENT_SECONDS)),
-                thinking: ask::choose_thinking(None, cfg.ask.thinking.as_deref())
+                thinking: ask::choose_thinking(None, cx.ask_thinking.as_deref())
                     .map_err(Error::Usage)?,
             });
         }
@@ -762,7 +1242,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         would: Vec::new(),
     };
     let state_root = state_root()?;
-    let state = state_root.join(&name);
+    let state = state_root.join(name);
     let signed_in = flow
         .act_async("signin", "check your sign-in (one call to /v1/me)", || {
             check_sign_in(g, env, ui)
@@ -823,7 +1303,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         match s.name {
             StepName::Git => {
                 let r = flow.act("git", "make a git repository with one commit", || {
-                    project::git_step(&dir, &name, &tpl.meta.id)
+                    project::git_step(&dir, name, &tpl.meta.id)
                 });
                 if let Some(st) = r {
                     report.steps.push(st);
@@ -835,12 +1315,12 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                     state.display()
                 );
                 let r = flow.act("register", &what, || {
-                    project::register_step(&dir, &state_root, &name, &tpl.meta.id, &created_at)
+                    project::register_step(&dir, &state_root, name, &tpl.meta.id, &created_at)
                 });
                 match r {
                     Some(Ok((_, st))) => {
                         report.steps.push(st);
-                        report.steps.extend(project::cloud_steps(&name));
+                        report.steps.extend(project::cloud_steps(name));
                     }
                     Some(Err(e)) => return Err(Error::Failed(e)),
                     None => {}
@@ -968,15 +1448,16 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             &flow,
             &files,
             &report,
-            &tpl,
+            tpl,
             &Chosen {
-                place: &place,
+                place,
                 lang: lang.as_deref(),
                 warnings: &warnings,
                 agent: agent_run.as_ref(),
-                answers: &answers,
+                answers,
             },
             out,
+            !preview,
         );
         return Ok(());
     }
@@ -1004,7 +1485,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             ui,
             g.verbose,
             &report,
-            &place,
+            place,
             lang.as_deref(),
             smoke.as_ref(),
             signed_in.as_deref(),
@@ -1055,7 +1536,8 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
 }
 
 /// The dry run's ending: the plan as data with `--json`, else the files and the agent's
-/// command and prompt, and the outro.
+/// command and prompt, and the outro (`last`: the review page's preview has none, a question
+/// follows it).
 fn dry_report(
     flow: &Flow,
     files: &[(String, String)],
@@ -1063,6 +1545,7 @@ fn dry_report(
     tpl: &Template,
     chosen: &Chosen<'_>,
     out: Out,
+    last: bool,
 ) {
     let (agent, answers) = (chosen.agent, chosen.answers);
     if out.json {
@@ -1115,7 +1598,9 @@ fn dry_report(
             ),
         );
     }
-    flow.ui.outro("dry run: nothing was changed");
+    if last {
+        flow.ui.outro("dry run: nothing was changed");
+    }
 }
 
 /// The sign-in check: checked, never required (one call, `GET /v1/me`, so a stale token is
