@@ -6,8 +6,11 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use support::{canon, kept_env};
 
 fn iohr(home: &Path, args: &[&str]) -> Output {
     iohr_in(home, home, args)
@@ -29,6 +32,7 @@ fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
     }
     cmd.current_dir(cwd)
         .args(args)
+        .envs(kept_env())
         .env("PATH", path)
         // The home directory is HOME on unix and USERPROFILE on Windows.
         .env("HOME", home)
@@ -220,7 +224,7 @@ fn write(path: &Path, text: &str) {
 
 /// A user template with a choice, a `when` question, a templated path and an agent step.
 fn user_template(home: &Path) -> std::path::PathBuf {
-    let t = home.join(".inorbit/templates/probe");
+    let t = home.join(".inorbit").join("templates").join("probe");
     write(
         &t.join("template.toml"),
         r#"id = "probe"
@@ -465,6 +469,7 @@ fn iohr_with_path(home: &Path, extra: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_iohr"))
         .args(args)
         .env_clear()
+        .envs(kept_env())
         .env("PATH", std::env::join_paths(paths).unwrap())
         .env("HOME", home)
         .env("USERPROFILE", home)
@@ -630,7 +635,7 @@ fn json(o: &Output) -> serde_json::Value {
 fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     let h = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let cwd_path = std::fs::canonicalize(cwd.path()).unwrap();
+    let cwd_path = canon(cwd.path());
     let out = iohr_in(
         h.path(),
         &cwd_path,
@@ -651,7 +656,15 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
         "{t}"
     );
     assert!(
-        !t.contains(h.path().to_str().unwrap()) || t.contains("projects/my-shop"),
+        !t.contains(h.path().to_str().unwrap())
+            || t.contains(
+                &h.path()
+                    .join(".inorbit")
+                    .join("projects")
+                    .join("my-shop")
+                    .display()
+                    .to_string()
+            ),
         "{t}"
     );
     let j = iohr_in(
@@ -711,7 +724,7 @@ fn a_folder_that_is_not_empty_is_refused_and_dotfiles_alone_are_fine() {
 fn inside_a_git_repository_the_dry_run_warns_that_it_would_nest() {
     let h = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let cwd_path = std::fs::canonicalize(cwd.path()).unwrap();
+    let cwd_path = canon(cwd.path());
     let git = Command::new("git")
         .args(["init", "-q"])
         .current_dir(&cwd_path)
@@ -853,8 +866,10 @@ fn every_live_language_scaffolds_and_its_smoke_test_passes_when_its_toolchain_is
         ])
         .current_dir(cwd.path())
         .env_clear()
+        .envs(kept_env())
         .env("PATH", path)
         .env("HOME", h.path())
+        .env("USERPROFILE", h.path())
         .env("IOHR_CONFIG_DIR", h.path().join("config"))
         .env("CARGO_HOME", Path::new(&real).join(".cargo"))
         .env("RUSTUP_HOME", Path::new(&real).join(".rustup"))
@@ -1145,6 +1160,7 @@ fn init_described(
         ])
         .args(extra)
         .env_clear()
+        .envs(kept_env())
         .env("PATH", std::env::join_paths(paths).unwrap())
         .env("HOME", h)
         .env("USERPROFILE", h)
