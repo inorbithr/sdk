@@ -643,7 +643,7 @@ async fn approvals_setup(
         Ok(seen) => seen,
         Err(e) => return off(&e),
     };
-    let tools = HostRunner::find(
+    let mut tools = HostRunner::find(
         set.kube_context.as_ref().map(|c| c.value.as_str()),
         set.kubeconfig.as_ref().map(|c| c.value.as_str()),
         set.user_units
@@ -651,6 +651,7 @@ async fn approvals_setup(
             .map_or(&[][..], |u| u.value.as_slice()),
         set.core_checkout.as_ref().map(|c| c.value.as_str()),
     );
+    tools.account = Some(account.to_owned());
     Out::note(&format!(
         "approved runs: on, as {runner_id}, {} device keys pinned{}; user units: {}",
         keys.len(),
