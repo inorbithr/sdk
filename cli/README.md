@@ -93,6 +93,8 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr token create --name N --scope S,... [--days 30] \| list [--status S] [--query Q] \| revoke ID` | API tokens for an account (a signed-in person only) |
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`, `-i` the status and request id before the body; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
+| `iohr memory remember TEXT [--why W] [--ref PATH]... [--preference] [--pin] [--scope S] \| recall QUERY \| list \| forget ID \| check [--strict] \| drift [--remote] [--strict] \| sync [--dry-run] [--pull]` | Memory kept as files, local first: one Markdown file per memory in `.inorbit/memory/` (the project, committed), `~/.inorbit/memory/notes/` (you) or, with `[memory] sync = true`, your InOrbit account. No sign-in and no network except `sync`, `drift --remote` and `--scope account`. `check` finds dangling refs, a missing why, stale and never-confirmed, duplicate and uncovered topics; `drift` compares with the code (git) and the service; `sync` never overwrites |
+| `iohr atlas roles list \| import [--dry-run]` | The built-in roles in `atlas/roles/` and whether each is in your InOrbit account; `import` sends them (`--dry-run` prints the body and sends nothing) |
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp\|swift --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline, `--package` names the surface's package or namespace (Go, Java, C#), `--runtime` the runtime's name in your project, `--force` replaces a non-empty directory |
 | `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
 | `iohr sdk check [--lock FILE] [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
@@ -114,8 +116,8 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
-| `iohr packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (the same as `iohr ext packages`) |
-| `iohr ask [--headless \| --interactive] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask Io a question about this folder; Io answers on your own Claude Code (`claude`, local, your subscription). At a terminal it starts the agent in the folder; under `--json`, with a context flag, with `--headless` or with no terminal it is headless: one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, no MCP, no tools, no write access, a scrubbed environment, the question on stdin), the answer printed after one AI label line on stderr. `--json` prints `{answer, command, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null); a failure is exit 1 or 2 with one line on stderr and no JSON. `--interactive` keeps the agent session; `--via io` and `--agent codex` say "not built yet" (below) |
+| `iohr ext packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (`iohr packages` still works, hidden from the help) |
+| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--allow-edits] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, no MCP, no tools, no write access, a scrubbed environment, the question on stdin), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null). `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
 | `iohr ask --menu --command C [--link L]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
 | `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
@@ -125,10 +127,23 @@ Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--e
 `--verbose` prints method, path, status, time and request id on stderr; never a header,
 a query value or a body.
 
-Exit codes: 0 success, 1 a failed call, 2 a usage error, 3 not signed in or the token
-was refused, 4 forbidden by scope, role or plan, 75 (`EX_TEMPFAIL`) `iohr runner run`
-stopped after installing a newer `iohr` so its launchd or systemd supervisor starts it
-(`upgrade_restart = "exit"`); that is not a failure.
+### The help, and exit codes
+
+`iohr --help` groups the commands the way `gh` does (Sign-in, Account, Build, Agents, Operate);
+`-h` prints one line per command and `--help` the long text. The help is coloured with the
+palette the interactive screens use, and plain under `NO_COLOR`, `--json` or a pipe.
+Commands that kept an older name still run (`iohr packages`, `iohr project templates`); they are
+hidden from the help.
+
+```
+0   ok
+1   a finding or a failure: a failed call, a lint finding, a check that did not pass
+2   usage: a flag or argument the command does not take
+3   not signed in, or the token was refused
+4   forbidden by scope, role or plan
+75  EX_TEMPFAIL: `iohr runner run` stopped after installing a newer `iohr` so its launchd or
+    systemd supervisor starts it (`upgrade_restart = "exit"`); that is not a failure
+```
 
 ## Your login in other programs
 
@@ -430,14 +445,239 @@ with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain `
 ```sh
 iohr project init demo
 iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
-iohr project templates            # name, what it is, live or coming, and the default
-iohr project templates --json
+iohr project template list        # name, status, origin, the default (*) and what it is
+iohr project template list --json
+iohr project template show demo   # what it asks, its languages, which files it writes, its steps
+cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 ```
 
-`iohr project templates` lists every template; `macos-app` and `ui-panel` are `coming` and
+`iohr project template list` lists every template (`iohr project templates` is the same command,
+kept for older scripts); `macos-app` and `ui-panel` are `coming` and
 refuse until they exist. The template is `--template`, else `template` under `[project]` in
 `config.toml` (`[project]` / `template = "coordinated"`; you edit it, `iohr config` does not
-write it), else `demo`. A configured template that is coming refuses too.
+write it), else `demo` (a described project uses `blank`, whatever `[project]` says). A configured
+template that is coming refuses too.
+
+### Templates are data
+
+A template is a folder with a `template.toml` and the files of the project (ADR 0213). Nothing
+about one is compiled in except the built-ins, which are the same folders embedded.
+
+```toml
+id = "my-sensor"
+description = "what it is"
+status = "live"          # or "coming"
+extends = "demo"         # optional: its files, questions and steps come first; yours replace by path
+agent_prompt = "Make @@NAME@@ read @@KIND@@."   # optional, used by the agent step and --describe
+
+[[questions]]
+key = "kind"             # lowercase snake_case; the file text gets @@KIND@@
+prompt = "Which kind?"
+type = "choice"          # string, bool, choice, multi
+choices = ["alpha", "beta"]
+default = "alpha"
+regex = "^[a-z]+$"       # string answers only
+help = "shown above the question"
+when = "kind == beta"    # also: `key`, `!key`, `key != value`; asked only when it holds
+
+[[steps]]
+name = "git"             # git, register, smoke, or agent (labelled AI)
+```
+
+Files are filled by the same `@@KEY@@` renderer as the built-ins (`@@NAME@@`, `@@ID@@`,
+`@@MODULE@@`, `@@CREATED_AT@@` plus your question keys), and path segments are filled too
+(`notes-@@KIND@@.md`). The shape follows copier's `copier.yml` (questions with a type, choices,
+default and `when`; layering) and cargo-generate's `cargo-generate.toml` (placeholders with a
+type, prompt, choices and regex).
+
+The template comes from, in order: `--template PATH` (a folder), `~/.inorbit/templates/<id>/`,
+then the built-ins. `--template gh:owner/repo[//subdir][@ref]` (or `git:URL`) shallow-clones a
+repository to read it (never in a dry run; `@ref` is a branch or tag).
+
+```sh
+iohr project template new my-sensor [--extends demo]   # a working template in ~/.inorbit/templates
+iohr project template lint ./my-sensor                 # checks keys, `when`, regexes, placeholders, a sample render
+iohr project template schema                           # the JSON Schema of template.toml
+iohr project template list                             # with an ORIGIN column
+iohr project template show my-sensor [--json]          # questions, `when`, files, the agent step
+iohr project template path my-sensor                   # only the folder, for `cd $(...)`
+```
+
+Answers come from `--set key=value` (repeatable), `--answers file.json|toml`, then, at a
+terminal, the questions for what is still missing, then the defaults; `--yes` never asks and
+takes the defaults, and a missing answer with no default is an error that names the key.
+
+### Describe it, your agent builds it
+
+When `claude` or `codex` is on your PATH (or `[ask]` `agent` in `config.toml` names one), the
+menu starts with "Describe it, your agent builds it", and `--describe "text"` does the same.
+The agent works in the background: `init` draws the progress itself, runs to the end and exits.
+There is no session to open or resume.
+
+The order is fixed: scaffold, then the agent, then the smoke test, then the report.
+
+1. The scaffold is the `blank` template (an empty project in your language; `--template` names
+   another on purpose). Its `agent_prompt` says only "a fresh project in <language>; build what
+   is described below; keep it free of secrets; keep `<test>` passing".
+2. The agent is your own `claude` or `codex` in print mode, in the new folder, with a prompt
+   from your words, the answers and the template. It may edit files (`--allow-edits`, the same
+   as `iohr ask`: files only, never a shell), is bounded by `--agent-turns` (default 40) and
+   `--agent-timeout` (seconds, default 600), and the output says which values were used. The
+   stream is the same as `iohr ask`: thinking dim, one row per tool, a footer labelled
+   "AI-built" (AI Act Art. 50).
+3. The smoke test then runs on what the agent built, so the report is true for the result.
+4. If the agent fails or runs out of turns or time, `init` says so, keeps the scaffold, exits
+   non-zero and prints one line to retry.
+
+`--json` passes the agent's own events through, as `iohr ask --json` does, then an
+`iohr_summary` line (the agent, the bounds, how it ended) and the `iohr_report` line.
+Prompts and answers are never logged or stored. With no agent it says how to configure one.
+
+### The `blank` template
+
+`iohr project init my-tool --template blank --lang rust` writes the smallest project in your
+language and nothing about InOrbit services: `README.md` (name and a one-line description from
+your words), `.gitignore`, `inorbit.toml`, `.inorbit/space`, and a skeleton with one trivial
+test (Rust `Cargo.toml` and `src/main.rs`; Python `pyproject.toml` and `src/<module>/__init__.py`;
+Go `go.mod` and `main.go`; TypeScript `package.json` and `src/index.ts`). The smoke test is the
+language's own test command. Its kind in `inorbit.toml` is `project`.
+
+### The project record and the space link
+
+Every template writes two committed files, neither holding a secret:
+
+- `inorbit.toml` at the root is the InOrbit project record `iohr` and InOrbit Desktop read. Its
+  keys are grouped as the project (`name`, `id`, `kind`: `project`, `macos-service`,
+  `macos-app` or `ui-panel`), where it came from (`template`, `template_version`,
+  `created_at`) and the InOrbit links (`space_id`, `listing`, `memory_namespace`, each empty
+  until the step that fills it exists). It was `inorbit-project.toml`; nothing in the CLI reads
+  the record, so there is no fallback for the old name.
+- `.inorbit/space` is the link to an InOrbit space (platform RFC 0103, "The link"): `id` and
+  `name` as `key = "value"` lines. `init` writes it from the shared scaffold step for every
+  template. Until the space exists it holds empty values and a comment naming the plugin
+  command `/inorbit:link <space>`; the CLI has no link command of its own. `.inorbit/` is never
+  ignored, and `git init` commits it.
+
+### The atlas, and `iohr sync`
+
+`iohr project init` also writes `atlas/` in the project root, a plain folder you can read and
+edit: `prd/`, `rfc/`, `adr/` and `studies/` with one starter each (numbered 0001, filled from
+the project name, template, language and `--describe` text, and labelled stubs), `canvas/` with
+a starter canvas (`iohr.canvas` version 3, the format InOrbit Desktop reads), `models/` for 3D
+files (glTF 2.0; a README, no fake model) and an `atlas/README.md`. A second run never
+overwrites a file you have. `iohr atlas init` adds the folder to a project made without it.
+
+```sh
+iohr atlas new rfc "Cache the catalogue"      # atlas/rfc/0002-cache-the-catalogue.md
+iohr sync --dry-run                            # what would be created or saved; sends nothing
+iohr sync                                      # send it to the space in .inorbit/space
+```
+
+A document is Markdown with front matter (`title`, `status`, `public`, `summary` and the rest)
+that maps one to one onto the Decisions document. `iohr sync` uses the SDK's Decisions client:
+it creates what is new, saves a new version of what changed on the version it read, and on a
+conflict (the document changed in Decisions) re-reads, says so and overwrites nothing. It writes
+`remote_id`, `remote_version`, `remote_number` and `remote_sha` back into the front matter; those
+keys stay local. The canvas and the 3D folder are never sent, and the output says so. No document
+text reaches a log. The `[sync]` `background` key in `config.toml` is read (default `false`); no
+background loop exists yet, so only `iohr sync` sends anything.
+
+### Roles and memory
+
+`iohr project init` and `iohr atlas init` also write the built-in roles into
+`atlas/roles/`: `security`, which every project gets whatever its language, and one
+engineer for the project's language (`rust-engineer`, `python-engineer`, `typescript-engineer`
+or `go-engineer`; `atlas init` reads the language from `inorbit.toml` or the build file). Each
+file has front matter (`name`, `parent`, `domain`, the catalogue it came from) and its lines, a
+core of at most 700 tokens and recall lines found by topic, each with the primary source it
+comes from (NIST SSDF, OWASP ASVS, the Rust API guidelines, the PEPs and the like). The
+catalogue is data in the binary, labelled origin `doctrine`, and `inorbit.toml` records the
+names in `[roles]`.
+
+Signed in, init imports them through `POST /v1/coordinator/personalities/import` and prints one
+line each (`written v1`, `unchanged`, `left alone`). A role already in your account that
+this project did not import, or one you changed in InOrbit since, is left alone; the catalogue
+only replaces what it wrote itself. When the account has no root role, `base-engineer`
+comes with them. Only the account owner or an admin may import. Signed out, offline or refused,
+init still succeeds, says so once and keeps the files; `iohr sync` (or
+`iohr atlas roles import`) imports later. `--json` reports each role.
+
+The folder was called `atlas/personalities/` before. `iohr atlas init`, `roles list`, `roles import`
+and `iohr sync` move it to `atlas/roles/` once and say so in one line; a file that `atlas/roles/`
+already has is never overwritten. `iohr atlas personalities` still works as a hidden alias of
+`iohr atlas roles`. The wire names stay as the service has them: the paths
+`/v1/coordinator/personalities` and `/v1/coordinator/personalities/import` and the `personalities`
+key in their bodies.
+
+Every built-in fact carries `checked: 2026-11-05`, the day it was last read against its primary
+source. Every prompt that asks a model to research or write facts (`project init`, `--describe`,
+the agent step) ends with the system clock's date: "Today is YYYY-MM-DD. Use the newest edition or
+version published as of today; name it with its publication date; if you are unsure a newer one
+exists, say so."
+
+### Memory
+
+`iohr memory` is local first (RFC 0205, ADR 0216: files, no database). Each memory is one
+Markdown file with front matter (`id`, `kind`, `scope`, `created`, `updated`, `checked`, `why`, `pinned`,
+`refs`) and the text as the body. There are three scopes; `--scope` picks one per command and
+`[memory] scope` in the config sets the default (else `project`):
+
+| Scope | Where | Notes |
+|---|---|---|
+| `project` | `<repo root>/.inorbit/memory/` | Committed with the code. The repo root is the nearest folder up with `.inorbit/`, `atlas/` or `.git` (the home folder's own `.inorbit/` is not one). Outside a project the default falls back to `user`, said on stderr; `--scope project` there is an error |
+| `user` | `~/.inorbit/memory/notes/` | Yours, on this machine |
+| `account` | InOrbit's service | Needs `[memory] sync = true`; the only scope that is not a file |
+
+```sh
+iohr memory remember "We use sqlx" --why "typed SQL" --ref src/db.rs   # offline; --preference, --pin, --scope
+iohr memory recall "database"          # ranked by word match, recency (preferences never decay) and pin
+iohr memory list
+iohr memory forget <id>
+iohr memory check [--strict]           # --strict exits 1 on any finding
+iohr memory drift [--remote] [--strict]
+iohr memory sync [--dry-run] [--pull]  # off until [memory] sync = true or you run it
+```
+
+`check` reports `dangling-ref` (a path that is gone, or a `cmd:` program not on PATH),
+`bad-ref` (absolute or `..`), `missing-why`, `stale` (not confirmed in 180 days, `--stale-days`;
+pinned ones are exempt), `unchecked` (no `checked:` date in the front matter, or one older than
+`--checked-days`, else `[memory] check_days`, else 180; pinned ones are exempt), `never-confirmed`, `duplicate` and `near-duplicate`, and `gap` (topics
+no memory covers: the language, the build and test commands, the owners). `drift` only reads: it
+compares each `--ref` with `git log` and `git status` (`ref-changed` when the path changed after
+the memory was last updated, `ref-uncommitted` when it has edits not committed), and says it
+skipped when the folder is not a git repository. It asks the service only when sync is on or
+`--remote` is given. A memory is never printed to a log; `--json` prints it to stdout only, and
+text is never in a URL. A text that looks like a secret is refused.
+
+`sync` (also run by `iohr sync` when `[memory] sync = true`) shares the `project` or `user`
+memories with your account, tagged `project:<slug>` or `user`. The service's `MemoryService` has
+create, list, recall and delete, and no update or version, so the check for a change on the
+other side is made here: `remote_sha` (a hash of kind and text) and `remote_version` are kept in
+the file's front matter, local only. Per memory the plan is `push` (new), `link` (the service
+already has the same text), `replace` (changed here: the new copy is created, the ids are written
+back, then the old one is deleted; this is create-then-delete, not atomic, and a failed delete
+is reported), `remote newer` and `remote gone` (reported, nothing overwritten) or `conflict`
+(changed on both sides: reported, exit 1, nothing overwritten). Entries only on the service are
+written as files only with `--pull`. `--dry-run` sends nothing. Signed out, `sync` is a sign-in
+error and the files stay as they are.
+
+`iohr project init` and `iohr atlas init` write `.inorbit/memory/README.md` and the built-in
+roles' recall lines as seed memories, locally, with no network; a seed you forget stays
+forgotten. The agent-instructions file (`AGENTS.md` or `CLAUDE.md`) gets a short section that
+tells agents to run `iohr memory recall` and `iohr memory remember`.
+
+### Try it without changing anything
+
+```sh
+iohr project init my-shop --template demo --dry-run --yes
+```
+
+`--dry-run` (alias `--plan`) runs the whole flow, questions, defaults and `when` skips
+included, and does nothing: no files or folders, no git, registration or smoke test, no
+sign-in, no network call, and the agent is not started; its exact command and full prompt are
+printed instead, still labelled AI. Every step reads `would: ...`, and it ends with
+`dry run: nothing was changed`. With `--json` the plan is data: `files` (path and bytes),
+`steps`, and `agent` (command and prompt). Every action goes through one gate that checks it.
 
 The steps that need InOrbit (the project as a Decisions space, its private listing, its own
 scopes and tokens, a memory namespace, monitors and notifications) are reported as `not yet`,
@@ -471,7 +711,7 @@ the whole message is capped at 16 KiB. A plain zsh hook cannot read a command's 
 it sends no output; a program that has it can call `iohr ask --output-file`. Io runs on
 Claude Code only: it signs in with your own `claude` login, never an API key, and `iohr`
 stores neither question nor answer. Only zsh is built; `iohr shell hook bash` and `fish`
-exit 1 with "not built yet", and so do `--via io` and `--agent codex`. An answer is an AI
+exit 1 with "not built yet", and so do `--via io` and `--headless` with `--agent codex`. An answer is an AI
 answer: check it before you rely on it.
 
 ## Runner

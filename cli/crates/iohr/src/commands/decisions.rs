@@ -15,9 +15,9 @@ use std::io::Read as _;
 use std::path::Path;
 
 use inorbithr::public::{
-    AddCommentRequest, CreateDiagramRequest, CreateDocumentRequest, Diagram, Document, Finding,
-    RequestReviewRequest, SaveDiagramRequest, SaveDocumentRequest, SetStatusRequest, Space,
-    Surface as _,
+    AddCommentRequest, CreateDiagramRequest, CreateDocumentRequest, CreateDocumentResponse,
+    Diagram, Document, Finding, RequestReviewRequest, SaveDiagramRequest, SaveDocumentRequest,
+    SaveDocumentResponse, SetStatusRequest, Space, Surface as _,
 };
 use inorbithr::public::{
     Decisions as DecisionsOps, DecisionsGetDocumentParams as GetDocumentParams,
@@ -423,7 +423,7 @@ fn read_model(path: &Path) -> Result<String, Error> {
 }
 
 /// The SDK's Decisions operations on the command's client.
-fn decisions(api: &Api) -> DecisionsOps<'_, inorbithr::Public> {
+pub(crate) fn decisions(api: &Api) -> DecisionsOps<'_, inorbithr::Public> {
     api.client().decisions()
 }
 
@@ -474,7 +474,11 @@ fn types_of(kind: &str) -> Option<String> {
     (kind != "all").then(|| kind.to_owned())
 }
 
-async fn find(api: &Api, r: &Ref, at: &DecisionsWhere) -> Result<(Space, Document), Error> {
+pub(crate) async fn find(
+    api: &Api,
+    r: &Ref,
+    at: &DecisionsWhere,
+) -> Result<(Space, Document), Error> {
     let kind = kind_of(r, at);
     let mut params = ListDocumentsParams::default();
     params.types = types_of(&kind);
@@ -510,7 +514,7 @@ async fn find(api: &Api, r: &Ref, at: &DecisionsWhere) -> Result<(Space, Documen
 }
 
 /// A 403 or 409 from the Decisions API, said in the words of what to do.
-fn scoped(e: inorbithr::Error) -> Error {
+pub(crate) fn scoped(e: inorbithr::Error) -> Error {
     match e.status() {
         Some(403) => Error::with_hint(
             e,
@@ -544,7 +548,7 @@ fn with_space(d: &Document, space: &Space) -> Value {
     v
 }
 
-fn note_findings(findings: &[Finding]) {
+pub(crate) fn note_findings(findings: &[Finding]) {
     for f in findings {
         Out::note(&format!(
             "finding {} (line {}): {}",
@@ -662,6 +666,52 @@ async fn show(
     Ok(())
 }
 
+/// Makes a document in a space. The number is the next free one (the API's default), and the
+/// text is saved separately by [`save_text`]. Shared by `decisions create` and `iohr sync`.
+pub(crate) async fn create_in(
+    api: &Api,
+    space_id: &str,
+    kind: &str,
+    title: &str,
+    summary: Option<String>,
+    parent_id: Option<String>,
+) -> Result<CreateDocumentResponse, Error> {
+    let mut body = CreateDocumentRequest::default();
+    body.space_id = Some(space_id.to_owned());
+    body.kind = Some(kind.to_owned());
+    body.title = Some(title.to_owned());
+    body.summary = summary;
+    body.parent_id = parent_id;
+    Ok(decisions(api)
+        .create_document(space_id, &body)
+        .await
+        .map_err(scoped)?
+        .value)
+}
+
+/// Saves a document's text as a new version on `base_version`; the API refuses (409) when
+/// someone saved since. Shared by `decisions save` and `iohr sync`.
+pub(crate) async fn save_text(
+    api: &Api,
+    space_id: &str,
+    document_id: &str,
+    base_version: i32,
+    text: String,
+    message: &str,
+) -> Result<SaveDocumentResponse, Error> {
+    let mut body = SaveDocumentRequest::default();
+    body.space_id = Some(space_id.to_owned());
+    body.document_id = Some(document_id.to_owned());
+    body.base_version = Some(base_version);
+    body.text = Some(text);
+    body.message = Some(message.to_owned());
+    Ok(decisions(api)
+        .save_document(space_id, document_id, &body)
+        .await
+        .map_err(scoped)?
+        .value)
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "one argument per flag of the command"
@@ -694,34 +744,22 @@ async fn create(
         }
         None => None,
     };
-    let mut body = CreateDocumentRequest::default();
-    body.space_id = Some(space.space_id.clone());
-    body.kind = Some(kind.to_owned());
-    body.title = Some(title.to_owned());
-    body.summary = summary;
-    body.parent_id = parent_id;
-    let made = decisions(api)
-        .create_document(&space.space_id, &body)
-        .await
-        .map_err(scoped)?
-        .value;
+    let made = create_in(api, &space.space_id, kind, title, summary, parent_id).await?;
     let doc = made
         .document
         .ok_or_else(|| Error::Failed("the API made the document but did not return it".into()))?;
     let mut findings = made.findings;
     let mut current = doc.clone();
     if let Some(text) = text {
-        let mut save = SaveDocumentRequest::default();
-        save.space_id = Some(space.space_id.clone());
-        save.document_id = Some(doc.document_id.clone());
-        save.base_version = Some(doc.current_version);
-        save.text = Some(text);
-        save.message = Some(message.unwrap_or_else(|| "First draft".to_owned()));
-        let saved = decisions(api)
-            .save_document(&space.space_id, &doc.document_id, &save)
-            .await
-            .map_err(scoped)?
-            .value;
+        let saved = save_text(
+            api,
+            &space.space_id,
+            &doc.document_id,
+            doc.current_version,
+            text,
+            &message.unwrap_or_else(|| "First draft".to_owned()),
+        )
+        .await?;
         findings = saved.findings;
         if let Some(d) = saved.document {
             current = d;
@@ -756,18 +794,15 @@ async fn save(
     out: Out,
 ) -> Result<(), Error> {
     let (space, d) = find(api, r, at).await?;
-    let mut body = SaveDocumentRequest::default();
-    body.space_id = Some(space.space_id.clone());
-    body.document_id = Some(d.document_id.clone());
-    body.base_version =
-        Some(base.map_or(d.current_version, |b| i32::try_from(b).unwrap_or(i32::MAX)));
-    body.text = Some(text);
-    body.message = Some(message.to_owned());
-    let saved = decisions(api)
-        .save_document(&space.space_id, &d.document_id, &body)
-        .await
-        .map_err(scoped)?
-        .value;
+    let saved = save_text(
+        api,
+        &space.space_id,
+        &d.document_id,
+        base.map_or(d.current_version, |b| i32::try_from(b).unwrap_or(i32::MAX)),
+        text,
+        message,
+    )
+    .await?;
     if out.json {
         Out::print_json(&saved);
         return Ok(());

@@ -366,8 +366,17 @@ template = "coordinated"
 [ask]                               # iohr ask (section 4.5)
 agent = "claude"
 model = "haiku"
+allow_edits = false
+thinking = "show"
 hints = "sometimes"
 menu_key = "down"
+
+[sync]                              # iohr sync (section 4.6)
+background = false
+
+[memory]                            # iohr memory (section 4.7)
+scope = "project"
+sync = false
 ```
 
 Rules:
@@ -496,25 +505,41 @@ The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
-| `template` | a name from `iohr project templates` that is live | `demo` | `iohr project init`, `create` and the default `templates` marks |
+| `template` | a name from `iohr project template list` that is live | `demo` | `iohr project init`, `create` and the default `template list` marks |
 
 ### 4.5 The ask table
 
-`iohr ask "..."` asks Io, which runs on your own agent (Claude Code, local). At a terminal
-it starts the agent in the current folder with the question; with `--json`, a context flag
-(`--cwd`, `--last-command`, `--exit-code`, `--output-file`), `--headless` or no terminal it
-makes one capped, read-only `claude -p` run instead (the `?` prompt of `iohr shell hook zsh`
-uses it); `--interactive` keeps the agent session. It reads `[ask]`; `--via`, `--agent` and
-`--model` win over it for one call. `iohr` never writes it, and never stores the question or
-the answer.
+`iohr ask "..."` runs your own agent once, in the current folder, in print mode: no session
+opens and nothing is kept. It draws the run in the terminal as it happens: what the agent
+thinks (dim, italic, in a quiet block under a `thinking` header), each tool it uses as one row
+(`⏺ Read src/x.rs`), the answer as it streams, and a short dim footer with the model, time,
+turns, cost and the AI label. A spinner shows until the first event. It reads `[ask]`; the
+flags win over it for one call. `iohr` never writes it, and never stores or logs the question
+or the answer.
+The `?` prompt of `iohr shell hook zsh` (and `--headless`, `--card` or a context flag such as
+`--cwd` or `--last-command`) uses one capped, read-only `claude -p` run instead, answered once
+and drawn as a card.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `via` | `local` (your own agent); `io` is reserved and says "not built yet" | `local` | `iohr ask` |
-| `agent` | `claude` (Claude Code); `codex` is reserved and says "not built yet" | `claude` | `iohr ask` |
-| `model` | A Claude alias such as `haiku`, `sonnet` or `opus`, or a full model name; a space or a leading `-` is refused. `--model` and `IOHR_ASK_MODEL` win over it. One reading for the `?` card and the answer printed to a pipe, and the card's meta line shows it | `haiku`, the small fast tier | `iohr ask` |
+| `agent` | `claude` (Claude Code, `claude -p --output-format stream-json --verbose --include-partial-messages --no-session-persistence`) or `codex` (`codex exec --json --ephemeral --skip-git-repo-check --sandbox read-only`) | `claude` | `iohr ask` |
+| `model` | any model name the agent knows; may not start with `-` | `haiku` for `claude`, the agent's own for `codex` | `iohr ask` |
+| `allow_edits` | `true` lets the agent edit files: `--permission-mode acceptEdits` for `claude`, `--sandbox workspace-write` for `codex` | `false` | `iohr ask` |
+| `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
 | `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
+
+Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--thinking`, `--dry-run`. Running a
+shell command is never allowed, with or without `--allow-edits`; the agent's default
+permissions stay in force. `--dry-run` prints the exact command line and starts nothing (with
+`--json` it is one object with `dry_run`, `via`, `agent`, `found`, `program` and `args`).
+
+With no colour (stderr is not a terminal, `NO_COLOR` is set, `TERM` is unset or `dumb`) only
+the answer is printed, on stdout; the thinking, tool rows, footer and spinner are not drawn.
+With `--json` the agent's own event lines are passed through untouched, one per line, followed
+by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
+command exits with the agent's code, and with 1 when the agent reports a failed run.
 
 The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes it: a terminal
 resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
@@ -524,14 +549,28 @@ The card's header says "AI answer" on every card. Its footer is the full disclos
 read, that nothing was run, that an AI model under your own subscription got the folder, and
 to check the answer) on the first card ever, whenever that text changes, and about once a
 day; every other card closes with one short hint, taken in turn from "`??` follows up",
-"`iohr ask --help` for flags", "`[ask] model` in config picks the model" and "`INORBIT_ASK=0`
-turns `?` off". `hints = "always"` shows the full disclosure every time; `"never"` shows it
+"`iohr ask --help` for flags" and "`[ask] model` in config picks the model". `INORBIT_ASK=0` in the
+environment turns `?` off; the card does not say so. `hints = "always"` shows the full disclosure every time; `"never"` shows it
 on the first card and when the text changes, and nothing otherwise. The one small file it
 keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),
 holds a fingerprint of the disclosure text, when it was last shown and a counter, never a
 question or an answer; delete it and the next card is the first again. A pipe, `--json`,
 `NO_COLOR` or a terminal that cannot draw the card print the one-line label instead, which
 carries the disclosure itself.
+
+### 4.6 The sync table
+
+`iohr sync` sends the project's `atlas/` documents (PRDs, RFCs, ADRs and studies) to its
+Decisions space. Nothing leaves the machine unless you run it, or turn the background trigger
+on here. `iohr` never writes this table.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `background` | `true` lets a background process send the documents; `false` or absent means only `iohr sync` does | `false` | `iohr sync` |
+
+Today the key is read and nothing else: `iohr` has no background process to hang the trigger
+on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
+background loop is the next slice (RFC 0205).
 
 Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open",
 with only what the answer has: Run and Copy when it suggested one command, Open when it named
@@ -543,6 +582,24 @@ tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener an
 executable, a file that runs when opened, and a path outside the folder. The suggested
 command is the last single-line fence of the answer in a shell language; `iohr --json ask`
 carries it as `command` (null when there is none). A pipe or `NO_COLOR` gets no row.
+
+`iohr atlas init` and `iohr project init` also add a `[personalities]` table to the project's
+`inorbit.toml` (`names`, the built-ins the project uses). `iohr` writes it once and never reads
+anything else back from the pack files; the import is made from the catalogue in the binary.
+
+### 4.7 The memory table
+
+`iohr memory` keeps memories as files, so it works with no sign-in and no network. This table
+chooses where it keeps them and whether it may use your InOrbit account. `iohr` never writes it.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `scope` | `project` (`<repo root>/.inorbit/memory/`, committed with the code), `user` (`~/.inorbit/memory/notes/`) or `account` (InOrbit's service; needs `sync = true`) | `project` | every `iohr memory` command; `--scope` overrides it per command |
+| `sync` | `true` lets `iohr sync` also sync memories, `drift` ask the service, and the `account` scope work; `false` or absent keeps everything on this machine | `false` | `iohr memory`, `iohr sync` |
+
+Outside a project the `project` default falls back to `user` with a note on stderr. With
+`sync = false`, `iohr memory sync` and `iohr memory drift --remote` still run when you type them:
+running the command is the explicit choice.
 
 ## 5. Credentials
 

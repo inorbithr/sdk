@@ -47,11 +47,10 @@ stale_after = "5m"
 [targets]
 platforms = ["darwin/arm64"]     # a private macOS service: this Mac first
 kinds = ["desktop"]
-needs = ["python3"]
+needs = [@@NEEDS@@]
 
 [upgrade]
 strategy = "replace"
 keep_previous = 2
 
-[dev]
-lang = "python"                  # how `iohr ext dev` runs this folder
+@@DEV@@

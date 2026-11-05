@@ -96,7 +96,7 @@ fn text(o: &Output) -> String {
 fn json_is_the_documented_shape_and_never_the_question() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
-    let out = r.run(&["--json", "ask", SECRET], OK_JSON, "0");
+    let out = r.run(&["--json", "ask", "--headless", SECRET], OK_JSON, "0");
     assert!(out.status.success(), "{}", text(&out));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
@@ -141,7 +141,11 @@ fn text_mode_prints_the_label_then_the_answer() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
     // Not a terminal, no flag: the answer is printed, the agent is not opened.
-    let out = r.run(&["ask", "why", "is", "the", "sky", "blue"], OK_JSON, "0");
+    let out = r.run(
+        &["ask", "--headless", "why", "is", "the", "sky", "blue"],
+        OK_JSON,
+        "0",
+    );
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
@@ -247,7 +251,11 @@ fn the_model_is_the_flag_then_the_config_then_haiku_and_the_json_says_which() {
         model_sent(&r, &["ask", "--headless", "--model", "opus", "q"]),
         "opus"
     );
-    let out = r.run(&["--json", "ask", "--model", "opus", "q"], OK_JSON, "0");
+    let out = r.run(
+        &["--json", "ask", "--headless", "--model", "opus", "q"],
+        OK_JSON,
+        "0",
+    );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["model"], "opus");
     let bad = r.run(
@@ -361,17 +369,14 @@ fn io_and_codex_still_say_not_built_yet_and_start_nothing() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
     for args in [
-        vec!["--json", "ask", "--via", "io", "q"],
-        vec!["--json", "ask", "--agent", "codex", "q"],
+        vec!["--json", "ask", "--headless", "--via", "io", "q"],
+        vec!["--json", "ask", "--headless", "--agent", "codex", "q"],
     ] {
         let out = r.run(&args, OK_JSON, "0");
         assert_eq!(out.status.code(), Some(1), "{}", text(&out));
         assert!(text(&out).contains("not built yet"), "{}", text(&out));
     }
     assert_eq!(r.saw("claude.args"), "");
-    // `--interactive` and `--json` cannot be combined: one prints, the other opens.
-    let out = r.run(&["--json", "ask", "--interactive", "q"], OK_JSON, "0");
-    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
 }
 
 /// An answer that suggests a command and names a file of the work folder.
@@ -389,15 +394,23 @@ const WITH_COMMAND: &str = "Check the log in notes.md, then run:\n```bash\ngit s
 fn the_json_answer_carries_the_suggested_command_or_null() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
-    let out = r.run(&["--json", "ask", "q"], &answer_json(WITH_COMMAND), "0");
+    let out = r.run(
+        &["--json", "ask", "--headless", "q"],
+        &answer_json(WITH_COMMAND),
+        "0",
+    );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["command"], "git status");
-    let out = r.run(&["--json", "ask", "q"], OK_JSON, "0");
+    let out = r.run(&["--json", "ask", "--headless", "q"], OK_JSON, "0");
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(v["command"].is_null(), "{v}");
     // Two lines, or a control character, are shown but never offered.
     let two = "```bash\ncd a\nls\n```";
-    let out = r.run(&["--json", "ask", "q"], &answer_json(two), "0");
+    let out = r.run(
+        &["--json", "ask", "--headless", "q"],
+        &answer_json(two),
+        "0",
+    );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(v["command"].is_null(), "{v}");
 }

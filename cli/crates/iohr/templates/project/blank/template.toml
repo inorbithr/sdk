@@ -1,0 +1,77 @@
+# The blank template as data (PRD 0088.1): an empty project in your language, nothing else.
+# Same format as demo/template.toml: `[[variants]]` are the languages, their files are in
+# `variants/<id>/`. No panel, no manifest, no service. The smoke test is the language's own
+# test command (`smoke = "test"`), not a heartbeat.
+#
+# `iohr project init --describe` and the "Describe it" menu entry use this one.
+id = "blank"
+description = "An empty project in your language"
+status = "live"
+default_variant = "python"
+agent_prompt = "This folder is a fresh project in @@LANGUAGE_LABEL@@ (@@SOURCE@@). Build what is described below by editing this folder. Keep it free of secrets, and keep the test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "python"
+label = "Python 3"
+status = "live"
+needs = ["python3"]
+smoke = "test"
+test = ["python3", "-m", "unittest", "discover", "-s", "tests"]
+[variants.env]
+PYTHONPATH = "$DIR/src"
+PYTHONDONTWRITEBYTECODE = "1"
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/"
+IGNORE = "__pycache__/\n*.pyc\n.venv/\n*.egg-info/"
+RUN_TEST = "`python3 -m unittest discover -s tests` with PYTHONPATH=src"
+LAYOUT = "- `src/@@MODULE@@/`: the code.\n- `tests/test_basic.py`: one test."
+
+[[variants]]
+id = "typescript"
+label = "TypeScript on Node 22.18 or newer"
+status = "live"
+needs = ["node"]
+smoke = "test"
+test = ["node", "--test", "tests/**/*.test.ts"]
+[variants.vars]
+SOURCE = "src/index.ts, tests in tests/"
+IGNORE = "node_modules/"
+RUN_TEST = "`node --test 'tests/**/*.test.ts'`"
+LAYOUT = "- `src/index.ts`: the code. Node runs the TypeScript as it is (22.18 or newer), so there is nothing to build or install.\n- `tests/index.test.ts`: one test."
+
+[[variants]]
+id = "go"
+label = "Go 1.22 or newer"
+status = "live"
+needs = ["go"]
+smoke = "test"
+test = ["go", "test", "./..."]
+[variants.vars]
+SOURCE = "main.go, tests in main_test.go"
+IGNORE = "/@@NAME@@"
+RUN_TEST = "`go test ./...`"
+LAYOUT = "- `main.go`: the code.\n- `main_test.go`: one test."
+
+[[variants]]
+id = "rust"
+label = "Rust"
+status = "live"
+needs = ["cargo"]
+smoke = "test"
+test = ["cargo", "test", "--quiet"]
+[variants.env]
+CARGO_TARGET_DIR = "$CACHE/target"
+[variants.vars]
+SOURCE = "src/main.rs, with its test inside"
+IGNORE = "target/"
+RUN_TEST = "`cargo test`"
+LAYOUT = "- `src/main.rs`: the code and its one test."
+
+[[steps]]
+name = "git"
+
+[[steps]]
+name = "register"
+
+[[steps]]
+name = "smoke"

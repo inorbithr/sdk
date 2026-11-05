@@ -1,0 +1,39 @@
+{"type": "system", "subtype": "init", "cwd": "/work", "model": "claude-haiku-5-5"}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "", "estimated_tokens": null}}, "parent_tool_use_id": null}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "hello.txt"}}]}, "parent_tool_use_id": null}
+{"type": "rate_limit_event"}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "", "estimated_tokens": null}}, "parent_tool_use_id": null}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "find / -name hello.txt -not -path \"*/proc/*\" 2>/dev/null | head -20"}}]}, "parent_tool_use_id": null}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls -la /work/"}}]}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "", "estimated_tokens": 50}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "", "estimated_tokens": null}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "I"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " couldn't read"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " `hello.txt`:"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " it"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " doesn't exist in the"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " working directory (`."}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "../scratch"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "pad/scratch`),"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " and that directory is empty."}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " I didn't run"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " a fil"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "esystem-"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "wide search because it need"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "s appro"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "val here"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "."}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " If the"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " file is som"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "ewhere else, give"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " me the"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " path and I'll read"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " it.\n\nFive"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " words:"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " **Hello, this is"}}, "parent_tool_use_id": null}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " Claude speaking.**"}}, "parent_tool_use_id": null}
+{"type": "result", "subtype": "success", "is_error": false, "duration_ms": 10345, "num_turns": 4, "result": "I couldn't read `hello.txt`: it doesn't exist in the working directory (`.../scratchpad/scratch`), and that directory is empty. I didn't run a filesystem-wide search because it needs approval here. If the file is somewhere else, give me the path and I'll read it.\n\nFive words: **Hello, this is Claude speaking.**", "total_cost_usd": 0.007792850000000001, "usage": {"output_tokens_details": {"thinking_tokens": 295}}}
