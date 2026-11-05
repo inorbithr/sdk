@@ -628,6 +628,26 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
     smoke_heartbeat(&words(&runner.run), runner, dir, (&st, &cache), &find)
 }
 
+/// What the demo child may inherit: the runner's own allowlist (`PATH`, the temp directory,
+/// and on Windows `SYSTEMROOT` and the rest Node and Winsock need to start), without the
+/// XDG directories, which would point the demo at the real configuration. The unix `PATH`
+/// stays the fixed system one.
+fn demo_base_env() -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    let mut env: Vec<_> = crate::runner::env::scrub(std::env::vars_os())
+        .into_iter()
+        .filter(|(k, _)| !k.to_string_lossy().to_ascii_uppercase().starts_with("XDG_"))
+        .collect();
+    #[cfg(unix)]
+    {
+        env.retain(|(k, _)| k != "PATH");
+        env.push((
+            "PATH".into(),
+            "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".into(),
+        ));
+    }
+    env
+}
+
 /// The service path of the smoke test: run the project once and read its heartbeat back.
 fn smoke_heartbeat(
     run: &[String],
@@ -649,11 +669,14 @@ fn smoke_heartbeat(
     cmd.args(args)
         .current_dir(dir)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")
+        .envs(demo_base_env())
         .env("HOME", cache)
         .env("STATE", st)
         .env("CACHE", cache)
         .env("IOHR_EXT_ONCE", "1");
+    // Windows reads the home from USERPROFILE, not HOME.
+    #[cfg(windows)]
+    cmd.env("USERPROFILE", cache);
     for (k, v) in &runner.env {
         cmd.env(k, paths_in(v, dir, st, cache));
     }
