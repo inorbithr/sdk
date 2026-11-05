@@ -406,18 +406,27 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 
 ## A project of your own
 
-`iohr project init NAME` sets up a project you build yourself (PRD 0088) with one command,
+`iohr project init NAME` (also `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
 and tells you what you now have. The local half is real: `~/development/NAME` from a template
 (`--template demo`: a private macOS service that heartbeats and serves a tiny panel, with the
-manifest of `iohr ext init`), a git repository with one commit, the project's own state under
+manifest of `iohr ext init`; `--template coordinated`: the same, plus a `coordination.toml` that
+names your account's Planner plan and an `ask` example you can file with
+`iohr coordinator asks create`), a git repository with one commit, the project's own state under
 `~/.inorbit/projects/NAME/` (never in the repository), a Keychain slot reserved by name, and a
 smoke test that runs the project once and reads its heartbeat back, with no token channel, so
 its token ask is refused: the proof the channel is its only credential.
 
 ```sh
 iohr project init demo
-iohr project init my-shop --template demo --dir ~/work/my-shop --json
+iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
+iohr project templates            # name, what it is, live or coming, and the default
+iohr project templates --json
 ```
+
+`iohr project templates` lists every template; `macos-app` and `ui-panel` are `coming` and
+refuse until they exist. The template is `--template`, else `template` under `[project]` in
+`config.toml` (`[project]` / `template = "coordinated"`; you edit it, `iohr config` does not
+write it), else `demo`. A configured template that is coming refuses too.
 
 The steps that need InOrbit (the project as a Decisions space, its private listing, its own
 scopes and tokens, a memory namespace, monitors and notifications) are reported as `not yet`,
