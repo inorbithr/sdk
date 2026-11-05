@@ -16,12 +16,16 @@ pub mod project;
 pub mod roles;
 pub mod template;
 
+mod actions;
 mod args;
 mod ask;
 mod browser;
+mod card;
 mod commands;
 mod context;
 mod error;
+mod headless;
+mod hints;
 mod io_signin;
 mod lock;
 mod output;

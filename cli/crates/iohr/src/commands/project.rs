@@ -259,6 +259,7 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
                     what
                 },
                 available: true,
+                key: None,
             }
         })
         .collect();
@@ -272,6 +273,7 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
                 label: v.label.clone(),
                 hint: String::new(),
                 available: false,
+                key: None,
             }),
     );
     let initial = recommended.map(|v| v.id.clone()).unwrap_or_default();
@@ -291,6 +293,7 @@ fn folder_choices(list: &[Proposal]) -> Vec<Choice> {
             },
             hint: p.reason.clone(),
             available: true,
+            key: None,
         })
         .collect()
 }
@@ -496,6 +499,7 @@ fn ask_question(
                     label: c.clone(),
                     hint: String::new(),
                     available: true,
+                    key: None,
                 })
                 .collect();
             let initial = default
@@ -725,6 +729,7 @@ impl Wizard<'_> {
                     label: n.clone(),
                     hint: why.clone(),
                     available: true,
+                    key: None,
                 })
                 .collect();
             choices.push(Choice {
@@ -732,6 +737,7 @@ impl Wizard<'_> {
                 label: "Another name...".into(),
                 hint: "type it".into(),
                 available: true,
+                key: None,
             });
             let initial = if before.is_empty() {
                 props[0].0.clone()
@@ -794,6 +800,7 @@ impl Wizard<'_> {
                     None => no_agent_help(),
                 },
                 available: true,
+                key: None,
             }];
             choices.extend(rows.iter().map(|r| Choice {
                 value: r.name.clone(),
@@ -804,6 +811,7 @@ impl Wizard<'_> {
                     r.origin
                 ),
                 available: r.status == "live",
+                key: None,
             }));
             let initial = self.draft.pick.clone().unwrap_or(default);
             match self
@@ -1004,6 +1012,7 @@ fn review(ui: Ui, wiz: &Wizard<'_>, problem: Option<Error>) -> Result<Review, Er
         label: label.into(),
         hint: hint.into(),
         available: true,
+        key: None,
     };
     loop {
         let mut choices = Vec::new();

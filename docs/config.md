@@ -368,6 +368,8 @@ agent = "claude"
 model = "haiku"
 allow_edits = false
 thinking = "show"
+hints = "sometimes"
+menu_key = "down"
 
 [sync]                              # iohr sync (section 4.6)
 background = false
@@ -493,6 +495,9 @@ thinks (dim, italic, in a quiet block under a `thinking` header), each tool it u
 turns, cost and the AI label. A spinner shows until the first event. It reads `[ask]`; the
 flags win over it for one call. `iohr` never writes it, and never stores or logs the question
 or the answer.
+The `?` prompt of `iohr shell hook zsh` (and `--headless`, `--card` or a context flag such as
+`--cwd` or `--last-command`) uses one capped, read-only `claude -p` run instead, answered once
+and drawn as a card.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
@@ -501,6 +506,8 @@ or the answer.
 | `model` | any model name the agent knows; may not start with `-` | `haiku` for `claude`, the agent's own for `codex` | `iohr ask` |
 | `allow_edits` | `true` lets the agent edit files: `--permission-mode acceptEdits` for `claude`, `--sandbox workspace-write` for `codex` | `false` | `iohr ask` |
 | `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
+| `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
+| `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
 
 Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--thinking`, `--dry-run`. Running a
 shell command is never allowed, with or without `--allow-edits`; the agent's default
@@ -512,6 +519,23 @@ the answer is printed, on stdout; the thinking, tool rows, footer and spinner ar
 With `--json` the agent's own event lines are passed through untouched, one per line, followed
 by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
 command exits with the agent's code, and with 1 when the agent reports a failed run.
+
+The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes it: a terminal
+resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
+do not close it or pick an action. Only a real terminal error closes it, with one line on stderr.
+
+The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
+read, that nothing was run, that an AI model under your own subscription got the folder, and
+to check the answer) on the first card ever, whenever that text changes, and about once a
+day; every other card closes with one short hint, taken in turn from "`??` follows up",
+"`iohr ask --help` for flags", "`[ask] model` in config picks the model" and "`INORBIT_ASK=0`
+turns `?` off". `hints = "always"` shows the full disclosure every time; `"never"` shows it
+on the first card and when the text changes, and nothing otherwise. The one small file it
+keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),
+holds a fingerprint of the disclosure text, when it was last shown and a counter, never a
+question or an answer; delete it and the next card is the first again. A pipe, `--json`,
+`NO_COLOR` or a terminal that cannot draw the card print the one-line label instead, which
+carries the disclosure itself.
 
 ### 4.6 The sync table
 
@@ -526,6 +550,17 @@ on here. `iohr` never writes this table.
 Today the key is read and nothing else: `iohr` has no background process to hang the trigger
 on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
 background loop is the next slice (RFC 0205).
+
+Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open",
+with only what the answer has: Run and Copy when it suggested one command, Open when it named
+an https link or a file in the folder. The key in `menu_key` opens the menu (`iohr ask
+--menu`, letters `r c f e o`, Esc leaves it). Run puts the command on the prompt line and
+nothing else: Enter still runs it, and iohr never does. Copy sends it to the clipboard
+through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside
+tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener and refuses an
+executable, a file that runs when opened, and a path outside the folder. The suggested
+command is the last single-line fence of the answer in a shell language; `iohr --json ask`
+carries it as `command` (null when there is none). A pipe or `NO_COLOR` gets no row.
 
 `iohr atlas init` and `iohr project init` also add a `[personalities]` table to the project's
 `inorbit.toml` (`names`, the built-ins the project uses). `iohr` writes it once and never reads

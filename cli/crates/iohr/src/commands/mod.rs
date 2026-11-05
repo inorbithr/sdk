@@ -25,6 +25,7 @@ mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
+mod shell;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -92,6 +93,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, check, out).await,
         Command::Ask(args) => ask::run(g, args, out).await,
+        Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
         Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
         Command::Sync(args) => atlas::sync(g, &env, &args, out).await,

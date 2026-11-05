@@ -117,6 +117,9 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
 | `iohr ext packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (`iohr packages` still works, hidden from the help) |
+| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--allow-edits] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, no MCP, no tools, no write access, a scrubbed environment, the question on stdin), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null). `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
+| `iohr ask --menu --command C [--link L]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
+| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--env production|local`
@@ -682,6 +685,34 @@ each with the API it waits on; nothing is skipped in silence, and a step that ne
 admin's say becomes an ask. Every step is re-runnable, and nothing is overwritten. Then
 `iohr ext lint --preview`, `iohr ext dev` and `iohr ext dev --test` work in the folder as for
 any extension, and InOrbit Desktop's Code opens it after asking you.
+
+## The `?` prompt
+
+`iohr ask` and `iohr shell hook zsh` put a question prompt in your terminal. Add this to `~/.zshrc`:
+
+```sh
+eval "$(iohr shell hook zsh)"
+```
+
+Then type `? why did that fail` at the prompt. The line is never run by the shell and is not
+kept in its history; the answer prints under it, after the label `Io · AI answer -- Io running
+on Claude Code (local), an AI model, under your own subscription; ...` and a line that says
+what was read. `?? and the second one` asks a follow-up with the last question and answer as
+context. A line such as `?.txt` or `? ` alone runs as it always did. An accept-line widget you
+already have is kept and called for every other line. `INORBIT_ASK=0` turns it off for the
+session. Inside the InOrbit app (`INORBIT_TERM`) the hook asks the app to draw the answer
+(an OSC `7727;ask` escape) instead of printing it.
+
+What goes to your provider: the question, the folder's path, the names at the top of that folder
+(at most 60 names and 2 KiB; dotfiles left out except `.inorbit`, `.github`, `.gitignore` and
+`.claude`; names the folder's own `.gitignore` hides left out; never file contents), the last
+command and its exit status, and, when a caller passes `--output-file`, the last 8 KiB (200 lines) of that file;
+the whole message is capped at 16 KiB. A plain zsh hook cannot read a command's output, so
+it sends no output; a program that has it can call `iohr ask --output-file`. Io runs on
+Claude Code only: it signs in with your own `claude` login, never an API key, and `iohr`
+stores neither question nor answer. Only zsh is built; `iohr shell hook bash` and `fish`
+exit 1 with "not built yet", and so do `--via io` and `--headless` with `--agent codex`. An answer is an AI
+answer: check it before you rely on it.
 
 ## Runner
 

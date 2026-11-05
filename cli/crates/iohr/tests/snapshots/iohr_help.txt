@@ -33,6 +33,7 @@ Build:
 
 Agents:
   ask          Ask your own AI agent a question in this folder
+  shell        Shell integration: `? question` at your prompt asks your AI agent
   runner       Run coordinator turns on this machine
   coordinator  List and file the coordinator's jobs and asks
   memory       Keep what a project knows as files, check it, and sync it when you choose
@@ -80,9 +81,9 @@ Global options:
           Sign in as someone other than a person (`iohr runner` and `iohr coordinator` only).
           
           `io` is the `OAuth2` client `iohr-io` with the client credentials grant, so jobs Io files
-          run on runners Io owns. The secret is read from the file `IOHR_CLIENT_SECRET_FILE` names
-          (mode 0600) or, on a Mac, from the keychain item the Mac bridge uses, never from an
-          argument.
+          run on runners Io owns. `iohr runner` and `iohr coordinator` only; the secret is read from
+          the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on a Mac, from the keychain item
+          the Mac bridge uses, never from an argument.
 
           Possible values:
           - io: Io, the `OAuth2` client `iohr-io` (client credentials)
