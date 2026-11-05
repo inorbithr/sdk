@@ -25,7 +25,7 @@ pub(crate) enum Agent {
 impl Via {
     /// The name in the config and the flag.
     #[must_use]
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Local => "local",
             Self::Io => "io",
@@ -36,7 +36,7 @@ impl Via {
 impl Agent {
     /// The name in the config, the flag and on PATH.
     #[must_use]
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -45,7 +45,7 @@ impl Agent {
 
     /// What to do when the binary is missing.
     #[must_use]
-    pub fn install_hint(self) -> &'static str {
+    pub(crate) fn install_hint(self) -> &'static str {
         match self {
             Self::Claude => {
                 "install Claude Code with `npm install -g @anthropic-ai/claude-code` (https://docs.claude.com/en/docs/claude-code/setup), then run `claude` once to sign in"
