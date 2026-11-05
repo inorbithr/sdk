@@ -1,6 +1,7 @@
 """inorbit/ask: a prototype of `iohr ask "<question>"`.
 
-Default backend: the MCP tool `llm_generate` (POST /mcp, JSON-RPC), the only route to the model a
+Default backend: the MCP tool `llm_generate` (POST /mcp, JSON-RPC), an interim route until ADR 0213
+is decided and the only route to the model a
 scoped key can use today (`mcp:generate`; no REST scope covers /v1/llm/generate/events). It
 returns the whole answer in one result, so nothing streams yet. ASK_BACKEND=generate streams
 /v1/llm/generate/events (SSE) and needs a token that holds `iohr.api`, which the extension channel
@@ -149,6 +150,9 @@ def mcp(api: str, tok: str, question: str) -> int:
             except (ValueError, AttributeError):
                 pass
             text += part
+    if not text.strip():
+        print("The model returned an empty answer", file=sys.stderr)
+        return 1
     print(f"--- {LABEL} ---", flush=True)
     print(text, flush=True)
     print("--- end of AI answer ---", flush=True)
@@ -167,8 +171,7 @@ def main() -> int:
     backend = os.environ.get("ASK_BACKEND", "mcp")
     say = backend == "say"
     try:
-        # ASK_TEST_TOKEN: the self-test's fake API needs no real token; never set outside tests.
-        tok = os.environ.get("ASK_TEST_TOKEN") if os.environ.get("IOHR_EXT_API", "").startswith("http://127.0.0.1") and os.environ.get("ASK_TEST_TOKEN") else token(SCOPES_SAY if say else SCOPES_GENERATE)
+        tok = token(SCOPES_SAY if say else SCOPES_GENERATE)
     except Refused as e:
         print(f"token refused: {e}", file=sys.stderr)
         return 1

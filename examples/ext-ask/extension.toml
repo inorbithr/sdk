@@ -8,7 +8,7 @@ kind = "program"                 # RFC 0073 kind; a program runs as its own proc
 delivery = "program"             # RFC 0073.1: how it arrives on a target
 entrypoint = "ask"    # the program's path inside the artifact
 args = []                        # arguments it is started with
-description = "Prototype of `iohr ask`: sends one question to Io over the coordinator thread API and prints a labelled AI answer."
+description = "Prototype of `iohr ask`: sends one question to the model over MCP llm_generate (default, interim until ADR 0213) or to Io over the coordinator thread API (ASK_BACKEND=say) and prints a labelled AI answer."
 api = ">=2026.10"                # the API versions it works with
 
 # Secrets are references, never values: `ref` is a name the target resolves (on this
@@ -43,8 +43,7 @@ disk = "16MiB"                   # for $CACHE; an installer refuses a target wit
 nice = 10
 
 [health]
-heartbeat = "$STATE/heartbeat.json"   # written every heartbeat_every
-heartbeat_every = "60s"
+# A oneshot program writes no heartbeat; it is judged by its exit code.
 stale_after = "5m"
 # check = { exec = ["ask", "status"], every = "5m" }   # optional: exits 0 with JSON `ok`
 
