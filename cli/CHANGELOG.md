@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.34](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.33...iohr/v0.1.0-alpha.34) (2026-11-05)
+
+
+### Bug fixes
+
+* **cli:** identity hash is stable across token refresh ([#357](https://github.com/inorbithr/sdk/issues/357)) ([603cae8](https://github.com/inorbithr/sdk/commit/603cae83372d3dfed868fa5f1f85f5e4eb09e1af))
+
 ## [0.1.0-alpha.33](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.32...iohr/v0.1.0-alpha.33) (2026-11-05)
 
 
