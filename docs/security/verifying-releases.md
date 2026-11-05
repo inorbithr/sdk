@@ -73,6 +73,11 @@ gh attestation verify iohr-X.Y.Z-x86_64-unknown-linux-musl.tar.gz --repo inorbit
 The installers run the checksum check themselves and the attestation check when `gh` is
 installed. Releases before 1.0 are marked pre-release.
 
+On macOS with `upgrade_sign_identity` set ([`config.md`](../config.md) section 4.3),
+`iohr upgrade` and the runner check the archive as above and then sign the binary with
+your own code-signing identity, so the installed file differs from the one in the archive
+by its signature. Verify the archive, not the installed file.
+
 The APT repository at `https://packages.inorbit.hr/apt` is signed with a key used for
 nothing else ([`cli/install/iohr.gpg`](../../cli/install/iohr.gpg), also served at
 `https://packages.inorbit.hr/iohr.gpg`). Check what you fetched with

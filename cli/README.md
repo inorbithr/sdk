@@ -542,7 +542,10 @@ verified install of `iohr upgrade`, and restarts itself (`exec` of the same path
 75 for a launchd or systemd supervisor with `upgrade_restart = "exit"`). A failure keeps
 the old version running and backs off from 5 minutes. `--no-auto-upgrade` or
 `auto_upgrade = false` turns it off; a copy installed by apt is reported and skipped.
-Keys, back-off and limits are in `docs/config.md` section 4.3.
+On macOS, `upgrade_sign_identity = "auto"` (or `IOHR_SIGN_IDENTITY`) signs each new binary
+with a code-signing identity from your keychain, so a keychain "Always Allow" grant holds
+across upgrades; it is off by default. Keys, back-off and limits are in `docs/config.md`
+section 4.3.
 
 ### Capacity
 
