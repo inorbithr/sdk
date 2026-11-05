@@ -164,6 +164,23 @@ pub fn add_space_link(files: &mut Vec<(String, String)>, space: Option<(&str, &s
     }
 }
 
+/// The space a folder is linked to, from [`SPACE_FILE`]: `(id, name)`. `None` when the file is
+/// missing or unreadable, or when it holds no id (the not-linked-yet text).
+#[must_use]
+pub fn read_space_link(dir: &std::path::Path) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(dir.join(SPACE_FILE)).ok()?;
+    let t: toml::Table = text.parse().ok()?;
+    let id = t.get("id")?.as_str()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let name = t
+        .get("name")
+        .and_then(toml::Value::as_str)
+        .unwrap_or_default();
+    Some((id.to_owned(), name.to_owned()))
+}
+
 /// The README line for a project: the person's own words (first line, at most 200 characters)
 /// when they described it, else a plain default. Never logged; it only goes into the README.
 #[must_use]

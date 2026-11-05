@@ -45,6 +45,9 @@ pub struct Config {
     /// `iohr ask` defaults (`[ask]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "AskConfig::is_empty")]
     pub ask: AskConfig,
+    /// `iohr sync` settings (`[sync]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "SyncConfig::is_empty")]
+    pub sync: SyncConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -186,6 +189,30 @@ impl AskConfig {
             && self.model.is_none()
             && self.allow_edits.is_none()
             && self.thinking.is_none()
+    }
+}
+
+/// The `[sync]` table: whether the project's `atlas/` documents may be pushed to Decisions
+/// without the person running `iohr sync` (RFC 0205). Nothing leaves the machine otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SyncConfig {
+    /// Push in the background. Off when unset: only `iohr sync` sends anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<bool>,
+}
+
+impl SyncConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.background.is_none()
+    }
+
+    /// Whether background sync is on (`background = true`).
+    #[must_use]
+    pub fn background_on(&self) -> bool {
+        self.background == Some(true)
     }
 }
 

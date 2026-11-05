@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod atlas;
 pub mod cli;
 pub mod environments;
 pub mod ext;

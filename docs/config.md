@@ -368,6 +368,9 @@ agent = "claude"
 model = "haiku"
 allow_edits = false
 thinking = "show"
+
+[sync]                              # iohr sync (section 4.6)
+background = false
 ```
 
 Rules:
@@ -1178,3 +1181,17 @@ language's driver runs every vector as a unit test next to its conformance drive
    transport (proxy, trust, mTLS), then logging and the `otel` feature.
 5. TypeScript, Python, Go, Java, C#, in that order, each lifting `pending` as it passes.
 6. READMEs show `load` first. `design.md` section 2 points here.
+
+### 4.6 The sync table
+
+`iohr sync` sends the project's `atlas/` documents (PRDs, RFCs, ADRs and studies) to its
+Decisions space. Nothing leaves the machine unless you run it, or turn the background trigger
+on here. `iohr` never writes this table.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `background` | `true` lets a background process send the documents; `false` or absent means only `iohr sync` does | `false` | `iohr sync` |
+
+Today the key is read and nothing else: `iohr` has no background process to hang the trigger
+on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
+background loop is the next slice (RFC 0205).

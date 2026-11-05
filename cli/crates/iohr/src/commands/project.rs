@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use crate::Env;
 use crate::ask::stream::{Look, Thinking};
 use crate::ask::{self, Agent};
+use crate::atlas;
 use crate::cli::{Global, ProjectCommand, TemplateCommand};
 use crate::commands::ask::Run;
 use crate::context::{Ctx, session};
@@ -39,7 +40,7 @@ fn publisher_of(asked: Option<&str>, account: Option<&str>) -> String {
     if ok { pick } else { "local".to_owned() }
 }
 
-fn now() -> String {
+pub(super) fn now() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
@@ -640,6 +641,17 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
     let mut files = template::render(&tpl_lang, &vals).map_err(Error::Failed)?;
     // Every project gets its InOrbit space link, whatever the template (RFC 0103).
     project::add_space_link(&mut files, None);
+    // And its atlas: starter PRD, RFC, ADR and study, a canvas and a 3D folder (RFC 0205).
+    atlas::add_atlas(
+        &mut files,
+        &atlas::Meta {
+            name: &name,
+            template: &tpl.meta.id,
+            lang: lang.as_deref(),
+            describe: describe.as_deref(),
+            created_at: &created_at,
+        },
+    );
     let programs = template::programs(&tpl, &vals);
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
     // Reads only, so a dry run finds the same problems a real one would.

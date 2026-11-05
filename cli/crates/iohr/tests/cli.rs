@@ -647,6 +647,8 @@ async fn verbose_output_never_shows_the_token() {
     // `runner run-key` keeps its key in the profile's store, which a bare token has not:
     // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
     // `iohr decisions` needs typed answers: `decisions_commands_never_show_the_token` runs it.
+    // `iohr sync` needs a project with an atlas: `sync_never_shows_the_token_or_a_documents_words`
+    // (tests/atlas.rs) runs it with `--verbose`.
     for args in commands {
         let mut args = args.clone();
         args.push("--verbose");

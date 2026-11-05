@@ -154,6 +154,8 @@ pub const GROUPS: &[(&str, &[&str])] = &[
         "Build",
         &[
             "project",
+            "atlas",
+            "sync",
             "ext",
             "sdk",
             "api",
@@ -324,6 +326,19 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder.
+    ///
+    /// The atlas: plain files in the project's `atlas/` folder (PRDs, RFCs, ADRs and studies as
+    /// Markdown, a canvas, a folder for 3D models). They stay on your machine until you run
+    /// `iohr sync`.
+    #[command(subcommand)]
+    Atlas(AtlasCommand),
+    /// Send the project's atlas documents to its Decisions space.
+    ///
+    /// The same as `iohr atlas sync`: creates what is new, saves a new version of what changed,
+    /// and never overwrites a document that changed in Decisions. Nothing else leaves
+    /// the machine.
+    Sync(SyncArgs),
     /// Ask your own AI agent a question in this folder.
     ///
     /// Ask a question in this folder: your own AI agent (Claude Code, or Codex) answers once,
@@ -1344,6 +1359,54 @@ pub struct AskArgs {
     /// Print the exact command line the agent would run and start nothing.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+/// The atlas kinds a document can be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum AtlasKind {
+    Prd,
+    Rfc,
+    Adr,
+    Study,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AtlasCommand {
+    /// Add the atlas folder to a project that has none.
+    ///
+    /// Writes the folders and starters `iohr project init` writes, for a project made without
+    /// them. Only what is missing: a file or folder you already have is left as it is.
+    Init {
+        /// The project folder. Default: the folder you are in.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Add a new PRD, RFC, ADR or study with the next free number.
+    New {
+        /// What kind of document.
+        #[arg(value_enum)]
+        kind: AtlasKind,
+        /// Its title, a few words: it becomes the file name.
+        title: String,
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Send the atlas documents to the project's Decisions space.
+    Sync(SyncArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SyncArgs {
+    /// Say what would be created or saved and send nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// The Decisions space id (`lab_...`). Default: the one in `.inorbit/space`.
+    #[arg(long, value_name = "ID")]
+    pub space: Option<String>,
+    /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
