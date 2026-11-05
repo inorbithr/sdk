@@ -8,15 +8,18 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 fn run(env: &[(&str, &str)], args: &[&str]) -> Output {
     let home = tempfile::tempdir().unwrap();
     let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
     c.args(args)
         .env_clear()
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .envs(kept_env())
         .env("HOME", home.path())
         .env("IOHR_CONFIG_DIR", home.path().join("config"))
         .env("COLUMNS", "100")

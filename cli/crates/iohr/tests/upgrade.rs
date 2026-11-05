@@ -7,8 +7,11 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use support::kept_env;
 
 #[cfg(not(windows))]
 use iohr::ext::layer::tar_gz;
@@ -27,20 +30,10 @@ fn installed() -> (tempfile::TempDir, PathBuf) {
     (dir, exe)
 }
 
-/// What the child needs to run at all: `SYSTEMROOT` is required for sockets on Windows,
-/// the temp variables for its download. Nothing that could hold a credential is passed on.
-fn kept_env() -> Vec<(String, std::ffi::OsString)> {
-    ["SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
-        .into_iter()
-        .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
-        .collect()
-}
-
 fn run(exe: &Path, install_dir: &Path, server: &MockServer, args: &[&str]) -> Output {
     Command::new(exe)
         .args(args)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
         .env("HOME", install_dir)
         .env("USERPROFILE", install_dir)
         .env("IOHR_INSTALL_DIR", install_dir)

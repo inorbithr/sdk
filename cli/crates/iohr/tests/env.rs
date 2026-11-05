@@ -6,7 +6,10 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use clap::Parser as _;
 use inorbithr::DEFAULT_BASE_URL;
@@ -18,12 +21,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn run(args: &[&str], extra: &[(&str, &str)]) -> Output {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
-    c.args(args).env_clear().env("IOHR_CONFIG_DIR", dir.path());
-    for k in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"] {
-        if let Some(v) = std::env::var_os(k) {
-            c.env(k, v);
-        }
-    }
+    c.args(args)
+        .env_clear()
+        .envs(kept_env())
+        .env("IOHR_CONFIG_DIR", dir.path());
     c.envs(extra.iter().copied());
     c.stdin(Stdio::null()).output().unwrap()
 }
