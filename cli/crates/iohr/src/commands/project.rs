@@ -1,4 +1,4 @@
-//! `iohr project init` (alias `create`) and `templates`: set a project of your own up (PRD 0088).
+//! `iohr project init` (alias `create`) and `template`: set a project of your own up (PRD 0088).
 
 use std::path::PathBuf;
 
@@ -11,6 +11,8 @@ use crate::output::Out;
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
 use crate::template::{self, Answer, Answers, Kind, Question, Spec, StepName, Template};
 use crate::ui::{Choice, Ui};
+
+use super::project_template;
 
 /// Where projects go by default: `~/development/<name>`.
 fn dev_root() -> Result<PathBuf, Error> {
@@ -95,51 +97,24 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
             )
             .await
         }
-        ProjectCommand::Templates => {
-            let configured = Ctx::load(g)?.config.project.template;
-            templates(configured.as_deref(), out)
-        }
-        ProjectCommand::Template { cmd } => template_command(cmd, out),
+        // The old name of `template list`: the same handler, so the output is identical.
+        ProjectCommand::Templates => template_command(g, TemplateCommand::List, out),
+        ProjectCommand::Template { cmd } => template_command(g, cmd, out),
     }
 }
 
-/// The templates table, or the same as a JSON list; `default` marks the one `init` uses.
-fn templates(configured: Option<&str>, out: Out) -> Result<(), Error> {
-    let default = choose_template(None, configured);
-    let rows = template::list(&template::user_root()?, &default);
-    if out.json {
-        Out::print_json(&rows);
-        return Ok(());
-    }
-    let width = rows.iter().map(|r| r.name.len()).max().unwrap_or(0).max(4);
-    let owidth = rows
-        .iter()
-        .map(|r| r.origin.len())
-        .max()
-        .unwrap_or(0)
-        .max(6);
-    Out::raw(
-        format!(
-            "{:<width$}  {:<7}  {:<owidth$}  DESCRIPTION\n",
-            "NAME", "STATUS", "ORIGIN"
-        )
-        .as_bytes(),
-    );
-    for r in &rows {
-        let star = if r.default { " (default)" } else { "" };
-        Out::raw(
-            format!(
-                "{:<width$}  {:<7}  {:<owidth$}  {}{star}\n",
-                r.name, r.status, r.origin, r.description
-            )
-            .as_bytes(),
-        );
-    }
-    Ok(())
+/// The template `init` uses without `--template`: `[project] template`, else the built-in
+/// default.
+fn default_template(g: &Global) -> Result<String, Error> {
+    let configured = Ctx::load(g)?.config.project.template;
+    Ok(choose_template(None, configured.as_deref()))
 }
 
-fn template_command(cmd: TemplateCommand, out: Out) -> Result<(), Error> {
+fn template_command(g: &Global, cmd: TemplateCommand, out: Out) -> Result<(), Error> {
     match cmd {
+        TemplateCommand::List => project_template::list(&default_template(g)?, out),
+        TemplateCommand::Show { id } => project_template::show(&id, &default_template(g)?, out),
+        TemplateCommand::Path { id } => project_template::path(&id, out),
         TemplateCommand::New { id, extends } => {
             let dir = template::scaffold(&template::user_root()?, &id, extends.as_deref())
                 .map_err(Error::Usage)?;

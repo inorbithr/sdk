@@ -19,6 +19,7 @@ mod login;
 mod openapi;
 mod profile;
 mod project;
+mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
