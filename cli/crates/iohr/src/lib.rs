@@ -10,6 +10,7 @@ pub mod atlas;
 pub mod cli;
 pub mod environments;
 pub mod ext;
+pub mod front;
 pub mod memory;
 pub mod personalities;
 pub mod project;

@@ -269,11 +269,12 @@ pub enum Command {
     /// The coordinator's jobs and queued asks: list and file work.
     #[command(subcommand)]
     Coordinator(CoordinatorCommand),
-    /// Remember and recall facts in your InOrbit memory, scoped to a project.
+    /// Keep what a project knows as files, check it, and sync it when you choose.
     ///
-    /// Your memory in InOrbit: keep a short fact or preference, find what is known by topic,
-    /// list and forget entries. Inside a project, entries are tagged `project:<name>` and these
-    /// commands show only that project's; `--all` shows everything. Needs `iohr login`.
+    /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
+    /// the code) or in your own notes, with no sign-in and no network. `check` finds what is
+    /// wrong, `drift` what moved in the code, and `sync` shares it with your InOrbit account
+    /// only when you turn that on in `[memory]` or run it.
     #[command(subcommand)]
     Memory(MemoryCommand),
     /// Browse the apps a connection can be made from.
@@ -1437,12 +1438,24 @@ pub enum MemoryCommand {
     Remember {
         /// What to keep, one short sentence. No secrets or personal data.
         text: String,
+        /// Why it holds, so it can be checked later. `iohr memory check` flags a memory without.
+        #[arg(long, value_name = "WHY")]
+        why: Option<String>,
+        /// A file or folder it is about (relative to the project), or `cmd:<command>`. Repeat it.
+        #[arg(long = "ref", value_name = "PATH", action = clap::ArgAction::Append)]
+        refs: Vec<String>,
         /// Keep it as a preference (how you want to be answered), not a fact.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "kind")]
         preference: bool,
-        /// The source tag. Default: `project:<name>` inside a project.
-        #[arg(long, value_name = "TAG")]
-        source: Option<String>,
+        /// The kind: fact, preference or episode. Default: fact.
+        #[arg(long, value_name = "KIND", value_parser = ["fact", "preference", "episode"])]
+        kind: Option<String>,
+        /// Never call it stale, however long since it was confirmed.
+        #[arg(long)]
+        pin: bool,
+        /// Where to keep it: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
     },
     /// Find what is known about a topic.
     Recall {
@@ -1451,29 +1464,75 @@ pub enum MemoryCommand {
         /// At most this many entries.
         #[arg(long, default_value_t = 10, value_name = "N")]
         limit: u32,
-        /// Show entries of every source, not only this project's.
-        #[arg(long)]
-        all: bool,
-        /// Only entries with this source tag. Default: `project:<name>` inside a project.
-        #[arg(long, value_name = "TAG")]
-        source: Option<String>,
+        /// Where to look: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
     },
     /// List what is kept.
     List {
         /// At most this many entries.
         #[arg(long, default_value_t = 50, value_name = "N")]
         limit: usize,
-        /// Show entries of every source, not only this project's.
-        #[arg(long)]
-        all: bool,
-        /// Only entries with this source tag. Default: `project:<name>` inside a project.
-        #[arg(long, value_name = "TAG")]
-        source: Option<String>,
+        /// Where to look: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
     },
     /// Forget one entry by id.
     Forget {
         /// The entry's id, from `iohr memory list`.
         id: String,
+        /// Where it is kept: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// Find memories that are wrong, stale, repeated or missing.
+    ///
+    /// Reads the memories on this machine, with no network: refs that no longer exist, no
+    /// reason given, not confirmed for a long time, the same thing twice, and what a
+    /// personality expects a project to remember (language, how to build and test, owners).
+    Check {
+        /// Where to look: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Exit non-zero when anything is found.
+        #[arg(long)]
+        strict: bool,
+        /// Days without a confirmation after which a memory is stale.
+        #[arg(long, default_value_t = 180, value_name = "DAYS")]
+        stale_days: u32,
+    },
+    /// Compare memories with the code, and with the service when sync is on.
+    ///
+    /// Asks git whether the files a memory is about changed after it was last confirmed. With
+    /// `[memory] sync = true` or `--remote`, also compares the files with the memory service:
+    /// only here, only there, changed on both sides. It only reads; nothing is changed.
+    Drift {
+        /// Where to look: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Compare with the memory service too, even when sync is off.
+        #[arg(long)]
+        remote: bool,
+        /// Exit non-zero when anything drifted.
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Sync memories with your InOrbit account.
+    ///
+    /// Off unless `[memory] sync = true` or you run this. Sends new and changed memories, links
+    /// ones the service already has, and stops on a memory changed on both sides: nothing is
+    /// overwritten. The service keeps no versions, so a change is detected here by hash and
+    /// replaced as create-then-delete.
+    Sync {
+        /// What to sync: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Say what would be sent and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also write the service's entries that have no file here as new files.
+        #[arg(long)]
+        pull: bool,
     },
 }
 

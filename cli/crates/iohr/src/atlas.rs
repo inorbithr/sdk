@@ -18,7 +18,6 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
-use sha2::{Digest as _, Sha256};
 
 /// The folder, in the project root.
 pub const DIR: &str = "atlas";
@@ -178,100 +177,19 @@ impl Meta<'_> {
 
 // ---------------------------------------------------------------- front matter
 
-/// Splits a document into its front matter (without the `---` lines) and the rest.
-#[must_use]
-pub fn split(text: &str) -> Option<(&str, &str)> {
-    let after = text.strip_prefix("---\n")?;
-    let end = after
-        .find("\n---\n")
-        .map(|i| (i, i + 5))
-        .or_else(|| after.strip_suffix("\n---").map(|s| (s.len(), after.len())))?;
-    Some((&after[..end.0], &after[end.1..]))
-}
-
-fn unquote(v: &str) -> String {
-    let v = v.trim();
-    if let Some(inner) = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-        return inner.replace("\\\"", "\"").replace("\\\\", "\\");
-    }
-    if let Some(inner) = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
-        return inner.replace("''", "'");
-    }
-    v.to_owned()
-}
-
-fn quote(v: &str) -> String {
-    let plain = !v.is_empty()
-        && !v.contains(": ")
-        && !v.contains(" #")
-        && !v.starts_with(|c: char| "\"'#&*!|>%@`[]{},-?".contains(c))
-        && !v.ends_with(':')
-        && v.trim() == v;
-    if plain {
-        v.to_owned()
-    } else {
-        format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
-    }
-}
-
-/// The value of a front matter key, unquoted.
-#[must_use]
-pub fn get(text: &str, key: &str) -> Option<String> {
-    let (fm, _) = split(text)?;
-    fm.lines().find_map(|l| {
-        let (k, v) = l.split_once(':')?;
-        (k.trim() == key).then(|| unquote(v))
-    })
-}
-
-/// The text with the given front matter keys set: an existing line is replaced, a missing
-/// key is added at the end of the front matter. A text without front matter is returned as
-/// it is.
-#[must_use]
-pub fn set_keys(text: &str, keys: &[(&str, String)]) -> String {
-    let Some((fm, rest)) = split(text) else {
-        return text.to_owned();
-    };
-    let mut lines: Vec<String> = fm.lines().map(str::to_owned).collect();
-    for (k, v) in keys {
-        let line = format!("{k}: {}", quote(v));
-        match lines
-            .iter()
-            .position(|l| l.split_once(':').is_some_and(|(lk, _)| lk.trim() == *k))
-        {
-            Some(i) => lines[i] = line,
-            None => lines.push(line),
-        }
-    }
-    format!("---\n{}\n---\n{rest}", lines.join("\n"))
-}
+pub use crate::front::{get, quote, set_keys, split};
 
 /// The text as Decisions should get it: the front matter without the [`LOCAL_KEYS`].
 #[must_use]
 pub fn strip_local(text: &str) -> String {
-    let Some((fm, rest)) = split(text) else {
-        return text.to_owned();
-    };
-    let kept: Vec<&str> = fm
-        .lines()
-        .filter(|l| {
-            l.split_once(':')
-                .is_none_or(|(k, _)| !LOCAL_KEYS.contains(&k.trim()))
-        })
-        .collect();
-    format!("---\n{}\n---\n{rest}", kept.join("\n"))
+    crate::front::strip_keys(text, &LOCAL_KEYS)
 }
 
 /// The fingerprint of what a push sends: the SHA-256 of [`strip_local`], in hex. Changing
 /// only the bookkeeping keys never changes it.
 #[must_use]
 pub fn fingerprint(text: &str) -> String {
-    let digest = Sha256::digest(strip_local(text).as_bytes());
-    digest.iter().fold(String::with_capacity(64), |mut s, b| {
-        use std::fmt::Write as _;
-        let _ = write!(s, "{b:02x}");
-        s
-    })
+    crate::front::sha_hex(&strip_local(text))
 }
 
 // ---------------------------------------------------------------- names and numbers
@@ -560,7 +478,6 @@ file, so it is versioned, reviewed and merged like code.
 | `canvas/` | Boards, in the InOrbit canvas format (`iohr.canvas`, version 3). |
 | `models/` | 3D models, in glTF 2.0. Empty for now. |
 | `personalities/` | The built-in InOrbit personalities for this project: `security` and the engineer of its language. Each line names its source. |
-| `memory/` | How this project's agents remember and recall through InOrbit memory. |
 
 The files named `0001-...` are starters. Each says so in its first line. Replace their text.
 
@@ -597,7 +514,8 @@ pub fn files(m: &Meta<'_>) -> Vec<(String, String)> {
     out.push(canvas_starter(m));
     out.push(models_readme());
     out.extend(crate::personalities::pack_files(m.lang));
-    out.push(crate::personalities::memory_readme(&slug(m.name)));
+    // Memory is not an atlas folder: it is `.inorbit/memory/`, local first, committed.
+    out.extend(crate::memory::seed::files(m.lang, &slug(m.name)));
     out
 }
 
@@ -612,7 +530,7 @@ pub fn add_atlas(files_out: &mut Vec<(String, String)>, m: &Meta<'_>) {
     }
     // The personalities are recorded in the manifest, and the agents are told about memory.
     crate::personalities::add_record(files_out, m.lang);
-    crate::personalities::add_agents(files_out, &slug(m.name));
+    crate::personalities::add_agents(files_out);
 }
 
 /// Whether the atlas of `root` already has this starter: the file itself, or any file a person
@@ -631,6 +549,10 @@ fn present(root: &Path, rel: &str) -> bool {
         .unwrap_or_default();
     if is_md(rel) && Kind::parse(folder).is_some() {
         return !md_files(parent).is_empty();
+    }
+    // A project that already keeps memories (or forgot a seed) keeps them as they are.
+    if rel.starts_with(crate::memory::store::PROJECT_DIR) {
+        return crate::memory::seed::has_entries(root);
     }
     if folder == "canvas" {
         return std::fs::read_dir(parent).is_ok_and(|rd| {
@@ -746,7 +668,7 @@ mod tests {
         let files = files(&meta());
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(
-            paths,
+            paths[..10],
             [
                 "atlas/README.md",
                 "atlas/prd/0001-what-my-shop-is-for.md",
@@ -757,8 +679,15 @@ mod tests {
                 "atlas/models/README.md",
                 "atlas/personalities/security.md",
                 "atlas/personalities/rust-engineer.md",
-                "atlas/memory/README.md",
+                ".inorbit/memory/README.md",
             ]
+        );
+        // The rest are the seed memories, local files under `.inorbit/memory/`.
+        assert!(paths.len() > 10);
+        assert!(
+            paths[10..]
+                .iter()
+                .all(|p| p.starts_with(".inorbit/memory/"))
         );
     }
 
@@ -766,7 +695,11 @@ mod tests {
     fn starters_say_they_are_stubs_and_use_the_description() {
         let files = files(&meta());
         for (p, t) in &files {
-            if is_md(p) && !p.ends_with("README.md") && !p.starts_with("atlas/personalities/") {
+            if is_md(p)
+                && !p.ends_with("README.md")
+                && !p.starts_with("atlas/personalities/")
+                && !p.starts_with(crate::memory::store::PROJECT_DIR)
+            {
                 assert!(t.contains("Stub"), "{p} is not labelled a stub");
                 assert_eq!(get(t, "number").as_deref(), Some("1"));
             }
@@ -846,7 +779,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let written = ensure(root, &meta()).unwrap();
-        assert_eq!(written.len(), 10);
+        // The ten folders' files, then the local memory's seeds under `.inorbit/memory/`.
+        assert!(written.len() >= 10, "{written:?}");
+        assert!(
+            written[10..]
+                .iter()
+                .all(|p| p.starts_with(crate::memory::store::PROJECT_DIR))
+        );
         // A person edits the RFC starter and renames it.
         let rfc = root.join("atlas/rfc/0001-how-my-shop-is-built.md");
         let renamed = root.join("atlas/rfc/0001-my-own-name.md");

@@ -645,49 +645,19 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
 /// The marker that says the section is in an agent-instructions file.
 pub const AGENTS_MARK: &str = "<!-- iohr:memory -->";
 
-/// The short section of CLAUDE.md or AGENTS.md: how the project's agents use InOrbit memory.
+/// The short section of CLAUDE.md or AGENTS.md: how the project's agents use its memory.
+/// Memory is local first, so nothing here needs a sign-in.
 #[must_use]
-pub fn agents_section(slug: &str) -> String {
+pub fn agents_section() -> String {
     format!(
-        "\n{AGENTS_MARK}\n## InOrbit memory and personalities\n\n\
+        "\n{AGENTS_MARK}\n## Project memory and personalities\n\n\
          - Before work, run `iohr memory recall \"<topic>\"`. After a lesson, run \
-         `iohr memory remember \"<fact>\"`. Both are scoped to this project (source \
-         `project:{slug}`) and need `iohr login`. See `atlas/memory/README.md`.\n\
+         `iohr memory remember \"<fact>\" --why \"<reason>\"`. Memories are files in \
+         `.inorbit/memory/`, committed with the code; no sign-in is needed. \
+         `iohr memory check` finds the wrong and the stale ones. See \
+         `.inorbit/memory/README.md`.\n\
          - The built-in personalities for this project are in `atlas/personalities/`.\n"
     )
-}
-
-/// `atlas/memory/README.md`: how a project's agents remember and recall through InOrbit.
-#[must_use]
-pub fn memory_readme(slug: &str) -> (String, String) {
-    let text = format!(
-        "\
-# Project memory
-
-This project's agents remember and recall through InOrbit's memory service
-(`iohr.memory.v1.MemoryService`), not through a file in the repo. Nothing is stored on this
-machine for it, and you must be signed in (`iohr login`).
-
-| Do | Command |
-| --- | --- |
-| Look up what is known before you start | `iohr memory recall \"<topic>\"` |
-| Keep a lesson or a fact | `iohr memory remember \"<fact>\"` |
-| See what this project kept | `iohr memory list` |
-| Drop an entry | `iohr memory forget <id>` |
-
-Every entry made from this project is tagged `source = \"project:{slug}\"`, and these commands
-show only those. `--all` shows everything in your memory. The service keeps one memory per
-person, so the tag is how this project's entries are told apart from your others; the
-filter runs in the CLI, because the service does not filter by source yet.
-
-Over REST the same calls are `POST /v1/memory/entries`, `POST /v1/memory/recall`,
-`GET /v1/memory/entries` and `DELETE /v1/memory/entries/{{id}}`.
-
-Keep entries short and true. Do not put secrets, personal data or anything owner-only in
-memory.
-"
-    );
-    ("atlas/memory/README.md".to_owned(), text)
 }
 
 fn instruction_files(files: &[(String, String)]) -> Vec<usize> {
@@ -701,18 +671,18 @@ fn instruction_files(files: &[(String, String)]) -> Vec<usize> {
 
 /// Adds the memory section to the agent-instructions file among a template's files, or an
 /// `AGENTS.md` when the template ships none.
-pub fn add_agents(files: &mut Vec<(String, String)>, slug: &str) {
+pub fn add_agents(files: &mut Vec<(String, String)>) {
     let found = instruction_files(files);
     if found.is_empty() {
         files.push((
             "AGENTS.md".to_owned(),
-            format!("# Agent instructions\n{}", agents_section(slug)),
+            format!("# Agent instructions\n{}", agents_section()),
         ));
         return;
     }
     for i in found {
         if !files[i].1.contains(AGENTS_MARK) {
-            files[i].1.push_str(&agents_section(slug));
+            files[i].1.push_str(&agents_section());
         }
     }
 }
@@ -724,7 +694,7 @@ pub fn add_agents(files: &mut Vec<(String, String)>, slug: &str) {
 /// # Errors
 ///
 /// A message saying what could not be written.
-pub fn ensure_agents(root: &Path, slug: &str) -> Result<Vec<String>, String> {
+pub fn ensure_agents(root: &Path) -> Result<Vec<String>, String> {
     let mut wrote = Vec::new();
     let mut any = false;
     for name in ["AGENTS.md", "CLAUDE.md"] {
@@ -740,17 +710,14 @@ pub fn ensure_agents(root: &Path, slug: &str) -> Result<Vec<String>, String> {
         if !next.ends_with('\n') {
             next.push('\n');
         }
-        next.push_str(&agents_section(slug));
+        next.push_str(&agents_section());
         std::fs::write(&path, next).map_err(|e| format!("cannot write {name}: {e}"))?;
         wrote.push(name.to_owned());
     }
     if !any {
         let path = root.join("AGENTS.md");
-        std::fs::write(
-            &path,
-            format!("# Agent instructions\n{}", agents_section(slug)),
-        )
-        .map_err(|e| format!("cannot write AGENTS.md: {e}"))?;
+        std::fs::write(&path, format!("# Agent instructions\n{}", agents_section()))
+            .map_err(|e| format!("cannot write AGENTS.md: {e}"))?;
         wrote.push("AGENTS.md".to_owned());
     }
     Ok(wrote)
@@ -929,16 +896,16 @@ mod tests {
         ];
         add_record(&mut files, Some("rust"));
         add_record(&mut files, Some("rust"));
-        add_agents(&mut files, "x");
-        add_agents(&mut files, "x");
+        add_agents(&mut files);
+        add_agents(&mut files);
         assert_eq!(files[0].1.matches("[personalities]").count(), 1);
         assert!(files[0].1.contains("\"rust-engineer\""));
         assert_eq!(files[1].1.matches(AGENTS_MARK).count(), 1);
         assert!(files[1].1.contains("iohr memory recall"));
         assert_eq!(files.len(), 2, "a shipped file is extended, none is added");
         let mut none: Vec<(String, String)> = Vec::new();
-        add_agents(&mut none, "x");
+        add_agents(&mut none);
         assert_eq!(none[0].0, "AGENTS.md");
-        assert!(none[0].1.contains("project:x"));
+        assert!(none[0].1.contains(".inorbit/memory/README.md"));
     }
 }

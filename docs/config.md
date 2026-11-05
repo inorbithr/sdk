@@ -371,6 +371,10 @@ thinking = "show"
 
 [sync]                              # iohr sync (section 4.6)
 background = false
+
+[memory]                            # iohr memory (section 4.7)
+scope = "project"
+sync = false
 ```
 
 Rules:
@@ -518,6 +522,20 @@ background loop is the next slice (RFC 0205).
 `iohr atlas init` and `iohr project init` also add a `[personalities]` table to the project's
 `inorbit.toml` (`names`, the built-ins the project uses). `iohr` writes it once and never reads
 anything else back from the pack files; the import is made from the catalogue in the binary.
+
+### 4.7 The memory table
+
+`iohr memory` keeps memories as files, so it works with no sign-in and no network. This table
+chooses where it keeps them and whether it may use your InOrbit account. `iohr` never writes it.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `scope` | `project` (`<repo root>/.inorbit/memory/`, committed with the code), `user` (`~/.inorbit/memory/notes/`) or `account` (InOrbit's service; needs `sync = true`) | `project` | every `iohr memory` command; `--scope` overrides it per command |
+| `sync` | `true` lets `iohr sync` also sync memories, `drift` ask the service, and the `account` scope work; `false` or absent keeps everything on this machine | `false` | `iohr memory`, `iohr sync` |
+
+Outside a project the `project` default falls back to `user` with a note on stderr. With
+`sync = false`, `iohr memory sync` and `iohr memory drift --remote` still run when you type them:
+running the command is the explicit choice.
 
 ## 5. Credentials
 

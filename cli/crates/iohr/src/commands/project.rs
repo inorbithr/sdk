@@ -41,9 +41,7 @@ fn publisher_of(asked: Option<&str>, account: Option<&str>) -> String {
 }
 
 pub(super) fn now() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
+    crate::front::now()
 }
 
 /// The menu's first entry: the agent builds it from a description.

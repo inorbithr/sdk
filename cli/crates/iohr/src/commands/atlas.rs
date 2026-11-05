@@ -104,8 +104,7 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
     if personalities::ensure_record(&root, lang).map_err(Error::Failed)? {
         written.push("inorbit.toml".to_owned());
     }
-    written
-        .extend(personalities::ensure_agents(&root, &atlas::slug(&name)).map_err(Error::Failed)?);
+    written.extend(personalities::ensure_agents(&root).map_err(Error::Failed)?);
     let report = import_for(g, env, &root, false).await;
     if out.json {
         Out::print_json(&serde_json::json!({
@@ -319,7 +318,33 @@ impl Lazy<'_> {
     }
 }
 
+/// `iohr sync`: the atlas documents and, when `[memory] sync = true`, the project's memories
+/// (`iohr memory sync`). Each stops on a conflict and overwrites nothing.
 pub(crate) async fn sync(g: &Global, env: &Env, args: &SyncArgs, out: Out) -> Result<(), Error> {
+    let memory = if Ctx::load(g)?.config.memory.sync_on() {
+        let report = super::memory::sync_for(g, env, None, args.dry_run, false).await?;
+        if !out.json {
+            super::memory::show_sync(Ui::detect(false), &report, out);
+        }
+        Some(report)
+    } else {
+        None
+    };
+    let docs = sync_documents(g, env, args, out, memory.as_ref()).await;
+    if let (true, true, Some(r)) = (docs.is_err(), out.json, &memory) {
+        Out::print_json(r);
+    }
+    docs?;
+    memory.map_or(Ok(()), |r| r.verdict())
+}
+
+async fn sync_documents(
+    g: &Global,
+    env: &Env,
+    args: &SyncArgs,
+    out: Out,
+    memory: Option<&super::memory::SyncReport>,
+) -> Result<(), Error> {
     let root = root_of(args.dir.clone())?;
     let config = Ctx::load(g)?.config;
     let ui = Ui::detect(out.json);
@@ -355,6 +380,7 @@ pub(crate) async fn sync(g: &Global, env: &Env, args: &SyncArgs, out: Out) -> Re
             "documents": rows,
             "local_only": local,
             "personalities": report,
+            "memory": memory,
         }));
         return Ok(());
     }

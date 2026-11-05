@@ -377,7 +377,9 @@ fn init_writes_the_personalities_the_record_the_memory_readme_and_the_agent_sect
     }
     assert!(!dir.join("atlas/personalities/python-engineer.md").exists());
     assert!(read(&dir, "inorbit.toml").contains("rust-engineer"));
-    assert!(read(&dir, "atlas/memory/README.md").contains("project:made"));
+    // Memory is local: a README and the seed memories under `.inorbit/memory/`, no network.
+    assert!(read(&dir, ".inorbit/memory/README.md").contains("iohr memory recall"));
+    assert!(!dir.join("atlas/memory").exists());
 
     // The agent file keeps the person's text and gains the memory section once.
     let a = read(&dir, "AGENTS.md");
@@ -525,122 +527,4 @@ async fn a_refused_import_never_fails_init_and_says_it_once() {
     assert!(o.status.success(), "{t}");
     assert_eq!(t.matches("stay local").count(), 1, "{t}");
     assert!(dir.join("atlas/personalities/security.md").is_file());
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines, reason = "one scenario, mock to assertions")]
-async fn memory_remembers_under_the_project_and_recall_and_list_pick_its_entries() {
-    let (h, dir) = project();
-    let server = MockServer::start().await;
-    let entry = |id: &str, source: &str| {
-        serde_json::json!({"id": id, "kind": "KIND_FACT", "text": "t", "source": source,
-            "created_at": "2026-11-05T00:00:00Z", "score": 0.5})
-    };
-    let all = vec![
-        entry("a", "project:made"),
-        entry("b", "project:other"),
-        entry("c", "cli"),
-    ];
-    Mock::given(method("POST"))
-        .and(path("/v1/memory/entries"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"entry": entry("m1", "project:made")})),
-        )
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/memory/recall"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"entries": all})))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/v1/memory/entries"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"entries": all, "total": 3, "max_entries": 100})),
-        )
-        .mount(&server)
-        .await;
-    Mock::given(method("DELETE"))
-        .and(path("/v1/memory/entries/a"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
-        .mount(&server)
-        .await;
-    let base = server.uri();
-
-    let o = iohr(
-        h.path(),
-        &dir,
-        Some(&base),
-        &["memory", "remember", "we use sqlx"],
-    );
-    assert!(o.status.success(), "{}", text(&o));
-    let sent = server.received_requests().await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(
-        &sent
-            .iter()
-            .find(|r| r.method.as_str() == "POST")
-            .unwrap()
-            .body,
-    )
-    .unwrap();
-    assert_eq!(body["source"], "project:made");
-    assert_eq!(body["text"], "we use sqlx");
-    assert!(
-        sent.iter().all(|r| !r.url.to_string().contains("sqlx")),
-        "text never in a URL"
-    );
-
-    // Inside the project: only its entries. `--all` and `--source` change that.
-    for (args, want) in [
-        (vec!["memory", "recall", "db", "--json"], vec!["a"]),
-        (vec!["memory", "list", "--json"], vec!["a"]),
-        (
-            vec!["memory", "list", "--all", "--json"],
-            vec!["a", "b", "c"],
-        ),
-        (
-            vec!["memory", "list", "--source", "cli", "--json"],
-            vec!["c"],
-        ),
-    ] {
-        let o = iohr(h.path(), &dir, Some(&base), &args);
-        assert!(o.status.success(), "{}", text(&o));
-        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-        let ids: Vec<&str> = v["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|e| e["id"].as_str().unwrap())
-            .collect();
-        assert_eq!(ids, want, "{args:?}");
-    }
-    let o = iohr(h.path(), &dir, Some(&base), &["memory", "forget", "a"]);
-    assert!(o.status.success(), "{}", text(&o));
-
-    // Outside a project the default source is the CLI's.
-    let o = iohr(
-        h.path(),
-        h.path(),
-        Some(&base),
-        &["memory", "remember", "x"],
-    );
-    assert!(o.status.success(), "{}", text(&o));
-    let sent = server.received_requests().await.unwrap();
-    let last: serde_json::Value = serde_json::from_slice(
-        &sent
-            .iter()
-            .rfind(|r| r.method.as_str() == "POST")
-            .unwrap()
-            .body,
-    )
-    .unwrap();
-    assert_eq!(last["source"], "cli");
-
-    // Signed out: one line, nothing stored locally.
-    let o = iohr(h.path(), &dir, None, &["memory", "remember", "x"]);
-    let t = text(&o);
-    assert!(!o.status.success(), "{t}");
-    assert!(t.contains("nothing is kept on this machine"), "{t}");
 }

@@ -48,6 +48,9 @@ pub struct Config {
     /// `iohr sync` settings (`[sync]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "SyncConfig::is_empty")]
     pub sync: SyncConfig,
+    /// `iohr memory` settings (`[memory]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "MemoryConfig::is_empty")]
+    pub memory: MemoryConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -213,6 +216,36 @@ impl SyncConfig {
     #[must_use]
     pub fn background_on(&self) -> bool {
         self.background == Some(true)
+    }
+}
+
+/// The `[memory]` table: where `iohr memory` keeps entries by default, and whether it may
+/// talk to the account's memory service. Nothing leaves the machine unless `sync = true` or
+/// the person runs `iohr memory sync` (RFC 0205, ADR 0216).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct MemoryConfig {
+    /// The default scope: `project` (the repository's `.inorbit/memory/`, committed), `user`
+    /// (this person's notes on this machine) or `account` (the memory service, needs sync).
+    /// `project` when unset; `--scope` overrides it per command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Sync with the account's memory service. Off when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<bool>,
+}
+
+impl MemoryConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.scope.is_none() && self.sync.is_none()
+    }
+
+    /// Whether sync is on (`sync = true`).
+    #[must_use]
+    pub fn sync_on(&self) -> bool {
+        self.sync == Some(true)
     }
 }
 
