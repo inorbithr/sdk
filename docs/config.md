@@ -405,6 +405,7 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `kinds` | `coordinate`, `build` | both | `register` and `run`: the turn classes the runner takes |
 | `always_on` | true or false | false | `register` |
 | `name` | text | the host name | `register`, and `run` to find the runner |
+| `id` | a runner id (`rnr_...`) | not set | `run` and `gate-report`: the runner they drive when this machine's key matches more than one; `register` refreshes that one. `--runner` and `IOHR_RUNNER_ID` win over it |
 | `kube_context` | a kubeconfig context name | not set | `run`: the cluster approved host actions reach, passed to every `kubectl` call as `--context` |
 | `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
 | `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
@@ -414,6 +415,13 @@ profile's keys win), and its flags win over both. The SDK does not read them.
 | `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
 
 With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh`, `mise`, `systemctl`, `git`, `df` or `helm` on its `PATH`, no `~/.inorbit/roll/remote-roll.sh` for `roll.task`, no `core_checkout` for `build.sweep-targets`, `agent.install-checks` or `disk.prune` with the target `host`, no cluster for `helm.runner-scale`, a system that is not Linux for `disk.prune`, no `~/.config/iohr-agent/checks.toml` or an agent unit outside `user_units` for `agent.install-checks`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
+
+One machine key holds one runner. `register` finds the runner this machine's key already
+holds, whatever name it was registered under, and says "already registered" rather than
+making a second one. When the key matches more than one runner (an older `iohr` could
+register twice), `run` and `gate-report` refuse to guess and list the ids: pin one with `id` in
+the profile's runner table (or `--runner <id>`, or `IOHR_RUNNER_ID`), then
+revoke the others. `register` prints the `id = "rnr_..."` line to add.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On
