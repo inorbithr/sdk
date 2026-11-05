@@ -463,8 +463,10 @@ already have is kept and called for every other line. `INORBIT_ASK=0` turns it o
 session. Inside the InOrbit app (`INORBIT_TERM`) the hook asks the app to draw the answer
 (an OSC `7727;ask` escape) instead of printing it.
 
-What goes to your provider: the question, the folder's path, the last command and its exit
-status, and, when a caller passes `--output-file`, the last 8 KiB (200 lines) of that file;
+What goes to your provider: the question, the folder's path, the names at the top of that folder
+(at most 60 names and 2 KiB; dotfiles left out except `.inorbit`, `.github`, `.gitignore` and
+`.claude`; names the folder's own `.gitignore` hides left out; never file contents), the last
+command and its exit status, and, when a caller passes `--output-file`, the last 8 KiB (200 lines) of that file;
 the whole message is capped at 16 KiB. A plain zsh hook cannot read a command's output, so
 it sends no output; a program that has it can call `iohr ask --output-file`. Io runs on
 Claude Code only: it signs in with your own `claude` login, never an API key, and `iohr`

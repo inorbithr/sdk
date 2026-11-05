@@ -487,6 +487,10 @@ the answer.
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
 | `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
 
+The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes it: a terminal
+resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
+do not close it or pick an action. Only a real terminal error closes it, with one line on stderr.
+
 The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
 read, that nothing was run, that an AI model under your own subscription got the folder, and
 to check the answer) on the first card ever, whenever that text changes, and about once a
