@@ -1,4 +1,4 @@
-//! `iohr project init`, its `create` alias and `templates`: the binary with a private HOME
+//! `iohr project init`, its `create` alias and `template list|show|path`: the binary with a private HOME
 //! and config folder, so nothing of the machine running the test is read or written.
 
 #![allow(
@@ -10,8 +10,14 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 fn iohr(home: &Path, args: &[&str]) -> Output {
+    iohr_in(home, home, args)
+}
+
+/// The same, run from `cwd`.
+fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
     let path = std::env::var_os("PATH").unwrap_or_default();
     Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .current_dir(cwd)
         .args(args)
         .env_clear()
         .env("PATH", path)
@@ -86,8 +92,9 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
         t.lines()
             .find(|l| l.starts_with("demo"))
             .unwrap()
-            .contains("(default)")
+            .contains('*')
     );
+    assert!(!t.contains("(default)"), "the default is the * column: {t}");
 
     let out = iohr(h.path(), &["project", "templates", "--json"]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -588,22 +595,6 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
     assert!(!d.exists() && !marker.exists() && !h.path().join(".inorbit/projects").exists());
 }
 
-/// Runs `iohr` from `cwd`, the way a person at a shell does.
-fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    Command::new(env!("CARGO_BIN_EXE_iohr"))
-        .args(args)
-        .current_dir(cwd)
-        .env_clear()
-        .env("PATH", path)
-        .env("HOME", home)
-        .env("USERPROFILE", home)
-        .env("IOHR_CONFIG_DIR", home.join("config"))
-        .stdin(Stdio::null())
-        .output()
-        .unwrap()
-}
-
 fn json(o: &Output) -> serde_json::Value {
     serde_json::from_slice(&o.stdout).unwrap_or_else(|e| panic!("{e}: {}", text(o)))
 }
@@ -853,4 +844,226 @@ fn every_live_language_scaffolds_and_its_smoke_test_passes_when_its_toolchain_is
         );
         assert!(cwd.path().join(&name).join("extension.toml").is_file());
     }
+}
+
+// ---- template list, show, path: one noun --------------------------------------------------------
+
+fn stdout(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn template_list_and_the_old_templates_name_print_the_same_bytes() {
+    let h = tempfile::tempdir().unwrap();
+    user_template(h.path());
+    for extra in [&[][..], &["--json"][..]] {
+        let mut new = vec!["project", "template", "list"];
+        let mut old = vec!["project", "templates"];
+        new.extend(extra);
+        old.extend(extra);
+        let (a, b) = (iohr(h.path(), &new), iohr(h.path(), &old));
+        assert!(a.status.success() && b.status.success(), "{}", text(&a));
+        assert_eq!(a.stdout, b.stdout, "{new:?} against {old:?}");
+        assert!(a.stdout.len() > 10, "{new:?} printed nothing");
+    }
+}
+
+#[test]
+fn template_list_columns_and_a_piped_run_has_no_footer_or_colour() {
+    let h = tempfile::tempdir().unwrap();
+    user_template(h.path());
+    let t = stdout(&iohr(h.path(), &["project", "template", "list"]));
+    let head: Vec<&str> = t.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(
+        head,
+        ["NAME", "STATUS", "ORIGIN", "DEFAULT", "DESCRIPTION"],
+        "{t}"
+    );
+    let demo = t.lines().find(|l| l.starts_with("demo")).unwrap();
+    assert!(demo.contains(" * "), "the default is marked: {demo}");
+    assert!(!t.contains("(default)"), "{t}");
+    assert!(t.contains("user: ~/.inorbit/templates/probe"), "{t}");
+    assert!(!t.contains("Next:"), "a pipe gets data only: {t}");
+    assert!(!t.contains('\u{1b}'), "no colour in a pipe: {t}");
+    assert!(!t.contains('\u{25cf}'), "the plain status is the word: {t}");
+}
+
+#[test]
+fn show_a_built_in_says_where_it_is_from_what_it_writes_and_has_no_folder() {
+    let h = tempfile::tempdir().unwrap();
+    let o = iohr(h.path(), &["project", "template", "show", "demo"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let t = stdout(&o);
+    for want in [
+        "demo",
+        "Origin",
+        "built-in",
+        "Questions",
+        "Files",
+        "extension.toml",
+        "panel/index.html",
+        "Languages",
+    ] {
+        assert!(t.contains(want), "{want}: {t}");
+    }
+    assert!(!t.contains("Next:"), "{t}");
+
+    let p = iohr(h.path(), &["project", "template", "path", "demo"]);
+    assert_eq!(p.status.code(), Some(1), "{}", text(&p));
+    assert_eq!(stdout(&p), "", "nothing on stdout");
+    assert!(
+        text(&p).contains("template new NAME --extends demo"),
+        "{}",
+        text(&p)
+    );
+    let missing = iohr(h.path(), &["project", "template", "show", "nope"]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        text(&missing).contains("template list"),
+        "{}",
+        text(&missing)
+    );
+}
+
+#[test]
+fn show_and_path_for_a_user_template() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = user_template(h.path());
+    let o = iohr(h.path(), &["project", "template", "show", "probe"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let t = stdout(&o);
+    for want in [
+        "Extends",
+        "demo",
+        "kind",
+        "choice (alpha, beta)",
+        "\"alpha\"",
+        "kind == beta",
+        "notes-@@KIND@@.md",
+        "Agent step",
+        "Make @@NAME@@ do @@KIND@@.",
+    ] {
+        assert!(t.contains(want), "{want}: {t}");
+    }
+    assert!(t.contains(dir.to_str().unwrap()), "{t}");
+
+    let p = iohr(h.path(), &["project", "template", "path", "probe"]);
+    assert!(p.status.success(), "{}", text(&p));
+    assert_eq!(
+        stdout(&p),
+        format!("{}\n", dir.display()),
+        "only the folder"
+    );
+    let by_folder = iohr(
+        h.path(),
+        &["project", "template", "path", dir.to_str().unwrap()],
+    );
+    assert_eq!(stdout(&by_folder), stdout(&p));
+}
+
+#[test]
+fn show_json_carries_everything() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = user_template(home.path());
+    let shown = iohr(
+        home.path(),
+        &["project", "template", "show", "probe", "--json"],
+    );
+    assert!(shown.status.success(), "{}", text(&shown));
+    let got: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
+    assert_eq!(got["id"], "probe");
+    assert_eq!(got["status"], "live");
+    assert_eq!(got["origin"]["kind"], "user");
+    assert_eq!(got["path"], dir.to_str().unwrap());
+    assert_eq!(got["extends"], "demo");
+    assert_eq!(got["default"], false);
+    assert_eq!(got["steps"], serde_json::json!(["git", "agent"]));
+    assert_eq!(got["agent"]["step"], true);
+    assert_eq!(
+        got["agent"]["describe_prompt"],
+        "Make @@NAME@@ do @@KIND@@."
+    );
+    let q = got["questions"].as_array().unwrap();
+    assert_eq!(q[0]["key"], "kind");
+    assert_eq!(q[0]["type"], "choice");
+    assert_eq!(q[0]["choices"], serde_json::json!(["alpha", "beta"]));
+    assert_eq!(q[0]["default"], "alpha");
+    assert_eq!(q[1]["when"], "kind == beta");
+    assert!(
+        got["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "notes-@@KIND@@.md")
+    );
+
+    let built_in = iohr(
+        home.path(),
+        &["project", "template", "show", "demo", "--json"],
+    );
+    let built_in: serde_json::Value = serde_json::from_slice(&built_in.stdout).unwrap();
+    assert_eq!(built_in["origin"]["kind"], "built-in");
+    assert!(built_in["path"].is_null());
+    assert_eq!(built_in["default"], true);
+}
+
+#[test]
+fn lint_with_no_path_checks_this_folder() {
+    let h = tempfile::tempdir().unwrap();
+    let made = iohr(h.path(), &["project", "template", "new", "here"]);
+    assert!(made.status.success(), "{}", text(&made));
+    let dir = h.path().join(".inorbit/templates/here");
+    let o = iohr_in(h.path(), &dir, &["project", "template", "lint"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let o = iohr_in(h.path(), h.path(), &["project", "template", "lint"]);
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "no template.toml here: {}",
+        text(&o)
+    );
+}
+
+#[test]
+fn show_lists_the_languages_a_template_offers_in_text_and_in_json() {
+    let h = tempfile::tempdir().unwrap();
+    let t = stdout(&iohr(h.path(), &["project", "template", "show", "demo"]));
+    assert!(t.contains("\nLanguages\n"), "{t}");
+    let go = t
+        .lines()
+        .find(|l| l.trim_start().starts_with("go "))
+        .unwrap();
+    assert!(go.contains("live") && go.contains("Go 1.22"), "{go}");
+    let py = t
+        .lines()
+        .find(|l| l.trim_start().starts_with("python "))
+        .unwrap();
+    assert!(
+        py.contains("default"),
+        "the default language is marked: {py}"
+    );
+    assert!(!t.contains('\u{1b}'), "no colour in a pipe: {t}");
+
+    let j = iohr(h.path(), &["project", "template", "show", "demo", "--json"]);
+    let got = json(&j);
+    let langs = got["languages"].as_array().unwrap();
+    let ids: Vec<&str> = langs.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["python", "typescript", "go", "rust"]);
+    assert_eq!(langs[0]["default"], true);
+    assert_eq!(langs[2]["needs"], serde_json::json!(["go"]));
+    assert!(langs[0]["ready"].is_boolean());
+    let files: Vec<&str> = langs[0]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f.as_str().unwrap())
+        .collect();
+    assert!(files.contains(&"src/@@MODULE@@/__main__.py"), "{files:?}");
+
+    // A template without variants has no Languages section.
+    let c = stdout(&iohr(
+        h.path(),
+        &["project", "template", "show", "macos-app"],
+    ));
+    assert!(!c.contains("Languages"), "{c}");
 }

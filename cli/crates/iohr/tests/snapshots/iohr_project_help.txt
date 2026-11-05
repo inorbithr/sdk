@@ -1,0 +1,56 @@
+Create projects and manage project templates.
+
+A project you build yourself: one command sets up everything it needs, from sign-in to a smoke test,
+and reports what you now have.
+
+Usage: iohr project [OPTIONS] <COMMAND>
+
+Commands:
+  init      Create a project from a template [alias: create]
+  template  List, show, make and check project templates
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Global options:
+      --profile <PROFILE>
+          The profile to use (default: the one `iohr profile use` chose)
+          
+          [env: IOHR_PROFILE=]
+
+      --json
+          Print JSON instead of tables
+
+  -v, --verbose
+          Describe each call on stderr: method, path, status, time, request id
+
+      --env <NAME>
+          The environment to call: `production` or `local`.
+          
+          Sets the API and sign-in addresses; `--base-url` and `IOHR_ISSUER` still win over it. The
+          default is `production`.
+          
+          [env: IOHR_ENV=]
+
+      --base-url <BASE_URL>
+          The API's address (default: the environment's)
+          
+          [env: IOHR_BASE_URL=]
+
+      --sign-in <WHO>
+          Sign in as someone other than a person (`iohr runner` only).
+          
+          `io` is the `OAuth2` client `iohr-io` with the client credentials grant, so jobs Io files
+          run on runners Io owns. `iohr runner` only; the secret is read from the file
+          `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on a Mac, from the keychain item the Mac
+          bridge uses, never from an argument.
+
+          Possible values:
+          - io: Io, the `OAuth2` client `iohr-io` (client credentials)
+          
+          [env: IOHR_SIGN_IN=]
