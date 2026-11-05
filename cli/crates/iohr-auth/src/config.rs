@@ -42,6 +42,9 @@ pub struct Config {
     /// `iohr project init` defaults (`[project]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "ProjectConfig::is_empty")]
     pub project: ProjectConfig,
+    /// `iohr ask` defaults (`[ask]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "AskConfig::is_empty")]
+    pub ask: AskConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -138,6 +141,28 @@ impl ProjectConfig {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.template.is_none()
+    }
+}
+
+/// The `[ask]` table: how `iohr ask` answers. `--via` and `--agent` win over it; `local` and
+/// `claude` apply when a key is unset. Checked where it is used.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AskConfig {
+    /// Where the answer comes from: `local` (the developer's own agent; the default). `io` is
+    /// reserved and not built yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+    /// With `via = "local"`, which agent to start: `claude` (the default) or `codex`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+}
+
+impl AskConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.via.is_none() && self.agent.is_none()
     }
 }
 
