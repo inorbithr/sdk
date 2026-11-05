@@ -158,8 +158,15 @@ mod tests {
 
     const BASE: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Pat.Example@example.test","orgId":"org-1111","orgName":"Example Org","subscriptionType":"max","loginExpiresAt":"2030-01-01T00:00:00Z","configDirectory":"/home/pat/.claude","projectsDirectory":"/home/pat/.claude/projects","analyticsDisabled":false}"#;
 
+    // One salt per test run, drawn at runtime like the account's real one.
     fn hash_of(text: &str) -> Option<String> {
-        canonical_identity_line(text).map(|l| identity_sha256("salt", &l))
+        static SALT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        let salt = SALT.get_or_init(|| {
+            let mut b = [0_u8; 16];
+            getrandom::fill(&mut b).unwrap();
+            super::super::claude::hex(&b)
+        });
+        canonical_identity_line(text).map(|l| identity_sha256(salt, &l))
     }
 
     #[test]
