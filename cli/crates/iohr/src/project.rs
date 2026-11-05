@@ -1038,6 +1038,10 @@ mod tests {
         let tpl =
             template::load(&Spec::Id("demo".into()), Path::new("/no-such-iohr-root")).unwrap();
         for v in tpl.live_variants() {
+            if cfg!(windows) && v.id == "rust" {
+                eprintln!("rust: the demo uses a unix socket: not run on Windows");
+                continue;
+            }
             let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
             if !missing.is_empty() {
                 eprintln!("{}: {missing:?} not on this PATH: not run", v.id);

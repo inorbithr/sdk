@@ -745,6 +745,7 @@ async fn verbose_output_never_shows_the_token() {
             .cmd(&args)
             .env("IOHR_TOKEN", &t)
             .env("HOME", &home)
+            .env("USERPROFILE", &home)
             .env("IOHR_EXT_ONCE", "1")
             .stdin(Stdio::null())
             .output()
