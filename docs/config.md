@@ -369,6 +369,9 @@ model = "haiku"
 allow_edits = false
 thinking = "show"
 hints = "sometimes"
+
+[sync]                              # iohr sync (section 4.6)
+background = false
 ```
 
 Rules:
@@ -515,6 +518,20 @@ holds a fingerprint of the disclosure text, when it was last shown and a counter
 question or an answer; delete it and the next card is the first again. A pipe, `--json`,
 `NO_COLOR` or a terminal that cannot draw the card print the one-line label instead, which
 carries the disclosure itself.
+
+### 4.6 The sync table
+
+`iohr sync` sends the project's `atlas/` documents (PRDs, RFCs, ADRs and studies) to its
+Decisions space. Nothing leaves the machine unless you run it, or turn the background trigger
+on here. `iohr` never writes this table.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `background` | `true` lets a background process send the documents; `false` or absent means only `iohr sync` does | `false` | `iohr sync` |
+
+Today the key is read and nothing else: `iohr` has no background process to hang the trigger
+on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
+background loop is the next slice (RFC 0205).
 
 ## 5. Credentials
 

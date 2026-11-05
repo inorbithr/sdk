@@ -2,6 +2,7 @@
 
 mod accounts;
 mod ask;
+mod atlas;
 mod auth;
 mod browser_ext;
 mod call;
@@ -92,6 +93,8 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ask(args) => ask::run(g, args, out).await,
         Command::Shell(cmd) => shell::run(&cmd),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
+        Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
+        Command::Sync(args) => atlas::sync(g, &env, &args, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,

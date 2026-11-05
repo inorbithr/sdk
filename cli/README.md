@@ -555,6 +555,30 @@ Every template writes two committed files, neither holding a secret:
   command `/inorbit:link <space>`; the CLI has no link command of its own. `.inorbit/` is never
   ignored, and `git init` commits it.
 
+### The atlas, and `iohr sync`
+
+`iohr project init` also writes `atlas/` in the project root, a plain folder you can read and
+edit: `prd/`, `rfc/`, `adr/` and `studies/` with one starter each (numbered 0001, filled from
+the project name, template, language and `--describe` text, and labelled stubs), `canvas/` with
+a starter canvas (`iohr.canvas` version 3, the format InOrbit Desktop reads), `models/` for 3D
+files (glTF 2.0; a README, no fake model) and an `atlas/README.md`. A second run never
+overwrites a file you have. `iohr atlas init` adds the folder to a project made without it.
+
+```sh
+iohr atlas new rfc "Cache the catalogue"      # atlas/rfc/0002-cache-the-catalogue.md
+iohr sync --dry-run                            # what would be created or saved; sends nothing
+iohr sync                                      # send it to the space in .inorbit/space
+```
+
+A document is Markdown with front matter (`title`, `status`, `public`, `summary` and the rest)
+that maps one to one onto the Decisions document. `iohr sync` uses the SDK's Decisions client:
+it creates what is new, saves a new version of what changed on the version it read, and on a
+conflict (the document changed in Decisions) re-reads, says so and overwrites nothing. It writes
+`remote_id`, `remote_version`, `remote_number` and `remote_sha` back into the front matter; those
+keys stay local. The canvas and the 3D folder are never sent, and the output says so. No document
+text reaches a log. The `[sync]` `background` key in `config.toml` is read (default `false`); no
+background loop exists yet, so only `iohr sync` sends anything.
+
 ### Try it without changing anything
 
 ```sh
