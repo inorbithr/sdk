@@ -68,8 +68,37 @@ fn is_exe(p: &Path) -> bool {
     p.is_file() || p.with_extension("exe").is_file() || p.with_extension("cmd").is_file()
 }
 
-/// SHA-256 (lowercase hex) over the account's salt, a newline and the identity line as
-/// the binary printed it (the salt comes with `CreateRunnerChallenge`).
+/// The canonical identity line of a subscription sign-in, from `claude auth status`:
+///
+/// `authMethod=claude.ai apiProvider=firstParty orgId=<orgId> email=<email>`
+///
+/// with `orgId` and `email` trimmed and lowercased. Only the fields that name the seat go
+/// in: the sign-in method and provider (always the subscription's, as nothing else is
+/// accepted), the organisation and the account's email. Fields that change on a token
+/// refresh or with the host (`loginExpiresAt`, `configDirectory`, `projectsDirectory`),
+/// or that the person may change without changing seat (`orgName`, `subscriptionType`),
+/// stay out, so one seat gives one line on every machine and after every refresh.
+///
+/// `None` when the answer is not plainly a subscription sign-in naming both an
+/// organisation and an email: such an answer names no seat and is never hashed.
+pub(crate) fn identity_line(text: &str) -> Option<String> {
+    if parse_auth_status(text) != AuthState::Subscription {
+        return None;
+    }
+    let v = serde_json::from_str::<Value>(text.trim()).ok()?;
+    let field = |k: &str| {
+        let s = v.get(k)?.as_str()?.trim().to_lowercase();
+        (!s.is_empty() && !s.contains(char::is_whitespace)).then_some(s)
+    };
+    let org = field("orgId")?;
+    let email = field("email").filter(|e| e.contains('@'))?;
+    Some(format!(
+        "authMethod=claude.ai apiProvider=firstParty orgId={org} email={email}"
+    ))
+}
+
+/// SHA-256 (lowercase hex) over the account's salt, a newline and the identity line
+/// ([`identity_line`]; the salt comes with `CreateRunnerChallenge`).
 pub(crate) fn identity_sha256(salt: &str, line: &str) -> String {
     super::claude::hex(&Sha256::digest(
         format!("{salt}\n{}", line.trim()).as_bytes(),
@@ -134,6 +163,150 @@ mod tests {
         let want = super::super::claude::hex(&Sha256::digest(format!("{salt}\nline").as_bytes()));
         assert_eq!(h, want);
         assert_ne!(h, identity_sha256(&other, "line"));
+    }
+
+    /// A subscription sign-in as `claude auth status` prints it, with every field.
+    fn status(email: &str, org: &str, expires: &str, config: &str, projects: &str) -> String {
+        serde_json::json!({
+            "analyticsDisabled": false,
+            "apiProvider": "firstParty",
+            "authMethod": "claude.ai",
+            "configDirectory": config,
+            "email": email,
+            "loggedIn": true,
+            "loginExpiresAt": expires,
+            "orgId": org,
+            "orgName": "Example",
+            "projectsDirectory": projects,
+            "subscriptionType": "max",
+        })
+        .to_string()
+    }
+
+    const ORG: &str = "00000000-0000-4000-8000-00000000000a";
+
+    #[test]
+    fn identity_line_is_the_seat_alone() {
+        let line = identity_line(&status(
+            "seat@example.com",
+            ORG,
+            "2026-11-05T10:00:00Z",
+            "/home/a/.claude",
+            "/home/a/.claude/projects",
+        ))
+        .unwrap();
+        assert_eq!(
+            line,
+            format!(
+                "authMethod=claude.ai apiProvider=firstParty orgId={ORG} email=seat@example.com"
+            )
+        );
+    }
+
+    #[test]
+    fn identity_hash_is_stable_across_refresh_and_hosts() {
+        let salt = "5a17";
+        let hash = |text: &str| identity_sha256(salt, &identity_line(text).unwrap());
+        let base = hash(&status(
+            "seat@example.com",
+            ORG,
+            "2026-11-05T10:00:00Z",
+            "/home/a/.claude",
+            "/home/a/.claude/projects",
+        ));
+        // A token refresh, another host, another config directory, the email's case.
+        for other in [
+            status(
+                "seat@example.com",
+                ORG,
+                "2026-11-06T10:00:00Z",
+                "/home/a/.claude",
+                "/home/a/.claude/projects",
+            ),
+            status(
+                "seat@example.com",
+                ORG,
+                "2026-11-05T10:00:00Z",
+                "/Users/b/.config/claude",
+                "/home/a/.claude/projects",
+            ),
+            status(
+                "seat@example.com",
+                ORG,
+                "2026-11-05T10:00:00Z",
+                "/home/a/.claude",
+                "/srv/projects",
+            ),
+            status(
+                "Seat@Example.COM",
+                ORG,
+                "2026-11-05T10:00:00Z",
+                "/home/a/.claude",
+                "/home/a/.claude/projects",
+            ),
+            status(
+                " seat@example.com ",
+                &ORG.to_uppercase(),
+                "2026-11-07T00:00:00Z",
+                "/x",
+                "/y",
+            ),
+        ] {
+            assert_eq!(hash(&other), base, "{other}");
+        }
+        // Another seat: another email, or the same email in another organisation.
+        for other in [
+            status(
+                "other@example.com",
+                ORG,
+                "2026-11-05T10:00:00Z",
+                "/home/a/.claude",
+                "/home/a/.claude/projects",
+            ),
+            status(
+                "seat@example.com",
+                "00000000-0000-4000-8000-00000000000b",
+                "2026-11-05T10:00:00Z",
+                "/home/a/.claude",
+                "/home/a/.claude/projects",
+            ),
+        ] {
+            assert_ne!(hash(&other), base, "{other}");
+        }
+    }
+
+    #[test]
+    fn identity_line_fails_closed() {
+        let ok = status("seat@example.com", ORG, "t", "/c", "/p");
+        assert!(identity_line(&ok).is_some());
+        let without = |k: &str| {
+            let mut v: Value = serde_json::from_str(&ok).unwrap();
+            v.as_object_mut().unwrap().remove(k);
+            v.to_string()
+        };
+        let with = |k: &str, x: Value| {
+            let mut v: Value = serde_json::from_str(&ok).unwrap();
+            v[k] = x;
+            v.to_string()
+        };
+        for text in [
+            String::new(),
+            "Logged in as seat@example.com".to_owned(),
+            r#"{"loggedIn":false}"#.to_owned(),
+            without("email"),
+            without("orgId"),
+            with("email", "".into()),
+            with("email", "not-an-email".into()),
+            with("email", "a b@example.com".into()),
+            with("email", Value::Null),
+            with("orgId", " ".into()),
+            with("orgId", 7.into()),
+            with("authMethod", "api_key".into()),
+            with("apiProvider", "bedrock".into()),
+            with("loggedIn", false.into()),
+        ] {
+            assert_eq!(identity_line(&text), None, "{text}");
+        }
     }
 
     #[test]
