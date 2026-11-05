@@ -416,6 +416,14 @@ names your account's Planner plan and an `ask` example you can file with
 smoke test that runs the project once and reads its heartbeat back, with no token channel, so
 its token ask is refused: the proof the channel is its only credential.
 
+At a terminal, `init` is guided: it asks for the name when it is missing (the folder's name is
+the default), offers the templates as a menu (templates that are coming are listed dimmed and
+cannot be chosen), confirms the folder, shows each step as a spinner that ends ok, warn or
+fail, folds what waits on an API into one line (`--verbose` lists it), and ends with the next
+commands. `--template` and `--yes` skip the menu and the confirmation. Without a terminal, or
+with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain `done:` and
+`not yet:` lines are printed as before, on stderr, and stdout stays data only.
+
 ```sh
 iohr project init demo
 iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
