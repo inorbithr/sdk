@@ -58,7 +58,8 @@ impl Where {
     /// Reads the environment: the current folder, its git work tree, the home folder.
     #[must_use]
     pub fn here(root: Option<String>) -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd =
+            crate::paths::real(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let git_top = git_top(&cwd);
         Self {
             cwd,
@@ -83,7 +84,8 @@ pub fn git_top(dir: &Path) -> Option<PathBuf> {
         return None;
     }
     let s = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    (!s.is_empty()).then(|| PathBuf::from(s))
+    // Git answers with `/` and the long folder names; the cwd may hold the short ones.
+    (!s.is_empty()).then(|| crate::paths::real(Path::new(&s)))
 }
 
 fn same(a: &Path, b: &Path) -> bool {
@@ -112,7 +114,7 @@ pub fn show(cwd: &Path, p: &Path, home: Option<&Path>) -> String {
     // Nothing in common beyond the root is no relation worth a `../../..`.
     if common > 1 && ups <= 3 {
         let rest: PathBuf = t[common..].iter().collect();
-        let rest = rest.to_string_lossy();
+        let rest = crate::paths::slashed(&rest);
         return match (ups, rest.is_empty()) {
             (0, true) => ".".to_owned(),
             (0, false) => format!("./{rest}"),
@@ -122,7 +124,7 @@ pub fn show(cwd: &Path, p: &Path, home: Option<&Path>) -> String {
     }
     match home.and_then(|h| p.strip_prefix(h).ok()) {
         Some(r) if r.as_os_str().is_empty() => "~".to_owned(),
-        Some(r) => format!("~/{}", r.to_string_lossy()),
+        Some(r) => format!("~/{}", crate::paths::slashed(r)),
         None => p.to_string_lossy().into_owned(),
     }
 }
@@ -377,7 +379,7 @@ mod tests {
 
     fn at(cwd: &Path) -> Where {
         Where {
-            cwd: cwd.canonicalize().unwrap(),
+            cwd: crate::paths::real(cwd),
             git_top: None,
             root: None,
             home: Some(PathBuf::from("/nonexistent-home")),
@@ -486,7 +488,7 @@ mod tests {
         let mut w = at(&repo);
         w.git_top = git_top(&w.cwd);
         assert_eq!(
-            w.git_top.as_deref().map(|p| p.canonicalize().unwrap()),
+            w.git_top.as_deref().map(crate::paths::real),
             Some(w.cwd.clone())
         );
         let list = proposals(&w, "my-shop");

@@ -29,6 +29,7 @@ mod hints;
 mod io_signin;
 mod lock;
 mod output;
+mod paths;
 mod prompt;
 mod runner;
 mod ui;
