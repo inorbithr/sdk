@@ -21,7 +21,7 @@ pub(crate) const HINTS: [&str; 4] = [
     "`??` follows up.",
     "`iohr ask --help` for flags.",
     "`[ask] model` in config picks the model.",
-    "`INORBIT_ASK=0` turns `?` off.",
+    "Set `INORBIT_ASK=0` to turn `?` off.",
 ];
 
 /// `[ask] hints`.

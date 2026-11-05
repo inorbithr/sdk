@@ -15,8 +15,6 @@ use std::time::Duration;
 
 use console::{Style, measure_text_width};
 
-/// The widest a card is drawn, however wide the terminal.
-pub(crate) const WIDTH_MAX: usize = 100;
 /// The narrowest: below this the terminal wraps the card anyway.
 const WIDTH_MIN: usize = 40;
 /// The rail before each body line.
@@ -113,13 +111,36 @@ pub(crate) struct Card<'a> {
     pub(crate) body: Body<'a>,
 }
 
-/// The width to draw at for a terminal `cols` wide (unknown: 80): one column less than the
-/// terminal, so no line ever fills the last column (a terminal that wraps eagerly, or one
+/// The width to draw at for a terminal `cols` wide (unknown: 80): the whole terminal less
+/// one column, so no line ever fills the last column (a terminal that wraps eagerly, or one
 /// that counts a glyph wider than we do, would break it and drop the rail).
 #[must_use]
 pub(crate) fn width_for(cols: Option<usize>) -> usize {
-    cols.map_or(80, |c| c.saturating_sub(1))
-        .clamp(WIDTH_MIN, WIDTH_MAX)
+    cols.map_or(80, |c| c.saturating_sub(1)).max(WIDTH_MIN)
+}
+
+/// The rows the card and the prompt take around the answer: the typed line, the header, the
+/// earlier question, the spacers, the action row, the footer, the hint and the next prompt.
+const CHROME_ROWS: usize = 9;
+/// The fewest lines an answer is given, however short the terminal (unknown: this).
+pub(crate) const LINES_MIN: usize = 8;
+
+/// The lines an answer may take in a terminal `rows` high: what is left after the card's
+/// own rows, so a full answer fits on one screen.
+#[must_use]
+pub(crate) fn lines_for(rows: Option<usize>) -> usize {
+    rows.map_or(LINES_MIN, |r| r.saturating_sub(CHROME_ROWS))
+        .max(LINES_MIN)
+}
+
+/// The answer's line budget for stderr's terminal, as [`lines_for`] counts it.
+#[must_use]
+pub(crate) fn stderr_lines() -> usize {
+    lines_for(
+        console::Term::stderr()
+            .size_checked()
+            .map(|(r, _)| usize::from(r)),
+    )
 }
 
 /// The width of stderr's terminal, as [`width_for`] draws it.
@@ -852,11 +873,14 @@ mod tests {
     }
 
     #[test]
-    fn the_width_follows_the_terminal_within_bounds() {
+    fn the_card_follows_the_terminal_in_width_and_height() {
         assert_eq!(width_for(None), 80);
-        assert_eq!(width_for(Some(300)), WIDTH_MAX);
+        assert_eq!(width_for(Some(300)), 299);
         assert_eq!(width_for(Some(10)), WIDTH_MIN);
         assert_eq!(width_for(Some(72)), 71);
+        assert_eq!(lines_for(None), LINES_MIN);
+        assert_eq!(lines_for(Some(12)), LINES_MIN);
+        assert_eq!(lines_for(Some(50)), 41);
     }
 
     /// A line as wide as the terminal leaves the cursor in the pending-wrap state, and a
