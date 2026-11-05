@@ -175,7 +175,10 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "decisions",
         ],
     ),
-    ("Agents", &["ask", "shell", "runner", "coordinator", "memory"]),
+    (
+        "Agents",
+        &["ask", "shell", "runner", "coordinator", "memory"],
+    ),
     (
         "Operate",
         &["tunnel", "browser", "upgrade", "completion", "help"],
