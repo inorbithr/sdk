@@ -95,3 +95,11 @@ run = ".build/debug/Calls {name}"
 
 [language.swift.skip]
 stream-socket = "the Swift SDK has no WebSocket stream transport yet"
+
+# Extensions (PRD 0084) are examples too, but not of a call type: each one runs its own
+# self-test with `iohr ext dev --test`, which fakes the API it talks to. The gate requires a
+# pass for every table here, under the table's name, as it does for a language.
+[extension.ext-ask]
+dir = "examples/ext-ask"
+run = "tools/iohr.sh ext dev --test examples/ext-ask"
+example = "self-test"
