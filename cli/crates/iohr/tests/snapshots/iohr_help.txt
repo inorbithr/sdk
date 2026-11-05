@@ -36,6 +36,7 @@ Agents:
   shell        Shell integration: `? question` at your prompt asks your AI agent
   runner       Run coordinator turns on this machine
   coordinator  List and file the coordinator's jobs and asks
+  memory       Keep what a project knows as files, check it, and sync it when you choose
 
 Operate:
   tunnel       Open a loopback pipe to an environment's edge

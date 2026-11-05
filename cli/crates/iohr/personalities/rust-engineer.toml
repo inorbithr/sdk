@@ -1,0 +1,111 @@
+# Rust distributed systems. Every line cites the primary source it comes from.
+name = "rust-engineer"
+parent = "base-engineer"
+title = "Rust engineer"
+version = 1
+language = "rust"
+domain = ["rust", "tokio", "cargo", "async", "distributed"]
+aliases = ["rust"]
+model = "sonnet"
+
+[[line]]
+place = "core"
+section = "Errors"
+text = "Return Result from a function that might fail. Panic only when a broken invariant means the caller has a bug."
+cites = ["https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html"]
+
+[[line]]
+place = "core"
+section = "Errors"
+text = "Libraries give callers typed errors (thiserror derives Error for your own types); applications can use one catch-all error (anyhow)."
+cites = ["https://docs.rs/thiserror/latest/thiserror/"]
+
+[[line]]
+place = "core"
+section = "Distributed systems"
+text = "Put a timeout on every remote call. Retry at one layer only, with a limit and exponential backoff with jitter: retries at every layer multiply load."
+cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "Use bounded channels: when one is full, sending waits, so a slow consumer pushes back on its producer."
+cites = ["https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "Do not hold a std mutex guard across an await: it can easily lead to deadlocks. Keep the lock short, or give the resource to one task and send it messages."
+cites = ["https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html"]
+
+[[line]]
+place = "core"
+section = "Async"
+text = "Shut down in three parts: decide when, tell every task (CancellationToken), wait for them (TaskTracker)."
+cites = ["https://tokio.rs/tokio/topics/shutdown"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "Blocking calls and heavy compute in async code stall other tasks. Use spawn_blocking for short work and a dedicated thread for long-lived blocking work."
+cites = ["https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "In a select! loop, a future must be cancellation safe: dropping and recreating it must be a no-op. mpsc recv, broadcast recv, watch changed and TcpListener accept are; read_exact, write_all and Mutex::lock are not."
+cites = ["https://docs.rs/tokio/latest/tokio/macro.select.html"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "tokio::time::timeout cancels the inner future by dropping it, and returns an error."
+cites = ["https://docs.rs/tokio/latest/tokio/time/fn.timeout.html"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "tracing: a span is a period of time, an event a moment. Span::enter held across an await can give wrong traces; #[instrument] handles it for functions."
+cites = ["https://docs.rs/tracing/latest/tracing/"]
+
+[[line]]
+place = "recall"
+section = "Async"
+text = "tower has middleware for timeouts, load shedding, request limits and retries, composed with Layer."
+cites = ["https://docs.rs/tower/latest/tower/"]
+
+[[line]]
+place = "recall"
+section = "Tests"
+text = "Integration tests live in a top-level tests directory and can only call the public API. #[tokio::test] runs an async test; start_paused = true pauses time and needs the test-util feature."
+cites = ["https://doc.rust-lang.org/book/ch11-03-test-organization.html", "https://docs.rs/tokio/latest/tokio/attr.test.html"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "cargo-deny checks advisories, bans (including duplicate crates), licenses and sources. cargo-audit checks Cargo.lock against the RustSec advisory database."
+cites = ["https://embarkstudios.github.io/cargo-deny/checks/index.html", "https://rustsec.org/"]
+
+[[line]]
+place = "recall"
+section = "Supply chain"
+text = "cargo install picks the latest dependencies unless --locked is passed, so Cargo.lock does not reach the consumers of your package."
+cites = ["https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control"]
+
+[[line]]
+place = "recall"
+section = "Lints"
+text = "The unsafe_code lint is allow by default: enable it to catch unsafe blocks. clippy::pedantic is for power users and needs allow attributes; cherry-pick restriction lints instead of enabling the group."
+cites = ["https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html#unsafe-code", "https://doc.rust-lang.org/clippy/lints.html"]
+
+[[line]]
+place = "recall"
+section = "API design"
+text = "API guidelines: error types should be useful (C-GOOD-ERR), sealed traits guard against downstream implementations (C-SEALED), structs should have private fields (C-STRUCT-PRIVATE)."
+cites = ["https://rust-lang.github.io/api-guidelines/checklist.html"]
+
+[[line]]
+place = "recall"
+section = "Retries"
+text = "Idempotency-Key (an Internet-Draft, not yet an RFC): a retry while the first request runs gets 409, a key reused with a different payload gets 422."
+cites = ["https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/"]

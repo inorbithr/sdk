@@ -10,11 +10,12 @@ use serde::Serialize;
 
 use crate::Env;
 use crate::atlas::{self, Kind};
-use crate::cli::{AtlasCommand, AtlasKind, Global, SyncArgs};
+use crate::cli::{AtlasCommand, AtlasKind, Global, PersonalitiesCommand, SyncArgs};
 use crate::commands::decisions::{create_in, decisions, save_text, scoped};
 use crate::context::{Api, Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::personalities::{self, Report};
 use crate::project::read_space_link;
 use crate::ui::Ui;
 use inorbithr::public::DecisionsGetDocumentParams as GetDocumentParams;
@@ -23,9 +24,10 @@ const MESSAGE: &str = "Synced from atlas by iohr sync";
 
 pub(crate) async fn run(g: &Global, env: &Env, cmd: AtlasCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        AtlasCommand::Init { dir } => init(dir, out),
+        AtlasCommand::Init { dir } => init(g, env, dir, out).await,
         AtlasCommand::New { kind, title, dir } => new(kind, &title, dir, out),
         AtlasCommand::Sync(args) => sync(g, env, &args, out).await,
+        AtlasCommand::Personalities(cmd) => personalities_cmd(g, env, cmd, out).await,
     }
 }
 
@@ -59,7 +61,7 @@ fn kind_of(k: AtlasKind) -> Kind {
 }
 
 /// The name and template of a project from its `inorbit.toml`, else the folder's name.
-fn project_meta(root: &Path) -> (String, String) {
+pub(crate) fn project_meta(root: &Path) -> (String, String) {
     let table = std::fs::read_to_string(root.join("inorbit.toml"))
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok());
@@ -79,31 +81,42 @@ fn project_meta(root: &Path) -> (String, String) {
     (name, pick("template").unwrap_or_else(|| "none".to_owned()))
 }
 
-fn init(dir: Option<PathBuf>, out: Out) -> Result<(), Error> {
+async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(), Error> {
     let root = start(dir)?;
     if !root.is_dir() {
         return Err(Error::Usage(format!("{} is not a folder", root.display())));
     }
     let (name, template) = project_meta(&root);
     let created_at = super::project::now();
-    let written = atlas::ensure(
+    // The language the project declares, else the one its build file shows.
+    let lang = personalities::detect_language(&root);
+    let mut written = atlas::ensure(
         &root,
         &atlas::Meta {
             name: &name,
             template: &template,
-            lang: None,
+            lang,
             describe: None,
             created_at: &created_at,
         },
     )
     .map_err(Error::Failed)?;
+    if personalities::ensure_record(&root, lang).map_err(Error::Failed)? {
+        written.push("inorbit.toml".to_owned());
+    }
+    written.extend(personalities::ensure_agents(&root).map_err(Error::Failed)?);
+    let report = import_for(g, env, &root, false).await;
     if out.json {
-        Out::print_json(
-            &serde_json::json!({ "root": root.display().to_string(), "written": written }),
-        );
+        Out::print_json(&serde_json::json!({
+            "root": root.display().to_string(),
+            "written": written,
+            "language": lang,
+            "personalities": report,
+        }));
         return Ok(());
     }
     let ui = Ui::detect(false);
+    show_report(ui, &report);
     if written.is_empty() {
         ui.outro("atlas/ is already complete: nothing written");
     } else {
@@ -111,6 +124,99 @@ fn init(dir: Option<PathBuf>, out: Out) -> Result<(), Error> {
         ui.outro("atlas/ ready. Documents stay on this machine until you run `iohr sync`.");
     }
     Ok(())
+}
+
+/// Imports the project's personalities when signed in; never fails (a failed import is
+/// in the report, and `iohr sync` tries again).
+pub(crate) async fn import_for(g: &Global, env: &Env, root: &Path, dry: bool) -> Report {
+    let session = session(g, env).await.ok();
+    personalities::import(session.as_ref().map(|s| &s.api), root, dry).await
+}
+
+/// One line per personality, then the one line about what could not happen.
+pub(crate) fn show_report(ui: Ui, report: &Report) {
+    let lines = report.lines();
+    if lines.is_empty() {
+        return;
+    }
+    ui.note("Personalities", &lines.join("\n"));
+}
+
+async fn personalities_cmd(
+    g: &Global,
+    env: &Env,
+    cmd: PersonalitiesCommand,
+    out: Out,
+) -> Result<(), Error> {
+    match cmd {
+        PersonalitiesCommand::List { dir } => {
+            let root = root_of(dir)?;
+            let found = personalities::locals(&root);
+            let rows: Vec<serde_json::Value> = found
+                .iter()
+                .map(|f| {
+                    let p = &f.personality;
+                    serde_json::json!({
+                        "name": p.name,
+                        "parent": p.parent,
+                        "language": p.language,
+                        "core_tokens": personalities::core_tokens(p),
+                        "lines": p.lines.len(),
+                        "catalogue_version": p.version,
+                        "imported_version": f.imported_version,
+                    })
+                })
+                .collect();
+            if out.json {
+                Out::print_json(&serde_json::json!({ "personalities": rows }));
+                return Ok(());
+            }
+            if rows.is_empty() {
+                Ui::detect(false).outro(
+                    "no personalities in atlas/personalities/: `iohr atlas init` writes them",
+                );
+                return Ok(());
+            }
+            let cells: Vec<Vec<String>> = found
+                .iter()
+                .map(|f| {
+                    let p = &f.personality;
+                    vec![
+                        p.name.clone(),
+                        p.parent.clone(),
+                        personalities::core_tokens(p).to_string(),
+                        p.lines.len().to_string(),
+                        f.imported_version
+                            .map_or_else(|| "not imported".to_owned(), |v| format!("v{v}")),
+                    ]
+                })
+                .collect();
+            Out::table(
+                &["name", "parent", "core tokens", "lines", "in InOrbit"],
+                &cells,
+            );
+            Ok(())
+        }
+        PersonalitiesCommand::Import { dry_run, dir } => {
+            let root = root_of(dir)?;
+            let report = import_for(g, env, &root, dry_run).await;
+            if out.json {
+                Out::print_json(
+                    &serde_json::json!({ "dry_run": dry_run, "personalities": report }),
+                );
+                return Ok(());
+            }
+            let ui = Ui::detect(false);
+            show_report(ui, &report);
+            if dry_run {
+                if let Some(b) = &report.body {
+                    Out::print_json(b);
+                }
+                ui.outro("dry run: nothing was sent");
+            }
+            Ok(())
+        }
+    }
 }
 
 fn new(kind: AtlasKind, title: &str, dir: Option<PathBuf>, out: Out) -> Result<(), Error> {
@@ -212,7 +318,33 @@ impl Lazy<'_> {
     }
 }
 
+/// `iohr sync`: the atlas documents and, when `[memory] sync = true`, the project's memories
+/// (`iohr memory sync`). Each stops on a conflict and overwrites nothing.
 pub(crate) async fn sync(g: &Global, env: &Env, args: &SyncArgs, out: Out) -> Result<(), Error> {
+    let memory = if Ctx::load(g)?.config.memory.sync_on() {
+        let report = super::memory::sync_for(g, env, None, args.dry_run, false).await?;
+        if !out.json {
+            super::memory::show_sync(Ui::detect(false), &report, out);
+        }
+        Some(report)
+    } else {
+        None
+    };
+    let docs = sync_documents(g, env, args, out, memory.as_ref()).await;
+    if let (true, true, Some(r)) = (docs.is_err(), out.json, &memory) {
+        Out::print_json(r);
+    }
+    docs?;
+    memory.map_or(Ok(()), |r| r.verdict())
+}
+
+async fn sync_documents(
+    g: &Global,
+    env: &Env,
+    args: &SyncArgs,
+    out: Out,
+    memory: Option<&super::memory::SyncReport>,
+) -> Result<(), Error> {
     let root = root_of(args.dir.clone())?;
     let config = Ctx::load(g)?.config;
     let ui = Ui::detect(out.json);
@@ -239,15 +371,20 @@ pub(crate) async fn sync(g: &Global, env: &Env, args: &SyncArgs, out: Out) -> Re
         rows.push(sync_one(&mut lazy, &space, f, args.dry_run).await?);
     }
     let local = atlas::local_only(&root);
+    // The built-in personalities go with the documents; a failed import never fails the sync.
+    let report = import_for(g, env, &root, args.dry_run).await;
     if out.json {
         Out::print_json(&serde_json::json!({
             "space": space,
             "dry_run": args.dry_run,
             "documents": rows,
             "local_only": local,
+            "personalities": report,
+            "memory": memory,
         }));
         return Ok(());
     }
+    show_report(ui, &report);
     if rows.is_empty() {
         ui.outro("no documents in atlas/ to sync");
         return Ok(());

@@ -42,9 +42,7 @@ fn publisher_of(asked: Option<&str>, account: Option<&str>) -> String {
 }
 
 pub(super) fn now() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
+    crate::front::now()
 }
 
 /// The menu's first entry: the agent builds it from a description.
@@ -1296,6 +1294,17 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         None => {}
     }
+    // The built-in personalities (security and the language's engineer): imported when signed in.
+    let personalities = flow
+        .act_async(
+            "personalities",
+            "import the built-in personalities into InOrbit (kept local when signed out)",
+            || super::atlas::import_for(g, env, &dir, false),
+        )
+        .await;
+    if let Some(r) = personalities.as_ref().filter(|_| !out.json) {
+        super::atlas::show_report(ui, r);
+    }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
     for s in &steps {
@@ -1470,6 +1479,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             "folder": place, "language": lang, "warnings": warnings,
             "answered": answers.keys().collect::<Vec<_>>(),
             "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
+            "personalities": personalities,
             "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
         });
         if ran {

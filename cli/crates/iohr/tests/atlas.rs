@@ -319,3 +319,212 @@ async fn sync_never_shows_the_token_or_a_documents_words() {
     assert!(t.contains("request id"), "{t}");
     assert!(!t.contains("Stub:"), "no document text in the output: {t}");
 }
+
+// ---------------------------------------------------------------- personalities and memory
+
+const PERSONALITIES: &str = "/v1/coordinator/personalities";
+const IMPORT: &str = "/v1/coordinator/personalities/import";
+
+async fn mount_personalities(server: &MockServer, listed: serde_json::Value, import_status: u16) {
+    Mock::given(method("GET"))
+        .and(path(PERSONALITIES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(listed))
+        .mount(server)
+        .await;
+    let names = ["base-engineer", "security", "rust-engineer"];
+    let written: Vec<_> = names
+        .iter()
+        .map(|n| serde_json::json!({"name": n, "version": 1}))
+        .collect();
+    Mock::given(method("POST"))
+        .and(path(IMPORT))
+        .respond_with(
+            ResponseTemplate::new(import_status)
+                .set_body_json(serde_json::json!({ "written": written })),
+        )
+        .mount(server)
+        .await;
+}
+
+fn imports(sent: &[wiremock::Request]) -> Vec<serde_json::Value> {
+    sent.iter()
+        .filter(|r| r.method.as_str() == "POST" && r.url.path() == IMPORT)
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect()
+}
+
+#[test]
+#[allow(clippy::many_single_char_names, reason = "short names in a long test")]
+fn init_writes_the_personalities_the_record_the_memory_readme_and_the_agent_section() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("work/made");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"made\"\n").unwrap();
+    std::fs::write(dir.join("inorbit.toml"), "name = \"made\"\n").unwrap();
+    std::fs::write(dir.join("AGENTS.md"), "# Agents\n\nMine.\n").unwrap();
+    let o = iohr(h.path(), &dir, None, &["atlas", "init"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    // Signed out: said once, nothing fails.
+    assert_eq!(t.matches("Not signed in").count(), 1, "{t}");
+
+    // The language came from the build file: a Rust project gets the Rust engineer.
+    for name in ["security", "rust-engineer"] {
+        let p = read(&dir, &format!("atlas/personalities/{name}.md"));
+        assert!(p.contains(&format!("name: {name}")), "{p}");
+        assert!(p.contains("parent:"), "{p}");
+        assert!(p.contains("https://"), "every line carries its source: {p}");
+    }
+    assert!(!dir.join("atlas/personalities/python-engineer.md").exists());
+    assert!(read(&dir, "inorbit.toml").contains("rust-engineer"));
+    // Memory is local: a README and the seed memories under `.inorbit/memory/`, no network.
+    assert!(read(&dir, ".inorbit/memory/README.md").contains("iohr memory recall"));
+    assert!(!dir.join("atlas/memory").exists());
+
+    // The agent file keeps the person's text and gains the memory section once.
+    let a = read(&dir, "AGENTS.md");
+    assert!(a.contains("Mine."), "{a}");
+    assert_eq!(a.matches("iohr memory recall").count(), 1, "{a}");
+    let o = iohr(h.path(), &dir, None, &["atlas", "init"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(
+        read(&dir, "AGENTS.md")
+            .matches("iohr memory recall")
+            .count(),
+        1
+    );
+
+    // JSON reports them; the dry run prints the body and sends nothing.
+    let o = iohr(h.path(), &dir, None, &["atlas", "init", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["personalities"]["signed_in"], false, "{v}");
+    assert!(v["personalities"]["outcomes"].as_array().unwrap().len() >= 2);
+    let o = iohr(
+        h.path(),
+        &dir,
+        None,
+        &["atlas", "personalities", "import", "--dry-run"],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("\"doctrine\""), "{t}");
+    assert!(t.contains("\"parent\""), "{t}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("work/made");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"made\"\n").unwrap();
+    let server = MockServer::start().await;
+    // An empty account: no root, so the base engineer comes with them.
+    mount_personalities(&server, serde_json::json!({ "personalities": [] }), 200).await;
+    let base = server.uri();
+
+    let o = iohr(h.path(), &dir, Some(&base), &["atlas", "init"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("security: written v1"), "{t}");
+    assert!(t.contains("rust-engineer: written v1"), "{t}");
+    assert!(!t.contains("TOKENSIGNATURE"), "{t}");
+    let sent = imports(&server.received_requests().await.unwrap());
+    assert_eq!(sent.len(), 1, "one import for all");
+    let names: Vec<&str> = sent[0]["personalities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"base-engineer"), "{names:?}");
+    let sec = sent[0]["personalities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "security")
+        .unwrap();
+    assert_eq!(sec["parent"], "base-engineer");
+    let line = &sec["sections"][0]["lines"][0];
+    assert_eq!(line["origin"], "doctrine");
+    assert!(line["cites"][0].as_str().unwrap().starts_with("https://"));
+
+    // The import is recorded in the pack, so the next run only compares.
+    let p = read(&dir, "atlas/personalities/security.md");
+    assert!(p.contains("imported_version: 1"), "{p}");
+
+    // The account now has them at the version we wrote: unchanged, no second POST.
+    let server2 = MockServer::start().await;
+    mount_personalities(
+        &server2,
+        serde_json::json!({ "personalities": [
+            {"name": "base-engineer", "parent": "", "head_version": 1},
+            {"name": "security", "parent": "base-engineer", "head_version": 1},
+            {"name": "rust-engineer", "parent": "security", "head_version": 1},
+        ]}),
+        200,
+    )
+    .await;
+    let o = iohr(
+        h.path(),
+        &dir,
+        Some(&server2.uri()),
+        &["atlas", "personalities", "import"],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("security: unchanged"), "{t}");
+    assert_eq!(
+        imports(&server2.received_requests().await.unwrap()).len(),
+        0
+    );
+
+    // Edited in InOrbit since our import: left alone, never overwritten.
+    let server3 = MockServer::start().await;
+    mount_personalities(
+        &server3,
+        serde_json::json!({ "personalities": [
+            {"name": "base-engineer", "parent": "", "head_version": 1},
+            {"name": "security", "parent": "base-engineer", "head_version": 4},
+            {"name": "rust-engineer", "parent": "security", "head_version": 1},
+        ]}),
+        200,
+    )
+    .await;
+    let o = iohr(
+        h.path(),
+        &dir,
+        Some(&server3.uri()),
+        &["atlas", "personalities", "import"],
+    );
+    let t = text(&o);
+    assert!(t.contains("security: left alone"), "{t}");
+    assert_eq!(
+        imports(&server3.received_requests().await.unwrap()).len(),
+        0
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_import_never_fails_init_and_says_it_once() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("work/made");
+    let server = MockServer::start().await;
+    mount_personalities(&server, serde_json::json!({ "personalities": [] }), 403).await;
+    let o = iohr(
+        h.path(),
+        h.path(),
+        Some(&server.uri()),
+        &[
+            "project",
+            "init",
+            "made",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--no-smoke",
+        ],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert_eq!(t.matches("stay local").count(), 1, "{t}");
+    assert!(dir.join("atlas/personalities/security.md").is_file());
+}
