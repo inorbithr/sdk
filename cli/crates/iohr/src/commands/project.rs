@@ -1,13 +1,15 @@
 //! `iohr project init` (alias `create`) and `templates`: set a project of your own up (PRD 0088).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::Env;
-use crate::cli::{Global, ProjectCommand};
+use crate::ask::{self, Agent};
+use crate::cli::{Global, ProjectCommand, TemplateCommand};
 use crate::context::{Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
-use crate::project::{self, Report, Smoke, TEMPLATES, check_name, choose_template, lines};
+use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
+use crate::template::{self, Answer, Answers, Kind, Question, Spec, StepName, Template};
 use crate::ui::{Choice, Ui};
 
 /// Where projects go by default: `~/development/<name>`.
@@ -43,156 +45,681 @@ fn now() -> String {
         .unwrap_or_default()
 }
 
+/// The menu's first entry: the agent builds it from a description.
+const DESCRIBE: &str = "@describe";
+
+/// What the person said to `init`, as the flags carry it.
+struct InitArgs {
+    name: Option<String>,
+    template: Option<String>,
+    set: Vec<String>,
+    answers: Option<PathBuf>,
+    describe: Option<String>,
+    dry_run: bool,
+    yes: bool,
+    dir: Option<PathBuf>,
+    publisher: Option<String>,
+    no_smoke: bool,
+}
+
 pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) -> Result<(), Error> {
     match cmd {
         ProjectCommand::Init {
             name,
             template,
+            set,
+            answers,
+            describe,
+            dry_run,
             yes,
             dir,
             publisher,
             no_smoke,
         } => {
-            let configured = Ctx::load(g)?.config.project.template;
-            let ui = Ui::detect(out.json);
-            let (name, template, dir) = if ui.fancy() {
-                ui.intro("iohr project init");
-                match ask(
-                    ui,
-                    name,
-                    template,
-                    configured.as_deref(),
-                    yes,
-                    dir.as_deref(),
-                )? {
-                    Some(a) => (a.name, a.template, a.dir),
-                    // The person declined at the confirmation: nothing was written.
-                    None => return Ok(()),
-                }
-            } else {
-                (
-                    name.ok_or_else(|| {
-                        Error::Usage(
-                            "a project name is needed: iohr project init NAME (there is no terminal to ask on)"
-                                .into(),
-                        )
-                    })?,
-                    choose_template(template.as_deref(), configured.as_deref()),
-                    dir,
-                )
-            };
             init(
                 g,
                 env,
-                &name,
-                &template,
-                dir.as_deref(),
-                publisher.as_deref(),
-                no_smoke,
+                InitArgs {
+                    name,
+                    template,
+                    set,
+                    answers,
+                    describe,
+                    dry_run,
+                    yes,
+                    dir,
+                    publisher,
+                    no_smoke,
+                },
                 out,
-                ui,
             )
             .await
         }
         ProjectCommand::Templates => {
             let configured = Ctx::load(g)?.config.project.template;
-            templates(configured.as_deref(), out);
+            templates(configured.as_deref(), out)
+        }
+        ProjectCommand::Template { cmd } => template_command(cmd, out),
+    }
+}
+
+/// The templates table, or the same as a JSON list; `default` marks the one `init` uses.
+fn templates(configured: Option<&str>, out: Out) -> Result<(), Error> {
+    let default = choose_template(None, configured);
+    let rows = template::list(&template::user_root()?, &default);
+    if out.json {
+        Out::print_json(&rows);
+        return Ok(());
+    }
+    let width = rows.iter().map(|r| r.name.len()).max().unwrap_or(0).max(4);
+    let owidth = rows
+        .iter()
+        .map(|r| r.origin.len())
+        .max()
+        .unwrap_or(0)
+        .max(6);
+    Out::raw(
+        format!(
+            "{:<width$}  {:<7}  {:<owidth$}  DESCRIPTION\n",
+            "NAME", "STATUS", "ORIGIN"
+        )
+        .as_bytes(),
+    );
+    for r in &rows {
+        let star = if r.default { " (default)" } else { "" };
+        Out::raw(
+            format!(
+                "{:<width$}  {:<7}  {:<owidth$}  {}{star}\n",
+                r.name, r.status, r.origin, r.description
+            )
+            .as_bytes(),
+        );
+    }
+    Ok(())
+}
+
+fn template_command(cmd: TemplateCommand, out: Out) -> Result<(), Error> {
+    match cmd {
+        TemplateCommand::New { id, extends } => {
+            let dir = template::scaffold(&template::user_root()?, &id, extends.as_deref())
+                .map_err(Error::Usage)?;
+            if out.json {
+                Out::print_json(&serde_json::json!({ "id": id, "dir": dir }));
+            } else {
+                Out::note(&format!(
+                    "Made {}\nEdit its template.toml, then `iohr project template lint {}` and `iohr project init NAME --template {id} --dry-run`.",
+                    dir.display(),
+                    dir.display()
+                ));
+            }
+            Ok(())
+        }
+        TemplateCommand::Lint { path } => {
+            let r = template::lint_dir(&path, &template::user_root()?);
+            if out.json {
+                Out::print_json(&r);
+            } else if r.ok {
+                Out::note(&format!("{}: ok", path.display()));
+            } else {
+                for f in &r.findings {
+                    Out::raw(format!("{}: {f}\n", path.display()).as_bytes());
+                }
+            }
+            if r.ok {
+                Ok(())
+            } else {
+                Err(Error::Failed(format!(
+                    "{} finding{}",
+                    r.findings.len(),
+                    if r.findings.len() == 1 { "" } else { "s" }
+                )))
+            }
+        }
+        TemplateCommand::Schema => {
+            Out::print_json(&template::schema());
             Ok(())
         }
     }
 }
 
-/// The templates table, or the same as a JSON list; `default` marks the one `init` uses.
-fn templates(configured: Option<&str>, out: Out) {
-    let default = choose_template(None, configured);
-    let list = project::listing(&default);
-    if out.json {
-        Out::print_json(&serde_json::Value::Array(list));
-        return;
-    }
-    let width = TEMPLATES
-        .iter()
-        .map(|(id, _, _)| id.len())
-        .max()
-        .unwrap_or(0);
-    Out::raw(format!("{:<width$}  {:<6}  DESCRIPTION\n", "NAME", "STATUS").as_bytes());
-    for t in &list {
-        let name = t["name"].as_str().unwrap_or_default();
-        let status = t["status"].as_str().unwrap_or_default();
-        let star = if t["default"] == true {
-            " (default)"
-        } else {
-            ""
-        };
-        Out::raw(
-            format!(
-                "{name:<width$}  {status:<6}  {}{star}\n",
-                t["description"].as_str().unwrap_or_default()
-            )
-            .as_bytes(),
-        );
-    }
-}
-
-/// What the guided questions settled.
-struct Asked {
-    name: String,
-    template: String,
-    dir: Option<PathBuf>,
-}
-
-/// The questions, at a terminal only: the name (the folder's name is the default), the
-/// template as a menu, and the folder to confirm. A flag skips its question, `--yes` skips
-/// the menu and the confirmation. `None` when the person declines the folder.
-fn ask(
+/// The one gate every action passes through. A dry run records what it would do and does
+/// nothing; no step decides that on its own.
+struct Flow {
+    dry: bool,
     ui: Ui,
-    name: Option<String>,
-    template: Option<String>,
-    configured: Option<&str>,
-    yes: bool,
-    dir: Option<&Path>,
-) -> Result<Option<Asked>, Error> {
-    let name = if let Some(n) = name {
-        n
+    would: Vec<(String, String)>,
+}
+
+impl Flow {
+    /// True when the action may really happen. In a dry run it says what it would do, and
+    /// returns false.
+    fn gate(&mut self, id: &str, what: &str) -> bool {
+        if self.dry {
+            self.would.push((id.to_owned(), what.to_owned()));
+            self.ui.info(&format!("would: {what}"));
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Runs `f` unless this is a dry run.
+    fn act<T>(&mut self, id: &str, what: &str, f: impl FnOnce() -> T) -> Option<T> {
+        self.gate(id, what).then(f)
+    }
+
+    /// The same, for an action that waits.
+    async fn act_async<T, Fut: std::future::Future<Output = T>>(
+        &mut self,
+        id: &str,
+        what: &str,
+        f: impl FnOnce() -> Fut,
+    ) -> Option<T> {
+        if self.gate(id, what) {
+            Some(f().await)
+        } else {
+            None
+        }
+    }
+}
+
+fn no_agent_help() -> String {
+    "no agent found: put `claude` (Claude Code) or `codex` on your PATH, or name one in iohr's config.toml with `[ask]` `agent = \"claude\"` (or `\"codex\"`)".to_owned()
+}
+
+fn nonempty(v: &str) -> Result<(), String> {
+    if v.trim().is_empty() {
+        Err("say what you want".into())
     } else {
-        let here = std::env::current_dir()
-            .ok()
-            .and_then(|d| d.file_name().map(|f| f.to_string_lossy().into_owned()))
-            .filter(|f| check_name(f).is_ok())
-            .unwrap_or_default();
-        ui.input("What is the project called?", &here, check_name)?
-    };
-    check_name(&name).map_err(Error::Usage)?;
-    let template = match template {
-        Some(t) => t,
-        None if yes => choose_template(None, configured),
-        None => {
-            let default = choose_template(None, configured);
-            let choices: Vec<Choice> = TEMPLATES
+        Ok(())
+    }
+}
+
+fn live_names(rows: &[template::Row]) -> String {
+    rows.iter()
+        .filter(|r| r.status == "live")
+        .map(|r| format!("`{}`", r.name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// One question at the terminal, drawn from the schema: the kind picks the control.
+fn ask_question(ui: Ui, q: &Question) -> Result<Answer, Error> {
+    if let Some(h) = &q.help {
+        ui.info(h);
+    }
+    let default = q.default.clone();
+    match q.kind {
+        Kind::Bool => Ok(Answer::Flag(
+            ui.confirm(&q.prompt, matches!(default, Some(Answer::Flag(true))))?,
+        )),
+        Kind::Choice => {
+            let choices: Vec<Choice> = q
+                .choices
                 .iter()
-                .map(|(id, what, live)| Choice {
-                    value: (*id).to_owned(),
-                    label: (*id).to_owned(),
-                    hint: what.replace("; coming after the demo", ""),
-                    available: *live,
+                .map(|c| Choice {
+                    value: c.clone(),
+                    label: c.clone(),
+                    hint: String::new(),
+                    available: true,
                 })
                 .collect();
-            ui.select("Which template?", &choices, &default)?
+            let initial = default
+                .map(|d| d.text())
+                .or_else(|| q.choices.first().cloned())
+                .unwrap_or_default();
+            Ok(Answer::Text(ui.select(&q.prompt, &choices, &initial)?))
+        }
+        Kind::Multi => {
+            let initial = match default {
+                Some(Answer::List(l)) => l,
+                _ => vec![],
+            };
+            Ok(Answer::List(
+                ui.multiselect(&q.prompt, &q.choices, &initial)?,
+            ))
+        }
+        Kind::String => {
+            let check = q.clone();
+            Ok(Answer::Text(ui.input(
+                &q.prompt,
+                &default.map(|d| d.text()).unwrap_or_default(),
+                move |v| template::coerce(&check, &Answer::Text(v.to_owned())).map(|_| ()),
+            )?))
+        }
+    }
+}
+
+/// The agent and the prompt it would get, when one is to run.
+struct AgentRun {
+    agent: Agent,
+    bin: PathBuf,
+    prompt: String,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one flow, top to bottom, every action through the gate"
+)]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "g, a, out are the repo's names for globals, args and output"
+)]
+async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error> {
+    let cfg = Ctx::load(g)?.config;
+    let configured = cfg.project.template;
+    let ui = Ui::detect(out.json);
+    let interactive = ui.fancy() && !a.yes;
+    let dry = a.dry_run;
+    let path_env = std::env::var_os("PATH").unwrap_or_default();
+    let agent = ask::detect_agent(cfg.ask.agent.as_deref(), &path_env).map_err(Error::Usage)?;
+    if a.describe.as_deref().is_some_and(|d| d.trim().is_empty()) {
+        return Err(Error::Usage(
+            "--describe needs words: what do you want built?".into(),
+        ));
+    }
+    if a.describe.is_some() && out.json && !dry {
+        return Err(Error::Usage(
+            "--describe starts your agent on your terminal, so --json (data only) cannot carry it; add --dry-run to see the plan as data".into(),
+        ));
+    }
+    if a.describe.is_some() && agent.is_none() {
+        return Err(Error::Failed(no_agent_help()));
+    }
+    let root = template::user_root()?;
+    if ui.fancy() {
+        ui.intro(if dry {
+            "iohr project init (dry run)"
+        } else {
+            "iohr project init"
+        });
+    }
+
+    // The name, and the template (a menu at a terminal).
+    let name = match a.name {
+        Some(n) => n,
+        None if interactive => {
+            let here = std::env::current_dir()
+                .ok()
+                .and_then(|d| d.file_name().map(|f| f.to_string_lossy().into_owned()))
+                .filter(|f| check_name(f).is_ok())
+                .unwrap_or_default();
+            ui.input("What is the project called?", &here, check_name)?
+        }
+        None => {
+            return Err(Error::Usage(
+                "a project name is needed: iohr project init NAME (there is no terminal to ask on)"
+                    .into(),
+            ));
         }
     };
-    let target = match dir {
-        Some(d) => d.to_path_buf(),
+    check_name(&name).map_err(Error::Usage)?;
+    let mut describe = a.describe;
+    let mut spec_text = a.template;
+    if spec_text.is_none() && interactive {
+        let default = choose_template(None, configured.as_deref());
+        let rows = template::list(&root, &default);
+        let mut choices = vec![Choice {
+            value: DESCRIBE.into(),
+            label: "Describe it, your agent builds it".into(),
+            hint: match &agent {
+                Some((ag, _)) => format!("starts {} in the new folder with your words", ag.name()),
+                None => no_agent_help(),
+            },
+            available: true,
+        }];
+        choices.extend(rows.iter().map(|r| Choice {
+            value: r.name.clone(),
+            label: r.name.clone(),
+            hint: format!(
+                "{} [{}]",
+                r.description.replace("; coming after the demo", ""),
+                r.origin
+            ),
+            available: r.status == "live",
+        }));
+        let picked = ui.select("Which template?", &choices, &default)?;
+        if picked == DESCRIBE {
+            if agent.is_none() {
+                return Err(Error::Failed(no_agent_help()));
+            }
+            describe = Some(ui.input("Describe the project", "", nonempty)?);
+            spec_text = None;
+        } else {
+            spec_text = Some(picked);
+        }
+    }
+    let spec = template::parse_spec(&choose_template(
+        spec_text.as_deref(),
+        configured.as_deref(),
+    ));
+    if dry && matches!(spec, Spec::Git { .. }) {
+        return Err(Error::Usage(
+            "a dry run makes no network call, so it cannot clone that template: clone it yourself and pass its folder with --template PATH".into(),
+        ));
+    }
+    let tpl: Template = template::load(&spec, &root).map_err(Error::Usage)?;
+    if tpl.meta.status == template::Status::Coming {
+        let rows = template::list(&root, "");
+        return Err(Error::Usage(format!(
+            "the `{}` template is coming; live today: {}",
+            tpl.meta.id,
+            live_names(&rows)
+        )));
+    }
+
+    // The answers: --set, then --answers, then the questions at a terminal, then defaults.
+    let mut given = match &a.answers {
+        Some(f) => template::read_answers(f).map_err(Error::Usage)?,
+        None => Answers::new(),
+    };
+    given.extend(template::parse_set(&a.set).map_err(Error::Usage)?);
+    let mut asker = |q: &Question| ask_question(ui, q);
+    let answers = template::answer(
+        &tpl,
+        &given,
+        if interactive { Some(&mut asker) } else { None },
+    )?;
+
+    let publisher = publisher_of(a.publisher.as_deref(), None);
+    let dir = match a.dir {
+        Some(d) => d,
         None => dev_root()?.join(&name),
     };
-    if !yes && !ui.confirm(format!("Create it in {}?", target.display()).as_str(), true)? {
+    if interactive && !dry && !ui.confirm(&format!("Create it in {}?", dir.display()), true)? {
         ui.outro("Nothing was written.");
-        return Ok(None);
+        return Ok(());
     }
-    Ok(Some(Asked {
-        name,
-        template,
-        dir: Some(target),
-    }))
+    let created_at = now();
+    let vals = template::values(&name, &publisher, &created_at, &answers);
+    let files = template::render(&tpl, &vals).map_err(Error::Failed)?;
+    // Reads only, so a dry run finds the same problems a real one would.
+    project::check_target(&dir).map_err(Error::Failed)?;
+    project::check_manifest(&files).map_err(Error::Failed)?;
+
+    // The steps, and the agent that will run, if one will.
+    let mut steps = tpl.steps();
+    if a.no_smoke {
+        steps.retain(|s| s.name != StepName::Smoke);
+    }
+    let step_prompt = steps
+        .iter()
+        .find(|s| s.name == StepName::Agent)
+        .map(|s| s.prompt.clone());
+    let has_agent_step = step_prompt.is_some();
+    let prompt_text = step_prompt
+        .flatten()
+        .or_else(|| tpl.meta.agent_prompt.clone());
+    let mut agent_run = None;
+    if let Some((ag, bin)) = &agent {
+        let wanted = if describe.is_some() {
+            true
+        } else if has_agent_step && interactive {
+            ui.confirm(
+                &format!(
+                    "Start {} in the new folder with the template's prompt?",
+                    ag.name()
+                ),
+                true,
+            )?
+        } else {
+            false
+        };
+        if wanted {
+            agent_run = Some(AgentRun {
+                agent: *ag,
+                bin: bin.clone(),
+                prompt: project::agent_prompt(
+                    prompt_text.as_deref(),
+                    describe.as_deref(),
+                    &name,
+                    &tpl.meta.id,
+                    &answers,
+                    &vals,
+                ),
+            });
+        }
+    } else if has_agent_step {
+        ui.info(&format!(
+            "The template has an agent step, skipped: {}",
+            no_agent_help()
+        ));
+    }
+    if agent_run.is_some() && !has_agent_step {
+        steps.push(template::StepDef {
+            name: StepName::Agent,
+            prompt: None,
+        });
+    }
+
+    // Everything below that changes anything goes through `flow`.
+    let mut flow = Flow {
+        dry,
+        ui,
+        would: Vec::new(),
+    };
+    let state_root = state_root()?;
+    let state = state_root.join(&name);
+    let signed_in = flow
+        .act_async("signin", "check your sign-in (one call to /v1/me)", || {
+            check_sign_in(g, env, ui)
+        })
+        .await
+        .flatten();
+    let mut report = Report {
+        name: name.clone(),
+        id: format!("{publisher}/{name}"),
+        dir: dir.clone(),
+        state: state.clone(),
+        files: files.iter().map(|(p, _)| p.clone()).collect(),
+        steps: Vec::new(),
+    };
+    let setup = format!(
+        "write {} files from `{}` into {}",
+        files.len(),
+        tpl.meta.id,
+        dir.display()
+    );
+    let sp = (!dry).then(|| ui.step(&format!("Setting up {name} from `{}`", tpl.meta.id)));
+    match flow.act("scaffold", &setup, || {
+        project::scaffold(&dir, &files, &tpl.meta.id)
+    }) {
+        Some(Ok((written, st))) => {
+            if let Some(sp) = sp {
+                sp.ok(&format!(
+                    "Scaffolded {} files in {}",
+                    written.len(),
+                    dir.display()
+                ));
+            }
+            report.files = written;
+            report.steps.push(st);
+        }
+        Some(Err(e)) => {
+            if let Some(sp) = sp {
+                sp.fail(&e);
+            }
+            return Err(Error::Failed(e));
+        }
+        None => {}
+    }
+    let mut smoke: Option<Smoke> = None;
+    let mut agent_exit: Option<i32> = None;
+    for s in &steps {
+        match s.name {
+            StepName::Git => {
+                let r = flow.act("git", "make a git repository with one commit", || {
+                    project::git_step(&dir, &name, &tpl.meta.id)
+                });
+                if let Some(st) = r {
+                    report.steps.push(st);
+                }
+            }
+            StepName::Register => {
+                let what = format!(
+                    "register the project: state and cache under {}",
+                    state.display()
+                );
+                let r = flow.act("register", &what, || {
+                    project::register_step(&dir, &state_root, &name, &tpl.meta.id, &created_at)
+                });
+                match r {
+                    Some(Ok((_, st))) => {
+                        report.steps.push(st);
+                        report.steps.extend(project::cloud_steps(&name));
+                    }
+                    Some(Err(e)) => return Err(Error::Failed(e)),
+                    None => {}
+                }
+            }
+            StepName::Smoke => {
+                let (d, st, n) = (dir.clone(), state.clone(), name.clone());
+                let run = (!dry).then(|| ui.step("Running the project once (smoke test)"));
+                let r = flow
+                    .act_async("smoke", "run the project once with python3 and read its heartbeat back (smoke test)", || async move {
+                        tokio::task::spawn_blocking(move || project::smoke(&d, &st, &n)).await
+                    })
+                    .await;
+                if let Some(r) = r {
+                    let result =
+                        r.map_err(|e| Error::Failed(format!("the smoke test could not run: {e}")))?;
+                    if let Some(run) = run {
+                        if result.ok {
+                            run.ok("Smoke test passed: one heartbeat read back");
+                        } else {
+                            run.fail(&format!("Smoke test failed: {}", result.said));
+                        }
+                    }
+                    smoke = Some(result);
+                }
+            }
+            StepName::Agent => {
+                if let Some(r) = &agent_run {
+                    let what = format!(
+                        "start {} in {} with the prompt below (not started in a dry run)",
+                        r.agent.name(),
+                        dir.display()
+                    );
+                    // The AI label is printed either way; the agent starts only past the gate.
+                    Out::note(&ask::label_for(
+                        "iohr project init",
+                        "AI-built project",
+                        r.agent,
+                    ));
+                    if dry {
+                        flow.gate("agent", &what);
+                    } else if flow.gate("agent", &what) {
+                        agent_exit = Some(
+                            crate::commands::ask::start(
+                                r.agent,
+                                &r.bin,
+                                r.prompt.clone(),
+                                Some(&dir),
+                            )
+                            .await?,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if dry {
+        dry_report(
+            &flow,
+            &files,
+            &report,
+            agent_run.as_ref(),
+            &answers,
+            &tpl,
+            out,
+        );
+        return Ok(());
+    }
+    // The report: what you now have, never claiming what did not happen.
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "name": report.name, "id": report.id, "dir": report.dir, "state": report.state,
+            "template": tpl.meta.id, "origin": tpl.origin.label(),
+            "answered": answers.keys().collect::<Vec<_>>(),
+            "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
+            "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
+        }));
+    } else if ui.fancy() {
+        finish(ui, g.verbose, &report, smoke.as_ref(), signed_in.as_deref());
+    } else {
+        Out::note(&format!(
+            "What you now have: {} at {}",
+            report.id,
+            report.dir.display()
+        ));
+        for l in lines(&report, smoke.as_ref(), signed_in.as_deref())
+            .iter()
+            .skip(1)
+        {
+            Out::note(&format!("  {l}"));
+        }
+        Out::note(
+            "Next: open it in InOrbit Desktop's Code (it asks you first), `iohr ext lint --preview` to read what it may do, `iohr ext dev` to run it with the real token channel.",
+        );
+    }
+    if let Some(c) = agent_exit.filter(|c| *c != 0) {
+        return Err(Error::Child(u8::try_from(c).unwrap_or(1)));
+    }
+    match smoke {
+        Some(s) if !s.ok => Err(Error::Failed(format!("the smoke test failed: {}", s.said))),
+        _ => Ok(()),
+    }
+}
+
+/// The dry run's ending: the plan as data with `--json`, else the files and the agent's
+/// command and prompt, and the outro.
+fn dry_report(
+    flow: &Flow,
+    files: &[(String, String)],
+    report: &Report,
+    agent: Option<&AgentRun>,
+    answers: &Answers,
+    tpl: &Template,
+    out: Out,
+) {
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "dry_run": true,
+            "name": report.name, "id": report.id, "dir": report.dir,
+            "template": tpl.meta.id, "origin": tpl.origin.label(),
+            "answered": answers.keys().collect::<Vec<_>>(),
+            "files": files.iter().map(|(p, t)| serde_json::json!({"path": p, "bytes": t.len()})).collect::<Vec<_>>(),
+            "steps": flow.would.iter().map(|(id, what)| serde_json::json!({"id": id, "would": what})).collect::<Vec<_>>(),
+            "agent": agent.as_ref().map(|r| serde_json::json!({
+                "name": r.agent.name(),
+                "command": [r.bin.to_string_lossy(), r.prompt],
+                "cwd": report.dir,
+                "prompt": r.prompt,
+            })),
+        }));
+        return;
+    }
+    flow.ui.note(
+        &format!("{} files, none written", files.len()),
+        &files
+            .iter()
+            .map(|(p, t)| format!("{p}  ({} bytes)", t.len()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    if let Some(r) = agent {
+        flow.ui.note(
+            "The agent would get (AI)",
+            &format!(
+                "cd {}\n{} <prompt>\n\n{}",
+                report.dir.display(),
+                r.bin.display(),
+                r.prompt
+            ),
+        );
+    }
+    flow.ui.outro("dry run: nothing was changed");
 }
 
 /// The sign-in check: checked, never required (one call, `GET /v1/me`, so a stale token is
@@ -220,117 +747,6 @@ async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
         }
     }
     signed_in
-}
-
-#[allow(clippy::too_many_arguments, reason = "one argument per flag")]
-async fn init(
-    g: &Global,
-    env: &Env,
-    name: &str,
-    template: &str,
-    dir: Option<&Path>,
-    publisher: Option<&str>,
-    no_smoke: bool,
-    out: Out,
-    ui: Ui,
-) -> Result<(), Error> {
-    check_name(name).map_err(Error::Usage)?;
-    if !TEMPLATES.iter().any(|(id, _, _)| *id == template) {
-        return Err(Error::Usage(format!(
-            "there is no `{template}` template; one of: {}",
-            TEMPLATES
-                .iter()
-                .map(|(id, what, live)| format!(
-                    "{id} ({what}{})",
-                    if *live { "" } else { "; coming" }
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
-    }
-    // 1. Sign-in: checked, never required. Without it the local half still happens and the
-    //    report says what to do; with it the cloud steps can land once their APIs exist.
-    //    The check is one call, `GET /v1/me`, so a stale token is found here and not later.
-    let signed_in = check_sign_in(g, env, ui).await;
-    // The account's slug is not on the token; the private-listing step reads it from
-    // /v1/accounts/me when that step lands. Until then: the flag, or "local".
-    let publisher = publisher_of(publisher, None);
-    let dir = match dir {
-        Some(d) => d.to_path_buf(),
-        None => dev_root()?.join(name),
-    };
-    let state_root = state_root()?;
-    // 2 to 4. The scaffold, the git repository, the project's own state, the Keychain slot
-    //    by name, and every cloud step as not-yet with the API it needs.
-    let setup = ui.step(&format!("Setting up {name} from `{template}`"));
-    let report: Report = match project::init(&dir, &state_root, name, template, &publisher, &now())
-    {
-        Ok(r) => r,
-        Err(e) => {
-            setup.fail(&e);
-            return Err(Error::Failed(e));
-        }
-    };
-    if ui.fancy() {
-        // The three local steps, one ok line each; a skipped one is a warning with its reason.
-        setup.ok(&format!(
-            "Scaffolded {} files in {}",
-            report.files.len(),
-            report.dir.display()
-        ));
-        for s in report.steps.iter().filter(|s| s.state == "skipped") {
-            ui.step(&s.title).warn(&format!("{}: {}", s.title, s.said));
-        }
-    }
-    // 5. The smoke test: the project once, under its own STATE and CACHE, no token channel.
-    let smoke: Option<Smoke> = if no_smoke {
-        None
-    } else {
-        let run = ui.step("Running the project once (smoke test)");
-        let (d, s, n) = (
-            report.dir.clone(),
-            report.state.clone(),
-            report.name.clone(),
-        );
-        let result = tokio::task::spawn_blocking(move || project::smoke(&d, &s, &n))
-            .await
-            .map_err(|e| Error::Failed(format!("the smoke test could not run: {e}")))?;
-        if result.ok {
-            run.ok("Smoke test passed: one heartbeat read back");
-        } else {
-            run.fail(&format!("Smoke test failed: {}", result.said));
-        }
-        Some(result)
-    };
-    // 6. The report: what you now have, never claiming what did not happen.
-    if out.json {
-        Out::print_json(&serde_json::json!({
-            "name": report.name, "id": report.id, "dir": report.dir, "state": report.state,
-            "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
-            "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
-        }));
-    } else if ui.fancy() {
-        finish(ui, g.verbose, &report, smoke.as_ref(), signed_in.as_deref());
-    } else {
-        Out::note(&format!(
-            "What you now have: {} at {}",
-            report.id,
-            report.dir.display()
-        ));
-        for l in lines(&report, smoke.as_ref(), signed_in.as_deref())
-            .iter()
-            .skip(1)
-        {
-            Out::note(&format!("  {l}"));
-        }
-        Out::note(
-            "Next: open it in InOrbit Desktop's Code (it asks you first), `iohr ext lint --preview` to read what it may do, `iohr ext dev` to run it with the real token channel.",
-        );
-    }
-    match smoke {
-        Some(s) if !s.ok => Err(Error::Failed(format!("the smoke test failed: {}", s.said))),
-        _ => Ok(()),
-    }
 }
 
 /// The drawn ending: what is left to do in one line (`--verbose` lists it), and an outro

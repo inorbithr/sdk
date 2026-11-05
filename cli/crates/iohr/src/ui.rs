@@ -198,6 +198,31 @@ impl Ui {
             .map_err(|e| cancelled(&e))
     }
 
+    /// Any of the choices, as a list; `initial` are ticked first.
+    ///
+    /// # Errors
+    ///
+    /// No terminal, or the person cancelled.
+    pub(crate) fn multiselect(
+        self,
+        prompt: &str,
+        choices: &[String],
+        initial: &[String],
+    ) -> Result<Vec<String>, Error> {
+        if !self.fancy {
+            return Err(Error::Usage(format!(
+                "{prompt}: there is no terminal to ask on; pass it with --set"
+            )));
+        }
+        let mut menu = cliclack::multiselect::<String>(prompt).required(false);
+        for c in choices {
+            menu = menu.item(c.clone(), c.clone(), "");
+        }
+        menu.initial_values(initial.to_vec())
+            .interact()
+            .map_err(|e| cancelled(&e))
+    }
+
     /// A yes or no. Plain: the default, asked of no one.
     ///
     /// # Errors

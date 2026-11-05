@@ -36,30 +36,7 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
     let question = args.question.join(" ");
     Out::note(&ask::label(agent));
     let started = Instant::now();
-    let mut child = tokio::process::Command::new(bin)
-        .arg(question)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(false)
-        .spawn()
-        .map_err(|e| Error::Failed(format!("cannot start `{}`: {}", agent.name(), e.kind())))?;
-    // Ctrl-C reaches the agent too (same process group); iohr waits for it instead of dying
-    // first and leaving the terminal to a half-stopped agent.
-    let status = loop {
-        tokio::select! {
-            s = child.wait() => break s,
-            _ = tokio::signal::ctrl_c() => {}
-        }
-    }
-    .map_err(|e| {
-        Error::Failed(format!(
-            "waiting for `{}` failed: {}",
-            agent.name(),
-            e.kind()
-        ))
-    })?;
-    let code = exit_code(status);
+    let code = start(agent, &bin, question, None).await?;
     if out.json {
         Out::print_json(&serde_json::json!({
             "via": via.name(),
@@ -73,6 +50,44 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
         Ok(c) => Err(Error::Child(c)),
         Err(_) => Err(Error::Child(1)),
     }
+}
+
+/// Starts the agent with `prompt` as its argument (in `cwd` when given), stdio inherited, and
+/// waits for it; its exit code. The one launch code of `iohr ask` and `iohr project init`.
+/// Ctrl-C reaches the agent too (same process group); iohr waits for it instead of dying
+/// first and leaving the terminal to a half-stopped agent.
+pub(crate) async fn start(
+    agent: Agent,
+    bin: &std::path::Path,
+    prompt: String,
+    cwd: Option<&std::path::Path>,
+) -> Result<i32, Error> {
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.arg(prompt)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(false);
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| Error::Failed(format!("cannot start `{}`: {}", agent.name(), e.kind())))?;
+    let status = loop {
+        tokio::select! {
+            s = child.wait() => break s,
+            _ = tokio::signal::ctrl_c() => {}
+        }
+    }
+    .map_err(|e| {
+        Error::Failed(format!(
+            "waiting for `{}` failed: {}",
+            agent.name(),
+            e.kind()
+        ))
+    })?;
+    Ok(exit_code(status))
 }
 
 #[cfg(unix)]

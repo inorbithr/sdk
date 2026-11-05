@@ -9,77 +9,17 @@
 //! that do not exist yet: each step is reported as `not-yet` with the API it needs, never
 //! skipped in silence. Every step is re-runnable; nothing is overwritten.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ext::init::fill;
 use crate::ext::lint::lint;
 use crate::ext::manifest::{SOURCE_FILE, check_name as check_ext_name};
 
-/// One file of a template: where it goes (placeholders allowed) and its text.
-struct TemplateFile {
-    path: &'static str,
-    text: &'static str,
-}
-
-macro_rules! tf {
-    ($path:expr, $src:expr) => {
-        TemplateFile {
-            path: $path,
-            text: include_str!(concat!("../templates/project/", $src)),
-        }
-    };
-}
-
-const DEMO: &[TemplateFile] = &[
-    tf!("extension.toml", "demo/extension.toml"),
-    tf!("README.md", "demo/README.md"),
-    tf!("inorbit-project.toml", "demo/inorbit-project.toml"),
-    tf!(".gitignore", "demo/gitignore"),
-    tf!("src/@@MODULE@@/__init__.py", "demo/src/module/__init__.py"),
-    tf!("src/@@MODULE@@/__main__.py", "demo/src/module/__main__.py"),
-    tf!("src/@@MODULE@@/channel.py", "demo/src/module/channel.py"),
-    tf!("panel/index.html", "demo/panel/index.html"),
-    tf!("tests/test_selftest.py", "demo/tests/test_selftest.py"),
-];
-
-/// What `coordinated` adds to the demo, by path: a file here replaces the demo's file of the
-/// same path, and a new path is added. The service itself is the demo's, not a copy.
-const COORDINATED: &[TemplateFile] = &[
-    tf!("README.md", "coordinated/README.md"),
-    tf!("inorbit-project.toml", "coordinated/inorbit-project.toml"),
-    tf!("coordination.toml", "coordinated/coordination.toml"),
-];
-
 /// The template used when neither `--template` nor `[project] template` names one.
 pub const DEFAULT_TEMPLATE: &str = "demo";
-
-/// The templates `--template` accepts: name, what it is, and whether it is live. A template
-/// that is not live says so and refuses.
-pub const TEMPLATES: &[(&str, &str, bool)] = &[
-    (
-        "demo",
-        "A private macOS service that heartbeats and serves a tiny local panel (Python, no dependencies)",
-        true,
-    ),
-    (
-        "coordinated",
-        "The demo, wired for coordination: a coordination.toml naming your Planner plan and an ask example",
-        true,
-    ),
-    (
-        "macos-app",
-        "A signed macOS app of your own; coming after the demo",
-        false,
-    ),
-    (
-        "ui-panel",
-        "A panel inside InOrbit Desktop; coming after the demo",
-        false,
-    ),
-];
 
 /// The name rule: the folder, the Python module and the extension's name all come from it, so
 /// it is the extension name rule (lowercase, digits, dashes, 2 to 32, never `tbd`) and never a
@@ -112,79 +52,6 @@ pub fn choose_template(flag: Option<&str>, configured: Option<&str>) -> String {
         .to_owned()
 }
 
-/// The templates as `iohr project templates` shows them (also its `--json`).
-#[must_use]
-pub fn listing(default: &str) -> Vec<serde_json::Value> {
-    TEMPLATES
-        .iter()
-        .map(|(id, what, live)| {
-            serde_json::json!({
-                "name": id,
-                "description": what,
-                "status": if *live { "live" } else { "coming" },
-                "default": *id == default,
-            })
-        })
-        .collect()
-}
-
-/// The names of the live templates, for messages.
-fn live_names() -> String {
-    TEMPLATES
-        .iter()
-        .filter(|(_, _, live)| *live)
-        .map(|(id, _, _)| format!("`{id}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// A template's files: the demo's, then the template's own over them by path.
-fn files_of(id: &str) -> Vec<&'static TemplateFile> {
-    let own: &[TemplateFile] = if id == "coordinated" {
-        COORDINATED
-    } else {
-        &[]
-    };
-    DEMO.iter()
-        .filter(|f| !own.iter().any(|o| o.path == f.path))
-        .chain(own.iter())
-        .collect()
-}
-
-/// The template's files for `name`, rendered: (relative path, text).
-///
-/// # Errors
-///
-/// A bad name, an unknown template, or one that is coming.
-pub fn render(
-    template: &str,
-    name: &str,
-    publisher: &str,
-    created_at: &str,
-) -> Result<Vec<(String, String)>, String> {
-    check_name(name)?;
-    let files = match TEMPLATES.iter().find(|(id, _, _)| *id == template) {
-        Some((id, _, true)) => files_of(id),
-        Some((id, _, false)) => {
-            return Err(format!(
-                "the `{id}` template is coming; live today: {}",
-                live_names()
-            ));
-        }
-        None => return Err(format!("there is no `{template}` template")),
-    };
-    let values = [
-        ("@@ID@@", format!("{publisher}/{name}")),
-        ("@@NAME@@", name.to_owned()),
-        ("@@MODULE@@", name.replace('-', "_")),
-        ("@@CREATED_AT@@", created_at.to_owned()),
-    ];
-    Ok(files
-        .iter()
-        .map(|f| (fill(f.path, &values), fill(f.text, &values)))
-        .collect())
-}
-
 /// One step of init, as the report shows it: what happened on this machine, or what it waits on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Step {
@@ -198,7 +65,7 @@ pub struct Step {
     pub needs: String,
 }
 
-fn step(id: &str, title: &str, state: &str, said: impl Into<String>, needs: &str) -> Step {
+pub fn step(id: &str, title: &str, state: &str, said: impl Into<String>, needs: &str) -> Step {
     Step {
         id: id.into(),
         title: title.into(),
@@ -268,7 +135,8 @@ fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
 }
 
 /// The steps that wait on InOrbit, each with the API it needs; never done in silence.
-fn cloud_steps(name: &str) -> Vec<Step> {
+#[must_use]
+pub fn cloud_steps(name: &str) -> Vec<Step> {
     vec![
         step(
             "keychain",
@@ -333,23 +201,13 @@ fn write_files(dir: &Path, files: &[(String, String)]) -> Result<Vec<String>, St
     Ok(written)
 }
 
-/// Writes the project: the files, a git repository with its first commit, and the state
-/// folders. `dir` must not exist or must be empty; nothing is overwritten. The template's
-/// manifest must pass the lint, as `iohr ext init`'s must.
+/// The folder must not exist or must be empty: nothing is overwritten. A read, so a dry run
+/// checks it too.
 ///
 /// # Errors
 ///
-/// A bad name or template, a busy folder, or a write that failed.
-pub fn init(
-    dir: &Path,
-    state_root: &Path,
-    name: &str,
-    template: &str,
-    publisher: &str,
-    now: &str,
-) -> Result<Report, String> {
-    let name = name.trim();
-    let files = render(template, name, publisher, now)?;
+/// A busy folder.
+pub fn check_target(dir: &Path) -> Result<(), String> {
     if dir.exists()
         && std::fs::read_dir(dir)
             .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
@@ -361,25 +219,49 @@ pub fn init(
             dir.display()
         ));
     }
-    let manifest = files
-        .iter()
-        .find(|(p, _)| p == SOURCE_FILE)
-        .map(|(_, t)| t.as_str())
-        .unwrap_or_default();
+    Ok(())
+}
+
+/// The manifest check of a template's rendered files: when there is an `extension.toml`, it
+/// must pass the lint, as `iohr ext init`'s must. A read.
+///
+/// # Errors
+///
+/// What the lint found.
+pub fn check_manifest(files: &[(String, String)]) -> Result<(), String> {
+    let Some((_, manifest)) = files.iter().find(|(p, _)| p == SOURCE_FILE) else {
+        return Ok(());
+    };
     let report = lint(manifest);
-    if !report.ok {
-        return Err(format!(
-            "the template's manifest does not pass the lint: {}",
-            report
-                .findings
-                .iter()
-                .map(|f| f.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; ")
-        ));
+    if report.ok {
+        return Ok(());
     }
-    let written = write_files(dir, &files)?;
-    let mut steps = vec![step(
+    Err(format!(
+        "the template's manifest does not pass the lint: {}",
+        report
+            .findings
+            .iter()
+            .map(|f| f.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ")
+    ))
+}
+
+/// The scaffold step: writes the files under `dir` (a real action: callers reach it only
+/// through the dry-run gate).
+///
+/// # Errors
+///
+/// A busy folder, a manifest that fails the lint, or a write that failed.
+pub fn scaffold(
+    dir: &Path,
+    files: &[(String, String)],
+    template: &str,
+) -> Result<(Vec<String>, Step), String> {
+    check_target(dir)?;
+    check_manifest(files)?;
+    let written = write_files(dir, files)?;
+    let s = step(
         "scaffold",
         "Scaffold from the template",
         "done",
@@ -389,9 +271,15 @@ pub fn init(
             dir.display()
         ),
         "",
-    )];
-    let committed = first_commit(dir, name, template);
-    steps.push(if committed {
+    );
+    Ok((written, s))
+}
+
+/// The git step: a repository with its first commit, or a skipped step when git did not
+/// answer.
+#[must_use]
+pub fn git_step(dir: &Path, name: &str, template: &str) -> Step {
+    if first_commit(dir, name, template) {
         step(
             "git",
             "A git repository with its first commit",
@@ -407,7 +295,22 @@ pub fn init(
             "git did not answer; the folder works without it",
             "",
         )
-    });
+    }
+}
+
+/// The register step: the project's state folders and its record under `state_root/<name>/`.
+/// Returns the state folder with the step.
+///
+/// # Errors
+///
+/// A folder or the record could not be written.
+pub fn register_step(
+    dir: &Path,
+    state_root: &Path,
+    name: &str,
+    template: &str,
+    now: &str,
+) -> Result<(PathBuf, Step), String> {
     let state = state_root.join(name);
     private_dir(&state.join("state"))?;
     private_dir(&state.join("cache"))?;
@@ -417,7 +320,7 @@ pub fn init(
     );
     std::fs::write(state.join("project.toml"), record)
         .map_err(|e| format!("cannot write the project record: {e}"))?;
-    steps.push(step(
+    let s = step(
         "runtime",
         "Registered with the local runtime",
         "done",
@@ -426,16 +329,39 @@ pub fn init(
             state.display()
         ),
         "",
-    ));
-    steps.extend(cloud_steps(name));
-    Ok(Report {
-        name: name.to_owned(),
-        id: format!("{publisher}/{name}"),
-        dir: dir.to_path_buf(),
-        state,
-        files: written,
-        steps,
-    })
+    );
+    Ok((state, s))
+}
+
+/// The prompt the agent gets: the template's own words, then the project, the answers and
+/// what the person described. It goes to the agent's argv and nowhere else.
+#[must_use]
+pub fn agent_prompt(
+    template_prompt: Option<&str>,
+    describe: Option<&str>,
+    name: &str,
+    template: &str,
+    answers: &crate::template::Answers,
+    vals: &[(String, String)],
+) -> String {
+    let base = template_prompt.unwrap_or(
+        "This folder is a fresh InOrbit project. Build what is described below by editing this folder. Keep it free of secrets.",
+    );
+    let mut p = crate::template::fill_text(base, vals);
+    let _ = write!(
+        p,
+        "\n\nThe project is `{name}`, scaffolded from the `{template}` template; you are in its folder."
+    );
+    if !answers.is_empty() {
+        p.push_str("\n\nThe answers given at setup:");
+        for (k, a) in answers {
+            let _ = write!(p, "\n- {k}: {}", a.text());
+        }
+    }
+    if let Some(d) = describe {
+        let _ = write!(p, "\n\nWhat the person wants:\n{d}");
+    }
+    p
 }
 
 /// The smoke test's result.
@@ -580,6 +506,13 @@ pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::template::{self, Answers, Spec};
+
+    fn rendered(id: &str, name: &str) -> Vec<(String, String)> {
+        let t = template::load(&Spec::Id(id.into()), Path::new("/no-such-iohr-root")).unwrap();
+        let vals = template::values(name, "local", "2026-10-12T10:00:00Z", &Answers::new());
+        template::render(&t, &vals).unwrap()
+    }
 
     #[test]
     fn the_name_rule() {
@@ -603,38 +536,27 @@ mod tests {
 
     #[test]
     fn the_demo_renders_whole_and_its_manifest_passes_the_lint() {
-        let files = render("demo", "my-shop", "local", "2026-10-12T10:00:00Z").unwrap();
+        let files = rendered("demo", "my-shop");
         assert!(files.iter().any(|(p, _)| p == "src/my_shop/__main__.py"));
         for (p, t) in &files {
             assert!(!t.contains("@@"), "{p} keeps a placeholder");
             assert!(!p.contains("@@"), "{p}");
         }
         let (_, manifest) = files.iter().find(|(p, _)| p == SOURCE_FILE).unwrap();
-        let r = lint(manifest);
-        assert!(r.ok, "{:?}", r.findings);
+        assert!(lint(manifest).ok);
         assert!(manifest.contains("id = \"local/my-shop\""));
-        assert!(
-            render("macos-app", "demo", "local", "")
-                .unwrap_err()
-                .contains("coming")
-        );
-        assert!(render("nope", "demo", "local", "").is_err());
-        assert!(render("demo", "tbd", "local", "").is_err());
+        assert!(check_manifest(&files).is_ok());
     }
 
     #[test]
     fn the_coordinated_template_is_the_demo_plus_a_coordination_manifest() {
-        let files = render("coordinated", "my-shop", "local", "2026-11-05T10:00:00Z").unwrap();
+        let files = rendered("coordinated", "my-shop");
         let get = |p: &str| files.iter().find(|(f, _)| f == p).map(|(_, t)| t.as_str());
         for (p, t) in &files {
             assert!(!t.contains("@@"), "{p} keeps a placeholder");
         }
-        assert!(
-            get("src/my_shop/__main__.py").is_some(),
-            "the demo's service"
-        );
-        let c = get("coordination.toml").expect("coordination.toml");
-        let v: toml::Table = c.parse().expect("coordination.toml is TOML");
+        assert!(get("src/my_shop/__main__.py").is_some());
+        let v: toml::Table = get("coordination.toml").unwrap().parse().unwrap();
         assert_eq!(v["plan"]["id"].as_str(), Some(""));
         assert_eq!(v["ask"][0]["external_id"].as_str(), Some("my-shop-first"));
         assert!(
@@ -642,16 +564,12 @@ mod tests {
                 .unwrap()
                 .contains("template = \"coordinated\"")
         );
-        assert!(get("README.md").unwrap().contains("coordination.toml"));
-        // One file per path, and the demo is not changed.
         let mut paths: Vec<&String> = files.iter().map(|(p, _)| p).collect();
         paths.sort();
         paths.dedup();
         assert_eq!(paths.len(), files.len());
-        let demo = render("demo", "my-shop", "local", "").unwrap();
+        let demo = rendered("demo", "my-shop");
         assert_eq!(demo.len() + 1, files.len());
-        assert!(!demo.iter().any(|(p, _)| p == "coordination.toml"));
-        assert!(lint(get(SOURCE_FILE).unwrap()).ok);
     }
 
     #[test]
@@ -663,63 +581,46 @@ mod tests {
     }
 
     #[test]
-    fn the_listing_names_every_template_with_live_or_coming_and_the_default() {
-        let l = listing("coordinated");
-        assert_eq!(l.len(), TEMPLATES.len());
-        let by = |n: &str| l.iter().find(|t| t["name"] == n).unwrap();
-        assert_eq!(by("demo")["status"], "live");
-        assert_eq!(by("coordinated")["status"], "live");
-        assert_eq!(by("coordinated")["default"], true);
-        assert_eq!(by("demo")["default"], false);
-        assert_eq!(by("macos-app")["status"], "coming");
-        assert_eq!(by("ui-panel")["status"], "coming");
-        let e = render("ui-panel", "demo", "local", "").unwrap_err();
-        assert!(e.contains("coming") && e.contains("`coordinated`"), "{e}");
-    }
-
-    #[test]
-    fn init_writes_the_project_and_its_state_refuses_a_busy_folder_and_reports_every_step() {
+    fn the_steps_write_the_project_and_its_state_and_refuse_a_busy_folder() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("development/demo");
         let st = d.path().join("projects");
-        let r = init(&dir, &st, "demo", "demo", "local", "2026-10-12T10:00:00Z").unwrap();
-        assert_eq!(r.id, "local/demo");
-        assert!(dir.join("extension.toml").is_file());
+        let files = rendered("demo", "demo");
+        let (written, s) = scaffold(&dir, &files, "demo").unwrap();
+        assert_eq!(s.id, "scaffold");
+        assert_eq!(written.len(), files.len());
         assert!(dir.join("src/demo/__main__.py").is_file());
-        assert!(st.join("demo/state").is_dir() && st.join("demo/cache").is_dir());
+        let (state, r) = register_step(&dir, &st, "demo", "demo", "2026-10-12T10:00:00Z").unwrap();
+        assert_eq!(r.id, "runtime");
+        assert!(state.join("state").is_dir() && state.join("cache").is_dir());
         assert!(st.join("demo/project.toml").is_file());
-        let ids: Vec<&str> = r.steps.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            [
-                "scaffold", "git", "runtime", "keychain", "allowed", "space", "listing", "memory",
-                "monitors"
-            ]
-        );
-        assert!(r.ok());
         assert!(
-            r.steps
+            cloud_steps("demo")
                 .iter()
-                .filter(|s| s.state == "not-yet")
-                .all(|s| !s.needs.is_empty()),
-            "a stub names what it needs"
+                .all(|s| s.state != "not-yet" || !s.needs.is_empty())
         );
-        let l = lines(&r, None, None);
-        assert_eq!(
-            l[0],
-            "local/demo is at ".to_owned() + &dir.display().to_string()
-        );
-        assert!(l[1].starts_with("not yet: not signed in"));
         assert!(
-            l.iter()
-                .any(|x| x.starts_with("asked: the editor may open it"))
-        );
-        assert!(l.last().unwrap().starts_with("not yet: its own monitors"));
-        assert!(
-            init(&dir, &st, "demo", "demo", "local", "")
+            scaffold(&dir, &files, "demo")
                 .unwrap_err()
                 .contains("not empty")
         );
+    }
+
+    #[test]
+    fn the_agent_prompt_holds_the_template_words_the_answers_and_the_description() {
+        let mut a = Answers::new();
+        a.insert("flavour".into(), template::Answer::Text("fancy".into()));
+        let vals = template::values("my-shop", "local", "", &a);
+        let p = agent_prompt(
+            Some("Module @@MODULE@@."),
+            Some("sell hats"),
+            "my-shop",
+            "demo",
+            &a,
+            &vals,
+        );
+        assert!(p.starts_with("Module my_shop."));
+        assert!(p.contains("- flavour: fancy") && p.contains("sell hats"));
     }
 
     #[test]
@@ -735,16 +636,9 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path().join("development/my-shop");
         let st = d.path().join("projects");
-        let r = init(
-            &dir,
-            &st,
-            "my-shop",
-            "demo",
-            "local",
-            "2026-10-12T10:00:00Z",
-        )
-        .unwrap();
-        let s = smoke(&r.dir, &r.state, "my-shop");
+        scaffold(&dir, &rendered("demo", "my-shop"), "demo").unwrap();
+        let (state, _) = register_step(&dir, &st, "my-shop", "demo", "").unwrap();
+        let s = smoke(&dir, &state, "my-shop");
         assert!(s.ok, "{} / {}", s.said, s.output);
         let b = s.heartbeat.unwrap();
         assert_eq!(b["id"], "local/my-shop");

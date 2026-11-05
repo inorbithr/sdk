@@ -436,6 +436,75 @@ refuse until they exist. The template is `--template`, else `template` under `[p
 `config.toml` (`[project]` / `template = "coordinated"`; you edit it, `iohr config` does not
 write it), else `demo`. A configured template that is coming refuses too.
 
+### Templates are data
+
+A template is a folder with a `template.toml` and the files of the project (ADR 0213). Nothing
+about one is compiled in except the built-ins, which are the same folders embedded.
+
+```toml
+id = "my-sensor"
+description = "what it is"
+status = "live"          # or "coming"
+extends = "demo"         # optional: its files, questions and steps come first; yours replace by path
+agent_prompt = "Make @@NAME@@ read @@KIND@@."   # optional, used by the agent step and --describe
+
+[[questions]]
+key = "kind"             # lowercase snake_case; the file text gets @@KIND@@
+prompt = "Which kind?"
+type = "choice"          # string, bool, choice, multi
+choices = ["alpha", "beta"]
+default = "alpha"
+regex = "^[a-z]+$"       # string answers only
+help = "shown above the question"
+when = "kind == beta"    # also: `key`, `!key`, `key != value`; asked only when it holds
+
+[[steps]]
+name = "git"             # git, register, smoke, or agent (labelled AI)
+```
+
+Files are filled by the same `@@KEY@@` renderer as the built-ins (`@@NAME@@`, `@@ID@@`,
+`@@MODULE@@`, `@@CREATED_AT@@` plus your question keys), and path segments are filled too
+(`notes-@@KIND@@.md`). The shape follows copier's `copier.yml` (questions with a type, choices,
+default and `when`; layering) and cargo-generate's `cargo-generate.toml` (placeholders with a
+type, prompt, choices and regex).
+
+The template comes from, in order: `--template PATH` (a folder), `~/.inorbit/templates/<id>/`,
+then the built-ins. `--template gh:owner/repo[//subdir][@ref]` (or `git:URL`) shallow-clones a
+repository to read it (never in a dry run; `@ref` is a branch or tag).
+
+```sh
+iohr project template new my-sensor [--extends demo]   # a working template in ~/.inorbit/templates
+iohr project template lint ./my-sensor                 # checks keys, `when`, regexes, placeholders, a sample render
+iohr project template schema                           # the JSON Schema of template.toml
+iohr project templates                                 # with an ORIGIN column
+```
+
+Answers come from `--set key=value` (repeatable), `--answers file.json|toml`, then, at a
+terminal, the questions for what is still missing, then the defaults; `--yes` never asks and
+takes the defaults, and a missing answer with no default is an error that names the key.
+
+### Describe it, your agent builds it
+
+When `claude` or `codex` is on your PATH (or `[ask]` `agent` in `config.toml` names one), the
+menu starts with "Describe it, your agent builds it", and `--describe "text"` does the same.
+`init` scaffolds the template (demo by default), then starts your own agent in the new folder
+with a prompt from your words, the answers and the template's `agent_prompt`, with your
+terminal attached, labelled AI. Prompts and answers are never logged. With no agent it says how
+to configure one. `--describe` cannot be combined with `--json` (add `--dry-run` for data).
+
+### Try it without changing anything
+
+```sh
+iohr project init my-shop --template demo --dry-run --yes
+```
+
+`--dry-run` (alias `--plan`) runs the whole flow, questions, defaults and `when` skips
+included, and does nothing: no files or folders, no git, registration or smoke test, no
+sign-in, no network call, and the agent is not started; its exact command and full prompt are
+printed instead, still labelled AI. Every step reads `would: ...`, and it ends with
+`dry run: nothing was changed`. With `--json` the plan is data: `files` (path and bytes),
+`steps`, and `agent` (command and prompt). Every action goes through one gate that checks it.
+
 The steps that need InOrbit (the project as a Decisions space, its private listing, its own
 scopes and tokens, a memory namespace, monitors and notifications) are reported as `not yet`,
 each with the API it waits on; nothing is skipped in silence, and a step that needs your or an

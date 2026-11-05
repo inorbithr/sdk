@@ -10,6 +10,7 @@ pub mod cli;
 pub mod environments;
 pub mod ext;
 pub mod project;
+pub mod template;
 
 mod args;
 mod ask;

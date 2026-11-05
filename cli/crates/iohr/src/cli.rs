@@ -1140,11 +1140,29 @@ pub enum ProjectCommand {
         /// At a terminal it is asked for when missing (the folder's name is the default);
         /// anywhere else it is required.
         name: Option<String>,
-        /// The template (`iohr project templates` lists them). Default: `[project] template`
-        /// in iohr's config.toml, else demo. A template that is coming says so and refuses.
-        /// At a terminal, leaving it out offers the templates as a menu.
+        /// The template: an id (`iohr project templates` lists them), a folder
+        /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
+        /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
+        /// else demo. A template that is coming says so and refuses. At a terminal, leaving
+        /// it out offers the templates as a menu.
         #[arg(long)]
         template: Option<String>,
+        /// Answer a template question: `--set key=value`, repeatable.
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        /// Answers from a .json or .toml file (a table of key to value); `--set` wins.
+        #[arg(long, value_name = "FILE")]
+        answers: Option<PathBuf>,
+        /// Describe the project and your own agent (claude or codex, on your PATH) builds it
+        /// in the new folder, from the template's agent prompt. Its output is labelled AI.
+        #[arg(long, value_name = "TEXT")]
+        describe: Option<String>,
+        /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
+        /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
+        /// agent is not started (its command and prompt are printed). Every step shows as
+        /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
+        #[arg(long, visible_alias = "plan")]
+        dry_run: bool,
         /// Answer the questions with their defaults: no menu, no confirmation.
         #[arg(short = 'y', long)]
         yes: bool,
@@ -1163,6 +1181,31 @@ pub enum ProjectCommand {
     /// one is the default (`[project] template` in config.toml, else demo). `--json` prints
     /// the same as a list.
     Templates,
+    /// Make, check and describe templates of your own (folders with a template.toml).
+    Template {
+        #[command(subcommand)]
+        cmd: TemplateCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TemplateCommand {
+    /// Scaffold a template of your own in ~/.inorbit/templates/ID, a working one to edit.
+    New {
+        /// The template's id: lowercase letters, digits and dashes.
+        id: String,
+        /// Add to another template (an id): its files, questions and steps come first.
+        #[arg(long, value_name = "ID")]
+        extends: Option<String>,
+    },
+    /// Check a template folder: its template.toml, its questions and `when` rules, every
+    /// placeholder, `extends`, and the extension manifest it renders. Exits 1 on any finding.
+    Lint {
+        /// The template's folder.
+        path: PathBuf,
+    },
+    /// Print the JSON Schema of template.toml, for editors and InOrbit Desktop.
+    Schema,
 }
 
 /// What `iohr ext init` scaffolds.

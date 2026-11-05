@@ -1,0 +1,17 @@
+# The demo template as data (PRD 0088.1). Every template is a folder with this file; the other
+# files of the folder are the project, with @@NAME@@, @@ID@@, @@MODULE@@, @@CREATED_AT@@ and
+# one @@KEY@@ per question filled in, in their text and in their paths.
+id = "demo"
+description = "A private macOS service that heartbeats and serves a tiny local panel (Python, no dependencies)"
+status = "live"
+# What the agent is told when you describe the project (`--describe`); the placeholders are filled.
+agent_prompt = "This folder is a fresh InOrbit project from the `demo` template: a private macOS service in Python (src/@@MODULE@@/) that heartbeats and serves a small panel (panel/index.html). Build what is described below by editing this folder. Keep extension.toml valid (`iohr ext lint --preview` must pass), keep the project free of secrets, and keep tests/test_selftest.py passing."
+
+[[steps]]
+name = "git"
+
+[[steps]]
+name = "register"
+
+[[steps]]
+name = "smoke"
