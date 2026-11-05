@@ -354,12 +354,11 @@ pub(crate) fn link_of(answer: &str, cwd: &std::path::Path) -> Option<String> {
         {
             // Written with `/` on every system, as the answer wrote it: the hook's record
             // and `actions::open` read the same form on Windows.
-            return real.strip_prefix(root).ok().and_then(|r| {
-                r.components()
-                    .map(|c| c.as_os_str().to_str())
-                    .collect::<Option<Vec<_>>>()
-                    .map(|parts| parts.join("/"))
-            });
+            return real
+                .strip_prefix(root)
+                .ok()
+                .filter(|r| r.to_str().is_some())
+                .map(crate::paths::slashed);
         }
     }
     None

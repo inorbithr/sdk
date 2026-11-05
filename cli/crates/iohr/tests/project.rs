@@ -224,7 +224,7 @@ fn write(path: &Path, text: &str) {
 
 /// A user template with a choice, a `when` question, a templated path and an agent step.
 fn user_template(home: &Path) -> std::path::PathBuf {
-    let t = home.join(".inorbit/templates/probe");
+    let t = home.join(".inorbit").join("templates").join("probe");
     write(
         &t.join("template.toml"),
         r#"id = "probe"
@@ -656,7 +656,14 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
         "{t}"
     );
     assert!(
-        !t.contains(h.path().to_str().unwrap()) || t.contains("projects/my-shop"),
+        !t.contains(h.path().to_str().unwrap())
+            || t.contains(
+                &h.path()
+                    .join(".inorbit/projects")
+                    .join("my-shop")
+                    .display()
+                    .to_string()
+            ),
         "{t}"
     );
     let j = iohr_in(
