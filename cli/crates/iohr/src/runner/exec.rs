@@ -142,9 +142,13 @@ impl ClaudeExec {
         }
     }
 
-    /// The raw `claude auth status` line, for the identity hash at registration.
+    /// The canonical identity line of the sign-in ([`provider::identity_line`]), for the
+    /// identity hash at registration; `None` when the answer names no seat.
     pub(crate) async fn identity_line(&self) -> Option<String> {
-        self.ask(&["auth", "status"]).await
+        self.ask(&["auth", "status"])
+            .await
+            .as_deref()
+            .and_then(provider::identity_line)
     }
 
     pub(crate) async fn version(&self) -> String {
