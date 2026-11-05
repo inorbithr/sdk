@@ -297,13 +297,15 @@ fn headless_wanted(h: &HeadlessArgs) -> bool {
 
 /// What the shell hook told this call, as the context the prompt is built from.
 fn context_of(h: &HeadlessArgs) -> Result<Context, Error> {
+    let cwd = match &h.cwd {
+        Some(c) => c.clone(),
+        None => std::env::current_dir()
+            .map(|d| d.display().to_string())
+            .unwrap_or_default(),
+    };
     Ok(Context {
-        cwd: match &h.cwd {
-            Some(c) => c.clone(),
-            None => std::env::current_dir()
-                .map(|d| d.display().to_string())
-                .unwrap_or_default(),
-        },
+        files: headless::list_folder(Path::new(&cwd)),
+        cwd,
         command: h.last_command.clone().unwrap_or_default(),
         exit_code: h.exit_code,
         output: match &h.output_file {

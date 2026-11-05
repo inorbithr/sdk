@@ -508,6 +508,10 @@ With `--json` the agent's own event lines are passed through untouched, one per 
 by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
 command exits with the agent's code, and with 1 when the agent reports a failed run.
 
+The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes it: a terminal
+resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
+do not close it or pick an action. Only a real terminal error closes it, with one line on stderr.
+
 The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
 read, that nothing was run, that an AI model under your own subscription got the folder, and
 to check the answer) on the first card ever, whenever that text changes, and about once a

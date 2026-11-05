@@ -321,6 +321,35 @@ fn context_flags_reach_the_agent_and_the_output_is_cut_to_its_end() {
 }
 
 #[test]
+fn the_agent_gets_the_folders_top_level_names_and_never_their_contents() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let dir = r.home.path().join("proj");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "CONTENTS-NEVER-SENT").unwrap();
+    std::fs::write(dir.join("debug.log"), "x").unwrap();
+    std::fs::write(dir.join(".env"), "x").unwrap();
+    std::fs::write(dir.join(".gitignore"), "*.log\n").unwrap();
+    let out = r.run(
+        &["ask", "--cwd", dir.to_str().unwrap(), "--", "what is here?"],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let m = r.saw("claude.stdin");
+    assert!(
+        m.contains("<files>\nsrc/\n.gitignore\nCargo.toml\n</files>"),
+        "{m}"
+    );
+    assert!(!m.contains("CONTENTS-NEVER-SENT") && !m.contains("debug.log") && !m.contains(".env"));
+    assert!(
+        text(&out).contains("its top-level file names"),
+        "{}",
+        text(&out)
+    );
+}
+
+#[test]
 fn a_failed_run_exits_1_and_never_quotes_the_question_or_the_agents_text() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
@@ -598,9 +627,11 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
 
 /// Drives a real interactive zsh on a pty (python3's `pty`; the test is skipped where zsh
 /// or python3 is missing). `lines` are typed one by one; the screen after each is returned.
+/// `RAW:` lines are keys as they are, `WINCH:` resizes the terminal and `SIG:NAME` signals the
+/// shell's process group.
 fn drive_zsh(hook_file: &std::path::Path, bin: &std::path::Path, lines: &[String]) -> Vec<String> {
     const DRIVER: &str = r#"
-import os, pty, select, sys, time
+import fcntl, os, pty, select, signal, struct, sys, termios, time
 bindir, home = sys.argv[1], sys.argv[2]
 lines = sys.argv[3:]
 pid, fd = pty.fork()
@@ -626,6 +657,12 @@ for l in lines:
     # "RAW:" lines are keys, sent as they are; the others are typed with Enter.
     if l.startswith("RAW:"):
         os.write(fd, l[4:].encode())
+    elif l.startswith("WINCH:"):
+        # The terminal is resized: SIGWINCH to the foreground group, as a window drag does.
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+    elif l.startswith("SIG:"):
+        # What an async prompt's worker does to the shell's group (the shell and its children).
+        os.killpg(pid, getattr(signal, "SIG" + l[4:]))
     else:
         os.write(fd, l.encode() + b"\n")
     shown.append(rd(1.2).decode(errors="replace"))
@@ -709,7 +746,7 @@ fn press_in_menu(
     env: &[(&str, &str)],
 ) -> Option<(String, String)> {
     const DRIVER: &str = r#"
-import json, os, pty, select, sys, time
+import fcntl, json, os, pty, select, signal, struct, sys, termios, time
 env, key, outfile, work = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
 argv = sys.argv[5:]
 pid, fd = pty.fork()
@@ -731,8 +768,18 @@ def rd(t):
                 break
     return out
 screen = rd(0.5)
-os.write(fd, key.encode())
-screen += rd(0.5)
+# `key` is one key, or steps split by the unit separator (0x1f): keys as they are, `WINCH:` (resize) and `SIG:NAME`.
+for step in key.split("\x1f"):
+    try:
+        if step.startswith("WINCH:"):
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+        elif step.startswith("SIG:"):
+            os.kill(pid, getattr(signal, "SIG" + step[4:]))
+        else:
+            os.write(fd, step.encode())
+    except OSError:
+        pass  # the menu is gone: its stdout says what it printed
+    screen += rd(0.5)
 sys.stdout.write(screen.decode(errors="replace"))
 "#;
     if Command::new("python3").arg("--version").output().is_err() {
@@ -865,6 +912,82 @@ fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
         "the line was not run: {on_line:?}"
     );
     assert!(out[7].contains("RAN-2"), "Enter runs it: {:?}", out[7]);
+}
+
+// The owner's bug (RFC 0203.1): the menu "does not hold, just exits". It must wait for a
+// choice through a resize, the signals of an async prompt's worker, and the application
+// cursor keys a shell's line editor turns on (`ESC O B` for Down; `ESC O F` and `ESC [ 1 ; 5 C`
+// used to pick Follow up and Copy by their last letter). Only the letter at the end picks.
+#[test]
+fn the_menu_holds_through_resizes_signals_and_application_cursor_keys() {
+    let r = Rig::new();
+    let cmd = ["ask", "--menu", "--command=git status", "--link=notes.md"];
+    let steps = [
+        "WINCH:",
+        "SIG:CHLD",
+        "SIG:WINCH",
+        "SIG:CONT",
+        "\u{1b}OB",
+        "\u{1b}OA",
+        "\u{1b}OC",
+        "\u{1b}OF",
+        "\u{1b}[1;5C",
+        "\u{1b}[B",
+        "x",
+        "e",
+    ]
+    .join("\u{1f}");
+    let Some((line, screen)) = press_in_menu(&r, &cmd, &steps, &[]) else {
+        return;
+    };
+    assert_eq!(line, "?? explain this command: git status", "{screen:?}");
+}
+
+// The same on a real zsh with the hook: the key opens the menu, an async worker's signals and
+// a resize reach the shell's group while it is open, and the menu still waits for the letter.
+#[test]
+fn the_menu_under_zsh_holds_through_signals_and_a_resize() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    // The answer is fake; the menu is the real binary.
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in\n*--menu*) exec {real} \"$@\";;\n*) printf 'the answer\\036git status\\036notes.md';;\nesac\n",
+            real = env!("CARGO_BIN_EXE_iohr")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {}", file.display()),
+            "? a question".to_owned(),
+            "RAW:\u{1b}[B".to_owned(), // Down on the empty line: the menu
+            "WINCH:".to_owned(),
+            "SIG:CHLD".to_owned(),
+            "SIG:WINCH".to_owned(),
+            "RAW:\u{1b}OB".to_owned(),
+            "RAW:\u{1b}OF".to_owned(),
+            "RAW:e".to_owned(),
+        ],
+    );
+    assert!(out[2].contains("What next?"), "{out:?}");
+    let want = "?? explain this command: git status";
+    for (i, screen) in out.iter().enumerate().take(8).skip(3) {
+        assert!(!screen.contains(want), "left the menu at step {i}: {out:?}");
+    }
+    assert!(out[8].contains(want), "the letter picked: {out:?}");
 }
 
 #[test]
