@@ -23,14 +23,31 @@ fn the_examples_validate_and_every_invalid_file_is_refused() {
         assert_eq!(validate(&read(p.clone())), Ok(()), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 18);
+    assert_eq!(n, 19);
     let mut n = 0;
     for e in std::fs::read_dir(dir.join("schema/invalid")).unwrap() {
         let p = e.unwrap().path();
         assert!(validate(&read(p.clone())).is_err(), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 54);
+    assert_eq!(n, 59);
+}
+
+#[test]
+fn the_reattribute_example_looks_up_and_its_effect_is_core_s_sentence() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/host-action");
+    let d: Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("schema/examples/labs-reattribute-document.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let a = lookup_on(&d, "linux").unwrap();
+    assert_eq!(a.id(), REATTRIBUTE_DOCUMENT);
+    assert_eq!(a.tool(), Tool::CoreMise);
+    assert_eq!(
+        d["effect"],
+        "Moves the proven rows of document ldoc_01M4P30371W9A3V5S3YCAHRTAN (documents 1, versions 2, comments 3) to Io; it can be reverted with labs:reattribute --revert <run>."
+    );
 }
 
 /// The two actions of RFC 0172: every example looks up to its action, and the rules a
@@ -479,6 +496,7 @@ fn host(dir: &std::path::Path, kube: Result<KubeTarget, String>) -> HostRunner {
         user_units: vec!["iohr-runner.service".to_owned()],
         core_checkout: None,
         ssh_env: Vec::new(),
+        account: None,
     }
 }
 
@@ -1411,4 +1429,36 @@ async fn a_dropped_run_takes_what_its_tool_started() {
     run.abort();
     let _ = run.await;
     assert!(crate::runner::exec::process_gone(pid).await);
+}
+
+#[test]
+fn a_worktree_is_only_core_mise_under_the_worktree_root_with_a_mise_toml() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let mut h = host(dir.path(), Err("none".to_owned()));
+    h.env = vec![("HOME".into(), home.clone().into())];
+    let root = home.join(".inorbit/state").join(WORKTREE_DIR);
+    let wt = root.join("reattribute-1");
+    std::fs::create_dir_all(&wt).unwrap();
+    // No mise.toml yet: not a core checkout.
+    assert!(h.worktree_problem(Tool::CoreMise, &wt).is_some());
+    std::fs::write(wt.join("mise.toml"), "").unwrap();
+    assert_eq!(h.worktree_problem(Tool::CoreMise, &wt), None);
+    // Other tools, the root itself, a path that climbs out, a sibling and a relative one.
+    assert!(h.worktree_problem(Tool::Git, &wt).is_some());
+    assert!(h.worktree_problem(Tool::CoreMise, &root).is_some());
+    assert!(
+        h.worktree_problem(Tool::CoreMise, &wt.join("../../../.."))
+            .is_some()
+    );
+    let other = home.join(".inorbit/state/other");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("mise.toml"), "").unwrap();
+    assert!(h.worktree_problem(Tool::CoreMise, &other).is_some());
+    assert!(
+        h.worktree_problem(Tool::CoreMise, Path::new("reattribute-1"))
+            .is_some()
+    );
+    // The root is never next to a core checkout's own worktrees.
+    assert_eq!(h.worktree_root().unwrap(), root);
 }

@@ -61,11 +61,16 @@
 //! half there, and the counts a summary needs are taken from the whole stream. It goes
 //! into a report only after [`redact_output`], and the report is cut to [`OUTPUT_CAP`]
 //! after that.
+//!
+//! `labs.reattribute-document` runs core's `labs:reattribute` task in a fresh detached
+//! worktree of core's `origin/main` ([`CoreWorktree`], under [`WORKTREE_DIR`] in the
+//! runner's state folder), removed on every way out; its module checks the evidence
+//! files, the counts and the result.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
@@ -75,6 +80,7 @@ use super::provider;
 
 mod disk_prune;
 mod install_checks;
+mod labs_reattribute;
 mod runner_scale;
 
 /// The schema a run's `schema_id` names.
@@ -93,6 +99,9 @@ pub(crate) const RELEASE_RERUN: &str = "gh.release-rerun";
 pub(crate) const INSTALL_CHECKS: &str = "agent.install-checks";
 pub(crate) const DISK_PRUNE: &str = "disk.prune";
 pub(crate) const RUNNER_SCALE: &str = "helm.runner-scale";
+pub(crate) const REATTRIBUTE_DOCUMENT: &str = "labs.reattribute-document";
+/// Core's task the action runs.
+pub(crate) const LABS_REATTRIBUTE: &str = "labs:reattribute";
 
 /// The roll tasks `roll.task` may run, a subset of what `remote-roll.sh` allows.
 pub(crate) const ROLL_TASKS: &[&str] = &[
@@ -347,6 +356,7 @@ pub(crate) fn effect_of(action: &str, params: &Value) -> Option<String> {
                 text("release")?
             )
         }
+        REATTRIBUTE_DOCUMENT => return labs_reattribute::effect(params),
         _ => return None,
     })
 }
@@ -478,6 +488,7 @@ pub(crate) fn validate(action: &Value) -> Result<(), String> {
         }
         DISK_PRUNE => disk_prune::params(params)?,
         RUNNER_SCALE => runner_scale::params(params)?,
+        REATTRIBUTE_DOCUMENT => labs_reattribute::params(params)?,
         _ => return Err("/action: unknown action".to_owned()),
     }
     if effect_of(id, &m["params"]).as_deref() != Some(effect) {
@@ -535,6 +546,14 @@ pub(crate) enum Action {
         max_runners: u64,
         min_runners: u64,
     },
+    /// `labs.reattribute-document`: one Decisions document's proven rows, moved from the
+    /// subject `from` to Io, when they are the `expected` counts.
+    ReattributeDocument {
+        document: String,
+        from: String,
+        evidence_ts: String,
+        expected: labs_reattribute::Counts,
+    },
 }
 
 impl Action {
@@ -554,6 +573,7 @@ impl Action {
             Self::InstallChecks { .. } => INSTALL_CHECKS,
             Self::DiskPrune { .. } => DISK_PRUNE,
             Self::RunnerScale { .. } => RUNNER_SCALE,
+            Self::ReattributeDocument { .. } => REATTRIBUTE_DOCUMENT,
         }
     }
 
@@ -567,7 +587,7 @@ impl Action {
             Self::Upgrade => Tool::Iohr,
             Self::PreviewTake { .. } => Tool::Mise,
             Self::RollTask { .. } => Tool::RemoteRoll,
-            Self::SweepTargets { .. } => Tool::CoreMise,
+            Self::SweepTargets { .. } | Self::ReattributeDocument { .. } => Tool::CoreMise,
             Self::InstallChecks { .. } => Tool::Git,
             Self::DiskPrune { .. } => Tool::Df,
             Self::RunnerScale { .. } => Tool::Helm,
@@ -658,6 +678,16 @@ pub(crate) fn lookup_on(doc: &Value, os: &str) -> Result<Action, String> {
                 Some(_) => int("min_runners")?,
             },
         },
+        Some(REATTRIBUTE_DOCUMENT) => Action::ReattributeDocument {
+            document: text("document")?,
+            from: text("from")?,
+            evidence_ts: text("evidence_ts")?,
+            expected: labs_reattribute::Counts {
+                documents: int("expected_documents")?,
+                versions: int("expected_versions")?,
+                comments: int("expected_comments")?,
+            },
+        },
         _ => return Err("unknown action".to_owned()),
     };
     plan(&action, os)?;
@@ -731,7 +761,8 @@ pub(crate) enum Tool {
     CoreMise,
     /// `~/.inorbit/roll/remote-roll.sh`, the host's one route to the deploy server.
     RemoteRoll,
-    /// `git`, started in the configured core checkout: reads only (`agent.install-checks`).
+    /// `git`, started in the configured core checkout: reads, plus adding and removing a
+    /// host action's own worktree ([`CoreWorktree`]).
     Git,
     /// `df`: reads the free bytes of one disk (`disk.prune`).
     Df,
@@ -772,7 +803,7 @@ impl Tool {
     }
 }
 
-/// What `disk.prune` and `helm.runner-scale` refuse before anything runs. Their calls
+/// What `disk.prune`, `helm.runner-scale` and `labs.reattribute-document` refuse before anything runs. Their calls
 /// depend on what the host says first, so the modules build them, not `plan`.
 fn check_before_start(action: &Action, os: &str) -> Result<(), String> {
     match action {
@@ -785,6 +816,12 @@ fn check_before_start(action: &Action, os: &str) -> Result<(), String> {
             max_runners,
             min_runners,
         } => runner_scale::check(release, *max_runners, *min_runners),
+        Action::ReattributeDocument {
+            document,
+            from,
+            evidence_ts,
+            expected,
+        } => labs_reattribute::check(document, from, evidence_ts, expected),
         _ => Ok(()),
     }
 }
@@ -875,7 +912,8 @@ pub(crate) fn plan(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>
         | Action::ReleaseRerun { .. }
         | Action::InstallChecks { .. }
         | Action::DiskPrune { .. }
-        | Action::RunnerScale { .. } => return plan_host_task(action, os),
+        | Action::RunnerScale { .. }
+        | Action::ReattributeDocument { .. } => return plan_host_task(action, os),
     })
 }
 
@@ -949,7 +987,9 @@ fn plan_host_task(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>,
             }
             Vec::new()
         }
-        Action::DiskPrune { .. } | Action::RunnerScale { .. } => {
+        Action::DiskPrune { .. }
+        | Action::RunnerScale { .. }
+        | Action::ReattributeDocument { .. } => {
             check_before_start(action, os)?;
             Vec::new()
         }
@@ -1076,6 +1116,88 @@ async fn drain(
     Ok(capture.finish())
 }
 
+/// The folder, under the runner's state folder, that holds the host actions' worktrees.
+/// The runner's config names no work or build folder, so this one is fixed; it is not
+/// next to the core checkout's own worktrees, which `wt-reap` removes.
+pub(crate) const WORKTREE_DIR: &str = "host-action-worktrees";
+
+/// Seconds since the Unix epoch.
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// A fresh detached worktree of core's `origin/main` for one host action, which is
+/// removed on every way out of [`CoreWorktree::within`].
+pub(crate) struct CoreWorktree;
+
+impl CoreWorktree {
+    /// Fetches `origin main`, adds the worktree `name` (`[a-z0-9-]`, 1 to 64 characters)
+    /// under [`ArgvRunner::worktree_root`], runs `body` in it and always runs
+    /// `git worktree remove --force` after, whatever `body` or the setup gave. A
+    /// leftover of the same name is cleared first. A failed removal is added to the
+    /// result.
+    ///
+    /// # Errors
+    /// The name, a failed git call, or what `body` refuses.
+    pub(crate) async fn within<T: ArgvRunner>(
+        tools: &T,
+        name: &str,
+        body: impl AsyncFnOnce(&Path) -> Result<String, String>,
+    ) -> Result<String, String> {
+        if name.is_empty()
+            || name.len() > 64
+            || !name
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+        {
+            return Err("worktree: not a worktree name".to_owned());
+        }
+        let root = tools.worktree_root()?;
+        std::fs::create_dir_all(&root)
+            .map_err(|e| format!("worktree: the folder cannot be made: {}", e.kind()))?;
+        let dir = root.join(name);
+        let shown = dir.display().to_string();
+        let git = async |argv: &[&str]| -> Result<(), String> {
+            let argv: Vec<String> = argv.iter().map(|a| (*a).to_owned()).collect();
+            let out = tools.run(Tool::Git, &argv).await?;
+            if out.success {
+                Ok(())
+            } else {
+                Err(format!("git {}: failed\n{}", argv[0], said(&out)))
+            }
+        };
+        let remove = async || {
+            let gone = git(&["worktree", "remove", "--force", &shown]).await;
+            // A folder git no longer knows is swept; the record is pruned.
+            let swept = !dir.exists() || std::fs::remove_dir_all(&dir).is_ok();
+            let _ = git(&["worktree", "prune"]).await;
+            (gone.is_ok() || swept).then_some(()).ok_or(())
+        };
+        // A leftover of a run that was killed.
+        if dir.exists() {
+            let _ = remove().await;
+        }
+        let setup = async {
+            git(&["worktree", "prune"]).await?;
+            git(&["fetch", "origin", "main"]).await?;
+            git(&["worktree", "add", "--detach", &shown, "origin/main"]).await
+        }
+        .await;
+        let result = match setup {
+            Ok(()) => body(&dir).await,
+            Err(e) => Err(e),
+        };
+        let cleaned = remove().await;
+        match (result, cleaned) {
+            (r, Ok(())) => r,
+            (Ok(s), Err(())) => Ok(format!("{s}\nthe worktree could not be removed")),
+            (Err(e), Err(())) => Err(format!("{e}\nthe worktree could not be removed")),
+        }
+    }
+}
+
 /// Runs one host tool with an argument vector: the only way a host action starts a
 /// process.
 pub(crate) trait ArgvRunner {
@@ -1092,6 +1214,45 @@ pub(crate) trait ArgvRunner {
     /// # Errors
     /// This host does not say where it is.
     fn agent_checks_file(&self) -> Result<PathBuf, String>;
+
+    /// [`ArgvRunner::run`] for `tool` started in `folder`, a worktree of
+    /// [`CoreWorktree`]; only for [`Tool::CoreMise`].
+    ///
+    /// # Errors
+    /// This host does not run tools in a worktree, or the folder is not one.
+    async fn run_in(
+        &self,
+        _tool: Tool,
+        _folder: &Path,
+        _argv: &[String],
+    ) -> Result<Output, String> {
+        Err("this host runs nothing in a worktree".to_owned())
+    }
+
+    /// The runner's state folder, `~/.inorbit/state`.
+    ///
+    /// # Errors
+    /// This host does not say where it is.
+    fn state_dir(&self) -> Result<PathBuf, String> {
+        Err("this host does not say where its state folder is".to_owned())
+    }
+
+    /// The folder of the host actions' worktrees: a fixed subfolder of the state folder,
+    /// never next to the core checkout's own worktrees (`wt-reap` removes those).
+    ///
+    /// # Errors
+    /// What [`ArgvRunner::state_dir`] says.
+    fn worktree_root(&self) -> Result<PathBuf, String> {
+        self.state_dir().map(|d| d.join(WORKTREE_DIR))
+    }
+
+    /// The account this runner belongs to, from its enrolment.
+    ///
+    /// # Errors
+    /// This host does not know it.
+    fn account(&self) -> Result<String, String> {
+        Err("this runner does not know its account".to_owned())
+    }
 
     /// The pause between two reads of the restarted agent's status.
     async fn settle(&self) {
@@ -1195,6 +1356,8 @@ pub(crate) struct HostRunner {
     /// What `ssh` reads to reach the deploy server and origin (`SSH_AUTH_SOCK`,
     /// `INORBIT_SSH_HOST`), outside the allowlist; only for the tools that need it.
     pub(crate) ssh_env: Vec<(OsString, OsString)>,
+    /// The account this runner's approvals belong to (`labs.reattribute-document`).
+    pub(crate) account: Option<String>,
 }
 
 impl HostRunner {
@@ -1221,6 +1384,7 @@ impl HostRunner {
             user_units: user_units.to_vec(),
             core_checkout: core_checkout.map(PathBuf::from),
             ssh_env: pass(&["SSH_AUTH_SOCK", "INORBIT_SSH_HOST"]),
+            account: None,
         }
     }
 
@@ -1345,6 +1509,51 @@ impl ArgvRunner for HostRunner {
     }
 
     async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
+        self.run_at(tool, None, argv).await
+    }
+
+    async fn run_in(&self, tool: Tool, folder: &Path, argv: &[String]) -> Result<Output, String> {
+        self.run_at(tool, Some(folder), argv).await
+    }
+
+    fn state_dir(&self) -> Result<PathBuf, String> {
+        self.home()
+            .map(|h| h.join(".inorbit/state"))
+            .ok_or_else(|| "this runner has no home folder".to_owned())
+    }
+
+    fn account(&self) -> Result<String, String> {
+        self.account
+            .clone()
+            .ok_or_else(|| "this runner does not know its account".to_owned())
+    }
+}
+
+impl HostRunner {
+    /// Why `dir` is not a worktree of [`CoreWorktree`] `tool` may start in: it must be
+    /// absolute, hold no `..`, sit under [`ArgvRunner::worktree_root`] and hold a
+    /// `mise.toml` (what [`HostRunner::folder`] asks of the core checkout).
+    fn worktree_problem(&self, tool: Tool, dir: &Path) -> Option<&'static str> {
+        use std::path::Component;
+        if tool != Tool::CoreMise {
+            return Some("only core's mise runs in a worktree");
+        }
+        let Ok(root) = self.worktree_root() else {
+            return Some("this runner has no home folder");
+        };
+        let plain = dir.is_absolute() && !dir.components().any(|c| c == Component::ParentDir);
+        if !plain || !dir.starts_with(&root) || dir == root {
+            return Some("the folder is not a host action's worktree");
+        }
+        (!dir.join("mise.toml").is_file()).then_some("the worktree is not a core checkout")
+    }
+
+    async fn run_at(
+        &self,
+        tool: Tool,
+        folder: Option<&Path>,
+        argv: &[String],
+    ) -> Result<Output, String> {
         // Checked again here, so no caller restarts an unlisted unit.
         if let (Tool::Systemctl, Some(i)) = (tool, argv.iter().position(|a| a == "restart"))
             && let Some(why) = argv[i + 1..]
@@ -1362,12 +1571,27 @@ impl ArgvRunner for HostRunner {
         full.extend_from_slice(argv);
         let name = tool.name();
         let mut c = tokio::process::Command::new(self.program(tool)?);
-        if let Some(dir) = self.folder(tool)? {
+        let mut env = self.env_for(tool);
+        if let Some(dir) = folder {
+            if let Some(why) = self.worktree_problem(tool, dir) {
+                return Err(why.to_owned());
+            }
+            c.current_dir(dir);
+            // The worktree has no `.env` of its own: core's task reads its database from
+            // the cluster, which needs the runner's kubeconfig (a path, not a secret).
+            if let Ok(KubeTarget {
+                kubeconfig: Some(k),
+                ..
+            }) = &self.kube
+            {
+                env.push(("KUBECONFIG".into(), k.into()));
+            }
+        } else if let Some(dir) = self.folder(tool)? {
             c.current_dir(dir);
         }
         c.args(&full)
             .env_clear()
-            .envs(self.env_for(tool))
+            .envs(env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1515,6 +1739,8 @@ pub(crate) async fn carry_out_on(
         disk_prune::prune(action, tools).await
     } else if matches!(action, Action::RunnerScale { .. }) {
         runner_scale::scale(action, tools).await
+    } else if matches!(action, Action::ReattributeDocument { .. }) {
+        labs_reattribute::reattribute(action, tools).await
     } else {
         let mut done = Vec::new();
         for (tool, argv) in &calls {
@@ -1545,7 +1771,8 @@ fn summary(action: &Action, what: &str, tally: &Tally) -> Option<String> {
         | Action::ReleaseRerun { .. }
         | Action::InstallChecks { .. }
         | Action::DiskPrune { .. }
-        | Action::RunnerScale { .. } => None,
+        | Action::RunnerScale { .. }
+        | Action::ReattributeDocument { .. } => None,
         Action::RolloutRestart {
             namespace,
             deployment,
@@ -1763,6 +1990,12 @@ pub(crate) mod testing {
         pub(crate) script: Mutex<VecDeque<Output>>,
         /// The agent's checks file, for `agent.install-checks`.
         pub(crate) checks_file: Option<std::path::PathBuf>,
+        /// The state folder (`~/.inorbit/state`), for `labs.reattribute-document`.
+        pub(crate) state: Option<std::path::PathBuf>,
+        /// The runner's account, for `labs.reattribute-document`.
+        pub(crate) account: Option<String>,
+        /// The folders of the calls made with `run_in`, in order.
+        pub(crate) folders: Mutex<Vec<std::path::PathBuf>>,
     }
 
     impl Fake {
@@ -1793,6 +2026,26 @@ pub(crate) mod testing {
         }
 
         async fn settle(&self) {}
+
+        fn state_dir(&self) -> Result<std::path::PathBuf, String> {
+            self.state
+                .clone()
+                .ok_or_else(|| "no state folder".to_owned())
+        }
+
+        fn account(&self) -> Result<String, String> {
+            self.account.clone().ok_or_else(|| "no account".to_owned())
+        }
+
+        async fn run_in(
+            &self,
+            tool: Tool,
+            folder: &std::path::Path,
+            argv: &[String],
+        ) -> Result<Output, String> {
+            self.folders.lock().unwrap().push(folder.to_path_buf());
+            self.run(tool, argv).await
+        }
 
         async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
             if let Some(why) = &self.missing {
@@ -1831,6 +2084,9 @@ pub(crate) mod testing {
             not_here: None,
             script: Mutex::new(VecDeque::new()),
             checks_file: None,
+            state: None,
+            account: None,
+            folders: Mutex::new(Vec::new()),
         }
     }
 }
