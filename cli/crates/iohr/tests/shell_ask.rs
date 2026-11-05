@@ -57,12 +57,16 @@ impl Rig {
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     fn run(&self, args: &[&str], json: &str, exit: &str) -> Output {
+        self.run_env(args, json, exit, &[])
+    }
+    fn run_env(&self, args: &[&str], json: &str, exit: &str, env: &[(&str, &str)]) -> Output {
         std::fs::write(self.out().join("json"), json).unwrap();
         std::fs::write(self.out().join("exit"), exit).unwrap();
         Command::new(env!("CARGO_BIN_EXE_iohr"))
             .args(args)
             .current_dir(self.work())
             .env_clear()
+            .envs(env.iter().copied())
             .env("PATH", format!("{}:/usr/bin:/bin", self.bin().display()))
             .env("HOME", self.home.path())
             .env("IOHR_CONFIG_DIR", self.home.path().join("config"))
@@ -102,6 +106,7 @@ fn json_is_the_documented_shape_and_never_the_question() {
         [
             "agent",
             "answer",
+            "command",
             "duration_ms",
             "exit_code",
             "label",
@@ -165,6 +170,7 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
         "0",
     );
     assert!(out.status.success(), "{}", text(&out));
+    // The answer once, on stdout; stderr carries only the label (the double-answer bug).
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         "It is Rayleigh scattering.\n"
@@ -172,10 +178,10 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(!err.contains('\u{1b}'), "{err:?}");
     let lines: Vec<&str> = err.lines().collect();
-    assert_eq!(lines.len(), 2, "{err}");
+    assert_eq!(lines.len(), 1, "{err}");
     assert!(lines[0].starts_with("Io · AI answer -- Io running on Claude Code (local)"));
     assert!(lines[0].ends_with("nothing was run."), "{err}");
-    assert_eq!(lines[1], "It is Rayleigh scattering.");
+    assert_eq!(text(&out).matches("Rayleigh").count(), 1, "{}", text(&out));
     // A failure is a card too: exit 1, the reason, never the question or the agent's text.
     let login =
         format!(r#"{{"type":"result","is_error":true,"result":"Not logged in /login {SECRET}"}}"#);
@@ -183,10 +189,7 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
     assert_eq!(out.status.code(), Some(1), "{}", text(&out));
     assert_eq!(out.stdout, b"");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("no answer: ") && err.contains("not signed in"),
-        "{err}"
-    );
+    assert!(err.contains("not signed in"), "{err}");
     assert!(!err.contains(SECRET), "{err}");
 }
 
@@ -347,6 +350,122 @@ fn io_and_codex_still_say_not_built_yet_and_start_nothing() {
     assert_eq!(r.saw("claude.args"), "");
 }
 
+/// An answer that suggests a command and names a file of the work folder.
+fn answer_json(answer: &str) -> String {
+    serde_json::json!({
+        "type": "result", "subtype": "success", "is_error": false,
+        "result": answer, "duration_ms": 5, "num_turns": 1
+    })
+    .to_string()
+}
+
+const WITH_COMMAND: &str = "Check the log in notes.md, then run:\n```bash\ngit status\n```\n";
+
+#[test]
+fn the_json_answer_carries_the_suggested_command_or_null() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let out = r.run(
+        &["--json", "ask", "--headless", "q"],
+        &answer_json(WITH_COMMAND),
+        "0",
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["command"], "git status");
+    let out = r.run(&["--json", "ask", "--headless", "q"], OK_JSON, "0");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["command"].is_null(), "{v}");
+    // Two lines, or a control character, are shown but never offered.
+    let two = "```bash\ncd a\nls\n```";
+    let out = r.run(
+        &["--json", "ask", "--headless", "q"],
+        &answer_json(two),
+        "0",
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["command"].is_null(), "{v}");
+}
+
+// The bug: a model from IOHR_ASK_MODEL took the card path, which printed the answer on stderr
+// and again on stdout, so a terminal showed it twice. One renderer now: once, wherever it goes.
+#[test]
+fn the_answer_is_printed_once_with_a_model_from_the_environment() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    for args in [
+        &["ask", "--headless", "--card", "hi"][..],
+        &["ask", "--headless", "hi"][..],
+        &["ask", "hi"][..],
+    ] {
+        let out = r.run_env(args, OK_JSON, "0", &[("IOHR_ASK_MODEL", "opus")]);
+        assert!(out.status.success(), "{}", text(&out));
+        assert_eq!(
+            text(&out).matches("Rayleigh scattering").count(),
+            1,
+            "{args:?}: {}",
+            text(&out)
+        );
+        assert!(r.saw("claude.args").contains("opus"));
+    }
+}
+
+// Off a terminal (a pipe, or NO_COLOR) the hook's card is plain: no escape, no row under it,
+// and the record on stdout is the answer, the command and the link, in that order.
+#[test]
+fn the_hook_record_is_three_fields_and_the_plain_card_has_no_row() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    std::fs::write(r.work().join("notes.md"), "x").unwrap();
+    for no_color in [false, true] {
+        let env: &[(&str, &str)] = if no_color { &[("NO_COLOR", "1")] } else { &[] };
+        let out = r.run_env(
+            &[
+                "ask",
+                "--headless",
+                "--hook",
+                "--cwd",
+                r.work().to_str().unwrap(),
+                "q",
+            ],
+            &answer_json(WITH_COMMAND),
+            "0",
+            env,
+        );
+        assert!(out.status.success(), "{}", text(&out));
+        let stdout = String::from_utf8(out.stdout.clone()).unwrap();
+        let f: Vec<&str> = stdout.split('\u{1e}').collect();
+        assert_eq!(f.len(), 3, "{stdout:?}");
+        assert!(
+            f[0].contains("run:") && f[0].contains("git status"),
+            "{f:?}"
+        );
+        assert_eq!(f[1], "git status");
+        assert_eq!(f[2], "notes.md");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !err.contains('\u{1b}') && !err.contains("to choose"),
+            "{err:?}"
+        );
+        assert!(
+            err.contains("git status"),
+            "the card shows the answer: {err}"
+        );
+    }
+}
+
+#[test]
+fn the_menu_needs_a_terminal_and_prints_nothing_without_one() {
+    let r = Rig::new();
+    let out = r.run(&["ask", "--menu", "--command=ls"], "", "0");
+    assert!(!out.status.success());
+    assert_eq!(out.stdout, b"", "nothing for a prompt line");
+    // The menu asks no model: the fake agent was never started.
+    assert_eq!(r.saw("claude.args"), "");
+    // `--menu` is not a question and takes none.
+    let out = r.run(&["ask", "--menu", "why"], "", "0");
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+}
+
 // ---------------------------------------------------------------- iohr shell hook
 
 fn hook(shell: &str) -> Output {
@@ -371,7 +490,11 @@ fn the_zsh_hook_has_its_key_lines() {
     assert!(t.contains("zle _iohr_ask_prev_accept"));
     assert!(t.contains("zle -N accept-line _iohr_ask_accept"));
     // The answer comes from `iohr ask`, headless, drawn as a card, with the question after `--`.
-    assert!(t.contains("command iohr ask --headless --card --cwd"));
+    // The menu key is a widget that only ever fills the buffer: no `zle -U`, no `print -z`.
+    assert!(t.contains("zle -N _iohr_card_action") && t.contains("ask --menu"));
+    assert!(t.contains("'^[[B' '^[OB'"), "{t}");
+    assert!(!t.contains("zle -U") && !t.contains("print -z"));
+    assert!(t.contains("command iohr ask --headless --hook --cwd"));
     assert!(t.contains("-- \"$q\""));
     // Inside the InOrbit app it speaks the app's OSC 7727 ask protocol.
     assert!(t.contains(r"\e]7727;ask;"));
@@ -399,7 +522,7 @@ fn the_hook_asks_the_binary_that_printed_it() {
     assert!(o.status.success());
     let t = String::from_utf8(o.stdout).unwrap();
     assert!(
-        t.contains("command iohr-preview ask --headless --card --cwd"),
+        t.contains("command iohr-preview ask --headless --hook --cwd"),
         "{t}"
     );
     assert!(!t.contains("__IOHR_BIN__"));
@@ -419,7 +542,11 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     let bin = dir.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let fake = bin.join("iohr");
-    std::fs::write(&fake, "#!/bin/sh\necho \"ARGS: $*\" >&2\necho the answer\n").unwrap();
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'the answer\\036ls -la\\036README.md'\n",
+    )
+    .unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let zsh = |script: &str| {
         Command::new("zsh")
@@ -446,9 +573,19 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
         err.contains("-- plain") && !err.contains("-- plain --prior"),
         "{err}"
     );
-    // `iohr ask --card` draws the answer on stderr; the hook only keeps stdout for `??`.
-    assert!(err.contains("--headless --card --cwd"), "{err}");
+    // `iohr ask --hook` draws the card on stderr; the hook keeps the record on stdout: the
+    // answer for `??`, the command and the link for the menu.
+    assert!(err.contains("--headless --hook --cwd"), "{err}");
     assert_eq!(out.trim(), "kept: the answer", "{out}");
+    let o = zsh(&format!(
+        "source {f}; _iohr_ask_q='? plain'; _iohr_ask_precmd; \
+         print -r -- \"$_iohr_ask_cmd|$_iohr_ask_link|$_iohr_ask_live\"",
+        f = file.display()
+    ));
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout).trim(),
+        "ls -la|README.md|1"
+    );
     // Inside the app: the OSC, not a call to iohr.
     let o = zsh(&format!(
         "source {f}; INORBIT_TERM=1; _iohr_ask_q='? hi'; _iohr_ask_precmd",
@@ -486,7 +623,11 @@ def rd(t):
 rd(1.0)
 shown = []
 for l in lines:
-    os.write(fd, l.encode() + b"\n")
+    # "RAW:" lines are keys, sent as they are; the others are typed with Enter.
+    if l.startswith("RAW:"):
+        os.write(fd, l[4:].encode())
+    else:
+        os.write(fd, l.encode() + b"\n")
     shown.append(rd(1.2).decode(errors="replace"))
 os.write(fd, b"exit\n")
 rd(0.3)
@@ -556,6 +697,200 @@ fn evaluating_the_hook_twice_keeps_enter_working_and_wires_accept_line_once() {
     );
     assert!(out[4].contains("the answer"), "{:?}", out[4]);
     assert!(out[5].contains("LAST-4"), "{:?}", out[5]);
+}
+
+/// Runs `iohr ask --menu ...` on a pty with the environment `env`, presses `key`, and gives
+/// back what reached stdout (the one line for the prompt) and the screen. None where python3
+/// is missing, so the test is skipped there.
+fn press_in_menu(
+    r: &Rig,
+    args: &[&str],
+    key: &str,
+    env: &[(&str, &str)],
+) -> Option<(String, String)> {
+    const DRIVER: &str = r#"
+import json, os, pty, select, sys, time
+env, key, outfile, work = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+argv = sys.argv[5:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ.clear()
+    os.environ.update(env)
+    os.environ["OUTFILE"] = outfile
+    os.chdir(work)
+    os.execv("/bin/sh", ["sh", "-c", 'exec "$@" >"$OUTFILE"', "sh", *argv])
+def rd(t):
+    out = b""
+    end = time.time() + t
+    while time.time() < end:
+        x, _, _ = select.select([fd], [], [], 0.1)
+        if x:
+            try:
+                out += os.read(fd, 4096)
+            except OSError:
+                break
+    return out
+screen = rd(0.5)
+os.write(fd, key.encode())
+screen += rd(0.5)
+sys.stdout.write(screen.decode(errors="replace"))
+"#;
+    if Command::new("python3").arg("--version").output().is_err() {
+        return None;
+    }
+    let outfile = r.home.path().join("menu.stdout");
+    let mut all: Vec<(&str, String)> = vec![
+        ("PATH", format!("{}:/usr/bin:/bin", r.bin().display())),
+        ("HOME", r.home.path().display().to_string()),
+        (
+            "IOHR_CONFIG_DIR",
+            r.home.path().join("config").display().to_string(),
+        ),
+        ("TERM", "xterm".to_owned()),
+    ];
+    all.extend(env.iter().map(|(k, v)| (*k, (*v).to_owned())));
+    let json = serde_json::to_string(&all.into_iter().collect::<std::collections::HashMap<_, _>>())
+        .unwrap();
+    let o = Command::new("python3")
+        .args(["-I", "-c", DRIVER, &json, key])
+        .arg(&outfile)
+        .arg(r.work())
+        .arg(env!("CARGO_BIN_EXE_iohr"))
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let line = std::fs::read_to_string(&outfile).unwrap_or_default();
+    Some((line, String::from_utf8_lossy(&o.stdout).into_owned()))
+}
+
+// The menu's letters: Run and Explain print the one line for the prompt and nothing else;
+// Copy and Esc print nothing; Copy goes through tmux when inside it. Nothing here runs the
+// command: the only place a command could run is the shell, and it only gets a line.
+#[test]
+fn the_menu_letters_print_one_prompt_line_or_nothing_and_copy_uses_tmux() {
+    let r = Rig::new();
+    let tmux_in = r.home.path().join("tmux.stdin");
+    r.fake(
+        "tmux",
+        &format!(
+            "#!/bin/sh\necho \"$*\" > {a}.args\ncat > {a}\n",
+            a = tmux_in.display()
+        ),
+    );
+    let cmd = ["ask", "--menu", "--command=git status", "--link=notes.md"];
+    let Some((line, screen)) = press_in_menu(&r, &cmd, "r", &[]) else {
+        return;
+    };
+    assert_eq!(line, "git status", "{screen:?}");
+    assert!(screen.contains("What next?"), "{screen:?}");
+    let (line, _) = press_in_menu(&r, &cmd, "e", &[]).unwrap();
+    assert_eq!(line, "?? explain this command: git status");
+    let (line, _) = press_in_menu(&r, &cmd, "f", &[]).unwrap();
+    assert_eq!(line, "?? ");
+    let (line, _) = press_in_menu(&r, &cmd, "\u{1b}", &[]).unwrap();
+    assert_eq!(line, "", "Esc leaves the line alone");
+    // A command with a control character or a second line is never offered, so Run is not a key.
+    let (line, screen) =
+        press_in_menu(&r, &["ask", "--menu", "--command=ls\u{7}"], "r", &[]).unwrap();
+    assert_eq!(line, "", "{screen:?}");
+    // Copy: inside tmux the text goes to `tmux load-buffer -w -`, and the line stays empty.
+    let (line, screen) = press_in_menu(&r, &cmd, "c", &[("TMUX", "/tmp/tmux-1,1,0")]).unwrap();
+    assert_eq!(line, "");
+    assert!(screen.contains("tmux"), "{screen:?}");
+    assert_eq!(std::fs::read_to_string(&tmux_in).unwrap(), "git status");
+    assert_eq!(
+        std::fs::read_to_string(format!("{}.args", tmux_in.display()))
+            .unwrap()
+            .trim(),
+        "load-buffer -w -"
+    );
+}
+
+// The widget on a real zsh: the key opens the menu under a live answer on an empty line, the
+// line it prints lands in the buffer and nothing runs until Enter; with text on the line, or
+// with no answer yet, the key does what it did.
+#[test]
+fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.path().join("menu.log");
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in\n*--menu*) echo \"$*\" >> {log}; printf '%s' 'echo RAN-$((1+1))';;\n*) printf 'the answer\\036echo RAN-$((1+1))\\036notes.md';;\nesac\n",
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let down = "RAW:\u{1b}[B";
+    let out = drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {}", file.display()),
+            // No answer yet: Down is the shell's own, the menu is not asked.
+            down.to_owned(),
+            "? a question".to_owned(),
+            // Text on the line: the key keeps its meaning, the menu is not asked.
+            "RAW:abc".to_owned(),
+            down.to_owned(),
+            "RAW:\u{15}".to_owned(), // ctrl-u clears the line
+            // An answer and an empty line: the menu, and its line lands in the buffer.
+            down.to_owned(),
+            // The line is only typed, not run, until Enter.
+            "RAW:\r".to_owned(),
+        ],
+    );
+    let asked = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(asked.lines().count(), 1, "one menu only: {asked:?}");
+    assert!(
+        asked.contains("--command=echo RAN-$((1+1))") && asked.contains("--link=notes.md"),
+        "{asked}"
+    );
+    assert!(out[3].contains("abc"), "{out:?}");
+    let on_line = &out[6];
+    assert!(on_line.contains("echo RAN-$((1+1))"), "{out:?}");
+    assert!(
+        !on_line.contains("RAN-2"),
+        "the line was not run: {on_line:?}"
+    );
+    assert!(out[7].contains("RAN-2"), "Enter runs it: {:?}", out[7]);
+}
+
+#[test]
+fn the_menu_key_is_configurable_and_off_binds_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let hook_with = |cfg: &str| {
+        let cfgdir = dir.path().join("cfg");
+        std::fs::create_dir_all(&cfgdir).unwrap();
+        std::fs::write(cfgdir.join("config.toml"), cfg).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_iohr"))
+            .args(["shell", "hook", "zsh"])
+            .env_clear()
+            .env("HOME", dir.path())
+            .env("IOHR_CONFIG_DIR", &cfgdir)
+            .output()
+            .unwrap()
+    };
+    let o = hook_with("[ask]\nmenu_key = \"ctrl-g\"\n");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let t = String::from_utf8(o.stdout).unwrap();
+    assert!(t.contains("_iohr_card_keys=('^G')"), "{t}");
+    let t = String::from_utf8(hook_with("[ask]\nmenu_key = \"off\"\n").stdout).unwrap();
+    assert!(t.contains("_iohr_card_keys=()"), "{t}");
+    let o = hook_with("[ask]\nmenu_key = \"f13\"\n");
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("menu_key"));
 }
 
 #[test]

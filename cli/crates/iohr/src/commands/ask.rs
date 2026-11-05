@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use tokio::io::AsyncBufReadExt as _;
 
+use crate::actions::{self, MenuKey};
 use crate::ask::stream::{self, Look, Renderer};
 use crate::ask::{self, Agent, Via};
 use crate::card::{self, Body, Card, Look as CardLook};
@@ -19,6 +20,9 @@ use crate::output::Out;
 use crate::ui::Ui;
 
 pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error> {
+    if args.menu {
+        return menu(&args);
+    }
     let ctx = Ctx::load(g)?;
     let cfg = ctx.config.ask;
     let via = ask::choose_via(args.via.as_deref(), cfg.via.as_deref()).map_err(Error::Usage)?;
@@ -41,6 +45,7 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
         ));
     }
     let hints = hints::Mode::parse(cfg.hints.as_deref()).map_err(Error::Usage)?;
+    let menu_key = MenuKey::parse(cfg.menu_key.as_deref()).map_err(Error::Usage)?;
     let path = std::env::var_os("PATH").unwrap_or_default();
     let bin = ask::find_on_path(agent.name(), &path);
     // The question is only ever an argument of the agent; nothing below prints or stores it
@@ -67,6 +72,7 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
                 // One reading of the setting for the card and the streamed run alike.
                 model: model.as_deref().unwrap_or(ask::DEFAULT_MODEL),
                 hints,
+                menu_key,
                 dir: &ctx.dir,
             },
             &question,
@@ -114,11 +120,25 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
     if let Some(f) = failure {
         Out::note(&format!("iohr ask: the agent reports: {f}"));
     }
+    ended(code)
+}
+
+/// The agent's exit code as this command's result.
+fn ended(code: i32) -> Result<(), Error> {
     match u8::try_from(code) {
         Ok(0) => Ok(()),
         Ok(c) => Err(Error::Child(c)),
         Err(_) => Err(Error::Child(1)),
     }
+}
+
+/// `--menu`: the menu under a card asks no model and needs no sign-in or agent.
+fn menu(args: &AskArgs) -> Result<(), Error> {
+    let cwd = args.headless.cwd.as_deref().map_or_else(
+        || std::env::current_dir().unwrap_or_default(),
+        std::path::PathBuf::from,
+    );
+    actions::menu(args.command.as_deref(), args.link.as_deref(), &cwd)
 }
 
 /// `--dry-run`: the exact command line, one object under `--json`; nothing is started.
@@ -269,10 +289,10 @@ fn exit_code(s: std::process::ExitStatus) -> i32 {
 }
 
 /// Answer once and print as a card or plain text (the `?` prompt hook, a script, the app),
-/// instead of streaming the run? Only when asked for: `--headless`, `--card` or a context
-/// flag. `--interactive` says no even then.
+/// instead of streaming the run? Only when asked for: `--headless`, `--card`, `--hook` or a
+/// context flag. `--interactive` says no even then.
 fn headless_wanted(h: &HeadlessArgs) -> bool {
-    !h.interactive && (h.headless || h.card || h.has_context())
+    !h.interactive && (h.headless || h.card || h.hook || h.has_context())
 }
 
 /// What the shell hook told this call, as the context the prompt is built from.
@@ -303,11 +323,14 @@ struct Chosen<'a> {
     via: Via,
     model: &'a str,
     hints: hints::Mode,
+    menu_key: MenuKey,
     dir: &'a Path,
 }
 
-/// One capped `claude -p` run (see [`headless`]). The label goes first on stderr so a pipe
-/// of the answer stays clean; under `--json` it is a field instead.
+/// One capped `claude -p` run (see [`headless`]), shown one way (RFC 0203.1): `--json` is the
+/// answer's fields; `--hook` is a card on stderr and a record on stdout; a person at a
+/// terminal gets a card on stderr; anything else gets the label on stderr and the plain
+/// answer once on stdout, so a pipe of the answer stays clean.
 async fn headless(
     chosen: &Chosen<'_>,
     question: &str,
@@ -320,6 +343,7 @@ async fn headless(
         via,
         model,
         hints,
+        menu_key,
         dir,
     } = *chosen;
     let ctx = context_of(h)?;
@@ -327,81 +351,91 @@ async fn headless(
     let read = headless::read_line(&ctx);
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
-    // A person reads a card; a pipe, a script and `--json` read the plain answer.
-    if !out.json && (h.card || (stdout_tty && fancy)) {
-        let look = CardLook::detect(fancy);
-        let started = Instant::now();
-        let run = headless::run(bin, &message, model, started);
-        let done = if look.fancy {
-            spin_while(run, agent, look, started).await?
-        } else {
-            run.await
-        };
-        let label = ask::label(agent);
-        let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
-        // Only a card that is drawn moves the footer on.
-        // A plain look has no footer (its label carries the disclosure), so it moves nothing.
-        let footer = if look.fancy {
-            hints::next(dir, hints, &notice, hints::now())
-        } else {
-            hints::Footer::Full
-        };
-        let mut shown = Card {
-            agent: agent.display(),
-            model,
-            elapsed: None,
-            follows: h.prior_question.as_deref(),
-            read: &read,
-            notice: &notice,
-            full: footer == hints::Footer::Full,
-            label: &label,
-            hint: match footer {
-                hints::Footer::Short(h) => h,
-                hints::Footer::Full => None,
-            },
-            body: Body::Failed(""),
-        };
-        let width = card::stderr_width();
-        return match &done {
-            Ok((text, duration_ms)) => {
-                shown.elapsed = Some(Duration::from_millis(*duration_ms));
-                shown.body = Body::Answer(text);
-                card::draw(&card::render(&shown, width, look));
-                if !stdout_tty {
-                    Out::raw(format!("{text}\n").as_bytes());
-                }
-                Ok(())
-            }
-            Err(why) => {
-                shown.elapsed = Some(started.elapsed());
-                shown.body = Body::Failed(why);
-                card::draw(&card::render(&shown, width, look));
-                Err(Error::Child(1))
-            }
-        };
-    }
-    let label = format!("{} {read}", ask::label(agent));
-    if !out.json {
-        Out::note(&label);
-    }
+    let label = ask::label(agent);
     let started = Instant::now();
-    let (text, duration_ms) = headless::run(bin, &message, model, started)
-        .await
-        .map_err(Error::Failed)?;
-    if out.json {
-        Out::print_json(&Answer {
-            text,
-            agent: agent.name(),
-            via: via.name(),
-            label,
-            model: model.to_owned(),
-            exit_code: 0,
-            duration_ms,
-        });
-    } else {
-        Out::raw(format!("{text}\n").as_bytes());
+    if out.json || !(h.hook || (fancy && (h.card || stdout_tty))) {
+        let label = format!("{label} {read}");
+        if !out.json {
+            Out::note(&label);
+        }
+        let (text, duration_ms) = headless::run(bin, &message, model, started)
+            .await
+            .map_err(Error::Failed)?;
+        if out.json {
+            Out::print_json(&Answer {
+                command: card::command_of(&text),
+                text,
+                agent: agent.name(),
+                via: via.name(),
+                label,
+                model: model.to_owned(),
+                exit_code: 0,
+                duration_ms,
+            });
+        } else {
+            Out::raw(format!("{text}\n").as_bytes());
+        }
+        return Ok(());
     }
-    Ok(())
+    // A person reads a card.
+    let look = CardLook::detect(fancy);
+    let run = headless::run(bin, &message, model, started);
+    let done = if look.fancy {
+        spin_while(run, agent, look, started).await?
+    } else {
+        run.await
+    };
+    let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
+    // Only a card that is drawn moves the footer on.
+    // A plain look has no footer (its label carries the disclosure), so it moves nothing.
+    let footer = if look.fancy {
+        hints::next(dir, hints, &notice, hints::now())
+    } else {
+        hints::Footer::Full
+    };
+    let mut shown = Card {
+        agent: agent.display(),
+        model,
+        elapsed: None,
+        follows: h.prior_question.as_deref(),
+        read: &read,
+        notice: &notice,
+        full: footer == hints::Footer::Full,
+        label: &label,
+        hint: match footer {
+            hints::Footer::Short(h) => h,
+            hints::Footer::Full => None,
+        },
+        row: None,
+        body: Body::Failed(""),
+    };
+    let width = card::stderr_width();
+    match &done {
+        Ok((text, duration_ms)) => {
+            let command = card::command_of(text);
+            let link = card::link_of(text, Path::new(&ctx.cwd));
+            // The row promises a key that only the hook binds, so only the hook draws it.
+            let row = (h.hook && look.fancy)
+                .then(|| actions::row(menu_key, command.is_some(), link.is_some()))
+                .flatten();
+            shown.elapsed = Some(Duration::from_millis(*duration_ms));
+            shown.row = row.as_deref();
+            shown.body = Body::Answer(text);
+            card::draw(&card::render(&shown, width, look));
+            if h.hook {
+                Out::raw(actions::record(text, command.as_deref(), link.as_deref()).as_bytes());
+            } else if !stdout_tty {
+                Out::raw(format!("{text}\n").as_bytes());
+            }
+            Ok(())
+        }
+        Err(why) => {
+            shown.elapsed = Some(started.elapsed());
+            shown.body = Body::Failed(why);
+            card::draw(&card::render(&shown, width, look));
+            Err(Error::Child(1))
+        }
+    }
 }
 
 /// Waits for `work` with a spinner on stderr. Ctrl-C clears the line and stops the run

@@ -369,6 +369,7 @@ model = "haiku"
 allow_edits = false
 thinking = "show"
 hints = "sometimes"
+menu_key = "down"
 
 [sync]                              # iohr sync (section 4.6)
 background = false
@@ -494,6 +495,7 @@ and drawn as a card.
 | `allow_edits` | `true` lets the agent edit files: `--permission-mode acceptEdits` for `claude`, `--sandbox workspace-write` for `codex` | `false` | `iohr ask` |
 | `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
+| `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
 
 Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--thinking`, `--dry-run`. Running a
 shell command is never allowed, with or without `--allow-edits`; the agent's default
@@ -532,6 +534,17 @@ on here. `iohr` never writes this table.
 Today the key is read and nothing else: `iohr` has no background process to hang the trigger
 on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
 background loop is the next slice (RFC 0205).
+
+Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open",
+with only what the answer has: Run and Copy when it suggested one command, Open when it named
+an https link or a file in the folder. The key in `menu_key` opens the menu (`iohr ask
+--menu`, letters `r c f e o`, Esc leaves it). Run puts the command on the prompt line and
+nothing else: Enter still runs it, and iohr never does. Copy sends it to the clipboard
+through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside
+tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener and refuses an
+executable, a file that runs when opened, and a path outside the folder. The suggested
+command is the last single-line fence of the answer in a shell language; `iohr --json ask`
+carries it as `command` (null when there is none). A pipe or `NO_COLOR` gets no row.
 
 ## 5. Credentials
 

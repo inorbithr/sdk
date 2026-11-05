@@ -183,6 +183,10 @@ pub struct AskConfig {
     /// day), `always` or `never` (the first card and a changed notice still show it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hints: Option<String>,
+    /// The key that opens the actions menu under a `?` card (RFC 0203.1): `down` (the
+    /// default, on an empty line), `ctrl-g`, `alt-enter`, or `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menu_key: Option<String>,
 }
 
 impl AskConfig {
@@ -195,6 +199,7 @@ impl AskConfig {
             && self.allow_edits.is_none()
             && self.thinking.is_none()
             && self.hints.is_none()
+            && self.menu_key.is_none()
     }
 }
 

@@ -260,6 +260,7 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
                     what
                 },
                 available: true,
+                key: None,
             }
         })
         .collect();
@@ -273,6 +274,7 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
                 label: v.label.clone(),
                 hint: String::new(),
                 available: false,
+                key: None,
             }),
     );
     let initial = recommended.map(|v| v.id.clone()).unwrap_or_default();
@@ -292,6 +294,7 @@ fn folder_choices(list: &[Proposal]) -> Vec<Choice> {
             },
             hint: p.reason.clone(),
             available: true,
+            key: None,
         })
         .collect()
 }
@@ -391,6 +394,7 @@ fn ask_question(ui: Ui, tpl: &Template, q: &Question) -> Result<Answer, Error> {
                     label: c.clone(),
                     hint: String::new(),
                     available: true,
+                    key: None,
                 })
                 .collect();
             let initial = default
@@ -494,6 +498,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                         label: n.clone(),
                         hint: why.clone(),
                         available: true,
+                        key: None,
                     })
                     .collect();
                 choices.push(Choice {
@@ -501,6 +506,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                     label: "Another name...".into(),
                     hint: "type it".into(),
                     available: true,
+                    key: None,
                 });
                 let picked = ui.select("What is the project called?", &choices, &props[0].0)?;
                 if picked == OTHER {
@@ -531,6 +537,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                 None => no_agent_help(),
             },
             available: true,
+            key: None,
         }];
         choices.extend(rows.iter().map(|r| Choice {
             value: r.name.clone(),
@@ -541,6 +548,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                 r.origin
             ),
             available: r.status == "live",
+            key: None,
         }));
         let picked = ui.select("Which template?", &choices, &default)?;
         if picked == DESCRIBE {

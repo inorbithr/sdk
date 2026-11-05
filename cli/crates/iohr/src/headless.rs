@@ -57,6 +57,9 @@ pub(crate) struct Context {
 pub(crate) struct Answer {
     #[serde(rename = "answer")]
     pub(crate) text: String,
+    /// The one command the answer suggests, by the rule in [`crate::card::command_of`], or
+    /// null. Shown and offered; never run.
+    pub(crate) command: Option<String>,
     pub(crate) agent: &'static str,
     pub(crate) via: &'static str,
     pub(crate) label: String,

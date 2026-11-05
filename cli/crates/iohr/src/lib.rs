@@ -13,6 +13,7 @@ pub mod ext;
 pub mod project;
 pub mod template;
 
+mod actions;
 mod args;
 mod ask;
 mod browser;
