@@ -57,8 +57,8 @@ pub struct Global {
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
     /// Sign in as someone other than a person: `io`, the `OAuth2` client `iohr-io` with the
-    /// client credentials grant, so jobs Io files run on runners Io owns. `iohr runner` only;
-    /// the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
+    /// client credentials grant, so jobs Io files run on runners Io owns. `iohr runner` and
+    /// `iohr coordinator` only; the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
     /// a Mac, from the keychain item the Mac bridge uses, never from an argument.
     #[arg(
         long,
@@ -68,6 +68,17 @@ pub struct Global {
         value_name = "WHO"
     )]
     pub sign_in: Option<SignIn>,
+    /// With `--sign-in io`: the personality named in the `x-iohr-via` attribution header
+    /// (RFC 0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`,
+    /// which `iohr ask` uses for where an answer comes from.
+    #[arg(long, global = true, env = "IOHR_VIA_PERSONALITY", value_name = "NAME")]
+    pub via_personality: Option<String>,
+    /// With `--sign-in io`: the agent session named in `x-iohr-via`.
+    #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
+    pub via_session: Option<String>,
+    /// With `--sign-in io`: the coordinator job named in `x-iohr-via`.
+    #[arg(long, global = true, env = "IOHR_VIA_JOB", value_name = "ID")]
+    pub via_job: Option<String>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
     pub config_dir: Option<PathBuf>,
