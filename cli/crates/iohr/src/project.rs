@@ -275,6 +275,10 @@ fn make_executable(p: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same signature as the unix variant"
+)]
 fn make_executable(_: &Path) -> Result<(), String> {
     Ok(())
 }
