@@ -1,0 +1,17 @@
+# How @@ID@@ works with the coordinator. Read by people and agents; nothing sensitive, ever.
+version = 1
+
+[plan]
+# The Planner plan of your account this project's work belongs to ("plan_..."). Empty until
+# you set it; `iohr project init` cannot choose it for you.
+id = ""
+# The item inside that plan this project's asks attach to (optional).
+item = ""
+
+# One ask you can file as it is:  iohr coordinator asks create --kind KIND --body BODY ...
+[[ask]]
+kind = "chore"                   # bug, feature, ui, api, docs, design, review, chore, question, watch
+title = "First task for @@NAME@@"
+body = "Add a second health check to @@NAME@@"
+external_id = "@@NAME@@-first"   # the same id returns the same ask: filing it twice is safe
+priority = 5                     # 1 to 10

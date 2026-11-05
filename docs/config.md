@@ -359,6 +359,9 @@ kinds = ["coordinate", "build"]
 
 [profiles.ci.runner]                # this profile's runner, over [runner]
 capacity = 8
+
+[project]                           # iohr project init (section 4.4)
+template = "coordinated"
 ```
 
 Rules:
@@ -450,6 +453,15 @@ config directory holds the version and the time of the last install, and the sam
 is not installed twice within 24 hours, so a binary that cannot start cannot loop. A copy
 installed by apt is reported once per version and skipped (use `apt upgrade`). A SIGHUP
 reads `auto_upgrade`, `upgrade_interval_minutes` and `upgrade_restart` again.
+
+### 4.4 The project table
+
+`iohr project init` (alias `create`) reads `[project]`; its `--template` flag wins over it.
+The SDK does not read it, and `iohr` never writes it: a person edits it.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `template` | a name from `iohr project templates` that is live | `demo` | `iohr project init`, `create` and the default `templates` marks |
 
 ## 5. Credentials
 

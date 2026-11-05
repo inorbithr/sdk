@@ -1122,14 +1122,15 @@ pub enum ProjectCommand {
     /// template with its manifest, a git repository with one commit, its own state under
     /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
     /// and a report. Idempotent: a step already done is done again without harm, and a
-    /// step that waits on an API says so instead of pretending.
+    /// step that waits on an API says so instead of pretending. `create` is the same command.
+    #[command(visible_alias = "create")]
     Init {
         /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
         name: String,
-        /// The template: demo (a private macOS service that heartbeats and serves a tiny
-        /// panel). Others say they are coming.
-        #[arg(long, default_value = "demo")]
-        template: String,
+        /// The template (`iohr project templates` lists them). Default: `[project] template`
+        /// in iohr's config.toml, else demo. A template that is coming says so and refuses.
+        #[arg(long)]
+        template: Option<String>,
         /// The folder to write (default: ~/development/NAME); it must not exist or be empty.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
@@ -1141,6 +1142,10 @@ pub enum ProjectCommand {
         #[arg(long)]
         no_smoke: bool,
     },
+    /// The templates `init` and `create` accept: name, what it is, live or coming, and which
+    /// one is the default (`[project] template` in config.toml, else demo). `--json` prints
+    /// the same as a list.
+    Templates,
 }
 
 /// What `iohr ext init` scaffolds.
