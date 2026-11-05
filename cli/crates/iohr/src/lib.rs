@@ -51,6 +51,9 @@ pub struct Env {
     pub ext_registry: Option<String>,
     /// `IOHR_EXT_REGISTRY_AUTH`: `user:password` for a private registry mirror.
     pub ext_registry_auth: Option<Redacted<String>>,
+    /// `IOHR_SIGN_IDENTITY`: how an upgrade signs the new binary on macOS, over
+    /// `upgrade_sign_identity` (`auto`, `-` or an identity).
+    pub sign_identity: Option<String>,
 }
 
 impl Env {
@@ -75,11 +78,15 @@ impl Env {
             .ok()
             .filter(|v| !v.trim().is_empty())
             .map(read);
+        let sign_identity = std::env::var("IOHR_SIGN_IDENTITY")
+            .ok()
+            .filter(|v| !v.trim().is_empty());
         Self {
             token,
             profile_tokens,
             ext_registry,
             ext_registry_auth,
+            sign_identity,
         }
     }
 

@@ -301,9 +301,52 @@ impl Store for MemoryStore {
     }
 }
 
+/// How long a credential-store call may take before the person is told why it waits.
+const SLOW_STORE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Runs a credential-store call off the async threads (every store call blocks). A call
+/// still running after [`SLOW_STORE`] prints one line on stderr: on a Mac the Keychain is
+/// most likely asking whether this `iohr` build may read its item, and a runner under
+/// launchd otherwise waits there with nothing in its log (Study 0094.15).
+///
+/// # Errors
+///
+/// The call's own error, or [`StoreError::Failed`] when the call panicked.
+pub async fn off_thread<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, StoreError> + Send + 'static,
+) -> Result<T, StoreError> {
+    off_thread_noting(f, SLOW_STORE, || {
+        use std::io::Write as _;
+        let _ = writeln!(
+            io::stderr().lock(),
+            "iohr: still waiting on the credential store after {}s; on a Mac the Keychain may be \
+             asking to let this iohr read its key: choose Always Allow",
+            SLOW_STORE.as_secs()
+        );
+    })
+    .await
+}
+
+async fn off_thread_noting<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, StoreError> + Send + 'static,
+    slow: std::time::Duration,
+    note: impl FnOnce(),
+) -> Result<T, StoreError> {
+    let mut call = tokio::task::spawn_blocking(f);
+    let joined = if let Ok(done) = tokio::time::timeout(slow, &mut call).await {
+        done
+    } else {
+        note();
+        call.await
+    };
+    joined.map_err(|e| StoreError::Failed(format!("the credential store call stopped: {e}")))?
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{EntryKey, FileStore, KeyringStore, MemoryStore, Store, StoreError};
+    use super::{
+        EntryKey, FileStore, KeyringStore, MemoryStore, Store, StoreError, off_thread_noting,
+    };
     use crate::Redacted;
 
     fn key(profile: &str, account: &str) -> EntryKey {
@@ -390,5 +433,33 @@ mod tests {
             }
             Err(e) => skip(&e.to_string()),
         }
+    }
+
+    #[tokio::test]
+    async fn a_slow_store_call_says_why_it_waits_and_still_answers() {
+        let noted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let n = std::sync::Arc::clone(&noted);
+        let got = off_thread_noting(
+            || {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                Ok(7)
+            },
+            std::time::Duration::from_millis(10),
+            move || n.store(true, std::sync::atomic::Ordering::SeqCst),
+        )
+        .await;
+        assert_eq!(got.unwrap(), 7);
+        assert!(noted.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_quick_store_call_says_nothing() {
+        let got = off_thread_noting(
+            || Err::<(), _>(StoreError::Invalid("no")),
+            std::time::Duration::from_secs(5),
+            || panic!("a quick call must not print the note"),
+        )
+        .await;
+        assert!(matches!(got, Err(StoreError::Invalid("no"))));
     }
 }

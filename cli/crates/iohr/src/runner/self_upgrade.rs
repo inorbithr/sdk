@@ -57,7 +57,7 @@ use tokio::sync::watch;
 use super::drain::Drain;
 use super::settings::RestartMode;
 use super::supervisor::{self, Restart, Supervisor};
-use crate::commands::upgrade::{self, Method, Upstream};
+use crate::commands::upgrade::{self, Method, SignWith, Upstream};
 use crate::error::Error;
 
 /// The first look comes this long after the runner starts (plus up to 10 percent).
@@ -71,13 +71,15 @@ pub(crate) const DRAIN_LIMIT: Duration = Duration::from_hours(4);
 /// it is older.
 pub(crate) const REINSTALL_GUARD: Duration = Duration::from_hours(24);
 
-/// What the person set (`auto_upgrade`, `upgrade_interval_minutes`, `upgrade_restart`),
-/// read again on SIGHUP.
+/// What the person set (`auto_upgrade`, `upgrade_interval_minutes`, `upgrade_restart`,
+/// `upgrade_sign_identity`), read again on SIGHUP.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Policy {
     pub(crate) enabled: bool,
     pub(crate) interval: Duration,
     pub(crate) restart: RestartMode,
+    /// How the install signs the new binary on macOS.
+    pub(crate) sign: SignWith,
 }
 
 impl Policy {
@@ -87,6 +89,7 @@ impl Policy {
             enabled: e.auto_upgrade.value,
             interval: e.upgrade_interval.value,
             restart: e.upgrade_restart.value,
+            sign: e.upgrade_sign.value.clone(),
         }
     }
 }
@@ -429,8 +432,11 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
     }
 }
 
-/// The real release lookup and installer: the code of `iohr upgrade`.
-pub(crate) struct RealSource;
+/// The real release lookup and installer: the code of `iohr upgrade`, signing as the
+/// policy in use says.
+pub(crate) struct RealSource {
+    pub(crate) policy: watch::Receiver<Policy>,
+}
 
 impl Source for RealSource {
     type Staged = upgrade::Staged;
@@ -450,6 +456,7 @@ impl Source for RealSource {
 
     async fn prepare(&self, here: &Here, version: &Version) -> Result<Self::Staged, Refused> {
         let (real, method, version) = (here.real.clone(), here.method.clone(), version.clone());
+        let sign = self.policy.borrow().sign.clone();
         // `brew` blocks, and the runner's loop shares a thread with this: it runs on the
         // blocking pool, on a runtime of its own with its own HTTP client.
         tokio::task::spawn_blocking(move || {
@@ -460,6 +467,7 @@ impl Source for RealSource {
             rt.block_on(async {
                 Upstream::from_process()
                     .map_err(|e| Refused::failed(e.to_string()))?
+                    .signing(sign)
                     .prepare(&method, &real, &version, false)
                     .await
                     .map_err(|e| match e {

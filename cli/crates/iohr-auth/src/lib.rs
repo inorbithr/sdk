@@ -39,4 +39,4 @@ pub use flow::{Authorization, Browser, Device, Granted};
 pub use oidc::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, Provider};
 pub use secret::Redacted;
 pub use session::Session;
-pub use store::{EntryKey, FileStore, KeyringStore, MemoryStore, Store, StoreError};
+pub use store::{EntryKey, FileStore, KeyringStore, MemoryStore, Store, StoreError, off_thread};
