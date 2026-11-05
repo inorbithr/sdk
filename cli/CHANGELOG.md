@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.35](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.34...iohr/v0.1.0-alpha.35) (2026-11-05)
+
+
+### Features
+
+* **cli:** --sign-in io files coordinator jobs as Io, with --via-personality attribution ([#374](https://github.com/inorbithr/sdk/issues/374)) ([8bab38c](https://github.com/inorbithr/sdk/commit/8bab38cfda2a8b8cc1573d8165ef30a5a3aebe10))
+* **cli:** labs.reattribute-document host action ([#378](https://github.com/inorbithr/sdk/issues/378)) ([ffe4924](https://github.com/inorbithr/sdk/commit/ffe49240056b79bf99b2f7f01efdf8986096aaa5))
+
+
+### Bug fixes
+
+* **cli:** set the Io secret file mode only on Unix in tests ([#382](https://github.com/inorbithr/sdk/issues/382)) ([4cacc98](https://github.com/inorbithr/sdk/commit/4cacc989efaeb958ec7536500e40b8d7817962b5))
+
 ## [0.1.0-alpha.34](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.33...iohr/v0.1.0-alpha.34) (2026-11-05)
 
 
