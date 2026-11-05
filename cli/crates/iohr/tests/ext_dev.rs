@@ -68,6 +68,7 @@ impl Box_ {
             .env("IOHR_CONFIG_DIR", self.dir.path().join("config"))
             .env("IOHR_DATA_DIR", self.dir.path().join("data"))
             .env("HOME", self.home())
+            .env("USERPROFILE", self.home())
             .env("IOHR_TOKEN", token(&["identity:read"]))
             .envs(kept_env())
             .current_dir(cwd);

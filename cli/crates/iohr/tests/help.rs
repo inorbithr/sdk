@@ -21,6 +21,7 @@ fn run(env: &[(&str, &str)], args: &[&str]) -> Output {
         .env_clear()
         .envs(kept_env())
         .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
         .env("IOHR_CONFIG_DIR", home.path().join("config"))
         .env("COLUMNS", "100")
         .stdin(Stdio::null());

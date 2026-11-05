@@ -10,7 +10,7 @@ mod support;
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use support::kept_env;
+use support::{canon, kept_env};
 
 fn iohr(home: &Path, args: &[&str]) -> Output {
     iohr_in(home, home, args)
@@ -635,7 +635,7 @@ fn json(o: &Output) -> serde_json::Value {
 fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     let h = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let cwd_path = std::fs::canonicalize(cwd.path()).unwrap();
+    let cwd_path = canon(cwd.path());
     let out = iohr_in(
         h.path(),
         &cwd_path,
@@ -724,7 +724,7 @@ fn a_folder_that_is_not_empty_is_refused_and_dotfiles_alone_are_fine() {
 fn inside_a_git_repository_the_dry_run_warns_that_it_would_nest() {
     let h = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let cwd_path = std::fs::canonicalize(cwd.path()).unwrap();
+    let cwd_path = canon(cwd.path());
     let git = Command::new("git")
         .args(["init", "-q"])
         .current_dir(&cwd_path)
@@ -869,6 +869,7 @@ fn every_live_language_scaffolds_and_its_smoke_test_passes_when_its_toolchain_is
         .envs(kept_env())
         .env("PATH", path)
         .env("HOME", h.path())
+        .env("USERPROFILE", h.path())
         .env("IOHR_CONFIG_DIR", h.path().join("config"))
         .env("CARGO_HOME", Path::new(&real).join(".cargo"))
         .env("RUSTUP_HOME", Path::new(&real).join(".rustup"))
