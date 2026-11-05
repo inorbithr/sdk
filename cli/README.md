@@ -114,7 +114,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
-| `iohr packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (the same as `iohr ext packages`) |
+| `iohr ext packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (`iohr packages` still works, hidden from the help) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--env production|local`
@@ -122,10 +122,23 @@ Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--e
 `--verbose` prints method, path, status, time and request id on stderr; never a header,
 a query value or a body.
 
-Exit codes: 0 success, 1 a failed call, 2 a usage error, 3 not signed in or the token
-was refused, 4 forbidden by scope, role or plan, 75 (`EX_TEMPFAIL`) `iohr runner run`
-stopped after installing a newer `iohr` so its launchd or systemd supervisor starts it
-(`upgrade_restart = "exit"`); that is not a failure.
+### The help, and exit codes
+
+`iohr --help` groups the commands the way `gh` does (Sign-in, Account, Build, Agents, Operate);
+`-h` prints one line per command and `--help` the long text. The help is coloured with the
+palette the interactive screens use, and plain under `NO_COLOR`, `--json` or a pipe.
+Commands that kept an older name still run (`iohr packages`, `iohr project templates`); they are
+hidden from the help.
+
+```
+0   ok
+1   a finding or a failure: a failed call, a lint finding, a check that did not pass
+2   usage: a flag or argument the command does not take
+3   not signed in, or the token was refused
+4   forbidden by scope, role or plan
+75  EX_TEMPFAIL: `iohr runner run` stopped after installing a newer `iohr` so its launchd or
+    systemd supervisor starts it (`upgrade_restart = "exit"`); that is not a failure
+```
 
 ## Your login in other programs
 
@@ -427,11 +440,14 @@ with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain `
 ```sh
 iohr project init demo
 iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
-iohr project templates            # name, what it is, live or coming, and the default
-iohr project templates --json
+iohr project template list        # name, status, origin, the default (*) and what it is
+iohr project template list --json
+iohr project template show demo   # what it asks, which files it writes, its steps
+cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 ```
 
-`iohr project templates` lists every template; `macos-app` and `ui-panel` are `coming` and
+`iohr project template list` lists every template (`iohr project templates` is the same command,
+kept for older scripts); `macos-app` and `ui-panel` are `coming` and
 refuse until they exist. The template is `--template`, else `template` under `[project]` in
 `config.toml` (`[project]` / `template = "coordinated"`; you edit it, `iohr config` does not
 write it), else `demo`. A configured template that is coming refuses too.
@@ -476,7 +492,9 @@ repository to read it (never in a dry run; `@ref` is a branch or tag).
 iohr project template new my-sensor [--extends demo]   # a working template in ~/.inorbit/templates
 iohr project template lint ./my-sensor                 # checks keys, `when`, regexes, placeholders, a sample render
 iohr project template schema                           # the JSON Schema of template.toml
-iohr project templates                                 # with an ORIGIN column
+iohr project template list                             # with an ORIGIN column
+iohr project template show my-sensor [--json]          # questions, `when`, files, the agent step
+iohr project template path my-sensor                   # only the folder, for `cd $(...)`
 ```
 
 Answers come from `--set key=value` (repeatable), `--answers file.json|toml`, then, at a

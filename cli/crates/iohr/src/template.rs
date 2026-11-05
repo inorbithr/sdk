@@ -519,7 +519,7 @@ pub fn load(spec: &Spec, root: &Path) -> Result<Template, String> {
     match spec {
         Spec::Id(id) => load_id(id, root, 0).map_err(|e| {
             if e.starts_with("there is no") {
-                format!("{e}; `iohr project templates` lists them")
+                format!("{e}; `iohr project template list` shows them")
             } else {
                 e
             }
@@ -532,7 +532,7 @@ pub fn load(spec: &Spec, root: &Path) -> Result<Template, String> {
     }
 }
 
-/// One line of `iohr project templates`.
+/// One line of `iohr project template list`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Row {
     pub name: String,
