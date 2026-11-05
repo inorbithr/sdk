@@ -7,8 +7,11 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -264,11 +267,10 @@ impl Box_ {
                 "IOHR_EXT_REGISTRY",
                 format!("{}/{PREFIX}", self.server.uri()),
             )
+            .envs(kept_env())
             .current_dir(self.dir.path());
-        for k in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "HOME"] {
-            if let Some(v) = std::env::var_os(k) {
-                c.env(k, v);
-            }
+        if let Some(v) = std::env::var_os("HOME") {
+            c.env("HOME", v);
         }
         c
     }

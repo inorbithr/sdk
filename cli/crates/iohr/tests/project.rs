@@ -6,8 +6,11 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 fn iohr(home: &Path, args: &[&str]) -> Output {
     iohr_in(home, home, args)
@@ -29,6 +32,7 @@ fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
     }
     cmd.current_dir(cwd)
         .args(args)
+        .envs(kept_env())
         .env("PATH", path)
         // The home directory is HOME on unix and USERPROFILE on Windows.
         .env("HOME", home)
@@ -465,6 +469,7 @@ fn iohr_with_path(home: &Path, extra: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_iohr"))
         .args(args)
         .env_clear()
+        .envs(kept_env())
         .env("PATH", std::env::join_paths(paths).unwrap())
         .env("HOME", home)
         .env("USERPROFILE", home)
@@ -853,6 +858,7 @@ fn every_live_language_scaffolds_and_its_smoke_test_passes_when_its_toolchain_is
         ])
         .current_dir(cwd.path())
         .env_clear()
+        .envs(kept_env())
         .env("PATH", path)
         .env("HOME", h.path())
         .env("IOHR_CONFIG_DIR", h.path().join("config"))
@@ -1145,6 +1151,7 @@ fn init_described(
         ])
         .args(extra)
         .env_clear()
+        .envs(kept_env())
         .env("PATH", std::env::join_paths(paths).unwrap())
         .env("HOME", h)
         .env("USERPROFILE", h)

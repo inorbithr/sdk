@@ -6,9 +6,12 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -29,15 +32,6 @@ fn token(scopes: &[&str]) -> String {
             "scp": scopes, "org": ACCOUNT, "plan": "free", "key": "key_1"
         }))
     )
-}
-
-/// What a child process needs to run at all; `SYSTEMROOT` is required for sockets on
-/// Windows. Nothing that could hold a credential is passed on.
-fn kept_env() -> Vec<(String, std::ffi::OsString)> {
-    ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
-        .into_iter()
-        .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
-        .collect()
 }
 
 struct Run<'a> {
