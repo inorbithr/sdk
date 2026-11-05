@@ -21,6 +21,7 @@ fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .args(args)
         .env_clear()
         .env("PATH", path)
+        // The home directory is HOME on unix and USERPROFILE on Windows.
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("IOHR_CONFIG_DIR", home.join("config"))
