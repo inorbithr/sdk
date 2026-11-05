@@ -99,7 +99,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr sdk add [rust\|typescript\|python\|go] [--version V] [--dry-run]` | Add the published SDK to the project here with the package manager it already uses; the language comes from the project's files when left out (below) |
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to; a later `iohr login` keeps it |
-| `iohr coordinator jobs list \| create`, `asks list \| create` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks, queue an ask (`asks create --kind K --body -`; the kind is required so the planner can file it); `--account <id>` on `jobs list|create` and `asks list` acts on a team you belong to (default: your own account; needs the coordinator release that accepts `account_id`). `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key |
+| `iohr coordinator jobs list \| create`, `asks list \| create` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks, queue an ask (`asks create --kind K --body -`; the kind is required so the planner can file it); `--account <id>` on `jobs list|create` and `asks list` acts on a team you belong to (default: your own account; needs the coordinator release that accepts `account_id`). `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key, or `--sign-in io` to file as Io (below) |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s for up to `--timeout` seconds (600) |
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
@@ -549,6 +549,14 @@ names (it must be yours and mode 0600, or the runner stops) or, on a Mac, from t
 keychain item the Mac bridge uses (`iohr-mcp-bridge-io`). A profile (`--profile`, else the
 default) still holds the runner's keys and settings, and `--account` names the account.
 Nothing else changes: without the flag the runner signs in as your profile does.
+`--sign-in io` also works on `iohr coordinator ...` (every other command refuses it), so an
+agent's jobs and asks are Io's, not the person's who runs it. To say which personality made
+the call, add `--via-personality NAME` (`IOHR_VIA_PERSONALITY`), and optionally
+`--via-session ID` (`IOHR_VIA_SESSION`) and `--via-job ID` (`IOHR_VIA_JOB`): they set the
+`x-iohr-via` header (`personality=improver; session=...; job=...`), which is attribution only and
+grants nothing. Each value is 1 to 64 of `A-Z a-z 0-9 . _ : -`, else the call is refused. (`--via` is
+taken: `iohr ask --via` says where an answer comes from.) These flags need `--sign-in io`.
+Example: `iohr --sign-in io --via-personality improver coordinator jobs create --kind chore --brief -`.
 A runner of Io's that holds a person's provider sign-in (the person signed in to `claude`
 on that machine) names that person at registration:
 `iohr --sign-in io runner register --holder <subject>`. The person must be Io's seat

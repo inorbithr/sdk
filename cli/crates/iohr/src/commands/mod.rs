@@ -52,9 +52,16 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     if !matches!(cli.command, Command::Tunnel(_)) {
         g.check_environment()?;
     }
-    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_)) {
+    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_) | Command::Coordinator(_)) {
         return Err(Error::Usage(
-            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` only".into(),
+            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` and `iohr coordinator` only".into(),
+        ));
+    }
+    if g.sign_in.is_none()
+        && (g.via_personality.is_some() || g.via_session.is_some() || g.via_job.is_some())
+    {
+        return Err(Error::Usage(
+            "--via-personality, --via-session and --via-job need --sign-in io".into(),
         ));
     }
     match cli.command {
