@@ -1,10 +1,13 @@
 //! `iohr project init` (alias `create`) and `template`: set a project of your own up (PRD 0088).
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::Env;
+use crate::ask::stream::{Look, Thinking};
 use crate::ask::{self, Agent};
 use crate::cli::{Global, ProjectCommand, TemplateCommand};
+use crate::commands::ask::Run;
 use crate::context::{Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
@@ -44,6 +47,8 @@ fn now() -> String {
 
 /// The menu's first entry: the agent builds it from a description.
 const DESCRIBE: &str = "@describe";
+/// The template a described project is made from, unless one is named.
+const DESCRIBE_TEMPLATE: &str = "blank";
 
 /// What the person said to `init`, as the flags carry it.
 struct InitArgs {
@@ -52,6 +57,8 @@ struct InitArgs {
     set: Vec<String>,
     answers: Option<PathBuf>,
     describe: Option<String>,
+    agent_turns: Option<u32>,
+    agent_timeout: Option<u64>,
     dry_run: bool,
     yes: bool,
     dir: Option<PathBuf>,
@@ -68,6 +75,8 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
             set,
             answers,
             describe,
+            agent_turns,
+            agent_timeout,
             dry_run,
             yes,
             dir,
@@ -84,6 +93,8 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
                     set,
                     answers,
                     describe,
+                    agent_turns,
+                    agent_timeout,
                     dry_run,
                     yes,
                     dir,
@@ -328,8 +339,16 @@ fn runs_in_ext_dev(lang: Option<&str>) -> bool {
     lang.is_none_or(|l| matches!(l, "python" | "rust" | "shell"))
 }
 
-/// The next commands, by whether `iohr ext dev` runs this language.
-fn next_lines(dev: bool) -> Vec<(&'static str, &'static str)> {
+/// The next commands: an extension folder (it has an `extension.toml`) is linted and run by
+/// `iohr ext`, by whether `iohr ext dev` runs this language; a plain project (`blank`) is not
+/// an extension, so it is read and run as its README says.
+fn next_lines(extension: bool, dev: bool) -> Vec<(&'static str, &'static str)> {
+    if !extension {
+        return vec![(
+            "README.md",
+            "how to build and test it, with the language's own tools",
+        )];
+    }
     let mut v = vec![("iohr ext lint --preview", "read what it may do")];
     if dev {
         v.push(("iohr ext dev", "run it with the real token channel"));
@@ -340,6 +359,11 @@ fn next_lines(dev: bool) -> Vec<(&'static str, &'static str)> {
         ));
     }
     v
+}
+
+/// Whether the project made is an extension: it has a manifest.
+fn is_extension(report: &project::Report) -> bool {
+    report.files.iter().any(|f| f == "extension.toml")
 }
 
 /// One question at the terminal, drawn from the schema: the kind picks the control.
@@ -399,7 +423,20 @@ struct AgentRun {
     agent: Agent,
     bin: PathBuf,
     prompt: String,
+    /// The arguments of the print-mode run ([`ask::argv`]), the prompt last.
+    args: Vec<String>,
+    model: Option<String>,
+    max_turns: u32,
+    timeout: Duration,
+    thinking: Thinking,
 }
+
+/// The most turns the agent gets in `init` when no flag says: init's own default, because
+/// `[ask]` in config.toml has no bound. Enough to write a small project; a wrong request cannot
+/// run away.
+const AGENT_TURNS: u32 = 40;
+/// The most seconds the agent gets in `init` when no flag says (init's own default).
+const AGENT_SECONDS: u64 = 600;
 
 #[allow(
     clippy::too_many_lines,
@@ -422,9 +459,9 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             "--describe needs words: what do you want built?".into(),
         ));
     }
-    if a.describe.is_some() && out.json && !dry {
+    if a.agent_turns == Some(0) || a.agent_timeout == Some(0) {
         return Err(Error::Usage(
-            "--describe starts your agent on your terminal, so --json (data only) cannot carry it; add --dry-run to see the plan as data".into(),
+            "--agent-turns and --agent-timeout need a number above 0".into(),
         ));
     }
     if a.describe.is_some() && agent.is_none() {
@@ -510,10 +547,15 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                 return Err(Error::Failed(no_agent_help()));
             }
             describe = Some(ui.input("Describe the project", "", nonempty)?);
-            spec_text = None;
+            spec_text = Some(DESCRIBE_TEMPLATE.to_owned());
         } else {
             spec_text = Some(picked);
         }
+    }
+    // A described project is a normal new project: `blank`, unless `--template` (or the menu)
+    // named another one. `[project] template` is for projects you did not describe.
+    if describe.is_some() && spec_text.is_none() {
+        spec_text = Some(DESCRIBE_TEMPLATE.to_owned());
     }
     let spec = template::parse_spec(&choose_template(
         spec_text.as_deref(),
@@ -588,8 +630,16 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         Some(l) => tpl.with_variant(l).map_err(Error::Usage)?,
         None => tpl.clone(),
     };
-    let vals = template::all_values(&tpl, &name, &publisher, &created_at, &answers);
-    let files = template::render(&tpl_lang, &vals).map_err(Error::Failed)?;
+    let mut vals = template::all_values(&tpl, &name, &publisher, &created_at, &answers);
+    if !vals.iter().any(|(k, _)| k == "@@DESCRIPTION@@") {
+        vals.push((
+            "@@DESCRIPTION@@".to_owned(),
+            project::one_line_description(describe.as_deref()),
+        ));
+    }
+    let mut files = template::render(&tpl_lang, &vals).map_err(Error::Failed)?;
+    // Every project gets its InOrbit space link, whatever the template (RFC 0103).
+    project::add_space_link(&mut files, None);
     let programs = template::programs(&tpl, &vals);
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
     // Reads only, so a dry run finds the same problems a real one would.
@@ -647,17 +697,29 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             false
         };
         if wanted {
+            let prompt = project::agent_prompt(
+                prompt_text.as_deref(),
+                describe.as_deref(),
+                &name,
+                &tpl.meta.id,
+                &answers,
+                &vals,
+            );
+            // The `[ask]` model (else the small fast tier), edits to files only, never shell,
+            // and init's own bounds: nothing the agent is told or says is stored here.
+            let model =
+                ask::choose_model(*ag, None, cfg.ask.model.as_deref()).map_err(Error::Usage)?;
+            let max_turns = a.agent_turns.unwrap_or(AGENT_TURNS);
             agent_run = Some(AgentRun {
                 agent: *ag,
                 bin: bin.clone(),
-                prompt: project::agent_prompt(
-                    prompt_text.as_deref(),
-                    describe.as_deref(),
-                    &name,
-                    &tpl.meta.id,
-                    &answers,
-                    &vals,
-                ),
+                args: ask::argv(*ag, model.as_deref(), true, Some(max_turns), &prompt),
+                prompt,
+                model,
+                max_turns,
+                timeout: Duration::from_secs(a.agent_timeout.unwrap_or(AGENT_SECONDS)),
+                thinking: ask::choose_thinking(None, cfg.ask.thinking.as_deref())
+                    .map_err(Error::Usage)?,
             });
         }
     } else if has_agent_step {
@@ -671,6 +733,15 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             name: StepName::Agent,
             prompt: None,
         });
+    }
+    // The agent builds first and the smoke test runs what it built, so the report is true for it.
+    if let (Some(at), Some(st)) = (
+        steps.iter().position(|s| s.name == StepName::Agent),
+        steps.iter().position(|s| s.name == StepName::Smoke),
+    ) && at > st
+    {
+        let agent_step = steps.remove(at);
+        steps.insert(st, agent_step);
     }
 
     // Everything below that changes anything goes through `flow`.
@@ -725,7 +796,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         None => {}
     }
     let mut smoke: Option<Smoke> = None;
-    let mut agent_exit: Option<i32> = None;
+    let mut agent_failed: Option<String> = None;
     for s in &steps {
         match s.name {
             StepName::Git => {
@@ -785,9 +856,11 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             StepName::Agent => {
                 if let Some(r) = &agent_run {
                     let what = format!(
-                        "start {} in {} with the prompt below (not started in a dry run)",
+                        "run {} once in print mode in {} (files only, never shell; at most {} turns and {} s) with the prompt below (not started in a dry run)",
                         r.agent.name(),
-                        dir.display()
+                        dir.display(),
+                        r.max_turns,
+                        r.timeout.as_secs()
                     );
                     // The AI label is printed either way; the agent starts only past the gate.
                     Out::note(&ask::label_for(
@@ -798,15 +871,70 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                     if dry {
                         flow.gate("agent", &what);
                     } else if flow.gate("agent", &what) {
-                        agent_exit = Some(
-                            crate::commands::ask::start(
-                                r.agent,
-                                &r.bin,
-                                r.prompt.clone(),
-                                Some(&dir),
-                            )
-                            .await?,
-                        );
+                        let started = Instant::now();
+                        let ended = crate::commands::ask::stream(Run {
+                            agent: r.agent,
+                            bin: &r.bin,
+                            args: &r.args,
+                            cwd: Some(&dir),
+                            json: out.json,
+                            look: Look {
+                                fancy: ui.fancy(),
+                                thinking: Some(r.thinking),
+                                cwd: Some(dir.display().to_string()),
+                                model: r.model.clone(),
+                                rows: true,
+                                made: Some("AI-built"),
+                            },
+                            ui,
+                            waiting: "Your agent is building it",
+                            timeout: Some(r.timeout),
+                        })
+                        .await?;
+                        let secs = started.elapsed().as_secs();
+                        if out.json {
+                            let line = serde_json::json!({
+                                "type": "iohr_summary",
+                                "agent": r.agent.name(),
+                                "exit_code": ended.code,
+                                "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                                "timed_out": ended.timed_out,
+                                "max_turns": r.max_turns,
+                                "timeout_seconds": r.timeout.as_secs(),
+                            });
+                            Out::raw(format!("{line}\n").as_bytes());
+                        }
+                        if ended.code == 0 {
+                            report.steps.push(project::step(
+                                "agent",
+                                "Agent build",
+                                "done",
+                                format!(
+                                    "{} built it in {secs} s, files only, never shell; AI-built, check it",
+                                    r.agent.name()
+                                ),
+                                "",
+                            ));
+                        } else {
+                            let why = if ended.timed_out {
+                                format!(
+                                    "it did not finish in {} s and was stopped",
+                                    r.timeout.as_secs()
+                                )
+                            } else {
+                                ended.failure.clone().unwrap_or_else(|| {
+                                    format!("it exited with code {}", ended.code)
+                                })
+                            };
+                            report.steps.push(project::step(
+                                "agent",
+                                "Agent build",
+                                "failed",
+                                why.clone(),
+                                "",
+                            ));
+                            agent_failed = Some(why);
+                        }
                     }
                 }
             }
@@ -832,14 +960,22 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
     }
     // The report: what you now have, never claiming what did not happen.
     if out.json {
-        Out::print_json(&serde_json::json!({
+        let ran = report.steps.iter().any(|s| s.id == "agent");
+        let doc = serde_json::json!({
+            "type": ran.then_some("iohr_report"),
             "name": report.name, "id": report.id, "dir": report.dir, "state": report.state,
             "template": tpl.meta.id, "origin": tpl.origin.label(),
             "folder": place, "language": lang, "warnings": warnings,
             "answered": answers.keys().collect::<Vec<_>>(),
             "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
             "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
-        }));
+        });
+        if ran {
+            // The agent's events were JSON lines; the report ends them as one more line.
+            Out::raw(format!("{doc}\n").as_bytes());
+        } else {
+            Out::print_json(&doc);
+        }
     } else if ui.fancy() {
         finish(
             ui,
@@ -863,15 +999,19 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         }
         Out::note(&format!(
             "Next: {}, or open it in InOrbit Desktop's Code (it asks you first).",
-            next_lines(runs_in_ext_dev(lang.as_deref()))
+            next_lines(is_extension(&report), runs_in_ext_dev(lang.as_deref()))
                 .iter()
                 .map(|(c, why)| format!("`{c}` ({why})"))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
     }
-    if let Some(c) = agent_exit.filter(|c| *c != 0) {
-        return Err(Error::Child(u8::try_from(c).unwrap_or(1)));
+    if let Some(why) = agent_failed {
+        // The scaffold stays; one line says how to go on from it.
+        return Err(Error::Failed(format!(
+            "the agent did not finish: {why}. The project is kept in {}; retry the agent there with `cd {} && iohr ask --allow-edits \"what you want\"`",
+            place.shown, place.shown
+        )));
     }
     match smoke {
         Some(s) if !s.ok => {
@@ -913,9 +1053,14 @@ fn dry_report(
             "steps": flow.would.iter().map(|(id, what)| serde_json::json!({"id": id, "would": what})).collect::<Vec<_>>(),
             "agent": agent.as_ref().map(|r| serde_json::json!({
                 "name": r.agent.name(),
-                "command": [r.bin.to_string_lossy(), r.prompt],
+                "command": std::iter::once(r.bin.to_string_lossy().into_owned())
+                    .chain(r.args.iter().cloned())
+                    .collect::<Vec<_>>(),
                 "cwd": report.dir,
                 "prompt": r.prompt,
+                "model": r.model,
+                "max_turns": r.max_turns,
+                "timeout_seconds": r.timeout.as_secs(),
             })),
         }));
         return;
@@ -932,9 +1077,17 @@ fn dry_report(
         flow.ui.note(
             "The agent would get (AI)",
             &format!(
-                "cd {}\n{} <prompt>\n\n{}",
+                "cd {}\n{}\n\n{}",
                 report.dir.display(),
-                r.bin.display(),
+                ask::shell_line(
+                    &r.bin.display().to_string(),
+                    &r.args
+                        .iter()
+                        .take(r.args.len().saturating_sub(1))
+                        .cloned()
+                        .chain(["<prompt>".to_owned()])
+                        .collect::<Vec<_>>()
+                ),
                 r.prompt
             ),
         );
@@ -996,7 +1149,7 @@ fn finish(
     } else if !later.is_empty() {
         ui.info(&later_line(later.len()));
     }
-    let next = next_lines(runs_in_ext_dev(lang));
+    let next = next_lines(is_extension(r), runs_in_ext_dev(lang));
     let width = next.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
     let mut body = format!("cd {}", place.shown);
     for (c, why) in &next {

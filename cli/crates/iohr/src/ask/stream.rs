@@ -145,6 +145,9 @@ enum ClaudeContent {
 struct ClaudeResult {
     #[serde(default)]
     is_error: bool,
+    /// `success`, or `error_max_turns`, `error_during_execution`, ...
+    #[serde(default)]
+    subtype: Option<String>,
     #[serde(default)]
     result: Option<String>,
     #[serde(default)]
@@ -207,7 +210,14 @@ impl ClaudeLine {
                 })
                 .collect(),
             Self::Result(r) => {
-                let failed = r.is_error;
+                let stopped = r.subtype.as_deref().filter(|t| t.starts_with("error"));
+                let failed = r.is_error || stopped.is_some();
+                let reason = match stopped {
+                    Some("error_max_turns") => {
+                        Some("it used all its turns before it finished".to_owned())
+                    }
+                    _ => r.result.clone(),
+                };
                 vec![Event::Done(Done {
                     duration_ms: r.duration_ms,
                     turns: r.num_turns,
@@ -217,9 +227,7 @@ impl ClaudeLine {
                         .and_then(|u| u.output_tokens_details)
                         .and_then(|d| d.thinking_tokens),
                     error: failed.then(|| {
-                        r.result
-                            .clone()
-                            .unwrap_or_else(|| "the agent reported an error".to_owned())
+                        reason.unwrap_or_else(|| "the agent reported an error".to_owned())
                     }),
                     answer: if failed { None } else { r.result },
                 })]
@@ -406,6 +414,11 @@ pub(crate) struct Look {
     pub(crate) cwd: Option<String>,
     /// The model asked for, shown in the footer.
     pub(crate) model: Option<String>,
+    /// A run nobody watches live (`iohr project init`): without the drawn look, still print one
+    /// plain row per tool and the footer, on stderr, so a log shows what the agent did.
+    pub(crate) rows: bool,
+    /// What the footer says the AI made: `AI answer` when unset.
+    pub(crate) made: Option<&'static str>,
 }
 
 /// A string in the dim style of the terminal on stderr.
@@ -508,7 +521,11 @@ impl<O: Write, E: Write> Renderer<O, E> {
             }
             Event::Tool { name, detail } => {
                 self.broke = true;
-                if self.look.fancy {
+                if !self.look.fancy && self.look.rows {
+                    self.end_out_line();
+                    let detail = short(&self.relative(&detail));
+                    let _ = writeln!(self.err, "- {name} {detail}");
+                } else if self.look.fancy {
                     self.end_thinking_line();
                     self.end_out_line();
                     let detail = short(&self.relative(&detail));
@@ -564,7 +581,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
             self.failed = Some(e);
             return;
         }
-        if self.look.fancy {
+        if self.look.fancy || self.look.rows {
             let ms = d.duration_ms.unwrap_or_else(|| {
                 u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
             });
@@ -582,7 +599,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
             if let Some(t) = d.thinking_tokens.filter(|t| *t > 0) {
                 parts.push(format!("{t} thinking tokens"));
             }
-            parts.push("AI answer".to_owned());
+            parts.push(self.look.made.unwrap_or("AI answer").to_owned());
             let _ = writeln!(self.err, "{}", dim(&parts.join(" \u{b7} ")));
         }
     }
@@ -679,6 +696,21 @@ mod tests {
     }
 
     #[test]
+    fn running_out_of_turns_is_a_failure_with_a_plain_reason() {
+        let ev = claude(
+            r#"{"type":"result","subtype":"error_max_turns","is_error":false,"num_turns":40}"#,
+        );
+        let [Event::Done(d)] = ev.as_slice() else {
+            panic!("one done event: {ev:?}");
+        };
+        assert_eq!(
+            d.error.as_deref(),
+            Some("it used all its turns before it finished")
+        );
+        assert_eq!(d.turns, Some(40));
+    }
+
+    #[test]
     fn a_result_carries_the_footer_numbers_and_a_failure() {
         let ev = claude(
             r#"{"type":"result","is_error":false,"result":"ok","duration_ms":1500,"num_turns":2,"total_cost_usd":0.01,"usage":{"output_tokens_details":{"thinking_tokens":7}}}"#,
@@ -752,6 +784,8 @@ mod tests {
             thinking: Some(Thinking::Show),
             cwd: Some("/work".into()),
             model: Some("haiku".into()),
+            rows: false,
+            made: None,
         };
         let mut r = Renderer::new(Vec::new(), Vec::new(), look, None);
         for e in events {

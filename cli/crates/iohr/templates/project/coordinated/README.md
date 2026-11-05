@@ -8,7 +8,7 @@ It was made from the `coordinated` template by `iohr project init` (or `iohr pro
 ## What is here
 
 - Everything the `demo` template has: `extension.toml`, `src/@@MODULE@@/`, `panel/`, `tests/`
-  and `inorbit-project.toml`.
+  and `inorbit.toml`.
 - `coordination.toml`: the plan this project belongs to and an `ask` example. Nothing in it is
   a secret; the plan id is empty until you set it.
 

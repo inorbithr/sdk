@@ -16,10 +16,19 @@ fn iohr(home: &Path, args: &[&str]) -> Output {
 /// The same, run from `cwd`.
 fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    Command::new(env!("CARGO_BIN_EXE_iohr"))
-        .current_dir(cwd)
+    // The run's HOME is a temp folder, so the toolchain manager keeps pointing at the real one
+    // (the smoke test runs the language's own test command).
+    let real = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_iohr"));
+    cmd.env_clear();
+    for (var, dir) in [("RUSTUP_HOME", ".rustup"), ("CARGO_HOME", ".cargo")] {
+        let set = std::env::var_os(var).map(std::path::PathBuf::from);
+        if let Some(p) = set.or_else(|| real.as_ref().map(|h| h.join(dir))) {
+            cmd.env(var, p);
+        }
+    }
+    cmd.current_dir(cwd)
         .args(args)
-        .env_clear()
         .env("PATH", path)
         .env("HOME", home)
         .env("USERPROFILE", home)
@@ -80,6 +89,7 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     let t = text(&out);
     assert!(t.starts_with("NAME"), "{t}");
     for (name, status) in [
+        ("blank", "live"),
         ("demo", "live"),
         ("coordinated", "live"),
         ("macos-app", "coming"),
@@ -99,10 +109,13 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     let out = iohr(h.path(), &["project", "templates", "--json"]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let rows = v.as_array().unwrap();
-    assert_eq!(rows.len(), 4);
-    assert_eq!(rows[0]["name"], "demo");
-    assert_eq!(rows[1]["status"], "live");
-    assert_eq!(rows[2]["status"], "coming");
+    assert_eq!(rows.len(), 5);
+    // `blank` is listed first, after the menu's "Describe it"; demo keeps its own description.
+    assert_eq!(rows[0]["name"], "blank");
+    assert_eq!(rows[0]["description"], "An empty project in your language");
+    assert_eq!(rows[1]["name"], "demo");
+    assert_eq!(rows[2]["status"], "live");
+    assert_eq!(rows[3]["status"], "coming");
 }
 
 #[test]
@@ -489,7 +502,16 @@ fn describe_starts_the_detected_agent_in_the_new_folder_with_the_ai_label() {
         called.contains("a sensor watcher") && called.contains("ai"),
         "{called}"
     );
-    assert!(d.join("extension.toml").is_file());
+    // Described projects are plain: `blank`, no panel and no manifest.
+    assert!(d.join("inorbit.toml").is_file() && d.join(".inorbit/space").is_file());
+    assert!(!d.join("extension.toml").exists() && !d.join("panel").exists());
+    let rec = std::fs::read_to_string(d.join("inorbit.toml")).unwrap();
+    assert!(
+        rec.contains("template = \"blank\"") && rec.contains("kind = \"project\""),
+        "{rec}"
+    );
+    let readme = std::fs::read_to_string(d.join("README.md")).unwrap();
+    assert!(readme.contains("a sensor watcher"), "{readme}");
     // No agent anywhere: it says how to configure one.
     let o = iohr(
         h.path(),
@@ -521,7 +543,7 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
     let marker = h.path().join("called");
     fake_claude(&h.path().join("bin"), &marker);
     user_template(h.path());
-    for id in ["demo", "coordinated", "probe"] {
+    for id in ["blank", "demo", "coordinated", "probe"] {
         for flag in ["--dry-run", "--plan"] {
             let d = h.path().join("w").join(format!("{id}-x"));
             let o = iohr_with_path(
@@ -544,6 +566,10 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
             assert!(
                 t.contains("dry run: nothing was changed") || t.contains("would:"),
                 "{id}: {t}"
+            );
+            assert!(
+                t.contains(".inorbit/space"),
+                "{id}: the dry run lists the link: {t}"
             );
             assert!(!d.exists(), "{id}: the folder must not exist");
             assert!(
@@ -620,7 +646,7 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     assert!(out.status.success(), "{}", text(&out));
     let t = text(&out);
     assert!(
-        t.contains("would: write 9 files into ./my-shop (in the folder you are in)"),
+        t.contains("would: write 10 files into ./my-shop (in the folder you are in)"),
         "{t}"
     );
     assert!(
@@ -1066,4 +1092,283 @@ fn show_lists_the_languages_a_template_offers_in_text_and_in_json() {
         &["project", "template", "show", "macos-app"],
     ));
     assert!(!c.contains("Languages"), "{c}");
+}
+
+// ---- --describe: the agent builds in the background, then the smoke test runs -------------------
+
+/// A fake `claude` for `init --describe`: records its folder and arguments in `$FAKE_OUT`,
+/// writes `built.txt`, then by `$FAKE_MODE`: `break` removes `src/` (so only a smoke test that
+/// runs after it can tell), `hang` waits 30 s. It prints the recorded stream `$FAKE_STREAM` and
+/// exits with `$FAKE_EXIT`.
+#[cfg(unix)]
+fn fake_builder(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).unwrap();
+    let bin = dir.join("claude");
+    std::fs::write(
+        &bin,
+        "#!/bin/sh\npwd > \"$FAKE_OUT/cwd\"\nprintf '%s\\n' \"$@\" > \"$FAKE_OUT/args\"\necho built > built.txt\ncase \"$FAKE_MODE\" in\n  break) rm -rf src;;\n  hang) exec sleep 30;;\nesac\nif [ -n \"$FAKE_STREAM\" ]; then while IFS= read -r l; do printf '%s\\n' \"$l\"; done < \"$FAKE_STREAM\"; fi\nexit \"${FAKE_EXIT:-0}\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// `iohr project init NAME --describe ... --yes` in `h` with the fake builder first on PATH,
+/// the recorded stream `stream` and `mode`, `exit`; returns the output and the project folder.
+#[cfg(unix)]
+fn init_described(
+    h: &Path,
+    extra: &[&str],
+    stream: &str,
+    mode: &str,
+    exit: &str,
+) -> (Output, std::path::PathBuf) {
+    fake_builder(&h.join("bin"));
+    std::fs::create_dir_all(h.join("out")).unwrap();
+    let d = h.join("w/bg");
+    let base = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths = vec![h.join("bin")];
+    paths.extend(std::env::split_paths(&base));
+    let o = Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .args([
+            "project",
+            "init",
+            "bg",
+            "--describe",
+            "a watcher that logs a line",
+            "--lang",
+            "python",
+            "--dir",
+            d.to_str().unwrap(),
+            "--yes",
+        ])
+        .args(extra)
+        .env_clear()
+        .env("PATH", std::env::join_paths(paths).unwrap())
+        .env("HOME", h)
+        .env("USERPROFILE", h)
+        .env("IOHR_CONFIG_DIR", h.join("config"))
+        .env("FAKE_OUT", h.join("out"))
+        .env(
+            "FAKE_STREAM",
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/data")
+                .join(stream),
+        )
+        .env("FAKE_MODE", mode)
+        .env("FAKE_EXIT", exit)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    (o, d)
+}
+
+#[cfg(unix)]
+#[test]
+fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test() {
+    if !on_path("python3") {
+        return;
+    }
+    let h = tempfile::tempdir().unwrap();
+    let (o, d) = init_described(h.path(), &[], "ask-claude.jsonl", "", "0");
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    // It streamed and exited: tool rows and the footer on stderr, no session, no resume line.
+    assert!(t.contains("- Read ") && t.contains("AI-built"), "{t}");
+    assert!(
+        !t.to_lowercase().contains("resume") && !t.contains("--resume"),
+        "{t}"
+    );
+    assert!(t.contains("generated by an AI model (claude)"), "{t}");
+    // Print mode, in the new folder, files only, bounded; the prompt is the last argument.
+    let args: Vec<String> = std::fs::read_to_string(h.path().join("out/args"))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let has = |a: &str, b: &str| args.windows(2).any(|w| w[0] == a && w[1] == b);
+    assert!(args.contains(&"-p".to_owned()), "{args:?}");
+    assert!(has("--output-format", "stream-json"), "{args:?}");
+    assert!(has("--permission-mode", "acceptEdits"), "{args:?}");
+    assert!(has("--disallowedTools", "Bash"), "{args:?}");
+    assert!(
+        has("--max-turns", "40") && has("--model", "haiku"),
+        "{args:?}"
+    );
+    assert!(
+        args.last().unwrap().contains("a watcher that logs a line"),
+        "{args:?}"
+    );
+    let cwd = std::fs::read_to_string(h.path().join("out/cwd")).unwrap();
+    assert_eq!(
+        std::fs::canonicalize(cwd.trim()).unwrap(),
+        std::fs::canonicalize(&d).unwrap()
+    );
+    assert!(d.join("built.txt").is_file());
+    // The smoke test ran on what the agent left, and the report says so.
+    assert!(t.contains("done: smoke test, `python3 -m unittest"), "{t}");
+    assert!(t.contains("done: agent build"), "{t}");
+    // The same run with --json: the agent's events as lines, then one summary and the report.
+    let h2 = tempfile::tempdir().unwrap();
+    let (o, _) = init_described(h2.path(), &["--json"], "ask-claude.jsonl", "", "0");
+    assert!(o.status.success(), "{}", text(&o));
+    let lines: Vec<serde_json::Value> = String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{e}: {l}")))
+        .collect();
+    let kind = |i: usize| lines[i]["type"].as_str().unwrap_or_default().to_owned();
+    assert_eq!(kind(lines.len() - 2), "iohr_summary", "{lines:?}");
+    assert_eq!(kind(lines.len() - 1), "iohr_report", "{lines:?}");
+    assert_eq!(lines[lines.len() - 1]["smoke"]["ok"], true);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_smoke_test_runs_after_the_agent_so_the_report_is_true_for_what_it_built() {
+    if !on_path("python3") {
+        return;
+    }
+    let h = tempfile::tempdir().unwrap();
+    // The agent removes src/: a smoke test that ran before it would have passed.
+    let (o, d) = init_described(h.path(), &[], "ask-claude.jsonl", "break", "0");
+    let t = text(&o);
+    assert!(!o.status.success(), "{t}");
+    assert!(t.contains("failed: smoke test"), "{t}");
+    assert!(t.contains("the smoke test failed"), "{t}");
+    assert!(d.join("built.txt").is_file() && !d.join("src").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failing_or_stuck_agent_keeps_the_scaffold_exits_non_zero_and_says_how_to_retry() {
+    let h = tempfile::tempdir().unwrap();
+    let (o, d) = init_described(
+        h.path(),
+        &["--no-smoke"],
+        "ask-claude-failed.jsonl",
+        "",
+        "1",
+    );
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(
+        t.contains("the agent did not finish: Not logged in")
+            && t.contains("iohr ask --allow-edits"),
+        "{t}"
+    );
+    assert!(d.join("inorbit.toml").is_file(), "the scaffold stays");
+    assert!(t.contains("failed: agent build"), "{t}");
+    // An agent that never ends is stopped at the time bound.
+    let h = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let (o, d) = init_described(
+        h.path(),
+        &["--no-smoke", "--agent-timeout", "1"],
+        "ask-claude.jsonl",
+        "hang",
+        "0",
+    );
+    let t = text(&o);
+    assert!(started.elapsed().as_secs() < 20, "{t}");
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(t.contains("did not finish in 1 s and was stopped"), "{t}");
+    assert!(d.join("inorbit.toml").is_file());
+    // The dry run starts nothing and shows the command it would run, bounds included.
+    let h = tempfile::tempdir().unwrap();
+    let (o, d) = init_described(h.path(), &["--dry-run", "--agent-turns", "9"], "", "", "0");
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(
+        t.contains("claude -p --output-format stream-json")
+            && t.contains("--max-turns 9")
+            && t.contains("--permission-mode acceptEdits"),
+        "{t}"
+    );
+    assert!(!d.exists() && !h.path().join("out/args").exists());
+}
+
+/// Every template's init writes `.inorbit/space` (RFC 0103), committed with the first commit,
+/// and no template's ignore file excludes `.inorbit/`.
+#[test]
+fn every_template_writes_the_space_link_and_git_commits_it() {
+    let h = tempfile::tempdir().unwrap();
+    for id in ["blank", "demo", "coordinated"] {
+        let d = h.path().join("w").join(id);
+        let o = iohr(
+            h.path(),
+            &[
+                "project",
+                "init",
+                &format!("{id}-x"),
+                "--template",
+                id,
+                "--dir",
+                d.to_str().unwrap(),
+                "--no-smoke",
+                "--yes",
+            ],
+        );
+        assert!(o.status.success(), "{id}: {}", text(&o));
+        let link = std::fs::read_to_string(d.join(".inorbit/space")).unwrap();
+        let v: toml::Table = link.parse().unwrap();
+        assert_eq!(v["id"].as_str(), Some(""), "{id}");
+        assert!(link.contains("/inorbit:link <space>"), "{id}: {link}");
+        let ignore = std::fs::read_to_string(d.join(".gitignore")).unwrap();
+        let ignored = ignore
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .any(|l| l.contains(".inorbit"));
+        assert!(!ignored, "{id}: {ignore}");
+        if Command::new("git").arg("--version").output().is_ok() {
+            let tracked = Command::new("git")
+                .args(["-C", d.to_str().unwrap(), "ls-files"])
+                .output()
+                .unwrap();
+            let files = String::from_utf8_lossy(&tracked.stdout).into_owned();
+            assert!(files.contains(".inorbit/space"), "{id}: {files}");
+            assert!(files.contains("inorbit.toml"), "{id}: {files}");
+        }
+    }
+}
+
+/// Every live language of `blank` passes its own test through `init`'s smoke step, where the
+/// toolchain is here, and the project holds the blank files only.
+#[test]
+fn every_blank_language_passes_the_smoke_test_through_init() {
+    let h = tempfile::tempdir().unwrap();
+    for (lang, prog) in [
+        ("python", "python3"),
+        ("typescript", "node"),
+        ("go", "go"),
+        ("rust", "cargo"),
+    ] {
+        if !on_path(prog) {
+            eprintln!("{lang}: {prog} not on PATH: not run");
+            continue;
+        }
+        let d = h.path().join("w").join(lang);
+        let o = iohr(
+            h.path(),
+            &[
+                "project",
+                "init",
+                "plain",
+                "--template",
+                "blank",
+                "--lang",
+                lang,
+                "--dir",
+                d.to_str().unwrap(),
+                "--yes",
+            ],
+        );
+        let t = text(&o);
+        assert!(o.status.success(), "{lang}: {t}");
+        assert!(t.contains("done: smoke test"), "{lang}: {t}");
+        assert!(
+            !d.join("extension.toml").exists() && !d.join("panel").exists(),
+            "{lang}"
+        );
+        assert!(!t.to_lowercase().contains("macos"), "{lang}: {t}");
+    }
 }

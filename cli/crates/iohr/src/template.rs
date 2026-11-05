@@ -174,6 +174,17 @@ pub struct TemplateToml {
     pub programs: Vec<String>,
 }
 
+/// What the smoke test of a language does: `heartbeat` (default) runs the project once and reads
+/// the heartbeat it wrote; `test` runs the language's own `test` command, for a project that is
+/// not a service.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SmokeBy {
+    #[default]
+    Heartbeat,
+    Test,
+}
+
 /// One language of a template: the files of `variants/<id>/` are laid over the common files,
 /// and the commands say how the smoke test and the self-test run it. In `build`, `run` and
 /// `test`, `$DIR` is the project folder, `$STATE` and `$CACHE` its state folders; a build writes
@@ -201,6 +212,10 @@ pub struct VariantDef {
     /// How the self-test runs, as the README says.
     #[serde(default)]
     pub test: Vec<String>,
+    /// What the smoke test does: `heartbeat` (default) or `test` (run `test`, in your
+    /// environment, writing only under `$CACHE` when `env` says so).
+    #[serde(default)]
+    pub smoke: SmokeBy,
     /// Extra environment for `run`, `$DIR`, `$STATE` and `$CACHE` allowed.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
@@ -215,6 +230,9 @@ pub struct Runner {
     pub label: String,
     pub build: Vec<String>,
     pub run: Vec<String>,
+    /// The language's own test command, run by the smoke test when `by_test`.
+    pub test: Vec<String>,
+    pub by_test: bool,
     pub env: BTreeMap<String, String>,
 }
 
@@ -361,6 +379,8 @@ impl Template {
             label: v.label.clone(),
             build: v.build.iter().map(f).collect(),
             run: v.run.iter().map(f).collect(),
+            test: v.test.iter().map(f).collect(),
+            by_test: v.smoke == SmokeBy::Test,
             env: v.env.iter().map(|(k, x)| (k.clone(), f(x))).collect(),
         })
     }
@@ -470,7 +490,7 @@ const DEMO: Embedded = &[
     bf!("template.toml", "demo/template.toml"),
     bf!("extension.toml", "demo/extension.toml"),
     bf!("README.md", "demo/README.md"),
-    bf!("inorbit-project.toml", "demo/inorbit-project.toml"),
+    bf!("inorbit.toml", "demo/inorbit.toml"),
     bf!(".gitignore", "demo/gitignore"),
     bf!("panel/index.html", "demo/panel/index.html"),
     bf!(
@@ -524,10 +544,49 @@ const DEMO: Embedded = &[
         "demo/variants/rust/tests/selftest.rs"
     ),
 ];
+const BLANK: Embedded = &[
+    bf!("template.toml", "blank/template.toml"),
+    bf!("README.md", "blank/README.md"),
+    bf!("inorbit.toml", "blank/inorbit.toml"),
+    bf!(".gitignore", "blank/gitignore"),
+    bf!(
+        "variants/python/pyproject.toml",
+        "blank/variants/python/pyproject.toml"
+    ),
+    bf!(
+        "variants/python/src/@@MODULE@@/__init__.py",
+        "blank/variants/python/src/module/__init__.py"
+    ),
+    bf!(
+        "variants/python/tests/test_basic.py",
+        "blank/variants/python/tests/test_basic.py"
+    ),
+    bf!(
+        "variants/typescript/package.json",
+        "blank/variants/typescript/package.json"
+    ),
+    bf!(
+        "variants/typescript/src/index.ts",
+        "blank/variants/typescript/src/index.ts"
+    ),
+    bf!(
+        "variants/typescript/tests/index.test.ts",
+        "blank/variants/typescript/tests/index.test.ts"
+    ),
+    bf!("variants/go/go.mod", "blank/variants/go/go.mod"),
+    bf!("variants/go/main.go", "blank/variants/go/main.go"),
+    bf!("variants/go/main_test.go", "blank/variants/go/main_test.go"),
+    bf!("variants/rust/Cargo.toml", "blank/variants/rust/Cargo.toml"),
+    bf!("variants/rust/Cargo.lock", "blank/variants/rust/Cargo.lock"),
+    bf!(
+        "variants/rust/src/main.rs",
+        "blank/variants/rust/src/main.rs"
+    ),
+];
 const COORDINATED: Embedded = &[
     bf!("template.toml", "coordinated/template.toml"),
     bf!("README.md", "coordinated/README.md"),
-    bf!("inorbit-project.toml", "coordinated/inorbit-project.toml"),
+    bf!("inorbit.toml", "coordinated/inorbit.toml"),
     bf!("coordination.toml", "coordinated/coordination.toml"),
 ];
 const MACOS_APP: Embedded = &[bf!("template.toml", "macos-app/template.toml")];
@@ -535,6 +594,7 @@ const UI_PANEL: Embedded = &[bf!("template.toml", "ui-panel/template.toml")];
 
 /// The built-ins, in the order they are listed.
 const BUILT_INS: &[(&str, Embedded)] = &[
+    ("blank", BLANK),
     ("demo", DEMO),
     ("coordinated", COORDINATED),
     ("macos-app", MACOS_APP),
@@ -1125,6 +1185,9 @@ pub fn programs(t: &Template, vals: &[(String, String)]) -> Vec<String> {
 /// A filled path that leaves the folder.
 pub fn render(t: &Template, vals: &[(String, String)]) -> Result<Vec<(String, String)>, String> {
     let mut vals = vals.to_vec();
+    if !vals.iter().any(|(x, _)| x == "@@DESCRIPTION@@") {
+        vals.push(("@@DESCRIPTION@@".to_owned(), String::new()));
+    }
     for q in &t.all_questions() {
         let k = format!("@@{}@@", q.key.to_ascii_uppercase());
         if !vals.iter().any(|(x, _)| *x == k) {
@@ -1272,13 +1335,16 @@ fn lint_variants(t: &Template, f: &mut Vec<String>) {
         if v.label.trim().is_empty() {
             f.push(format!("variant `{id}` has no label"));
         }
-        if v.status == Status::Live
-            && m.steps.iter().any(|s| s.name == StepName::Smoke)
-            && v.run.is_empty()
-        {
-            f.push(format!(
-                "variant `{id}` is live and the template has a smoke step, but it has no `run`"
-            ));
+        if v.status == Status::Live && m.steps.iter().any(|s| s.name == StepName::Smoke) {
+            if v.smoke == SmokeBy::Test && v.test.is_empty() {
+                f.push(format!(
+                    "variant `{id}` smokes by `test` and is live, but it has no `test`"
+                ));
+            } else if v.smoke == SmokeBy::Heartbeat && v.run.is_empty() {
+                f.push(format!(
+                    "variant `{id}` is live and the template has a smoke step, but it has no `run`"
+                ));
+            }
         }
         if v.needs
             .iter()
@@ -1430,7 +1496,7 @@ pub fn lint_dir(path: &Path, root: &Path) -> LintReport {
     match extend(t.clone(), root, 0) {
         Err(e) => f.push(e),
         Ok(full) => {
-            let known: Vec<String> = ["NAME", "ID", "MODULE", "CREATED_AT"]
+            let known: Vec<String> = ["NAME", "ID", "MODULE", "CREATED_AT", "DESCRIPTION"]
                 .iter()
                 .map(|s| (*s).to_owned())
                 .chain(

@@ -140,7 +140,8 @@ pub(crate) fn choose_thinking(
 /// Claude (flags checked against `claude --help`): `-p` prints and exits, `--output-format
 /// stream-json` needs `--verbose`, `--include-partial-messages` streams pieces as they
 /// arrive, `--no-session-persistence` keeps nothing on disk, `--permission-mode acceptEdits`
-/// lets it edit. Codex (<https://developers.openai.com/codex/cli/reference>): `exec --json`
+/// lets it edit (and `--disallowedTools Bash` keeps the shell out even when the person's own
+/// settings would allow it), `--max-turns` bounds the run. Codex (<https://developers.openai.com/codex/cli/reference>): `exec --json`
 /// prints JSON lines, `--ephemeral` keeps no session, `--sandbox` is `read-only` unless edits
 /// are allowed, `--skip-git-repo-check` lets it answer in any folder.
 #[must_use]
@@ -148,6 +149,7 @@ pub(crate) fn argv(
     agent: Agent,
     model: Option<&str>,
     allow_edits: bool,
+    max_turns: Option<u32>,
     question: &str,
 ) -> Vec<String> {
     let mut a: Vec<String> = match agent {
@@ -171,6 +173,7 @@ pub(crate) fn argv(
     match (agent, allow_edits) {
         (Agent::Claude, true) => {
             a.extend(["--permission-mode".to_owned(), "acceptEdits".to_owned()]);
+            a.extend(["--disallowedTools".to_owned(), "Bash".to_owned()]);
         }
         (Agent::Claude, false) => {}
         (Agent::Codex, edits) => a.extend([
@@ -182,6 +185,10 @@ pub(crate) fn argv(
             }
             .to_owned(),
         ]),
+    }
+    // Codex has no turn limit; the caller's time limit is its only bound.
+    if let (Agent::Claude, Some(n)) = (agent, max_turns) {
+        a.extend(["--max-turns".to_owned(), n.to_string()]);
     }
     a.extend(["--".to_owned(), question.to_owned()]);
     a
@@ -297,17 +304,24 @@ mod tests {
 
     #[test]
     fn the_argv_has_no_session_and_no_edits_unless_asked() {
-        let a = argv(Agent::Claude, Some("haiku"), false, "q");
+        let a = argv(Agent::Claude, Some("haiku"), false, None, "q");
         assert!(a.contains(&"--no-session-persistence".to_owned()));
         assert!(!a.contains(&"--permission-mode".to_owned()));
         assert_eq!(a[a.len() - 2..], ["--", "q"]);
-        let e = argv(Agent::Claude, Some("haiku"), true, "q");
+        let e = argv(Agent::Claude, Some("haiku"), true, Some(7), "q");
         assert!(
             e.windows(2)
                 .any(|w| w == ["--permission-mode", "acceptEdits"])
         );
+        // Edits never include the shell, and the turn bound reaches Claude only.
+        assert!(e.windows(2).any(|w| w == ["--disallowedTools", "Bash"]));
+        assert!(e.windows(2).any(|w| w == ["--max-turns", "7"]));
         assert!(
-            argv(Agent::Codex, None, false, "q")
+            !a.contains(&"--max-turns".to_owned()) && !a.contains(&"--disallowedTools".to_owned())
+        );
+        assert!(!argv(Agent::Codex, None, false, Some(7), "q").contains(&"--max-turns".to_owned()));
+        assert!(
+            argv(Agent::Codex, None, false, Some(7), "q")
                 .windows(2)
                 .any(|w| w == ["--sandbox", "read-only"])
         );

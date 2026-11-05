@@ -1368,9 +1368,19 @@ pub enum ProjectCommand {
         #[arg(long, value_name = "FILE")]
         answers: Option<PathBuf>,
         /// Describe the project and your own agent (claude or codex, on your PATH) builds it
-        /// in the new folder, from the template's agent prompt. Its output is labelled AI.
+        /// in the new folder, from the template's agent prompt. It runs in the background of
+        /// this command, in print mode (no session opens): it may edit files, never run shell
+        /// commands, and iohr draws its progress. The smoke test runs after it. Its output is
+        /// labelled AI. `--json` passes the agent's events through as JSON lines.
         #[arg(long, value_name = "TEXT")]
         describe: Option<String>,
+        /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
+        /// 40, init's own: `[ask]` in config.toml has no bound.
+        #[arg(long, value_name = "N")]
+        agent_turns: Option<u32>,
+        /// The most seconds the agent may run before iohr stops it. Default 600, init's own.
+        #[arg(long, value_name = "SECONDS")]
+        agent_timeout: Option<u64>,
         /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
         /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
         /// agent is not started (its command and prompt are printed). Every step shows as
