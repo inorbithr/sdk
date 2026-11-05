@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use iohr_auth::RunnerConfig;
 
+use crate::commands::upgrade::{SignWith, sign};
+
 /// The most turns one runner holds at once; the service clamps to the same.
 pub(crate) const MAX_CAPACITY: u32 = 32;
 /// The turn classes a runner may declare (the service's `coordinate` and `build`).
@@ -34,6 +36,8 @@ pub(crate) const BUILD_FLOOR_BYTES: u64 = 100 * 1_000_000_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Source {
     Flag,
+    /// An environment variable, by name.
+    Env(&'static str),
     /// `[profiles.<name>.runner]`.
     Profile(String),
     /// `[runner]`.
@@ -45,6 +49,7 @@ impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Flag => f.write_str("flag"),
+            Self::Env(name) => f.write_str(name),
             Self::Profile(p) => write!(f, "[profiles.{p}.runner]"),
             Self::File => f.write_str("[runner]"),
             Self::Default => f.write_str("default"),
@@ -69,6 +74,8 @@ pub(crate) struct Flags {
     pub(crate) name: Option<String>,
     /// `--no-auto-upgrade` given (it can only say no).
     pub(crate) no_auto_upgrade: bool,
+    /// `IOHR_SIGN_IDENTITY`, over `upgrade_sign_identity`.
+    pub(crate) sign_identity: Option<String>,
 }
 
 /// How an upgraded runner restarts (`upgrade_restart`).
@@ -117,6 +124,8 @@ pub(crate) struct Effective {
     /// How long between looks for a newer release.
     pub(crate) upgrade_interval: Setting<Duration>,
     pub(crate) upgrade_restart: Setting<RestartMode>,
+    /// How an upgrade signs the new binary on macOS (`upgrade_sign_identity`; default off).
+    pub(crate) upgrade_sign: Setting<SignWith>,
     /// The user service units `systemd.user-restart` may restart; `None` or empty, none.
     pub(crate) user_units: Option<Setting<Vec<String>>>,
     /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
@@ -215,6 +224,7 @@ pub(crate) fn resolve(
     });
     let upgrade_interval = upgrade_interval_of(profile, file)?;
     let upgrade_restart = restart_mode_of(profile, file)?;
+    let upgrade_sign = upgrade_sign_of(flags.sign_identity.as_deref(), profile, file);
     let user_units = pick(None, profile, file, |c| c.user_units.clone());
     if let Some(u) = &user_units
         && let Some(bad) = u
@@ -247,9 +257,36 @@ pub(crate) fn resolve(
         auto_upgrade,
         upgrade_interval,
         upgrade_restart,
+        upgrade_sign,
         user_units,
         core_checkout,
     })
+}
+
+/// `upgrade_sign_identity`: `IOHR_SIGN_IDENTITY`, then the profile's table, then
+/// `[runner]`, then off. Every value is taken (`-` is off, `auto` picks, the rest is a
+/// name `codesign` is asked for), so it never stops a runner or an upgrade.
+pub(crate) fn upgrade_sign_of(
+    env: Option<&str>,
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Setting<SignWith> {
+    if let Some(v) = env.filter(|v| !v.trim().is_empty()) {
+        return Setting {
+            value: SignWith::parse(v),
+            source: Source::Env(sign::ENV),
+        };
+    }
+    pick(None, profile, file, |c| c.upgrade_sign_identity.clone()).map_or(
+        Setting {
+            value: SignWith::Off,
+            source: Source::Default,
+        },
+        |s| Setting {
+            value: SignWith::parse(&s.value),
+            source: s.source,
+        },
+    )
 }
 
 /// The upgrade interval, checked, from the profile, the file or the default.
@@ -545,6 +582,49 @@ mod tests {
                 source: Source::Flag
             }
         );
+    }
+
+    #[test]
+    fn signing_is_off_unless_set_and_the_variable_beats_the_tables() {
+        let e = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.upgrade_sign,
+            Setting {
+                value: SignWith::Off,
+                source: Source::Default
+            }
+        );
+        let mut file = RunnerConfig::default();
+        file.upgrade_sign_identity = Some("auto".into());
+        let mut work = RunnerConfig::default();
+        work.upgrade_sign_identity = Some("Apple Development: Someone (ABC123)".into());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.upgrade_sign.value, e.upgrade_sign.source),
+            (SignWith::Auto, Source::File)
+        );
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(
+            e.upgrade_sign,
+            Setting {
+                value: SignWith::Named("Apple Development: Someone (ABC123)".into()),
+                source: Source::Profile("work".into())
+            }
+        );
+        // `-` from the environment turns it off over both tables; an empty one is unset.
+        let flags = Flags {
+            sign_identity: Some("-".into()),
+            ..Flags::default()
+        };
+        let e = resolve(&file, Some(("work", &work)), &flags).unwrap();
+        assert_eq!(
+            (e.upgrade_sign.value, e.upgrade_sign.source.to_string()),
+            (SignWith::Off, "IOHR_SIGN_IDENTITY".to_owned())
+        );
+        assert_eq!(upgrade_sign_of(Some(" "), None, &file).source, Source::File);
+        // Any value is taken: it never stops a runner.
+        file.upgrade_sign_identity = Some("no such identity".into());
+        assert!(resolve(&file, None, &Flags::default()).is_ok());
     }
 
     #[test]

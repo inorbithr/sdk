@@ -51,6 +51,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             capacity,
             kinds,
             no_auto_upgrade,
+            sign_identity: env.sign_identity.clone(),
             ..Flags::default()
         };
         let e = effective(&ctx.config, profile.as_ref(), &flags)?;
@@ -250,6 +251,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity,
                 kinds,
                 no_auto_upgrade,
+                sign_identity: env.sign_identity.clone(),
                 ..Flags::default()
             };
             let set = effective(&ctx.config, s.profile.as_ref(), &flags)?;
@@ -297,6 +299,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             ));
             let (declare, declared) = watch::channel(declared);
             let (policy, policy_rx) = watch::channel(Policy::of(&set));
+            let signing = policy_rx.clone();
             reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare, policy);
             // One drain: the turn loop and the approved-run poller take no new work while
             // an upgrade is waiting to install, and say when nothing is left running.
@@ -330,14 +333,16 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let upgrader = Version::parse(env!("CARGO_PKG_VERSION")).ok().map(|current| {
                 let supervisor = supervisor::detect(&Surroundings::from_process());
                 Out::note(&format!(
-                    "auto-upgrade is {} ({}), looking every {} minutes, restart {} under {supervisor}",
+                    "auto-upgrade is {} ({}), looking every {} minutes, restart {} under {supervisor}, signing {} ({})",
                     if set.auto_upgrade.value { "on" } else { "off" },
                     set.auto_upgrade.source,
                     set.upgrade_interval.value.as_secs() / 60,
                     set.upgrade_restart.value.as_str(),
+                    set.upgrade_sign.value,
+                    set.upgrade_sign.source,
                 ));
                 Upgrader {
-                    source: RealSource,
+                    source: RealSource { policy: signing },
                     ledger: FileLedger {
                         path: ctx.dir.join("runner").join("last-upgrade"),
                     },
@@ -734,10 +739,11 @@ fn reload_on_hangup(
                     let _ = declare.send(d);
                     let now = Policy::of(&e);
                     Out::note(&format!(
-                        "auto-upgrade {}, every {} minutes, restart {}",
+                        "auto-upgrade {}, every {} minutes, restart {}, signing {}",
                         if now.enabled { "on" } else { "off" },
                         now.interval.as_secs() / 60,
-                        now.restart.as_str()
+                        now.restart.as_str(),
+                        now.sign
                     ));
                     let _ = policy.send(now);
                 }
@@ -792,6 +798,7 @@ async fn show_settings(e: &Effective, out: Out) {
             "auto_upgrade": { "value": e.auto_upgrade.value, "source": e.auto_upgrade.source.to_string() },
             "upgrade_interval_minutes": { "value": e.upgrade_interval.value.as_secs() / 60, "source": e.upgrade_interval.source.to_string() },
             "upgrade_restart": { "value": e.upgrade_restart.value.as_str(), "source": e.upgrade_restart.source.to_string() },
+            "upgrade_sign_identity": { "value": e.upgrade_sign.value.to_string(), "source": e.upgrade_sign.source.to_string() },
             "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
             "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
@@ -833,6 +840,11 @@ async fn show_settings(e: &Effective, out: Out) {
             "upgrade_restart".to_owned(),
             e.upgrade_restart.value.as_str().to_owned(),
             e.upgrade_restart.source.to_string(),
+        ],
+        vec![
+            "upgrade_sign_identity".to_owned(),
+            e.upgrade_sign.value.to_string(),
+            e.upgrade_sign.source.to_string(),
         ],
         vec![
             "build_floor".to_owned(),

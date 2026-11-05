@@ -154,6 +154,7 @@ fn rig(method: Method, current: &str, latest: &str, sup: Supervisor, mode: Resta
         enabled: true,
         interval: HOUR,
         restart: mode,
+        sign: SignWith::Off,
     });
     let (stop, _) = watch::channel(false);
     Rig {
