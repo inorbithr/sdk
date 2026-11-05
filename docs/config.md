@@ -501,6 +501,20 @@ With `--json` the agent's own event lines are passed through untouched, one per 
 by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
 command exits with the agent's code, and with 1 when the agent reports a failed run.
 
+### 4.6 The sync table
+
+`iohr sync` sends the project's `atlas/` documents (PRDs, RFCs, ADRs and studies) to its
+Decisions space. Nothing leaves the machine unless you run it, or turn the background trigger
+on here. `iohr` never writes this table.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `background` | `true` lets a background process send the documents; `false` or absent means only `iohr sync` does | `false` | `iohr sync` |
+
+Today the key is read and nothing else: `iohr` has no background process to hang the trigger
+on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
+background loop is the next slice (RFC 0205).
+
 ## 5. Credentials
 
 ### 5.1 The chain
@@ -1181,17 +1195,3 @@ language's driver runs every vector as a unit test next to its conformance drive
    transport (proxy, trust, mTLS), then logging and the `otel` feature.
 5. TypeScript, Python, Go, Java, C#, in that order, each lifting `pending` as it passes.
 6. READMEs show `load` first. `design.md` section 2 points here.
-
-### 4.6 The sync table
-
-`iohr sync` sends the project's `atlas/` documents (PRDs, RFCs, ADRs and studies) to its
-Decisions space. Nothing leaves the machine unless you run it, or turn the background trigger
-on here. `iohr` never writes this table.
-
-| Key | Values | Default | Read by |
-|---|---|---|---|
-| `background` | `true` lets a background process send the documents; `false` or absent means only `iohr sync` does | `false` | `iohr sync` |
-
-Today the key is read and nothing else: `iohr` has no background process to hang the trigger
-on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
-background loop is the next slice (RFC 0205).
