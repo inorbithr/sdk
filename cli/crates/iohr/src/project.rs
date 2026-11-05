@@ -633,13 +633,16 @@ pub fn smoke(dir: &Path, state: &Path, name: &str, runner: Option<&Runner>) -> S
 /// XDG directories, which would point the demo at the real configuration. The unix `PATH`
 /// stays the fixed system one.
 fn demo_base_env() -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    // The fixed system path on unix; Windows keeps the runner's own, where its tools live.
+    let fixed = cfg!(unix);
     let mut env: Vec<_> = crate::runner::env::scrub(std::env::vars_os())
         .into_iter()
-        .filter(|(k, _)| !k.to_string_lossy().to_ascii_uppercase().starts_with("XDG_"))
+        .filter(|(k, _)| {
+            let up = k.to_string_lossy().to_ascii_uppercase();
+            !(up.starts_with("XDG_") || fixed && up == "PATH")
+        })
         .collect();
-    #[cfg(unix)]
-    {
-        env.retain(|(k, _)| k != "PATH");
+    if fixed {
         env.push((
             "PATH".into(),
             "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".into(),
