@@ -1950,7 +1950,7 @@ async fn revoke_refuses_a_bad_id_and_an_unknown_runner_without_a_delete() {
         "{}",
         text(&o)
     );
-    assert!(deletes(&server).await.is_empty());
+    assert_eq!(deletes(&server).await, Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -1964,7 +1964,7 @@ async fn revoke_refuses_an_online_runner_unless_forced() {
     ));
     assert_ne!(o.status.code(), Some(0), "{}", text(&o));
     assert!(text(&o).contains("--force-online"), "{}", text(&o));
-    assert!(deletes(&server).await.is_empty());
+    assert_eq!(deletes(&server).await, Vec::<String>::new());
     let args = ["runner", "revoke", REVOKE_ID, "--force-online"];
     let o = run(&mut iohr(&server, dir.path(), &args));
     assert_eq!(o.status.code(), Some(0), "{}", text(&o));
