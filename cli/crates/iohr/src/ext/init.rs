@@ -355,3 +355,29 @@ mod tests {
         assert!(e.to_string().contains("not empty"), "{e}");
     }
 }
+
+#[cfg(test)]
+mod dump {
+    #[test]
+    #[ignore = "one-off: dumps the per-language texts for template.toml"]
+    fn dump_values() {
+        let mut m = serde_json::Map::new();
+        for lang in [super::Lang::Shell, super::Lang::Python, super::Lang::Rust] {
+            let v: serde_json::Map<String, serde_json::Value> =
+                super::values("@@ID@@", "@@NAME@@", lang)
+                    .into_iter()
+                    .filter(|(k, _)| {
+                        ["@@LANG_NOTES@@", "@@MATRIX@@", "@@BUILD@@", "@@PLATFORMS@@", "@@NEEDS@@"]
+                            .contains(k)
+                    })
+                    .map(|(k, v)| (k.to_owned(), serde_json::Value::String(v)))
+                    .collect();
+            m.insert(lang.as_str().to_owned(), v.into());
+        }
+        std::fs::write(
+            std::env::var("DUMP_TO").unwrap(),
+            serde_json::to_string(&m).unwrap(),
+        )
+        .unwrap();
+    }
+}
