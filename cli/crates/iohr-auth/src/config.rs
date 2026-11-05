@@ -39,6 +39,9 @@ pub struct Config {
     /// `[profiles.<name>.runner]` overrides them key by key.
     #[serde(default, skip_serializing_if = "RunnerConfig::is_empty")]
     pub runner: RunnerConfig,
+    /// `iohr project init` defaults (`[project]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "ProjectConfig::is_empty")]
+    pub project: ProjectConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -117,6 +120,24 @@ impl ExtConfig {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.registry.is_none() && self.trusted_keys.is_empty()
+    }
+}
+
+/// The `[project]` table: defaults for `iohr project init`. A `--template` flag wins over it;
+/// the built-in default (`demo`) applies when it is unset. Checked where it is used.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ProjectConfig {
+    /// The template a new project is made from when `--template` is not given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+}
+
+impl ProjectConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.template.is_none()
     }
 }
 
@@ -664,6 +685,23 @@ mod tests {
         assert!(text.contains("account = \"acc_1\""));
         assert!(!text.contains("token =") && !text.contains("secret"));
         assert_eq!(Config::load(dir.path()).unwrap(), c);
+    }
+
+    #[test]
+    fn the_project_table_is_read_and_a_save_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[project]   # my default\ntemplate = \"coordinated\"\n",
+        )
+        .unwrap();
+        let mut c = Config::load(dir.path()).unwrap();
+        assert_eq!(c.project.template.as_deref(), Some("coordinated"));
+        c.default = Some(name("work"));
+        c.save(dir.path()).unwrap();
+        let saved = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(saved.contains("[project]   # my default"), "{saved}");
+        assert!(saved.contains("template = \"coordinated\""), "{saved}");
     }
 
     #[test]

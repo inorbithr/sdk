@@ -44,11 +44,28 @@ const DEMO: &[TemplateFile] = &[
     tf!("tests/test_selftest.py", "demo/tests/test_selftest.py"),
 ];
 
-/// The templates `--template` accepts. Only `demo` is live; the others say so and refuse.
+/// What `coordinated` adds to the demo, by path: a file here replaces the demo's file of the
+/// same path, and a new path is added. The service itself is the demo's, not a copy.
+const COORDINATED: &[TemplateFile] = &[
+    tf!("README.md", "coordinated/README.md"),
+    tf!("inorbit-project.toml", "coordinated/inorbit-project.toml"),
+    tf!("coordination.toml", "coordinated/coordination.toml"),
+];
+
+/// The template used when neither `--template` nor `[project] template` names one.
+pub const DEFAULT_TEMPLATE: &str = "demo";
+
+/// The templates `--template` accepts: name, what it is, and whether it is live. A template
+/// that is not live says so and refuses.
 pub const TEMPLATES: &[(&str, &str, bool)] = &[
     (
         "demo",
         "A private macOS service that heartbeats and serves a tiny local panel (Python, no dependencies)",
+        true,
+    ),
+    (
+        "coordinated",
+        "The demo, wired for coordination: a coordination.toml naming your Planner plan and an ask example",
         true,
     ),
     (
@@ -81,6 +98,58 @@ pub fn check_name(name: &str) -> Result<(), String> {
     check_ext_name(n).map_err(|e| e.0)
 }
 
+/// The template to use: the flag, else `[project] template` from iohr's config, else
+/// [`DEFAULT_TEMPLATE`].
+#[must_use]
+pub fn choose_template(flag: Option<&str>, configured: Option<&str>) -> String {
+    [flag, configured]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|t| !t.is_empty())
+        .unwrap_or(DEFAULT_TEMPLATE)
+        .to_owned()
+}
+
+/// The templates as `iohr project templates` shows them (also its `--json`).
+#[must_use]
+pub fn listing(default: &str) -> Vec<serde_json::Value> {
+    TEMPLATES
+        .iter()
+        .map(|(id, what, live)| {
+            serde_json::json!({
+                "name": id,
+                "description": what,
+                "status": if *live { "live" } else { "coming" },
+                "default": *id == default,
+            })
+        })
+        .collect()
+}
+
+/// The names of the live templates, for messages.
+fn live_names() -> String {
+    TEMPLATES
+        .iter()
+        .filter(|(_, _, live)| *live)
+        .map(|(id, _, _)| format!("`{id}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A template's files: the demo's, then the template's own over them by path.
+fn files_of(id: &str) -> Vec<&'static TemplateFile> {
+    let own: &[TemplateFile] = if id == "coordinated" {
+        COORDINATED
+    } else {
+        &[]
+    };
+    DEMO.iter()
+        .filter(|f| !own.iter().any(|o| o.path == f.path))
+        .chain(own.iter())
+        .collect()
+}
+
 fn fill(text: &str, values: &[(&str, String)]) -> String {
     values
         .iter()
@@ -100,10 +169,11 @@ pub fn render(
 ) -> Result<Vec<(String, String)>, String> {
     check_name(name)?;
     let files = match TEMPLATES.iter().find(|(id, _, _)| *id == template) {
-        Some((_, _, true)) => DEMO,
+        Some((id, _, true)) => files_of(id),
         Some((id, _, false)) => {
             return Err(format!(
-                "the `{id}` template is coming; `demo` is the one that works today"
+                "the `{id}` template is coming; live today: {}",
+                live_names()
             ));
         }
         None => return Err(format!("there is no `{template}` template")),
@@ -555,6 +625,61 @@ mod tests {
         );
         assert!(render("nope", "demo", "local", "").is_err());
         assert!(render("demo", "tbd", "local", "").is_err());
+    }
+
+    #[test]
+    fn the_coordinated_template_is_the_demo_plus_a_coordination_manifest() {
+        let files = render("coordinated", "my-shop", "local", "2026-11-05T10:00:00Z").unwrap();
+        let get = |p: &str| files.iter().find(|(f, _)| f == p).map(|(_, t)| t.as_str());
+        for (p, t) in &files {
+            assert!(!t.contains("@@"), "{p} keeps a placeholder");
+        }
+        assert!(
+            get("src/my_shop/__main__.py").is_some(),
+            "the demo's service"
+        );
+        let c = get("coordination.toml").expect("coordination.toml");
+        let v: toml::Table = c.parse().expect("coordination.toml is TOML");
+        assert_eq!(v["plan"]["id"].as_str(), Some(""));
+        assert_eq!(v["ask"][0]["external_id"].as_str(), Some("my-shop-first"));
+        assert!(
+            get("inorbit-project.toml")
+                .unwrap()
+                .contains("template = \"coordinated\"")
+        );
+        assert!(get("README.md").unwrap().contains("coordination.toml"));
+        // One file per path, and the demo is not changed.
+        let mut paths: Vec<&String> = files.iter().map(|(p, _)| p).collect();
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), files.len());
+        let demo = render("demo", "my-shop", "local", "").unwrap();
+        assert_eq!(demo.len() + 1, files.len());
+        assert!(!demo.iter().any(|(p, _)| p == "coordination.toml"));
+        assert!(lint(get(SOURCE_FILE).unwrap()).ok);
+    }
+
+    #[test]
+    fn the_template_is_the_flag_then_the_config_then_demo() {
+        assert_eq!(choose_template(Some("demo"), Some("coordinated")), "demo");
+        assert_eq!(choose_template(None, Some("coordinated")), "coordinated");
+        assert_eq!(choose_template(None, None), "demo");
+        assert_eq!(choose_template(Some(" "), Some(" ")), "demo");
+    }
+
+    #[test]
+    fn the_listing_names_every_template_with_live_or_coming_and_the_default() {
+        let l = listing("coordinated");
+        assert_eq!(l.len(), TEMPLATES.len());
+        let by = |n: &str| l.iter().find(|t| t["name"] == n).unwrap();
+        assert_eq!(by("demo")["status"], "live");
+        assert_eq!(by("coordinated")["status"], "live");
+        assert_eq!(by("coordinated")["default"], true);
+        assert_eq!(by("demo")["default"], false);
+        assert_eq!(by("macos-app")["status"], "coming");
+        assert_eq!(by("ui-panel")["status"], "coming");
+        let e = render("ui-panel", "demo", "local", "").unwrap_err();
+        assert!(e.contains("coming") && e.contains("`coordinated`"), "{e}");
     }
 
     #[test]

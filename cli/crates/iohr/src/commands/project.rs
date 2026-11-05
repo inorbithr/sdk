@@ -1,13 +1,13 @@
-//! `iohr project init`: the one command that sets a project of your own up (PRD 0088).
+//! `iohr project init` (alias `create`) and `templates`: set a project of your own up (PRD 0088).
 
 use std::path::{Path, PathBuf};
 
 use crate::Env;
 use crate::cli::{Global, ProjectCommand};
-use crate::context::session;
+use crate::context::{Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
-use crate::project::{self, Report, Smoke, TEMPLATES, check_name, lines};
+use crate::project::{self, Report, Smoke, TEMPLATES, check_name, choose_template, lines};
 
 /// Where projects go by default: `~/development/<name>`.
 fn dev_root() -> Result<PathBuf, Error> {
@@ -51,6 +51,8 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
             publisher,
             no_smoke,
         } => {
+            let configured = Ctx::load(g)?.config.project.template;
+            let template = choose_template(template.as_deref(), configured.as_deref());
             init(
                 g,
                 env,
@@ -63,6 +65,43 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
             )
             .await
         }
+        ProjectCommand::Templates => {
+            let configured = Ctx::load(g)?.config.project.template;
+            templates(configured.as_deref(), out);
+            Ok(())
+        }
+    }
+}
+
+/// The templates table, or the same as a JSON list; `default` marks the one `init` uses.
+fn templates(configured: Option<&str>, out: Out) {
+    let default = choose_template(None, configured);
+    let list = project::listing(&default);
+    if out.json {
+        Out::print_json(&serde_json::Value::Array(list));
+        return;
+    }
+    let width = TEMPLATES
+        .iter()
+        .map(|(id, _, _)| id.len())
+        .max()
+        .unwrap_or(0);
+    Out::raw(format!("{:<width$}  {:<6}  DESCRIPTION\n", "NAME", "STATUS").as_bytes());
+    for t in &list {
+        let name = t["name"].as_str().unwrap_or_default();
+        let status = t["status"].as_str().unwrap_or_default();
+        let star = if t["default"] == true {
+            " (default)"
+        } else {
+            ""
+        };
+        Out::raw(
+            format!(
+                "{name:<width$}  {status:<6}  {}{star}\n",
+                t["description"].as_str().unwrap_or_default()
+            )
+            .as_bytes(),
+        );
     }
 }
 
