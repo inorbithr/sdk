@@ -68,9 +68,8 @@ where
     T: Send + 'static,
     F: FnOnce(&dyn Store) -> Result<T, StoreError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || f(store.as_ref()))
+    iohr_auth::off_thread(move || f(store.as_ref()))
         .await
-        .map_err(|e| Error::Failed(format!("the credential store call stopped: {e}")))?
         .map_err(Error::from)
 }
 
