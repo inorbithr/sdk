@@ -495,8 +495,8 @@ The card's header says "AI answer" on every card. Its footer is the full disclos
 read, that nothing was run, that an AI model under your own subscription got the folder, and
 to check the answer) on the first card ever, whenever that text changes, and about once a
 day; every other card closes with one short hint, taken in turn from "`??` follows up",
-"`iohr ask --help` for flags", "`[ask] model` in config picks the model" and "`INORBIT_ASK=0`
-turns `?` off". `hints = "always"` shows the full disclosure every time; `"never"` shows it
+"`iohr ask --help` for flags" and "`[ask] model` in config picks the model". `INORBIT_ASK=0` in the
+environment turns `?` off; the card does not say so. `hints = "always"` shows the full disclosure every time; `"never"` shows it
 on the first card and when the text changes, and nothing otherwise. The one small file it
 keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),
 holds a fingerprint of the disclosure text, when it was last shown and a counter, never a
