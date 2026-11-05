@@ -233,13 +233,17 @@ pub struct MemoryConfig {
     /// Sync with the account's memory service. Off when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<bool>,
+    /// Days after which a memory's `checked:` date is too old for `iohr memory check`.
+    /// 180 when unset; `--checked-days` overrides it per run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_days: Option<u32>,
 }
 
 impl MemoryConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.scope.is_none() && self.sync.is_none()
+        self.scope.is_none() && self.sync.is_none() && self.check_days.is_none()
     }
 
     /// Whether sync is on (`sync = true`).

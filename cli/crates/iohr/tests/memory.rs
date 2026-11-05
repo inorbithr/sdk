@@ -329,6 +329,85 @@ fn check_finds_a_dangling_ref_and_a_missing_why_and_strict_fails() {
 }
 
 #[test]
+fn check_flags_a_memory_with_no_checked_date_or_an_old_one_and_remember_dates_it_today() {
+    let (h, dir) = repo();
+    let o = iohr(
+        h.path(),
+        &dir,
+        None,
+        &[
+            "memory",
+            "remember",
+            "Edition nine is current.",
+            "--why",
+            "doc",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    let files = memory_files(&dir);
+    assert_eq!(files.len(), 1);
+    let kept = std::fs::read_to_string(&files[0]).unwrap();
+    let today = kept
+        .lines()
+        .find_map(|l| l.strip_prefix("checked: "))
+        .unwrap_or_else(|| panic!("no checked line: {kept}"))
+        .to_owned();
+    assert_eq!(today.len(), 10, "{today}");
+    assert!(
+        today.starts_with("20") && today.as_str() >= "2026-11-05",
+        "{today}"
+    );
+    let findings = |h: &Path, extra: &[&str]| {
+        let mut a = vec!["memory", "check", "--json"];
+        a.extend_from_slice(extra);
+        json(&iohr(h, &dir, None, &a))["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["rule"] == "unchecked")
+            .map(|f| f["message"].as_str().unwrap().to_owned())
+            .collect::<Vec<String>>()
+    };
+    assert!(findings(h.path(), &[]).is_empty(), "fresh");
+    // An old date, then none: each is one plain line naming the limit or the missing key.
+    std::fs::write(
+        &files[0],
+        kept.replace(&format!("checked: {today}"), "checked: 2025-01-01"),
+    )
+    .unwrap();
+    let old = findings(h.path(), &[]);
+    assert_eq!(old.len(), 1, "{old:?}");
+    assert!(
+        old[0].starts_with("checked 2025-01-01,") && old[0].contains("limit 180"),
+        "{old:?}"
+    );
+    assert!(
+        findings(h.path(), &["--checked-days", "100000"]).is_empty(),
+        "limit"
+    );
+    std::fs::write(&files[0], kept.replace(&format!("checked: {today}\n"), "")).unwrap();
+    let none = findings(h.path(), &[]);
+    assert_eq!(none.len(), 1, "{none:?}");
+    assert!(none[0].contains("no `checked:` date"), "{none:?}");
+    // The limit also comes from `[memory] check_days`.
+    let cfg = h.path().join("config/config.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    std::fs::write(&cfg, "[memory]\ncheck_days = 100000\n").unwrap();
+    std::fs::write(
+        &files[0],
+        kept.replace(&format!("checked: {today}"), "checked: 2025-01-01"),
+    )
+    .unwrap();
+    assert!(findings(h.path(), &[]).is_empty(), "config limit is read");
+    // Plain text under NO_COLOR and a pipe: the rule and the line, no escape codes.
+    std::fs::remove_file(&cfg).unwrap();
+    let o = iohr(h.path(), &dir, None, &["memory", "check"]);
+    let t = text(&o);
+    assert!(t.contains("unchecked") && t.contains("limit 180"), "{t}");
+    assert!(!t.contains('\u{1b}'), "{t:?}");
+}
+
+#[test]
 fn check_finds_duplicates_and_a_clean_store_passes_strict_once_the_gaps_are_covered() {
     let (h, dir) = repo();
     for t in [
@@ -718,10 +797,7 @@ fn project_init_and_atlas_init_create_the_local_memory_with_no_network() {
     let readme = std::fs::read_to_string(dir.join(".inorbit/memory/README.md")).unwrap();
     assert!(readme.contains("iohr memory recall"), "{readme}");
     let seeds = memory_files(&dir).len() - 1;
-    assert!(
-        seeds > 0,
-        "the personalities' seed memories are written locally"
-    );
+    assert!(seeds > 0, "the roles' seed memories are written locally");
     assert!(!dir.join("atlas/memory").exists());
     // The seeds read back through the same commands, and a clean `check` has no dangling ref.
     let o = iohr(h.path(), &dir, None, &["memory", "list", "--json"]);

@@ -11,6 +11,7 @@
 //! scope: project
 //! created: 2026-11-05T10:00:00Z
 //! updated: 2026-11-05T10:00:00Z
+//! checked: 2026-11-05
 //! why: the billing service moved off diesel
 //! pinned: false
 //! refs: [src/db.rs, "cmd:cargo nextest run"]
@@ -133,6 +134,11 @@ pub struct Entry {
     pub kind: Kind,
     pub created: String,
     pub updated: String,
+    /// The day (`YYYY-MM-DD`, UTC) the fact was last checked against its source or its
+    /// person; `None` for a file written before the key existed. `iohr memory check` flags a
+    /// missing or old one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<String>,
     pub why: String,
     pub pinned: bool,
     /// Paths (relative to the project root) and commands (`cmd:...`) the memory is about.
@@ -156,6 +162,7 @@ impl Entry {
             kind,
             created: now.clone(),
             updated: now,
+            checked: Some(front::today()),
             why: why.trim().to_owned(),
             pinned,
             refs,
@@ -186,6 +193,9 @@ impl Entry {
             format!("pinned: {}", self.pinned),
             format!("refs: {}", front::list_value(&self.refs)),
         ];
+        if let Some(c) = &self.checked {
+            lines.insert(5, format!("checked: {c}"));
+        }
         for (k, v) in [
             ("remote_id", &self.remote_id),
             ("remote_version", &self.remote_version),
@@ -212,6 +222,7 @@ impl Entry {
             kind: Kind::parse(&front::get(text, "kind").unwrap_or_default()),
             updated: some("updated").unwrap_or_else(|| created.clone()),
             created,
+            checked: some("checked"),
             why: front::get(text, "why").unwrap_or_default(),
             pinned: front::get(text, "pinned").is_some_and(|p| p.trim() == "true"),
             refs: front::get_list(text, "refs"),
@@ -414,6 +425,7 @@ pub fn remember(
     if let Some(same) = existing.iter().find(|e| text::normalize(&e.text) == norm) {
         let mut e = same.clone();
         e.updated = front::now();
+        e.checked = Some(front::today());
         if !why.trim().is_empty() {
             why.trim().clone_into(&mut e.why);
         }

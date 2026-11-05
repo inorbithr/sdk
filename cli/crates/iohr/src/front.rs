@@ -14,6 +14,24 @@ pub fn now() -> String {
         .unwrap_or_default()
 }
 
+/// Today's date in UTC as `YYYY-MM-DD`, read from the system clock. It is what a fact is
+/// "checked" on and what a model is told today is.
+#[must_use]
+pub fn today() -> String {
+    let d = time::OffsetDateTime::now_utc().date();
+    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
+}
+
+/// The unix seconds of the start (UTC) of a `YYYY-MM-DD` date, or `None` when it does not
+/// parse.
+#[must_use]
+pub fn unix_of_date(date: &str) -> Option<i64> {
+    let fmt = time::macros::format_description!("[year]-[month]-[day]");
+    time::Date::parse(date.trim(), &fmt)
+        .ok()
+        .map(|d| d.midnight().assume_utc().unix_timestamp())
+}
+
 /// The unix seconds of an RFC 3339 time, or `None` when it does not parse.
 #[must_use]
 pub fn unix_of(rfc3339: &str) -> Option<i64> {

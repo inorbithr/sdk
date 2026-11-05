@@ -1,11 +1,11 @@
 //! What a new project starts with in `.inorbit/memory/`: a README and the built-in
-//! personalities' recall lines as memories, written locally with no network. Used by
+//! roles' recall lines as memories, written locally with no network. Used by
 //! `iohr project init` and `iohr atlas init`.
 
 use std::path::Path;
 
 use super::store::{Entry, Kind, PROJECT_DIR, Scope};
-use crate::personalities;
+use crate::roles;
 
 /// The README's path, relative to the project root.
 #[must_use]
@@ -13,20 +13,22 @@ pub fn readme_path() -> String {
     format!("{PROJECT_DIR}/README.md")
 }
 
-/// The seed memories of a project of `lang`: the recall lines of the personalities it gets
+/// The seed memories of a project of `lang`: the recall lines of the roles it gets
 /// (`security` and its language's engineer), each as a fact that names its source.
 #[must_use]
 pub fn entries(lang: Option<&str>) -> Vec<Entry> {
     let mut out: Vec<Entry> = Vec::new();
-    for p in personalities::selection(lang) {
+    for p in roles::selection(lang) {
         for l in p.lines.iter().filter(|l| l.place == "recall") {
             let why = format!(
-                "seed from the {} personality (catalogue v{}); source {}",
+                "seed from the {} role (catalogue v{}); source {}",
                 p.title,
                 p.version,
                 l.cites.first().map_or("", String::as_str)
             );
-            let e = Entry::new(&l.text, Kind::Fact, &why, Vec::new(), false);
+            let mut e = Entry::new(&l.text, Kind::Fact, &why, Vec::new(), false);
+            // A built-in fact was last checked when the catalogue was, not when it was seeded.
+            e.checked = Some(roles::CHECKED.to_owned());
             if !out.iter().any(|o| o.id == e.id) {
                 out.push(e);
             }
@@ -104,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_rust_project_gets_the_readme_and_the_recall_lines_of_two_personalities() {
+    fn a_rust_project_gets_the_readme_and_the_recall_lines_of_two_roles() {
         let f = files(Some("rust"), "x");
         assert_eq!(f[0].0, ".inorbit/memory/README.md");
         assert!(f.len() > 5, "{}", f.len());
@@ -115,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn no_language_still_seeds_the_security_personality() {
+    fn no_language_still_seeds_the_security_role() {
         assert_ne!(entries(None).len(), 0);
     }
 

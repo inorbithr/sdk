@@ -477,7 +477,7 @@ file, so it is versioned, reviewed and merged like code.
 | `studies/` | Measurements, with the question asked before the result. |
 | `canvas/` | Boards, in the InOrbit canvas format (`iohr.canvas`, version 3). |
 | `models/` | 3D models, in glTF 2.0. Empty for now. |
-| `personalities/` | The built-in InOrbit personalities for this project: `security` and the engineer of its language. Each line names its source. |
+| `roles/` | The built-in InOrbit roles for this project: `security` and the engineer of its language. Each line names its source. |
 
 The files named `0001-...` are starters. Each says so in its first line. Replace their text.
 
@@ -492,9 +492,9 @@ Nothing here leaves your machine unless you run `iohr sync`. It sends the docume
 since the last sync is reported and never overwritten. `iohr sync --dry-run` shows what it
 would do and sends nothing.
 
-`iohr sync` also imports the files in `personalities/` into your InOrbit account (signed in
+`iohr sync` also imports the files in `roles/` into your InOrbit account (signed in
 only; `--dry-run` shows what would be sent). The packs are copies of the catalogue: an edit
-here is not read back, so change a personality in InOrbit.
+here is not read back, so change a role in InOrbit.
 
 The keys `kind`, `number`, `remote_id`, `remote_version`, `remote_number` and `remote_sha`
 at the top of a document are bookkeeping for sync. They are not sent.
@@ -513,7 +513,7 @@ pub fn files(m: &Meta<'_>) -> Vec<(String, String)> {
     out.extend(Kind::ALL.into_iter().map(|k| starter(k, m)));
     out.push(canvas_starter(m));
     out.push(models_readme());
-    out.extend(crate::personalities::pack_files(m.lang));
+    out.extend(crate::roles::pack_files(m.lang));
     // Memory is not an atlas folder: it is `.inorbit/memory/`, local first, committed.
     out.extend(crate::memory::seed::files(m.lang, &slug(m.name)));
     out
@@ -528,9 +528,9 @@ pub fn add_atlas(files_out: &mut Vec<(String, String)>, m: &Meta<'_>) {
             files_out.push((path, text));
         }
     }
-    // The personalities are recorded in the manifest, and the agents are told about memory.
-    crate::personalities::add_record(files_out, m.lang);
-    crate::personalities::add_agents(files_out);
+    // The roles are recorded in the manifest, and the agents are told about memory.
+    crate::roles::add_record(files_out, m.lang);
+    crate::roles::add_agents(files_out);
 }
 
 /// Whether the atlas of `root` already has this starter: the file itself, or any file a person
@@ -677,8 +677,8 @@ mod tests {
                 "atlas/studies/0001-the-first-measurement-for-my-shop.md",
                 "atlas/canvas/start.canvas.json",
                 "atlas/models/README.md",
-                "atlas/personalities/security.md",
-                "atlas/personalities/rust-engineer.md",
+                "atlas/roles/security.md",
+                "atlas/roles/rust-engineer.md",
                 ".inorbit/memory/README.md",
             ]
         );
@@ -697,7 +697,7 @@ mod tests {
         for (p, t) in &files {
             if is_md(p)
                 && !p.ends_with("README.md")
-                && !p.starts_with("atlas/personalities/")
+                && !p.starts_with("atlas/roles/")
                 && !p.starts_with(crate::memory::store::PROJECT_DIR)
             {
                 assert!(t.contains("Stub"), "{p} is not labelled a stub");

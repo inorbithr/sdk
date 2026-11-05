@@ -714,6 +714,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
                 &tpl.meta.id,
                 &answers,
                 &vals,
+                &crate::front::today(),
             );
             // The `[ask]` model (else the small fast tier), edits to files only, never shell,
             // and init's own bounds: nothing the agent is told or says is stored here.
@@ -805,15 +806,15 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         }
         None => {}
     }
-    // The built-in personalities (security and the language's engineer): imported when signed in.
-    let personalities = flow
+    // The built-in roles (security and the language's engineer): imported when signed in.
+    let roles = flow
         .act_async(
-            "personalities",
-            "import the built-in personalities into InOrbit (kept local when signed out)",
+            "roles",
+            "import the built-in roles into InOrbit (kept local when signed out)",
             || super::atlas::import_for(g, env, &dir, false),
         )
         .await;
-    if let Some(r) = personalities.as_ref().filter(|_| !out.json) {
+    if let Some(r) = roles.as_ref().filter(|_| !out.json) {
         super::atlas::show_report(ui, r);
     }
     let mut smoke: Option<Smoke> = None;
@@ -989,7 +990,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             "folder": place, "language": lang, "warnings": warnings,
             "answered": answers.keys().collect::<Vec<_>>(),
             "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
-            "personalities": personalities,
+            "roles": roles,
             "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
         });
         if ran {

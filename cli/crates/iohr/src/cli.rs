@@ -1402,25 +1402,25 @@ pub enum AtlasCommand {
     },
     /// Send the atlas documents to the project's Decisions space.
     Sync(SyncArgs),
-    /// The built-in personalities of this project.
-    #[command(subcommand)]
-    Personalities(PersonalitiesCommand),
+    /// The built-in roles of this project.
+    #[command(subcommand, alias = "personalities")]
+    Roles(RolesCommand),
 }
 
 #[derive(Debug, Subcommand)]
-pub enum PersonalitiesCommand {
-    /// Show the project's personalities and whether InOrbit has them.
+pub enum RolesCommand {
+    /// Show the project's roles and whether InOrbit has them.
     ///
-    /// The built-in personalities in `atlas/personalities/`: their size and sources, and, when
+    /// The built-in roles in `atlas/roles/`: their size and sources, and, when
     /// you are signed in, the version InOrbit holds.
     List {
         /// The project folder. Default: the nearest folder up from here that has `atlas/`.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
     },
-    /// Import the project's personalities into your InOrbit account.
+    /// Import the project's roles into your InOrbit account.
     ///
-    /// The same import `iohr sync` does. A personality already in your account that did not
+    /// The same import `iohr sync` does. A role already in your account that did not
     /// come from this project, or that changed in InOrbit since, is left alone.
     Import {
         /// Say what would be sent and send nothing.
@@ -1488,8 +1488,8 @@ pub enum MemoryCommand {
     /// Find memories that are wrong, stale, repeated or missing.
     ///
     /// Reads the memories on this machine, with no network: refs that no longer exist, no
-    /// reason given, not confirmed for a long time, the same thing twice, and what a
-    /// personality expects a project to remember (language, how to build and test, owners).
+    /// reason given, not confirmed for a long time, no `checked:` date or an old one, the same thing twice, and what a
+    /// role expects a project to remember (language, how to build and test, owners).
     Check {
         /// Where to look: project or user. Default: `[memory] scope`, else project.
         #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
@@ -1500,6 +1500,10 @@ pub enum MemoryCommand {
         /// Days without a confirmation after which a memory is stale.
         #[arg(long, default_value_t = 180, value_name = "DAYS")]
         stale_days: u32,
+        /// Days after which a memory's `checked:` date is too old. Default: `[memory]
+        /// check_days`, else 180.
+        #[arg(long, value_name = "DAYS")]
+        checked_days: Option<u32>,
     },
     /// Compare memories with the code, and with the service when sync is on.
     ///

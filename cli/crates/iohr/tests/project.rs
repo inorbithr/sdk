@@ -1196,10 +1196,27 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
         has("--max-turns", "40") && has("--model", "haiku"),
         "{args:?}"
     );
+    // The prompt is several lines (the file holds one argument line by line): the description
+    // is in it, and the last line tells the model today's date from the clock.
     assert!(
-        args.last().unwrap().contains("a watcher that logs a line"),
+        args.iter()
+            .any(|l| l.contains("a watcher that logs a line")),
         "{args:?}"
     );
+    let today = args
+        .iter()
+        .find(|l| l.starts_with("Today is "))
+        .unwrap_or_else(|| panic!("no dated line: {args:?}"));
+    assert!(
+        today.contains("Use the newest edition or version published as of today;")
+            && today.contains("if you are unsure a newer one exists, say so."),
+        "{today}"
+    );
+    assert!(
+        today.as_bytes()[9..13].iter().all(u8::is_ascii_digit),
+        "{today}"
+    );
+    assert!(&today[9..19] >= "2026-11-05", "{today}");
     let cwd = std::fs::read_to_string(h.path().join("out/cwd")).unwrap();
     assert_eq!(
         std::fs::canonicalize(cwd.trim()).unwrap(),
