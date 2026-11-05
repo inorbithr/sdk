@@ -185,6 +185,10 @@ pub struct RunnerConfig {
     /// The runner's name; default the host name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The runner's id (`rnr_...`): pins which runner `run` and `check` drive when this
+    /// machine's key matches more than one. The `--runner` flag wins over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// The kubectl context approved host actions run in (`kubectl --context`). With no
     /// context and no `kubeconfig`, the runner refuses every host action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -224,6 +228,7 @@ impl RunnerConfig {
             && self.kinds.is_none()
             && self.always_on.is_none()
             && self.name.is_none()
+            && self.id.is_none()
             && self.kube_context.is_none()
             && self.kubeconfig.is_none()
             && self.auto_upgrade.is_none()
