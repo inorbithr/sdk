@@ -135,11 +135,10 @@ async fn secrets(source: &SourceManifest) -> Result<Vec<(String, Redacted<String
             continue;
         }
         let reference = s.reference.clone();
-        let found = tokio::task::spawn_blocking(move || {
+        let found = iohr_auth::off_thread(move || {
             iohr_auth::KeyringStore::open()?.get_named(SECRET_SERVICE, &reference)
         })
-        .await
-        .map_err(|e| Error::Failed(e.to_string()))?;
+        .await;
         match found {
             Ok(Some(v)) => out.push((s.env.clone(), v)),
             Ok(None) | Err(_) => {

@@ -1056,9 +1056,13 @@ async fn config_show_names_the_upgrade_settings_and_the_flag_turns_it_off() {
         v["upgrade_restart"],
         json!({"value": "exec", "source": "default"})
     );
+    assert_eq!(
+        v["upgrade_sign_identity"],
+        json!({"value": "off", "source": "default"})
+    );
     add_to_config(
         dir.path(),
-        "\n[runner]\nauto_upgrade = true\nupgrade_interval_minutes = 15\nupgrade_restart = \"exit\"\n",
+        "\n[runner]\nauto_upgrade = true\nupgrade_interval_minutes = 15\nupgrade_restart = \"exit\"\nupgrade_sign_identity = \"auto\"\n",
     );
     let v = show(&[]);
     assert_eq!(
@@ -1073,8 +1077,23 @@ async fn config_show_names_the_upgrade_settings_and_the_flag_turns_it_off() {
         v["upgrade_restart"],
         json!({"value": "exit", "source": "[runner]"})
     );
+    assert_eq!(
+        v["upgrade_sign_identity"],
+        json!({"value": "auto", "source": "[runner]"})
+    );
     let v = show(&["--no-auto-upgrade"]);
     assert_eq!(v["auto_upgrade"], json!({"value": false, "source": "flag"}));
+    // The variable beats the file; `-` is off.
+    let o = run(
+        iohr(&server, dir.path(), &["runner", "config", "show", "--json"])
+            .env("IOHR_SIGN_IDENTITY", "-"),
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let v = serde_json::from_slice::<Value>(&o.stdout).unwrap();
+    assert_eq!(
+        v["upgrade_sign_identity"],
+        json!({"value": "off", "source": "IOHR_SIGN_IDENTITY"})
+    );
     // A value out of range stops the start, before anything is sent.
     let p = dir.path().join("config").join("config.toml");
     let t = std::fs::read_to_string(&p).unwrap();
