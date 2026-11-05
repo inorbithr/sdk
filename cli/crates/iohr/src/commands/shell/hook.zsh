@@ -1,0 +1,125 @@
+# iohr shell hook zsh: `? question` at the prompt asks your own AI agent (PRD 0187).
+# Add to ~/.zshrc:  eval "$(iohr shell hook zsh)"
+#
+# A line that is `?` or `??`, a space and then the question, on one line, is a question; a
+# `?` inside a word or a glob such as `?.txt` is not one. The shell never runs the line and
+# keeps it out of its history. `?? ...` follows up the last answer. The answer is AI text
+# under your own subscription and says so; nothing in it is ever run. INORBIT_ASK=0 turns
+# this off for a shell. The folder and the last command (with its exit status) are sent as
+# context; a plain shell cannot see that command's output. Under an answer, the Down arrow
+# on an empty line (`[ask] menu_key`) opens a menu: Run puts the answer's command on the
+# prompt line for you to read and run with Enter, Copy, Follow up, Explain, Open. Nothing
+# in the menu runs a command.
+if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
+  typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_live
+  typeset -gA _iohr_card_prev
+  # The keys that open the menu, from `[ask] menu_key` (none when it is off).
+  typeset -ga _iohr_card_keys=(__IOHR_MENU_KEYS__)
+  typeset -g _iohr_ask_re='^[[:space:]]*\?\??[[:space:]]+[^[:space:]]'
+
+  # The widget: a question line is kept, the shell is handed an empty line, and the answer
+  # is printed by the precmd below, before the next prompt (a widget cannot print safely).
+  _iohr_ask_accept() {
+    _iohr_ask_live=  # any new line ends the card's menu
+    if [[ ${INORBIT_ASK-} != 0 && $BUFFER != *$'\n'* && $BUFFER =~ $_iohr_ask_re ]]; then
+      _iohr_ask_q=$BUFFER
+      PREDISPLAY=$BUFFER  # the typed line stays on screen while the shell gets an empty one
+      BUFFER=""
+    fi
+    zle _iohr_ask_prev_accept
+  }
+
+  # The menu under the answer. It is only ever a key on an empty line after an answer; with
+  # text on the line, or no answer, the key does what it did before. The menu draws on the
+  # terminal and prints at most one line, which goes to the buffer: `iohr` never runs it, the
+  # line is only run when you press Enter (it is set in BUFFER and nowhere else).
+  _iohr_card_action() {
+    if [[ -z $_iohr_ask_live || -n $BUFFER ]]; then
+      zle ${_iohr_card_prev[$KEYMAP]:-down-line-or-history}
+      return
+    fi
+    local out
+    zle -I
+    out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" </dev/tty 2>/dev/tty)
+    if [[ -n $out ]]; then
+      BUFFER=$out
+      CURSOR=${#BUFFER}
+    fi
+    zle reset-prompt
+  }
+
+  _iohr_ask_precmd() {
+    local rc=$?
+    [[ -n $_iohr_ask_q ]] || return 0
+    local line=$_iohr_ask_q
+    _iohr_ask_q=
+    local last=${history[$((HISTCMD-1))]:-}
+    local follow=0 q
+    setopt localoptions extendedglob
+    line=${line##[[:space:]]#}
+    if [[ $line == '??'* ]]; then follow=1; q=${line#\?\?}; else q=${line#\?}; fi
+    q=${q##[[:space:]]#}
+    if [[ ${INORBIT_TERM-} == 1 ]]; then
+      # Inside the InOrbit app: it draws the answer card from this, as its own hook does:
+      # ESC ] 7727 ; ask ; ROWS ; QUESTION ; FOLDER ; LAST COMMAND BEL, each text in base64.
+      local rows=${INORBIT_ASK_ROWS:-6} x; local -a f
+      (( rows >= 3 && rows <= 12 )) || rows=6
+      for x in "$line" "$PWD" "${last[1,1024]}"; do
+        f+=("$(print -rn -- "$x" | command base64 | command tr -d '\n')")
+      done
+      print -rn -- $'\e]7727;ask;'"$rows;${(j:;:)f}"$'\a'
+      repeat $rows print
+      return 0
+    fi
+    # __IOHR_BIN__ is the name of the binary that printed this hook (iohr, iohr-preview).
+    local -a a=(command __IOHR_BIN__ ask --headless --hook --cwd "$PWD")
+    [[ -n $last ]] && a+=(--last-command "${last[1,1024]}" --exit-code "$rc")
+    (( follow )) && [[ -n $_iohr_ask_pq ]] && a+=(--prior-question "$_iohr_ask_pq" --prior-answer "$_iohr_ask_pa")
+    local rec rs=$'\x1e' rest
+    # The card goes to the terminal on stderr. The record on stdout is the answer (kept for
+    # `??`), the command it suggests and the link it names, separated by a 0x1e character.
+    if rec=$("${a[@]}" -- "$q"); then
+      rest=${rec#*$rs}
+      _iohr_ask_pq=$q
+      _iohr_ask_pa=${rec%%$rs*}
+      _iohr_ask_cmd=${rest%%$rs*}
+      _iohr_ask_link=${rest#*$rs}
+      _iohr_ask_live=1
+    else
+      _iohr_ask_pq= _iohr_ask_pa= _iohr_ask_cmd= _iohr_ask_link= _iohr_ask_live=
+    fi
+  }
+
+  autoload -Uz add-zsh-hook
+  # First, so the exit status it reads is the last command's.
+  add-zsh-hook precmd _iohr_ask_precmd
+  precmd_functions=(_iohr_ask_precmd ${precmd_functions:#_iohr_ask_precmd})
+  # Wired once: sourcing this again (a second `source ~/.zshrc`, or a plugin such as
+  # zsh-autosuggestions that re-wraps widgets) would copy our own widget into
+  # _iohr_ask_prev_accept, and accept-line would call itself until FUNCNEST. The functions
+  # above are safe to redefine; only the wiring is guarded, by the widget that holds the
+  # previous accept-line (a shell variable can be reset, the widget table is the truth).
+  if (( ! ${+widgets[_iohr_ask_prev_accept]} )); then
+    # Chain to whatever accept-line was before (the shell's own, or the user's widget).
+    zle -A accept-line _iohr_ask_prev_accept
+    zle -N accept-line _iohr_ask_accept
+  fi
+  # The menu key, once per keymap and key: the widget that held it is kept so the key keeps
+  # its meaning anywhere else (the same guard against wrapping ourselves).
+  if (( ${#_iohr_card_keys} && ! ${+widgets[_iohr_card_action]} )); then
+    zle -N _iohr_card_action
+    local _iohr_km _iohr_seq _iohr_cur
+    for _iohr_km in emacs viins; do
+      for _iohr_seq in $_iohr_card_keys; do
+        if [[ -z ${_iohr_card_prev[$_iohr_km]-} ]]; then
+          _iohr_cur=$(bindkey -M $_iohr_km -- "$_iohr_seq" 2>/dev/null)
+          _iohr_cur=${_iohr_cur##* }
+          [[ -n $_iohr_cur && $_iohr_cur != undefined-key && $_iohr_cur != _iohr_card_action ]] &&
+            _iohr_card_prev[$_iohr_km]=$_iohr_cur
+        fi
+        bindkey -M $_iohr_km -- "$_iohr_seq" _iohr_card_action
+      done
+    done
+    unset _iohr_km _iohr_seq _iohr_cur
+  fi
+fi

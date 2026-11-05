@@ -11,12 +11,16 @@ pub mod environments;
 pub mod ext;
 pub mod project;
 
+mod actions;
 mod args;
 mod ask;
 mod browser;
+mod card;
 mod commands;
 mod context;
 mod error;
+mod headless;
+mod hints;
 mod io_signin;
 mod lock;
 mod output;
