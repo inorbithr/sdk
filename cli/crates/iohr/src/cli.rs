@@ -206,10 +206,15 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
-    /// Ask a question in this folder: starts your own AI agent here (Claude Code, `claude`)
-    /// with the question, under your own subscription. The agent's own prompts confirm every
-    /// change; iohr never stores the question or the answer. Defaults come from `[ask]` in
-    /// config.toml; the flags win for one call.
+    /// Ask a question in this folder: your own AI agent (Claude Code, or Codex) answers once,
+    /// right here in the terminal, under your own subscription. No session opens: the agent
+    /// runs in print mode with the small fast model (`haiku`) and iohr draws what it thinks
+    /// (dim, in a quiet block), each tool it uses (one row each) and the answer as it arrives,
+    /// then a footer with the time, turns and cost. Without a terminal, with `NO_COLOR` or
+    /// TERM=dumb it prints only the answer; `--json` passes the agent's own events through as
+    /// JSON lines. Nothing is changed unless you pass `--allow-edits` (files only); shell
+    /// commands are never allowed. iohr never stores the question or the answer. Defaults
+    /// come from `[ask]` in config.toml; the flags win for one call.
     Ask(AskArgs),
     /// The coordinator's runner (RFC 0120): this machine runs coordinator turns on your own
     /// installed `claude`, on your own subscription.
@@ -1125,6 +1130,23 @@ pub struct AskArgs {
     /// The agent to start: `claude` (default; `[ask] agent`).
     #[arg(long, value_name = "AGENT")]
     pub agent: Option<String>,
+    /// The model that answers: a Claude alias such as `haiku` or a full model name. Default
+    /// `[ask] model`, else `haiku`, the small fast tier. With `--agent codex` it is passed on
+    /// only when you name one.
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+    /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
+    /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits
+    /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
+    #[arg(long)]
+    pub allow_edits: bool,
+    /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block;
+    /// default) or `collapse` (one line). `[ask] thinking`.
+    #[arg(long, value_name = "HOW")]
+    pub thinking: Option<String>,
+    /// Print the exact command line the agent would run and start nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
