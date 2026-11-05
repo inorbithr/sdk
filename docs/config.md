@@ -362,6 +362,9 @@ capacity = 8
 
 [project]                           # iohr project init (section 4.4)
 template = "coordinated"
+
+[ask]                               # iohr ask (section 4.5)
+agent = "claude"
 ```
 
 Rules:
@@ -462,6 +465,17 @@ The SDK does not read it, and `iohr` never writes it: a person edits it.
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `template` | a name from `iohr project templates` that is live | `demo` | `iohr project init`, `create` and the default `templates` marks |
+
+### 4.5 The ask table
+
+`iohr ask "..."` starts your own agent in the current folder with the question. It reads
+`[ask]`; `--via` and `--agent` win over it for one call. `iohr` never writes it, and never
+stores the question or the answer.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `via` | `local` (your own agent); `io` is reserved and says "not built yet" | `local` | `iohr ask` |
+| `agent` | `claude` (Claude Code); `codex` is reserved and says "not built yet" | `claude` | `iohr ask` |
 
 ## 5. Credentials
 

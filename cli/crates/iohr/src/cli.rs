@@ -206,6 +206,11 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Ask a question in this folder: starts your own AI agent here (Claude Code, `claude`)
+    /// with the question, under your own subscription. The agent's own prompts confirm every
+    /// change; iohr never stores the question or the answer. Defaults come from `[ask]` in
+    /// config.toml; the flags win for one call.
+    Ask(AskArgs),
     /// The coordinator's runner (RFC 0120): this machine runs coordinator turns on your own
     /// installed `claude`, on your own subscription.
     #[command(subcommand)]
@@ -1107,6 +1112,19 @@ pub enum ExtCommand {
         #[arg(long)]
         preview: bool,
     },
+}
+
+#[derive(Debug, Args)]
+pub struct AskArgs {
+    /// The question or the job, in words (quotes are optional).
+    #[arg(required = true, num_args = 1..)]
+    pub question: Vec<String>,
+    /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
+    #[arg(long, value_name = "WHERE")]
+    pub via: Option<String>,
+    /// The agent to start: `claude` (default; `[ask] agent`).
+    #[arg(long, value_name = "AGENT")]
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
