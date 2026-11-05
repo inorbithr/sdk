@@ -75,6 +75,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             capacity,
             always_on,
             holder,
+            refresh,
             account,
         } => {
             let holder_subject = holder.map(|h| h.trim().to_owned());
@@ -107,15 +108,19 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 Ok(k) => Some(k.public_key()),
                 Err(_) => None,
             };
-            if let Some(r) = mine.iter().find(|r| {
+            let held = mine.iter().find(|r| {
                 r.name == name
                     && !r.public_key.is_empty()
                     && local_key.as_deref() == Some(&r.public_key)
-            }) {
+            });
+            if let Some(r) = held
+                && !refresh
+            {
                 show_runner(r, out, "already registered");
                 return Ok(());
             }
-            if mine.iter().any(|r| r.name == name) {
+            let held = held.map(|r| r.runner_id.clone());
+            if held.is_none() && mine.iter().any(|r| r.name == name) {
                 Out::note(&format!(
                     "a runner named {name} exists but this machine does not hold its key: registering this machine afresh; revoke the old one if it is gone"
                 ));
@@ -123,13 +128,17 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let signer = runner_signer(&ctx, &s, &account, true).await?;
             // The challenge is one-use and lives five minutes: asked last, signed at once.
             let challenge = svc.challenge().await?;
-            let mut identity = BTreeMap::new();
-            if let Some(line) = exec.identity_line().await {
-                identity.insert(
-                    "claude".to_owned(),
-                    provider::identity_sha256(&challenge.identity_salt, &line),
-                );
-            }
+            // The sign-in must name its seat (organisation and email): an answer that
+            // does not is refused here rather than registered without an identity.
+            let Some(line) = exec.identity_line().await else {
+                return Err(Error::Failed(
+                    "claude auth status names no organisation and email for this sign-in: run `claude`, then `/login`, and register again".into(),
+                ));
+            };
+            let identity = BTreeMap::from([(
+                "claude".to_owned(),
+                provider::identity_sha256(&challenge.identity_salt, &line),
+            )]);
             let public_key = signer.public_key();
             let signature = signer
                 .sign(signing::registration_message(&challenge.challenge, &public_key).as_bytes());
@@ -149,7 +158,16 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 holder_subject,
             };
             let r = svc.register(&reg).await?;
-            show_runner(&r, out, "registered");
+            match held {
+                Some(id) if id == r.runner_id => show_runner(&r, out, "refreshed"),
+                Some(id) => {
+                    show_runner(&r, out, "registered");
+                    Out::note(&format!(
+                        "the service made a new runner rather than refreshing {id}: revoke {id} once this one runs"
+                    ));
+                }
+                None => show_runner(&r, out, "registered"),
+            }
             Ok(())
         }
         RunnerCommand::Status { account } => {

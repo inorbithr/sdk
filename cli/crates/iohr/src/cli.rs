@@ -57,8 +57,8 @@ pub struct Global {
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
     /// Sign in as someone other than a person: `io`, the `OAuth2` client `iohr-io` with the
-    /// client credentials grant, so jobs Io files run on runners Io owns. `iohr runner` only;
-    /// the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
+    /// client credentials grant, so jobs Io files run on runners Io owns. `iohr runner` and
+    /// `iohr coordinator` only; the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
     /// a Mac, from the keychain item the Mac bridge uses, never from an argument.
     #[arg(
         long,
@@ -68,6 +68,17 @@ pub struct Global {
         value_name = "WHO"
     )]
     pub sign_in: Option<SignIn>,
+    /// With `--sign-in io`: the personality named in the `x-iohr-via` attribution header
+    /// (RFC 0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`,
+    /// which `iohr ask` uses for where an answer comes from.
+    #[arg(long, global = true, env = "IOHR_VIA_PERSONALITY", value_name = "NAME")]
+    pub via_personality: Option<String>,
+    /// With `--sign-in io`: the agent session named in `x-iohr-via`.
+    #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
+    pub via_session: Option<String>,
+    /// With `--sign-in io`: the coordinator job named in `x-iohr-via`.
+    #[arg(long, global = true, env = "IOHR_VIA_JOB", value_name = "ID")]
+    pub via_job: Option<String>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
     pub config_dir: Option<PathBuf>,
@@ -329,8 +340,10 @@ pub enum RunnerCommand {
     /// Register this machine as one of your runners: its name, system and what it can run.
     ///
     /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
-    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
-    /// `claude auth status` prints. Run it again and it says the runner exists.
+    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the seat
+    /// `claude auth status` names (organisation and email). Run it again and it says the runner exists; with
+    /// `--refresh` it sends the registration again with the key this machine holds, so
+    /// the runner keeps its id and the coordinator records its current sign-in.
     Register {
         /// The runner's name (default: `[runner] name` in config.toml, else this
         /// machine's host name).
@@ -351,6 +364,11 @@ pub enum RunnerCommand {
         /// their verified work.
         #[arg(long, value_name = "SUBJECT", value_parser = clap::builder::NonEmptyStringValueParser::new())]
         holder: Option<String>,
+        /// Register again a runner this machine already holds the key of: its name,
+        /// system, capacity and the hash of its current provider sign-in are sent anew
+        /// (after signing in to another account, or to update a registration).
+        #[arg(long)]
+        refresh: bool,
         #[command(flatten)]
         account: AccountArg,
     },
