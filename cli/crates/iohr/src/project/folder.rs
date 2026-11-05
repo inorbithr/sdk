@@ -89,18 +89,12 @@ pub fn git_top(dir: &Path) -> Option<PathBuf> {
 }
 
 fn same(a: &Path, b: &Path) -> bool {
-    let (x, y) = (a.canonicalize(), b.canonicalize());
-    match (x, y) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => a == b,
-    }
+    crate::paths::real(a) == crate::paths::real(b)
 }
 
 /// Whether `inner` is `outer` or below it.
 fn within(inner: &Path, outer: &Path) -> bool {
-    let i = inner.canonicalize().unwrap_or_else(|_| inner.to_path_buf());
-    let o = outer.canonicalize().unwrap_or_else(|_| outer.to_path_buf());
-    i.starts_with(o)
+    crate::paths::real(inner).starts_with(crate::paths::real(outer))
 }
 
 /// `p` as a person reads it from `cwd`: `.`, `./x`, `../x` (up to three levels), else the

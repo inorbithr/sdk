@@ -18,15 +18,36 @@ pub(crate) fn slashed(p: &Path) -> String {
 
 /// `p` as the disk names it: links followed and, on Windows, the short `RUNNER~1` form made
 /// long, without the `\\?\` prefix `canonicalize` adds there (so it compares equal to a path git
-/// or the person typed). `p` itself when it does not exist.
+/// or the person typed). A part that does not exist yet (a folder about to be made) is kept
+/// as written, below the nearest folder that does.
 #[must_use]
 pub(crate) fn real(p: &Path) -> PathBuf {
-    let c = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let mut rest = Vec::new();
+    let mut at = p;
+    let base = loop {
+        if let Ok(c) = at.canonicalize() {
+            break c;
+        }
+        match (at.parent(), at.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                at = parent;
+            }
+            _ => return p.to_path_buf(),
+        }
+    };
+    let mut out = plain(base);
+    out.extend(rest.iter().rev());
+    out
+}
+
+/// `c` without the `\\?\` prefix of a canonical Windows path (a drive path only).
+fn plain(c: PathBuf) -> PathBuf {
     if cfg!(windows)
-        && let Some(plain) = c.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
-        && plain.as_bytes().get(1) == Some(&b':')
+        && let Some(p) = c.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
+        && p.as_bytes().get(1) == Some(&b':')
     {
-        return PathBuf::from(plain);
+        return PathBuf::from(p);
     }
     c
 }
@@ -34,6 +55,14 @@ pub(crate) fn real(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_not_made_yet_is_named_below_the_one_that_exists() {
+        let d = tempfile::tempdir().unwrap();
+        let made = real(&d.path().join("a").join("b"));
+        assert_eq!(made, real(d.path()).join("a").join("b"));
+        assert!(!made.exists());
+    }
 
     #[test]
     fn components_are_joined_by_a_slash() {

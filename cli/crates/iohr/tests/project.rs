@@ -659,7 +659,8 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
         !t.contains(h.path().to_str().unwrap())
             || t.contains(
                 &h.path()
-                    .join(".inorbit/projects")
+                    .join(".inorbit")
+                    .join("projects")
                     .join("my-shop")
                     .display()
                     .to_string()
