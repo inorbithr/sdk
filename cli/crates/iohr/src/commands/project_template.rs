@@ -64,9 +64,12 @@ pub(crate) fn render_list(rows: &[Row], p: Paint) -> String {
 /// `user: /Users/me/.inorbit/templates/x` as `user: ~/.inorbit/templates/x`: shorter, and the
 /// same on every machine.
 fn tilde(origin: &str) -> String {
-    match etcetera::home_dir() {
-        Ok(h) => origin.replace(&h.display().to_string(), "~"),
-        Err(_) => origin.to_owned(),
+    let home = etcetera::home_dir().map(|h| h.display().to_string());
+    match home.as_deref().ok().and_then(|h| origin.split_once(h)) {
+        Some((before, rest)) => {
+            format!("{before}~{}", crate::paths::slashed(Path::new(rest)))
+        }
+        None => origin.to_owned(),
     }
 }
 

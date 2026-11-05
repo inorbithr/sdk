@@ -6,8 +6,11 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -35,7 +38,7 @@ fn iohr(home: &Path, cwd: &Path, base: Option<&str>, args: &[&str]) -> Output {
     cmd.env_clear()
         .current_dir(cwd)
         .args(args)
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .envs(kept_env())
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("NO_COLOR", "1")

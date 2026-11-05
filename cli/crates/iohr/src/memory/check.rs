@@ -60,11 +60,17 @@ pub fn command_of(r: &str) -> Option<&str> {
 #[must_use]
 pub fn inside(r: &str) -> bool {
     let p = Path::new(r);
+    // Refs are written with `/`, so a leading one is rooted on Windows too, where `Path` alone
+    // calls `/etc/hosts` relative (it has no drive).
     !r.is_empty()
+        && !r.starts_with(['/', '\\'])
         && p.is_relative()
-        && !p
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
+        && p.components().all(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
 }
 
 /// Whether `program` is found on the `PATH`, or is a path to a file.
