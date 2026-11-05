@@ -353,6 +353,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     drain: drain.clone(),
                     drain_limit: DRAIN_LIMIT,
                     jitter: run_loop::jitter,
+                    exec_failed: std::sync::Mutex::default(),
                 }
             });
             let upgrade_stopped = asks_stopped.clone();
