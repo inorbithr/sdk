@@ -64,8 +64,7 @@ pub struct Global {
     /// Sign in as someone other than a person (`iohr runner` and `iohr coordinator` only).
     ///
     /// `io` is the `OAuth2` client `iohr-io` with the client credentials grant, so jobs Io
-    /// files run on runners Io owns. `iohr runner` and `iohr coordinator` only;
-    /// the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
+    /// files run on runners Io owns. The secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
     /// a Mac, from the keychain item the Mac bridge uses, never from an argument.
     #[arg(
         long,
