@@ -450,7 +450,8 @@ cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 kept for older scripts); `macos-app` and `ui-panel` are `coming` and
 refuse until they exist. The template is `--template`, else `template` under `[project]` in
 `config.toml` (`[project]` / `template = "coordinated"`; you edit it, `iohr config` does not
-write it), else `demo`. A configured template that is coming refuses too.
+write it), else `demo` (a described project uses `blank`, whatever `[project]` says). A configured
+template that is coming refuses too.
 
 ### Templates are data
 
@@ -505,10 +506,52 @@ takes the defaults, and a missing answer with no default is an error that names 
 
 When `claude` or `codex` is on your PATH (or `[ask]` `agent` in `config.toml` names one), the
 menu starts with "Describe it, your agent builds it", and `--describe "text"` does the same.
-`init` scaffolds the template (demo by default), then starts your own agent in the new folder
-with a prompt from your words, the answers and the template's `agent_prompt`, with your
-terminal attached, labelled AI. Prompts and answers are never logged. With no agent it says how
-to configure one. `--describe` cannot be combined with `--json` (add `--dry-run` for data).
+The agent works in the background: `init` draws the progress itself, runs to the end and exits.
+There is no session to open or resume.
+
+The order is fixed: scaffold, then the agent, then the smoke test, then the report.
+
+1. The scaffold is the `blank` template (an empty project in your language; `--template` names
+   another on purpose). Its `agent_prompt` says only "a fresh project in <language>; build what
+   is described below; keep it free of secrets; keep `<test>` passing".
+2. The agent is your own `claude` or `codex` in print mode, in the new folder, with a prompt
+   from your words, the answers and the template. It may edit files (`--allow-edits`, the same
+   as `iohr ask`: files only, never a shell), is bounded by `--agent-turns` (default 40) and
+   `--agent-timeout` (seconds, default 600), and the output says which values were used. The
+   stream is the same as `iohr ask`: thinking dim, one row per tool, a footer labelled
+   "AI-built" (AI Act Art. 50).
+3. The smoke test then runs on what the agent built, so the report is true for the result.
+4. If the agent fails or runs out of turns or time, `init` says so, keeps the scaffold, exits
+   non-zero and prints one line to retry.
+
+`--json` passes the agent's own events through, as `iohr ask --json` does, then an
+`iohr_summary` line (the agent, the bounds, how it ended) and the `iohr_report` line.
+Prompts and answers are never logged or stored. With no agent it says how to configure one.
+
+### The `blank` template
+
+`iohr project init my-tool --template blank --lang rust` writes the smallest project in your
+language and nothing about InOrbit services: `README.md` (name and a one-line description from
+your words), `.gitignore`, `inorbit.toml`, `.inorbit/space`, and a skeleton with one trivial
+test (Rust `Cargo.toml` and `src/main.rs`; Python `pyproject.toml` and `src/<module>/__init__.py`;
+Go `go.mod` and `main.go`; TypeScript `package.json` and `src/index.ts`). The smoke test is the
+language's own test command. Its kind in `inorbit.toml` is `project`.
+
+### The project record and the space link
+
+Every template writes two committed files, neither holding a secret:
+
+- `inorbit.toml` at the root is the InOrbit project record `iohr` and InOrbit Desktop read. Its
+  keys are grouped as the project (`name`, `id`, `kind`: `project`, `macos-service`,
+  `macos-app` or `ui-panel`), where it came from (`template`, `template_version`,
+  `created_at`) and the InOrbit links (`space_id`, `listing`, `memory_namespace`, each empty
+  until the step that fills it exists). It was `inorbit-project.toml`; nothing in the CLI reads
+  the record, so there is no fallback for the old name.
+- `.inorbit/space` is the link to an InOrbit space (platform RFC 0103, "The link"): `id` and
+  `name` as `key = "value"` lines. `init` writes it from the shared scaffold step for every
+  template. Until the space exists it holds empty values and a comment naming the plugin
+  command `/inorbit:link <space>`; the CLI has no link command of its own. `.inorbit/` is never
+  ignored, and `git init` commits it.
 
 ### Try it without changing anything
 

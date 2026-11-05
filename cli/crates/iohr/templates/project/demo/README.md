@@ -10,7 +10,7 @@ and it is isolated from everything else on this Mac: its own folder, its own sta
 - `extension.toml`: the manifest (PRD 0084). What it runs, what it may do, how it is healthy.
 @@LAYOUT@@
 - `panel/index.html`: the panel InOrbit Desktop shows as a pane. It reads `/api/heartbeat`.
-- `inorbit-project.toml`: the project record the app reads (name, template, kind, when).
+- `inorbit.toml`: the project record the app reads (name, template, kind, when).
 
 It is written in @@LANGUAGE_LABEL@@ (`--lang @@LANGUAGE@@`).
 

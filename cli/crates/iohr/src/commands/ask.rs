@@ -1,7 +1,7 @@
 //! `iohr ask`: the developer's own agent answers once in this folder, streamed to the terminal.
 
 use std::process::Stdio;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio::io::AsyncBufReadExt as _;
 
@@ -33,7 +33,7 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
     // The question is only ever an argument of the agent; nothing below prints or stores it
     // except `--dry-run`, which prints the command line you asked to see.
     let question = args.question.join(" ");
-    let command_line = ask::argv(agent, model.as_deref(), allow_edits, &question);
+    let command_line = ask::argv(agent, model.as_deref(), allow_edits, None, &question);
     if args.dry_run {
         let program = bin
             .as_ref()
@@ -69,8 +69,20 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
             .ok()
             .map(|d| d.display().to_string()),
         model,
+        ..Look::default()
     };
-    let (code, failure) = stream(agent, &bin, &command_line, out.json, look, ui).await?;
+    let Ended { code, failure, .. } = stream(Run {
+        agent,
+        bin: &bin,
+        args: &command_line,
+        cwd: None,
+        json: out.json,
+        look,
+        ui,
+        waiting: "thinking",
+        timeout: None,
+    })
+    .await?;
     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     if out.json {
         // One more line in the stream, so a program reading the lines knows how it ended.
@@ -93,25 +105,61 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
     }
 }
 
+/// One run of the agent in print mode: what to start, where, and how to draw it.
+pub(crate) struct Run<'a> {
+    pub(crate) agent: Agent,
+    pub(crate) bin: &'a std::path::Path,
+    /// The arguments from [`ask::argv`], the prompt last.
+    pub(crate) args: &'a [String],
+    /// The folder to run in; the current one when unset.
+    pub(crate) cwd: Option<&'a std::path::Path>,
+    /// Pass each line of the agent's stream through untouched instead of drawing it.
+    pub(crate) json: bool,
+    pub(crate) look: Look,
+    pub(crate) ui: Ui,
+    /// What the spinner says until the agent's first event.
+    pub(crate) waiting: &'a str,
+    /// Stop the agent after this long; `None` waits for it.
+    pub(crate) timeout: Option<Duration>,
+}
+
+/// How a run ended.
+pub(crate) struct Ended {
+    /// The agent's exit code (1 when it exited 0 but said the run failed).
+    pub(crate) code: i32,
+    /// The reason the agent gave when it said the run failed.
+    pub(crate) failure: Option<String>,
+    /// iohr stopped the agent because `timeout` passed.
+    pub(crate) timed_out: bool,
+}
+
 /// Runs the agent once with its JSON stream piped to iohr and draws it as it arrives (or, with
 /// `json`, passes each line through untouched). No terminal is handed to the agent and its
-/// stdin is closed, so it cannot open a session or prompt. Its exit code, and the reason it
-/// gave when it said the run failed. Ctrl-C reaches the agent too (same process group); iohr
-/// waits for it to end.
-async fn stream(
-    agent: Agent,
-    bin: &std::path::Path,
-    command_line: &[String],
-    json: bool,
-    look: Look,
-    ui: Ui,
-) -> Result<(i32, Option<String>), Error> {
-    let mut child = tokio::process::Command::new(bin)
-        .args(command_line)
+/// stdin is closed, so it cannot open a session or prompt. The one launch code of `iohr ask`
+/// and `iohr project init`. Ctrl-C reaches the agent too (same process group); iohr waits
+/// for it to end. When `timeout` passes, the agent is killed and the run is `timed_out`.
+pub(crate) async fn stream(run: Run<'_>) -> Result<Ended, Error> {
+    let Run {
+        agent,
+        bin,
+        args,
+        cwd,
+        json,
+        look,
+        ui,
+        waiting,
+        timeout,
+    } = run;
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
-        .kill_on_drop(false)
+        .kill_on_drop(true);
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| Error::Failed(format!("cannot start `{}`: {}", agent.name(), e.kind())))?;
     let Some(stdout) = child.stdout.take() else {
@@ -120,9 +168,13 @@ async fn stream(
             agent.name()
         )));
     };
-    let spinner = (!json).then(|| ui.step("thinking"));
+    let spinner = (!json).then(|| ui.step(waiting));
     let mut render = Renderer::new(std::io::stdout(), std::io::stderr(), look, spinner);
     let mut lines = tokio::io::BufReader::new(stdout).lines();
+    // No limit is a year away, far inside what the timer takes.
+    let deadline = tokio::time::sleep(timeout.unwrap_or(Duration::from_hours(8760)));
+    tokio::pin!(deadline);
+    let mut timed_out = false;
     loop {
         tokio::select! {
             line = lines.next_line() => match line {
@@ -134,6 +186,11 @@ async fn stream(
                 }
                 _ => break,
             },
+            () = &mut deadline, if timeout.is_some() => {
+                timed_out = true;
+                let _ = child.start_kill();
+                break;
+            }
             _ = tokio::signal::ctrl_c() => {}
         }
     }
@@ -141,6 +198,10 @@ async fn stream(
     let status = loop {
         tokio::select! {
             s = child.wait() => break s,
+            () = &mut deadline, if timeout.is_some() && !timed_out => {
+                timed_out = true;
+                let _ = child.start_kill();
+            }
             _ = tokio::signal::ctrl_c() => {}
         }
     }
@@ -156,45 +217,11 @@ async fn stream(
     if code == 0 && failure.is_some() {
         code = 1;
     }
-    Ok((code, failure))
-}
-
-/// Starts the agent with `prompt` as its argument (in `cwd` when given), stdio inherited, and
-/// waits for it; its exit code. The one launch code of `iohr ask` and `iohr project init`.
-/// Ctrl-C reaches the agent too (same process group); iohr waits for it instead of dying
-/// first and leaving the terminal to a half-stopped agent.
-pub(crate) async fn start(
-    agent: Agent,
-    bin: &std::path::Path,
-    prompt: String,
-    cwd: Option<&std::path::Path>,
-) -> Result<i32, Error> {
-    let mut cmd = tokio::process::Command::new(bin);
-    cmd.arg(prompt)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(false);
-    if let Some(d) = cwd {
-        cmd.current_dir(d);
-    }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| Error::Failed(format!("cannot start `{}`: {}", agent.name(), e.kind())))?;
-    let status = loop {
-        tokio::select! {
-            s = child.wait() => break s,
-            _ = tokio::signal::ctrl_c() => {}
-        }
-    }
-    .map_err(|e| {
-        Error::Failed(format!(
-            "waiting for `{}` failed: {}",
-            agent.name(),
-            e.kind()
-        ))
-    })?;
-    Ok(exit_code(status))
+    Ok(Ended {
+        code,
+        failure,
+        timed_out,
+    })
 }
 
 #[cfg(unix)]
