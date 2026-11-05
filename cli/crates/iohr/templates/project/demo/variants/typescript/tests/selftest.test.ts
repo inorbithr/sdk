@@ -1,4 +1,4 @@
-// The self-test: `node --test tests/` runs it with the STATE and CACHE `iohr ext dev --test`
+// The self-test: `node --test 'tests/**/*.test.ts'` runs it with the STATE and CACHE `iohr ext dev --test`
 // gives (or the folders InOrbit Desktop's smoke test uses). One heartbeat, then what it wrote
 // and where.
 
