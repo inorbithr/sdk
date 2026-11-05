@@ -8,9 +8,11 @@
 //! - `bad-ref`: a ref that points outside the project (absolute, or with `..`);
 //! - `missing-why`: the memory gives no reason;
 //! - `stale`: not confirmed for longer than the stale limit (pinned memories are exempt);
+//! - `unchecked`: no `checked:` date, or one older than the check limit (pinned memories are
+//!   exempt): a fact such as an edition or a version is only as good as the day it was checked;
 //! - `never-confirmed`: never confirmed again since it was written, for a third of that limit;
 //! - `duplicate` and `near-duplicate`: the same text, or text that overlaps another's;
-//! - `gap`: a topic a personality expects a project to have memories about (the language, how
+//! - `gap`: a topic a role expects a project to have memories about (the language, how
 //!   to build, how to test, who owns it) that no memory covers.
 //!
 //! Findings name memories by id and never carry their text.
@@ -26,6 +28,10 @@ use crate::front;
 
 /// Days without a confirmation after which a memory is called stale.
 pub const STALE_DAYS: u32 = 180;
+
+/// Days after which a fact's `checked:` date is too old, unless `[memory] check_days` or
+/// `--checked-days` says otherwise.
+pub const CHECKED_DAYS: u32 = 180;
 
 /// One problem.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -146,7 +152,7 @@ fn covers(t: &Topic, e: &Entry) -> bool {
 }
 
 /// The findings for `entries`, in the project at `root`. `now_unix` and `stale_days` decide
-/// staleness; `lang` is the project's language when known. `strict_gaps` is whether gaps are
+/// staleness, `now_unix` and `checked_days` how old a `checked:` date may be; `lang` is the project's language when known. `strict_gaps` is whether gaps are
 /// reported (a folder with no memory at all reports them too).
 #[must_use]
 pub fn check(
@@ -155,6 +161,7 @@ pub fn check(
     lang: Option<&str>,
     now_unix: i64,
     stale_days: u32,
+    checked_days: u32,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
     let norms: Vec<String> = entries.iter().map(|e| text::normalize(&e.text)).collect();
@@ -201,6 +208,30 @@ pub fn check(
                     "never-confirmed",
                     format!("written {age} days ago and never confirmed again"),
                 ));
+            }
+        }
+        if !e.pinned {
+            match e.checked.as_deref().map(|c| (c, front::unix_of_date(c))) {
+                None => out.push(finding(
+                    &e.id,
+                    "unchecked",
+                    "no `checked:` date; check it against its source and run `iohr memory remember` on it",
+                )),
+                Some((c, None)) => out.push(finding(
+                    &e.id,
+                    "unchecked",
+                    format!("`checked: {c}` is not a YYYY-MM-DD date"),
+                )),
+                Some((c, Some(t))) => {
+                    let age = (now_unix - t).max(0) / 86_400;
+                    if age > i64::from(checked_days) {
+                        out.push(finding(
+                            &e.id,
+                            "unchecked",
+                            format!("checked {c}, {age} days ago (limit {checked_days})"),
+                        ));
+                    }
+                }
             }
         }
         for (j, o) in entries.iter().enumerate().skip(i + 1) {
@@ -266,6 +297,7 @@ mod tests {
             None,
             now,
             STALE_DAYS,
+            CHECKED_DAYS,
         );
         assert!(rules(&f).contains(&(first.id.as_str(), "dangling-ref")));
         assert!(rules(&f).contains(&(first.id.as_str(), "missing-why")));
@@ -276,7 +308,7 @@ mod tests {
     fn refs_outside_the_project_are_bad_not_checked() {
         let dir = tempfile::tempdir().expect("tempdir");
         let first = entry("x is y.", "because", &["../secret", "/etc/hosts"]);
-        let f = check(&[first], dir.path(), None, 0, STALE_DAYS);
+        let f = check(&[first], dir.path(), None, 0, STALE_DAYS, CHECKED_DAYS);
         assert_eq!(f.iter().filter(|f| f.rule == "bad-ref").count(), 2);
     }
 
@@ -302,6 +334,7 @@ mod tests {
             None,
             ninety + 100 * 86_400,
             STALE_DAYS,
+            CHECKED_DAYS,
         );
         let r = rules(&f);
         assert!(r.contains(&(first.id.as_str(), "stale")));
@@ -315,6 +348,42 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn a_missing_or_old_checked_date_is_found_and_a_fresh_one_or_a_pin_is_not() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let now = front::unix_of(&front::now()).unwrap_or(0);
+        let mut missing = entry("Edition one is current.", "why", &[]);
+        missing.checked = None;
+        let mut old = entry("Edition two is current.", "why", &[]);
+        old.checked = Some("2025-01-01".into());
+        let mut garbled = entry("Edition three is current.", "why", &[]);
+        garbled.checked = Some("last spring".into());
+        let fresh = entry("Edition four is current.", "why", &[]);
+        let mut pinned = entry("Edition five is current.", "why", &[]);
+        pinned.checked = None;
+        pinned.pinned = true;
+        let all = [missing.clone(), old.clone(), garbled.clone(), fresh, pinned];
+        let f = check(&all, dir.path(), None, now, STALE_DAYS, CHECKED_DAYS);
+        let un: Vec<&Finding> = f.iter().filter(|f| f.rule == "unchecked").collect();
+        assert_eq!(un.len(), 3, "{un:?}");
+        assert!(
+            un.iter()
+                .any(|f| f.id == missing.id && f.message.contains("no `checked:`"))
+        );
+        assert!(
+            un.iter()
+                .any(|f| f.id == old.id && f.message.contains("limit 180"))
+        );
+        assert!(
+            un.iter()
+                .any(|f| f.id == garbled.id && f.message.contains("YYYY-MM-DD"))
+        );
+        // A shorter limit flags the fresh one too once enough days pass.
+        let later = now + 10 * 86_400;
+        let f = check(&all, dir.path(), None, later, STALE_DAYS, 5);
+        assert_eq!(f.iter().filter(|f| f.rule == "unchecked").count(), 4);
     }
 
     #[test]
@@ -336,7 +405,14 @@ mod tests {
             "w",
             &[],
         );
-        let f = check(&[first, second, third], dir.path(), None, 0, STALE_DAYS);
+        let f = check(
+            &[first, second, third],
+            dir.path(),
+            None,
+            0,
+            STALE_DAYS,
+            CHECKED_DAYS,
+        );
         assert!(f.iter().any(|f| f.rule == "duplicate"));
         assert!(f.iter().any(|f| f.rule == "near-duplicate"));
     }
@@ -344,11 +420,18 @@ mod tests {
     #[test]
     fn topics_no_memory_covers_are_gaps_and_a_covering_memory_closes_one() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let none = check(&[], dir.path(), Some("rust"), 0, STALE_DAYS);
+        let none = check(&[], dir.path(), Some("rust"), 0, STALE_DAYS, CHECKED_DAYS);
         assert_eq!(none.iter().filter(|f| f.rule == "gap").count(), 4);
         let first = entry("This is a rust project.", "w", &[]);
         let second = entry("Tests run with `cargo nextest run`.", "w", &[]);
-        let f = check(&[first, second], dir.path(), Some("rust"), 0, STALE_DAYS);
+        let f = check(
+            &[first, second],
+            dir.path(),
+            Some("rust"),
+            0,
+            STALE_DAYS,
+            CHECKED_DAYS,
+        );
         let gaps: Vec<&str> = f
             .iter()
             .filter(|f| f.rule == "gap")

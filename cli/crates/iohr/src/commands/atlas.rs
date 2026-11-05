@@ -10,13 +10,13 @@ use serde::Serialize;
 
 use crate::Env;
 use crate::atlas::{self, Kind};
-use crate::cli::{AtlasCommand, AtlasKind, Global, PersonalitiesCommand, SyncArgs};
+use crate::cli::{AtlasCommand, AtlasKind, Global, RolesCommand, SyncArgs};
 use crate::commands::decisions::{create_in, decisions, save_text, scoped};
 use crate::context::{Api, Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
-use crate::personalities::{self, Report};
 use crate::project::read_space_link;
+use crate::roles::{self, Report};
 use crate::ui::Ui;
 use inorbithr::public::DecisionsGetDocumentParams as GetDocumentParams;
 
@@ -27,7 +27,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AtlasCommand, out: Out) -> R
         AtlasCommand::Init { dir } => init(g, env, dir, out).await,
         AtlasCommand::New { kind, title, dir } => new(kind, &title, dir, out),
         AtlasCommand::Sync(args) => sync(g, env, &args, out).await,
-        AtlasCommand::Personalities(cmd) => personalities_cmd(g, env, cmd, out).await,
+        AtlasCommand::Roles(cmd) => roles_cmd(g, env, cmd, out).await,
     }
 }
 
@@ -81,15 +81,26 @@ pub(crate) fn project_meta(root: &Path) -> (String, String) {
     (name, pick("template").unwrap_or_else(|| "none".to_owned()))
 }
 
+/// Moves an older `atlas/personalities/` to `atlas/roles/` and says so in one line (not in
+/// `--json`, which the caller adds to its own object). Runs before anything is written.
+pub(crate) fn move_legacy_roles(root: &Path, out: Out) -> Result<Option<String>, Error> {
+    let moved = roles::migrate_legacy(root).map_err(Error::Failed)?;
+    if let Some(line) = moved.as_deref().filter(|_| !out.json) {
+        Ui::detect(false).info(line);
+    }
+    Ok(moved)
+}
+
 async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(), Error> {
     let root = start(dir)?;
     if !root.is_dir() {
         return Err(Error::Usage(format!("{} is not a folder", root.display())));
     }
+    let moved = move_legacy_roles(&root, out)?;
     let (name, template) = project_meta(&root);
     let created_at = super::project::now();
     // The language the project declares, else the one its build file shows.
-    let lang = personalities::detect_language(&root);
+    let lang = roles::detect_language(&root);
     let mut written = atlas::ensure(
         &root,
         &atlas::Meta {
@@ -101,17 +112,18 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
         },
     )
     .map_err(Error::Failed)?;
-    if personalities::ensure_record(&root, lang).map_err(Error::Failed)? {
+    if roles::ensure_record(&root, lang).map_err(Error::Failed)? {
         written.push("inorbit.toml".to_owned());
     }
-    written.extend(personalities::ensure_agents(&root).map_err(Error::Failed)?);
+    written.extend(roles::ensure_agents(&root).map_err(Error::Failed)?);
     let report = import_for(g, env, &root, false).await;
     if out.json {
         Out::print_json(&serde_json::json!({
             "root": root.display().to_string(),
             "written": written,
             "language": lang,
-            "personalities": report,
+            "moved": moved,
+            "roles": report,
         }));
         return Ok(());
     }
@@ -126,41 +138,37 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
     Ok(())
 }
 
-/// Imports the project's personalities when signed in; never fails (a failed import is
+/// Imports the project's roles when signed in; never fails (a failed import is
 /// in the report, and `iohr sync` tries again).
 pub(crate) async fn import_for(g: &Global, env: &Env, root: &Path, dry: bool) -> Report {
     let session = session(g, env).await.ok();
-    personalities::import(session.as_ref().map(|s| &s.api), root, dry).await
+    roles::import(session.as_ref().map(|s| &s.api), root, dry).await
 }
 
-/// One line per personality, then the one line about what could not happen.
+/// One line per role, then the one line about what could not happen.
 pub(crate) fn show_report(ui: Ui, report: &Report) {
     let lines = report.lines();
     if lines.is_empty() {
         return;
     }
-    ui.note("Personalities", &lines.join("\n"));
+    ui.note("Roles", &lines.join("\n"));
 }
 
-async fn personalities_cmd(
-    g: &Global,
-    env: &Env,
-    cmd: PersonalitiesCommand,
-    out: Out,
-) -> Result<(), Error> {
+async fn roles_cmd(g: &Global, env: &Env, cmd: RolesCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        PersonalitiesCommand::List { dir } => {
+        RolesCommand::List { dir } => {
             let root = root_of(dir)?;
-            let found = personalities::locals(&root);
+            move_legacy_roles(&root, out)?;
+            let found = roles::locals(&root);
             let rows: Vec<serde_json::Value> = found
                 .iter()
                 .map(|f| {
-                    let p = &f.personality;
+                    let p = &f.role;
                     serde_json::json!({
                         "name": p.name,
                         "parent": p.parent,
                         "language": p.language,
-                        "core_tokens": personalities::core_tokens(p),
+                        "core_tokens": roles::core_tokens(p),
                         "lines": p.lines.len(),
                         "catalogue_version": p.version,
                         "imported_version": f.imported_version,
@@ -168,23 +176,21 @@ async fn personalities_cmd(
                 })
                 .collect();
             if out.json {
-                Out::print_json(&serde_json::json!({ "personalities": rows }));
+                Out::print_json(&serde_json::json!({ "roles": rows }));
                 return Ok(());
             }
             if rows.is_empty() {
-                Ui::detect(false).outro(
-                    "no personalities in atlas/personalities/: `iohr atlas init` writes them",
-                );
+                Ui::detect(false).outro("no roles in atlas/roles/: `iohr atlas init` writes them");
                 return Ok(());
             }
             let cells: Vec<Vec<String>> = found
                 .iter()
                 .map(|f| {
-                    let p = &f.personality;
+                    let p = &f.role;
                     vec![
                         p.name.clone(),
                         p.parent.clone(),
-                        personalities::core_tokens(p).to_string(),
+                        roles::core_tokens(p).to_string(),
                         p.lines.len().to_string(),
                         f.imported_version
                             .map_or_else(|| "not imported".to_owned(), |v| format!("v{v}")),
@@ -197,13 +203,12 @@ async fn personalities_cmd(
             );
             Ok(())
         }
-        PersonalitiesCommand::Import { dry_run, dir } => {
+        RolesCommand::Import { dry_run, dir } => {
             let root = root_of(dir)?;
+            move_legacy_roles(&root, out)?;
             let report = import_for(g, env, &root, dry_run).await;
             if out.json {
-                Out::print_json(
-                    &serde_json::json!({ "dry_run": dry_run, "personalities": report }),
-                );
+                Out::print_json(&serde_json::json!({ "dry_run": dry_run, "roles": report }));
                 return Ok(());
             }
             let ui = Ui::detect(false);
@@ -364,6 +369,7 @@ async fn sync_documents(
                     .into(),
             )
         })?;
+    move_legacy_roles(&root, out)?;
     let found = atlas::scan(&root);
     let mut lazy = Lazy { g, env, api: None };
     let mut rows = Vec::new();
@@ -371,7 +377,7 @@ async fn sync_documents(
         rows.push(sync_one(&mut lazy, &space, f, args.dry_run).await?);
     }
     let local = atlas::local_only(&root);
-    // The built-in personalities go with the documents; a failed import never fails the sync.
+    // The built-in roles go with the documents; a failed import never fails the sync.
     let report = import_for(g, env, &root, args.dry_run).await;
     if out.json {
         Out::print_json(&serde_json::json!({
@@ -379,7 +385,7 @@ async fn sync_documents(
             "dry_run": args.dry_run,
             "documents": rows,
             "local_only": local,
-            "personalities": report,
+            "roles": report,
             "memory": memory,
         }));
         return Ok(());

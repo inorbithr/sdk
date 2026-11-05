@@ -1,4 +1,4 @@
-# The base personality: every project gets it, whatever its language.
+# The base role: every project gets it, whatever its language.
 name = "security"
 parent = "base-engineer"
 title = "Security"

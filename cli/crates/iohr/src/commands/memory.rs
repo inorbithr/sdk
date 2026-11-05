@@ -26,7 +26,7 @@ use crate::memory::remote::{self, Action, Remote};
 use crate::memory::store::{self, Entry, Kind, Remembered, Scope, Store};
 use crate::memory::{self, check, drift, recall};
 use crate::output::Out;
-use crate::personalities;
+use crate::roles;
 use crate::ui::Ui;
 
 use super::{day, pages, str_of};
@@ -81,9 +81,18 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: MemoryCommand, out: Out) -> 
             scope,
             strict,
             stale_days,
+            checked_days,
         } => {
             let w = Where::resolve_local(g, scope.as_deref())?;
-            check_cmd(&w, strict, stale_days, out)
+            let checked_days = match checked_days {
+                Some(d) => d,
+                None => Ctx::load(g)?
+                    .config
+                    .memory
+                    .check_days
+                    .unwrap_or(check::CHECKED_DAYS),
+            };
+            check_cmd(&w, strict, stale_days, checked_days, out)
         }
         MemoryCommand::Drift {
             scope,
@@ -527,11 +536,17 @@ fn forgotten(id: &str, scope: Scope, note: Option<&str>, out: Out) {
 
 // ---- check --------------------------------------------------------------------------------
 
-fn check_cmd(w: &Where, strict: bool, stale_days: u32, out: Out) -> Result<(), Error> {
+fn check_cmd(
+    w: &Where,
+    strict: bool,
+    stale_days: u32,
+    checked_days: u32,
+    out: Out,
+) -> Result<(), Error> {
     let entries = w.store()?.load()?;
     let base = w.base();
-    let lang = personalities::detect_language(&base);
-    let mut findings = check::check(&entries, &base, lang, now_unix(), stale_days);
+    let lang = roles::detect_language(&base);
+    let mut findings = check::check(&entries, &base, lang, now_unix(), stale_days, checked_days);
     // Topics a project is expected to remember are a project's business, not a person's notes.
     if w.scope != Scope::Project {
         findings.retain(|f| f.rule != "gap");

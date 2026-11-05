@@ -94,7 +94,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr api <METHOD> <PATH>` | One call; `-f k=v` string fields, `-F k=json` typed fields, `--input file`, `-i` the status and request id before the body; `--all` GETs every page of a list (`next_page_token`) as one answer, `--max-pages N` bounds it |
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
 | `iohr memory remember TEXT [--why W] [--ref PATH]... [--preference] [--pin] [--scope S] \| recall QUERY \| list \| forget ID \| check [--strict] \| drift [--remote] [--strict] \| sync [--dry-run] [--pull]` | Memory kept as files, local first: one Markdown file per memory in `.inorbit/memory/` (the project, committed), `~/.inorbit/memory/notes/` (you) or, with `[memory] sync = true`, your InOrbit account. No sign-in and no network except `sync`, `drift --remote` and `--scope account`. `check` finds dangling refs, a missing why, stale and never-confirmed, duplicate and uncovered topics; `drift` compares with the code (git) and the service; `sync` never overwrites |
-| `iohr atlas personalities list \| import [--dry-run]` | The built-in personalities in `atlas/personalities/` and whether each is in your InOrbit account; `import` sends them (`--dry-run` prints the body and sends nothing) |
+| `iohr atlas roles list \| import [--dry-run]` | The built-in roles in `atlas/roles/` and whether each is in your InOrbit account; `import` sends them (`--dry-run` prints the body and sends nothing) |
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp\|swift --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline, `--package` names the surface's package or namespace (Go, Java, C#), `--runtime` the runtime's name in your project, `--force` replaces a non-empty directory |
 | `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
 | `iohr sdk check [--lock FILE] [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
@@ -582,30 +582,43 @@ keys stay local. The canvas and the 3D folder are never sent, and the output say
 text reaches a log. The `[sync]` `background` key in `config.toml` is read (default `false`); no
 background loop exists yet, so only `iohr sync` sends anything.
 
-### Personalities and memory
+### Roles and memory
 
-`iohr project init` and `iohr atlas init` also write the built-in personalities into
-`atlas/personalities/`: `security`, which every project gets whatever its language, and one
+`iohr project init` and `iohr atlas init` also write the built-in roles into
+`atlas/roles/`: `security`, which every project gets whatever its language, and one
 engineer for the project's language (`rust-engineer`, `python-engineer`, `typescript-engineer`
 or `go-engineer`; `atlas init` reads the language from `inorbit.toml` or the build file). Each
 file has front matter (`name`, `parent`, `domain`, the catalogue it came from) and its lines, a
 core of at most 700 tokens and recall lines found by topic, each with the primary source it
 comes from (NIST SSDF, OWASP ASVS, the Rust API guidelines, the PEPs and the like). The
 catalogue is data in the binary, labelled origin `doctrine`, and `inorbit.toml` records the
-names in `[personalities]`.
+names in `[roles]`.
 
 Signed in, init imports them through `POST /v1/coordinator/personalities/import` and prints one
-line each (`written v1`, `unchanged`, `left alone`). A personality already in your account that
+line each (`written v1`, `unchanged`, `left alone`). A role already in your account that
 this project did not import, or one you changed in InOrbit since, is left alone; the catalogue
-only replaces what it wrote itself. When the account has no root personality, `base-engineer`
+only replaces what it wrote itself. When the account has no root role, `base-engineer`
 comes with them. Only the account owner or an admin may import. Signed out, offline or refused,
 init still succeeds, says so once and keeps the files; `iohr sync` (or
-`iohr atlas personalities import`) imports later. `--json` reports each personality.
+`iohr atlas roles import`) imports later. `--json` reports each role.
+
+The folder was called `atlas/personalities/` before. `iohr atlas init`, `roles list`, `roles import`
+and `iohr sync` move it to `atlas/roles/` once and say so in one line; a file that `atlas/roles/`
+already has is never overwritten. `iohr atlas personalities` still works as a hidden alias of
+`iohr atlas roles`. The wire names stay as the service has them: the paths
+`/v1/coordinator/personalities` and `/v1/coordinator/personalities/import` and the `personalities`
+key in their bodies.
+
+Every built-in fact carries `checked: 2026-11-05`, the day it was last read against its primary
+source. Every prompt that asks a model to research or write facts (`project init`, `--describe`,
+the agent step) ends with the system clock's date: "Today is YYYY-MM-DD. Use the newest edition or
+version published as of today; name it with its publication date; if you are unsure a newer one
+exists, say so."
 
 ### Memory
 
 `iohr memory` is local first (RFC 0205, ADR 0216: files, no database). Each memory is one
-Markdown file with front matter (`id`, `kind`, `scope`, `created`, `updated`, `why`, `pinned`,
+Markdown file with front matter (`id`, `kind`, `scope`, `created`, `updated`, `checked`, `why`, `pinned`,
 `refs`) and the text as the body. There are three scopes; `--scope` picks one per command and
 `[memory] scope` in the config sets the default (else `project`):
 
@@ -627,7 +640,8 @@ iohr memory sync [--dry-run] [--pull]  # off until [memory] sync = true or you r
 
 `check` reports `dangling-ref` (a path that is gone, or a `cmd:` program not on PATH),
 `bad-ref` (absolute or `..`), `missing-why`, `stale` (not confirmed in 180 days, `--stale-days`;
-pinned ones are exempt), `never-confirmed`, `duplicate` and `near-duplicate`, and `gap` (topics
+pinned ones are exempt), `unchecked` (no `checked:` date in the front matter, or one older than
+`--checked-days`, else `[memory] check_days`, else 180; pinned ones are exempt), `never-confirmed`, `duplicate` and `near-duplicate`, and `gap` (topics
 no memory covers: the language, the build and test commands, the owners). `drift` only reads: it
 compares each `--ref` with `git log` and `git status` (`ref-changed` when the path changed after
 the memory was last updated, `ref-uncommitted` when it has edits not committed), and says it
@@ -648,7 +662,7 @@ written as files only with `--pull`. `--dry-run` sends nothing. Signed out, `syn
 error and the files stay as they are.
 
 `iohr project init` and `iohr atlas init` write `.inorbit/memory/README.md` and the built-in
-personalities' recall lines as seed memories, locally, with no network; a seed you forget stays
+roles' recall lines as seed memories, locally, with no network; a seed you forget stays
 forgotten. The agent-instructions file (`AGENTS.md` or `CLAUDE.md`) gets a short section that
 tells agents to run `iohr memory recall` and `iohr memory remember`.
 

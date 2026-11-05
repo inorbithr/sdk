@@ -320,14 +320,14 @@ async fn sync_never_shows_the_token_or_a_documents_words() {
     assert!(!t.contains("Stub:"), "no document text in the output: {t}");
 }
 
-// ---------------------------------------------------------------- personalities and memory
+// ---------------------------------------------------------------- roles and memory
 
-const PERSONALITIES: &str = "/v1/coordinator/personalities";
+const ROLES: &str = "/v1/coordinator/personalities";
 const IMPORT: &str = "/v1/coordinator/personalities/import";
 
-async fn mount_personalities(server: &MockServer, listed: serde_json::Value, import_status: u16) {
+async fn mount_roles(server: &MockServer, listed: serde_json::Value, import_status: u16) {
     Mock::given(method("GET"))
-        .and(path(PERSONALITIES))
+        .and(path(ROLES))
         .respond_with(ResponseTemplate::new(200).set_body_json(listed))
         .mount(server)
         .await;
@@ -355,7 +355,7 @@ fn imports(sent: &[wiremock::Request]) -> Vec<serde_json::Value> {
 
 #[test]
 #[allow(clippy::many_single_char_names, reason = "short names in a long test")]
-fn init_writes_the_personalities_the_record_the_memory_readme_and_the_agent_section() {
+fn init_writes_the_roles_the_record_the_memory_readme_and_the_agent_section() {
     let h = tempfile::tempdir().unwrap();
     let dir = h.path().join("work/made");
     std::fs::create_dir_all(&dir).unwrap();
@@ -370,12 +370,12 @@ fn init_writes_the_personalities_the_record_the_memory_readme_and_the_agent_sect
 
     // The language came from the build file: a Rust project gets the Rust engineer.
     for name in ["security", "rust-engineer"] {
-        let p = read(&dir, &format!("atlas/personalities/{name}.md"));
+        let p = read(&dir, &format!("atlas/roles/{name}.md"));
         assert!(p.contains(&format!("name: {name}")), "{p}");
         assert!(p.contains("parent:"), "{p}");
         assert!(p.contains("https://"), "every line carries its source: {p}");
     }
-    assert!(!dir.join("atlas/personalities/python-engineer.md").exists());
+    assert!(!dir.join("atlas/roles/python-engineer.md").exists());
     assert!(read(&dir, "inorbit.toml").contains("rust-engineer"));
     // Memory is local: a README and the seed memories under `.inorbit/memory/`, no network.
     assert!(read(&dir, ".inorbit/memory/README.md").contains("iohr memory recall"));
@@ -397,18 +397,87 @@ fn init_writes_the_personalities_the_record_the_memory_readme_and_the_agent_sect
     // JSON reports them; the dry run prints the body and sends nothing.
     let o = iohr(h.path(), &dir, None, &["atlas", "init", "--json"]);
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(v["personalities"]["signed_in"], false, "{v}");
-    assert!(v["personalities"]["outcomes"].as_array().unwrap().len() >= 2);
+    assert_eq!(v["roles"]["signed_in"], false, "{v}");
+    assert!(v["roles"]["outcomes"].as_array().unwrap().len() >= 2);
     let o = iohr(
         h.path(),
         &dir,
         None,
-        &["atlas", "personalities", "import", "--dry-run"],
+        &["atlas", "roles", "import", "--dry-run"],
     );
     let t = text(&o);
     assert!(o.status.success(), "{t}");
     assert!(t.contains("\"doctrine\""), "{t}");
     assert!(t.contains("\"parent\""), "{t}");
+}
+
+#[test]
+fn the_built_in_facts_carry_the_day_they_were_checked() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("work/made");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"made\"\n").unwrap();
+    let o = iohr(h.path(), &dir, None, &["atlas", "init"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let pack = read(&dir, "atlas/roles/security.md");
+    assert!(pack.contains("\nchecked: 2026-11-05\n"), "{pack}");
+    let mut seeded = 0;
+    for e in std::fs::read_dir(dir.join(".inorbit/memory"))
+        .unwrap()
+        .flatten()
+    {
+        if e.file_name() == "README.md" {
+            continue;
+        }
+        let t = std::fs::read_to_string(e.path()).unwrap();
+        assert!(t.contains("\nchecked: 2026-11-05\n"), "{t}");
+        seeded += 1;
+    }
+    assert!(seeded > 0);
+}
+
+#[test]
+fn an_older_personalities_folder_moves_to_roles_once_and_never_overwrites() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("work/made");
+    std::fs::create_dir_all(dir.join("atlas/personalities")).unwrap();
+    std::fs::create_dir_all(dir.join("atlas/roles")).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"made\"\n").unwrap();
+    std::fs::write(
+        dir.join("atlas/personalities/security.md"),
+        "old security\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("atlas/personalities/mine.md"), "my own\n").unwrap();
+    std::fs::write(dir.join("atlas/roles/mine.md"), "already in roles\n").unwrap();
+    let o = iohr(h.path(), &dir, None, &["atlas", "init"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert_eq!(
+        t.matches("moved atlas/personalities/ to atlas/roles/")
+            .count(),
+        1,
+        "{t}"
+    );
+    // Moved, not overwritten, and the one that clashed stays where it was.
+    assert_eq!(read(&dir, "atlas/roles/security.md"), "old security\n");
+    assert_eq!(read(&dir, "atlas/roles/mine.md"), "already in roles\n");
+    assert_eq!(read(&dir, "atlas/personalities/mine.md"), "my own\n");
+    assert!(!dir.join("atlas/personalities/security.md").exists());
+    // The second run has nothing to move and says nothing about it.
+    let o = iohr(h.path(), &dir, None, &["atlas", "init"]);
+    assert!(
+        !text(&o).contains("moved atlas/personalities/"),
+        "{}",
+        text(&o)
+    );
+    // The old subcommand name still works, hidden, and so does the new one.
+    for word in ["personalities", "roles"] {
+        let o = iohr(h.path(), &dir, None, &["atlas", word, "list", "--json"]);
+        assert!(o.status.success(), "{word}: {}", text(&o));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert!(v["roles"].is_array(), "{v}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -419,7 +488,7 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
     std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"made\"\n").unwrap();
     let server = MockServer::start().await;
     // An empty account: no root, so the base engineer comes with them.
-    mount_personalities(&server, serde_json::json!({ "personalities": [] }), 200).await;
+    mount_roles(&server, serde_json::json!({ "personalities": [] }), 200).await;
     let base = server.uri();
 
     let o = iohr(h.path(), &dir, Some(&base), &["atlas", "init"]);
@@ -449,12 +518,12 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
     assert!(line["cites"][0].as_str().unwrap().starts_with("https://"));
 
     // The import is recorded in the pack, so the next run only compares.
-    let p = read(&dir, "atlas/personalities/security.md");
+    let p = read(&dir, "atlas/roles/security.md");
     assert!(p.contains("imported_version: 1"), "{p}");
 
     // The account now has them at the version we wrote: unchanged, no second POST.
     let server2 = MockServer::start().await;
-    mount_personalities(
+    mount_roles(
         &server2,
         serde_json::json!({ "personalities": [
             {"name": "base-engineer", "parent": "", "head_version": 1},
@@ -468,7 +537,7 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
         h.path(),
         &dir,
         Some(&server2.uri()),
-        &["atlas", "personalities", "import"],
+        &["atlas", "roles", "import"],
     );
     let t = text(&o);
     assert!(o.status.success(), "{t}");
@@ -480,7 +549,7 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
 
     // Edited in InOrbit since our import: left alone, never overwritten.
     let server3 = MockServer::start().await;
-    mount_personalities(
+    mount_roles(
         &server3,
         serde_json::json!({ "personalities": [
             {"name": "base-engineer", "parent": "", "head_version": 1},
@@ -494,7 +563,7 @@ async fn signed_in_init_imports_under_the_base_then_leaves_alone_and_skips() {
         h.path(),
         &dir,
         Some(&server3.uri()),
-        &["atlas", "personalities", "import"],
+        &["atlas", "roles", "import"],
     );
     let t = text(&o);
     assert!(t.contains("security: left alone"), "{t}");
@@ -509,7 +578,7 @@ async fn a_refused_import_never_fails_init_and_says_it_once() {
     let h = tempfile::tempdir().unwrap();
     let dir = h.path().join("work/made");
     let server = MockServer::start().await;
-    mount_personalities(&server, serde_json::json!({ "personalities": [] }), 403).await;
+    mount_roles(&server, serde_json::json!({ "personalities": [] }), 403).await;
     let o = iohr(
         h.path(),
         h.path(),
@@ -526,5 +595,5 @@ async fn a_refused_import_never_fails_init_and_says_it_once() {
     let t = text(&o);
     assert!(o.status.success(), "{t}");
     assert_eq!(t.matches("stay local").count(), 1, "{t}");
-    assert!(dir.join("atlas/personalities/security.md").is_file());
+    assert!(dir.join("atlas/roles/security.md").is_file());
 }

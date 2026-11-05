@@ -422,6 +422,7 @@ pub fn agent_prompt(
     template: &str,
     answers: &crate::template::Answers,
     vals: &[(String, String)],
+    today: &str,
 ) -> String {
     let base = template_prompt.unwrap_or(
         "This folder is a fresh InOrbit project. Build what is described below by editing this folder. Keep it free of secrets.",
@@ -440,7 +441,19 @@ pub fn agent_prompt(
     if let Some(d) = describe {
         let _ = write!(p, "\n\nWhat the person wants:\n{d}");
     }
+    let _ = write!(p, "\n\n{}", dated(today));
     p
+}
+
+/// The line every prompt that has a model research or write facts carries, so it does not
+/// answer from the year its training ended. `today` is `YYYY-MM-DD`, read from the system
+/// clock ([`crate::front::today`]).
+#[must_use]
+pub fn dated(today: &str) -> String {
+    format!(
+        "Today is {today}. Use the newest edition or version published as of today; name it \
+         with its publication date; if you are unsure a newer one exists, say so."
+    )
 }
 
 /// The smoke test's result.
@@ -859,9 +872,15 @@ mod tests {
             "demo",
             &a,
             &vals,
+            "2026-11-05",
         );
         assert!(p.starts_with("Module my_shop."));
         assert!(p.contains("- flavour: fancy") && p.contains("sell hats"));
+        assert!(p.ends_with(&dated("2026-11-05")));
+        assert!(p.contains(
+            "Today is 2026-11-05. Use the newest edition or version published as of today;"
+        ));
+        assert!(p.contains("if you are unsure a newer one exists, say so."));
     }
 
     /// The program a variant needs, on this machine's PATH?

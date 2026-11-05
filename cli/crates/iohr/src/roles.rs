@@ -1,10 +1,10 @@
-//! The built-in personalities `iohr project init` and `iohr atlas init` give a project
+//! The built-in roles `iohr project init` and `iohr atlas init` give a project
 //! (RFC 0124.1, RFC 0205): `security` for every project, and one engineer for the language
-//! chosen. The catalogue is data in `personalities/*.toml`, versioned with this binary; every
+//! chosen. The catalogue is data in `roles/*.toml`, versioned with this binary; every
 //! line carries the primary source it comes from.
 //!
-//! A project gets readable packs under `atlas/personalities/` and, when the person is signed
-//! in, the same personalities in InOrbit through `POST /v1/coordinator/personalities/import`.
+//! A project gets readable packs under `atlas/roles/` and, when the person is signed
+//! in, the same roles in InOrbit through `POST /v1/coordinator/personalities/import`.
 //! Nothing here blocks an init: an import that cannot happen is reported and left for
 //! `iohr sync`.
 
@@ -20,28 +20,34 @@ use crate::context::Api;
 use inorbithr::Method;
 
 /// The folder of the packs, under the project root.
-pub const DIR: &str = "atlas/personalities";
-/// The one personality every project gets, whatever its language.
+pub const DIR: &str = "atlas/roles";
+/// The day the facts built into the catalogue (`roles/*.toml`) were last checked against their
+/// sources. A pack and every memory seeded from it carry it as `checked:`. Move it only after
+/// the facts were read again against their primary sources: it is a claim, not a build date.
+pub const CHECKED: &str = "2026-11-05";
+/// Where the packs were written before the word became Role.
+const LEGACY_DIR: &str = "atlas/personalities";
+/// The one role every project gets, whatever its language.
 pub const BASE: &str = "security";
 /// The root of the tree. Imported only when the account has no root of its own.
 pub const ROOT: &str = "base-engineer";
-/// The REST route that takes personalities.
+/// The REST route that takes roles.
 pub const IMPORT_PATH: &str = "/v1/coordinator/personalities/import";
 const LIST_PATH: &str = "/v1/coordinator/personalities";
 
 const FILES: [&str; 6] = [
-    include_str!("../personalities/base-engineer.toml"),
-    include_str!("../personalities/security.toml"),
-    include_str!("../personalities/rust-engineer.toml"),
-    include_str!("../personalities/python-engineer.toml"),
-    include_str!("../personalities/typescript-engineer.toml"),
-    include_str!("../personalities/go-engineer.toml"),
+    include_str!("../roles/base-engineer.toml"),
+    include_str!("../roles/security.toml"),
+    include_str!("../roles/rust-engineer.toml"),
+    include_str!("../roles/python-engineer.toml"),
+    include_str!("../roles/typescript-engineer.toml"),
+    include_str!("../roles/go-engineer.toml"),
 ];
 
-const NOT_SIGNED_IN: &str = "Not signed in: the personalities stay in atlas/personalities/. \
-     Run `iohr login`, then `iohr sync` (or `iohr atlas personalities import`) imports them.";
+const NOT_SIGNED_IN: &str = "Not signed in: the roles stay in atlas/roles/. \
+     Run `iohr login`, then `iohr sync` (or `iohr atlas roles import`) imports them.";
 
-/// One line of a personality: its text and the sources it comes from.
+/// One line of a role: its text and the sources it comes from.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Line {
     /// `core` (always in the brief) or `recall` (found by topic).
@@ -53,9 +59,9 @@ pub struct Line {
     pub cites: Vec<String>,
 }
 
-/// A personality of the catalogue.
+/// A role of the catalogue.
 #[derive(Debug, Clone, Deserialize)]
-pub struct Personality {
+pub struct Role {
     pub name: String,
     /// Empty for the root.
     pub parent: String,
@@ -76,10 +82,10 @@ pub struct Personality {
 
 /// The whole catalogue, root first.
 #[must_use]
-pub fn catalogue() -> Vec<Personality> {
+pub fn catalogue() -> Vec<Role> {
     FILES
         .iter()
-        .filter_map(|t| toml::from_str::<Personality>(t).ok())
+        .filter_map(|t| toml::from_str::<Role>(t).ok())
         .collect()
 }
 
@@ -97,7 +103,7 @@ pub fn canonical_language(text: &str) -> Option<&'static str> {
 
 /// What a project gets: `security`, and the engineer of its language when there is one.
 #[must_use]
-pub fn selection(lang: Option<&str>) -> Vec<Personality> {
+pub fn selection(lang: Option<&str>) -> Vec<Role> {
     let want = lang.and_then(canonical_language);
     catalogue()
         .into_iter()
@@ -148,9 +154,9 @@ fn tokens(text: &str) -> usize {
     text.chars().count().div_ceil(4)
 }
 
-/// The size of a personality's core, in the service's measure (characters over four).
+/// The size of a role's core, in the service's measure (characters over four).
 #[must_use]
-pub fn core_tokens(p: &Personality) -> usize {
+pub fn core_tokens(p: &Role) -> usize {
     p.lines
         .iter()
         .filter(|l| l.place == "core")
@@ -158,12 +164,12 @@ pub fn core_tokens(p: &Personality) -> usize {
         .sum()
 }
 
-/// The readable pack of a personality: front matter (name, parent, domain, source version),
+/// The readable pack of a role: front matter (name, parent, domain, source version),
 /// then its lines under their headings, each with its sources.
 #[must_use]
-pub fn pack(p: &Personality) -> String {
+pub fn pack(p: &Role) -> String {
     let mut out = format!(
-        "---\nname: {}\nparent: {}\ndomain: {}\nsource: {}\ncatalogue_version: {}\n---\n",
+        "---\nname: {}\nparent: {}\ndomain: {}\nsource: {}\ncatalogue_version: {}\nchecked: {CHECKED}\n---\n",
         p.name,
         p.parent,
         p.domain.join(", "),
@@ -172,7 +178,7 @@ pub fn pack(p: &Personality) -> String {
     );
     let _ = write!(
         out,
-        "# {}\n\nA built-in personality of the `iohr` catalogue. Its lines come from primary \
+        "# {}\n\nA built-in role of the `iohr` catalogue. Its lines come from primary \
          sources, named under each one. `iohr sync` imports it into InOrbit from the catalogue, \
          not from this file: an edit here is not read back.\n",
         p.title
@@ -205,7 +211,7 @@ pub fn pack_files(lang: Option<&str>) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The `[personalities]` table of `inorbit.toml`: which built-ins the project uses.
+/// The `[roles]` table of `inorbit.toml`: which built-ins the project uses.
 #[must_use]
 pub fn record(lang: Option<&str>) -> String {
     let names: Vec<String> = selection(lang)
@@ -213,10 +219,10 @@ pub fn record(lang: Option<&str>) -> String {
         .map(|p| format!("\"{}\"", p.name))
         .collect();
     format!(
-        "\n# --- Personalities ---\n\n\
-         # The built-in InOrbit personalities this project uses. Their packs are in\n\
-         # atlas/personalities/; `iohr sync` imports them into your InOrbit account.\n\
-         [personalities]\nnames = [{}]\n",
+        "\n# --- Roles ---\n\n\
+         # The built-in InOrbit roles this project uses. Their packs are in\n\
+         # atlas/roles/; `iohr sync` imports them into your InOrbit account.\n\
+         [roles]\nnames = [{}]\n",
         names.join(", ")
     )
 }
@@ -224,7 +230,7 @@ pub fn record(lang: Option<&str>) -> String {
 /// Adds the record to `inorbit.toml` among a template's files, unless it has one already.
 pub fn add_record(files: &mut [(String, String)], lang: Option<&str>) {
     if let Some((_, text)) = files.iter_mut().find(|(p, _)| p == "inorbit.toml")
-        && !text.contains("[personalities]")
+        && !text.contains("[roles]")
     {
         text.push_str(&record(lang));
     }
@@ -240,7 +246,7 @@ pub fn ensure_record(root: &Path, lang: Option<&str>) -> Result<bool, String> {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Ok(false);
     };
-    if text.contains("[personalities]") {
+    if text.contains("[roles]") {
         return Ok(false);
     }
     let mut next = text;
@@ -252,9 +258,57 @@ pub fn ensure_record(root: &Path, lang: Option<&str>) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Moves the packs of an older `atlas/personalities/` into `atlas/roles/`, once. A file that
+/// `atlas/roles/` already has stays where it is: nothing in `atlas/roles/` is overwritten.
+/// Returns the one line to say, or `None` when there was nothing to move.
+///
+/// # Errors
+///
+/// A message saying what could not be moved.
+pub fn migrate_legacy(root: &Path) -> Result<Option<String>, String> {
+    let old = root.join(LEGACY_DIR);
+    if !old.is_dir() {
+        return Ok(None);
+    }
+    let new = root.join(DIR);
+    std::fs::create_dir_all(&new).map_err(|e| format!("cannot make {DIR}/: {e}"))?;
+    let (mut moved, mut left) = (0usize, 0usize);
+    let rd = std::fs::read_dir(&old).map_err(|e| format!("cannot read {LEGACY_DIR}/: {e}"))?;
+    for entry in rd.filter_map(Result::ok) {
+        let from = entry.path();
+        if !from.is_file() {
+            left += 1;
+            continue;
+        }
+        let to = new.join(entry.file_name());
+        if to.exists() {
+            left += 1;
+        } else {
+            std::fs::rename(&from, &to)
+                .map_err(|e| format!("cannot move {}: {e}", from.display()))?;
+            moved += 1;
+        }
+    }
+    // Gone when empty; an old folder that still holds something is left for the person.
+    let _ = std::fs::remove_dir(&old);
+    // Said once: a run that moves nothing (the leftovers were named the time before) is quiet.
+    if moved == 0 {
+        return Ok(None);
+    }
+    let kept = if left == 0 {
+        String::new()
+    } else {
+        format!(", {left} left in {LEGACY_DIR}/ because {DIR}/ has it or it is not a file")
+    };
+    Ok(Some(format!(
+        "moved {LEGACY_DIR}/ to {DIR}/ ({moved} file{}{kept})",
+        if moved == 1 { "" } else { "s" }
+    )))
+}
+
 // ---------------------------------------------------------------- the import body
 
-fn sections(p: &Personality) -> Vec<Value> {
+fn sections(p: &Role) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     let mut order: Vec<(&str, &str)> = Vec::new();
     for l in &p.lines {
@@ -281,7 +335,7 @@ fn sections(p: &Personality) -> Vec<Value> {
     out
 }
 
-fn input(p: &Personality, parent: &str) -> Value {
+fn input(p: &Role, parent: &str) -> Value {
     json!({
         "name": p.name,
         "parent": parent,
@@ -295,12 +349,13 @@ fn input(p: &Personality, parent: &str) -> Value {
 /// The body of an import: `send` hang under `parent`, and the root joins them when
 /// `with_root` (the account has none).
 #[must_use]
-pub fn import_body(send: &[&Personality], parent: &str, with_root: bool) -> Value {
+pub fn import_body(send: &[&Role], parent: &str, with_root: bool) -> Value {
     let mut list = Vec::new();
     if with_root && let Some(root) = catalogue().iter().find(|p| p.name == ROOT) {
         list.push(input(root, ""));
     }
     list.extend(send.iter().map(|p| input(p, parent)));
+    // The wire keeps the name `personalities`: core kept it when it renamed the word (#1365).
     json!({ "personalities": list })
 }
 
@@ -309,7 +364,7 @@ pub fn import_body(send: &[&Personality], parent: &str, with_root: bool) -> Valu
 /// A pack in the project and what an import recorded in it.
 #[derive(Debug, Clone)]
 pub struct Local {
-    pub personality: Personality,
+    pub role: Role,
     pub path: PathBuf,
     /// The version InOrbit gave it when we imported it.
     pub imported_version: Option<i64>,
@@ -317,7 +372,7 @@ pub struct Local {
     pub imported_catalogue: Option<u32>,
 }
 
-/// The packs of `root` that name a personality of the catalogue.
+/// The packs of `root` that name a role of the catalogue.
 #[must_use]
 pub fn locals(root: &Path) -> Vec<Local> {
     let cat = catalogue();
@@ -338,9 +393,9 @@ pub fn locals(root: &Path) -> Vec<Local> {
             if name == ROOT {
                 return None;
             }
-            let personality = cat.iter().find(|p| p.name == name)?.clone();
+            let role = cat.iter().find(|p| p.name == name)?.clone();
             Some(Local {
-                personality,
+                role,
                 imported_version: atlas::get(&text, "imported_version")
                     .and_then(|v| v.trim().parse().ok()),
                 imported_catalogue: atlas::get(&text, "imported_catalogue")
@@ -353,7 +408,7 @@ pub fn locals(root: &Path) -> Vec<Local> {
 
 // ---------------------------------------------------------------- the import
 
-/// One personality's result.
+/// One role's result.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Outcome {
     pub name: String,
@@ -377,7 +432,7 @@ pub struct Report {
 }
 
 impl Report {
-    /// The lines to show: one per personality, then the message once.
+    /// The lines to show: one per role, then the message once.
     #[must_use]
     pub fn lines(&self) -> Vec<String> {
         let mut out: Vec<String> = self
@@ -409,7 +464,7 @@ fn number(v: &Value) -> Option<i64> {
 fn why(e: &inorbithr::Error) -> String {
     match e.status() {
         Some(401) => "not signed in: run `iohr login`".to_owned(),
-        Some(403) => "refused: only the account owner or an admin can import personalities, \
+        Some(403) => "refused: only the account owner or an admin can import roles, \
                       and an API key has no coordinator scope"
             .to_owned(),
         Some(s) => format!("InOrbit answered {s}: {e}"),
@@ -434,7 +489,7 @@ fn remote_of(listed: Option<&Value>) -> BTreeMap<String, (String, i64)> {
         .unwrap_or_default()
 }
 
-/// Tells each local personality apart by what InOrbit has; the ones to send are returned,
+/// Tells each local role apart by what InOrbit has; the ones to send are returned,
 /// the others are said in the report.
 fn decide<'a>(
     found: &'a [Local],
@@ -443,7 +498,7 @@ fn decide<'a>(
 ) -> Vec<&'a Local> {
     let mut send: Vec<&Local> = Vec::new();
     for f in found {
-        let name = &f.personality.name;
+        let name = &f.role.name;
         let (action, version, note) = match remote.get(name) {
             None => {
                 send.push(f);
@@ -460,10 +515,7 @@ fn decide<'a>(
                     Some(*head),
                     "changed in InOrbit since the import",
                 ),
-                Some(_)
-                    if f.imported_catalogue
-                        .is_some_and(|c| c < f.personality.version) =>
-                {
+                Some(_) if f.imported_catalogue.is_some_and(|c| c < f.role.version) => {
                     send.push(f);
                     continue;
                 }
@@ -511,7 +563,7 @@ fn write_back(f: &Local, v: i64) -> String {
         &text,
         &[
             ("imported_version", v.to_string()),
-            ("imported_catalogue", f.personality.version.to_string()),
+            ("imported_catalogue", f.role.version.to_string()),
         ],
     );
     match std::fs::write(&f.path, next) {
@@ -520,11 +572,11 @@ fn write_back(f: &Local, v: i64) -> String {
     }
 }
 
-/// Every personality stays in the project; `why` is said once.
+/// Every role stays in the project; `why` is said once.
 fn local_only(found: &[Local], report: &mut Report, why: &str) {
     for f in found {
         report.outcomes.push(Outcome {
-            name: f.personality.name.clone(),
+            name: f.role.name.clone(),
             action: "local",
             version: None,
             note: String::new(),
@@ -533,7 +585,7 @@ fn local_only(found: &[Local], report: &mut Report, why: &str) {
     report.message = Some(why.to_owned());
 }
 
-/// Imports the packs of `root` into the account of `api`, one personality at a time told
+/// Imports the packs of `root` into the account of `api`, one role at a time told
 /// apart by what is already there:
 /// - absent in InOrbit: imported;
 /// - present, never imported from this project: `left alone` (it is the account's own);
@@ -542,7 +594,7 @@ fn local_only(found: &[Local], report: &mut Report, why: &str) {
 /// - otherwise `unchanged`.
 ///
 /// With `dry`, nothing is sent and nothing written, and the report holds the body. With no
-/// `api`, every personality stays local, with one message saying so. Never fails.
+/// `api`, every role stays local, with one message saying so. Never fails.
 pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report {
     let found = locals(root);
     let mut report = Report::default();
@@ -550,7 +602,7 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
         return report;
     }
     let Some(api) = api else {
-        let refs: Vec<&Personality> = found.iter().map(|f| &f.personality).collect();
+        let refs: Vec<&Role> = found.iter().map(|f| &f.role).collect();
         if dry {
             report.body = Some(import_body(&refs, ROOT, true));
         }
@@ -563,7 +615,7 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
             local_only(
                 &found,
                 &mut report,
-                &format!("The personalities stay local: {}.", why(&e)),
+                &format!("The roles stay local: {}.", why(&e)),
             );
             return report;
         }
@@ -579,12 +631,12 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
         return report;
     }
     let parent = root_name.clone().unwrap_or_else(|| ROOT.to_owned());
-    let refs: Vec<&Personality> = send.iter().map(|f| &f.personality).collect();
+    let refs: Vec<&Role> = send.iter().map(|f| &f.role).collect();
     let body = import_body(&refs, &parent, root_name.is_none());
     if dry {
         for f in &send {
             report.outcomes.push(Outcome {
-                name: f.personality.name.clone(),
+                name: f.role.name.clone(),
                 action: "would write",
                 version: None,
                 note: String::new(),
@@ -598,20 +650,20 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
         Err(line) => {
             for f in &send {
                 report.outcomes.push(Outcome {
-                    name: f.personality.name.clone(),
+                    name: f.role.name.clone(),
                     action: "failed",
                     version: None,
                     note: String::new(),
                 });
             }
             report.message = Some(format!(
-                "The personalities stay local ({line}). `iohr sync` tries again."
+                "The roles stay local ({line}). `iohr sync` tries again."
             ));
             return report;
         }
     };
     for f in send {
-        let name = f.personality.name.clone();
+        let name = f.role.name.clone();
         let Some(&v) = written.get(&name) else {
             report.outcomes.push(Outcome {
                 name,
@@ -634,7 +686,7 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
             name: ROOT.to_owned(),
             action: "written",
             version: written.get(ROOT).copied(),
-            note: "the account had no root personality".to_owned(),
+            note: "the account had no root role".to_owned(),
         });
     }
     report
@@ -650,13 +702,13 @@ pub const AGENTS_MARK: &str = "<!-- iohr:memory -->";
 #[must_use]
 pub fn agents_section() -> String {
     format!(
-        "\n{AGENTS_MARK}\n## Project memory and personalities\n\n\
+        "\n{AGENTS_MARK}\n## Project memory and roles\n\n\
          - Before work, run `iohr memory recall \"<topic>\"`. After a lesson, run \
          `iohr memory remember \"<fact>\" --why \"<reason>\"`. Memories are files in \
          `.inorbit/memory/`, committed with the code; no sign-in is needed. \
          `iohr memory check` finds the wrong and the stale ones. See \
          `.inorbit/memory/README.md`.\n\
-         - The built-in personalities for this project are in `atlas/personalities/`.\n"
+         - The built-in roles for this project are in `atlas/roles/`.\n"
     )
 }
 
@@ -727,7 +779,7 @@ pub fn ensure_agents(root: &Path) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    fn core_text(p: &Personality) -> String {
+    fn core_text(p: &Role) -> String {
         p.lines
             .iter()
             .filter(|l| l.place == "core")
@@ -854,7 +906,7 @@ mod tests {
     #[test]
     fn the_import_body_is_what_the_service_takes() {
         let sel = selection(Some("python"));
-        let refs: Vec<&Personality> = sel.iter().collect();
+        let refs: Vec<&Role> = sel.iter().collect();
         let body = import_body(&refs, "base-engineer", true);
         let list = body["personalities"].as_array().unwrap();
         assert_eq!(list.len(), 3);
@@ -898,7 +950,7 @@ mod tests {
         add_record(&mut files, Some("rust"));
         add_agents(&mut files);
         add_agents(&mut files);
-        assert_eq!(files[0].1.matches("[personalities]").count(), 1);
+        assert_eq!(files[0].1.matches("[roles]").count(), 1);
         assert!(files[0].1.contains("\"rust-engineer\""));
         assert_eq!(files[1].1.matches(AGENTS_MARK).count(), 1);
         assert!(files[1].1.contains("iohr memory recall"));
