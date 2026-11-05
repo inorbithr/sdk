@@ -972,6 +972,12 @@ mod tests {
             for word in ["macos", "service", "panel", "extension.toml"] {
                 assert!(!prompt.contains(word), "the prompt says {word}");
             }
+            // The Rust demo talks to the host over a unix socket (`std::os::unix`), so it
+            // cannot be built on Windows; the macOS service it stands for is not there either.
+            if cfg!(windows) && v.id == "rust" {
+                eprintln!("rust: the demo uses a unix socket: not run on Windows");
+                continue;
+            }
             let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
             if !missing.is_empty() {
                 eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
