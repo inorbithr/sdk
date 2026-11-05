@@ -113,6 +113,7 @@ pub const CAPABILITIES: &[(&str, &str)] = &[
 pub const RESERVED: &[&str] = &[
     "accounts",
     "api",
+    "ask",
     "auth",
     "browser",
     "completion",

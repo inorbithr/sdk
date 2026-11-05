@@ -1,6 +1,7 @@
 //! One module per command.
 
 mod accounts;
+mod ask;
 mod auth;
 mod browser_ext;
 mod call;
@@ -79,6 +80,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, check, out).await,
+        Command::Ask(args) => ask::run(g, args, out).await,
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
