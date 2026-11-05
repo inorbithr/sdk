@@ -64,6 +64,51 @@ fn plain(line: &str) {
     let _ = writeln!(io::stderr().lock(), "{line}");
 }
 
+/// The width of the terminal on stderr, 80 when it is not known.
+fn terminal_width() -> usize {
+    usize::from(console::Term::stderr().size().1).max(40)
+}
+
+/// The text of each menu entry: labels padded to one width so the reasons line up in a
+/// column, the reason dim, and the whole line cut to `width` (less the menu's own margin) so
+/// it never wraps. An entry that cannot be chosen is dim and says "coming".
+fn menu_rows(choices: &[Choice], width: usize) -> Vec<String> {
+    let label = |c: &Choice| {
+        if c.available {
+            c.label.clone()
+        } else {
+            format!("{} (coming)", c.label)
+        }
+    };
+    let pad = choices
+        .iter()
+        .map(|c| console::measure_text_width(&label(c)))
+        .max()
+        .unwrap_or(0);
+    let room = width.saturating_sub(6);
+    choices
+        .iter()
+        .map(|c| {
+            let l = label(c);
+            let gap = pad - console::measure_text_width(&l);
+            let plain_line = if c.hint.is_empty() {
+                l.clone()
+            } else {
+                format!("{l}{}  {}", " ".repeat(gap), c.hint)
+            };
+            let cut = console::truncate_str(&plain_line, room, "...").into_owned();
+            let head: String = cut.chars().take(l.chars().count()).collect();
+            let tail: String = cut.chars().skip(l.chars().count()).collect();
+            let head = if c.available {
+                head
+            } else {
+                console::style(head).dim().to_string()
+            };
+            format!("{head}{}", console::style(tail).dim())
+        })
+        .collect()
+}
+
 impl Ui {
     /// The look for this run: drawn only when [`fancy_for`] says so.
     #[must_use]
@@ -121,6 +166,15 @@ impl Ui {
         }
     }
 
+    /// A warning line between steps. Plain: the line with `warning:` in front.
+    pub(crate) fn warn(self, line: &str) {
+        if self.fancy {
+            let _ = cliclack::log::warning(line);
+        } else {
+            plain(&format!("warning: {line}"));
+        }
+    }
+
     /// Starts a step. Plain: nothing until it ends.
     pub(crate) fn step(self, what: &str) -> Step {
         if !self.fancy {
@@ -148,17 +202,11 @@ impl Ui {
                 "{prompt}: there is no terminal to ask on; pass the choice as a flag"
             )));
         }
+        let rows = menu_rows(choices, terminal_width());
         loop {
             let mut menu = cliclack::select::<String>(prompt);
-            for c in choices {
-                let label = if c.available {
-                    c.label.clone()
-                } else {
-                    console::style(format!("{} (coming)", c.label))
-                        .dim()
-                        .to_string()
-                };
-                menu = menu.item(c.value.clone(), label, c.hint.clone());
+            for (c, label) in choices.iter().zip(&rows) {
+                menu = menu.item(c.value.clone(), label.clone(), "");
             }
             let picked = menu
                 .initial_value(initial.to_owned())
@@ -265,7 +313,44 @@ impl Step {
 
 #[cfg(test)]
 mod tests {
-    use super::fancy_for;
+    use super::{Choice, fancy_for, menu_rows};
+
+    fn c(value: &str, label: &str, hint: &str, available: bool) -> Choice {
+        Choice {
+            value: value.into(),
+            label: label.into(),
+            hint: hint.into(),
+            available,
+        }
+    }
+
+    #[test]
+    fn menu_reasons_start_in_one_column() {
+        console::set_colors_enabled(false);
+        let rows = menu_rows(
+            &[
+                c("a", "./my-shop", "in the folder you are in", true),
+                c("b", "~/code/my-shop", "your projects folder", true),
+            ],
+            120,
+        );
+        assert_eq!(rows[0].find("in the"), rows[1].find("your"));
+        assert!(rows[0].starts_with("./my-shop"));
+    }
+
+    #[test]
+    fn a_long_reason_is_cut_to_the_width_and_a_coming_entry_says_so() {
+        console::set_colors_enabled(false);
+        let rows = menu_rows(
+            &[
+                c("a", "go", &"x".repeat(200), true),
+                c("b", "zig", "later", false),
+            ],
+            50,
+        );
+        assert!(console::measure_text_width(&rows[0]) <= 50, "{}", rows[0]);
+        assert!(rows[1].contains("zig (coming)"), "{}", rows[1]);
+    }
 
     #[test]
     fn the_look_needs_a_terminal_and_a_colour_capable_term() {

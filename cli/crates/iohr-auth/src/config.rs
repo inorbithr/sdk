@@ -134,13 +134,18 @@ pub struct ProjectConfig {
     /// The template a new project is made from when `--template` is not given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
+    /// A folder your projects live in (`~` is your home). When set, `iohr project init` offers
+    /// `ROOT/NAME` as a place for the new project; unset, there is no projects folder and the
+    /// default is `./NAME` in the folder you are in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
 }
 
 impl ProjectConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.template.is_none()
+        self.template.is_none() && self.root.is_none()
     }
 }
 
@@ -717,16 +722,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("config.toml"),
-            "[project]   # my default\ntemplate = \"coordinated\"\n",
+            "[project]   # my default\ntemplate = \"coordinated\"\nroot = \"~/code\"\n",
         )
         .unwrap();
         let mut c = Config::load(dir.path()).unwrap();
         assert_eq!(c.project.template.as_deref(), Some("coordinated"));
+        assert_eq!(c.project.root.as_deref(), Some("~/code"));
         c.default = Some(name("work"));
         c.save(dir.path()).unwrap();
         let saved = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(saved.contains("[project]   # my default"), "{saved}");
         assert!(saved.contains("template = \"coordinated\""), "{saved}");
+        assert!(saved.contains("root = \"~/code\""), "{saved}");
     }
 
     #[test]

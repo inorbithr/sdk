@@ -587,3 +587,270 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
     );
     assert!(!d.exists() && !marker.exists() && !h.path().join(".inorbit/projects").exists());
 }
+
+/// Runs `iohr` from `cwd`, the way a person at a shell does.
+fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    Command::new(env!("CARGO_BIN_EXE_iohr"))
+        .args(args)
+        .current_dir(cwd)
+        .env_clear()
+        .env("PATH", path)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("IOHR_CONFIG_DIR", home.join("config"))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn json(o: &Output) -> serde_json::Value {
+    serde_json::from_slice(&o.stdout).unwrap_or_else(|e| panic!("{e}: {}", text(o)))
+}
+
+#[test]
+fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
+    let h = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let cwd_path = std::fs::canonicalize(cwd.path()).unwrap();
+    let out = iohr_in(
+        h.path(),
+        &cwd_path,
+        &[
+            "project",
+            "init",
+            "my-shop",
+            "--template",
+            "demo",
+            "--dry-run",
+            "--yes",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let t = text(&out);
+    assert!(
+        t.contains("would: write 9 files into ./my-shop (in the folder you are in)"),
+        "{t}"
+    );
+    assert!(
+        !t.contains(h.path().to_str().unwrap()) || t.contains("projects/my-shop"),
+        "{t}"
+    );
+    let j = iohr_in(
+        h.path(),
+        &cwd_path,
+        &[
+            "project",
+            "init",
+            "my-shop",
+            "--template",
+            "demo",
+            "--dry-run",
+            "--yes",
+            "--json",
+        ],
+    );
+    let v = json(&j);
+    assert_eq!(v["folder"]["shown"], "./my-shop");
+    assert_eq!(v["folder"]["kind"], "here");
+    assert_eq!(
+        v["folder"]["dir"],
+        cwd_path.join("my-shop").to_str().unwrap()
+    );
+    assert_eq!(v["language"], "python");
+    assert!(
+        !cwd_path.join("my-shop").exists(),
+        "a dry run writes nothing"
+    );
+}
+
+#[test]
+fn a_folder_that_is_not_empty_is_refused_and_dotfiles_alone_are_fine() {
+    let h = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(cwd.path().join("my-shop")).unwrap();
+    std::fs::write(cwd.path().join("my-shop/notes.txt"), "x").unwrap();
+    let args = [
+        "project",
+        "init",
+        "my-shop",
+        "--template",
+        "demo",
+        "--yes",
+        "--no-smoke",
+    ];
+    let out = iohr_in(h.path(), cwd.path(), &args);
+    assert!(!out.status.success());
+    assert!(text(&out).contains("not empty"), "{}", text(&out));
+    std::fs::remove_file(cwd.path().join("my-shop/notes.txt")).unwrap();
+    std::fs::write(cwd.path().join("my-shop/.DS_Store"), "x").unwrap();
+    let out = iohr_in(h.path(), cwd.path(), &args);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(cwd.path().join("my-shop/extension.toml").is_file());
+}
+
+#[test]
+fn inside_a_git_repository_the_dry_run_warns_that_it_would_nest() {
+    let h = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let cwd_path = std::fs::canonicalize(cwd.path()).unwrap();
+    let git = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&cwd_path)
+        .status();
+    if !git.is_ok_and(|s| s.success()) {
+        return;
+    }
+    let out = iohr_in(
+        h.path(),
+        &cwd_path,
+        &[
+            "project",
+            "init",
+            "my-shop",
+            "--template",
+            "demo",
+            "--dry-run",
+            "--yes",
+            "--json",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let v = json(&out);
+    let w = v["warnings"][0].as_str().unwrap_or_default();
+    assert!(w.contains("inside the git repository"), "{v}");
+    assert!(w.contains("../my-shop"), "{v}");
+}
+
+#[test]
+fn lang_picks_the_variant_and_a_wrong_one_is_refused() {
+    let h = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    for (lang, file) in [
+        ("typescript", "src/main.ts"),
+        ("go", "main.go"),
+        ("rust", "Cargo.toml"),
+    ] {
+        let out = iohr_in(
+            h.path(),
+            cwd.path(),
+            &[
+                "project",
+                "init",
+                "my-shop",
+                "--template",
+                "demo",
+                "--lang",
+                lang,
+                "--dry-run",
+                "--yes",
+                "--json",
+            ],
+        );
+        assert!(out.status.success(), "{lang}: {}", text(&out));
+        let v = json(&out);
+        assert_eq!(v["language"], lang);
+        let files: Vec<&str> = v["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert!(files.contains(&file), "{lang}: {files:?}");
+    }
+    let bad = iohr_in(
+        h.path(),
+        cwd.path(),
+        &[
+            "project",
+            "init",
+            "my-shop",
+            "--template",
+            "demo",
+            "--lang",
+            "cobol",
+            "--dry-run",
+            "--yes",
+        ],
+    );
+    assert!(!bad.status.success());
+    assert!(
+        text(&bad).contains("python, typescript, go, rust"),
+        "{}",
+        text(&bad)
+    );
+    let clash = iohr_in(
+        h.path(),
+        cwd.path(),
+        &[
+            "project",
+            "init",
+            "my-shop",
+            "--template",
+            "demo",
+            "--lang",
+            "go",
+            "--set",
+            "language=rust",
+            "--dry-run",
+            "--yes",
+        ],
+    );
+    assert!(!clash.status.success());
+    assert!(text(&clash).contains("disagree"), "{}", text(&clash));
+}
+
+fn on_path(program: &str) -> bool {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path).any(|d| d.join(program).is_file())
+}
+
+#[test]
+fn every_live_language_scaffolds_and_its_smoke_test_passes_when_its_toolchain_is_here() {
+    for (lang, program) in [
+        ("python", "python3"),
+        ("typescript", "node"),
+        ("go", "go"),
+        ("rust", "cargo"),
+    ] {
+        if !on_path(program) {
+            continue;
+        }
+        let h = tempfile::tempdir().unwrap();
+        // The toolchains keep their own homes under the real HOME.
+        let cwd = tempfile::tempdir().unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let real = std::env::var_os("HOME").unwrap_or_default();
+        let name = format!("smoke-{lang}");
+        let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
+        c.args([
+            "project",
+            "init",
+            &name,
+            "--template",
+            "demo",
+            "--lang",
+            lang,
+            "--yes",
+        ])
+        .current_dir(cwd.path())
+        .env_clear()
+        .env("PATH", path)
+        .env("HOME", h.path())
+        .env("IOHR_CONFIG_DIR", h.path().join("config"))
+        .env("CARGO_HOME", Path::new(&real).join(".cargo"))
+        .env("RUSTUP_HOME", Path::new(&real).join(".rustup"))
+        .env("GOPATH", h.path().join("go"))
+        .env("GOCACHE", h.path().join("gocache"))
+        .env("GOFLAGS", "-modcacherw")
+        .stdin(Stdio::null());
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "{lang}: {}", text(&out));
+        assert!(
+            text(&out).contains("done: smoke test, one heartbeat"),
+            "{lang}: {}",
+            text(&out)
+        );
+        assert!(cwd.path().join(&name).join("extension.toml").is_file());
+    }
+}

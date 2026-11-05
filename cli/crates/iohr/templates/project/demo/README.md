@@ -8,25 +8,24 @@ and it is isolated from everything else on this Mac: its own folder, its own sta
 ## What is here
 
 - `extension.toml`: the manifest (PRD 0084). What it runs, what it may do, how it is healthy.
-- `src/@@MODULE@@/`: the service. `__main__.py` heartbeats and serves the panel; `channel.py`
-  asks iohr's token socket for a token with the one scope the manifest declares.
+@@LAYOUT@@
 - `panel/index.html`: the panel InOrbit Desktop shows as a pane. It reads `/api/heartbeat`.
-- `tests/test_selftest.py`: the self-test. One heartbeat, nothing written outside its state.
 - `inorbit-project.toml`: the project record the app reads (name, template, kind, when).
+
+It is written in @@LANGUAGE_LABEL@@ (`--lang @@LANGUAGE@@`).
 
 ## Run it
 
 ```sh
 iohr ext lint --preview     # the manifest, checked, in plain words
-iohr ext dev                # run it with live logs, a real token channel, $STATE and $CACHE
-iohr ext dev --test         # the self-test, with the same channel and folders
+@@RUN_DEV@@
 ```
 
-Without the SDK's dev loop installed, InOrbit Desktop's smoke test runs it once:
+Without the SDK's dev loop installed, InOrbit Desktop's smoke test runs it once, and the
+self-test checks what it wrote:
 
 ```sh
-STATE=~/.inorbit/projects/@@NAME@@/state CACHE=~/.inorbit/projects/@@NAME@@/cache \
-IOHR_EXT_ONCE=1 PYTHONPATH=src python3 -m @@MODULE@@
+@@RUN_ONCE@@
 ```
 
 ## What it may do
