@@ -45,7 +45,8 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
       repeat $rows print
       return 0
     fi
-    local -a a=(command iohr ask --headless --cwd "$PWD")
+    # __IOHR_BIN__ is the name of the binary that printed this hook (iohr, iohr-preview).
+    local -a a=(command __IOHR_BIN__ ask --headless --cwd "$PWD")
     [[ -n $last ]] && a+=(--last-command "${last[1,1024]}" --exit-code "$rc")
     (( follow )) && [[ -n $_iohr_ask_pq ]] && a+=(--prior-question "$_iohr_ask_pq" --prior-answer "$_iohr_ask_pa")
     local answer

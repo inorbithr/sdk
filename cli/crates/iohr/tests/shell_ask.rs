@@ -308,6 +308,28 @@ fn the_zsh_hook_has_its_key_lines() {
     assert!(t.contains("${+widgets[_iohr_ask_prev_accept]}") && t.contains("_inorbit_accept"));
 }
 
+// Installed under another name (the preview channel's `iohr-preview`), the hook asks that
+// binary, not whatever `iohr` is first on the PATH.
+#[test]
+fn the_hook_asks_the_binary_that_printed_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("iohr-preview");
+    std::fs::copy(env!("CARGO_BIN_EXE_iohr"), &copy).unwrap();
+    let o = Command::new(&copy)
+        .args(["shell", "hook", "zsh"])
+        .env_clear()
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    let t = String::from_utf8(o.stdout).unwrap();
+    assert!(
+        t.contains("command iohr-preview ask --headless --cwd"),
+        "{t}"
+    );
+    assert!(!t.contains("__IOHR_BIN__"));
+}
+
 #[test]
 fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     if Command::new("zsh").arg("--version").output().is_err() {
