@@ -104,6 +104,8 @@ pub(crate) struct Effective {
     pub(crate) always_on: Setting<bool>,
     /// `None` when set nowhere: register uses the host name, run the key this machine holds.
     pub(crate) name: Option<Setting<String>>,
+    /// `None` when set nowhere: `run` and `gate-report` pick by key. The runner id they drive.
+    pub(crate) id: Option<Setting<String>>,
     /// `None` when set nowhere: with no kube context either, approved host actions are
     /// refused (every `kubectl` call is pinned to the configured cluster).
     pub(crate) kube_context: Option<Setting<String>>,
@@ -193,6 +195,15 @@ pub(crate) fn resolve(
     {
         return Err(format!("runner name ({}) is empty", n.source));
     }
+    let id = pick(None, profile, file, |c| c.id.clone());
+    if let Some(i) = &id
+        && !i.value.starts_with("rnr_")
+    {
+        return Err(format!(
+            "runner id ({}) is not a runner id (rnr_...)",
+            i.source
+        ));
+    }
     let kube_context = pick(None, profile, file, |c| c.kube_context.clone());
     let kubeconfig = pick(None, profile, file, |c| c.kubeconfig.clone());
     let auto_upgrade = pick(flags.no_auto_upgrade.then_some(false), profile, file, |c| {
@@ -230,6 +241,7 @@ pub(crate) fn resolve(
         kinds,
         always_on,
         name,
+        id,
         kube_context,
         kubeconfig,
         auto_upgrade,
