@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0-alpha.33](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.32...iohr/v0.1.0-alpha.33) (2026-11-05)
+
+
+### Features
+
+* **cli:** a guided, drawn project init with menus and spinners (PRD 0088.1) ([#363](https://github.com/inorbithr/sdk/issues/363)) ([148669d](https://github.com/inorbithr/sdk/commit/148669dc592c58d3533be1e7a3f0bf99755d7b3b))
+* **cli:** iohr ask runs your own agent in this folder (PRD 0088.1) ([#361](https://github.com/inorbithr/sdk/issues/361)) ([bfdc6f7](https://github.com/inorbithr/sdk/commit/bfdc6f76f69549724b9134f833a69ad731f7a84e))
+* **cli:** iohr project create, templates, a configured default and the coordinated template ([#359](https://github.com/inorbithr/sdk/issues/359)) ([54f0d0a](https://github.com/inorbithr/sdk/commit/54f0d0ae5239b3b936a3e687306c409fb1fd4260))
+
 ## [0.1.0-alpha.32](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.31...iohr/v0.1.0-alpha.32) (2026-11-04)
 
 
