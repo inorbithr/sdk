@@ -1462,3 +1462,53 @@ fn a_worktree_is_only_core_mise_under_the_worktree_root_with_a_mise_toml() {
     // The root is never next to a core checkout's own worktrees.
     assert_eq!(h.worktree_root().unwrap(), root);
 }
+
+#[test]
+fn a_worktree_run_needs_the_kube_context_to_be_the_kubeconfigs_current_one() {
+    assert_eq!(
+        current_context("current-context: prod\nkind: Config\n").as_deref(),
+        Some("prod")
+    );
+    assert_eq!(
+        current_context("current-context: \"a b\" # c\n").as_deref(),
+        Some("a b")
+    );
+    assert_eq!(current_context("kind: Config\n"), None);
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("kubeconfig");
+    std::fs::write(&cfg, "current-context: prod\n").unwrap();
+    let with = |context: Option<&str>, file: &std::path::Path| {
+        host(
+            dir.path(),
+            Ok(KubeTarget {
+                context: context.map(str::to_owned),
+                kubeconfig: Some(file.to_path_buf()),
+            }),
+        )
+    };
+    assert!(with(Some("prod"), &cfg).kube_context_problem().is_none());
+    assert!(with(None, &cfg).kube_context_problem().is_none());
+    assert!(with(Some("staging"), &cfg).kube_context_problem().is_some());
+    assert!(
+        with(Some("prod"), &dir.path().join("missing"))
+            .kube_context_problem()
+            .is_some()
+    );
+}
+
+#[test]
+fn a_worktree_removal_sweeps_only_its_own_git_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = dir.path().join("core/.git/worktrees/reattribute-1");
+    std::fs::create_dir_all(&rec).unwrap();
+    let wt = dir.path().join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join(".git"), format!("gitdir: {}\n", rec.display())).unwrap();
+    assert_eq!(own_record(&wt, "reattribute-1"), Some(rec.clone()));
+    assert_eq!(own_record(&wt, "other"), None);
+    std::fs::write(wt.join(".git"), "gitdir: /x/y\n").unwrap();
+    assert_eq!(own_record(&wt, "y"), None);
+    let (a, b) = (unique_name("reattribute"), unique_name("reattribute"));
+    assert!(a.len() <= 64 && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    let _ = b;
+}

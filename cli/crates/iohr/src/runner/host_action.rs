@@ -1128,6 +1128,28 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// `<prefix>-<unix seconds>-<nanoseconds and pid in hex>`: two runs never share it.
+pub(crate) fn unique_name(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    format!("{prefix}-{}-{nanos:x}{:x}", unix_now(), std::process::id())
+}
+
+/// The record git keeps for the worktree `dir` named `name` (`<git dir>/worktrees/<name>`),
+/// from the `gitdir:` line of the worktree's `.git` file; `None` unless it is that shape.
+fn own_record(dir: &Path, name: &str) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(dir.join(".git")).ok()?;
+    let path = PathBuf::from(text.lines().next()?.strip_prefix("gitdir:")?.trim());
+    let ours = path.is_absolute()
+        && path.file_name().is_some_and(|n| n == name)
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|n| n == "worktrees");
+    ours.then_some(path)
+}
+
 /// A fresh detached worktree of core's `origin/main` for one host action, which is
 /// removed on every way out of [`CoreWorktree::within`].
 pub(crate) struct CoreWorktree;
@@ -1169,10 +1191,18 @@ impl CoreWorktree {
             }
         };
         let remove = async || {
+            // Read before the folder goes: where git keeps this worktree's own record.
+            let record = own_record(&dir, name);
             let gone = git(&["worktree", "remove", "--force", &shown]).await;
-            // A folder git no longer knows is swept; the record is pruned.
+            // A folder git no longer knows is swept, with its own record and no other:
+            // a global `git worktree prune` would drop the user's stale records too.
             let swept = !dir.exists() || std::fs::remove_dir_all(&dir).is_ok();
-            let _ = git(&["worktree", "prune"]).await;
+            if gone.is_err()
+                && swept
+                && let Some(r) = record
+            {
+                let _ = std::fs::remove_dir_all(r);
+            }
             (gone.is_ok() || swept).then_some(()).ok_or(())
         };
         // A leftover of a run that was killed.
@@ -1180,7 +1210,6 @@ impl CoreWorktree {
             let _ = remove().await;
         }
         let setup = async {
-            git(&["worktree", "prune"]).await?;
             git(&["fetch", "origin", "main"]).await?;
             git(&["worktree", "add", "--detach", &shown, "origin/main"]).await
         }
@@ -1529,6 +1558,14 @@ impl ArgvRunner for HostRunner {
     }
 }
 
+/// The top-level `current-context:` of a kubeconfig's text.
+fn current_context(text: &str) -> Option<String> {
+    let line = text.lines().find(|l| l.starts_with("current-context:"))?;
+    let v = line["current-context:".len()..].split(" #").next()?.trim();
+    let v = v.trim_matches(|c| c == '"' || c == '\'');
+    (!v.is_empty()).then(|| v.to_owned())
+}
+
 impl HostRunner {
     /// Why `dir` is not a worktree of [`CoreWorktree`] `tool` may start in: it must be
     /// absolute, hold no `..`, sit under [`ArgvRunner::worktree_root`] and hold a
@@ -1546,6 +1583,31 @@ impl HostRunner {
             return Some("the folder is not a host action's worktree");
         }
         (!dir.join("mise.toml").is_file()).then_some("the worktree is not a core checkout")
+    }
+
+    /// Core's `labs:reattribute` runs plain `kubectl`, which uses the kubeconfig's
+    /// current-context and honors no `--context`. So a configured `kube_context` is only
+    /// safe when it is that current-context: otherwise the production write could read
+    /// its database secret from another cluster, and the run is refused.
+    fn kube_context_problem(&self) -> Option<String> {
+        let Ok(KubeTarget {
+            context: Some(want),
+            kubeconfig,
+        }) = &self.kube
+        else {
+            return None;
+        };
+        let file = kubeconfig
+            .clone()
+            .or_else(|| self.home().map(|h| h.join(".kube/config")))?;
+        let current = std::fs::read_to_string(file)
+            .ok()
+            .and_then(|t| current_context(&t));
+        (current.as_deref() != Some(want.as_str())).then(|| {
+            "the configured kube_context is not the kubeconfig's current-context, which core's \
+             task uses; set the current-context to it"
+                .to_owned()
+        })
     }
 
     async fn run_at(
@@ -1579,6 +1641,9 @@ impl HostRunner {
             c.current_dir(dir);
             // The worktree has no `.env` of its own: core's task reads its database from
             // the cluster, which needs the runner's kubeconfig (a path, not a secret).
+            if let Some(why) = self.kube_context_problem() {
+                return Err(why);
+            }
             if let Ok(KubeTarget {
                 kubeconfig: Some(k),
                 ..

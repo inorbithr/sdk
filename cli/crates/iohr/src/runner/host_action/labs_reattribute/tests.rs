@@ -74,8 +74,8 @@ fn host(mid: Vec<Output>) -> Host {
     f.account = Some(ACCOUNT.to_owned());
     {
         let mut s = f.script.lock().unwrap();
-        // prune, fetch, add
-        s.extend([ok(""), ok(""), ok("")]);
+        // fetch, add
+        s.extend([ok(""), ok("")]);
         s.extend(mid);
     }
     Host { fake: f, _dir: dir }
@@ -166,12 +166,12 @@ async fn a_matching_run_moves_the_rows_and_removes_the_worktree() {
         "{out}"
     );
     let a = argvs(&h.fake);
-    assert_eq!(a[0], "git worktree prune");
-    assert_eq!(a[1], "git fetch origin main");
-    assert!(a[2].starts_with("git worktree add --detach "), "{a:?}");
-    assert!(a[2].ends_with(" origin/main"), "{a:?}");
-    assert_eq!(a[3], "mise trust -q .");
-    assert_eq!(a[4], "mise run -q labs:reattribute --help");
+    assert_eq!(a[0], "git fetch origin main");
+    assert!(a[1].starts_with("git worktree add --detach "), "{a:?}");
+    assert!(a[1].ends_with(" origin/main"), "{a:?}");
+    assert!(!a.iter().any(|c| c.contains("worktree prune")), "{a:?}");
+    assert_eq!(a[2], "mise trust -q .");
+    assert_eq!(a[3], "mise run -q labs:reattribute --help");
     let flags = |n: usize, mode: &str| {
         a[n].contains(&format!("--account {ACCOUNT} --from {FROM} "))
             && a[n].contains("--unproven keep")
@@ -179,16 +179,16 @@ async fn a_matching_run_moves_the_rows_and_removes_the_worktree() {
             && a[n].contains(&format!("labs-writes-{TS}.jsonl"))
             && a[n].contains(&format!("mcp-decisions-{TS}.jsonl"))
     };
-    assert!(flags(5, "--dry-run"), "{a:?}");
-    assert!(flags(6, "--apply"), "{a:?}");
-    assert!(flags(7, "--dry-run"), "{a:?}");
-    assert!(a[8].starts_with("git worktree remove --force "), "{a:?}");
+    assert!(flags(4, "--dry-run"), "{a:?}");
+    assert!(flags(5, "--apply"), "{a:?}");
+    assert!(flags(6, "--dry-run"), "{a:?}");
+    assert!(a[7].starts_with("git worktree remove --force "), "{a:?}");
     // Every mise call ran in the one worktree, which is under the state folder.
     let folders = h.fake.folders.lock().unwrap().clone();
     assert_eq!(folders.len(), 5);
     assert!(folders.iter().all(|f| *f == folders[0]));
     assert!(folders[0].starts_with(h.fake.state.as_ref().unwrap().join(WORKTREE_DIR)));
-    assert!(a[2].contains(&folders[0].display().to_string()));
+    assert!(a[1].contains(&folders[0].display().to_string()));
 }
 
 #[tokio::test]
@@ -250,7 +250,7 @@ async fn a_failed_fetch_runs_nothing_in_a_worktree_but_still_cleans_up() {
     {
         let mut s = h.fake.script.lock().unwrap();
         s.clear();
-        s.extend([ok(""), Output::new(false, "", "fatal: no route")]);
+        s.extend([Output::new(false, "", "fatal: no route")]);
     }
     let e = run(&h).await.unwrap_err();
     assert!(e.contains("git fetch: failed"), "{e}");

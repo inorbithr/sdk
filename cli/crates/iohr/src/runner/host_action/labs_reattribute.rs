@@ -323,7 +323,7 @@ pub(crate) async fn reattribute(
     }
     let evidence = tools.state_dir()?.join(EVIDENCE);
     verify_evidence(&evidence, evidence_ts)?;
-    let stamp = format!("reattribute-{}", super::unix_now());
+    let stamp = super::unique_name("reattribute");
     CoreWorktree::within(tools, &stamp, async |dir: &Path| {
         let mise = async |argv: Vec<String>| tools.run_in(Tool::CoreMise, dir, &argv).await;
         // The checkout is trusted by the host's mise, as the by-hand script did.
