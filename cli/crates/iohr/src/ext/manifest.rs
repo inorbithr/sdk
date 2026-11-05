@@ -138,6 +138,7 @@ pub const RESERVED: &[&str] = &[
     "rfc",
     "runner",
     "sdk",
+    "shell",
     "token",
     "tunnel",
     "upgrade",
