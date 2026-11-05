@@ -415,6 +415,13 @@ impl Ui {
 }
 
 impl Step {
+    /// The step is over and leaves nothing on screen.
+    pub(crate) fn clear(self) {
+        if let Some(b) = self.bar {
+            b.clear();
+        }
+    }
+
     /// The step worked.
     pub(crate) fn ok(self, said: &str) {
         if let Some(b) = self.bar {

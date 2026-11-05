@@ -365,6 +365,9 @@ template = "coordinated"
 
 [ask]                               # iohr ask (section 4.5)
 agent = "claude"
+model = "haiku"
+allow_edits = false
+thinking = "show"
 ```
 
 Rules:
@@ -468,14 +471,32 @@ The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 ### 4.5 The ask table
 
-`iohr ask "..."` starts your own agent in the current folder with the question. It reads
-`[ask]`; `--via` and `--agent` win over it for one call. `iohr` never writes it, and never
-stores the question or the answer.
+`iohr ask "..."` runs your own agent once, in the current folder, in print mode: no session
+opens and nothing is kept. It draws the run in the terminal as it happens: what the agent
+thinks (dim, italic, in a quiet block under a `thinking` header), each tool it uses as one row
+(`⏺ Read src/x.rs`), the answer as it streams, and a short dim footer with the model, time,
+turns, cost and the AI label. A spinner shows until the first event. It reads `[ask]`; the
+flags win over it for one call. `iohr` never writes it, and never stores or logs the question
+or the answer.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `via` | `local` (your own agent); `io` is reserved and says "not built yet" | `local` | `iohr ask` |
-| `agent` | `claude` (Claude Code); `codex` is reserved and says "not built yet" | `claude` | `iohr ask` |
+| `agent` | `claude` (Claude Code, `claude -p --output-format stream-json --verbose --include-partial-messages --no-session-persistence`) or `codex` (`codex exec --json --ephemeral --skip-git-repo-check --sandbox read-only`) | `claude` | `iohr ask` |
+| `model` | any model name the agent knows; may not start with `-` | `haiku` for `claude`, the agent's own for `codex` | `iohr ask` |
+| `allow_edits` | `true` lets the agent edit files: `--permission-mode acceptEdits` for `claude`, `--sandbox workspace-write` for `codex` | `false` | `iohr ask` |
+| `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
+
+Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--thinking`, `--dry-run`. Running a
+shell command is never allowed, with or without `--allow-edits`; the agent's default
+permissions stay in force. `--dry-run` prints the exact command line and starts nothing (with
+`--json` it is one object with `dry_run`, `via`, `agent`, `found`, `program` and `args`).
+
+With no colour (stderr is not a terminal, `NO_COLOR` is set, `TERM` is unset or `dumb`) only
+the answer is printed, on stdout; the thinking, tool rows, footer and spinner are not drawn.
+With `--json` the agent's own event lines are passed through untouched, one per line, followed
+by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
+command exits with the agent's code, and with 1 when the agent reports a failed run.
 
 ## 5. Credentials
 

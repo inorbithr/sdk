@@ -161,13 +161,31 @@ pub struct AskConfig {
     /// With `via = "local"`, which agent to start: `claude` (the default) or `codex`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// The model the agent answers with: a Claude alias such as `haiku` (the default, the
+    /// small fast tier) or a full model name. `--model` wins over it. For `codex` it is passed
+    /// as `--model` only when set; Codex otherwise uses its own configured model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
+    /// `--sandbox workspace-write`). Off by default; `--allow-edits` turns it on for one call.
+    /// Shell commands are never allowed by iohr.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_edits: Option<bool>,
+    /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block; the
+    /// default) or `collapse` (one line). `--thinking` wins over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
 }
 
 impl AskConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.via.is_none() && self.agent.is_none()
+        self.via.is_none()
+            && self.agent.is_none()
+            && self.model.is_none()
+            && self.allow_edits.is_none()
+            && self.thinking.is_none()
     }
 }
 
