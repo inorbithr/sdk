@@ -21,7 +21,7 @@ use sha2::{Digest as _, Sha256};
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#;
+const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Pat@Example.test","orgId":"org-1111","loginExpiresAt":"2030-01-01T00:00:00Z","configDirectory":"/home/pat/.claude"}"#;
 const TURN: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"{\"say\":\"hello\",\"state\":\"s\",\"actions\":[{\"kind\":\"ask\",\"payload\":{\"q\":1}}],\"evidence\":[\"e1\"],\"left\":[]}","session_id":"s1","num_turns":2,"duration_ms":5,"total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}"#;
 const API_KEY: &str = r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty"}"#;
 
@@ -252,10 +252,10 @@ async fn register_signs_the_challenge_and_never_sends_a_credential() {
     assert_eq!(post["providers"][0]["method"], "subscription");
     // A person's own runner names no holder.
     assert!(post.get("holder_subject").is_none());
-    // The identity hash is sha256(salt + "\n" + line).
+    // The identity hash is sha256(salt + "\n" + lower-cased email + "\n" + orgId).
     assert_eq!(
         post["identity_sha256"]["claude"],
-        sha(&format!("{SALT}\n{SUB}"))
+        sha(&format!("{SALT}\npat@example.test\norg-1111"))
     );
     // A standard, padded base64 key; the challenge; a signature over the registration lines.
     let key = post["public_key"].as_str().unwrap();
@@ -303,7 +303,7 @@ async fn register_with_a_holder_names_that_person() {
     // The holder is checked against the sign-in the runner holds, so it goes with it.
     assert_eq!(
         post["identity_sha256"]["claude"],
-        sha(&format!("{SALT}\n{SUB}"))
+        sha(&format!("{SALT}\npat@example.test\norg-1111"))
     );
 }
 

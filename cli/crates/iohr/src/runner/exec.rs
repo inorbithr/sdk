@@ -142,9 +142,10 @@ impl ClaudeExec {
         }
     }
 
-    /// The raw `claude auth status` line, for the identity hash at registration.
+    /// The stable sign-in identity (`email` and `orgId` of `claude auth status`), for the
+    /// identity hash at registration; `None` when the output has no such identity.
     pub(crate) async fn identity_line(&self) -> Option<String> {
-        self.ask(&["auth", "status"]).await
+        provider::canonical_identity_line(&self.ask(&["auth", "status"]).await?)
     }
 
     pub(crate) async fn version(&self) -> String {

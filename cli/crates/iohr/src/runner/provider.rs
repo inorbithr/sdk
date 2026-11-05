@@ -68,8 +68,28 @@ fn is_exe(p: &Path) -> bool {
     p.is_file() || p.with_extension("exe").is_file() || p.with_extension("cmd").is_file()
 }
 
-/// SHA-256 (lowercase hex) over the account's salt, a newline and the identity line as
-/// the binary printed it (the salt comes with `CreateRunnerChallenge`).
+/// The stable sign-in identity in `claude auth status` output: the lower-cased, trimmed
+/// `email`, a newline and the `orgId`. Fields that move with a token refresh, the
+/// environment or the binary's version (`loginExpiresAt`, directories, added keys) are
+/// left out, so one sign-in keeps one identity. `None` when the output is not JSON or
+/// lacks either field: no identity is sent, as when signed out.
+pub(crate) fn canonical_identity_line(text: &str) -> Option<String> {
+    let v = serde_json::from_str::<Value>(text.trim()).ok()?;
+    let field = |k: &str| {
+        v.get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    Some(format!(
+        "{}\n{}",
+        field("email")?.to_lowercase(),
+        field("orgId")?
+    ))
+}
+
+/// SHA-256 (lowercase hex) over the account's salt, a newline and the canonical identity
+/// line (`canonical_identity_line`; the salt comes with `CreateRunnerChallenge`).
 pub(crate) fn identity_sha256(salt: &str, line: &str) -> String {
     super::claude::hex(&Sha256::digest(
         format!("{salt}\n{}", line.trim()).as_bytes(),
@@ -134,6 +154,62 @@ mod tests {
         let want = super::super::claude::hex(&Sha256::digest(format!("{salt}\nline").as_bytes()));
         assert_eq!(h, want);
         assert_ne!(h, identity_sha256(&other, "line"));
+    }
+
+    const BASE: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Pat.Example@example.test","orgId":"org-1111","orgName":"Example Org","subscriptionType":"max","loginExpiresAt":"2030-01-01T00:00:00Z","configDirectory":"/home/pat/.claude","projectsDirectory":"/home/pat/.claude/projects","analyticsDisabled":false}"#;
+
+    fn hash_of(text: &str) -> Option<String> {
+        canonical_identity_line(text).map(|l| identity_sha256("salt", &l))
+    }
+
+    #[test]
+    fn identity_ignores_what_moves_with_refresh_environment_and_version() {
+        let want = hash_of(BASE).unwrap();
+        for changed in [
+            BASE.replace("2030-01-01", "2031-06-06"),
+            BASE.replace("/home/pat", "/srv/other"),
+            BASE.replace("\"max\"", "\"pro\""),
+            BASE.replace("\"loggedIn\":true,", "\"loggedIn\":true,\"newKey\":[1,2],"),
+            BASE.replace(
+                "\"Pat.Example@example.test\"",
+                "\"  PAT.example@Example.test \"",
+            ),
+        ] {
+            assert_eq!(hash_of(&changed).as_ref(), Some(&want), "{changed}");
+        }
+        let line = canonical_identity_line(BASE).unwrap();
+        assert_eq!(line, "pat.example@example.test\norg-1111");
+    }
+
+    #[test]
+    fn identity_follows_email_and_org() {
+        let want = hash_of(BASE).unwrap();
+        assert_ne!(
+            hash_of(
+                &BASE
+                    .replace("pat.example@", "sam.example@")
+                    .replace("Pat.Example@", "Sam.Example@")
+            ),
+            Some(want.clone())
+        );
+        assert_ne!(hash_of(&BASE.replace("org-1111", "org-2222")), Some(want));
+    }
+
+    #[test]
+    fn identity_is_none_without_json_or_a_field() {
+        assert_eq!(canonical_identity_line("Logged in as someone"), None);
+        assert_eq!(canonical_identity_line(""), None);
+        assert_eq!(canonical_identity_line(r#"{"loggedIn":false}"#), None);
+        assert_eq!(canonical_identity_line(r#"{"email":"a@b.test"}"#), None);
+        assert_eq!(canonical_identity_line(r#"{"orgId":"org-1"}"#), None);
+        assert_eq!(
+            canonical_identity_line(r#"{"email":" ","orgId":"org-1"}"#),
+            None
+        );
+        assert_eq!(
+            canonical_identity_line(r#"{"email":"a@b.test","orgId":7}"#),
+            None
+        );
     }
 
     #[test]
