@@ -58,7 +58,10 @@ cli/
 - Secrets go only through `Store`: `KeyringStore` by default, `FileStore` only with
   `--insecure-storage`. The config file never holds one. Entries are keyed by profile and
   account (`EntryKey`).
-- Credential-store calls block: run them through `context::blocking`.
+- Credential-store calls block: run them through `context::blocking` (or
+  `iohr_auth::off_thread` where there is no profile store). Both are the one helper that
+  says on stderr why a call still waits after 5 s (a macOS Keychain prompt); never call
+  `spawn_blocking` on the store directly.
 - Sign-in: PKCE S256 only, a fresh `state` compared in constant time, the issuer checked
   in discovery and in the ID token, every endpoint and link on the issuer's origin, the
   loopback listener on `127.0.0.1` (or `[::1]`) only, one `GET /callback`, 5 minutes.
