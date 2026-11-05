@@ -3,7 +3,7 @@
 use std::io::Write as _;
 use std::process::ExitCode;
 
-use clap::Parser as _;
+use clap::FromArgMatches as _;
 use iohr::cli::Cli;
 use iohr::{Env, refuse_secrets_in_args, run};
 
@@ -12,7 +12,11 @@ fn main() -> ExitCode {
     if let Err(e) = refuse_secrets_in_args(&args) {
         return fail(&e);
     }
-    let cli = Cli::parse_from(args);
+    let json = args.iter().any(|a| a == "--json");
+    let cli = match iohr::cli::command(json).try_get_matches_from(args) {
+        Ok(matches) => Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit()),
+        Err(e) => e.exit(),
+    };
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

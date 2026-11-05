@@ -2,6 +2,7 @@
 
 mod accounts;
 mod ask;
+mod atlas;
 mod auth;
 mod browser_ext;
 mod call;
@@ -16,12 +17,15 @@ mod ext_catalogue;
 mod ext_packages;
 mod lab;
 mod login;
+mod memory;
 mod openapi;
 mod profile;
 mod project;
+mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
+mod shell;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -51,9 +55,16 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     if !matches!(cli.command, Command::Tunnel(_)) {
         g.check_environment()?;
     }
-    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_)) {
+    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_) | Command::Coordinator(_)) {
         return Err(Error::Usage(
-            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` only".into(),
+            "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` and `iohr coordinator` only".into(),
+        ));
+    }
+    if g.sign_in.is_none()
+        && (g.via_personality.is_some() || g.via_session.is_some() || g.via_job.is_some())
+    {
+        return Err(Error::Usage(
+            "--via-personality, --via-session and --via-job need --sign-in io".into(),
         ));
     }
     match cli.command {
@@ -75,13 +86,17 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Sdk(SdkCommand::Add(args)) => sdk_add::add(&args, out),
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
         Command::Coordinator(cmd) => coordinator::run(g, &env, cmd, out).await,
+        Command::Memory(cmd) => memory::run(g, &env, cmd, out).await,
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
-        Command::Upgrade { check } => upgrade::run(g, check, out).await,
+        Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
         Command::Ask(args) => ask::run(g, args, out).await,
+        Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
+        Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
+        Command::Sync(args) => atlas::sync(g, &env, &args, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,

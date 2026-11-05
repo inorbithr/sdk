@@ -68,9 +68,8 @@ where
     T: Send + 'static,
     F: FnOnce(&dyn Store) -> Result<T, StoreError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || f(store.as_ref()))
+    iohr_auth::off_thread(move || f(store.as_ref()))
         .await
-        .map_err(|e| Error::Failed(format!("the credential store call stopped: {e}")))?
         .map_err(Error::from)
 }
 
@@ -191,6 +190,55 @@ pub(crate) struct Response {
     pub(crate) body: Vec<u8>,
 }
 
+/// Sets `x-iohr-via` on every call: attribution only (RFC 0065.2).
+struct ViaMw(String);
+
+impl inorbithr::middleware::Middleware for ViaMw {
+    fn name(&self) -> &'static str {
+        "iohr_via"
+    }
+
+    fn handle<'a>(
+        &'a self,
+        mut req: inorbithr::middleware::Request,
+        next: inorbithr::middleware::Next<'a>,
+    ) -> inorbithr::middleware::BoxFuture<
+        'a,
+        Result<inorbithr::middleware::Response, inorbithr::Error>,
+    > {
+        req.headers_mut().insert("x-iohr-via", self.0.clone());
+        Box::pin(next.run(req))
+    }
+}
+
+/// The `x-iohr-via` value the `--via-*` flags name, in the order `via.rs` reads, or `None`
+/// when none is set. Each value is 1 to 64 of `[A-Za-z0-9._:-]`: the platform drops
+/// anything else, so a value that would be dropped is refused here instead.
+pub(crate) fn via_header(global: &Global) -> Result<Option<String>, Error> {
+    let mut parts = Vec::new();
+    for (key, flag, v) in [
+        ("personality", "--via-personality", &global.via_personality),
+        ("session", "--via-session", &global.via_session),
+        ("job", "--via-job", &global.via_job),
+    ] {
+        let Some(v) = v.as_deref().map(str::trim) else {
+            continue;
+        };
+        if v.is_empty()
+            || v.len() > 64
+            || !v
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-'))
+        {
+            return Err(Error::Usage(format!(
+                "{flag} is 1 to 64 letters, digits, '.', '_', ':' or '-'"
+            )));
+        }
+        parts.push(format!("{key}={v}"));
+    }
+    Ok((!parts.is_empty()).then(|| parts.join("; ")))
+}
+
 /// The calls every command makes, on the runtime's client.
 pub(crate) struct Api {
     client: Client,
@@ -210,12 +258,25 @@ impl Api {
         credential: Arc<AnyCredential>,
         verbose: bool,
     ) -> Result<Self, Error> {
+        Self::with_via(base, credential, verbose, None)
+    }
+
+    /// [`new`](Self::new) that also sets `x-iohr-via` (RFC 0065.2) on every call.
+    pub(crate) fn with_via(
+        base: &str,
+        credential: Arc<AnyCredential>,
+        verbose: bool,
+        via: Option<String>,
+    ) -> Result<Self, Error> {
         let mut b = Client::builder()
             .base_url(base)
             .token_provider(Shared(credential))
             .user_agent_suffix(concat!("iohr/", env!("CARGO_PKG_VERSION")));
         if verbose {
             b = b.hook(Verbose::new());
+        }
+        if let Some(value) = via {
+            b = b.pipeline(move |p| p.add_per_call(ViaMw(value)));
         }
         // A base URL that cannot be used is a failed call (exit 1), as it always was,
         // named by the variable that set it.
@@ -427,6 +488,7 @@ pub(crate) async fn session_for(
 /// runner for a team passes `--account`.
 pub(crate) async fn io_session(global: &Global, ctx: &Ctx) -> Result<Session, Error> {
     use crate::io_signin::{self, SecretSource};
+    let via = via_header(global)?;
     let source = SecretSource::choose(std::env::var(io_signin::SECRET_FILE_VAR).ok().as_deref())?;
     let secret = source.read().await?;
     let provider = io_signin::credential(global.issuer(), secret)?;
@@ -438,7 +500,12 @@ pub(crate) async fn io_session(global: &Global, ctx: &Ctx) -> Result<Session, Er
         .map_err(|e| Error::NotSignedIn(e.to_string()))?;
     let claims = Claims::read(bearer.expose(), OffsetDateTime::now_utc())
         .map_err(|e| Error::NotSignedIn(format!("Io's token is not usable: {e}")))?;
-    let api = Api::new(global.base_url(), Arc::clone(&credential), global.verbose)?;
+    let api = Api::with_via(
+        global.base_url(),
+        Arc::clone(&credential),
+        global.verbose,
+        via,
+    )?;
     Ok(Session {
         label: format!("Io ({})", io_signin::IO_CLIENT_ID),
         profile: global

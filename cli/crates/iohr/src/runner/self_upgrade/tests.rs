@@ -1,7 +1,7 @@
 //! The self-upgrade's state machine on a fake release source, installer, ledger and
 //! restarter, with paused time: no network, no disk but the ledger's own test, no process.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::time::Instant;
@@ -30,8 +30,13 @@ struct Fake {
     prepare: Arc<Mutex<Result<(), Refused>>>,
     /// What the swap does.
     install: Arc<Mutex<Result<(), String>>>,
+    /// What the file says before any swap (the version this process runs, unless
+    /// another runner or a person installed one since).
+    on_disk: Arc<Mutex<Result<Version, String>>>,
     /// What the installed file then says.
     says: Arc<Mutex<Result<Version, String>>>,
+    /// Whether a swap went through (a failed one leaves the old file).
+    swapped: Arc<AtomicBool>,
     looks: Arc<AtomicUsize>,
     /// Whether the drain was wanted at each download.
     wanted_at_prepare: Arc<Mutex<Vec<bool>>>,
@@ -43,13 +48,15 @@ struct Fake {
 }
 
 impl Fake {
-    fn new(method: Method, latest: &str, drain: &Arc<Drain>) -> Self {
+    fn new(method: Method, current: &str, latest: &str, drain: &Arc<Drain>) -> Self {
         Self {
             method,
             latest: Arc::new(Mutex::new(Ok(v(latest)))),
+            on_disk: Arc::new(Mutex::new(Ok(v(current)))),
             prepare: Arc::new(Mutex::new(Ok(()))),
             install: Arc::new(Mutex::new(Ok(()))),
             says: Arc::new(Mutex::new(Ok(v(latest)))),
+            swapped: Arc::default(),
             looks: Arc::default(),
             wanted_at_prepare: Arc::default(),
             installs: Arc::default(),
@@ -100,10 +107,18 @@ impl Source for Fake {
             .lock()
             .unwrap()
             .push(self.drain.is_wanted());
-        self.install.lock().unwrap().clone()
+        let done = self.install.lock().unwrap().clone();
+        if done.is_ok() {
+            self.swapped.store(true, Ordering::SeqCst);
+        }
+        done
     }
     fn installed(&self, _: &Here) -> Result<Version, String> {
-        self.says.lock().unwrap().clone()
+        if self.swapped.load(Ordering::SeqCst) {
+            self.says.lock().unwrap().clone()
+        } else {
+            self.on_disk.lock().unwrap().clone()
+        }
     }
 }
 
@@ -148,12 +163,13 @@ struct Rig {
 
 fn rig(method: Method, current: &str, latest: &str, sup: Supervisor, mode: RestartMode) -> Rig {
     let drain = Arc::new(Drain::default());
-    let fake = Fake::new(method, latest, &drain);
+    let fake = Fake::new(method, current, latest, &drain);
     let (marks, execs) = (Marks::default(), Execs::default());
     let (policy, rx) = watch::channel(Policy {
         enabled: true,
         interval: HOUR,
         restart: mode,
+        sign: SignWith::Off,
     });
     let (stop, _) = watch::channel(false);
     Rig {
@@ -167,6 +183,7 @@ fn rig(method: Method, current: &str, latest: &str, sup: Supervisor, mode: Resta
             drain: drain.clone(),
             drain_limit: DRAIN_LIMIT,
             jitter: || 0.0,
+            exec_failed: Mutex::default(),
         },
         fake,
         marks,
@@ -669,6 +686,99 @@ async fn a_restart_that_fails_is_tried_once_and_the_version_is_not_installed_aga
     assert!(
         all.iter().any(|l| l.contains("tried in the last 24 hours")),
         "{all:?}"
+    );
+}
+
+/// Two runners of one config directory share the ledger: the other one installed the
+/// release and noted it, so this one only has to restart into the file it runs from.
+fn installed_by_another_runner(mode: RestartMode) -> Rig {
+    let r = rig(
+        script_dir(),
+        "0.1.0-alpha.34",
+        "0.1.0-alpha.35",
+        Supervisor::Systemd,
+        mode,
+    );
+    *r.marks.last.lock().unwrap() = Some(v("0.1.0-alpha.35"));
+    *r.fake.on_disk.lock().unwrap() = Ok(v("0.1.0-alpha.35"));
+    r
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_release_another_runner_installed_is_a_restart_not_a_24_hour_wait() {
+    let r = installed_by_another_runner(RestartMode::Exit);
+    assert!(matches!(r.up.check().await, Check::Installed(ver, _) if ver == v("0.1.0-alpha.35")));
+    let _idle = idle_loop(&r.drain);
+    let (all, log) = lines();
+    let got = tokio::time::timeout(HOUR, r.up.run(r.stop.subscribe(), &log)).await;
+    assert_eq!(got, Ok(Outcome::Exit));
+    assert_eq!(r.fake.prepares(), 0, "nothing downloaded");
+    assert_eq!(r.fake.installs(), 0, "nothing swapped");
+    assert!(
+        r.drain.is_wanted(),
+        "no lease between the drain and the exit"
+    );
+    let all = all.lock().unwrap();
+    assert!(
+        all.iter()
+            .any(|l| l.contains("0.1.0-alpha.35 is already installed")),
+        "{all:?}"
+    );
+    assert!(!all.iter().any(|l| l.contains("24 hours")), "{all:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_into_an_installed_release_that_fails_is_tried_once() {
+    let r = installed_by_another_runner(RestartMode::Exec);
+    let _idle = idle_loop(&r.drain);
+    let (all, log) = lines();
+    let _ = tokio::time::timeout(6 * HOUR, r.up.run(r.stop.subscribe(), &log)).await;
+    assert_eq!(
+        r.execs.0.load(Ordering::SeqCst),
+        1,
+        "exec once, then the guard holds"
+    );
+    assert_eq!(r.fake.installs(), 0);
+    assert!(!r.drain.is_wanted());
+    let all = all.lock().unwrap();
+    assert!(
+        all.iter().any(|l| l.contains("tried in the last 24 hours")),
+        "{all:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_file_that_changed_during_the_drain_is_not_restarted_into() {
+    let r = installed_by_another_runner(RestartMode::Exit);
+    let Check::Installed(ver, here) = r.up.check().await else {
+        panic!("installed expected")
+    };
+    *r.fake.on_disk.lock().unwrap() = Ok(v("0.1.0-alpha.34"));
+    let _idle = idle_loop(&r.drain);
+    let (_, log) = lines();
+    let got = r.up.restart(&ver, &here, r.stop.subscribe(), &log).await;
+    assert!(
+        got.unwrap_err()
+            .contains("the file now says 0.1.0-alpha.34")
+    );
+    assert!(!r.drain.is_wanted(), "work is taken again");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_apt_copy_a_person_upgraded_restarts_into_it() {
+    let r = rig(
+        Method::Apt,
+        "0.1.0-alpha.34",
+        "0.1.0-alpha.35",
+        Supervisor::Systemd,
+        RestartMode::Exit,
+    );
+    *r.fake.on_disk.lock().unwrap() = Ok(v("0.1.0-alpha.35"));
+    assert!(matches!(r.up.check().await, Check::Installed(..)));
+    *r.fake.on_disk.lock().unwrap() = Ok(v("0.1.0-alpha.34"));
+    assert!(
+        matches!(r.up.check().await, Check::Skipped(..)),
+        "not upgraded: as before"
     );
 }
 

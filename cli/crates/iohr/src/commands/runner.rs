@@ -51,6 +51,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             capacity,
             kinds,
             no_auto_upgrade,
+            sign_identity: env.sign_identity.clone(),
             ..Flags::default()
         };
         let e = effective(&ctx.config, profile.as_ref(), &flags)?;
@@ -75,6 +76,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             capacity,
             always_on,
             holder,
+            refresh,
             account,
         } => {
             let holder_subject = holder.map(|h| h.trim().to_owned());
@@ -107,15 +109,23 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 Ok(k) => Some(k.public_key()),
                 Err(_) => None,
             };
-            if let Some(r) = mine.iter().find(|r| {
-                r.name == name
-                    && !r.public_key.is_empty()
-                    && local_key.as_deref() == Some(&r.public_key)
-            }) {
+            // The key alone says this machine already has a runner, whatever name it was
+            // registered under: a second one for the same key is never made. A pinned id
+            // (`--runner`, `id` in the settings) picks among several.
+            let held = held_runner(
+                &mine,
+                local_key.as_deref(),
+                set.id.as_ref().map(|i| i.value.as_str()),
+            );
+            if let Some(r) = held
+                && !refresh
+            {
                 show_runner(r, out, "already registered");
+                pin_note(&r.runner_id, s.profile.as_ref());
                 return Ok(());
             }
-            if mine.iter().any(|r| r.name == name) {
+            let held = held.map(|r| r.runner_id.clone());
+            if held.is_none() && mine.iter().any(|r| r.name == name) {
                 Out::note(&format!(
                     "a runner named {name} exists but this machine does not hold its key: registering this machine afresh; revoke the old one if it is gone"
                 ));
@@ -123,13 +133,17 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let signer = runner_signer(&ctx, &s, &account, true).await?;
             // The challenge is one-use and lives five minutes: asked last, signed at once.
             let challenge = svc.challenge().await?;
-            let mut identity = BTreeMap::new();
-            if let Some(line) = exec.identity_line().await {
-                identity.insert(
-                    "claude".to_owned(),
-                    provider::identity_sha256(&challenge.identity_salt, &line),
-                );
-            }
+            // The sign-in must name its seat (organisation and email): an answer that
+            // does not is refused here rather than registered without an identity.
+            let Some(line) = exec.identity_line().await else {
+                return Err(Error::Failed(
+                    "claude auth status names no organisation and email for this sign-in: run `claude`, then `/login`, and register again".into(),
+                ));
+            };
+            let identity = BTreeMap::from([(
+                "claude".to_owned(),
+                provider::identity_sha256(&challenge.identity_salt, &line),
+            )]);
             let public_key = signer.public_key();
             let signature = signer
                 .sign(signing::registration_message(&challenge.challenge, &public_key).as_bytes());
@@ -149,7 +163,22 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 holder_subject,
             };
             let r = svc.register(&reg).await?;
-            show_runner(&r, out, "registered");
+            match held {
+                Some(id) if id == r.runner_id => {
+                    show_runner(&r, out, "refreshed");
+                    pin_note(&r.runner_id, s.profile.as_ref());
+                }
+                Some(id) => {
+                    show_runner(&r, out, "registered");
+                    Out::note(&format!(
+                        "the service made a new runner rather than refreshing {id}: revoke {id} once this one runs"
+                    ));
+                }
+                None => {
+                    show_runner(&r, out, "registered");
+                    pin_note(&r.runner_id, s.profile.as_ref());
+                }
+            }
             Ok(())
         }
         RunnerCommand::Status { account } => {
@@ -222,6 +251,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 capacity,
                 kinds,
                 no_auto_upgrade,
+                sign_identity: env.sign_identity.clone(),
                 ..Flags::default()
             };
             let set = effective(&ctx.config, s.profile.as_ref(), &flags)?;
@@ -233,8 +263,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 .name
                 .as_ref()
                 .map_or_else(host_name, |n| n.value.clone());
+            let pinned = runner.or_else(|| set.id.as_ref().map(|i| i.value.clone()));
             let me: RunnerInfo =
-                pick_runner(all, runner.as_deref(), name.as_deref(), &local_key, &host)?
+                pick_runner(all, pinned.as_deref(), name.as_deref(), &local_key, &host)?
                     .ok_or_else(|| {
                         Error::Failed(
                             "no such runner of yours: run `iohr runner register` first".into(),
@@ -268,6 +299,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             ));
             let (declare, declared) = watch::channel(declared);
             let (policy, policy_rx) = watch::channel(Policy::of(&set));
+            let signing = policy_rx.clone();
             reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare, policy);
             // One drain: the turn loop and the approved-run poller take no new work while
             // an upgrade is waiting to install, and say when nothing is left running.
@@ -301,14 +333,16 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let upgrader = Version::parse(env!("CARGO_PKG_VERSION")).ok().map(|current| {
                 let supervisor = supervisor::detect(&Surroundings::from_process());
                 Out::note(&format!(
-                    "auto-upgrade is {} ({}), looking every {} minutes, restart {} under {supervisor}",
+                    "auto-upgrade is {} ({}), looking every {} minutes, restart {} under {supervisor}, signing {} ({})",
                     if set.auto_upgrade.value { "on" } else { "off" },
                     set.auto_upgrade.source,
                     set.upgrade_interval.value.as_secs() / 60,
                     set.upgrade_restart.value.as_str(),
+                    set.upgrade_sign.value,
+                    set.upgrade_sign.source,
                 ));
                 Upgrader {
-                    source: RealSource,
+                    source: RealSource { policy: signing },
                     ledger: FileLedger {
                         path: ctx.dir.join("runner").join("last-upgrade"),
                     },
@@ -319,6 +353,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     drain: drain.clone(),
                     drain_limit: DRAIN_LIMIT,
                     jitter: run_loop::jitter,
+                    exec_failed: std::sync::Mutex::default(),
                 }
             });
             let upgrade_stopped = asks_stopped.clone();
@@ -372,9 +407,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let local_key = signer.public_key();
             let svc = HttpService::new(&s.api, account.clone(), Some(signer));
             let all = svc.list_runners(true).await?;
+            let set = effective(&ctx.config, s.profile.as_ref(), &Flags::default())?;
+            let pinned = runner.or_else(|| set.id.as_ref().map(|i| i.value.clone()));
             let me: RunnerInfo = pick_runner(
                 all,
-                runner.as_deref(),
+                pinned.as_deref(),
                 name.as_deref(),
                 &local_key,
                 &host_name(),
@@ -625,7 +662,7 @@ async fn approvals_setup(
         Ok(seen) => seen,
         Err(e) => return off(&e),
     };
-    let tools = HostRunner::find(
+    let mut tools = HostRunner::find(
         set.kube_context.as_ref().map(|c| c.value.as_str()),
         set.kubeconfig.as_ref().map(|c| c.value.as_str()),
         set.user_units
@@ -633,6 +670,7 @@ async fn approvals_setup(
             .map_or(&[][..], |u| u.value.as_slice()),
         set.core_checkout.as_ref().map(|c| c.value.as_str()),
     );
+    tools.account = Some(account.to_owned());
     Out::note(&format!(
         "approved runs: on, as {runner_id}, {} device keys pinned{}; user units: {}",
         keys.len(),
@@ -702,10 +740,11 @@ fn reload_on_hangup(
                     let _ = declare.send(d);
                     let now = Policy::of(&e);
                     Out::note(&format!(
-                        "auto-upgrade {}, every {} minutes, restart {}",
+                        "auto-upgrade {}, every {} minutes, restart {}, signing {}",
                         if now.enabled { "on" } else { "off" },
                         now.interval.as_secs() / 60,
-                        now.restart.as_str()
+                        now.restart.as_str(),
+                        now.sign
                     ));
                     let _ = policy.send(now);
                 }
@@ -760,6 +799,7 @@ async fn show_settings(e: &Effective, out: Out) {
             "auto_upgrade": { "value": e.auto_upgrade.value, "source": e.auto_upgrade.source.to_string() },
             "upgrade_interval_minutes": { "value": e.upgrade_interval.value.as_secs() / 60, "source": e.upgrade_interval.source.to_string() },
             "upgrade_restart": { "value": e.upgrade_restart.value.as_str(), "source": e.upgrade_restart.source.to_string() },
+            "upgrade_sign_identity": { "value": e.upgrade_sign.value.to_string(), "source": e.upgrade_sign.source.to_string() },
             "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
             "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
@@ -801,6 +841,11 @@ async fn show_settings(e: &Effective, out: Out) {
             "upgrade_restart".to_owned(),
             e.upgrade_restart.value.as_str().to_owned(),
             e.upgrade_restart.source.to_string(),
+        ],
+        vec![
+            "upgrade_sign_identity".to_owned(),
+            e.upgrade_sign.value.to_string(),
+            e.upgrade_sign.source.to_string(),
         ],
         vec![
             "build_floor".to_owned(),
@@ -1009,13 +1054,43 @@ fn pick_runner(
                 .map(|r| r.runner_id.as_str())
                 .collect();
             return Err(Error::Failed(format!(
-                "this machine's key matches more than one runner ({}): pass --runner <id> or --name",
+                "this machine's key matches more than one runner ({}): pin one with `id = \"rnr_...\"` under [profiles.<name>.runner] in config.toml, or pass --runner <id> (IOHR_RUNNER_ID) or --name; then revoke the extra ones",
                 ids.join(", ")
             )));
         }
         return Ok(all.into_iter().nth(first));
     }
     Ok(all.into_iter().find(|r| r.name == host))
+}
+
+/// The runner this machine's key already holds, whatever its name: the pinned id when
+/// it is one of them, else the first (a pin this key does not hold never makes a second
+/// runner for the key). `None` without a key or without a match.
+fn held_runner<'a>(
+    mine: &'a [RunnerInfo],
+    local_key: Option<&str>,
+    pinned: Option<&str>,
+) -> Option<&'a RunnerInfo> {
+    let key = local_key?;
+    let held = || {
+        mine.iter()
+            .filter(move |r| !r.public_key.is_empty() && r.public_key == key)
+    };
+    pinned
+        .and_then(|id| held().find(|r| r.runner_id == id))
+        .or_else(|| held().next())
+}
+
+/// Says how to pin the runner in config.toml. Nothing here writes `[runner]` settings
+/// (the config writer keeps them as read), so the line is given for the person to add.
+fn pin_note(id: &str, profile: Option<&ProfileName>) {
+    let table = profile.map_or_else(
+        || "[runner]".to_owned(),
+        |p| format!("[profiles.{p}.runner]"),
+    );
+    Out::note(&format!(
+        "to pin this runner, set id = \"{id}\" under {table} in config.toml"
+    ));
 }
 
 fn host_name() -> String {
@@ -1110,11 +1185,40 @@ mod tests {
     }
 
     #[test]
+    fn register_finds_the_runner_by_key_whatever_its_name() {
+        let mine = vec![r("a", "other", "KEY_B"), r("b", "io-name", "KEY_A")];
+        assert_eq!(
+            held_runner(&mine, Some("KEY_A"), None).unwrap().runner_id,
+            "b"
+        );
+        assert!(held_runner(&mine, None, None).is_none());
+        let two = vec![r("a", "x", "KEY_A"), r("b", "x", "KEY_A")];
+        assert_eq!(
+            held_runner(&two, Some("KEY_A"), Some("b"))
+                .unwrap()
+                .runner_id,
+            "b"
+        );
+        // A pin this key does not hold falls back to the key's runner, never a new one.
+        assert_eq!(
+            held_runner(&two, Some("KEY_A"), Some("zz"))
+                .unwrap()
+                .runner_id,
+            "a"
+        );
+    }
+
+    #[test]
     fn a_key_held_by_more_than_one_runner_is_an_error_not_a_pick() {
         let all = vec![r("a", "one", "KEY_A"), r("b", "two", "KEY_A")];
         let e = pick_runner(all.clone(), None, None, "KEY_A", &host_name()).unwrap_err();
         let msg = format!("{e}");
-        assert!(msg.contains("more than one runner") && msg.contains('a') && msg.contains('b'));
+        assert!(
+            msg.contains("more than one runner")
+                && msg.contains("[profiles.<name>.runner]")
+                && msg.contains("revoke the extra ones")
+                && msg.contains("a, b")
+        );
         // An explicit id still resolves it.
         assert_eq!(
             pick_runner(all, Some("b"), None, "KEY_A", &host_name())

@@ -13,6 +13,10 @@
 //!   |      Checking -- upgrades off ------------------------------+
 //!   |          | newest complete release (the `iohr upgrade` lookup)
 //!   |          +-- not newer (semver, prereleases ordered) -------+
+//!   |          +-- newer, and the file already says it (another runner on this machine,
+//!   |          |   or a person, installed it): Draining, then Restarting; nothing to
+//!   |          |   download or swap, and the ledger is not asked. Not when an exec of
+//!   |          |   that version already failed in this process.
 //!   |          +-- newer, APT or a copy iohr did not install -----+ reported once per version
 //!   |          +-- newer, installed in the last 24 h, still old --+ (restart-loop guard)
 //!   |          +-- lookup failed -> failures + 1 ----------------+
@@ -35,7 +39,7 @@
 //!   |      Restarting -- exec: the process becomes the new binary and never comes back here
 //!   |          |         exit: Outcome::Exit, the caller stops the loop and exits 75; the
 //!   |          |         drain stays on, so no lease is taken in the last moments
-//!   |          +-- exec fails -> want(false), failures + 1
+//!   |          +-- exec fails -> want(false), failures + 1, noted for this process
 //!   +----------+  every arrow back to Waiting waits `delay`: the interval after a success,
 //!                 5 min doubling to 6 h (never past the interval) after failures in a row
 //! ```
@@ -44,11 +48,13 @@
 //! the runner idles only for the swap itself, never for a download that can fail; any
 //! failure leaves the old version running, logs one line, backs off and never retries in
 //! a loop; the same version is not tried twice in 24 hours while this process still runs
-//! an older one (also when the install gave another version); shutdown ends the machine
-//! at every waiting point.
+//! an older one (also when the install gave another version); a file that already says
+//! the newest release costs a restart only, never the 24-hour wait (the ledger is shared
+//! by every runner of the config directory), and one failed exec stops that for the
+//! process; shutdown ends the machine at every waiting point.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use semver::Version;
@@ -57,7 +63,7 @@ use tokio::sync::watch;
 use super::drain::Drain;
 use super::settings::RestartMode;
 use super::supervisor::{self, Restart, Supervisor};
-use crate::commands::upgrade::{self, Method, Upstream};
+use crate::commands::upgrade::{self, Method, SignWith, Upstream};
 use crate::error::Error;
 
 /// The first look comes this long after the runner starts (plus up to 10 percent).
@@ -71,13 +77,15 @@ pub(crate) const DRAIN_LIMIT: Duration = Duration::from_hours(4);
 /// it is older.
 pub(crate) const REINSTALL_GUARD: Duration = Duration::from_hours(24);
 
-/// What the person set (`auto_upgrade`, `upgrade_interval_minutes`, `upgrade_restart`),
-/// read again on SIGHUP.
+/// What the person set (`auto_upgrade`, `upgrade_interval_minutes`, `upgrade_restart`,
+/// `upgrade_sign_identity`), read again on SIGHUP.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Policy {
     pub(crate) enabled: bool,
     pub(crate) interval: Duration,
     pub(crate) restart: RestartMode,
+    /// How the install signs the new binary on macOS.
+    pub(crate) sign: SignWith,
 }
 
 impl Policy {
@@ -87,6 +95,7 @@ impl Policy {
             enabled: e.auto_upgrade.value,
             interval: e.upgrade_interval.value,
             restart: e.upgrade_restart.value,
+            sign: e.upgrade_sign.value.clone(),
         }
     }
 }
@@ -166,6 +175,9 @@ pub(crate) enum Check {
     Skipped(Version, String),
     Failed(String),
     Newer(Version, Here),
+    /// A newer release the file this process runs from already says: another runner of
+    /// this machine, or a person, installed it; only a restart is missing.
+    Installed(Version, Here),
 }
 
 impl PartialEq for Here {
@@ -210,6 +222,10 @@ pub(crate) struct Upgrader<S, L, R> {
     pub(crate) drain_limit: Duration,
     /// 0.0 to 1.0, read before each wait.
     pub(crate) jitter: fn() -> f64,
+    /// The version an exec in place already failed for in this process: a file that says
+    /// it no longer counts as installed here (the restart-loop guard that does not rest on
+    /// the ledger, which every runner of the config directory shares).
+    pub(crate) exec_failed: Mutex<Option<Version>>,
 }
 
 impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
@@ -228,6 +244,20 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
         };
         if latest <= self.current {
             return Check::Current(latest);
+        }
+        // Another runner of this config directory notes its install in the shared ledger,
+        // which would hold this one off for 24 hours though only a restart is missing.
+        let exec_failed = match self.exec_failed.lock() {
+            Ok(failed) => failed.as_ref() == Some(&latest),
+            Err(_) => true,
+        };
+        if !exec_failed
+            && self
+                .source
+                .installed(&here)
+                .is_ok_and(|said| said == latest)
+        {
+            return Check::Installed(latest, here);
         }
         match &here.method {
             Method::Apt => Check::Skipped(
@@ -298,6 +328,34 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
         log(&format!(
             "iohr {version} is ready: taking no new work until the running work is done"
         ));
+        self.drained(version, here, Some(staged), stop, log).await
+    }
+
+    /// Restarts into the file this process runs from, which already says `version`
+    /// ([`Check::Installed`]): drains, reads the file again and restarts as the supervisor
+    /// allows. Nothing is downloaded, swapped or noted. Results as for [`Self::upgrade`].
+    pub(crate) async fn restart(
+        &self,
+        version: &Version,
+        here: &Here,
+        stop: watch::Receiver<bool>,
+        log: &dyn Fn(&str),
+    ) -> Result<Option<Outcome>, String> {
+        log(&format!(
+            "iohr {version} is already installed (this runner is {}): taking no new work until the running work is done, then restarting",
+            self.current
+        ));
+        self.drained(version, here, None, stop, log).await
+    }
+
+    async fn drained(
+        &self,
+        version: &Version,
+        here: &Here,
+        staged: Option<S::Staged>,
+        mut stop: watch::Receiver<bool>,
+        log: &dyn Fn(&str),
+    ) -> Result<Option<Outcome>, String> {
         self.drain.want(true);
         let outcome = self
             .upgrade_drained(version, here, staged, &mut stop, log)
@@ -310,11 +368,13 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
         outcome
     }
 
+    /// Once drained: swaps in `staged` (none when the file already says `version`),
+    /// checks what the file says and restarts.
     async fn upgrade_drained(
         &self,
         version: &Version,
         here: &Here,
-        staged: S::Staged,
+        staged: Option<S::Staged>,
         stop: &mut watch::Receiver<bool>,
         log: &dyn Fn(&str),
     ) -> Result<Option<Outcome>, String> {
@@ -328,19 +388,27 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
             }
             _ = stop.changed() => return Ok(None),
         }
-        self.source
-            .apply(here, version, staged)
-            .await
-            .map_err(|e| {
-                format!(
-                    "installing iohr {version} failed, {} keeps running: {e}",
-                    self.current
-                )
-            })?;
+        let swapped = staged.is_some();
+        if let Some(staged) = staged {
+            self.source
+                .apply(here, version, staged)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "installing iohr {version} failed, {} keeps running: {e}",
+                        self.current
+                    )
+                })?;
+        }
         let said = self
             .source
             .installed(here)
             .map_err(|e| format!("iohr {version} was installed but does not run: {e}"))?;
+        if !swapped && said != *version {
+            return Err(format!(
+                "iohr {version} was installed but the file now says {said}: not restarting"
+            ));
+        }
         if said != *version {
             // Homebrew installs the formula's version, and the tap can lag the release:
             // note the version so the next look does not repeat this every round.
@@ -355,9 +423,11 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
                 "iohr {version} was installed but the file says {said}: not restarting{note}"
             ));
         }
-        self.ledger
-            .record(version)
-            .map_err(|e| format!("cannot note the install of {version}, not restarting: {e}"))?;
+        if swapped {
+            self.ledger.record(version).map_err(|e| {
+                format!("cannot note the install of {version}, not restarting: {e}")
+            })?;
+        }
         match supervisor::plan(&self.supervisor, self.policy.borrow().restart) {
             Restart::Exit => {
                 log(&format!(
@@ -372,9 +442,13 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
                     "iohr {version} is installed: restarting in place ({})",
                     self.supervisor
                 ));
+                let why = self.restarter.exec(here);
+                // Only a failed exec comes back: this process does not try it again.
+                if let Ok(mut failed) = self.exec_failed.lock() {
+                    *failed = Some(version.clone());
+                }
                 Err(format!(
-                    "iohr {version} is installed but {}; {} keeps running",
-                    self.restarter.exec(here),
+                    "iohr {version} is installed but {why}; {} keeps running",
                     self.current
                 ))
             }
@@ -393,11 +467,11 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
                 _ = stop.changed() => return Outcome::Stopped,
                 () = tokio::time::sleep(wait) => {}
             }
-            match self.check().await {
-                Check::Disabled => {
+            let tried = match self.check().await {
+                Check::Disabled | Check::Current(_) => {
                     failures = 0;
+                    None
                 }
-                Check::Current(_) => failures = 0,
                 Check::Skipped(v, what) => {
                     failures = 0;
                     if told.as_ref() != Some(&v) {
@@ -406,31 +480,39 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
                         ));
                         told = Some(v);
                     }
+                    None
                 }
                 Check::Failed(e) => {
                     failures = failures.saturating_add(1);
                     log(&format!(
                         "looking for a newer iohr failed ({failures} in a row): {e}"
                     ));
+                    None
                 }
-                Check::Newer(v, here) => match self.upgrade(&v, &here, stop.clone(), log).await {
-                    Ok(Some(Outcome::Exit)) => return Outcome::Exit,
-                    Ok(Some(Outcome::Stopped) | None) => return Outcome::Stopped,
-                    Err(e) => {
-                        failures = failures.saturating_add(1);
-                        log(&format!(
-                            "upgrade failed ({failures} in a row), the old version runs on: {e}"
-                        ));
-                    }
-                },
+                Check::Newer(v, here) => Some(self.upgrade(&v, &here, stop.clone(), log).await),
+                Check::Installed(v, here) => Some(self.restart(&v, &here, stop.clone(), log).await),
+            };
+            match tried {
+                Some(Ok(Some(Outcome::Exit))) => return Outcome::Exit,
+                Some(Ok(Some(Outcome::Stopped) | None)) => return Outcome::Stopped,
+                Some(Err(e)) => {
+                    failures = failures.saturating_add(1);
+                    log(&format!(
+                        "upgrade failed ({failures} in a row), the old version runs on: {e}"
+                    ));
+                }
+                None => {}
             }
             wait = delay(self.policy.borrow().interval, failures, (self.jitter)());
         }
     }
 }
 
-/// The real release lookup and installer: the code of `iohr upgrade`.
-pub(crate) struct RealSource;
+/// The real release lookup and installer: the code of `iohr upgrade`, signing as the
+/// policy in use says.
+pub(crate) struct RealSource {
+    pub(crate) policy: watch::Receiver<Policy>,
+}
 
 impl Source for RealSource {
     type Staged = upgrade::Staged;
@@ -450,6 +532,7 @@ impl Source for RealSource {
 
     async fn prepare(&self, here: &Here, version: &Version) -> Result<Self::Staged, Refused> {
         let (real, method, version) = (here.real.clone(), here.method.clone(), version.clone());
+        let sign = self.policy.borrow().sign.clone();
         // `brew` blocks, and the runner's loop shares a thread with this: it runs on the
         // blocking pool, on a runtime of its own with its own HTTP client.
         tokio::task::spawn_blocking(move || {
@@ -460,6 +543,7 @@ impl Source for RealSource {
             rt.block_on(async {
                 Upstream::from_process()
                     .map_err(|e| Refused::failed(e.to_string()))?
+                    .signing(sign)
                     .prepare(&method, &real, &version, false)
                     .await
                     .map_err(|e| match e {

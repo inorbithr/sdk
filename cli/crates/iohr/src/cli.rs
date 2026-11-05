@@ -18,11 +18,14 @@ use crate::environments::{self, Environment, Environments};
 #[derive(Debug, Parser)]
 #[command(
     name = "iohr",
+    bin_name = "iohr",
     version,
     about,
     long_about,
     propagate_version = true,
-    max_term_width = 100
+    max_term_width = 100,
+    styles = crate::ui::clap_styles(),
+    after_help = "Exit codes: 0 ok, 1 a finding or a failure, 2 usage, 3 not signed in, 4 forbidden."
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -33,6 +36,7 @@ pub struct Cli {
 
 /// Flags every command takes.
 #[derive(Debug, Clone, Args)]
+#[command(next_help_heading = "Global options")]
 pub struct Global {
     /// The profile to use (default: the one `iohr profile use` chose).
     #[arg(long, global = true, env = "IOHR_PROFILE")]
@@ -43,8 +47,10 @@ pub struct Global {
     /// Describe each call on stderr: method, path, status, time, request id.
     #[arg(short, long, global = true)]
     pub verbose: bool,
-    /// The environment to call: `production` (the default) or `local`. Sets the API and
-    /// sign-in addresses; `--base-url` and `IOHR_ISSUER` still win over it.
+    /// The environment to call: `production` or `local`.
+    ///
+    /// Sets the API and sign-in addresses; `--base-url` and `IOHR_ISSUER` still win over
+    /// it. The default is `production`.
     #[arg(long, global = true, env = "IOHR_ENV", value_parser = environments::parse_name, value_name = "NAME")]
     pub env: Option<String>,
     /// The API's address (default: the environment's).
@@ -56,8 +62,10 @@ pub struct Global {
     /// The OAuth client the command line signs in as.
     #[arg(long, global = true, env = "IOHR_CLIENT_ID", default_value = iohr_auth::DEFAULT_CLIENT_ID, hide = true)]
     pub client_id: String,
-    /// Sign in as someone other than a person: `io`, the `OAuth2` client `iohr-io` with the
-    /// client credentials grant, so jobs Io files run on runners Io owns. `iohr runner` only;
+    /// Sign in as someone other than a person (`iohr runner` and `iohr coordinator` only).
+    ///
+    /// `io` is the `OAuth2` client `iohr-io` with the client credentials grant, so jobs Io
+    /// files run on runners Io owns. `iohr runner` and `iohr coordinator` only;
     /// the secret is read from the file `IOHR_CLIENT_SECRET_FILE` names (mode 0600) or, on
     /// a Mac, from the keychain item the Mac bridge uses, never from an argument.
     #[arg(
@@ -68,6 +76,17 @@ pub struct Global {
         value_name = "WHO"
     )]
     pub sign_in: Option<SignIn>,
+    /// With `--sign-in io`: the personality named in the `x-iohr-via` attribution header
+    /// (RFC 0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`,
+    /// which `iohr ask` uses for where an answer comes from.
+    #[arg(long, global = true, env = "IOHR_VIA_PERSONALITY", value_name = "NAME")]
+    pub via_personality: Option<String>,
+    /// With `--sign-in io`: the agent session named in `x-iohr-via`.
+    #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
+    pub via_session: Option<String>,
+    /// With `--sign-in io`: the coordinator job named in `x-iohr-via`.
+    #[arg(long, global = true, env = "IOHR_VIA_JOB", value_name = "ID")]
+    pub via_job: Option<String>,
     /// Where profiles are kept (default: the platform's config directory).
     #[arg(long, global = true, env = "IOHR_CONFIG_DIR", hide = true)]
     pub config_dir: Option<PathBuf>,
@@ -130,8 +149,106 @@ impl Global {
     }
 }
 
+/// The top-level commands by heading, the way `gh` groups its own. clap 4 lists subcommands
+/// under one heading only (`Command::subcommand_help_heading`), so [`command`] writes the
+/// root's `help_template` from this table. A test holds every visible command to exactly one
+/// group, so a new command cannot be left out of `iohr --help`.
+pub const GROUPS: &[(&str, &[&str])] = &[
+    (
+        "Sign-in",
+        &["login", "logout", "whoami", "profile", "auth", "token"],
+    ),
+    (
+        "Account",
+        &["accounts", "domains", "connectors", "connections", "config"],
+    ),
+    (
+        "Build",
+        &[
+            "project",
+            "atlas",
+            "sync",
+            "ext",
+            "sdk",
+            "api",
+            "openapi",
+            "lab",
+            "decisions",
+        ],
+    ),
+    (
+        "Agents",
+        &["ask", "shell", "runner", "coordinator", "memory"],
+    ),
+    (
+        "Operate",
+        &["tunnel", "browser", "upgrade", "completion", "help"],
+    ),
+];
+
+/// The command tree `main` parses with: [`Cli`]'s, with the root help grouped by
+/// [`GROUPS`] and colour off under `--json` (a pipe and `NO_COLOR` are clap's own rules).
+///
+/// clap's `help_template` accepts runtime text
+/// (<https://docs.rs/clap/4.6/clap/struct.Command.html#method.help_template>); `{all-args}`
+/// still renders Options and Global options with their headings, so the subcommands are
+/// hidden from it and listed here instead. Hidden commands still run.
+#[must_use]
+pub fn command(json: bool) -> clap::Command {
+    use clap::CommandFactory as _;
+    use std::fmt::Write as _;
+    let mut cmd = Cli::command();
+    if json {
+        cmd = cmd.color(clap::ColorChoice::Never);
+    }
+    let styles = cmd.get_styles().clone();
+    let (head, lit) = (styles.get_header(), styles.get_literal());
+    let listed: Vec<(String, String)> = cmd
+        .get_subcommands()
+        .filter(|c| !c.is_hide_set())
+        .map(|c| {
+            (
+                c.get_name().to_owned(),
+                c.get_about().map(ToString::to_string).unwrap_or_default(),
+            )
+        })
+        .collect();
+    let width = listed.iter().map(|(n, _)| n.len()).max().unwrap_or(0) + 2;
+    let mut groups = String::new();
+    for (title, names) in GROUPS {
+        let _ = writeln!(groups, "{}{title}:{}", head.render(), head.render_reset());
+        for name in *names {
+            let about = listed
+                .iter()
+                .find(|(n, _)| n == name)
+                .map_or("Print this message or the help of a command", |(_, a)| {
+                    a.as_str()
+                });
+            let _ = writeln!(
+                groups,
+                "  {}{name}{}{:pad$}{about}",
+                lit.render(),
+                lit.render_reset(),
+                "",
+                pad = width - name.len()
+            );
+        }
+        groups.push('\n');
+    }
+    let template = format!(
+        "{{about-with-newline}}\n{{usage-heading}} {{usage}}\n\n{groups}{{all-args}}{{after-help}}"
+    );
+    let names: Vec<String> = listed.into_iter().map(|(n, _)| n).collect();
+    for n in names {
+        cmd = cmd.mut_subcommand(n, |c| c.hide(true));
+    }
+    cmd.help_template(template)
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Sign in and add a profile.
+    ///
     /// Sign in and add a profile: in a browser when this machine can open one, with
     /// a device code otherwise.
     Login(Login),
@@ -162,25 +279,45 @@ pub enum Command {
     /// Domains an account controls, proved with one DNS record.
     #[command(subcommand)]
     Domains(DomainsCommand),
-    /// The coordinator's jobs and queued asks: list and file work (RFC 0120, RFC 0138).
+    /// List and file the coordinator's jobs and asks.
+    ///
+    /// The coordinator's jobs and queued asks: list and file work.
     #[command(subcommand)]
     Coordinator(CoordinatorCommand),
-    /// The apps a connection can be made from: incident tools, chat, observability, AI models
-    /// (RFC 0044).
+    /// Keep what a project knows as files, check it, and sync it when you choose.
+    ///
+    /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
+    /// the code) or in your own notes, with no sign-in and no network. `check` finds what is
+    /// wrong, `drift` what moved in the code, and `sync` shares it with your InOrbit account
+    /// only when you turn that on in `[memory]` or run it.
+    #[command(subcommand)]
+    Memory(MemoryCommand),
+    /// Browse the apps a connection can be made from.
+    ///
+    /// The apps a connection can be made from: incident tools, chat, observability, AI models.
     #[command(subcommand)]
     Connectors(ConnectorsCommand),
+    /// Manage the account's connections to outside systems.
+    ///
     /// The account's connections to outside systems: add one with a key or by signing
-    /// in, test, pause, grant its actions, delete it (RFC 0044).
+    /// in, test, pause, grant its actions, delete it.
     #[command(subcommand)]
     Connections(ConnectionsCommand),
+    /// Install, verify and run extensions.
+    ///
     /// Extensions: separate programs iohr installs from a registry, verifies, pins and
     /// runs as `iohr <name> ...`.
     #[command(subcommand)]
     Ext(ExtCommand),
+    /// Every package you have in one table.
+    ///
     /// Every package you have in one table: published by your account (public or
     /// private), private ones shared with it, unpublished ones in progress on this
     /// machine, and what is installed. The same as `iohr ext packages`.
+    #[command(hide = true)]
     Packages,
+    /// Update iohr to the newest release.
+    ///
     /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs
     /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
     /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
@@ -194,30 +331,68 @@ pub enum Command {
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
-    /// Lab documents: RFCs and studies kept in your repository (RFC 0035).
+    /// Check lab documents kept in your repository.
+    ///
+    /// Lab documents: RFCs and studies kept in your repository.
     #[command(subcommand)]
     Lab(LabCommand),
-    /// Decisions: RFCs, PRDs and ADRs in the Decisions product (RFC 0065, core ADR 0056):
+    /// Read and write RFCs, PRDs and ADRs in Decisions.
+    ///
+    /// Decisions: RFCs, PRDs and ADRs in the Decisions product:
     /// list and read them, create one, save a new version, set its status, comment, link a
     /// pull request, ask for a review.
     #[command(subcommand)]
     Decisions(DecisionsCommand),
-    /// A project you build yourself (PRD 0088): one command sets up everything it needs,
+    /// Create projects and manage project templates.
+    ///
+    /// A project you build yourself: one command sets up everything it needs,
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
-    /// Ask a question in this folder: starts your own AI agent here (Claude Code, `claude`)
-    /// with the question, under your own subscription. The agent's own prompts confirm every
-    /// change; iohr never stores the question or the answer. Defaults come from `[ask]` in
-    /// config.toml; the flags win for one call.
+    /// Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder.
+    ///
+    /// The atlas: plain files in the project's `atlas/` folder (PRDs, RFCs, ADRs and studies as
+    /// Markdown, a canvas, a folder for 3D models). They stay on your machine until you run
+    /// `iohr sync`.
+    #[command(subcommand)]
+    Atlas(AtlasCommand),
+    /// Send the project's atlas documents to its Decisions space.
+    ///
+    /// The same as `iohr atlas sync`: creates what is new, saves a new version of what changed,
+    /// and never overwrites a document that changed in Decisions. Nothing else leaves
+    /// the machine.
+    Sync(SyncArgs),
+    /// Ask your own AI agent a question in this folder.
+    ///
+    /// Ask a question in this folder: your own AI agent (Claude Code, or Codex) answers once,
+    /// right here in the terminal, under your own subscription. No session opens: the agent
+    /// runs in print mode with the small fast model (`haiku`, or `--model`, `IOHR_ASK_MODEL`, `[ask] model`) and iohr draws what it thinks
+    /// (dim, in a quiet block), each tool it uses (one row each) and the answer as it arrives,
+    /// then a footer with the time, turns and cost. Without a terminal, with `NO_COLOR` or
+    /// TERM=dumb it prints only the answer; `--json` passes the agent's own events through as
+    /// JSON lines. Nothing is changed unless you pass `--allow-edits` (files only); shell
+    /// commands are never allowed. iohr never stores the question or the answer. Defaults
+    /// come from `[ask]` in config.toml; the flags win for one call.
     Ask(AskArgs),
-    /// The coordinator's runner (RFC 0120): this machine runs coordinator turns on your own
+    /// Shell integration: `? question` at your prompt asks your AI agent.
+    ///
+    /// `iohr shell hook zsh` prints what makes `? question` at your prompt ask your own AI
+    /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
+    #[command(subcommand)]
+    Shell(ShellCommand),
+    /// Run coordinator turns on this machine.
+    ///
+    /// The coordinator's runner: this machine runs coordinator turns on your own
     /// installed `claude`, on your own subscription.
     #[command(subcommand)]
     Runner(RunnerCommand),
+    /// Install the InOrbit Trails browser extension.
+    ///
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
     #[command(subcommand)]
     Browser(BrowserCommand),
+    /// Open a loopback pipe to an environment's edge.
+    ///
     /// A loopback pipe from this machine into an environment's Envoy edge, so the real
     /// site opens at `http://www.localhost:<port>/` (and console, docs, auth). Runs
     /// `ssh -N -L` until Ctrl-C; binds 127.0.0.1 only and goes through Envoy, never to a
@@ -235,6 +410,8 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
+    /// Print a profile's access token.
+    ///
     /// Print the profile's access token, refreshing a signed-in session first when less
     /// than a minute of it is left.
     ///
@@ -249,7 +426,7 @@ pub enum AuthCommand {
 #[derive(Debug, Args)]
 pub struct AuthToken {
     /// `text`: the token alone on one line. `json`: one line with `access_token`,
-    /// `expires_at` (RFC 3339, or null when the token does not expire), `profile` (null
+    /// `expires_at`, `profile` (null
     /// for `IOHR_TOKEN`) and `account`. `--json` is the same as `--format json`.
     #[arg(long, value_enum, default_value_t = TokenFormat::Text)]
     pub format: TokenFormat,
@@ -263,6 +440,8 @@ pub enum TokenFormat {
 
 #[derive(Debug, Subcommand)]
 pub enum LabCommand {
+    /// Check RFCs and studies against the lab's rules.
+    ///
     /// Check RFCs and studies the way the InOrbit site checks its own: file names,
     /// front matter, status logs, and the redaction rules on public documents. Reads
     /// only the files named, makes no network call, needs no sign-in.
@@ -295,7 +474,7 @@ pub struct DecisionsWhere {
     /// The account whose spaces to use. Default: the credential's own.
     #[arg(long)]
     pub account: Option<String>,
-    /// The kind of document (RFC 0081): `rfc` (default), `prd`, `adr` or `study`; `all`
+    /// The kind of document: `rfc` (default), `prd`, `adr` or `study`; `all`
     /// means every kind. A number names a document of this kind; `PRD 0001` or
     /// `ADR 0003` in place of a number names its kind itself.
     #[arg(long, default_value = "rfc", value_parser = ["rfc", "prd", "adr", "study", "all"])]
@@ -322,11 +501,15 @@ pub struct PrLine {
 
 #[derive(Debug, Subcommand)]
 pub enum RunnerCommand {
+    /// Register this machine as a runner.
+    ///
     /// Register this machine as one of your runners: its name, system and what it can run.
     ///
     /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
-    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the line
-    /// `claude auth status` prints. Run it again and it says the runner exists.
+    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the seat
+    /// `claude auth status` names (organisation and email). Run it again and it says the runner exists; with
+    /// `--refresh` it sends the registration again with the key this machine holds, so
+    /// the runner keeps its id and the coordinator records its current sign-in.
     Register {
         /// The runner's name (default: `[runner] name` in config.toml, else this
         /// machine's host name).
@@ -347,17 +530,24 @@ pub enum RunnerCommand {
         /// their verified work.
         #[arg(long, value_name = "SUBJECT", value_parser = clap::builder::NonEmptyStringValueParser::new())]
         holder: Option<String>,
+        /// Register again a runner this machine already holds the key of: its name,
+        /// system, capacity and the hash of its current provider sign-in are sent anew
+        /// (after signing in to another account, or to update a registration).
+        #[arg(long)]
+        refresh: bool,
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Run the runner loop until Ctrl-C.
+    ///
     /// Run the loop: heartbeat, accept a lease, run its turn on `claude -p`, report it.
     /// Stops on Ctrl-C.
     Run {
         /// The runner's name (default: this machine's host name).
         #[arg(long, conflicts_with = "runner")]
         name: Option<String>,
-        /// The runner's id, from `iohr runner status`.
-        #[arg(long)]
+        /// The runner's id, from `iohr runner status` (or `id` in `[profiles.<name>.runner]`).
+        #[arg(long, env = "IOHR_RUNNER_ID")]
         runner: Option<String>,
         /// Seconds between heartbeats (default: what the service says, the RFC's 20).
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
@@ -384,9 +574,13 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// The runner's settings from config.toml.
+    ///
     /// The runner's settings from config.toml: `[runner]` and `[profiles.<name>.runner]`.
     #[command(subcommand)]
     Config(RunnerConfigCommand),
+    /// Run the check on a job's checkout and send a signed report.
+    ///
     /// Run the check on a build job's checkout and send the service a signed report of it.
     ///
     /// Fetches `origin/main`, refuses a checkout with uncommitted changes or one that is
@@ -417,8 +611,8 @@ pub enum RunnerCommand {
         /// The runner's name (default: the one whose key this machine holds).
         #[arg(long, conflicts_with = "runner")]
         name: Option<String>,
-        /// The runner's id, from `iohr runner status`.
-        #[arg(long)]
+        /// The runner's id, from `iohr runner status` (or `id` in `[profiles.<name>.runner]`).
+        #[arg(long, env = "IOHR_RUNNER_ID")]
         runner: Option<String>,
         #[command(flatten)]
         account: AccountArg,
@@ -428,8 +622,10 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Show or enrol this machine's run key.
+    ///
     /// This machine's run key: the P-256 key that signs what it reports on approved
-    /// pinned runs (RFC 0153), and whether the approvals service has it enrolled.
+    /// pinned runs, and whether the approvals service has it enrolled.
     ///
     /// Makes the key the first time and keeps it in the credential store beside the
     /// runner key. Not enrolled yet, it asks you on your phone (a `runner_enrollment`
@@ -459,6 +655,8 @@ pub enum RunnerCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum RunnerConfigCommand {
+    /// Show the values the runner would use now.
+    ///
     /// The values `iohr runner run` would use now, each with where it came from: a flag,
     /// `[profiles.<name>.runner]`, `[runner]` or the default. Needs no sign-in.
     Show {
@@ -508,13 +706,15 @@ pub enum DecisionsCommand {
         #[arg(long = "at-version", value_name = "N")]
         at_version: Option<u32>,
     },
+    /// Create an RFC, PRD or ADR in a space.
+    ///
     /// A new RFC, PRD or ADR in a space: the account gives it the next number of its
     /// kind. With `--file`, the file's text is saved as its next version straight away.
     Create {
         /// The space, by slug (`platform`) or id.
         #[arg(long)]
         space: String,
-        /// The kind (RFC 0081): `rfc` (default), `prd` or `adr`.
+        /// The kind: `rfc` (default), `prd` or `adr`.
         #[arg(long, default_value = "rfc", value_parser = ["rfc", "prd", "adr"])]
         kind: String,
         /// The account the space belongs to. Default: the credential's own.
@@ -536,6 +736,8 @@ pub enum DecisionsCommand {
         #[arg(long, short, requires = "file")]
         message: Option<String>,
     },
+    /// Save a new version of a document from a file.
+    ///
     /// Save a new version of a document from a file: the whole document, front matter and
     /// all. Refused when someone saved since the version it was made from.
     Save {
@@ -553,7 +755,9 @@ pub enum DecisionsCommand {
         #[arg(long)]
         base: Option<u32>,
     },
-    /// Set a document's status in the words of its kind (RFC 0081): an RFC's `draft`,
+    /// Set a document's status.
+    ///
+    /// Set a document's status in the words of its kind: an RFC's `draft`,
     /// `in_review`, `accepted`, `rejected`, `withdrawn` or `superseded` (with
     /// `--successor`); a PRD's the same without `withdrawn`; an ADR's `proposed`,
     /// `accepted`, `rejected` or `superseded`. `open` and `decided` still read as before.
@@ -568,6 +772,8 @@ pub enum DecisionsCommand {
         #[arg(long)]
         successor: Option<String>,
     },
+    /// Comment on a document.
+    ///
     /// Comment on a document. With `--pr`, the comment starts with the pull request's line
     /// (`owner/repo#n "title": open`, `merged` or `live`), so the document's thread reads
     /// as the record of the work; the same line `mise run decisions:comment` writes.
@@ -584,6 +790,8 @@ pub enum DecisionsCommand {
         #[arg(long)]
         anchor: Option<String>,
     },
+    /// Record a pull request that implements a document.
+    ///
     /// Record a pull request that implements a document, as a comment with its line alone:
     /// `owner/repo#n "title": open` when it opens, then `merged`, then `live`.
     LinkPr {
@@ -604,6 +812,8 @@ pub enum DecisionsCommand {
         #[arg(long)]
         live: bool,
     },
+    /// Create a diagram, or save a new version of one.
+    ///
     /// Create a diagram from a model file, or with its id save a new version of one. The
     /// model is the Decisions product's diagram JSON (`version`, `nodes`, `edges`); embed it in
     /// a document with a ```` ```diagram <id> ```` block.
@@ -622,6 +832,8 @@ pub enum DecisionsCommand {
         #[arg(long, short)]
         message: Option<String>,
     },
+    /// Ask for a review of a document.
+    ///
     /// Ask for a review of a document's current version from members of its account who
     /// may write (never yourself or the document's author).
     Review {
@@ -704,6 +916,8 @@ pub enum ConnectorsCommand {
         #[arg(long, value_enum)]
         category: Option<ConnectorCategory>,
     },
+    /// Show one connector: sign-in modes, actions and hosts.
+    ///
     /// One connector: its sign-in modes and their fields, settings, actions and the
     /// hosts it may call.
     Show {
@@ -747,6 +961,8 @@ pub enum ConnectionsCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Show one connection: provider identity, health and grants.
+    ///
     /// One connection: who it is at the provider, its health and grants. Never shows
     /// a credential.
     Show {
@@ -755,6 +971,8 @@ pub enum ConnectionsCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Connect an app with a key or by signing in.
+    ///
     /// Connect an app. A key is asked for without echo, or read with --secret-file or
     /// --secret-stdin, never from an argument; signing in opens the provider in a
     /// browser and waits for it.
@@ -766,6 +984,8 @@ pub enum ConnectionsCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// List every use of the connections, newest first.
+    ///
     /// Every use of the account's connections, or of one, newest first: who, which
     /// action, the outcome; never the content.
     History {
@@ -809,6 +1029,8 @@ pub enum ConnectionsCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Delete a connection and destroy its credential.
+    ///
     /// Delete a connection: its credential is destroyed and its grants stop working.
     /// Asks first unless --yes.
     Delete {
@@ -820,9 +1042,13 @@ pub enum ConnectionsCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Give a connection a new credential.
+    ///
     /// Give a connection a new credential: a key is asked for again, a signed-in
     /// connection opens the provider in a browser.
     Reconnect(ConnectionsReconnect),
+    /// Grant a consumer actions of a connection.
+    ///
     /// Grant a consumer named actions of a connection, until an expiry. A signed-in
     /// owner or admin only.
     Grant {
@@ -953,13 +1179,17 @@ impl UseStatus {
 
 #[derive(Debug, Subcommand)]
 pub enum ExtCommand {
+    /// List every package you have, in one table.
+    ///
     /// Every package you have, in one table: NAME, KIND, SOURCE (account, shared, local,
     /// installed), VISIBILITY, VERSION and INSTALLED. Published ones, private too, come
     /// from the API; local ones are the folders under ~/.inorbit/ext-dev, read from disk
     /// and never sent anywhere. An installed extension is matched to a package by name
     /// alone, since the lock keeps no publisher. With `--json`, an array of the same fields.
     Packages,
-    /// Search the extensions catalogue (RFC 0073): name, kind, publisher, latest
+    /// Search the extensions catalogue.
+    ///
+    /// Search the extensions catalogue: name, kind, publisher, latest
     /// version and visibility. Reads the API only, never the registry.
     Search {
         /// Words to look for in the name, publisher and description.
@@ -974,12 +1204,16 @@ pub enum ExtCommand {
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=200))]
         page_size: Option<u32>,
     },
+    /// Show one extension in the catalogue.
+    ///
     /// One extension in the catalogue: what it does, its publisher, signer, scopes,
     /// privileges in plain words, evidence, versions and the line that installs it.
     Show {
         /// PUBLISHER/NAME, such as inorbit/agent.
         extension: String,
     },
+    /// Verify and install an extension.
+    ///
     /// Fetch an extension, verify its signature, provenance and digest, and install it.
     /// One that declares privileges for its system service asks first unless --yes.
     ///
@@ -1009,6 +1243,8 @@ pub enum ExtCommand {
         #[arg(long, conflicts_with = "interfaces")]
         all_interfaces: bool,
     },
+    /// Set up an extension's system service.
+    ///
     /// Set up the system service of an installed extension that has one (Linux, with
     /// sudo): runs `sudo <program> service install --agent-user <you>`.
     Service {
@@ -1023,6 +1259,8 @@ pub enum ExtCommand {
     },
     /// The installed extensions.
     List,
+    /// Install the newest release of an extension.
+    ///
     /// Install the newest release of one extension, or of every installed one. A release
     /// that declares new privileges asks first unless --yes.
     Upgrade {
@@ -1043,10 +1281,12 @@ pub enum ExtCommand {
         #[arg(long, value_name = "FILE")]
         lock: Option<PathBuf>,
     },
+    /// Check installed extensions, or one artifact, offline.
+    ///
     /// Check installed extensions again, offline: the program's hash, the signature
     /// and provenance kept at install, and the signer the lock pins.
     ///
-    /// Or check one artifact that is not installed (RFC 0143): give a file, or a
+    /// Or check one artifact that is not installed: give a file, or a
     /// `sha256:DIGEST`, with the Sigstore bundle(s) for it in `--bundle` (what `cosign
     /// sign-blob --bundle` writes, the same file the cluster's init container checks) and,
     /// for a publisher's own key, `--publisher-key`. It runs the same trust check as an
@@ -1072,6 +1312,8 @@ pub enum ExtCommand {
         #[arg(long, default_value = "iohr-ext.lock", value_name = "FILE")]
         lock: PathBuf,
     },
+    /// Start a new extension in a folder.
+    ///
     /// Start a new extension: a folder with its manifest (every field, commented), a
     /// program that asks the token channel for a token and writes a heartbeat, a
     /// self-test, a README and a release workflow that signs it.
@@ -1088,6 +1330,8 @@ pub enum ExtCommand {
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
     },
+    /// Run an extension from a folder.
+    ///
     /// Run the extension in a folder: its manifest linted, the token channel for exactly
     /// its scopes (a refused request shown in red), its secrets, STATE and CACHE under
     /// ~/.inorbit/ext-dev/NAME/, and its output with the time. Never touches installed
@@ -1101,8 +1345,10 @@ pub enum ExtCommand {
         #[arg(long)]
         test: bool,
     },
+    /// Check an extension's extension.toml.
+    ///
     /// Check the extension.toml in a folder: unknown keys, values that look like
-    /// secrets, data outside ADR 0063's non-sensitive kinds, unsupported targets, a
+    /// secrets, data outside the non-sensitive kinds, unsupported targets, a
     /// "tbd" name, and every rule of the artifact. Exits 1 on any.
     Lint {
         /// The extension's folder (default: this one).
@@ -1117,18 +1363,320 @@ pub enum ExtCommand {
 #[derive(Debug, Args)]
 pub struct AskArgs {
     /// The question or the job, in words (quotes are optional).
-    #[arg(required = true, num_args = 1..)]
+    #[arg(required_unless_present = "menu", conflicts_with = "menu", num_args = 1..)]
     pub question: Vec<String>,
+    #[command(flatten)]
+    pub headless: HeadlessArgs,
+    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain
+    /// or Open with a letter or the arrows. It asks no model, runs nothing, and prints the one
+    /// line to put on the prompt (or nothing) on stdout.
+    #[arg(long, conflicts_with_all = ["interactive", "headless", "card", "hook"])]
+    pub menu: bool,
+    /// With `--menu`: the command the answer suggested.
+    #[arg(long, value_name = "COMMAND", requires = "menu")]
+    pub command: Option<String>,
+    /// With `--menu`: the file (relative to `--cwd`) or `https://` link the answer named.
+    #[arg(long, value_name = "LINK", requires = "menu")]
+    pub link: Option<String>,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,
     /// The agent to start: `claude` (default; `[ask] agent`).
     #[arg(long, value_name = "AGENT")]
     pub agent: Option<String>,
+    /// The model that answers: a Claude alias such as `haiku` or a full model name. Default
+    /// `[ask] model`, else `haiku`, the small fast tier. With `--agent codex` it is passed on
+    /// only when you name one.
+    #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
+    pub model: Option<String>,
+    /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
+    /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits
+    /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
+    #[arg(long)]
+    pub allow_edits: bool,
+    /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block;
+    /// default) or `collapse` (one line). `[ask] thinking`.
+    #[arg(long, value_name = "HOW")]
+    pub thinking: Option<String>,
+    /// Print the exact command line the agent would run and start nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// The atlas kinds a document can be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum AtlasKind {
+    Prd,
+    Rfc,
+    Adr,
+    Study,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AtlasCommand {
+    /// Add the atlas folder to a project that has none.
+    ///
+    /// Writes the folders and starters `iohr project init` writes, for a project made without
+    /// them. Only what is missing: a file or folder you already have is left as it is.
+    Init {
+        /// The project folder. Default: the folder you are in.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Add a new PRD, RFC, ADR or study with the next free number.
+    New {
+        /// What kind of document.
+        #[arg(value_enum)]
+        kind: AtlasKind,
+        /// Its title, a few words: it becomes the file name.
+        title: String,
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Send the atlas documents to the project's Decisions space.
+    Sync(SyncArgs),
+    /// The built-in roles of this project.
+    #[command(subcommand, alias = "personalities")]
+    Roles(RolesCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RolesCommand {
+    /// Show the project's roles and whether InOrbit has them.
+    ///
+    /// The built-in roles in `atlas/roles/`: their size and sources, and, when
+    /// you are signed in, the version InOrbit holds.
+    List {
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// Import the project's roles into your InOrbit account.
+    ///
+    /// The same import `iohr sync` does. A role already in your account that did not
+    /// come from this project, or that changed in InOrbit since, is left alone.
+    Import {
+        /// Say what would be sent and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MemoryCommand {
+    /// Keep a fact or a preference.
+    Remember {
+        /// What to keep, one short sentence. No secrets or personal data.
+        text: String,
+        /// Why it holds, so it can be checked later. `iohr memory check` flags a memory without.
+        #[arg(long, value_name = "WHY")]
+        why: Option<String>,
+        /// A file or folder it is about (relative to the project), or `cmd:<command>`. Repeat it.
+        #[arg(long = "ref", value_name = "PATH", action = clap::ArgAction::Append)]
+        refs: Vec<String>,
+        /// Keep it as a preference (how you want to be answered), not a fact.
+        #[arg(long, conflicts_with = "kind")]
+        preference: bool,
+        /// The kind: fact, preference or episode. Default: fact.
+        #[arg(long, value_name = "KIND", value_parser = ["fact", "preference", "episode"])]
+        kind: Option<String>,
+        /// Never call it stale, however long since it was confirmed.
+        #[arg(long)]
+        pin: bool,
+        /// Where to keep it: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// Find what is known about a topic.
+    Recall {
+        /// The topic, in words.
+        query: String,
+        /// At most this many entries.
+        #[arg(long, default_value_t = 10, value_name = "N")]
+        limit: u32,
+        /// Where to look: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// List what is kept.
+    List {
+        /// At most this many entries.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// Where to look: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// Forget one entry by id.
+    Forget {
+        /// The entry's id, from `iohr memory list`.
+        id: String,
+        /// Where it is kept: project, user or account. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user", "account"])]
+        scope: Option<String>,
+    },
+    /// Find memories that are wrong, stale, repeated or missing.
+    ///
+    /// Reads the memories on this machine, with no network: refs that no longer exist, no
+    /// reason given, not confirmed for a long time, no `checked:` date or an old one, the same thing twice, and what a
+    /// role expects a project to remember (language, how to build and test, owners).
+    Check {
+        /// Where to look: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Exit non-zero when anything is found.
+        #[arg(long)]
+        strict: bool,
+        /// Days without a confirmation after which a memory is stale.
+        #[arg(long, default_value_t = 180, value_name = "DAYS")]
+        stale_days: u32,
+        /// Days after which a memory's `checked:` date is too old. Default: `[memory]
+        /// check_days`, else 180.
+        #[arg(long, value_name = "DAYS")]
+        checked_days: Option<u32>,
+    },
+    /// Compare memories with the code, and with the service when sync is on.
+    ///
+    /// Asks git whether the files a memory is about changed after it was last confirmed. With
+    /// `[memory] sync = true` or `--remote`, also compares the files with the memory service:
+    /// only here, only there, changed on both sides. It only reads; nothing is changed.
+    Drift {
+        /// Where to look: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Compare with the memory service too, even when sync is off.
+        #[arg(long)]
+        remote: bool,
+        /// Exit non-zero when anything drifted.
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Sync memories with your InOrbit account.
+    ///
+    /// Off unless `[memory] sync = true` or you run this. Sends new and changed memories, links
+    /// ones the service already has, and stops on a memory changed on both sides: nothing is
+    /// overwritten. The service keeps no versions, so a change is detected here by hash and
+    /// replaced as create-then-delete.
+    Sync {
+        /// What to sync: project or user. Default: `[memory] scope`, else project.
+        #[arg(long, value_name = "SCOPE", value_parser = ["project", "user"])]
+        scope: Option<String>,
+        /// Say what would be sent and send nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also write the service's entries that have no file here as new files.
+        #[arg(long)]
+        pull: bool,
+    },
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SyncArgs {
+    /// Say what would be created or saved and send nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// The Decisions space id (`lab_...`). Default: the one in `.inorbit/space`.
+    #[arg(long, value_name = "ID")]
+    pub space: Option<String>,
+    /// The project folder. Default: the nearest folder up from here that has `atlas/`.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ShellCommand {
+    /// Print the hook for a shell, to be evaluated by it: `? question` (and `?? follow-up`)
+    /// at the prompt asks `iohr ask` with the folder and the last command, and the shell
+    /// never runs that line. Only zsh is built; bash and fish say so and exit 1.
+    Hook {
+        /// The shell: `zsh` (`bash` and `fish` are not built yet).
+        #[arg(value_enum)]
+        shell: HookShell,
+    },
+}
+
+/// A shell `iohr shell hook` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum HookShell {
+    Zsh,
+    Bash,
+    Fish,
+}
+
+/// What makes `iohr ask` answer once and print (one capped, read-only run) instead of
+/// streaming the agent's run: the way a shell prompt, a script or the InOrbit app asks
+/// (PRD 0187). Any of `--headless`, `--card` or a context flag selects it.
+#[derive(Debug, Args, Default)]
+#[allow(clippy::struct_excessive_bools)] // independent command-line switches, not a state
+pub struct HeadlessArgs {
+    /// Answer once and print (a small model, a turn cap, no tools), even at a terminal.
+    #[arg(long, conflicts_with = "interactive")]
+    pub headless: bool,
+    /// Stream the agent's run (the default), even with a flag that asks for one printed answer.
+    #[arg(long)]
+    pub interactive: bool,
+    /// Draw the answer for a person on stderr; stdout still gets the plain answer.
+    #[arg(long, conflicts_with = "interactive")]
+    pub card: bool,
+    /// For the shell hook: draw the card on stderr, with the action row, and print on stdout
+    /// the answer, the suggested command and the link, separated by the 0x1e character.
+    #[arg(long, conflicts_with = "interactive")]
+    pub hook: bool,
+    /// The folder the question is about (default: this one). Sent to the agent as text.
+    #[arg(long, value_name = "DIR", conflicts_with = "interactive")]
+    pub cwd: Option<String>,
+    /// The last command the person ran, as context (cut to 1 KiB).
+    #[arg(long, value_name = "COMMAND", conflicts_with = "interactive")]
+    pub last_command: Option<String>,
+    /// That command's exit status.
+    #[arg(
+        long,
+        value_name = "N",
+        allow_hyphen_values = true,
+        conflicts_with = "interactive"
+    )]
+    pub exit_code: Option<i32>,
+    /// A file with that command's output; only its last 200 lines or 8 KiB are used.
+    #[arg(long, value_name = "FILE", conflicts_with = "interactive")]
+    pub output_file: Option<std::path::PathBuf>,
+    /// An earlier question this one follows up (with `--prior-answer`).
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "prior_answer",
+        conflicts_with = "interactive"
+    )]
+    pub prior_question: Option<String>,
+    /// The earlier question's answer.
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "prior_question",
+        conflicts_with = "interactive"
+    )]
+    pub prior_answer: Option<String>,
+}
+
+impl HeadlessArgs {
+    /// True when a context flag was given: only a headless run reads them.
+    #[must_use]
+    pub fn has_context(&self) -> bool {
+        self.cwd.is_some()
+            || self.last_command.is_some()
+            || self.exit_code.is_some()
+            || self.output_file.is_some()
+            || self.prior_question.is_some()
+    }
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ProjectCommand {
+    /// Create a project from a template.
+    ///
     /// Set up a project of your own: sign-in checked, the folder scaffolded from a
     /// template with its manifest, a git repository with one commit, its own state under
     /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
@@ -1140,35 +1688,132 @@ pub enum ProjectCommand {
         /// At a terminal it is asked for when missing (the folder's name is the default);
         /// anywhere else it is required.
         name: Option<String>,
-        /// The template (`iohr project templates` lists them). Default: `[project] template`
-        /// in iohr's config.toml, else demo. A template that is coming says so and refuses.
-        /// At a terminal, leaving it out offers the templates as a menu.
+        /// The template: an id (`iohr project template list` shows them), a folder
+        /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
+        /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
+        /// else demo. A template that is coming says so and refuses. At a terminal, leaving
+        /// it out offers the templates as a menu.
         #[arg(long)]
         template: Option<String>,
+        /// Answer a template question: `--set key=value`, repeatable.
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        /// Answers from a .json or .toml file (a table of key to value); `--set` wins.
+        #[arg(long, value_name = "FILE")]
+        answers: Option<PathBuf>,
+        /// Describe the project and your own agent (claude or codex, on your PATH) builds it
+        /// in the new folder, from the template's agent prompt. It runs in the background of
+        /// this command, in print mode (no session opens): it may edit files, never run shell
+        /// commands, and iohr draws its progress. The smoke test runs after it. Its output is
+        /// labelled AI. `--json` passes the agent's events through as JSON lines.
+        #[arg(long, value_name = "TEXT")]
+        describe: Option<String>,
+        /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
+        /// 40, init's own: `[ask]` in config.toml has no bound.
+        #[arg(long, value_name = "N")]
+        agent_turns: Option<u32>,
+        /// The most seconds the agent may run before iohr stops it. Default 600, init's own.
+        #[arg(long, value_name = "SECONDS")]
+        agent_timeout: Option<u64>,
+        /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
+        /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
+        /// agent is not started (its command and prompt are printed). Every step shows as
+        /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
+        #[arg(long, visible_alias = "plan")]
+        dry_run: bool,
         /// Answer the questions with their defaults: no menu, no confirmation.
         #[arg(short = 'y', long)]
         yes: bool,
-        /// The folder to write (default: ~/development/NAME); it must not exist or be empty.
+        /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
+        /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
+        /// when you are inside a git repository, or a path of your own. It must not exist
+        /// or be empty.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
+        /// The language, for a template that offers several (the same as `--set
+        /// language=ID`); `iohr project template show ID` lists them. At a terminal,
+        /// leaving it out offers a menu that marks the toolchains you have.
+        #[arg(long, value_name = "ID")]
+        lang: Option<String>,
         /// The publisher half of the extension id (default: your account's slug, else
         /// "local"); the private listing takes it when that step lands.
         #[arg(long)]
         publisher: Option<String>,
-        /// Skip the smoke test (it runs the project once with python3).
+        /// Skip the smoke test (it runs the project once with the language's own runtime).
         #[arg(long)]
         no_smoke: bool,
     },
-    /// The templates `init` and `create` accept: name, what it is, live or coming, and which
-    /// one is the default (`[project] template` in config.toml, else demo). `--json` prints
-    /// the same as a list.
+    /// The same as `template list`, kept so older scripts work.
+    #[command(hide = true)]
     Templates,
+    /// List, show, make and check project templates.
+    ///
+    /// Templates are folders with a template.toml: the built-in ones, and your own in
+    /// ~/.inorbit/templates/. `list` shows them, `show` says what one asks and writes,
+    /// `new` scaffolds one of yours, `lint` checks a folder, `path` prints where one lives
+    /// and `schema` prints the JSON Schema of template.toml.
+    Template {
+        #[command(subcommand)]
+        cmd: TemplateCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TemplateCommand {
+    /// List the templates `init` accepts.
+    ///
+    /// The templates `init` and `create` accept: name, live or coming, where each comes
+    /// from, which one is the default (`[project] template` in config.toml, else demo) and
+    /// what it is. `--json` prints the same as a list.
+    List,
+    /// Show what a template asks, writes and runs.
+    ///
+    /// Show one template: where it comes from, what it extends, every question (id, type,
+    /// default and `when`), the files it renders and its agent step. The id may also be a
+    /// folder or a git repository, as for `init --template`. `--json` prints all of it as
+    /// one object.
+    Show {
+        /// The template: an id, a folder (`./my-template`) or `gh:owner/repo[//subdir][@ref]`.
+        id: String,
+    },
+    /// Print the folder a template lives in.
+    ///
+    /// Print only the folder of a template of yours, so `cd $(iohr project template path
+    /// demo)` works. A built-in template is part of iohr and has no folder: exit 1, with
+    /// the command that makes an editable copy.
+    Path {
+        /// The template's id.
+        id: String,
+    },
+    /// Scaffold a template of your own.
+    ///
+    /// Scaffold a template of your own in ~/.inorbit/templates/ID, a working one to edit.
+    New {
+        /// The template's id: lowercase letters, digits and dashes.
+        id: String,
+        /// Add to another template (an id): its files, questions and steps come first.
+        #[arg(long, value_name = "ID")]
+        extends: Option<String>,
+    },
+    /// Check a template folder.
+    ///
+    /// Check a template folder: its template.toml, its questions and `when` rules, every
+    /// placeholder, `extends`, and the extension manifest it renders. Exits 1 on any finding.
+    Lint {
+        /// The template's folder (default: this one).
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+    /// Print the JSON Schema of template.toml.
+    ///
+    /// Print the JSON Schema of template.toml, for editors and InOrbit Desktop.
+    Schema,
 }
 
 /// What `iohr ext init` scaffolds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum InitKind {
-    /// A program that runs as its own process (RFC 0073).
+    /// A program that runs as its own process.
     Program,
 }
 
@@ -1253,6 +1898,8 @@ pub enum ProfileCommand {
         /// The profile.
         name: Option<ProfileName>,
     },
+    /// Point a profile at one of its accounts.
+    ///
     /// Point a signed-in profile at one of its accounts (a team's id or slug), the one
     /// `iohr sdk generate` cuts the document to.
     Account {
@@ -1381,16 +2028,24 @@ pub enum OpenapiCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum SdkCommand {
+    /// Write an SDK cut to what your profiles may call.
+    ///
     /// Write a surface cut to what your profiles may call into a directory, with its
     /// `iohr.lock` beside it.
     Generate(SdkGenerate),
+    /// Fail when the cut has moved since it was generated.
+    ///
     /// Fetch every profile's document again and fail when the cut has moved since the
     /// surface was generated (run it in CI with `IOHR_TOKEN_<PROFILE>` per profile).
     Check(SdkCheck),
+    /// Write a snippet per operation and language.
+    ///
     /// Write a short program per operation and language that calls it with the published
     /// runtime, as JSON keyed by operation id: what the API reference shows beside each
     /// operation. Every snippet builds against the runtime's public surface.
     Examples(SdkExamples),
+    /// Print the configuration an SDK client would use here.
+    ///
     /// Print the configuration an SDK client built with `load` would use here: every
     /// setting with where its value came from, the credential chain, the pipeline and
     /// what was ignored, as the SDKs' `describe()` gives it (`docs/config.md` section
@@ -1398,6 +2053,8 @@ pub enum SdkCommand {
     /// file; contacts no host. `--profile NAME` stands for `profile` in the client's
     /// code; `IOHR_PROFILE` is not read, as the SDKs do not read it.
     Config(SdkConfig),
+    /// Add the published SDK to this project.
+    ///
     /// Add the published SDK to the project here with the package manager it already
     /// uses: `cargo add`, `npm install` (or pnpm, yarn, bun, deno), `uv add` (or poetry,
     /// pdm, pip in the active virtualenv) or `go get`.
@@ -1524,6 +2181,8 @@ impl Lang {
 
 #[derive(Debug, Subcommand)]
 pub enum BrowserCommand {
+    /// Open the page that adds InOrbit Trails to your browser.
+    ///
     /// Open the console's install page in the default browser. It adds InOrbit Trails
     /// from that browser's store (Chrome Web Store, Edge Add-ons, Firefox add-ons), or
     /// shows the load-unpacked steps while that store has no listing yet.
@@ -1545,9 +2204,11 @@ pub enum CoordinatorCommand {
     /// The coordinator's queued asks.
     #[command(subcommand)]
     Asks(CoordinatorAsksCommand),
+    /// Print a job's brief.
+    ///
     /// A job's brief, the one text a worker starts from: the task, its acceptance, the
     /// files and the linked document's excerpt, capped at the kind's token budget
-    /// (RFC 0132). Prints the text alone so it can be piped into a worker.
+    ///. Prints the text alone so it can be piped into a worker.
     Brief {
         /// The job id (`job_...`).
         job: String,
@@ -1575,6 +2236,8 @@ pub enum CoordinatorJobsCommand {
         #[arg(long)]
         account: Option<String>,
     },
+    /// File a job.
+    ///
     /// File a job. The brief is the text to work on, from --brief or `-` for standard input.
     Create {
         /// The kind: question, watch, docs, ui, fix, review, chore, mentor, api or design.
@@ -1636,6 +2299,8 @@ pub enum CoordinatorAsksCommand {
         #[arg(long)]
         account: Option<String>,
     },
+    /// Queue an ask.
+    ///
     /// Queue an ask. The coordinator's planner files a job for a kind it knows (bug,
     /// feature, ui, api, docs, design, review, chore, question, watch); an ask with
     /// any other kind stays queued, with the reason.
@@ -1683,4 +2348,49 @@ pub struct Tunnel {
     /// Print the ssh command and the addresses, then stop.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[cfg(test)]
+mod grammar_tests {
+    use super::GROUPS;
+    use clap::CommandFactory as _;
+
+    #[test]
+    fn every_visible_command_is_in_exactly_one_help_group() {
+        // `command()` hides the subcommands from clap's own list; the names come from the
+        // un-hidden derive tree.
+        let tree = super::Cli::command();
+        let visible: Vec<&str> = tree
+            .get_subcommands()
+            .filter(|c| !c.is_hide_set())
+            .map(clap::Command::get_name)
+            .collect();
+        assert!(visible.len() > 10, "{visible:?}");
+        for name in &visible {
+            let n = GROUPS.iter().filter(|(_, g)| g.contains(name)).count();
+            assert_eq!(n, 1, "`{name}` is in {n} help groups; it needs exactly one");
+        }
+        for (title, names) in GROUPS {
+            for name in *names {
+                assert!(
+                    *name == "help" || visible.contains(name),
+                    "group {title} lists `{name}`, which is not a visible command"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_old_names_parse() {
+        use clap::Parser as _;
+        let p = |a: &[&str]| {
+            super::Cli::try_parse_from(std::iter::once("iohr").chain(a.iter().copied()))
+        };
+        assert!(p(&["packages"]).is_ok());
+        assert!(p(&["project", "templates"]).is_ok());
+        assert!(
+            p(&["project", "template", "lint"]).is_ok(),
+            "lint defaults to ."
+        );
+    }
 }

@@ -6,9 +6,12 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -29,15 +32,6 @@ fn token(scopes: &[&str]) -> String {
             "scp": scopes, "org": ACCOUNT, "plan": "free", "key": "key_1"
         }))
     )
-}
-
-/// What a child process needs to run at all; `SYSTEMROOT` is required for sockets on
-/// Windows. Nothing that could hold a credential is passed on.
-fn kept_env() -> Vec<(String, std::ffi::OsString)> {
-    ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
-        .into_iter()
-        .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
-        .collect()
 }
 
 struct Run<'a> {
@@ -571,6 +565,7 @@ async fn verbose_output_never_shows_the_token() {
     let secret_arg = format!("api_key={}", secret_file.to_str().unwrap());
     let commands: Vec<Vec<&str>> = vec![
         vec!["whoami"],
+        vec!["coordinator", "jobs", "list"],
         vec![
             "coordinator",
             "asks",
@@ -647,6 +642,8 @@ async fn verbose_output_never_shows_the_token() {
     // `runner run-key` keeps its key in the profile's store, which a bare token has not:
     // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
     // `iohr decisions` needs typed answers: `decisions_commands_never_show_the_token` runs it.
+    // `iohr sync` needs a project with an atlas: `sync_never_shows_the_token_or_a_documents_words`
+    // (tests/atlas.rs) runs it with `--verbose`.
     for args in commands {
         let mut args = args.clone();
         args.push("--verbose");
@@ -748,6 +745,7 @@ async fn verbose_output_never_shows_the_token() {
             .cmd(&args)
             .env("IOHR_TOKEN", &t)
             .env("HOME", &home)
+            .env("USERPROFILE", &home)
             .env("IOHR_EXT_ONCE", "1")
             .stdin(Stdio::null())
             .output()
@@ -3365,6 +3363,221 @@ async fn coordinator_jobs_create_list_and_asks_list() {
     let o = r.with_token(&t, &["coordinator", "asks", "list", "--state", "open"]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(String::from_utf8_lossy(&o.stdout).contains("An ask"));
+}
+
+const IO_SECRET: &str = "IOSECRETMARKER";
+
+/// A mode 0600 secret file, and the mock sign-in service that mints `io_token` for it.
+async fn io_setup(server: &MockServer, dir: &Path, io_token: &str) -> std::path::PathBuf {
+    Mock::given(method("POST"))
+        .and(path("/oauth2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"access_token": io_token, "token_type": "bearer", "expires_in": 900}),
+        ))
+        .mount(server)
+        .await;
+    let secret = dir.join("io-secret");
+    std::fs::write(&secret, format!("{IO_SECRET}\n")).unwrap();
+    // The mode check is Unix-only (io_signin::read_private_file), so is setting it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    secret
+}
+
+/// `--sign-in io` on `iohr coordinator jobs create` (RFC 0065.2): the job is filed with
+/// Io's bearer and the `x-iohr-via` header the flags name, in the form the platform
+/// reads; a person's call sends neither; the flags without `--sign-in` and a bad value
+/// are refused; no other command takes `--sign-in`; nothing secret is shown.
+#[tokio::test(flavor = "multi_thread")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario: the allowed, refused and unchanged paths"
+)]
+async fn coordinator_jobs_create_signs_in_as_io_with_a_via_header() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let io_token = token(&["coordinator:read", "coordinator:write"]).replace("key_1", "io_1");
+    let secret = io_setup(&server, dir.path(), &io_token).await;
+    let job = serde_json::json!({"job_id": "job_7", "state": "intake", "kind": "chore",
+        "model": "sonnet", "brief": "x", "created_at": "2026-10-13T10:00:00Z"});
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/jobs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"job": job})))
+        .mount(&server)
+        .await;
+    let create = [
+        "coordinator",
+        "jobs",
+        "create",
+        "--kind",
+        "chore",
+        "--brief",
+        "-",
+    ];
+    let as_io = |extra: &[&str]| {
+        let mut args: Vec<&str> = create.to_vec();
+        args.extend(["--sign-in", "io"]);
+        args.extend(extra);
+        let mut c = r.cmd(&args);
+        c.env("IOHR_ISSUER", server.uri())
+            .env("IOHR_CLIENT_SECRET_FILE", &secret)
+            .env("IOHR_TOKEN", token(&[]));
+        spawn_with_stdin(&mut c, "Fix the thing\n")
+    };
+
+    let o = as_io(&["--via-personality", "improver", "--via-session", "ab12cd34"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!text(&o).contains(IO_SECRET) && !text(&o).contains("TOKENSIGNATUREMARKER"));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("authorization").unwrap().to_str().unwrap(),
+        format!("Bearer {io_token}")
+    );
+    assert_eq!(
+        call.headers.get("x-iohr-via").unwrap().to_str().unwrap(),
+        "personality=improver; session=ab12cd34"
+    );
+
+    // The environment names it too; no flag, no header.
+    let mut c = r.cmd(&[create.as_slice(), &["--sign-in", "io"]].concat());
+    c.env("IOHR_ISSUER", server.uri())
+        .env("IOHR_CLIENT_SECRET_FILE", &secret)
+        .env("IOHR_VIA_PERSONALITY", "improver")
+        .env("IOHR_VIA_JOB", "job_01M6");
+    let o = spawn_with_stdin(&mut c, "Fix the thing\n");
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("x-iohr-via").unwrap().to_str().unwrap(),
+        "personality=improver; job=job_01M6"
+    );
+
+    // A bad value is refused before any sign-in call.
+    let before = server.received_requests().await.unwrap().len();
+    let o = as_io(&["--via-personality", "im prover;x=y"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+
+    // The via flags without --sign-in io are refused.
+    let o = r.with_token_and_stdin(
+        &token(&[]),
+        "x\n",
+        &[create.as_slice(), &["--via-personality", "improver"]].concat(),
+    );
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    assert!(text(&o).contains("--sign-in io"), "{}", text(&o));
+
+    // A person's call is unchanged: their token, no via header.
+    let person = token(&[]);
+    let o = r.with_token_and_stdin(&person, "Fix the thing\n", &create);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("authorization").unwrap().to_str().unwrap(),
+        format!("Bearer {person}")
+    );
+    assert!(call.headers.get("x-iohr-via").is_none());
+
+    // Other commands still refuse it, and say which take it.
+    let others: [&[&str]; 2] = [
+        &["whoami", "--sign-in", "io"],
+        &["accounts", "list", "--sign-in", "io"],
+    ];
+    for args in others {
+        let mut c = r.cmd(args);
+        c.env("IOHR_ISSUER", server.uri())
+            .env("IOHR_CLIENT_SECRET_FILE", &secret)
+            .stdin(Stdio::null());
+        let o = c.output().unwrap();
+        assert_eq!(code(&o), 2, "{args:?}: {}", text(&o));
+        assert!(text(&o).contains("iohr coordinator"), "{}", text(&o));
+    }
+}
+
+/// The Io paths of coordinator commands, with `--verbose`: neither Io's secret nor its
+/// token appears in the output (SR-24, SR-13).
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_io_paths_never_show_the_secret_or_the_token() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let io_token = token(&["coordinator:read", "coordinator:write"]);
+    let secret = io_setup(&server, dir.path(), &io_token).await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "job": {"job_id": "job_7", "state": "intake", "kind": "chore", "model": "sonnet",
+                    "brief": "x", "created_at": "2026-10-13T10:00:00Z"},
+            "jobs": [], "asks": [], "ask": {"id": "ask_1", "state": "queued"}
+        })))
+        .mount(&server)
+        .await;
+    let commands: Vec<Vec<&str>> = vec![
+        vec![
+            "coordinator",
+            "jobs",
+            "create",
+            "--kind",
+            "chore",
+            "--brief",
+            "-",
+        ],
+        vec!["coordinator", "jobs", "list"],
+        vec!["coordinator", "asks", "list"],
+        vec![
+            "coordinator",
+            "asks",
+            "create",
+            "--kind",
+            "bug",
+            "--body",
+            "x",
+        ],
+    ];
+    for mut args in commands {
+        args.extend([
+            "--sign-in",
+            "io",
+            "--via-personality",
+            "improver",
+            "--verbose",
+        ]);
+        let mut c = r.cmd(&args);
+        c.env("IOHR_ISSUER", server.uri())
+            .env("IOHR_CLIENT_SECRET_FILE", &secret);
+        let o = spawn_with_stdin(&mut c, "Fix the thing\n");
+        assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+        let all = text(&o);
+        assert!(
+            !all.contains(IO_SECRET) && !all.contains("TOKENSIGNATUREMARKER"),
+            "{args:?} leaked Io's secret or token"
+        );
+        assert!(
+            all.contains("request id"),
+            "{args:?} printed no verbose line"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
