@@ -1144,11 +1144,17 @@ pub enum ProjectCommand {
     #[command(visible_alias = "create")]
     Init {
         /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
-        name: String,
+        /// At a terminal it is asked for when missing (the folder's name is the default);
+        /// anywhere else it is required.
+        name: Option<String>,
         /// The template (`iohr project templates` lists them). Default: `[project] template`
         /// in iohr's config.toml, else demo. A template that is coming says so and refuses.
+        /// At a terminal, leaving it out offers the templates as a menu.
         #[arg(long)]
         template: Option<String>,
+        /// Answer the questions with their defaults: no menu, no confirmation.
+        #[arg(short = 'y', long)]
+        yes: bool,
         /// The folder to write (default: ~/development/NAME); it must not exist or be empty.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
