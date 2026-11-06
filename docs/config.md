@@ -367,6 +367,7 @@ template = "coordinated"
 agent = "claude"
 model = "haiku"
 allow_edits = false
+permissions = "prompt"
 thinking = "show"
 hints = "sometimes"
 menu_key = "down"
@@ -526,20 +527,74 @@ and drawn as a card.
 | `agent` | `claude` (Claude Code, `claude -p --output-format stream-json --verbose --include-partial-messages --no-session-persistence`) or `codex` (`codex exec --json --ephemeral --skip-git-repo-check --sandbox read-only`) | `claude` | `iohr ask` |
 | `model` | any model name the agent knows; may not start with `-` | `haiku` for `claude`, the agent's own for `codex` | `iohr ask` |
 | `allow_edits` | `true` lets the agent edit files: `--permission-mode acceptEdits` for `claude`, `--sandbox workspace-write` for `codex` | `false` | `iohr ask` |
+| `permissions` | What the `?` card may run: `prompt` (the person's rules decide, then Io asks in the terminal), `rules` (the rules only; the rest is refused and listed after the answer) or `deny` (no commands at all, the earlier behaviour); `IOHR_ASK_PERMISSIONS` and `--permissions` win over it | `prompt` at a terminal, `rules` without one (and under `--json`) | `iohr ask --headless`, `--card` |
 | `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
 | `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
 
-Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--thinking`, `--dry-run`. Running a
-shell command is never allowed, with or without `--allow-edits`; the agent's default
-permissions stay in force. `--dry-run` prints the exact command line and starts nothing (with
+Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--permissions`, `--thinking`, `--dry-run`. In the streamed
+run a shell command is never allowed, with or without `--allow-edits`; the agent's default
+permissions stay in force. The headless run (the `?` card) can run a command only through the
+permission rules below. `--dry-run` prints the exact command line and starts nothing (with
 `--json` it is one object with `dry_run`, `via`, `agent`, `found`, `program` and `args`).
+
+#### Asking before Io runs a command
+
+The `?` card (and `--headless`, `--card`) gives Io a Bash tool, and the person decides what it
+runs. Claude Code is started with `--permission-prompt-tool` pointing at a small MCP server that
+`iohr` itself serves (`iohr permission-server`, hidden), which talks to the card over a private
+unix socket in a folder only you can open (removed when the card ends)
+(<https://code.claude.com/docs/en/cli-reference>, <https://code.claude.com/docs/en/agent-sdk/permissions>).
+Your rules decide first; a command they do not cover is shown as one line:
+
+```text
+Io (AI) wants to run `ls -la` in my-project · y once · a always in this project · n no
+```
+
+`y` runs it once, `a` runs it and saves the narrowest rule (`Bash(ls:*)`, never `Bash(*)`) to
+`.inorbit/permissions.toml`, `n`, Esc, Ctrl-C or no answer refuses it. Rules use Claude Code's
+grammar (<https://code.claude.com/docs/en/permissions>) in two TOML files, the project's
+`.inorbit/permissions.toml` and the user's `permissions.toml` in the iohr config folder:
+
+```toml
+allow = ["Bash(ls:*)", "Bash(git status:*)", "Read(src/**)"]
+deny  = ["Bash(rm:*)"]
+```
+
+Deny beats allow, and the secret-file rules (keys, `.env`, credentials, `.ssh`, `.aws`,
+`.kube`, token files, Terraform state) beat everything: no rule and no answer can allow them. A shell line with `$(...)`,
+backticks or a write redirect is never allowed by a rule, and a compound line (`a && b`) is
+allowed only when every part is. Every decision is appended to `.inorbit/permissions.log`
+(time, tool, the rule, the outcome, who); command output and file contents are never written.
+`iohr permissions list|allow|deny|remove|check [--project|--user]` edits and tests the rules
+(`allow` refuses a rule that could open a secret file and a blanket `Bash(*)`; exit 2).
+In `rules` mode, and where there is no terminal, a command no rule allows is refused and the
+answer is followed by the rule that would allow it (`iohr permissions allow '<rule>'`).
+A repository can ship its own `.inorbit/permissions.toml`: read it before you trust a clone,
+because an allow rule in it runs without asking.
 
 With no colour (stderr is not a terminal, `NO_COLOR` is set, `TERM` is unset or `dumb`) only
 the answer is printed, on stdout; the thinking, tool rows, footer and spinner are not drawn.
 With `--json` the agent's own event lines are passed through untouched, one per line, followed
 by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
 command exits with the agent's code, and with 1 when the agent reports a failed run.
+
+The card asks back instead of stopping at "not known". Inside a project (a folder with `.git` or
+`.inorbit` above it) iohr reads, itself and with the git command line, the branch, the last five
+commits (one line each) and the `git status --porcelain` counts, and puts them in the prompt as
+facts; the model has no tools and is told never to say it cannot run git while they are there.
+When an answer needs something only you can tell (what the project is for), the model may add
+up to two questions, each with two to four short choices; iohr validates them (a broken block is
+dropped and never shown) and draws them under the answer: keys `1` to `4` pick a choice, `o` types
+your own, `s` skips that question, Esc or `q` skips all, and a skip saves nothing. An answer is
+kept by iohr, never the model: a note in `.inorbit/memory/` (refused when it looks like a
+secret) and, for the purpose, `[project] description` in `inorbit.toml`; the answer is then
+refreshed once, with the note in hand, and never asks again. With no terminal, or under `--json`,
+the questions are plain lines on stderr (`Question for you: ... [1] ... [2] ...`; nothing is
+saved, `iohr memory remember` keeps one) and `--json` carries them in `questions`. When the
+account has open asks, one dim line under the card says how many wait and that Down then `a` opens
+them (the menu's Asks entry puts `iohr asks list` on the prompt); offline or signed out it says
+nothing.
 
 The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes it: a terminal
 resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
@@ -548,8 +603,8 @@ do not close it or pick an action. Only a real terminal error closes it, with on
 The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
 read, that nothing was run, that an AI model under your own subscription got the folder, and
 to check the answer) on the first card ever, whenever that text changes, and about once a
-day; every other card closes with one short hint, taken in turn from "`??` follows up",
-"`iohr ask --help` for flags" and "`[ask] model` in config picks the model". `INORBIT_ASK=0` in the
+day; every other card closes with one short hint, taken in turn from "`??` follows up" and
+"`iohr ask --help` for flags" (the header already names the agent and the model). `INORBIT_ASK=0` in the
 environment turns `?` off; the card does not say so. `hints = "always"` shows the full disclosure every time; `"never"` shows it
 on the first card and when the text changes, and nothing otherwise. The one small file it
 keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),

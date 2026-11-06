@@ -1,7 +1,7 @@
 //! `iohr coordinator`: the coordinator's jobs and queued asks over the public API
 //! (RFC 0120, RFC 0138). The coordinator serves signed-in people, so these need a
 //! person's profile (`iohr login`), not an API key, or Io with `--sign-in io` (RFC 0065.2),
-//! so jobs an agent files are Io's, attributed to a personality by `--via-personality`.
+//! so jobs an agent files are Io's, attributed to a role by `--via-role`.
 
 use std::io::Read as _;
 
@@ -184,17 +184,7 @@ fn job_body(a: &JobArgs<'_>) -> Result<Value, Error> {
 /// The first line, without control characters (a brief is other people's text and must
 /// not move the cursor or recolour the terminal), cut to 70 characters.
 fn headline(brief: &str) -> String {
-    let clean: String = brief
-        .chars()
-        .filter(|c| !c.is_control() || *c == '\n')
-        .collect();
-    let line = clean.lines().next().unwrap_or_default();
-    if line.chars().count() > 70 {
-        let cut: String = line.chars().take(69).collect();
-        format!("{cut}...")
-    } else {
-        line.to_owned()
-    }
+    super::headline(brief, 70)
 }
 
 /// The list under `key`; an answer without it is an error, not an empty list. (An empty

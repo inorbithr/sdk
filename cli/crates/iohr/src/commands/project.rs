@@ -11,6 +11,7 @@ use crate::cli::{Global, ProjectCommand, TemplateCommand};
 use crate::commands::ask::Run;
 use crate::context::{Ctx, session};
 use crate::error::Error;
+use crate::handoff::{self, Stop};
 use crate::output::Out;
 use std::fmt::Write as _;
 
@@ -19,6 +20,7 @@ use crate::project::folder::{self, Kind as Place, Proposal, Where};
 use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
+use crate::toolchain::{self, Lang, State};
 use crate::ui::{Choice, Nav, Ui, cancel};
 
 /// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
@@ -57,6 +59,7 @@ struct InitArgs {
     set: Vec<String>,
     answers: Option<PathBuf>,
     describe: Option<String>,
+    agent_model: Option<String>,
     agent_turns: Option<u32>,
     agent_timeout: Option<u64>,
     dry_run: bool,
@@ -75,6 +78,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
             set,
             answers,
             describe,
+            agent_model,
             agent_turns,
             agent_timeout,
             dry_run,
@@ -93,6 +97,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
                     set,
                     answers,
                     describe,
+                    agent_model,
                     agent_turns,
                     agent_timeout,
                     dry_run,
@@ -230,8 +235,13 @@ fn live_names(rows: &[template::Row]) -> String {
 /// The language menu: every language of the template, the live ones first, each marked with
 /// whether its toolchain is on the PATH (`have`); the cursor starts on the first live one that
 /// has its toolchain (else on the template's default). The ones still coming are listed, dim,
-/// and refused when picked.
-fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>, String) {
+/// and refused when picked. `behind` says, for a toolchain that is found, where it stands
+/// against the latest stable (`rustc 1.90.0, 1.93.0 is out`), or nothing.
+fn language_choices(
+    tpl: &Template,
+    have: impl Fn(&str) -> bool,
+    behind: impl Fn(&template::VariantDef) -> Option<String>,
+) -> (Vec<Choice>, String) {
     let found = |v: &template::VariantDef| v.needs.iter().all(|n| have(n));
     let live = tpl.live_variants();
     let recommended = live
@@ -245,7 +255,10 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
             let what = if v.needs.is_empty() {
                 "nothing to install".to_owned()
             } else if found(v) {
-                format!("{} found", v.needs.join(", "))
+                match behind(v) {
+                    Some(note) => format!("{} found \u{b7} {note}", v.needs.join(", ")),
+                    None => format!("{} found", v.needs.join(", ")),
+                }
             } else {
                 format!("{} not on your PATH", v.needs.join(", "))
             };
@@ -474,8 +487,14 @@ fn ask_question(
     let default = prev.cloned().or_else(|| q.default.clone());
     if q.key == LANGUAGE && !tpl.meta.variants.is_empty() {
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let (choices, mut initial) =
-            language_choices(tpl, |n| ask::find_on_path(n, &path).is_some());
+        let (choices, mut initial) = language_choices(
+            tpl,
+            |n| ask::find_on_path(n, &path).is_some(),
+            |v| {
+                let lang = Lang::of_toolchain(&v.toolchain)?;
+                toolchain::state(lang).map(|s| s.hint(lang))
+            },
+        );
         if let Some(p) = prev {
             initial = p.text();
         }
@@ -533,6 +552,24 @@ fn ask_question(
     }
 }
 
+/// The iohr commands an `init` agent may run, by the name the binary runs under: new documents,
+/// the dry-run listing of what `sync` would send, and memory. Each is a prefix, so `sync` itself
+/// (which writes to Decisions) is not among them: the person runs that.
+fn init_allow(bin: &str) -> Vec<String> {
+    [
+        "atlas new",
+        "atlas sync --dry-run",
+        "memory remember",
+        "memory recall",
+        "memory list",
+        "memory check",
+    ]
+    .iter()
+    .map(|c| format!("{bin} {c}"))
+    .chain(["git status", "git log", "git diff", "ls"].map(str::to_owned))
+    .collect()
+}
+
 /// The agent and the prompt it would get, when one is to run.
 struct AgentRun {
     agent: Agent,
@@ -546,12 +583,137 @@ struct AgentRun {
     thinking: Thinking,
 }
 
-/// The most turns the agent gets in `init` when no flag says: init's own default, because
-/// `[ask]` in config.toml has no bound. Enough to write a small project; a wrong request cannot
-/// run away.
-const AGENT_TURNS: u32 = 40;
-/// The most seconds the agent gets in `init` when no flag says (init's own default).
-const AGENT_SECONDS: u64 = 600;
+/// Starts the latest-stable lookups: every language at a terminal (the menu shows each one's
+/// state), else only the language `--lang` names (the lookup of any other starts if it is
+/// asked for). Not under `--json`.
+fn start_toolchain_check(a: &InitArgs, interactive: bool, out: Out) {
+    if out.json {
+        return;
+    }
+    let langs: Vec<Lang> = if interactive {
+        Lang::ALL.to_vec()
+    } else {
+        a.lang
+            .as_deref()
+            .and_then(lang_of_variant)
+            .into_iter()
+            .collect()
+    };
+    toolchain::start(&langs);
+}
+
+/// The language of a built-in variant id (`typescript` is Node).
+fn lang_of_variant(id: &str) -> Option<Lang> {
+    match id {
+        "rust" => Some(Lang::Rust),
+        "go" => Some(Lang::Go),
+        "typescript" => Some(Lang::Node),
+        "python" => Some(Lang::Python),
+        _ => None,
+    }
+}
+
+/// What the toolchain check did, for the report.
+struct ToolchainCheck {
+    step: project::Step,
+    /// An upgrade ran and succeeded: read the version again.
+    upgraded: bool,
+}
+
+/// Puts the check's result in the plan (a dry run says what it would do), and, when the
+/// toolchain is behind, offers the upgrade: at a terminal a yes/no question that defaults to
+/// no, and the command runs only on a yes; without a terminal, with `--yes` or in a dry run
+/// the command is printed and never run. Nothing here fails `init`.
+///
+/// # Errors
+/// The person cancelled the question.
+fn check_toolchain(
+    flow: &mut Flow,
+    interactive: bool,
+    lang: Lang,
+    state: &State,
+) -> Result<ToolchainCheck, Error> {
+    let ui = flow.ui;
+    let said = state.said(lang);
+    let step = |st: &str, text: String| project::step("toolchain", "Toolchain", st, text, "");
+    let State::Behind { latest, .. } = state else {
+        flow.gate("toolchain", &format!("report the toolchain check: {said}"));
+        let (st, text) = if matches!(state, State::Unchecked { .. }) {
+            ("skipped", said)
+        } else {
+            ("done", said)
+        };
+        return Ok(ToolchainCheck {
+            step: step(st, text),
+            upgraded: false,
+        });
+    };
+    let up = toolchain::upgrade_here(lang, latest);
+    let how = if up.run.is_some() {
+        "asked first, never run by default"
+    } else {
+        "for you to run"
+    };
+    if !flow.gate(
+        "toolchain",
+        &format!(
+            "report the toolchain check: {said}; upgrade with `{}` ({how})",
+            up.shown
+        ),
+    ) {
+        return Ok(ToolchainCheck {
+            step: step("ask", format!("{said}; upgrade with `{}`", up.shown)),
+            upgraded: false,
+        });
+    }
+    let behind = format!("{said}; upgrade with `{}`", up.shown);
+    if up.run.is_none() || !interactive {
+        ui.info(&format!("{behind} (iohr did not run it)"));
+        return Ok(ToolchainCheck {
+            step: step("ask", behind),
+            upgraded: false,
+        });
+    }
+    ui.info(&said);
+    let yes = ui.confirm(
+        &format!("Upgrade {} now with `{}`?", lang.label(), up.shown),
+        false,
+    )?;
+    if !yes {
+        return Ok(ToolchainCheck {
+            step: step("ask", behind),
+            upgraded: false,
+        });
+    }
+    match toolchain::run_upgrade(&up) {
+        Ok(()) => Ok(ToolchainCheck {
+            step: step(
+                "done",
+                format!("upgraded {} with `{}`", lang.label(), up.shown),
+            ),
+            upgraded: true,
+        }),
+        Err(why) => {
+            ui.warn(&format!("the upgrade did not finish: {why}"));
+            Ok(ToolchainCheck {
+                step: step("skipped", format!("{behind}; it did not finish: {why}")),
+                upgraded: false,
+            })
+        }
+    }
+}
+
+/// The most turns the agent gets in `init` when neither a flag nor `[project] agent_turns` says:
+/// init's own default, because `[ask]` in config.toml has no bound. Enough to fetch a site and
+/// write a knowledge base; a wrong request still cannot run away.
+const AGENT_TURNS: u32 = 150;
+/// The most seconds the agent gets in `init` when neither a flag nor `[project] agent_timeout`
+/// says (init's own default).
+const AGENT_SECONDS: u64 = 1800;
+/// The Claude model an `init` agent run uses when neither the flag (`--agent-model`,
+/// `IOHR_INIT_AGENT_MODEL`) nor `[project] agent_model` names one: a build of many files needs
+/// more than the small fast tier `iohr ask` answers with.
+const AGENT_MODEL: &str = "sonnet";
 
 #[allow(
     clippy::too_many_lines,
@@ -574,7 +736,9 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             "--describe needs words: what do you want built?".into(),
         ));
     }
-    if a.agent_turns == Some(0) || a.agent_timeout == Some(0) {
+    if a.agent_turns.or(cfg.project.agent_turns) == Some(0)
+        || a.agent_timeout.or(cfg.project.agent_timeout) == Some(0)
+    {
         return Err(Error::Usage(
             "--agent-turns and --agent-timeout need a number above 0".into(),
         ));
@@ -583,6 +747,9 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         return Err(Error::Failed(no_agent_help()));
     }
     let root = template::user_root()?;
+    // The latest stable of each installed language is looked up on threads of its own while
+    // the person answers; never under --json, and never a reason for init to fail.
+    start_toolchain_check(&a, interactive, out);
     if ui.fancy() {
         ui.intro(if dry {
             "iohr project init (dry run)"
@@ -599,7 +766,15 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         ui,
         interactive,
         agent: &agent,
-        ask_model: cfg.ask.model.clone(),
+        agent_model: a.agent_model.clone().or(cfg.project.agent_model.clone()),
+        agent_turns: a
+            .agent_turns
+            .or(cfg.project.agent_turns)
+            .unwrap_or(AGENT_TURNS),
+        agent_timeout: a
+            .agent_timeout
+            .or(cfg.project.agent_timeout)
+            .unwrap_or(AGENT_SECONDS),
         ask_thinking: cfg.ask.thinking.clone(),
         out,
     };
@@ -1058,7 +1233,11 @@ struct Exec<'a> {
     ui: Ui,
     interactive: bool,
     agent: &'a Option<(Agent, PathBuf)>,
-    ask_model: Option<String>,
+    /// `--agent-model`, `IOHR_INIT_AGENT_MODEL`, else `[project] agent_model`.
+    agent_model: Option<String>,
+    /// The turn cap and the time cap: the flag, else `[project]`, else init's own default.
+    agent_turns: u32,
+    agent_timeout: u64,
     ask_thinking: Option<String>,
     out: Out,
 }
@@ -1119,6 +1298,50 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             project::one_line_description(describe.as_deref()),
         ));
     }
+    // The installed toolchain, read once: its version fills the files that name one
+    // (`rust-version`) and is told to the agent. A toolchain that will not run keeps the
+    // variant's own default and is not told.
+    let variant = lang.as_deref().and_then(|l| tpl.variant(l));
+    let docs_only = variant.is_some_and(template::VariantDef::is_docs_only);
+    // What this binary is called: the agent runs it by that name, AGENTS.md names it.
+    let me = super::shell::running_bin();
+    // Everything that changes anything goes through `flow`.
+    let mut flow = Flow {
+        dry,
+        ui,
+        would: Vec::new(),
+    };
+    let mut toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+    // Is it behind the latest stable? (Off under --json, and when the lookup found nothing.)
+    let tool_lang = variant.and_then(|v| Lang::of_toolchain(&v.toolchain));
+    let mut tool_step = None;
+    if let Some(l) = tool_lang
+        && let Some(state) = toolchain::state(l)
+    {
+        // A lookup that ran out of time under load has not read the installed version; this
+        // function has (the line above), so the report still names what is installed.
+        let state = match state {
+            State::Unchecked { installed: None } => State::Unchecked {
+                installed: toolchain.as_deref().and_then(project::installed_version),
+            },
+            other => other,
+        };
+        let done = check_toolchain(&mut flow, interactive, l, &state)?;
+        if done.upgraded {
+            // The files and the agent are told the version that is there now.
+            toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+        }
+        tool_step = Some(done.step);
+    }
+    if let Some((full, minor)) = toolchain.as_deref().and_then(template::version_in) {
+        for (k, v) in [
+            ("@@TOOLCHAIN_VERSION@@", full),
+            ("@@TOOLCHAIN_MINOR@@", minor),
+        ] {
+            vals.retain(|(x, _)| x != k);
+            vals.push((k.to_owned(), v));
+        }
+    }
     let mut files = template::render(&tpl_lang, &vals).map_err(Error::Failed)?;
     // Every project gets its InOrbit space link, whatever the template (RFC 0103).
     project::add_space_link(&mut files, None);
@@ -1131,6 +1354,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             lang: lang.as_deref(),
             describe: describe.as_deref(),
             created_at: &created_at,
+            bin: &me,
         },
     );
     let programs = template::programs(tpl, &vals);
@@ -1163,7 +1387,8 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
 
     // The steps, and the agent that will run, if one will.
     let mut steps = tpl.steps();
-    if a.no_smoke {
+    // A documents-only language has no program: no smoke test, the plan says nothing about one.
+    if a.no_smoke || docs_only {
         steps.retain(|s| s.name != StepName::Smoke);
     }
     let step_prompt = steps
@@ -1203,21 +1428,41 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 &tpl.meta.id,
                 answers,
                 &vals,
-                &crate::front::today(),
+                project::Facts {
+                    toolchain: toolchain.as_deref(),
+                    today: &crate::front::today(),
+                    bin: &me,
+                    docs_only,
+                },
             );
-            // The `[ask]` model (else the small fast tier), edits to files only, never shell,
-            // and init's own bounds: nothing the agent is told or says is stored here.
-            let model =
-                ask::choose_model(*ag, None, cx.ask_model.as_deref()).map_err(Error::Usage)?;
-            let max_turns = a.agent_turns.unwrap_or(AGENT_TURNS);
+            // The language's own build and test commands, scoped, and iohr's own document and
+            // memory commands by the name this binary runs under; nothing else of the shell.
+            let mut allow: Vec<String> = variant.map(|v| v.agent_allow.clone()).unwrap_or_default();
+            allow.extend(init_allow(&me));
+            // Init's own model (sonnet unless named), edits to files, the commands above and
+            // init's own bounds: nothing the agent is told or says is stored here.
+            let model = ask::choose_model(
+                *ag,
+                cx.agent_model.as_deref(),
+                (*ag == Agent::Claude).then_some(AGENT_MODEL),
+            )
+            .map_err(Error::Usage)?;
+            let max_turns = cx.agent_turns;
             agent_run = Some(AgentRun {
                 agent: *ag,
                 bin: bin.clone(),
-                args: ask::argv(*ag, model.as_deref(), true, Some(max_turns), &prompt),
+                args: ask::argv(
+                    *ag,
+                    model.as_deref(),
+                    true,
+                    &allow,
+                    Some(max_turns),
+                    &prompt,
+                ),
                 prompt,
                 model,
                 max_turns,
-                timeout: Duration::from_secs(a.agent_timeout.unwrap_or(AGENT_SECONDS)),
+                timeout: Duration::from_secs(cx.agent_timeout),
                 thinking: ask::choose_thinking(None, cx.ask_thinking.as_deref())
                     .map_err(Error::Usage)?,
             });
@@ -1244,12 +1489,6 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         steps.insert(st, agent_step);
     }
 
-    // Everything below that changes anything goes through `flow`.
-    let mut flow = Flow {
-        dry,
-        ui,
-        would: Vec::new(),
-    };
     let state_root = state_root()?;
     let state = state_root.join(name);
     let signed_in = flow
@@ -1266,6 +1505,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         files: files.iter().map(|(p, _)| p.clone()).collect(),
         steps: Vec::new(),
     };
+    report.steps.extend(tool_step);
     let setup = format!(
         "write {} files into {} ({})",
         files.len(),
@@ -1299,8 +1539,8 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let roles = flow
         .act_async(
             "roles",
-            "import the built-in roles into InOrbit (kept local when signed out)",
-            || super::atlas::import_for(g, env, &dir, false),
+            "import the built-in roles into your InOrbit account (they stay in the project when you are signed out)",
+            || super::atlas::import_for(g, env, &dir, false, false),
         )
         .await;
     if let Some(r) = roles.as_ref().filter(|_| !out.json) {
@@ -1308,6 +1548,8 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
+    let mut agent_built = false;
+    let mut stop_note: Option<String> = None;
     for s in &steps {
         match s.name {
             StepName::Git => {
@@ -1367,18 +1609,22 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             StepName::Agent => {
                 if let Some(r) = &agent_run {
                     let what = format!(
-                        "run {} once in print mode in {} (files only, never shell; at most {} turns and {} s) with the prompt below (not started in a dry run)",
+                        "run {} ({}) once in print mode in {} (it may edit files, fetch pages and run only the language's build and test commands and iohr's atlas and memory commands; at most {} turns and {} s) with the prompt below (not started in a dry run)",
                         r.agent.name(),
+                        r.model.as_deref().unwrap_or("its own model"),
                         dir.display(),
                         r.max_turns,
                         r.timeout.as_secs()
                     );
-                    // The AI label is printed either way; the agent starts only past the gate.
-                    Out::note(&ask::label_for(
-                        "iohr project init",
-                        "AI-built project",
-                        r.agent,
-                    ));
+                    // The AI label is printed once: in the plan pass that a real run follows
+                    // it would show twice, so only the run (or a `--dry-run`) draws it.
+                    if !preview || a.dry_run {
+                        ui.info(&ask::label_for(
+                            "iohr project init",
+                            "AI-built project",
+                            r.agent,
+                        ));
+                    }
                     if dry {
                         flow.gate("agent", &what);
                     } else if flow.gate("agent", &what) {
@@ -1416,22 +1662,48 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                             Out::raw(format!("{line}\n").as_bytes());
                         }
                         if ended.code == 0 {
+                            agent_built = true;
                             report.steps.push(project::step(
                                 "agent",
                                 "Agent build",
                                 "done",
                                 format!(
-                                    "{} built it in {secs} s, files only, never shell; AI-built, check it",
-                                    r.agent.name()
+                                    "{} built it in {secs} s with edits{}; AI-built, check it",
+                                    r.agent.name(),
+                                    if docs_only {
+                                        ", the project's atlas and memory commands and the web"
+                                    } else {
+                                        " and the language's build and test commands only"
+                                    }
                                 ),
                                 "",
                             ));
                         } else {
-                            let why = if ended.timed_out {
-                                format!(
-                                    "it did not finish in {} s and was stopped",
-                                    r.timeout.as_secs()
-                                )
+                            let stopped = if ended.timed_out {
+                                Some(Stop::Time(r.timeout.as_secs()))
+                            } else {
+                                ended.turn_capped.then_some(Stop::Turns)
+                            };
+                            let why = if let Some(st) = stopped {
+                                let why = st.said(r.max_turns);
+                                // The work so far is on disk: leave a short note for the run
+                                // that goes on from it (`ask --allow-edits` reads it).
+                                match handoff::write(
+                                    &dir,
+                                    describe.as_deref().unwrap_or("the template's prompt"),
+                                    &ended.last_said,
+                                    &why,
+                                    &me,
+                                ) {
+                                    Ok(n) => {
+                                        stop_note = Some(format!(
+                                            "{n} files are in the folder; {} says what is left",
+                                            handoff::FILE
+                                        ));
+                                    }
+                                    Err(e) => ui.warn(&format!("no handoff note: {e}")),
+                                }
+                                why
                             } else {
                                 ended.failure.clone().unwrap_or_else(|| {
                                     format!("it exited with code {}", ended.code)
@@ -1452,6 +1724,28 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
     }
 
+    // The agent's work is its own commit, once the smoke test has passed it.
+    if agent_built
+        && !dry
+        && agent_failed.is_none()
+        && let Some(r) = &agent_run
+    {
+        let st = project::ai_commit(
+            &dir,
+            name,
+            r.agent.name(),
+            smoke.as_ref().map(|s| s.ok),
+            docs_only,
+        );
+        if !out.json {
+            if st.state == "skipped" {
+                ui.warn(&st.said);
+            } else {
+                ui.info(&st.said);
+            }
+        }
+        report.steps.push(st);
+    }
     if dry {
         dry_report(
             &flow,
@@ -1521,8 +1815,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     if let Some(why) = agent_failed {
         // The scaffold stays; one line says how to go on from it.
+        let kept = stop_note.map_or_else(String::new, |n| format!(" ({n})"));
         return Err(Error::Failed(format!(
-            "the agent did not finish: {why}. The project is kept in {}; retry the agent there with `cd {} && iohr ask --allow-edits \"what you want\"`",
+            "the agent did not finish: {why}. The project is kept in {}{kept}; continue with `cd {} && {me} ask --allow-edits \"continue the work\"` (it reads the note), or raise the caps with --agent-turns and --agent-timeout",
             place.shown, place.shown
         )));
     }
@@ -1582,17 +1877,16 @@ fn dry_report(
     }
     flow.ui.note(
         &format!("{} files, none written", files.len()),
-        &files
-            .iter()
-            .map(|(p, t)| format!("{p}  ({} bytes)", t.len()))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        &plan_lines(files.iter().map(|(p, t)| (p.as_str(), t.len()))).join("\n"),
     );
     if let Some(r) = agent {
         flow.ui.note(
             "The agent would get (AI)",
             &format!(
-                "cd {}\n{}\n\n{}",
+                "model {}, at most {} turns and {} s\n\ncd {}\n{}\n\n{}",
+                r.model.as_deref().unwrap_or("its own"),
+                r.max_turns,
+                r.timeout.as_secs(),
                 report.dir.display(),
                 ask::shell_line(
                     &r.bin.display().to_string(),
@@ -1685,7 +1979,45 @@ fn later_line(n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{later_line, publisher_of};
+    use super::{Lang, lang_of_variant, language_choices, later_line, publisher_of};
+    use crate::template::{self, Spec};
+    use std::path::Path;
+
+    #[test]
+    fn the_picker_hint_says_where_the_installed_toolchain_stands() {
+        let tpl =
+            template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
+        let hint_of = |id: &str, behind: Option<&str>| {
+            let (choices, _) = language_choices(
+                &tpl,
+                |_| true,
+                |v| {
+                    (v.id == "rust")
+                        .then(|| behind.map(str::to_owned))
+                        .flatten()
+                },
+            );
+            choices.into_iter().find(|c| c.value == id).unwrap().hint
+        };
+        assert!(
+            hint_of("rust", Some("rustc 1.90.0, 1.93.0 is out"))
+                .starts_with("cargo found \u{b7} rustc 1.90.0, 1.93.0 is out"),
+            "{}",
+            hint_of("rust", Some("rustc 1.90.0, 1.93.0 is out"))
+        );
+        // No lookup (offline off, --json, a language with no source): the hint is as before.
+        assert!(hint_of("rust", None).starts_with("cargo found"));
+        assert!(!hint_of("rust", None).contains('\u{b7}'));
+    }
+
+    #[test]
+    fn a_variant_id_is_its_language() {
+        assert_eq!(lang_of_variant("typescript"), Some(Lang::Node));
+        assert_eq!(lang_of_variant("rust"), Some(Lang::Rust));
+        assert_eq!(lang_of_variant("go"), Some(Lang::Go));
+        assert_eq!(lang_of_variant("python"), Some(Lang::Python));
+        assert_eq!(lang_of_variant("cobol"), None);
+    }
 
     #[test]
     fn the_later_line_counts_and_points_at_verbose() {
@@ -1703,5 +2035,52 @@ mod tests {
         assert_eq!(publisher_of(None, None), "local");
         assert_eq!(publisher_of(Some("bad slug"), None), "local");
         assert_eq!(publisher_of(Some("x"), None), "local");
+    }
+}
+
+/// The dry run's file list: one line per file, except that a folder holding more than
+/// [`FOLDED`] files (the memory facts) is one line with its count and size.
+fn plan_lines<'a>(files: impl Iterator<Item = (&'a str, usize)> + Clone) -> Vec<String> {
+    const FOLDED: usize = 5;
+    let folder = |p: &'a str| p.rsplit_once('/').map_or("", |(d, _)| d);
+    let mut counts: std::collections::BTreeMap<&str, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for (p, n) in files.clone() {
+        let c = counts.entry(folder(p)).or_default();
+        c.0 += 1;
+        c.1 += n;
+    }
+    let mut shown = std::collections::BTreeSet::new();
+    let mut lines = Vec::new();
+    for (p, n) in files {
+        let d = folder(p);
+        match counts.get(d) {
+            Some(&(count, bytes)) if !d.is_empty() && count > FOLDED => {
+                if shown.insert(d) {
+                    lines.push(format!("{d}/  ({count} files, {bytes} bytes)"));
+                }
+            }
+            _ => lines.push(format!("{p}  ({n} bytes)")),
+        }
+    }
+    lines
+}
+
+#[cfg(test)]
+mod plan_lines_tests {
+    #[test]
+    fn a_folder_of_many_files_is_one_line_and_the_rest_stay_one_per_file() {
+        let mut files = vec![("README.md", 10), ("src/main.rs", 20)];
+        let facts: Vec<String> = (0..7).map(|i| format!(".inorbit/memory/f{i}.md")).collect();
+        files.extend(facts.iter().map(|p| (p.as_str(), 3)));
+        let lines = super::plan_lines(files.iter().copied());
+        assert_eq!(
+            lines,
+            [
+                "README.md  (10 bytes)",
+                "src/main.rs  (20 bytes)",
+                ".inorbit/memory/  (7 files, 21 bytes)"
+            ]
+        );
     }
 }

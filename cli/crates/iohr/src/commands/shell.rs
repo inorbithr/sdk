@@ -11,7 +11,7 @@ pub(crate) const ZSH_HOOK: &str = include_str!("shell/hook.zsh");
 
 /// The file name this binary was started as, when it is a plain command name (letters,
 /// digits, `.`, `_`, `-`): the hook is evaluated by a shell, so anything else is `iohr`.
-fn bin_name(arg0: Option<&std::ffi::OsStr>) -> &str {
+pub(crate) fn bin_name(arg0: Option<&std::ffi::OsStr>) -> &str {
     let name = arg0
         .and_then(|a| std::path::Path::new(a).file_name())
         .and_then(std::ffi::OsStr::to_str)
@@ -22,6 +22,12 @@ fn bin_name(arg0: Option<&std::ffi::OsStr>) -> &str {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
     if plain { name } else { "iohr" }
+}
+
+/// The name this process was started as (`iohr`, or `iohr-preview`): what a project's
+/// instructions tell an agent to run, so they call back the binary that made them.
+pub(crate) fn running_bin() -> String {
+    bin_name(std::env::args_os().next().as_deref()).to_owned()
 }
 
 /// The menu key's `bindkey` strings as zsh words, each in single quotes (they hold `^` and `[`).
@@ -39,11 +45,10 @@ pub(crate) fn run(g: &Global, cmd: &ShellCommand) -> Result<(), Error> {
         HookShell::Zsh => {
             // Text that is evaluated: printed as it is, also under `--json`. It calls back the
             // binary that printed it, so `iohr-preview shell hook zsh` asks `iohr-preview`.
-            let name = std::env::args_os().next();
             let key = MenuKey::parse(Ctx::load(g)?.config.ask.menu_key.as_deref())
                 .map_err(Error::Usage)?;
             let hook = ZSH_HOOK
-                .replace("__IOHR_BIN__", bin_name(name.as_deref()))
+                .replace("__IOHR_BIN__", &running_bin())
                 .replace("__IOHR_MENU_KEYS__", &key_words(key));
             Out::raw(hook.as_bytes());
             Ok(())

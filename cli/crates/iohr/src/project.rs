@@ -117,10 +117,9 @@ fn git(dir: &Path, args: &[&str]) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// `git init`, add everything and one commit; false when git did not answer.
-fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
-    git(dir, &["init", "-q", "-b", "main"])
-        && git(dir, &["add", "-A"])
+/// A commit by iohr, with its own identity and no signing, of everything in the folder.
+fn commit_all(dir: &Path, message: &str) -> bool {
+    git(dir, &["add", "-A"])
         && git(
             dir,
             &[
@@ -133,9 +132,95 @@ fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
                 "commit",
                 "-q",
                 "-m",
-                &format!("{name}: new project from the {template} template"),
+                message,
             ],
         )
+}
+
+/// `git init`, add everything and one commit; false when git did not answer.
+fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
+    git(dir, &["init", "-q", "-b", "main"])
+        && commit_all(
+            dir,
+            &format!("{name}: new project from the {template} template"),
+        )
+}
+
+/// The agent's work, committed on its own so the scaffold and what an AI model built stay
+/// apart in `git log`. Runs after the agent and a passing smoke test; the message says so.
+/// `smoke` is the smoke test's verdict, `None` when it did not run. `skipped` when it did not
+/// pass, when the agent changed nothing, or when git did not answer. A documents-only project
+/// (`docs_only`) has no program to run, so no smoke test gates its commit.
+#[must_use]
+pub fn ai_commit(
+    dir: &Path,
+    name: &str,
+    agent: &str,
+    smoke: Option<bool>,
+    docs_only: bool,
+) -> Step {
+    let title = "The agent's work committed";
+    if !docs_only && smoke != Some(true) {
+        let why = if smoke.is_some() {
+            "the smoke test did not pass"
+        } else {
+            "no smoke test ran"
+        };
+        return step(
+            "ai-commit",
+            title,
+            "skipped",
+            format!(
+                "{why}, so what the agent built is left uncommitted in the folder; read it, fix it and commit it yourself"
+            ),
+            "",
+        );
+    }
+    let changed = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| !o.stdout.is_empty());
+    match changed {
+        Some(false) => step(
+            "ai-commit",
+            title,
+            "skipped",
+            "the agent changed nothing",
+            "",
+        ),
+        Some(true)
+            if commit_all(
+                dir,
+                &format!(
+                    "{name}: AI-built changes by {agent}\n\nBuilt by an AI model ({agent}) from the description given to `iohr project init`{}. Review it before you rely on it.",
+                    if docs_only {
+                        ""
+                    } else {
+                        ", after which the smoke test passed"
+                    }
+                ),
+            ) =>
+        {
+            step(
+                "ai-commit",
+                title,
+                "done",
+                format!("a second commit, labelled AI-built ({agent}); `git log` shows it"),
+                "",
+            )
+        }
+        _ => step(
+            "ai-commit",
+            title,
+            "skipped",
+            "git did not answer; what the agent built is left uncommitted",
+            "",
+        ),
+    }
 }
 
 /// Where a project's link to its InOrbit space lives (RFC 0103, "The link"): committed, so
@@ -416,6 +501,21 @@ pub fn register_step(
     Ok((state, s))
 }
 
+/// What iohr read on this machine before the run, so the agent does not guess it.
+#[derive(Debug, Clone, Copy)]
+pub struct Facts<'a> {
+    /// The first line the language's toolchain prints for its version (`rustc --version`).
+    pub toolchain: Option<&'a str>,
+    /// Today, `YYYY-MM-DD`.
+    pub today: &'a str,
+    /// The name of the binary that ran init (`iohr`, `iohr-preview`): the agent runs it by this
+    /// name (`atlas new`, `memory remember`) and tells the person to sync with it.
+    pub bin: &'a str,
+    /// A documents-only project: no language, no test. The prompt is about the atlas and the
+    /// memory, never about code or a passing test.
+    pub docs_only: bool,
+}
+
 /// The prompt the agent gets: the template's own words, then the project, the answers and
 /// what the person described. It goes to the agent's argv and nowhere else.
 #[must_use]
@@ -426,11 +526,15 @@ pub fn agent_prompt(
     template: &str,
     answers: &crate::template::Answers,
     vals: &[(String, String)],
-    today: &str,
+    facts: Facts<'_>,
 ) -> String {
-    let base = template_prompt.unwrap_or(
-        "This folder is a fresh InOrbit project. Build what is described below by editing this folder. Keep it free of secrets.",
-    );
+    let base = if facts.docs_only {
+        DOCS_PROMPT
+    } else {
+        template_prompt.unwrap_or(
+            "This folder is a fresh InOrbit project. Build what is described below by editing this folder. Keep it free of secrets.",
+        )
+    };
     let mut p = crate::template::fill_text(base, vals);
     let _ = write!(
         p,
@@ -445,8 +549,96 @@ pub fn agent_prompt(
     if let Some(d) = describe {
         let _ = write!(p, "\n\nWhat the person wants:\n{d}");
     }
-    let _ = write!(p, "\n\n{}", dated(today));
+    // Facts iohr read before the run, so the agent does not guess them.
+    let _ = write!(
+        p,
+        "\n\nFacts read on this machine just now:\n- {}",
+        dated(facts.today)
+    );
+    if let Some(t) = facts.toolchain {
+        let _ = write!(p, "\n- Installed toolchain: {t}");
+    }
+    let _ = write!(p, "\n\n{}", how_to_work(facts.bin));
+    if !facts.docs_only {
+        let _ = write!(p, "\n\n{LATEST_STABLE}");
+    }
     p
+}
+
+/// What a documents-only project is: the base of its prompt, in place of the template's code
+/// words. No test, no language.
+const DOCS_PROMPT: &str = "This folder is a fresh InOrbit project made of documents, not code. \
+     Do the work described below by writing files in this folder: Markdown documents in atlas/ \
+     and memory notes. There is no program to build and no test to keep passing. Keep it free \
+     of secrets.";
+
+/// How the agent works in a project made by `iohr project init`: the tools it has, the atlas
+/// and memory conventions with the binary's own name, and what the person does next. The same
+/// conventions AGENTS.md holds ([`crate::roles::usage_lines`]), so the two never drift.
+#[must_use]
+pub fn how_to_work(bin: &str) -> String {
+    format!(
+        "How to work here:\n\
+         - Run one simple command per Bash call: no `&&`, `;`, pipes or redirects (a compound \
+           command is refused and wastes a turn). You may run `git status`, `git log`, `git diff`, \
+           `ls`, and `{bin} atlas new`, `{bin} atlas sync --dry-run`, `{bin} memory remember`, \
+           `{bin} memory recall`, `{bin} memory list`, `{bin} memory check`.\n\
+         - Fetch web pages with WebFetch (and look things up with WebSearch), never with curl or \
+           a shell. When WebFetch is not listed among your tools, fetch through the Agent tool: \
+           give a sub-agent the URLs and ask it to return the page text. Read, Glob, Grep, Write \
+           and Edit are open for this folder.\n\
+         - Work in small steps and save each file as you go: you have a limited number of turns, \
+           and what is on disk is what counts. End with a short summary of what you wrote and \
+           what is left.\n\
+         {}\
+         When you are done the person runs `{bin} sync` to send atlas/ to the project's Decisions \
+         space.",
+        crate::roles::usage_lines(bin)
+    )
+}
+
+/// The rule every agent run in a new project carries: what to pick, and where to check it.
+pub const LATEST_STABLE: &str = "Use the latest stable, secure release of every language \
+     feature, tool and dependency you pick. Check it at its upstream repository (releases page \
+     or tags) and its security advisories with WebFetch or WebSearch, and name the version and \
+     where you read it.";
+
+/// What `command` prints first, for the agent's prompt (`rustc 1.99.0 (b940084d7 2026-09-28)`),
+/// else nothing: a toolchain that will not run is told nothing rather than guessed. A version
+/// command is a read, so a dry run runs it too.
+#[must_use]
+pub fn toolchain_line(command: &[String]) -> Option<String> {
+    let (prog, args) = command.split_first()?;
+    let o = Command::new(prog).args(args).output().ok()?;
+    if !o.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&o.stdout);
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(first.chars().take(120).collect())
+}
+
+/// The version in a toolchain's first line, for the comparison with the latest stable:
+/// `rustc 1.99.0 (b940084d7 2026-09-28)` is 1.99.0, `go version go1.27.3 darwin/arm64` is
+/// 1.27.3, `Python 3.14.7` is 3.14.7, `v26.11.1` is 26.11.1; a two-part `1.27` is 1.27.0.
+/// Read with [`template::version_in`], the one parser the `@@TOOLCHAIN_VERSION@@` files
+/// use. A pre-release tag is not kept, so `1.101.0-nightly` compares as 1.101.0. `None`
+/// when the line holds no version: a version is never guessed.
+#[must_use]
+pub fn installed_version(line: &str) -> Option<semver::Version> {
+    let (full, _) = crate::template::version_in(line)?;
+    parse_lenient(&full)
+}
+
+/// `1.27` and `3` as semver, the missing parts zero.
+pub(crate) fn parse_lenient(v: &str) -> Option<semver::Version> {
+    let mut parts = v.trim().split('.');
+    let mut next = || -> Option<u64> { parts.next().map_or(Some(0), |p| p.parse().ok()) };
+    let (major, minor, patch) = (next()?, next()?, next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(semver::Version::new(major, minor, patch))
 }
 
 /// The line every prompt that has a model research or write facts carries, so it does not
@@ -781,6 +973,28 @@ mod tests {
     use super::*;
     use crate::template::{self, Answers, Spec};
 
+    #[test]
+    fn the_installed_version_is_read_from_each_languages_own_line() {
+        let v = |l: &str| installed_version(l).map(|v| v.to_string());
+        assert_eq!(
+            v("rustc 1.90.0 (1159e78c4 2025-09-14)").as_deref(),
+            Some("1.90.0")
+        );
+        assert_eq!(
+            v("go version go1.25.3 darwin/arm64").as_deref(),
+            Some("1.25.3")
+        );
+        assert_eq!(v("Python 3.13.7").as_deref(), Some("3.13.7"));
+        assert_eq!(v("v24.9.0").as_deref(), Some("24.9.0"));
+        // Two parts get a zero patch; a prerelease or a line with no version gives none.
+        assert_eq!(
+            v("go version go1.26 linux/amd64").as_deref(),
+            Some("1.26.0")
+        );
+        assert_eq!(v("command not found"), None);
+        assert_eq!(v(""), None);
+    }
+
     fn rendered(id: &str, name: &str) -> Vec<(String, String)> {
         rendered_in(id, name, "python").0
     }
@@ -891,6 +1105,74 @@ mod tests {
     }
 
     #[test]
+    fn the_agents_work_is_a_second_ai_labelled_commit_only_after_a_passing_smoke_test() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "scaffold").unwrap();
+        assert!(first_commit(d.path(), "x", "blank"));
+        let log = |dir: &Path| {
+            let o = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["log", "--format=%s"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&o.stdout).into_owned()
+        };
+        // Nothing the agent changed: nothing to commit.
+        assert_eq!(
+            ai_commit(d.path(), "x", "claude", Some(true), false).state,
+            "skipped"
+        );
+        std::fs::write(d.path().join("b.txt"), "built by the agent").unwrap();
+        // Smoke failed, or did not run: the tree stays dirty and the step says so.
+        for smoke in [Some(false), None] {
+            let st = ai_commit(d.path(), "x", "claude", smoke, false);
+            assert_eq!(st.state, "skipped");
+            assert!(st.said.contains("left uncommitted"), "{}", st.said);
+            assert_eq!(log(d.path()).lines().count(), 1);
+        }
+        let st = ai_commit(d.path(), "x", "claude", Some(true), false);
+        assert_eq!(st.state, "done", "{}", st.said);
+        let l = log(d.path());
+        assert_eq!(l.lines().count(), 2, "{l}");
+        assert!(
+            l.lines()
+                .next()
+                .unwrap()
+                .contains("AI-built changes by claude")
+        );
+    }
+
+    #[test]
+    fn a_documents_project_commits_the_agents_work_with_no_smoke_test() {
+        let d = tempfile::tempdir().unwrap();
+        for a in [
+            &["init", "-q"][..],
+            &["config", "user.email", "t@example.com"],
+            &["config", "user.name", "t"],
+            &["commit", "-q", "--allow-empty", "-m", "first"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(d.path())
+                    .args(a)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        std::fs::write(d.path().join("a.md"), "a document").unwrap();
+        // Not a docs project: no smoke test, nothing committed. A docs project: committed.
+        assert_eq!(
+            ai_commit(d.path(), "x", "claude", None, false).state,
+            "skipped"
+        );
+        let st = ai_commit(d.path(), "x", "claude", None, true);
+        assert_eq!(st.state, "done", "{}", st.said);
+    }
+
+    #[test]
     fn the_agent_prompt_holds_the_template_words_the_answers_and_the_description() {
         let mut a = Answers::new();
         a.insert("flavour".into(), template::Answer::Text("fancy".into()));
@@ -902,15 +1184,58 @@ mod tests {
             "demo",
             &a,
             &vals,
-            "2026-11-05",
+            Facts {
+                toolchain: Some("rustc 1.99.0 (b940084d7 2026-09-28)"),
+                today: "2026-11-05",
+                bin: "iohr",
+                docs_only: false,
+            },
         );
         assert!(p.starts_with("Module my_shop."));
+        assert!(p.contains("- Installed toolchain: rustc 1.99.0 (b940084d7 2026-09-28)"));
+        assert!(p.ends_with(LATEST_STABLE) && p.contains("upstream repository"));
         assert!(p.contains("- flavour: fancy") && p.contains("sell hats"));
-        assert!(p.ends_with(&dated("2026-11-05")));
+        assert!(p.contains(&dated("2026-11-05")));
         assert!(p.contains(
             "Today is 2026-11-05. Use the newest edition or version published as of today;"
         ));
         assert!(p.contains("if you are unsure a newer one exists, say so."));
+    }
+
+    #[test]
+    fn a_documents_project_prompt_names_the_binary_and_has_no_code_words() {
+        let a = Answers::new();
+        let vals = template::values("velebit-ai", "local", "", &a);
+        let p = agent_prompt(
+            Some("keep the test passing (@@RUN_TEST@@)"),
+            Some("build the knowledge base"),
+            "velebit-ai",
+            "blank",
+            &a,
+            &vals,
+            Facts {
+                toolchain: None,
+                today: "2026-11-06",
+                bin: "iohr-preview",
+                docs_only: true,
+            },
+        );
+        assert!(
+            !p.contains("test passing") && !p.contains(LATEST_STABLE),
+            "{p}"
+        );
+        for want in [
+            "documents, not code",
+            "one simple command per Bash call",
+            "WebFetch",
+            "`iohr-preview atlas new <prd|rfc|adr|study>",
+            "`iohr-preview memory remember",
+            "`iohr-preview sync`",
+            "build the knowledge base",
+        ] {
+            assert!(p.contains(want), "missing {want}: {p}");
+        }
+        assert!(!p.contains("`iohr "), "{p}");
     }
 
     /// The program a variant needs, on this machine's PATH?
@@ -944,10 +1269,84 @@ mod tests {
     /// skeleton with one test: no panel, no manifest, no heartbeat, nothing about macOS. Each
     /// language renders whole, and where its toolchain is here its own test is the smoke test.
     #[test]
+    fn the_rust_templates_use_edition_2024_and_the_installed_minor_and_the_readme_has_no_stray_ticks()
+     {
+        for id in ["blank", "demo"] {
+            let (files, _) = rendered_in(id, "my-shop", "rust");
+            let cargo = &files.iter().find(|(p, _)| p == "Cargo.toml").unwrap().1;
+            assert!(cargo.contains("edition = \"2024\""), "{id}: {cargo}");
+            // Nothing probed in this helper, so the variant's own floor (the first release with
+            // edition 2024) stands; the real run swaps in the installed toolchain's minor.
+            assert!(cargo.contains("rust-version = \"1.85\""), "{id}: {cargo}");
+        }
+        for lang in ["rust", "go", "python", "typescript"] {
+            let (files, _) = rendered_in("blank", "my-shop", lang);
+            let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+            let block = readme
+                .split("```sh\n")
+                .nth(1)
+                .unwrap()
+                .split("```")
+                .next()
+                .unwrap();
+            assert!(
+                !block.contains('`') && !block.trim().is_empty(),
+                "{lang}: {block:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_version_is_read_out_of_the_first_line_a_toolchain_prints() {
+        for (line, full, minor) in [
+            ("rustc 1.99.0 (b940084d7 2026-09-28)", "1.99.0", "1.99"),
+            ("go version go1.27.3 darwin/arm64", "1.27.3", "1.27"),
+            ("Python 3.14.7", "3.14.7", "3.14"),
+            ("v26.11.1", "26.11.1", "26.11"),
+        ] {
+            assert_eq!(
+                template::version_in(line),
+                Some((full.into(), minor.into())),
+                "{line}"
+            );
+        }
+        assert_eq!(template::version_in("no version here"), None);
+        assert_eq!(template::version_in("build 7"), None);
+    }
+
+    #[test]
+    fn every_live_language_names_the_commands_the_agent_may_run_and_the_toolchain_to_read() {
+        let t = template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
+        let allow = |id: &str| t.variant(id).unwrap().agent_allow.clone();
+        assert_eq!(
+            allow("rust"),
+            ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+        );
+        assert_eq!(allow("go"), ["go build", "go test", "go vet"]);
+        // The documents variant has no program: no build commands, no toolchain.
+        let docs = t.variant("docs").unwrap();
+        assert!(docs.is_docs_only() && docs.agent_allow.is_empty() && docs.toolchain.is_empty());
+        for v in t.live_variants().into_iter().filter(|v| !v.is_docs_only()) {
+            assert!(
+                !v.agent_allow.is_empty() && !v.toolchain.is_empty(),
+                "{}",
+                v.id
+            );
+            assert!(
+                v.agent_allow
+                    .iter()
+                    .all(|c| !c.starts_with("bash") && !c.starts_with("sh ")),
+                "{}",
+                v.id
+            );
+        }
+    }
+
+    #[test]
     fn the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test() {
         let tpl =
             template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
-        assert_eq!(tpl.live_variants().len(), 4);
+        assert_eq!(tpl.live_variants().len(), 5);
         for v in tpl.live_variants() {
             let (files, runner) = rendered_in("blank", "my-shop", &v.id);
             let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
@@ -981,6 +1380,11 @@ mod tests {
             let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
             if !missing.is_empty() {
                 eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
+                continue;
+            }
+            // A documents project has nothing to run: init drops its Smoke step.
+            if v.is_docs_only() {
+                assert!(runner.as_ref().is_some_and(|r| r.test.is_empty()), "docs");
                 continue;
             }
             let tmp = tempfile::tempdir().unwrap();

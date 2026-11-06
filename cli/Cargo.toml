@@ -5,7 +5,7 @@ members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/ioh
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0-alpha.36"
+version = "0.1.0-alpha.37"
 edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
@@ -57,6 +57,9 @@ url = "2"
 zeroize = "1"
 
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
+# The version apple-native-keyring-store already uses: `QuietStore` switches the Keychain's
+# dialogs off through it.
+security-framework = "3.7"
 windows-native-keyring-store = "1"
 zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 

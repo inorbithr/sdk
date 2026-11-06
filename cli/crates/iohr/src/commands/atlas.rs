@@ -99,6 +99,7 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
     let moved = move_legacy_roles(&root, out)?;
     let (name, template) = project_meta(&root);
     let created_at = super::project::now();
+    let bin = super::shell::running_bin();
     // The language the project declares, else the one its build file shows.
     let lang = roles::detect_language(&root);
     let mut written = atlas::ensure(
@@ -109,14 +110,15 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
             lang,
             describe: None,
             created_at: &created_at,
+            bin: &bin,
         },
     )
     .map_err(Error::Failed)?;
     if roles::ensure_record(&root, lang).map_err(Error::Failed)? {
         written.push("inorbit.toml".to_owned());
     }
-    written.extend(roles::ensure_agents(&root).map_err(Error::Failed)?);
-    let report = import_for(g, env, &root, false).await;
+    written.extend(roles::ensure_agents(&root, &bin).map_err(Error::Failed)?);
+    let report = import_for(g, env, &root, false, false).await;
     if out.json {
         Out::print_json(&serde_json::json!({
             "root": root.display().to_string(),
@@ -140,9 +142,15 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
 
 /// Imports the project's roles when signed in; never fails (a failed import is
 /// in the report, and `iohr sync` tries again).
-pub(crate) async fn import_for(g: &Global, env: &Env, root: &Path, dry: bool) -> Report {
+pub(crate) async fn import_for(
+    g: &Global,
+    env: &Env,
+    root: &Path,
+    dry: bool,
+    upgrade: bool,
+) -> Report {
     let session = session(g, env).await.ok();
-    roles::import(session.as_ref().map(|s| &s.api), root, dry).await
+    roles::import(session.as_ref().map(|s| &s.api), root, dry, upgrade).await
 }
 
 /// One line per role, then the one line about what could not happen.
@@ -203,10 +211,14 @@ async fn roles_cmd(g: &Global, env: &Env, cmd: RolesCommand, out: Out) -> Result
             );
             Ok(())
         }
-        RolesCommand::Import { dry_run, dir } => {
+        RolesCommand::Import {
+            dry_run,
+            upgrade,
+            dir,
+        } => {
             let root = root_of(dir)?;
             move_legacy_roles(&root, out)?;
-            let report = import_for(g, env, &root, dry_run).await;
+            let report = import_for(g, env, &root, dry_run, upgrade).await;
             if out.json {
                 Out::print_json(&serde_json::json!({ "dry_run": dry_run, "roles": report }));
                 return Ok(());
@@ -378,7 +390,7 @@ async fn sync_documents(
     }
     let local = atlas::local_only(&root);
     // The built-in roles go with the documents; a failed import never fails the sync.
-    let report = import_for(g, env, &root, args.dry_run).await;
+    let report = import_for(g, env, &root, args.dry_run, false).await;
     if out.json {
         Out::print_json(&serde_json::json!({
             "space": space,

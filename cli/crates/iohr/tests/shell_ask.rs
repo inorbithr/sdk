@@ -111,9 +111,11 @@ fn json_is_the_documented_shape_and_never_the_question() {
             "exit_code",
             "label",
             "model",
+            "questions",
             "via"
         ]
     );
+    assert_eq!(v["questions"], serde_json::json!([]));
     assert_eq!(v["answer"], "It is Rayleigh scattering.");
     assert_eq!(v["agent"], "claude");
     assert_eq!(v["via"], "local");
@@ -180,7 +182,11 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
     let lines: Vec<&str> = err.lines().collect();
     assert_eq!(lines.len(), 1, "{err}");
     assert!(lines[0].starts_with("Io · AI answer -- Io running on Claude Code (local)"));
-    assert!(lines[0].ends_with("nothing was run."), "{err}");
+    // Without a terminal the rules decide, and the label says commands may run under them.
+    assert!(
+        lines[0].ends_with("a command runs only when you or your rules allow it."),
+        "{err}"
+    );
     assert_eq!(text(&out).matches("Rayleigh").count(), 1, "{}", text(&out));
     // A failure is a card too: exit 1, the reason, never the question or the agent's text.
     let login =
@@ -197,7 +203,11 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
 fn the_run_is_bounded_scrubbed_and_never_has_a_forbidden_flag() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
-    let out = r.run(&["ask", "--headless", "q"], OK_JSON, "0");
+    let out = r.run(
+        &["ask", "--headless", "--permissions", "deny", "q"],
+        OK_JSON,
+        "0",
+    );
     assert!(out.status.success(), "{}", text(&out));
     let args: Vec<String> = r.saw("claude.args").lines().map(str::to_owned).collect();
     for bad in [
@@ -216,8 +226,10 @@ fn the_run_is_bounded_scrubbed_and_never_has_a_forbidden_flag() {
     }
     let at = |f: &str| args.iter().position(|a| a == f).unwrap();
     assert_eq!(args[at("--model") + 1], "haiku");
-    assert_eq!(args[at("--max-turns") + 1], "4");
-    assert_eq!(args[at("--tools") + 1], "");
+    // A project folder (not home, not the root) lets the model read its files: a few more
+    // turns, read-only tools, never Bash.
+    assert_eq!(args[at("--max-turns") + 1], "12");
+    assert_eq!(args[at("--tools") + 1], "Read,Grep,Glob");
     assert!(args.contains(&"--no-session-persistence".to_owned()));
     assert!(args.contains(&"--strict-mcp-config".to_owned()));
     assert_eq!(
@@ -768,6 +780,9 @@ def rd(t):
                 break
     return out
 screen = rd(0.5)
+limit = time.time() + 10
+while not screen and time.time() < limit:  # a slow start (a loaded machine) must not eat the key
+    screen = rd(0.2)
 # `key` is one key, or steps split by the unit separator (0x1f): keys as they are, `WINCH:` (resize) and `SIG:NAME`.
 for step in key.split("\x1f"):
     try:
@@ -852,6 +867,104 @@ fn the_menu_letters_print_one_prompt_line_or_nothing_and_copy_uses_tmux() {
             .trim(),
         "load-buffer -w -"
     );
+}
+
+// PRD 0187.1: the menu is a bar of numbered rows in a box under the card. A digit picks a row
+// at once, so do its letter and Enter on the highlighted row; Esc leaves nothing on the screen
+// and nothing on stdout; with NO_COLOR it is plain numbered lines.
+/// `text` without its `ESC [ ... letter` sequences.
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for n in chars.by_ref() {
+                if n.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[test]
+fn the_action_bar_picks_by_number_letter_or_arrows_and_esc_leaves_nothing() {
+    let r = Rig::new();
+    let cmd = ["ask", "--menu", "--command=git status", "--link=notes.md"];
+    let Some((line, screen)) = press_in_menu(&r, &cmd, "1", &[]) else {
+        return;
+    };
+    assert_eq!(line, "git status", "1 is Run: {screen:?}");
+    let plain_screen = strip_escapes(&screen);
+    for want in [
+        "\u{256d}\u{2500} What next?",
+        "[1] Run",
+        "[2] Copy",
+        "[3] Follow up",
+        "[4] Explain",
+        "[5] Open",
+        "\u{2191}\u{2193} move \u{b7} 1-9 or letter pick \u{b7} enter \u{b7} esc",
+    ] {
+        assert!(plain_screen.contains(want), "{want}: {screen:?}");
+    }
+    let (line, _) = press_in_menu(&r, &cmd, "3", &[]).unwrap();
+    assert_eq!(line, "?? ", "3 is Follow up");
+    let (line, _) = press_in_menu(&r, &cmd, "4", &[]).unwrap();
+    assert_eq!(line, "?? explain this command: git status");
+    let (line, _) = press_in_menu(&r, &cmd, "9", &[]).unwrap();
+    assert_eq!(
+        line, "",
+        "no ninth row: the bar holds, then the end of input leaves"
+    );
+    // Arrows (and j) move, Enter picks the highlighted row.
+    let (line, _) = press_in_menu(&r, &cmd, "\u{1b}[B\u{1f}\u{1b}[B\u{1f}\r", &[]).unwrap();
+    assert_eq!(line, "?? ", "Down twice from Run, then Enter");
+    let (line, _) = press_in_menu(&r, &cmd, "j\u{1f}j\u{1f}j\u{1f}k\u{1f}\r", &[]).unwrap();
+    assert_eq!(line, "?? ", "j j j k from Run is Follow up");
+    // Esc and q leave: nothing on stdout, and every line the bar drew is erased again.
+    for key in ["\u{1b}", "q"] {
+        let (line, screen) = press_in_menu(&r, &cmd, key, &[]).unwrap();
+        assert_eq!(line, "", "{key:?}");
+        let drawn = screen.matches('\n').count();
+        let erased = screen.matches("\u{1b}[2K").count();
+        assert!(
+            drawn >= 7 && erased >= 7,
+            "{key:?}: drew {drawn}, erased {erased}: {screen:?}"
+        );
+    }
+}
+
+#[test]
+fn with_no_color_the_action_bar_is_plain_numbered_lines() {
+    let r = Rig::new();
+    let cmd = ["ask", "--menu", "--command=git status"];
+    let Some((line, screen)) = press_in_menu(&r, &cmd, "2", &[("NO_COLOR", "1")]) else {
+        return;
+    };
+    assert_eq!(line, "", "2 is Copy, which prints nothing on stdout");
+    for want in [
+        "What next?",
+        "[1] Run",
+        "[2] Copy",
+        "[3] Follow up",
+        "[4] Explain",
+    ] {
+        assert!(screen.contains(want), "{want}: {screen:?}");
+    }
+    assert!(
+        !screen.contains('\u{2502}') && !screen.contains('\u{256d}'),
+        "{screen:?}"
+    );
+    // No colour or style sequences (`ESC [ ... m`); the cursor ones that erase the bar stay.
+    let mut rest = screen.as_str();
+    while let Some(i) = rest.find("\u{1b}[") {
+        rest = &rest[i + 2..];
+        let end = rest.find(|c: char| c.is_ascii_alphabetic()).unwrap();
+        assert_ne!(&rest[end..=end], "m", "colour in NO_COLOR: {screen:?}");
+    }
 }
 
 // The widget on a real zsh: the key opens the menu under a live answer on an empty line, the
@@ -1026,4 +1139,167 @@ fn bash_and_fish_say_not_built_yet_and_exit_1() {
         assert!(e.contains("not built yet") && e.contains("zsh"), "{e}");
     }
     assert_eq!(hook("nushell").status.code(), Some(2));
+}
+
+// ---------------------------------------------------------------- the card asks back
+
+const ASKS_BACK: &str = "The work is in src.\n```questions\n{\"questions\":[{\"about\":\"purpose\",\"ask\":\"What is this project for?\",\"choices\":[\"A CLI tool\",\"A web service\",\"other\"]}]}\n```\n";
+
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+#[test]
+fn a_questions_block_is_in_json_and_never_in_the_answer() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    std::fs::create_dir_all(r.work().join(".inorbit")).unwrap();
+    let out = r.run(
+        &["--json", "ask", "--headless", "where are we?"],
+        &answer_json(ASKS_BACK),
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["answer"], "The work is in src.");
+    let q = &v["questions"][0];
+    assert_eq!(q["about"], "purpose");
+    assert_eq!(q["ask"], "What is this project for?");
+    // "other" is the card's own key, never one of the model's choices.
+    assert_eq!(
+        q["choices"],
+        serde_json::json!(["A CLI tool", "A web service"])
+    );
+    assert_eq!(v["questions"].as_array().unwrap().len(), 1);
+    // Nothing was kept: only the person's answer is ever written, and iohr writes it.
+    assert!(!r.work().join(".inorbit/memory").exists());
+}
+
+#[test]
+fn without_a_terminal_the_questions_are_plain_lines_and_the_answer_stays_clean() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    std::fs::create_dir_all(r.work().join(".inorbit")).unwrap();
+    let out = r.run(
+        &["ask", "--headless", "where are we?"],
+        &answer_json(ASKS_BACK),
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "The work is in src.\n"
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("Question for you: What is this project for?")
+            && err.contains("[1] A CLI tool"),
+        "{err}"
+    );
+    assert!(!err.contains("```"), "{err}");
+}
+
+#[test]
+fn the_model_is_told_to_ask_only_inside_a_project_and_a_folder_outside_one_gets_none() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    // A project: the notes block is there, so the model may ask.
+    std::fs::create_dir_all(r.work().join(".inorbit")).unwrap();
+    let out = r.run(&["--json", "ask", "--headless", "q"], OK_JSON, "0");
+    assert!(out.status.success(), "{}", text(&out));
+    let m = r.saw("claude.stdin");
+    assert!(m.contains("<project>\nnothing is written down yet"), "{m}");
+    // Not a project: no <project> block, so there is nowhere to keep an answer.
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let out = r.run(&["--json", "ask", "--headless", "q"], OK_JSON, "0");
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!r.saw("claude.stdin").contains("<project>\nnothing"));
+}
+
+#[test]
+fn git_facts_come_from_iohr_and_the_model_has_no_way_to_run_git() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let w = r.work();
+    git_in(&w, &["init", "-q", "-b", "trunk"]);
+    std::fs::write(w.join("a.txt"), "x").unwrap();
+    git_in(&w, &["add", "a.txt"]);
+    git_in(&w, &["commit", "-q", "-m", "first change"]);
+    std::fs::write(w.join("b.txt"), "y").unwrap();
+    let out = r.run(
+        &[
+            "--json",
+            "ask",
+            "--headless",
+            "--permissions",
+            "deny",
+            "where are we?",
+        ],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let m = r.saw("claude.stdin");
+    assert!(m.contains("<git>\nbranch: trunk"), "{m}");
+    assert!(m.contains("first change"), "{m}");
+    assert!(m.contains("1 untracked"), "{m}");
+    // The model's tools are the read-only ones, never Bash: git was read by iohr, not by it.
+    let args = r.saw("claude.args");
+    let lines: Vec<&str> = args.lines().collect();
+    let at = lines.iter().position(|l| *l == "--tools").unwrap();
+    assert_eq!(lines[at + 1], "Read,Grep,Glob", "{args}");
+    // The brief says what to do with the facts.
+    assert!(
+        args.contains("never say you cannot run git or see the history"),
+        "{args}"
+    );
+    assert!(
+        !args.contains("Bash") && !args.contains("--allowedTools"),
+        "{args}"
+    );
+    // The label says it was read.
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["label"]
+            .as_str()
+            .unwrap()
+            .contains("the git branch, last commits and change counts")
+    );
+}
+
+#[test]
+fn the_menu_offers_asks_only_when_some_wait_and_puts_the_list_on_the_prompt() {
+    let r = Rig::new();
+    let count = r.home.path().join("asks-count");
+    let file = count.to_str().unwrap();
+    let cmd = ["ask", "--menu", "--command=git status"];
+    // None waiting: the key is not offered, so it prints nothing.
+    std::fs::write(&count, "0\n").unwrap();
+    let Some((line, _)) = press_in_menu(&r, &cmd, "a", &[("IOHR_ASKS_COUNT_FILE", file)]) else {
+        return;
+    };
+    assert_eq!(line, "");
+    // Two waiting: the entry is there, says how many, and fills the prompt with the command.
+    std::fs::write(&count, "2\n").unwrap();
+    let (line, screen) = press_in_menu(&r, &cmd, "a", &[("IOHR_ASKS_COUNT_FILE", file)]).unwrap();
+    assert_eq!(line, "iohr asks list", "{screen:?}");
+    assert!(screen.contains("2 waiting"), "{screen:?}");
 }

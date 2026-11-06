@@ -1,7 +1,7 @@
 name = "go-engineer"
 parent = "base-engineer"
 title = "Go engineer"
-version = 1
+version = 2
 language = "go"
 domain = ["go", "golang", "goroutine", "context"]
 aliases = ["go", "golang"]
@@ -72,3 +72,9 @@ place = "recall"
 section = "Distributed systems"
 text = "Put a timeout on every remote call and retry in one layer, with a limit and backoff with jitter."
 cites = ["https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"]
+
+[[line]]
+place = "recall"
+section = "Dependency currency"
+text = "Go tools for the dependency check (the steps are in the security role's supply-chain lines): proxy.golang.org lists a module's versions; go list -m -u all shows newer ones and go get example.com/pkg@latest takes the latest; vuln.go.dev holds the reviewed vulnerability reports; govulncheck reports only vulnerabilities that affect code you call (exit 0 when none, non-zero when found); go mod tidy after."
+cites = ["https://proxy.golang.org/", "https://go.dev/doc/security/vuln/", "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck", "https://go.dev/doc/modules/managing-dependencies"]

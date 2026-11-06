@@ -49,16 +49,16 @@ impl Look {
             s.color256(ansi)
         }
     }
-    fn violet(self) -> Style {
+    pub(crate) fn violet(self) -> Style {
         self.style((167, 139, 250), 141)
     }
     fn green(self) -> Style {
         self.style((74, 222, 128), 114)
     }
-    fn cyan(self) -> Style {
+    pub(crate) fn cyan(self) -> Style {
         self.style((125, 211, 252), 117)
     }
-    fn dim(self) -> Style {
+    pub(crate) fn dim(self) -> Style {
         self.style((139, 144, 163), 246)
     }
     fn amber(self) -> Style {
@@ -72,7 +72,7 @@ impl Look {
             s.on_color256(141)
         }
     }
-    fn plain(self) -> Style {
+    pub(crate) fn plain(self) -> Style {
         Style::new().force_styling(self.fancy)
     }
 }
@@ -700,18 +700,46 @@ fn body(text: &str, width: usize, look: Look) -> Vec<String> {
     out
 }
 
+/// Set while a permission question is on the terminal, so the spinner leaves the line alone.
+static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Stops (or restarts) the spinner while a question is open.
+pub(crate) fn pause_spin(on: bool) {
+    // Held while the stderr lock is taken in `spin`, so no frame lands after this returns.
+    let _guard = std::io::stderr().lock();
+    PAUSED.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Writes a question's line over the spinner's, without a newline: the answer replaces it.
+pub(crate) fn say(line: &str) {
+    let mut err = std::io::stderr().lock();
+    let _ = write!(err, "\r\x1b[2K{line}");
+    let _ = err.flush();
+}
+
+/// Replaces the question's line with its result and ends the line.
+pub(crate) fn say_done(line: &str) {
+    let mut err = std::io::stderr().lock();
+    let _ = writeln!(err, "\r\x1b[2K{line}");
+    let _ = err.flush();
+}
+
 /// One spinner frame on stderr, over the line before it.
 pub(crate) fn spin(frame: usize, elapsed: Duration, agent: &str, look: Look) {
     let f = FRAMES[frame % FRAMES.len()];
+    let mut err = std::io::stderr().lock();
+    if PAUSED.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let _ = write!(
-        std::io::stderr().lock(),
+        err,
         "\r\x1b[2K{} {} {}",
         look.violet().bold().apply_to(f),
         look.violet().apply_to("Io is thinking"),
         look.dim()
             .apply_to(format!("{:.1}s · {agent}", elapsed.as_secs_f64())),
     );
-    let _ = std::io::stderr().flush();
+    let _ = err.flush();
 }
 
 /// Writes a rendered card to stderr.

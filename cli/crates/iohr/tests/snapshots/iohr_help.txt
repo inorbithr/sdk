@@ -33,6 +33,8 @@ Build:
 
 Agents:
   ask          Ask your own AI agent a question in this folder
+  asks         Read and answer the asks waiting for you: list, show, deny, question
+  permissions  Rules for what Io may run or open when you ask it something
   shell        Shell integration: `? question` at your prompt asks your AI agent
   runner       Run coordinator turns on this machine
   coordinator  List and file the coordinator's jobs and asks
@@ -90,12 +92,12 @@ Global options:
           
           [env: IOHR_SIGN_IN=]
 
-      --via-personality <NAME>
-          With `--sign-in io`: the personality named in the `x-iohr-via` attribution header (RFC
-          0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr
-          ask` uses for where an answer comes from
+      --via-role <NAME>
+          With `--sign-in io`: the role named in the `x-iohr-via` attribution header, such as
+          `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr ask` uses for
+          where an answer comes from
           
-          [env: IOHR_VIA_PERSONALITY=]
+          [env: IOHR_VIA_ROLE=]
 
       --via-session <ID>
           With `--sign-in io`: the agent session named in `x-iohr-via`

@@ -117,7 +117,10 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     assert_eq!(rows.len(), 5);
     // `blank` is listed first, after the menu's "Describe it"; demo keeps its own description.
     assert_eq!(rows[0]["name"], "blank");
-    assert_eq!(rows[0]["description"], "An empty project in your language");
+    assert_eq!(
+        rows[0]["description"],
+        "A starter project in your language: one runnable file, Roles and memory"
+    );
     assert_eq!(rows[1]["name"], "demo");
     assert_eq!(rows[2]["status"], "live");
     assert_eq!(rows[3]["status"], "coming");
@@ -652,7 +655,7 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     assert!(out.status.success(), "{}", text(&out));
     let t = text(&out);
     assert!(
-        t.contains("would: write 35 files into ./my-shop (in the folder you are in)"),
+        t.contains("would: write 84 files into ./my-shop (in the folder you are in)"),
         "{t}"
     );
     assert!(
@@ -1075,7 +1078,7 @@ fn show_lists_the_languages_a_template_offers_in_text_and_in_json() {
         .lines()
         .find(|l| l.trim_start().starts_with("go "))
         .unwrap();
-    assert!(go.contains("live") && go.contains("Go 1.22"), "{go}");
+    assert!(go.contains("live") && go.contains("Go 1.26"), "{go}");
     let py = t
         .lines()
         .find(|l| l.trim_start().starts_with("python "))
@@ -1181,6 +1184,35 @@ fn init_described(
 }
 
 #[cfg(unix)]
+/// The scaffold's commit, then the agent's work as its own AI-labelled commit, tree clean.
+fn assert_two_commits_the_second_ai_built(d: &Path) {
+    let git = |a: &[&str]| {
+        String::from_utf8_lossy(
+            &std::process::Command::new("git")
+                .arg("-C")
+                .arg(d)
+                .args(a)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .into_owned()
+    };
+    let log = git(&["log", "--format=%s"]);
+    assert_eq!(log.lines().count(), 2, "{log}");
+    assert!(
+        log.lines()
+            .next()
+            .unwrap()
+            .contains("AI-built changes by claude"),
+        "{log}"
+    );
+    assert!(
+        git(&["status", "--porcelain"]).is_empty(),
+        "the tree is committed"
+    );
+}
+
 #[test]
 fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test() {
     if !on_path("python3") {
@@ -1207,9 +1239,38 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
     assert!(args.contains(&"-p".to_owned()), "{args:?}");
     assert!(has("--output-format", "stream-json"), "{args:?}");
     assert!(has("--permission-mode", "acceptEdits"), "{args:?}");
-    assert!(has("--disallowedTools", "Bash"), "{args:?}");
+    // The language's own commands are allowed by prefix, the web is allowed, and the rest of the
+    // shell is not (no blanket `Bash` denial, which would beat the scoped allows); secrets stay
+    // unreadable.
+    assert!(!has("--disallowedTools", "Bash"), "{args:?}");
     assert!(
-        has("--max-turns", "40") && has("--model", "haiku"),
+        args.contains(&"Bash(python3 -m unittest:*)".to_owned()),
+        "{args:?}"
+    );
+    assert!(
+        args.contains(&"WebSearch".to_owned()) && args.contains(&"WebFetch".to_owned()),
+        "{args:?}"
+    );
+    // The project's own commands (atlas, memory) are allowed by prefix, named by the binary
+    // that ran; no curl and no network shell.
+    assert!(
+        args.iter()
+            .any(|a| a.starts_with("Bash(") && a.contains(" atlas new:*)")),
+        "{args:?}"
+    );
+    assert!(
+        args.iter().any(|a| a.contains(" memory remember:*)")),
+        "{args:?}"
+    );
+    assert!(
+        !args
+            .iter()
+            .any(|a| a.starts_with("Bash(") && a.contains("curl")),
+        "{args:?}"
+    );
+    assert!(args.contains(&"Read(./.env)".to_owned()), "{args:?}");
+    assert!(
+        has("--max-turns", "150") && has("--model", "sonnet"),
         "{args:?}"
     );
     // The prompt is several lines (the file holds one argument line by line): the description
@@ -1221,7 +1282,7 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
     );
     let today = args
         .iter()
-        .find(|l| l.starts_with("Today is "))
+        .find(|l| l.starts_with("- Today is "))
         .unwrap_or_else(|| panic!("no dated line: {args:?}"));
     assert!(
         today.contains("Use the newest edition or version published as of today;")
@@ -1229,16 +1290,27 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
         "{today}"
     );
     assert!(
-        today.as_bytes()[9..13].iter().all(u8::is_ascii_digit),
+        today.as_bytes()[11..15].iter().all(u8::is_ascii_digit),
         "{today}"
     );
-    assert!(&today[9..19] >= "2026-11-05", "{today}");
+    assert!(&today[11..21] >= "2026-11-05", "{today}");
+    assert!(
+        args.iter()
+            .any(|l| l.starts_with("- Installed toolchain: Python ")),
+        "{args:?}"
+    );
+    assert!(
+        args.iter().any(|l| l.contains("upstream repository")),
+        "{args:?}"
+    );
     let cwd = std::fs::read_to_string(h.path().join("out/cwd")).unwrap();
     assert_eq!(
         std::fs::canonicalize(cwd.trim()).unwrap(),
         std::fs::canonicalize(&d).unwrap()
     );
     assert!(d.join("built.txt").is_file());
+    assert_two_commits_the_second_ai_built(&d);
+    assert!(t.contains("done: the agent's work committed"), "{t}");
     // The smoke test ran on what the agent left, and the report says so.
     assert!(t.contains("done: smoke test, `python3 -m unittest"), "{t}");
     assert!(t.contains("done: agent build"), "{t}");
@@ -1307,6 +1379,37 @@ fn a_failing_or_stuck_agent_keeps_the_scaffold_exits_non_zero_and_says_how_to_re
     assert_eq!(o.status.code(), Some(1), "{t}");
     assert!(t.contains("did not finish in 1 s and was stopped"), "{t}");
     assert!(d.join("inorbit.toml").is_file());
+    // A run that hits its turn cap says so, prints how to continue and leaves a handoff note
+    // with what was asked, what was written and the agent's last words.
+    let h = tempfile::tempdir().unwrap();
+    let (o, d) = init_described(
+        h.path(),
+        &["--no-smoke", "--agent-turns", "7"],
+        "ask-claude-capped.jsonl",
+        "",
+        "1",
+    );
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(
+        t.contains("used all its 7 turns") && t.contains(".inorbit/handoff.md"),
+        "{t}"
+    );
+    assert!(
+        t.contains("ask --allow-edits \"continue the work\"") && t.contains("--agent-turns"),
+        "{t}"
+    );
+    let note = std::fs::read_to_string(d.join(".inorbit/handoff.md")).unwrap();
+    for want in [
+        "a watcher that logs a line",
+        "built.txt",
+        "> I wrote the first PRD. Left: the ADRs and the studies.",
+        "used all its 7 turns",
+    ] {
+        assert!(note.contains(want), "missing {want}: {note}");
+    }
+    // The timed-out run left a note too.
+    assert!(d.join("inorbit.toml").is_file());
     // The dry run starts nothing and shows the command it would run, bounds included.
     let h = tempfile::tempdir().unwrap();
     let (o, d) = init_described(h.path(), &["--dry-run", "--agent-turns", "9"], "", "", "0");
@@ -1319,6 +1422,41 @@ fn a_failing_or_stuck_agent_keeps_the_scaffold_exits_non_zero_and_says_how_to_re
         "{t}"
     );
     assert!(!d.exists() && !h.path().join("out/args").exists());
+}
+
+/// The documents variant of the blank template is a project of atlas and memory: no program, no
+/// smoke test, AGENTS.md names the binary that made it, and `atlas sync --dry-run` is its check.
+#[test]
+fn the_documents_language_makes_an_atlas_and_memory_project_with_no_smoke_test() {
+    let h = tempfile::tempdir().unwrap();
+    let d = h.path().join("w/kb");
+    let o = iohr(
+        h.path(),
+        &[
+            "project",
+            "init",
+            "kb",
+            "--template",
+            "blank",
+            "--lang",
+            "docs",
+            "--dir",
+            d.to_str().unwrap(),
+            "--yes",
+        ],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(!t.contains("smoke test"), "{t}");
+    for f in ["atlas", ".inorbit/memory", "AGENTS.md", "README.md"] {
+        assert!(d.join(f).exists(), "{f}: {t}");
+    }
+    assert!(!d.join("src").exists() && !d.join("tests").exists());
+    let agents = std::fs::read_to_string(d.join("AGENTS.md")).unwrap();
+    assert!(
+        agents.contains("atlas new") && agents.contains("memory remember"),
+        "{agents}"
+    );
 }
 
 /// Every template's init writes `.inorbit/space` (RFC 0103), committed with the first commit,

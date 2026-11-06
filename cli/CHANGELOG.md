@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.0-alpha.37](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.36...iohr/v0.1.0-alpha.37) (2026-11-06)
+
+
+### Bug fixes
+
+* **cli:** tests never open a real browser ([#390](https://github.com/inorbithr/sdk/issues/390)) ([7e8007e](https://github.com/inorbithr/sdk/commit/7e8007ee5072770c880c55bfa27b498113812b96))
+* **cli:** the client-policy step sends the file body over stdin, not argv ([#370](https://github.com/inorbithr/sdk/issues/370)) ([64e43e1](https://github.com/inorbithr/sdk/commit/64e43e1e7f3dbb42618f55254220fd96c9fa784d))
+* **cli:** the runner re-reads its sign-in after a 401 and exits when it stays refused ([#400](https://github.com/inorbithr/sdk/issues/400)) ([ebec2d7](https://github.com/inorbithr/sdk/commit/ebec2d75e8f83e3deac573a2c8f0f262284c7cce))
+
 ## [0.1.0-alpha.36](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.35...iohr/v0.1.0-alpha.36) (2026-11-05)
 
 

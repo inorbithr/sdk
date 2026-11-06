@@ -14,7 +14,7 @@ use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use wiremock::matchers::{body_partial_json, method, path};
+use wiremock::matchers::{body_partial_json, body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SPACE: &str = "lab_1";
@@ -423,7 +423,7 @@ fn the_built_in_facts_carry_the_day_they_were_checked() {
     let o = iohr(h.path(), &dir, None, &["atlas", "init"]);
     assert!(o.status.success(), "{}", text(&o));
     let pack = read(&dir, "atlas/roles/security.md");
-    assert!(pack.contains("\nchecked: 2026-11-05\n"), "{pack}");
+    assert!(pack.contains("\nchecked: 2026-11-06\n"), "{pack}");
     let mut seeded = 0;
     for e in std::fs::read_dir(dir.join(".inorbit/memory"))
         .unwrap()
@@ -433,7 +433,7 @@ fn the_built_in_facts_carry_the_day_they_were_checked() {
             continue;
         }
         let t = std::fs::read_to_string(e.path()).unwrap();
-        assert!(t.contains("\nchecked: 2026-11-05\n"), "{t}");
+        assert!(t.contains("\nchecked: 2026-11-06\n"), "{t}");
         seeded += 1;
     }
     assert!(seeded > 0);
@@ -599,4 +599,189 @@ async fn a_refused_import_never_fails_init_and_says_it_once() {
     assert!(o.status.success(), "{t}");
     assert_eq!(t.matches("stay local").count(), 1, "{t}");
     assert!(dir.join("atlas/roles/security.md").is_file());
+}
+
+/// InOrbit lints an import as a whole: one refused role must not keep the others local.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_refused_role_keeps_only_itself_local_and_the_others_are_imported() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = fresh_rust_project(h.path());
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(ROLES))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "personalities": [] })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(IMPORT))
+        .and(body_string_contains(r#""name":"security""#))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": {"code": "failed_precondition", "message": "a line is refused by the privacy filter"}
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(IMPORT))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "written": [{"name": "base-engineer", "version": 1}, {"name": "rust-engineer", "version": 1}]
+        })))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let o = iohr(h.path(), &dir, Some(&server.uri()), &["atlas", "init"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("InOrbit refused security"), "{t}");
+    assert!(!t.contains("stay local ("), "{t}");
+    let sent = imports(&server.received_requests().await.unwrap());
+    let alone = sent
+        .iter()
+        .filter(|b| {
+            b["personalities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["name"] == "rust-engineer")
+        })
+        .count();
+    assert_eq!(alone, 2, "the batch, then rust-engineer alone: {sent:?}");
+    let rust = read(&dir, "atlas/roles/rust-engineer.md");
+    assert!(rust.contains("imported_version"), "{rust}");
+    let security = read(&dir, "atlas/roles/security.md");
+    assert!(!security.contains("imported_version"), "{security}");
+}
+
+/// An account that already holds `security` (and its root) at version 1, from an earlier
+/// project: its head's lines and the cause of each version it has, for the upgrade tests.
+async fn account_with_security(
+    lines: serde_json::Value,
+    causes: &[&str],
+    posted_version: i64,
+) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(ROLES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "personalities": [
+                {"name": "base-engineer", "parent": "", "head_version": 1},
+                {"name": "security", "parent": "base-engineer", "head_version": causes.len()},
+            ]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{ROLES}/security")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "name": "security", "head_version": causes.len(), "lines": lines
+        })))
+        .mount(&server)
+        .await;
+    let versions: Vec<_> = causes
+        .iter()
+        .enumerate()
+        .map(|(i, c)| serde_json::json!({"version": i + 1, "cause": c}))
+        .collect();
+    Mock::given(method("GET"))
+        .and(path(format!("{ROLES}/security/versions")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "versions": versions })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(IMPORT))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "written": [{"name": "security", "version": posted_version}]
+        })))
+        .mount(&server)
+        .await;
+    server
+}
+
+fn fresh_rust_project(h: &Path) -> PathBuf {
+    let dir = h.join("work/made");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"made\"\n").unwrap();
+    dir
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unmodified_older_built_in_in_the_account_is_upgraded_and_says_v1_to_v2() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = fresh_rust_project(h.path());
+    // Every version in its history is an import, and its lines are an older catalogue's.
+    let server = account_with_security(
+        serde_json::json!([{"place": "base", "section": "Old", "text": "an older built-in line", "origin": "doctrine"}]),
+        &["import"],
+        2,
+    )
+    .await;
+    let o = iohr(h.path(), &dir, Some(&server.uri()), &["atlas", "init"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("security: upgraded v1 \u{2192} v2"), "{t}");
+    assert!(!t.contains("left alone v1"), "{t}");
+    let sent = imports(&server.received_requests().await.unwrap());
+    assert_eq!(sent.len(), 1, "one import, with the newer security in it");
+    assert!(
+        sent[0]["personalities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == "security")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_copy_the_person_edited_is_left_alone_with_the_command_that_takes_the_newer_one() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = fresh_rust_project(h.path());
+    // A version that is not an import: the person (or a learned line) changed it.
+    let server = account_with_security(
+        serde_json::json!([{"place": "base", "section": "Mine", "text": "my own rule", "origin": "doctrine"}]),
+        &["import", "applied"],
+        3,
+    )
+    .await;
+    let o = iohr(h.path(), &dir, Some(&server.uri()), &["atlas", "init"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("security: left alone"), "{t}");
+    assert!(t.contains("catalogue v"), "{t}");
+    assert!(t.contains("iohr atlas roles import --upgrade"), "{t}");
+    // The language's engineer is new to this account and goes; the edited security does not.
+    for sent in imports(&server.received_requests().await.unwrap()) {
+        assert!(
+            sent["personalities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["name"] != "security"),
+            "nothing is sent over an edited copy"
+        );
+    }
+
+    // `--upgrade` is the person's go: the catalogue's version replaces it.
+    let o = iohr(
+        h.path(),
+        &dir,
+        Some(&server.uri()),
+        &["atlas", "roles", "import", "--upgrade"],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("security: upgraded v2 \u{2192} v3"), "{t}");
+    assert!(
+        imports(&server.received_requests().await.unwrap())
+            .iter()
+            .any(|s| s["personalities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["name"] == "security")),
+        "the catalogue's security was sent on --upgrade"
+    );
 }

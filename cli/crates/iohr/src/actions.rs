@@ -117,7 +117,7 @@ pub(crate) fn risk(command: &str) -> Option<&'static str> {
     }
 }
 
-fn choices(command: Option<&str>, link: bool) -> Vec<Choice> {
+fn choices(command: Option<&str>, link: bool, asks: usize) -> Vec<Choice> {
     let pick = |value: &str, label: &str, hint: &str, key: char| Choice {
         value: value.to_owned(),
         label: label.to_owned(),
@@ -149,6 +149,14 @@ fn choices(command: Option<&str>, link: bool) -> Vec<Choice> {
             'o',
         ));
     }
+    if asks > 0 {
+        out.push(pick(
+            "asks",
+            "Asks",
+            &format!("{asks} waiting: put `iohr asks list` on your prompt"),
+            'a',
+        ));
+    }
     out
 }
 
@@ -163,9 +171,13 @@ fn choices(command: Option<&str>, link: bool) -> Vec<Choice> {
 pub(crate) fn menu(command: Option<&str>, link: Option<&str>, cwd: &Path) -> Result<(), Error> {
     let command = command.and_then(card::insertable);
     let link = link.filter(|l| !l.is_empty() && !l.chars().any(char::is_control));
-    let all = choices(command, link.is_some());
+    let all = choices(
+        command,
+        link.is_some(),
+        crate::commands::asks::cached_count(),
+    );
     let first = all.first().map_or("", |c| c.value.as_str()).to_owned();
-    let Some(picked) = Ui::select_keyed("What next?", &all, &first)? else {
+    let Some(picked) = Ui::select_bar("What next?", &all, &first)? else {
         return Ok(());
     };
     let say = |line: &str| Out::note(line);
@@ -180,6 +192,7 @@ pub(crate) fn menu(command: Option<&str>, link: Option<&str>, cwd: &Path) -> Res
         }
         ("explain", Some(c), _) => Some(format!("?? explain this command: {c}")),
         ("explain", None, _) => Some("?? explain that in more detail".to_owned()),
+        ("asks", ..) => Some("iohr asks list".to_owned()),
         ("follow", ..) => Some("?? ".to_owned()),
         ("open", _, Some(l)) => {
             match open(l, cwd) {
@@ -331,6 +344,25 @@ mod tests {
         assert_eq!(MenuKey::parse(Some("off")), Ok(MenuKey::Off));
         assert!(MenuKey::parse(Some("f13")).is_err());
         assert_eq!(MenuKey::Off.sequences(), [] as [&str; 0]);
+    }
+
+    #[test]
+    fn asks_are_a_choice_only_when_some_wait() {
+        let keys = |n| -> Vec<char> {
+            choices(None, false, n)
+                .iter()
+                .filter_map(|c| c.key)
+                .collect()
+        };
+        assert_eq!(keys(0), ['f', 'e']);
+        assert_eq!(keys(3), ['f', 'e', 'a']);
+        assert!(
+            choices(None, false, 3)
+                .last()
+                .unwrap()
+                .hint
+                .starts_with("3 waiting")
+        );
     }
 
     #[test]

@@ -219,9 +219,48 @@ pub struct VariantDef {
     /// Extra environment for `run`, `$DIR`, `$STATE` and `$CACHE` allowed.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// The command that prints the installed toolchain's version (`rustc --version`). Its
+    /// first line is told to the agent, and its version fills `@@TOOLCHAIN_VERSION@@` (`1.99.0`)
+    /// and `@@TOOLCHAIN_MINOR@@` (`1.99`) in the files; the variant's own `vars` hold the
+    /// values used when it cannot run.
+    #[serde(default)]
+    pub toolchain: Vec<String>,
+    /// The commands the agent may run in the project, as prefixes (`cargo test`): the
+    /// language's own build and test tools. Nothing else of the shell is open to it; with none
+    /// listed it gets no shell.
+    #[serde(default)]
+    pub agent_allow: Vec<String>,
     /// Text per language: each `KEY` fills `@@KEY@@` (upper case letters, digits, underscores).
     #[serde(default)]
     pub vars: BTreeMap<String, String>,
+}
+
+impl VariantDef {
+    /// A documents-only variant: nothing to build, run or test (`blank --lang docs`). Its
+    /// project is the atlas and the memory, so it has no smoke test and the agent is told no
+    /// code words.
+    #[must_use]
+    pub fn is_docs_only(&self) -> bool {
+        self.build.is_empty() && self.run.is_empty() && self.test.is_empty()
+    }
+}
+
+/// The first `major.minor[.patch]` in `line`: the version and its `major.minor`. `rustc 1.99.0
+/// (b940084d7 2026-09-28)` is `("1.99.0", "1.99")`.
+#[must_use]
+pub fn version_in(line: &str) -> Option<(String, String)> {
+    let start = line.find(|c: char| c.is_ascii_digit())?;
+    let v: String = line[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let v = v.trim_end_matches('.');
+    let mut p = v.split('.');
+    let (major, minor) = (p.next()?, p.next()?);
+    if major.is_empty() || minor.is_empty() {
+        return None;
+    }
+    Some((v.to_owned(), format!("{major}.{minor}")))
 }
 
 /// What the smoke test runs for one language, placeholders and `$DIR` filled.

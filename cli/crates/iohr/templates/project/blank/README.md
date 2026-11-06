@@ -14,5 +14,5 @@ It is written in @@LANGUAGE_LABEL@@ (`--lang @@LANGUAGE@@`).
 ## Test
 
 ```sh
-@@RUN_TEST@@
+@@README_TEST@@
 ```

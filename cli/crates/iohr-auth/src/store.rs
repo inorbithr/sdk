@@ -72,6 +72,13 @@ pub enum StoreError {
     /// A value the store cannot take.
     #[error("{0}")]
     Invalid(&'static str),
+    /// A [`QuietStore`] call that the store would not answer without asking the person
+    /// (a Keychain prompt) or inside its budget. Nothing was shown and nothing changed.
+    #[error(
+        "the credential store would need to ask you before this iohr may read its key; \
+         run `iohr whoami` in a terminal and choose Always Allow"
+    )]
+    WouldAsk,
     /// Reading or writing the file store failed.
     #[error("cannot {action} {path}: {source}")]
     Io {
@@ -180,8 +187,23 @@ impl KeyringStore {
 fn failed(e: keyring_core::Error) -> StoreError {
     match e {
         keyring_core::Error::NoStorageAccess(p) => StoreError::Unavailable(p.to_string()),
+        keyring_core::Error::PlatformFailure(p) if would_ask(p.as_ref()) => StoreError::WouldAsk,
         other => StoreError::Failed(other.to_string()),
     }
+}
+
+/// Whether a platform error is the Keychain saying it would have shown a prompt:
+/// `errSecInteractionNotAllowed` (-25308), which is what a call returns while
+/// [`QuietStore`] has switched the user interface off, or `errSecUserCanceled` (-128).
+#[cfg(target_os = "macos")]
+fn would_ask(e: &(dyn std::error::Error + 'static)) -> bool {
+    e.downcast_ref::<security_framework::base::Error>()
+        .is_some_and(|e| matches!(e.code(), -25308 | -128))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn would_ask(_: &(dyn std::error::Error + 'static)) -> bool {
+    false
 }
 
 impl Store for KeyringStore {
@@ -301,6 +323,111 @@ impl Store for MemoryStore {
     }
 }
 
+/// How long a [`QuietStore`] call may take: a Keychain read that has not answered by then
+/// is waiting on a prompt (or a locked keychain), and the prompt segment must not wait.
+const QUIET_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// How long a [`QuietStore`] write may take. A write follows a refresh that already
+/// rotated the refresh token, so giving up on it would lose the new one and end the
+/// sign-in; it only runs after a read the store allowed, so it is normally as quick.
+const QUIET_WRITE_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A store for paths that must never block on, or show, a credential prompt: the zsh
+/// prompt's `asks count`. Reads and writes go to the inner store as usual; where the
+/// store would have asked the person, or has not answered within the budget, the call
+/// fails at once with [`StoreError::WouldAsk`].
+///
+/// On macOS, building one calls `SecKeychain::disable_user_interaction`
+/// (`SecKeychainSetUserInteractionAllowed(false)`), so the Keychain returns
+/// `errSecInteractionNotAllowed` instead of drawing its dialog. The setting holds for the
+/// life of the process, which is the one short command that asked for it
+/// (<https://docs.rs/security-framework/3.7.0/security_framework/os/macos/keychain/struct.SecKeychain.html#method.disable_user_interaction>).
+/// The budget is the backstop for a store that waits without a dialog; the call still
+/// running is left on its own thread and ends with the process. Writes get a longer one
+/// (10 s): they save a refresh token the server has already rotated.
+pub struct QuietStore {
+    inner: Arc<dyn Store>,
+    budget: std::time::Duration,
+    write_budget: std::time::Duration,
+    #[cfg(target_os = "macos")]
+    _no_ui: Option<security_framework::os::macos::keychain::KeychainUserInteractionLock>,
+}
+
+impl fmt::Debug for QuietStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("QuietStore")
+            .field("budget", &self.budget)
+            .field("write_budget", &self.write_budget)
+            .finish_non_exhaustive()
+    }
+}
+
+impl QuietStore {
+    /// `inner` with the Keychain's dialogs off, reads bounded to 1.5 s and writes to 10 s.
+    #[must_use]
+    pub fn new(inner: Arc<dyn Store>) -> Self {
+        Self::with_budgets(inner, QUIET_BUDGET, QUIET_WRITE_BUDGET)
+    }
+
+    /// As [`new`](Self::new), with other budgets for reads and for writes.
+    #[must_use]
+    pub fn with_budgets(
+        inner: Arc<dyn Store>,
+        budget: std::time::Duration,
+        write_budget: std::time::Duration,
+    ) -> Self {
+        Self {
+            inner,
+            budget,
+            write_budget,
+            // When the switch fails the budget still bounds the wait.
+            #[cfg(target_os = "macos")]
+            _no_ui: security_framework::os::macos::keychain::SecKeychain::disable_user_interaction(
+            )
+            .ok(),
+        }
+    }
+
+    fn within<T: Send + 'static>(
+        &self,
+        budget: std::time::Duration,
+        f: impl FnOnce(&dyn Store) -> Result<T, StoreError> + Send + 'static,
+    ) -> Result<T, StoreError> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let inner = Arc::clone(&self.inner);
+        std::thread::Builder::new()
+            .name("iohr-quiet-store".into())
+            .spawn(move || {
+                let _ = tx.send(f(inner.as_ref()));
+            })
+            .map_err(|e| StoreError::Failed(format!("cannot start the store call: {e}")))?;
+        match rx.recv_timeout(budget) {
+            Ok(done) => done,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(StoreError::WouldAsk),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(StoreError::Failed(
+                "the credential store call stopped".into(),
+            )),
+        }
+    }
+}
+
+impl Store for QuietStore {
+    fn get(&self, key: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+        let key = key.clone();
+        self.within(self.budget, move |s| s.get(&key))
+    }
+
+    fn set(&self, key: &EntryKey, secret: &Redacted<String>) -> Result<(), StoreError> {
+        let (key, secret) = (key.clone(), secret.clone());
+        self.within(self.write_budget, move |s| s.set(&key, &secret))
+    }
+
+    fn delete(&self, key: &EntryKey) -> Result<bool, StoreError> {
+        let key = key.clone();
+        self.within(self.write_budget, move |s| s.delete(&key))
+    }
+}
+
 /// How long a credential-store call may take before the person is told why it waits.
 const SLOW_STORE: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -345,7 +472,8 @@ async fn off_thread_noting<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::{
-        EntryKey, FileStore, KeyringStore, MemoryStore, Store, StoreError, off_thread_noting,
+        EntryKey, FileStore, KeyringStore, MemoryStore, QuietStore, Store, StoreError,
+        off_thread_noting,
     };
     use crate::Redacted;
 
@@ -461,5 +589,98 @@ mod tests {
         )
         .await;
         assert!(matches!(got, Err(StoreError::Invalid("no"))));
+    }
+
+    /// A store whose every call takes `delay`, as a Keychain does behind its dialog.
+    struct Slow {
+        delay: std::time::Duration,
+    }
+
+    impl Store for Slow {
+        fn get(&self, _: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+            std::thread::sleep(self.delay);
+            Ok(Some(Redacted::new("late".into())))
+        }
+        fn set(&self, _: &EntryKey, _: &Redacted<String>) -> Result<(), StoreError> {
+            std::thread::sleep(self.delay);
+            Ok(())
+        }
+        fn delete(&self, _: &EntryKey) -> Result<bool, StoreError> {
+            std::thread::sleep(self.delay);
+            Ok(true)
+        }
+    }
+
+    fn quiet(delay_ms: u64, budget_ms: u64) -> std::sync::Arc<QuietStore> {
+        let ms = std::time::Duration::from_millis;
+        std::sync::Arc::new(QuietStore::with_budgets(
+            std::sync::Arc::new(Slow {
+                delay: ms(delay_ms),
+            }),
+            ms(budget_ms),
+            ms(budget_ms * 10),
+        ))
+    }
+
+    /// The prompt path: the store would wait on a dialog, so the call fails inside its
+    /// budget, without the "still waiting" line, and the person sees nothing.
+    #[tokio::test]
+    async fn a_quiet_store_call_fails_fast_and_never_says_it_waits() {
+        let store = quiet(2_000, 30);
+        let k = key("work", "acc_1");
+        let started = std::time::Instant::now();
+        let got = off_thread_noting(
+            move || store.get(&k),
+            // The wait note comes after 300 ms; the budget is 30 ms.
+            std::time::Duration::from_millis(300),
+            || panic!("the quiet path must never print the wait note"),
+        )
+        .await;
+        assert!(matches!(got, Err(StoreError::WouldAsk)), "{got:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(1_000),
+            "the call did not wait for the slow store"
+        );
+    }
+
+    #[test]
+    fn a_quiet_store_passes_quick_calls_through() {
+        let store = quiet(0, 1_000);
+        let k = key("work", "acc_1");
+        assert_eq!(store.get(&k).unwrap().unwrap().expose(), "late");
+        store.set(&k, &Redacted::new("x".into())).unwrap();
+        assert!(store.delete(&k).unwrap());
+    }
+
+    /// A write is a refresh token the server already rotated: it waits longer than a read
+    /// and is not given up on at the read's budget.
+    #[test]
+    fn a_quiet_store_gives_a_write_more_time_than_a_read() {
+        // The store answers in 100 ms: well past the 20 ms read budget, well inside a
+        // 5 s write budget, so a busy test host cannot push the write over its deadline.
+        let ms = std::time::Duration::from_millis;
+        let store = QuietStore::with_budgets(
+            std::sync::Arc::new(Slow { delay: ms(100) }),
+            ms(20),
+            ms(5_000),
+        );
+        let k = key("work", "acc_1");
+        assert!(matches!(store.get(&k), Err(StoreError::WouldAsk)));
+        store.set(&k, &Redacted::new("x".into())).unwrap();
+    }
+
+    /// `errSecInteractionNotAllowed` is how the Keychain says "I would have asked".
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_keychain_refusing_to_prompt_is_would_ask() {
+        use security_framework::base::Error;
+        let platform = |code: i32| {
+            super::failed(keyring_core::Error::PlatformFailure(Box::new(
+                Error::from_code(code),
+            )))
+        };
+        assert!(matches!(platform(-25308), StoreError::WouldAsk));
+        assert!(matches!(platform(-128), StoreError::WouldAsk));
+        assert!(matches!(platform(-25293), StoreError::Failed(_)));
     }
 }

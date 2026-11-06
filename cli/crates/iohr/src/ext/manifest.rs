@@ -114,6 +114,7 @@ pub const RESERVED: &[&str] = &[
     "accounts",
     "api",
     "ask",
+    "asks",
     "atlas",
     "auth",
     "browser",
@@ -133,6 +134,8 @@ pub const RESERVED: &[&str] = &[
     "memory",
     "openapi",
     "packages",
+    "permission-server",
+    "permissions",
     "profile",
     "project",
     // `iohr rfc` until core ADR 0056 (2026-10-08): kept from extensions so a script that

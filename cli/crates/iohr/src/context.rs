@@ -7,7 +7,8 @@ use inorbithr::{
 };
 use iohr_auth::{
     AuthError, Bearer, Claims, Config, Credential, EntryKey, FileStore, KeyringStore, Kind,
-    ProfileName, Redacted, Session as PersonSession, StaticToken, Storage, Store, StoreError,
+    ProfileName, QuietStore, Redacted, Session as PersonSession, StaticToken, Storage, Store,
+    StoreError,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -43,6 +44,15 @@ impl Ctx {
         Ok(match storage {
             Storage::File => Arc::new(FileStore::new(self.dir.join("secrets"))),
             _ => Arc::new(KeyringStore::open()?),
+        })
+    }
+
+    /// [`store`](Self::store) for a path that must never wait on, or show, a credential
+    /// prompt: the OS store comes wrapped in a [`QuietStore`].
+    pub(crate) fn quiet_store(&self, storage: Storage) -> Result<Arc<dyn Store>, Error> {
+        Ok(match storage {
+            Storage::File => self.store(storage)?,
+            _ => Arc::new(QuietStore::new(Arc::new(KeyringStore::open()?))),
         })
     }
 
@@ -223,7 +233,7 @@ impl inorbithr::middleware::Middleware for ViaMw {
 pub(crate) fn via_header(global: &Global) -> Result<Option<String>, Error> {
     let mut parts = Vec::new();
     for (key, flag, v) in [
-        ("personality", "--via-personality", &global.via_personality),
+        ("personality", "--via-role", &global.via_role().cloned()),
         ("session", "--via-session", &global.via_session),
         ("job", "--via-job", &global.via_job),
     ] {
@@ -384,6 +394,14 @@ pub(crate) async fn session(global: &Global, env: &Env) -> Result<Session, Error
     session_for(global, env, &ctx, chosen.as_ref()).await
 }
 
+/// [`session`] for the shell prompt's paths: the credential store never shows a prompt and
+/// never makes the call wait; where it would, the error is [`Error::StoreWouldAsk`].
+pub(crate) async fn quiet_session(global: &Global, env: &Env) -> Result<Session, Error> {
+    let ctx = Ctx::load(global)?;
+    let chosen = run_profile(global, env, &ctx);
+    session_in(global, env, &ctx, chosen.as_ref(), true).await
+}
+
 /// The profile a run uses: `--profile` or `IOHR_PROFILE`; none when `IOHR_TOKEN` is set
 /// without one; otherwise the default profile, if any.
 pub(crate) fn run_profile(global: &Global, env: &Env, ctx: &Ctx) -> Option<ProfileName> {
@@ -402,6 +420,17 @@ pub(crate) async fn session_for(
     env: &Env,
     ctx: &Ctx,
     name: Option<&ProfileName>,
+) -> Result<Session, Error> {
+    session_in(global, env, ctx, name, false).await
+}
+
+/// `quiet`: the OS store is read through a [`QuietStore`] ([`Ctx::quiet_store`]).
+async fn session_in(
+    global: &Global,
+    env: &Env,
+    ctx: &Ctx,
+    name: Option<&ProfileName>,
+    quiet: bool,
 ) -> Result<Session, Error> {
     let base = global.base_url();
     // A named profile takes `IOHR_TOKEN_<PROFILE>` and nothing else from the environment;
@@ -444,7 +473,11 @@ pub(crate) async fn session_for(
         ))
     })?;
     let key = EntryKey::new(name.clone(), &profile.account)?;
-    let store = ctx.store(profile.storage)?;
+    let store = if quiet {
+        ctx.quiet_store(profile.storage)?
+    } else {
+        ctx.store(profile.storage)?
+    };
     let (credential, claims) = match profile.kind {
         Kind::Token => {
             let secret: Option<Redacted<String>> = blocking(store, move |s| s.get(&key)).await?;

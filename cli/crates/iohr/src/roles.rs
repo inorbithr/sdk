@@ -24,7 +24,7 @@ pub const DIR: &str = "atlas/roles";
 /// The day the facts built into the catalogue (`roles/*.toml`) were last checked against their
 /// sources. A pack and every memory seeded from it carry it as `checked:`. Move it only after
 /// the facts were read again against their primary sources: it is a claim, not a build date.
-pub const CHECKED: &str = "2026-11-05";
+pub const CHECKED: &str = "2026-11-06";
 /// Where the packs were written before the word became Role.
 const LEGACY_DIR: &str = "atlas/personalities";
 /// The one role every project gets, whatever its language.
@@ -412,9 +412,13 @@ pub fn locals(root: &Path) -> Vec<Local> {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Outcome {
     pub name: String,
-    /// `written`, `would write`, `unchanged`, `left alone`, `local` or `failed`.
+    /// `written`, `upgraded`, `would write`, `would upgrade`, `unchanged`, `left alone`, `local` or
+    /// `failed`.
     pub action: &'static str,
     pub version: Option<i64>,
+    /// For `upgraded`: the version the account had before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<i64>,
     pub note: String,
 }
 
@@ -439,7 +443,11 @@ impl Report {
             .outcomes
             .iter()
             .map(|o| {
-                let v = o.version.map_or_else(String::new, |v| format!(" v{v}"));
+                let v = match (o.from, o.version) {
+                    (Some(from), Some(to)) => format!(" v{from} \u{2192} v{to}"),
+                    (Some(from), None) => format!(" v{from} \u{2192} next"),
+                    (None, v) => v.map_or_else(String::new, |v| format!(" v{v}")),
+                };
                 let n = if o.note.is_empty() {
                     String::new()
                 } else {
@@ -489,56 +497,181 @@ fn remote_of(listed: Option<&Value>) -> BTreeMap<String, (String, i64)> {
         .unwrap_or_default()
 }
 
+/// What InOrbit's own history says about an account's copy of a role the project has no
+/// record of (a fresh project, the copy came from an earlier one).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// Its lines are the catalogue's lines as this build carries them.
+    Current,
+    /// Every version of it was an import and its lines are not this build's: an older
+    /// built-in nobody changed since.
+    OlderBuiltIn,
+    /// Something other than an import wrote a version (a learned line, a revert), or the
+    /// lines are the person's own.
+    Edited,
+}
+
+/// Reads the account's copy of `role`: its head's lines against this catalogue's, and
+/// whether every version in its history was an import (`ListPersonalityVersions` names the
+/// cause of each: `import`, `auto_applied`, `applied`, `reverted`). `None` when InOrbit does
+/// not answer, and the role is then left alone as before.
+async fn account_copy(api: &Api, role: &Role) -> Option<Provenance> {
+    let path = format!("{LIST_PATH}/{}", role.name);
+    let head = api
+        .send(Method::Get, &path, &[], None)
+        .await
+        .ok()?
+        .json::<Value>()
+        .ok()?;
+    let versions = api
+        .send(Method::Get, &format!("{path}/versions"), &[], None)
+        .await
+        .ok()?
+        .json::<Value>()
+        .ok()?;
+    let mut theirs: Vec<(String, String, String)> = head
+        .pointer("/lines")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter(|l| l.get("origin").and_then(Value::as_str) != Some("learned"))
+        .map(|l| {
+            let g = |k: &str| {
+                l.get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned()
+            };
+            (g("place"), g("section"), g("text"))
+        })
+        .collect();
+    let mut mine: Vec<(String, String, String)> = role
+        .lines
+        .iter()
+        .map(|l| (l.place.clone(), l.section.clone(), l.text.trim().to_owned()))
+        .collect();
+    mine.sort();
+    theirs.sort();
+    let all_imports = versions
+        .pointer("/versions")
+        .and_then(Value::as_array)
+        .is_some_and(|a| {
+            !a.is_empty()
+                && a.iter()
+                    .all(|v| v.get("cause").and_then(Value::as_str) == Some("import"))
+        });
+    Some(if mine == theirs {
+        Provenance::Current
+    } else if all_imports {
+        Provenance::OlderBuiltIn
+    } else {
+        Provenance::Edited
+    })
+}
+
+/// What [`account_copy`] finds for each role the account has and this project never imported.
+async fn copies_of(
+    api: &Api,
+    found: &[Local],
+    remote: &BTreeMap<String, (String, i64)>,
+) -> BTreeMap<String, Provenance> {
+    let mut copies = BTreeMap::new();
+    for f in found {
+        if f.imported_version.is_none()
+            && remote.contains_key(&f.role.name)
+            && let Some(c) = account_copy(api, &f.role).await
+        {
+            copies.insert(f.role.name.clone(), c);
+        }
+    }
+    copies
+}
+
+/// The command that takes the catalogue's version over an edited copy.
+const UPGRADE_HINT: &str = "`iohr atlas roles import --upgrade`";
+
 /// Tells each local role apart by what InOrbit has; the ones to send are returned,
-/// the others are said in the report.
+/// the others are said in the report. `copies` is what [`account_copy`] found for the roles
+/// this project has no import record of. With `upgrade`, an edited copy is sent too.
 fn decide<'a>(
     found: &'a [Local],
     remote: &BTreeMap<String, (String, i64)>,
+    copies: &BTreeMap<String, Provenance>,
+    upgrade: bool,
     report: &mut Report,
 ) -> Vec<&'a Local> {
     let mut send: Vec<&Local> = Vec::new();
     for f in found {
         let name = &f.role.name;
+        let newer = format!(
+            "catalogue v{} differs from your copy: {UPGRADE_HINT} takes it",
+            f.role.version
+        );
         let (action, version, note) = match remote.get(name) {
             None => {
                 send.push(f);
                 continue;
             }
             Some((_, head)) => match f.imported_version {
-                None => (
-                    "left alone",
-                    Some(*head),
-                    "already in your account, not from this project",
-                ),
-                Some(v) if v != *head => (
-                    "left alone",
-                    Some(*head),
-                    "changed in InOrbit since the import",
-                ),
+                None => match copies.get(name) {
+                    Some(Provenance::OlderBuiltIn) => {
+                        send.push(f);
+                        continue;
+                    }
+                    Some(Provenance::Current) => ("unchanged", Some(*head), String::new()),
+                    Some(Provenance::Edited) if upgrade => {
+                        send.push(f);
+                        continue;
+                    }
+                    Some(Provenance::Edited) => (
+                        "left alone",
+                        Some(*head),
+                        format!("you changed it; {newer}"),
+                    ),
+                    None => (
+                        "left alone",
+                        Some(*head),
+                        "already in your account, not from this project".to_owned(),
+                    ),
+                },
+                Some(v) if v != *head => {
+                    if upgrade {
+                        send.push(f);
+                        continue;
+                    }
+                    let note = if f.imported_catalogue.is_some_and(|c| c < f.role.version) {
+                        format!("changed in InOrbit since the import; {newer}")
+                    } else {
+                        "changed in InOrbit since the import".to_owned()
+                    };
+                    ("left alone", Some(*head), note)
+                }
                 Some(_) if f.imported_catalogue.is_some_and(|c| c < f.role.version) => {
                     send.push(f);
                     continue;
                 }
-                Some(_) => ("unchanged", Some(*head), ""),
+                Some(_) => ("unchanged", Some(*head), String::new()),
             },
         };
         report.outcomes.push(Outcome {
             name: name.clone(),
             action,
             version,
-            note: note.to_owned(),
+            from: None,
+            note,
         });
     }
     send
 }
 
-/// Sends the import; what InOrbit wrote as name to version, or the line saying why not.
-async fn post(api: &Api, body: &Value) -> Result<BTreeMap<String, i64>, String> {
+/// Sends the import; what InOrbit wrote as name to version, or the status and the line
+/// saying why not.
+async fn post(api: &Api, body: &Value) -> Result<BTreeMap<String, i64>, (Option<u16>, String)> {
     let v = api
         .send(Method::Post, IMPORT_PATH, &[], Some(body))
         .await
         .and_then(|r| r.json::<Value>())
-        .map_err(|e| why(&e))?;
+        .map_err(|e| (e.status(), why(&e)))?;
     Ok(v.pointer("/written")
         .and_then(Value::as_array)
         .map(|a| {
@@ -579,23 +712,62 @@ fn local_only(found: &[Local], report: &mut Report, why: &str) {
             name: f.role.name.clone(),
             action: "local",
             version: None,
+            from: None,
             note: String::new(),
         });
     }
     report.message = Some(why.to_owned());
 }
 
+/// One outcome for each role that was sent: `written` or, over an account's copy, `upgraded`
+/// with the version it had; `failed` when InOrbit did not say it was written.
+fn record_written(
+    send: Vec<&Local>,
+    written: &BTreeMap<String, i64>,
+    remote: &BTreeMap<String, (String, i64)>,
+    report: &mut Report,
+) {
+    for f in send {
+        let name = f.role.name.clone();
+        let Some(&v) = written.get(&name) else {
+            report.outcomes.push(Outcome {
+                name,
+                action: "failed",
+                version: None,
+                from: None,
+                note: "InOrbit did not say it was written".to_owned(),
+            });
+            continue;
+        };
+        let note = write_back(f, v);
+        let from = remote.get(&name).map(|(_, v)| *v);
+        report.outcomes.push(Outcome {
+            name,
+            action: if from.is_some() {
+                "upgraded"
+            } else {
+                "written"
+            },
+            version: Some(v),
+            from,
+            note,
+        });
+    }
+}
+
 /// Imports the packs of `root` into the account of `api`, one role at a time told
 /// apart by what is already there:
 /// - absent in InOrbit: imported;
-/// - present, never imported from this project: `left alone` (it is the account's own);
-/// - present and changed in InOrbit since our import: `left alone`;
-/// - present at the version we imported and the catalogue moved on: imported again;
+/// - present, never imported from this project: read its history ([`account_copy`]); an
+///   unchanged older built-in is `upgraded` (`v1 → v2`), one the person changed is `left alone`
+///   and names the command (`--upgrade`) that takes the catalogue's version;
+/// - present and changed in InOrbit since our import: `left alone`, the same hint;
+/// - present at the version we imported and the catalogue moved on: `upgraded`;
 /// - otherwise `unchanged`.
 ///
 /// With `dry`, nothing is sent and nothing written, and the report holds the body. With no
 /// `api`, every role stays local, with one message saying so. Never fails.
-pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report {
+pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool, upgrade: bool) -> Report {
     let found = locals(root);
     let mut report = Report::default();
     if found.is_empty() {
@@ -626,7 +798,10 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
         .iter()
         .find(|(_, (parent, _))| parent.is_empty())
         .map(|(n, _)| n.clone());
-    let send = decide(&found, &remote, &mut report);
+    // A role the account has and this project never imported: its history says whether it
+    // is an unchanged built-in (upgraded) or the person's own (left alone, with the command).
+    let copies = copies_of(api, &found, &remote).await;
+    let send = decide(&found, &remote, &copies, upgrade, &mut report);
     if send.is_empty() {
         return report;
     }
@@ -635,10 +810,16 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
     let body = import_body(&refs, &parent, root_name.is_none());
     if dry {
         for f in &send {
+            let from = remote.get(&f.role.name).map(|(_, v)| *v);
             report.outcomes.push(Outcome {
                 name: f.role.name.clone(),
-                action: "would write",
+                action: if from.is_some() {
+                    "would upgrade"
+                } else {
+                    "would write"
+                },
                 version: None,
+                from,
                 note: String::new(),
             });
         }
@@ -647,12 +828,26 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
     }
     let written = match post(api, &body).await {
         Ok(w) => w,
-        Err(line) => {
+        // InOrbit lints the batch as a whole, so one refused role (400) would keep every
+        // other one local: send each alone and keep only the refused ones back.
+        Err((Some(400), _)) if send.len() > 1 => {
+            let (written, refused) = one_by_one(api, &send, &parent, root_name.is_none()).await;
+            let ok: Vec<&Local> = send
+                .into_iter()
+                .filter(|f| !refused.iter().any(|(n, _)| *n == f.role.name))
+                .collect();
+            record_written(ok, &written, &remote, &mut report);
+            record_refused(&refused, &mut report);
+            root_outcome(root_name.is_none(), &written, &mut report);
+            return report;
+        }
+        Err((_, line)) => {
             for f in &send {
                 report.outcomes.push(Outcome {
                     name: f.role.name.clone(),
                     action: "failed",
                     version: None,
+                    from: None,
                     note: String::new(),
                 });
             }
@@ -662,34 +857,63 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
             return report;
         }
     };
-    for f in send {
-        let name = f.role.name.clone();
-        let Some(&v) = written.get(&name) else {
-            report.outcomes.push(Outcome {
-                name,
-                action: "failed",
-                version: None,
-                note: "InOrbit did not say it was written".to_owned(),
-            });
-            continue;
-        };
-        let note = write_back(f, v);
+    record_written(send, &written, &remote, &mut report);
+    root_outcome(root_name.is_none(), &written, &mut report);
+    report
+}
+
+/// A `failed` outcome with InOrbit's line for each refused role, and one message naming them.
+fn record_refused(refused: &[(String, String)], report: &mut Report) {
+    for (name, line) in refused {
         report.outcomes.push(Outcome {
-            name,
-            action: "written",
-            version: Some(v),
-            note,
+            name: name.clone(),
+            action: "failed",
+            version: None,
+            from: None,
+            note: line.clone(),
         });
     }
-    if root_name.is_none() && written.contains_key(ROOT) {
+    let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
+    report.message = Some(format!(
+        "InOrbit refused {}; the other roles were imported. Edit the refused line and \
+         run `iohr sync`.",
+        names.join(", ")
+    ));
+}
+
+/// The root role's outcome, when the account had none and this import wrote it.
+fn root_outcome(had_none: bool, written: &BTreeMap<String, i64>, report: &mut Report) {
+    if had_none && written.contains_key(ROOT) {
         report.outcomes.push(Outcome {
             name: ROOT.to_owned(),
             action: "written",
             version: written.get(ROOT).copied(),
+            from: None,
             note: "the account had no root role".to_owned(),
         });
     }
-    report
+}
+
+/// Sends each role alone, the root with the first one InOrbit takes: what was written, and
+/// each refused role with InOrbit's line.
+async fn one_by_one(
+    api: &Api,
+    send: &[&Local],
+    parent: &str,
+    mut with_root: bool,
+) -> (BTreeMap<String, i64>, Vec<(String, String)>) {
+    let mut written = BTreeMap::new();
+    let mut refused = Vec::new();
+    for f in send {
+        match post(api, &import_body(&[&f.role], parent, with_root)).await {
+            Ok(w) => {
+                with_root = with_root && !w.contains_key(ROOT);
+                written.extend(w);
+            }
+            Err((_, line)) => refused.push((f.role.name.clone(), line)),
+        }
+    }
+    (written, refused)
 }
 
 // ---------------------------------------------------------------- agent files
@@ -697,18 +921,36 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
 /// The marker that says the section is in an agent-instructions file.
 pub const AGENTS_MARK: &str = "<!-- iohr:memory -->";
 
-/// The short section of CLAUDE.md or AGENTS.md: how the project's agents use its memory.
-/// Memory is local first, so nothing here needs a sign-in.
+/// How an agent works with this project's documents, memory and sync, with `bin` as the
+/// command that made the project (`iohr`, or `iohr-preview`). One text for the agent files
+/// and for the prompt of an agent `init` starts, so they never differ.
 #[must_use]
-pub fn agents_section() -> String {
+pub fn usage_lines(bin: &str) -> String {
     format!(
-        "\n{AGENTS_MARK}\n## Project memory and roles\n\n\
-         - Before work, run `iohr memory recall \"<topic>\"`. After a lesson, run \
-         `iohr memory remember \"<fact>\" --why \"<reason>\"`. Memories are files in \
-         `.inorbit/memory/`, committed with the code; no sign-in is needed. \
-         `iohr memory check` finds the wrong and the stale ones. See \
+        "- Documents: PRDs, RFCs, ADRs and studies are Markdown files in `atlas/prd/`, \
+         `atlas/rfc/`, `atlas/adr/` and `atlas/studies/`, each starting with front matter \
+         (`title`, `status`, `date`, `public`, `summary`). Make one with `{bin} atlas new \
+         <prd|rfc|adr|study> \"<title>\"`: it takes the next free number and writes the front \
+         matter and the headings; then edit the file and write a one-sentence `summary`. A file \
+         that still says \"Stub\" is a starter: rewrite it rather than add another.\n\
+         - Memory: before work, run `{bin} memory recall \"<topic>\"`. After a lesson, run \
+         `{bin} memory remember \"<fact>\" --why \"<reason>\"`. Memories are files in \
+         `.inorbit/memory/`, one per memory, committed with the code; no sign-in is needed. \
+         `{bin} memory check` finds the wrong and the stale ones. See \
          `.inorbit/memory/README.md`.\n\
+         - Sync: the person sends `atlas/` to the project's Decisions space with `{bin} sync`. \
+         `{bin} atlas sync --dry-run` lists what would be sent and sends nothing.\n\
          - The built-in roles for this project are in `atlas/roles/`.\n"
+    )
+}
+
+/// The short section of CLAUDE.md or AGENTS.md: how the project's agents use its documents,
+/// memory and sync. Memory is local first, so nothing here needs a sign-in.
+#[must_use]
+pub fn agents_section(bin: &str) -> String {
+    format!(
+        "\n{AGENTS_MARK}\n## Project documents, memory and roles\n\n{}",
+        usage_lines(bin)
     )
 }
 
@@ -723,18 +965,18 @@ fn instruction_files(files: &[(String, String)]) -> Vec<usize> {
 
 /// Adds the memory section to the agent-instructions file among a template's files, or an
 /// `AGENTS.md` when the template ships none.
-pub fn add_agents(files: &mut Vec<(String, String)>) {
+pub fn add_agents(files: &mut Vec<(String, String)>, bin: &str) {
     let found = instruction_files(files);
     if found.is_empty() {
         files.push((
             "AGENTS.md".to_owned(),
-            format!("# Agent instructions\n{}", agents_section()),
+            format!("# Agent instructions\n{}", agents_section(bin)),
         ));
         return;
     }
     for i in found {
         if !files[i].1.contains(AGENTS_MARK) {
-            files[i].1.push_str(&agents_section());
+            files[i].1.push_str(&agents_section(bin));
         }
     }
 }
@@ -746,7 +988,7 @@ pub fn add_agents(files: &mut Vec<(String, String)>) {
 /// # Errors
 ///
 /// A message saying what could not be written.
-pub fn ensure_agents(root: &Path) -> Result<Vec<String>, String> {
+pub fn ensure_agents(root: &Path, bin: &str) -> Result<Vec<String>, String> {
     let mut wrote = Vec::new();
     let mut any = false;
     for name in ["AGENTS.md", "CLAUDE.md"] {
@@ -762,14 +1004,17 @@ pub fn ensure_agents(root: &Path) -> Result<Vec<String>, String> {
         if !next.ends_with('\n') {
             next.push('\n');
         }
-        next.push_str(&agents_section());
+        next.push_str(&agents_section(bin));
         std::fs::write(&path, next).map_err(|e| format!("cannot write {name}: {e}"))?;
         wrote.push(name.to_owned());
     }
     if !any {
         let path = root.join("AGENTS.md");
-        std::fs::write(&path, format!("# Agent instructions\n{}", agents_section()))
-            .map_err(|e| format!("cannot write AGENTS.md: {e}"))?;
+        std::fs::write(
+            &path,
+            format!("# Agent instructions\n{}", agents_section(bin)),
+        )
+        .map_err(|e| format!("cannot write AGENTS.md: {e}"))?;
         wrote.push("AGENTS.md".to_owned());
     }
     Ok(wrote)
@@ -838,6 +1083,22 @@ mod tests {
 
     /// The service's lint, in what it can tell from the text: the budget, the override words
     /// a child's core must not hold, the privacy words and the secret shapes.
+    struct Private {
+        classified: regex::Regex,
+        benign: regex::Regex,
+        money: regex::Regex,
+        secret: regex::Regex,
+    }
+
+    impl Private {
+        fn is_match(&self, text: &str) -> bool {
+            let without = self.benign.replace_all(text, " ");
+            self.classified.is_match(&without)
+                || self.money.is_match(&without)
+                || self.secret.is_match(text)
+        }
+    }
+
     #[test]
     fn the_catalogue_passes_the_services_lint_in_what_a_client_can_check() {
         let override_words =
@@ -847,10 +1108,36 @@ mod tests {
             r"(?i)\b(allow(ed|s)? to|grant(ed|s)?|permission|may now|can now|optional|unnecessary|not needed|skip (the )?(check|gate|review|tests?|ci)|auto-?approve|force-?push)\b",
         )
         .unwrap();
-        let private = regex::Regex::new(
-            r"(?i)\b(tenders?|investors?|investments?|banks?|loan|invoices?|revenue|profit|salary|salaries|taxes|finances?|equity|contracts?|classified|confidential|procurement|valuation|funding)\b|[€$£]\s*\d|\d{11}|(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S{6,}",
-        )
-        .unwrap();
+        // The service's privacy filter as it is (core `crates/coordinator/src/learning/privacy.rs`:
+        // `CLASSIFIED` and `MONEY` after `BENIGN`, then the secrets), copied whole: a partial copy
+        // let "financial entities" through and `iohr project init` kept every Role local (400).
+        let classified = regex::Regex::new(r"(?ix)
+        \b(
+            tenders? | tendering | natje[cč]aj\w* | javn\w*\s+nabav\w* | procurement | bid\s*bond | rfq | rfp
+          | investors? | investments? | invest(ed|ing|s)? | invest(ir|itor|icij)\w* | ula[gž]a\w* | ulaganj\w* | dionic\w* | dioni[cč]ar\w* | udjel\w* | term\s*sheet | cap\s*table | valuation | shareholders? | equity
+          | funding | fundrais\w* | seed\s*round | series\s*[ab] | pitch\s*deck | due\s*diligence | angel
+          | banks? | banking | iban | swift\s*code | bic | loan | credit\s*line | overdraft
+          | invoices? | revenue | profit | ebitda | salary | salaries | payroll | taxes | tax\s*return | vat\s*number
+          | finances? | finance[-_.]\w* | eporezn\w* | bank_\w* | oib | \d{11} | balance\s*sheet | p\s*&\s*l | cash\s*flow | runway | burn\s*rate | accounting | bookkeeping | company\s*financ\w* | financials?
+          | contracts? | ugovor\w* | addendum | nda\s*with
+          | kredit\w* | porez\w* | prihod\w* | dobit | pla[ćc]a | plaće | plaću | plaćanj\w* | faktur\w* | ra[cč]unovod\w* | banc\w* | bank[aeiu]\w* | nabav\w* | ponud\w* | financij\w*
+          | classified | confidential
+        )\b").unwrap();
+        let benign = regex::Regex::new(r"(?ix)\b( (api|data|page|type|interface|wire|schema|tactical|console|smart|token|erc\d*|solidity|evm|deployed|response|request|rpc|proto|service|module|ui|design)[\s_-]contracts? | contracts?[\s_-](address(es)?|calls?|abi|bytecode|code|deploy\w*|storage|events?|tests?|checks?|files?) | contracts?[\s_-](tests?|checks?|files?\.?) | tactical_contract(\.py)? | rfc\s*0082-console-contract )\b").unwrap();
+        let money = regex::Regex::new(r"(?i)(\d[\d.,]*\s*(k|m|mil|milijun\w*|million\w*|thousand|tisu[cć]\w*)?\s*(€|eur\b|eura\b|euro\w*|usd\b|dollars?\b|kn\b|kuna\b)|[€$£]\s*\d|\b(eur|usd|euro)\s*\(?\s*\d|\b(milijun|million|billion|milijard)\w*\s+(eura|euro|dollars?|usd|eur)\b)").unwrap();
+        let secret =
+            regex::Regex::new(r"(?i)(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S{6,}")
+                .unwrap();
+        let private = Private {
+            classified,
+            benign,
+            money,
+            secret,
+        };
+        assert!(
+            private.is_match("DORA (applying to financial entities since 17 January 2025)"),
+            "the copy refuses what the service refused"
+        );
         for p in catalogue() {
             assert!(
                 core_tokens(&p) <= 700,
@@ -865,6 +1152,7 @@ mod tests {
             for l in &p.lines {
                 assert!(!widen.is_match(&l.text), "{}: {}", p.name, l.text);
                 assert!(!private.is_match(&l.text), "{}: {}", p.name, l.text);
+                assert!(!private.is_match(&l.section), "{}: {}", p.name, l.section);
                 for c in &l.cites {
                     assert!(!private.is_match(c), "{}: {c}", p.name);
                 }
@@ -894,7 +1182,7 @@ mod tests {
             Some("base-engineer")
         );
         assert!(atlas::get(&text, "domain").is_some_and(|d| d.contains("tokio")));
-        assert_eq!(atlas::get(&text, "catalogue_version").as_deref(), Some("1"));
+        assert_eq!(atlas::get(&text, "catalogue_version").as_deref(), Some("2"));
         assert!(atlas::get(&text, "source").is_some_and(|s| s.starts_with("iohr ")));
         for l in &p.lines {
             for c in &l.cites {
@@ -948,16 +1236,33 @@ mod tests {
         ];
         add_record(&mut files, Some("rust"));
         add_record(&mut files, Some("rust"));
-        add_agents(&mut files);
-        add_agents(&mut files);
+        add_agents(&mut files, "iohr");
+        add_agents(&mut files, "iohr");
         assert_eq!(files[0].1.matches("[roles]").count(), 1);
         assert!(files[0].1.contains("\"rust-engineer\""));
         assert_eq!(files[1].1.matches(AGENTS_MARK).count(), 1);
         assert!(files[1].1.contains("iohr memory recall"));
         assert_eq!(files.len(), 2, "a shipped file is extended, none is added");
         let mut none: Vec<(String, String)> = Vec::new();
-        add_agents(&mut none);
+        add_agents(&mut none, "iohr");
         assert_eq!(none[0].0, "AGENTS.md");
         assert!(none[0].1.contains(".inorbit/memory/README.md"));
+    }
+
+    #[test]
+    fn the_agent_file_names_the_binary_that_made_the_project() {
+        let mut files: Vec<(String, String)> = Vec::new();
+        add_agents(&mut files, "iohr-preview");
+        let text = &files[0].1;
+        for want in [
+            "`iohr-preview atlas new <prd|rfc|adr|study>",
+            "`iohr-preview memory remember",
+            "`iohr-preview memory recall",
+            "`iohr-preview sync`",
+            "`iohr-preview atlas sync --dry-run`",
+        ] {
+            assert!(text.contains(want), "missing {want}: {text}");
+        }
+        assert!(!text.contains("`iohr "), "no bare iohr left: {text}");
     }
 }

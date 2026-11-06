@@ -119,9 +119,11 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
 | `iohr ext packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (`iohr packages` still works, hidden from the help) |
-| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--allow-edits] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, no MCP, no tools, no write access, a scrubbed environment, the question on stdin), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null). `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
-| `iohr ask --menu --command C [--link L]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
-| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below) |
+| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--allow-edits] [--permissions prompt\|rules\|deny] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, read-only file tools, no write access, a scrubbed environment, the question on stdin; a Bash tool only through your permission rules, and at a terminal Io asks `y` once, `a` always in this project or `n` before it runs a command the rules do not cover, with `--permissions rules` or `deny` or `IOHR_ASK_PERMISSIONS` or `[ask] permissions` choosing the mode), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, questions, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null; `questions` are the at most two questions the model asked back, each `{about, ask, choices}`, or `[]`). Inside a project the prompt carries iohr's own git facts (branch, last 5 commits, change counts) and the project's notes; at a terminal the card asks the questions, keeps the answer in `.inorbit/memory/` and `inorbit.toml` and refreshes the answer once, and a dim line says when asks are waiting `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
+| `iohr ask --menu --command C [--link L]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open, and Asks when some wait) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
+| `iohr asks count [--cache] [--json] [--account A]` | How many asks wait for you: "3 asks", nothing for none; only asks whose turn is yours (`pending`) count, one you already answered with a note (`question`) is the agent's turn and is left out (`iohr asks list` still shows it), `{"count": N}` with `--json`; `--cache` keeps just the number in `~/.inorbit/term/asks-count` and does nothing while that file is under 30 seconds old (the shell hook's prompt segment uses it). It reads the sign-in through a quiet credential store: no Keychain dialog (macOS interaction is switched off) and no wait past 1.5 s; when the store would ask, `--cache` keeps the last number and prints nothing, without `--cache` it exits 1 saying so |
+| `iohr permissions list\|allow RULE\|deny RULE\|remove RULE\|check TOOL INPUT [--project\|--user] [--json]` | The rules for what Io may run or open when you ask it something (Claude Code's rule grammar) in `.inorbit/permissions.toml` and the user file in the iohr config folder; `allow` refuses rules that could open a secret file and a blanket `Bash(*)` (exit 2); `check` prints `allow`, `deny` or `ask` and the rule; every ask decision is logged to `.inorbit/permissions.log` (no output, no contents); see `docs/config.md`, section 4.5 |
+| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--env production|local`
@@ -516,20 +518,57 @@ menu starts with "Describe it, your agent builds it", and `--describe "text"` do
 The agent works in the background: `init` draws the progress itself, runs to the end and exits.
 There is no session to open or resume.
 
+### Is the toolchain behind?
+
+While you answer, `init` reads the installed Rust, Go, Node or Python version and asks that
+language's own upstream for the latest stable: Rust `static.rust-lang.org/dist/channel-rust-stable.toml`,
+Go `go.dev/dl/?mode=json`, Node `nodejs.org/dist/index.json` (the newest LTS line) and Python
+`www.python.org/api/v2/downloads/release/` (the highest stable 3.x.y). The language menu shows
+it (`cargo found · rustc 1.90.0, 1.93.0 is out`), the dry run says `would: report the toolchain
+check: ...`, and the report carries it with the command that upgrades it (`rustup update
+stable`, `brew upgrade go` when Homebrew installed it, `mise upgrade`, a download link, ...).
+
+- At a terminal, `init` asks `Upgrade Rust now with ...?` (default no) and runs the command
+  only on yes. With `--yes`, without a terminal and in a dry run it prints the command and
+  never runs it.
+- The whole lookup is bounded to about 3 seconds and runs beside the other steps. Offline, on
+  an error, on a timeout or under `--json` it is skipped and the line says `could not check`;
+  a version is never guessed and `init` never fails on it.
+- `IOHR_TOOLCHAIN_UPSTREAM=off` turns the lookup off; any other value is a base URL for the
+  routes `/rust`, `/go`, `/node` and `/python` (the tests use a local server).
+
 The order is fixed: scaffold, then the agent, then the smoke test, then the report.
 
 1. The scaffold is the `blank` template (an empty project in your language; `--template` names
    another on purpose). Its `agent_prompt` says only "a fresh project in <language>; build what
    is described below; keep it free of secrets; keep `<test>` passing".
 2. The agent is your own `claude` or `codex` in print mode, in the new folder, with a prompt
-   from your words, the answers and the template. It may edit files (`--allow-edits`, the same
-   as `iohr ask`: files only, never a shell), is bounded by `--agent-turns` (default 40) and
-   `--agent-timeout` (seconds, default 600), and the output says which values were used. The
+   from your words, the answers and the template. It may edit files and run only the
+   language's own build and test commands (`cargo build|test|fmt|clippy`, `go build|test|vet`,
+   the template's Python and Node tools), this project's own `atlas new`, `atlas sync
+   --dry-run` and `memory remember|recall|list|check` (under the running binary's name),
+   read-only `git status|log|diff` and `ls`, and fetch and search the web with WebFetch and
+   WebSearch; any other shell command (curl included) is denied and drawn dim with its reason.
+   The prompt tells it to run one simple command per call and names the binary, the atlas
+   and memory conventions and that you send the result with `<bin> sync`. The `docs`
+   language ("None, documents only") makes a project of atlas and memory with no program and
+   no smoke test; its prompt has no code in it. Its prompt carries the installed toolchain version
+   and today's date, and tells it to use the latest stable, secure release and check it at the
+   upstream repository and its advisories. It is bounded by `--agent-turns` (default 150, or
+   `[project] agent_turns`), `--agent-timeout` (seconds, default 1800, or `[project]
+   agent_timeout`) and runs on `--agent-model` (default `sonnet`, env
+   `IOHR_INIT_AGENT_MODEL`, or `[project] agent_model`); the output says which values were used. The
    stream is the same as `iohr ask`: thinking dim, one row per tool, a footer labelled
    "AI-built" (AI Act Art. 50).
 3. The smoke test then runs on what the agent built, so the report is true for the result.
+   When it passes, what the agent built is committed on its own, a second commit whose message
+   says it is AI-built (`git log` shows both). When the smoke test fails or does not run, the
+   tree is left as the agent left it, uncommitted, and the report says so.
 4. If the agent fails or runs out of turns or time, `init` says so, keeps the scaffold, exits
-   non-zero and prints one line to retry.
+   non-zero and prints one line to continue (`<bin> ask --allow-edits "continue the work"`).
+   It also writes `.inorbit/handoff.md` (what was asked, the files written, the agent's last
+   words); the next `ask --allow-edits` in that folder reads it into its prompt and removes it
+   when that run succeeds. It is a first, small handoff; a fuller one builds on it.
 
 `--json` passes the agent's own events through, as `iohr ask --json` does, then an
 `iohr_summary` line (the agent, the bounds, how it ended) and the `iohr_report` line.
@@ -597,9 +636,15 @@ catalogue is data in the binary, labelled origin `doctrine`, and `inorbit.toml` 
 names in `[roles]`.
 
 Signed in, init imports them through `POST /v1/coordinator/personalities/import` and prints one
-line each (`written v1`, `unchanged`, `left alone`). A role already in your account that
-this project did not import, or one you changed in InOrbit since, is left alone; the catalogue
-only replaces what it wrote itself. When the account has no root role, `base-engineer`
+line each (`written v1`, `upgraded v1 → v2`, `unchanged`, `left alone`). A role already in your
+account that an earlier project put there is read from its history (`ListPersonalityVersions`):
+when every version of it was an import and its lines are an older catalogue's, nobody changed
+it, and it is upgraded (`v1 → v2`). A copy you changed (a version that is not an import, or
+lines of your own), or one you changed in InOrbit since this project's import, is left alone;
+the line says the catalogue's version differs and names the command that takes it,
+`iohr atlas roles import --upgrade`, which is your go to replace the changed copy. Provenance is
+read from that history; there is no built-in marker on the server, so a role whose history
+cannot be read stays `left alone`. The catalogue never replaces your changes on its own. When the account has no root role, `base-engineer`
 comes with them. Only the account owner or an admin may import. Signed out, offline or refused,
 init still succeeds, says so once and keeps the files; `iohr sync` (or
 `iohr atlas roles import`) imports later. `--json` reports each role.
@@ -736,13 +781,13 @@ keychain item the Mac bridge uses (`iohr-mcp-bridge-io`). A profile (`--profile`
 default) still holds the runner's keys and settings, and `--account` names the account.
 Nothing else changes: without the flag the runner signs in as your profile does.
 `--sign-in io` also works on `iohr coordinator ...` (every other command refuses it), so an
-agent's jobs and asks are Io's, not the person's who runs it. To say which personality made
-the call, add `--via-personality NAME` (`IOHR_VIA_PERSONALITY`), and optionally
+agent's jobs and asks are Io's, not the person's who runs it. To say which role made
+the call, add `--via-role NAME` (`IOHR_VIA_ROLE`; the old `--via-personality` and `IOHR_VIA_PERSONALITY` still work), and optionally
 `--via-session ID` (`IOHR_VIA_SESSION`) and `--via-job ID` (`IOHR_VIA_JOB`): they set the
 `x-iohr-via` header (`personality=improver; session=...; job=...`), which is attribution only and
 grants nothing. Each value is 1 to 64 of `A-Z a-z 0-9 . _ : -`, else the call is refused. (`--via` is
 taken: `iohr ask --via` says where an answer comes from.) These flags need `--sign-in io`.
-Example: `iohr --sign-in io --via-personality improver coordinator jobs create --kind chore --brief -`.
+Example: `iohr --sign-in io --via-role improver coordinator jobs create --kind chore --brief -`.
 A runner of Io's that holds a person's provider sign-in (the person signed in to `claude`
 on that machine) names that person at registration:
 `iohr --sign-in io runner register --holder <subject>`. The person must be Io's seat

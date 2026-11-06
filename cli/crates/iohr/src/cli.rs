@@ -76,10 +76,20 @@ pub struct Global {
         value_name = "WHO"
     )]
     pub sign_in: Option<SignIn>,
-    /// With `--sign-in io`: the personality named in the `x-iohr-via` attribution header
-    /// (RFC 0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`,
-    /// which `iohr ask` uses for where an answer comes from.
-    #[arg(long, global = true, env = "IOHR_VIA_PERSONALITY", value_name = "NAME")]
+    /// With `--sign-in io`: the role named in the `x-iohr-via` attribution header, such as
+    /// `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr ask` uses for
+    /// where an answer comes from.
+    #[arg(long, global = true, env = "IOHR_VIA_ROLE", value_name = "NAME")]
+    pub via_role: Option<String>,
+    /// The old name of `--via-role`, kept so scripts keep working. The header it sets is
+    /// unchanged (`personality=...`).
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_PERSONALITY",
+        value_name = "NAME",
+        hide = true
+    )]
     pub via_personality: Option<String>,
     /// With `--sign-in io`: the agent session named in `x-iohr-via`.
     #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
@@ -103,6 +113,13 @@ pub enum SignIn {
 }
 
 impl Global {
+    /// The role named for attribution: `--via-role` (`IOHR_VIA_ROLE`), else the hidden old
+    /// name `--via-personality` (`IOHR_VIA_PERSONALITY`).
+    #[must_use]
+    pub fn via_role(&self) -> Option<&String> {
+        self.via_role.as_ref().or(self.via_personality.as_ref())
+    }
+
     /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
     #[must_use]
     pub fn environment(&self) -> &'static Environment {
@@ -178,7 +195,15 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Agents",
-        &["ask", "shell", "runner", "coordinator", "memory"],
+        &[
+            "ask",
+            "asks",
+            "permissions",
+            "shell",
+            "runner",
+            "coordinator",
+            "memory",
+        ],
     ),
     (
         "Operate",
@@ -284,6 +309,14 @@ pub enum Command {
     /// The coordinator's jobs and queued asks: list and file work.
     #[command(subcommand)]
     Coordinator(CoordinatorCommand),
+    /// Read and answer the asks waiting for you: list, show, deny, question.
+    ///
+    /// The asks agents file for you (a pull request to merge, a roll, a review). `list` and
+    /// `show` stay live on a terminal and print once with `--once`, `--json` or in a pipe.
+    /// You can deny an ask or put a question to its agent here; approving needs your phone's
+    /// key, so `approve` says so and waits for it.
+    #[command(subcommand)]
+    Asks(AsksCommand),
     /// Keep what a project knows as files, check it, and sync it when you choose.
     ///
     /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
@@ -380,6 +413,23 @@ pub enum Command {
     /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
     #[command(subcommand)]
     Shell(ShellCommand),
+    /// Rules for what Io may run or open when you ask it something.
+    ///
+    /// `iohr ask` (and `?` at your prompt) asks you before Io runs a command. Your answers
+    /// are rules in Claude Code's own grammar (`Bash(ls:*)`, `Read(./src/**)`,
+    /// `WebFetch(domain:example.com)`), kept in `.inorbit/permissions.toml` in the project
+    /// and in your config folder. A deny rule beats an allow rule, and keys, `.env` files
+    /// and credentials are never allowed by any rule or answer. Every decision is appended
+    /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
+    #[command(subcommand)]
+    Permissions(PermissionsCommand),
+    /// Serves the permission questions of one `iohr ask` run to Claude Code (not for you).
+    #[command(name = "permission-server", hide = true)]
+    PermissionServer {
+        /// The private socket of the `iohr ask` that started it.
+        #[arg(long, value_name = "PATH")]
+        socket: std::path::PathBuf,
+    },
     /// Run coordinator turns on this machine.
     ///
     /// The coordinator's runner: this machine runs coordinator turns on your own
@@ -1394,6 +1444,12 @@ pub struct AskArgs {
     /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
     #[arg(long)]
     pub allow_edits: bool,
+    /// What happens when Io wants to run a command or open a file no rule decides: `prompt`
+    /// asks you at the terminal (default at a terminal), `rules` only follows your rules and
+    /// says no to the rest (default without one), `deny` offers no commands at all. Rules:
+    /// `iohr permissions`. `[ask] permissions`.
+    #[arg(long, value_name = "HOW", env = "IOHR_ASK_PERMISSIONS")]
+    pub permissions: Option<String>,
     /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block;
     /// default) or `collapse` (one line). `[ask] thinking`.
     #[arg(long, value_name = "HOW")]
@@ -1454,15 +1510,74 @@ pub enum RolesCommand {
     },
     /// Import the project's roles into your InOrbit account.
     ///
-    /// The same import `iohr sync` does. A role already in your account that did not
-    /// come from this project, or that changed in InOrbit since, is left alone.
+    /// The same import `iohr sync` does. A built-in role already in your account that nobody
+    /// changed is upgraded to the catalogue's newer version; one you changed, or that is not
+    /// a built-in, is left alone (`--upgrade` takes the catalogue's version over a changed one).
     Import {
         /// Say what would be sent and send nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Also replace a copy you changed with the catalogue's newer version (InOrbit keeps
+        /// the old version, so it can be reverted).
+        #[arg(long)]
+        upgrade: bool,
         /// The project folder. Default: the nearest folder up from here that has `atlas/`.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
+    },
+}
+
+/// Which rule file: the project's or yours. Neither means the default for the command.
+#[derive(Debug, Clone, Copy, Args)]
+pub struct PermissionScope {
+    /// The project's `.inorbit/permissions.toml` (committed with the code).
+    #[arg(long, conflicts_with = "user")]
+    pub project: bool,
+    /// Your own file in the config folder (every project).
+    #[arg(long)]
+    pub user: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PermissionsCommand {
+    /// Show the rules, and where each one is kept.
+    List {
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Allow a command or file, like `Bash(ls:*)` or `Read(./src/**)`.
+    ///
+    /// Default: the project file. Refused for anything that could open keys, `.env` files or
+    /// credentials, and for a rule that would allow every command.
+    Allow {
+        /// The rule, in Claude Code's grammar.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Never allow a command or file; this beats any allow rule.
+    Deny {
+        /// The rule, in Claude Code's grammar.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Forget a rule, from the allow or deny list, in both files unless one is named.
+    Remove {
+        /// The rule, exactly as `list` shows it.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Show what the rules say about one call, without running it.
+    ///
+    /// `iohr permissions check Bash 'git status'`, `... check Read ./src/main.rs`,
+    /// `... check WebFetch https://example.com`. Says allow, deny or ask, and which rule.
+    Check {
+        /// The tool: Bash, Read, Edit, Write, Grep, Glob or `WebFetch`.
+        tool: String,
+        /// The command, the file or the address.
+        input: String,
     },
 }
 
@@ -1703,18 +1818,28 @@ pub enum ProjectCommand {
         answers: Option<PathBuf>,
         /// Describe the project and your own agent (claude or codex, on your PATH) builds it
         /// in the new folder, from the template's agent prompt. It runs in the background of
-        /// this command, in print mode (no session opens): it may edit files, never run shell
-        /// commands, and iohr draws its progress. The smoke test runs after it. Its output is
+        /// this command, in print mode (no session opens): it may edit files, read, search and fetch from the web,
+        /// and run only the language's own build and test commands (cargo, go, python, node), a few
+        /// read-only ones (git status, log and diff, ls) and this program's `atlas new`,
+        /// `atlas sync --dry-run` and `memory` commands, never any other shell command (no curl);
+        /// iohr draws its progress. The smoke test runs after it. Its output is
         /// labelled AI. `--json` passes the agent's events through as JSON lines.
         #[arg(long, value_name = "TEXT")]
         describe: Option<String>,
         /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
-        /// 40, init's own: `[ask]` in config.toml has no bound.
+        /// `[project] agent_turns`, else 150, init's own: `[ask]` in config.toml has no bound.
         #[arg(long, value_name = "N")]
         agent_turns: Option<u32>,
-        /// The most seconds the agent may run before iohr stops it. Default 600, init's own.
+        /// The most seconds the agent may run before iohr stops it. Default `[project]
+        /// agent_timeout`, else 1800, init's own. When it stops at a cap, iohr says so,
+        /// writes `.inorbit/handoff.md` and prints how to continue.
         #[arg(long, value_name = "SECONDS")]
         agent_timeout: Option<u64>,
+        /// The model the agent builds with: a Claude alias such as `sonnet` or a full model
+        /// name. Default `[project] agent_model`, else `sonnet` (a whole site needs more than
+        /// the small fast tier `iohr ask` uses). With Codex it is passed on only when named.
+        #[arg(long, value_name = "MODEL", env = "IOHR_INIT_AGENT_MODEL")]
+        agent_model: Option<String>,
         /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
         /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
         /// agent is not started (its command and prompt are printed). Every step shows as
@@ -2276,6 +2401,96 @@ pub enum CoordinatorJobsCommand {
         /// The queued ask this job works on.
         #[arg(long)]
         ask: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AsksCommand {
+    /// List the asks waiting for you, live on a terminal.
+    List {
+        /// open (pending and question, the default), all, or one status: pending, question,
+        /// approved, denied, `in_progress`, done, failed, stale.
+        #[arg(long, default_value = "open")]
+        status: String,
+        /// Only this kind: `pull_request`, roll, review, document, decision or run.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Print once and stop, even on a terminal.
+        #[arg(long)]
+        once: bool,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=500))]
+        limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Print how many asks are waiting for you, for a shell prompt.
+    ///
+    /// Prints "N asks" when some wait, nothing when none do, and `--json` prints `{"count": N}`.
+    /// With `--cache` the number (and nothing else) is kept in `~/.inorbit/term/asks-count`,
+    /// written whole, and the call does nothing while that file is under 30 seconds old; the
+    /// shell hook (`iohr shell hook zsh`) reads that file at the prompt and refreshes it in
+    /// the background.
+    Count {
+        /// Keep the number in `~/.inorbit/term/asks-count`; refresh it at most every 30 seconds.
+        #[arg(long)]
+        cache: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Show one ask with its timeline, live on a terminal.
+    Show {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Print once and stop, even on a terminal.
+        #[arg(long)]
+        once: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Choose what to do with an ask from a menu: approve, deny or question.
+    Decide {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Deny an ask, with a note if you like.
+    Deny {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Why (at most 500 characters); the agent reads it.
+        #[arg(long)]
+        note: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Put a question to the agent that asked; the ask stays open.
+    Question {
+        /// The ask's id (apr_...).
+        id: String,
+        /// The question (at most 500 characters); asked here when left out on a terminal.
+        #[arg(long)]
+        note: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Approve on your phone: it holds the key, this waits for you to use it.
+    Approve {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Say so and stop, without waiting.
+        #[arg(long)]
+        once: bool,
         /// Act on this account: a team you belong to (default: your own).
         #[arg(long)]
         account: Option<String>,

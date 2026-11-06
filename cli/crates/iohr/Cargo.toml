@@ -46,6 +46,7 @@ thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 url.workspace = true
 zeroize.workspace = true
 
