@@ -1463,6 +1463,7 @@ dependencies = [
  "getrandom 0.4.3",
  "keyring-core",
  "reqwest",
+ "security-framework",
  "serde",
  "serde_json",
  "sha2",
