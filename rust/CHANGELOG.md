@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.1](https://github.com/inorbithr/sdk/compare/rust/v0.4.0...rust/v0.4.1) (2026-11-06)
+
+
+### Documentation
+
+* **docs:** READMEs match today's SDKs and CLI ([#323](https://github.com/inorbithr/sdk/issues/323)) ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+* **sdk:** READMEs match today's SDKs and CLI ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+
+
+### Dependencies
+
+* **rust:** bump serde-saphyr ([20347d7](https://github.com/inorbithr/sdk/commit/20347d7227ed1e9c6ee64c097701aebc14c15150))
+* **rust:** bump serde-saphyr from 1.3.0 to 2.0.0 in /rust in the rust-major group across 1 directory ([#286](https://github.com/inorbithr/sdk/issues/286)) ([20347d7](https://github.com/inorbithr/sdk/commit/20347d7227ed1e9c6ee64c097701aebc14c15150))
+
 ## [0.4.0](https://github.com/inorbithr/sdk/compare/rust/v0.3.0...rust/v0.4.0) (2026-10-24)
 
 
