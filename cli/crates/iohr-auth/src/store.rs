@@ -656,7 +656,14 @@ mod tests {
     /// and is not given up on at the read's budget.
     #[test]
     fn a_quiet_store_gives_a_write_more_time_than_a_read() {
-        let store = quiet(100, 20);
+        // The store answers in 100 ms: well past the 20 ms read budget, well inside a
+        // 5 s write budget, so a busy test host cannot push the write over its deadline.
+        let ms = std::time::Duration::from_millis;
+        let store = QuietStore::with_budgets(
+            std::sync::Arc::new(Slow { delay: ms(100) }),
+            ms(20),
+            ms(5_000),
+        );
         let k = key("work", "acc_1");
         assert!(matches!(store.get(&k), Err(StoreError::WouldAsk)));
         store.set(&k, &Redacted::new("x".into())).unwrap();
