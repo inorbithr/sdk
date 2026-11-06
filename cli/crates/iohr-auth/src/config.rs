@@ -190,6 +190,12 @@ pub struct AskConfig {
     /// default, on an empty line), `ctrl-g`, `alt-enter`, or `off`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu_key: Option<String>,
+    /// What happens when Io wants to run a command or open a file no rule decides (PRD
+    /// 0197): `prompt` (ask at the terminal; the default at one), `rules` (follow the rules
+    /// only; the default without a terminal) or `deny` (no commands offered).
+    /// `--permissions` wins over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
 }
 
 impl AskConfig {
@@ -203,6 +209,7 @@ impl AskConfig {
             && self.thinking.is_none()
             && self.hints.is_none()
             && self.menu_key.is_none()
+            && self.permissions.is_none()
     }
 }
 

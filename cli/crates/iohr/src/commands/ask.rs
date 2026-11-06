@@ -19,8 +19,28 @@ use crate::error::Error;
 use crate::headless::{self, Answer, Context};
 use crate::hints;
 use crate::output::Out;
+use crate::permissions::Mode;
+use crate::permissions::broker::{self, Opts, Session};
+use crate::permissions::engine::Place;
+use crate::permissions::store::Files;
 use crate::ui::Ui;
 use crate::{Env, prompt};
+
+/// What is not built yet, said before anything starts.
+fn built(via: Via, agent: Agent, args: &AskArgs) -> Result<(), Error> {
+    if via == Via::Io {
+        return Err(Error::Failed(
+            "`--via io` is not built yet; use `--via local`".to_owned(),
+        ));
+    }
+    if agent == Agent::Codex && headless_wanted(&args.headless) {
+        return Err(Error::Failed(
+            "`--agent codex` is not built yet for `--headless`, `--card` or a context flag; use `--agent claude`"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
 
 pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
@@ -36,17 +56,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     let thinking = ask::choose_thinking(args.thinking.as_deref(), cfg.thinking.as_deref())
         .map_err(Error::Usage)?;
     let allow_edits = args.allow_edits || cfg.allow_edits.unwrap_or(false);
-    if via == Via::Io {
-        return Err(Error::Failed(
-            "`--via io` is not built yet; use `--via local`".to_owned(),
-        ));
-    }
-    if agent == Agent::Codex && headless_wanted(&args.headless) {
-        return Err(Error::Failed(
-            "`--agent codex` is not built yet for `--headless`, `--card` or a context flag; use `--agent claude`"
-                .to_owned(),
-        ));
-    }
+    built(via, agent, &args)?;
     let hints = hints::Mode::parse(cfg.hints.as_deref()).map_err(Error::Usage)?;
     let menu_key = MenuKey::parse(cfg.menu_key.as_deref()).map_err(Error::Usage)?;
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -77,6 +87,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
                 hints,
                 menu_key,
                 dir: &ctx.dir,
+                permissions: (args.permissions.as_deref(), cfg.permissions.as_deref()),
             },
             &question,
             &args.headless,
@@ -343,6 +354,8 @@ struct Chosen<'a> {
     hints: hints::Mode,
     menu_key: MenuKey,
     dir: &'a Path,
+    /// `--permissions` and `[ask] permissions`, as written; settled in [`headless`].
+    permissions: (Option<&'a str>, Option<&'a str>),
 }
 
 /// One capped `claude -p` run (see [`headless`]), shown one way (RFC 0203.1): `--json` is the
@@ -365,10 +378,13 @@ async fn headless(
     } = *chosen;
     let (ctx, root) = context_of(h)?;
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
-    let read = headless::read_line(&ctx);
     let folder = ctx.reads.then(|| Path::new(&ctx.cwd));
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
+    // The live ask (PRD 0197): only where the run may read the folder, and only when the
+    // person did not turn it off. A person is asked only at a terminal and not for `--json`.
+    let session = permission_session(chosen, &ctx, !out.json && prompt::interactive())?;
+    let read = headless::read_line(&ctx, session.is_some());
     let label = ask::label(agent);
     let started = Instant::now();
     if out.json || !(h.hook || (fancy && (h.card || stdout_tty))) {
@@ -376,9 +392,13 @@ async fn headless(
         if !out.json {
             Out::note(&label);
         }
-        let (text, duration_ms) = headless::run(bin, &message, model, started, folder)
-            .await
-            .map_err(Error::Failed)?;
+        let ran = headless::run(bin, &message, model, started, folder, session.as_ref()).await;
+        if !out.json {
+            for line in refused_lines(session.as_ref()) {
+                Out::note(&line);
+            }
+        }
+        let (text, duration_ms) = ran.map_err(Error::Failed)?;
         let (text, questions) = askback::split(&text);
         if out.json {
             Out::print_json(&Answer {
@@ -416,6 +436,7 @@ async fn headless(
             started,
             fancy,
             stdout_tty,
+            session,
         },
     )
     .await
@@ -431,6 +452,84 @@ struct Prepared {
     started: Instant,
     fancy: bool,
     stdout_tty: bool,
+    /// The live permission ask, when the run may run commands; dropped when the card ends.
+    session: Option<Session>,
+}
+
+/// Settles how this run handles calls no rule decides and starts the broker for it. `None`
+/// when the mode is `deny`, when the folder is not readable (the run has no tools then) or
+/// when this system has no unix sockets. A broker that cannot start is an error the person
+/// sees, never a silent fall back to something more permissive.
+fn permission_session(
+    chosen: &Chosen<'_>,
+    ctx: &Context,
+    terminal: bool,
+) -> Result<Option<Session>, Error> {
+    let (flag, config) = chosen.permissions;
+    let mode = Mode::choose(flag, config, terminal).map_err(Error::Usage)?;
+    if mode == Mode::Deny || !ctx.reads {
+        return Ok(None);
+    }
+    let place = Place::at(Path::new(&ctx.cwd));
+    let bin = crate::commands::shell::bin_name(std::env::args_os().next().as_deref()).to_owned();
+    let files = Files::find(Path::new(&ctx.cwd), chosen.dir);
+    match Session::start(Opts {
+        mode,
+        files,
+        place,
+        bin,
+    }) {
+        Ok(s) => Ok(Some(s)),
+        Err(why) if cfg!(unix) => Err(Error::Failed(format!(
+            "cannot start the permission ask: {why}; run with `--permissions deny` to go on without commands"
+        ))),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The lines after an answer for what Io wanted and could not be allowed: with a rule to
+/// allow each. Empty when nothing was refused, or at a terminal where the person was asked.
+fn refused_lines(session: Option<&Session>) -> Vec<String> {
+    session
+        .map(|s| broker::denied_lines(&s.denied(), s.bin()))
+        .unwrap_or_default()
+}
+
+/// A failed run is a card too; the exit code is the agent's.
+fn draw_failed(
+    shown: &Card<'_>,
+    why: &str,
+    started: Instant,
+    (width, look): (usize, CardLook),
+) -> Error {
+    let failed = Card {
+        elapsed: Some(started.elapsed()),
+        body: Body::Failed(why),
+        ..*shown
+    };
+    card::draw(&card::render(&failed, width, look));
+    Error::Child(1)
+}
+
+/// After the answer: what the rules refused, then the one line about waiting asks.
+fn closing_notes(
+    session: Option<&Session>,
+    waiting: Option<&asks::Waiting>,
+    (h, menu_key, look, width): (&HeadlessArgs, MenuKey, CardLook, usize),
+) {
+    for line in refused_lines(session) {
+        Out::note(&line);
+    }
+    if let Some(w) = waiting {
+        Out::note(&waiting_line(w, h.hook, menu_key, look, width));
+    }
+}
+
+/// The line the shell hook reads back: the answer's one command and link.
+fn record_hook(text: &str, cwd: &Path) {
+    let command = card::command_of(text);
+    let link = card::link_of(text, cwd);
+    Out::raw(actions::record(text, command.as_deref(), link.as_deref()).as_bytes());
 }
 
 /// The card: the model runs under a spinner while the asks waiting are counted, the answer is
@@ -461,10 +560,12 @@ async fn card_run(
         started,
         fancy,
         stdout_tty,
+        session,
     } = prepared;
     let look = CardLook::detect(fancy);
     let folder = ctx.reads.then(|| std::path::PathBuf::from(&ctx.cwd));
-    let run = headless::run(bin, &message, model, started, folder.as_deref());
+    let (folder, session_ref) = (folder.as_deref(), session.as_ref());
+    let run = headless::run(bin, &message, model, started, folder, session_ref);
     // The asks waiting are looked up while the model thinks, so they add no time.
     let (done, waiting) = if look.fancy {
         let (done, waiting) =
@@ -474,8 +575,7 @@ async fn card_run(
         (run.await, None)
     };
     let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
-    // Only a card that is drawn moves the footer on.
-    // A plain look has no footer (its label carries the disclosure), so it moves nothing.
+    // Only a drawn card moves the footer on: a plain look has none (its label discloses).
     let footer = if look.fancy {
         hints::next(dir, hints, &notice, hints::now())
     } else {
@@ -510,34 +610,33 @@ async fn card_run(
                 && (h.hook || h.card || !h.headless)
                 && !questions.is_empty();
             if let Some(root) = root.as_deref().filter(|_| can_ask)
-                && let Some((again, ms)) =
-                    ask_back(chosen, question, &mut ctx, (root, &questions), look).await?
+                && let Some((again, ms)) = ask_back(
+                    chosen,
+                    question,
+                    &mut ctx,
+                    (root, &questions),
+                    look,
+                    session.as_ref(),
+                )
+                .await?
             {
                 text = again;
                 let took = Duration::from_millis(ms);
                 draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
             }
-            if let Some(w) = &waiting {
-                Out::note(&waiting_line(w, h.hook, menu_key, look, width));
-            }
+            closing_notes(
+                session.as_ref(),
+                waiting.as_ref(),
+                (h, menu_key, look, width),
+            );
             if h.hook {
-                let command = card::command_of(&text);
-                let link = card::link_of(&text, &cwd);
-                Out::raw(actions::record(&text, command.as_deref(), link.as_deref()).as_bytes());
+                record_hook(&text, &cwd);
             } else if !stdout_tty {
                 Out::raw(format!("{text}\n").as_bytes());
             }
             Ok(())
         }
-        Err(why) => {
-            let failed = Card {
-                elapsed: Some(started.elapsed()),
-                body: Body::Failed(why),
-                ..shown
-            };
-            card::draw(&card::render(&failed, width, look));
-            Err(Error::Child(1))
-        }
+        Err(why) => Err(draw_failed(&shown, why, started, (width, look))),
     }
 }
 
@@ -551,6 +650,7 @@ async fn ask_back(
     ctx: &mut Context,
     (root, questions): (&Path, &[askback::Question]),
     look: CardLook,
+    session: Option<&Session>,
 ) -> Result<Option<(String, u64)>, Error> {
     let Some(answers) = askback::ask_person(questions) else {
         return Ok(None);
@@ -563,7 +663,14 @@ async fn ask_back(
     let again = headless::assemble(question, ctx).map_err(Error::Usage)?;
     let started = Instant::now();
     let folder = ctx.reads.then(|| std::path::PathBuf::from(&ctx.cwd));
-    let run = headless::run(chosen.bin, &again, chosen.model, started, folder.as_deref());
+    let run = headless::run(
+        chosen.bin,
+        &again,
+        chosen.model,
+        started,
+        folder.as_deref(),
+        session,
+    );
     match spin_while(run, chosen.agent, look, started).await? {
         // The second answer asks nothing: a question in it is dropped.
         Ok((raw, ms)) => Ok(Some((askback::split(&raw).0, ms))),
