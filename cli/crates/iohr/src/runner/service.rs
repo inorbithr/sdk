@@ -171,6 +171,7 @@ pub(crate) struct RunnerInfo {
     pub(crate) user: String,
     pub(crate) name: String,
     pub(crate) status: String,
+    pub(crate) os: String,
     pub(crate) last_seen_at: String,
     pub(crate) providers: Vec<String>,
     /// The Ed25519 public key (base64) the runner registered with; empty if the
@@ -193,6 +194,7 @@ impl RunnerInfo {
             user: s("user"),
             name: s("name"),
             status: s("status"),
+            os: s("os"),
             last_seen_at: s("last_seen_at"),
             public_key: s("public_key"),
             capacity: u32::try_from(num(v, "capacity")).unwrap_or(0),

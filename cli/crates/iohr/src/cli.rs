@@ -701,6 +701,20 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Revoke a runner: it claims and reports nothing from then on (`RevokeRunner`).
+    ///
+    /// Looks the runner up in the account first and refuses an id that is not there or
+    /// is already revoked. A runner that is online is refused unless `--force-online`:
+    /// revoking a live runner stops its work.
+    Revoke {
+        /// The runner's id (`rnr_` and 26 characters), from `iohr runner status`.
+        runner_id: String,
+        /// Revoke it although it is online.
+        #[arg(long)]
+        force_online: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
 }
 
 #[derive(Debug, Subcommand)]
