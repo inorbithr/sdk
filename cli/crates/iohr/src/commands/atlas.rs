@@ -99,6 +99,7 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
     let moved = move_legacy_roles(&root, out)?;
     let (name, template) = project_meta(&root);
     let created_at = super::project::now();
+    let bin = super::shell::running_bin();
     // The language the project declares, else the one its build file shows.
     let lang = roles::detect_language(&root);
     let mut written = atlas::ensure(
@@ -109,13 +110,14 @@ async fn init(g: &Global, env: &Env, dir: Option<PathBuf>, out: Out) -> Result<(
             lang,
             describe: None,
             created_at: &created_at,
+            bin: &bin,
         },
     )
     .map_err(Error::Failed)?;
     if roles::ensure_record(&root, lang).map_err(Error::Failed)? {
         written.push("inorbit.toml".to_owned());
     }
-    written.extend(roles::ensure_agents(&root).map_err(Error::Failed)?);
+    written.extend(roles::ensure_agents(&root, &bin).map_err(Error::Failed)?);
     let report = import_for(g, env, &root, false, false).await;
     if out.json {
         Out::print_json(&serde_json::json!({

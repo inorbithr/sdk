@@ -167,6 +167,8 @@ pub struct Meta<'a> {
     pub describe: Option<&'a str>,
     /// When, as an RFC 3339 timestamp in UTC.
     pub created_at: &'a str,
+    /// The command that made the project (`iohr`, or `iohr-preview`), named in `AGENTS.md`.
+    pub bin: &'a str,
 }
 
 impl Meta<'_> {
@@ -530,7 +532,7 @@ pub fn add_atlas(files_out: &mut Vec<(String, String)>, m: &Meta<'_>) {
     }
     // The roles are recorded in the manifest, and the agents are told about memory.
     crate::roles::add_record(files_out, m.lang);
-    crate::roles::add_agents(files_out);
+    crate::roles::add_agents(files_out, m.bin);
 }
 
 /// Whether the atlas of `root` already has this starter: the file itself, or any file a person
@@ -660,6 +662,7 @@ mod tests {
             lang: Some("rust"),
             describe: Some("A shop for hand-made chairs.\nSecond line."),
             created_at: "2026-11-05T10:00:00Z",
+            bin: "iohr",
         }
     }
 

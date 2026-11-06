@@ -149,11 +149,18 @@ fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
 /// The agent's work, committed on its own so the scaffold and what an AI model built stay
 /// apart in `git log`. Runs after the agent and a passing smoke test; the message says so.
 /// `smoke` is the smoke test's verdict, `None` when it did not run. `skipped` when it did not
-/// pass, when the agent changed nothing, or when git did not answer.
+/// pass, when the agent changed nothing, or when git did not answer. A documents-only project
+/// (`docs_only`) has no program to run, so no smoke test gates its commit.
 #[must_use]
-pub fn ai_commit(dir: &Path, name: &str, agent: &str, smoke: Option<bool>) -> Step {
+pub fn ai_commit(
+    dir: &Path,
+    name: &str,
+    agent: &str,
+    smoke: Option<bool>,
+    docs_only: bool,
+) -> Step {
     let title = "The agent's work committed";
-    if smoke != Some(true) {
+    if !docs_only && smoke != Some(true) {
         let why = if smoke.is_some() {
             "the smoke test did not pass"
         } else {
@@ -189,7 +196,12 @@ pub fn ai_commit(dir: &Path, name: &str, agent: &str, smoke: Option<bool>) -> St
             if commit_all(
                 dir,
                 &format!(
-                    "{name}: AI-built changes by {agent}\n\nBuilt by an AI model ({agent}) from the description given to `iohr project init`, after which the smoke test passed. Review it before you rely on it."
+                    "{name}: AI-built changes by {agent}\n\nBuilt by an AI model ({agent}) from the description given to `iohr project init`{}. Review it before you rely on it.",
+                    if docs_only {
+                        ""
+                    } else {
+                        ", after which the smoke test passed"
+                    }
                 ),
             ) =>
         {
@@ -496,6 +508,12 @@ pub struct Facts<'a> {
     pub toolchain: Option<&'a str>,
     /// Today, `YYYY-MM-DD`.
     pub today: &'a str,
+    /// The name of the binary that ran init (`iohr`, `iohr-preview`): the agent runs it by this
+    /// name (`atlas new`, `memory remember`) and tells the person to sync with it.
+    pub bin: &'a str,
+    /// A documents-only project: no language, no test. The prompt is about the atlas and the
+    /// memory, never about code or a passing test.
+    pub docs_only: bool,
 }
 
 /// The prompt the agent gets: the template's own words, then the project, the answers and
@@ -510,9 +528,13 @@ pub fn agent_prompt(
     vals: &[(String, String)],
     facts: Facts<'_>,
 ) -> String {
-    let base = template_prompt.unwrap_or(
-        "This folder is a fresh InOrbit project. Build what is described below by editing this folder. Keep it free of secrets.",
-    );
+    let base = if facts.docs_only {
+        DOCS_PROMPT
+    } else {
+        template_prompt.unwrap_or(
+            "This folder is a fresh InOrbit project. Build what is described below by editing this folder. Keep it free of secrets.",
+        )
+    };
     let mut p = crate::template::fill_text(base, vals);
     let _ = write!(
         p,
@@ -536,8 +558,43 @@ pub fn agent_prompt(
     if let Some(t) = facts.toolchain {
         let _ = write!(p, "\n- Installed toolchain: {t}");
     }
-    let _ = write!(p, "\n\n{LATEST_STABLE}");
+    let _ = write!(p, "\n\n{}", how_to_work(facts.bin));
+    if !facts.docs_only {
+        let _ = write!(p, "\n\n{LATEST_STABLE}");
+    }
     p
+}
+
+/// What a documents-only project is: the base of its prompt, in place of the template's code
+/// words. No test, no language.
+const DOCS_PROMPT: &str = "This folder is a fresh InOrbit project made of documents, not code. \
+     Do the work described below by writing files in this folder: Markdown documents in atlas/ \
+     and memory notes. There is no program to build and no test to keep passing. Keep it free \
+     of secrets.";
+
+/// How the agent works in a project made by `iohr project init`: the tools it has, the atlas
+/// and memory conventions with the binary's own name, and what the person does next. The same
+/// conventions AGENTS.md holds ([`crate::roles::usage_lines`]), so the two never drift.
+#[must_use]
+pub fn how_to_work(bin: &str) -> String {
+    format!(
+        "How to work here:\n\
+         - Run one simple command per Bash call: no `&&`, `;`, pipes or redirects (a compound \
+           command is refused and wastes a turn). You may run `git status`, `git log`, `git diff`, \
+           `ls`, and `{bin} atlas new`, `{bin} atlas sync --dry-run`, `{bin} memory remember`, \
+           `{bin} memory recall`, `{bin} memory list`, `{bin} memory check`.\n\
+         - Fetch web pages with WebFetch (and look things up with WebSearch), never with curl or \
+           a shell. When WebFetch is not listed among your tools, fetch through the Agent tool: \
+           give a sub-agent the URLs and ask it to return the page text. Read, Glob, Grep, Write \
+           and Edit are open for this folder.\n\
+         - Work in small steps and save each file as you go: you have a limited number of turns, \
+           and what is on disk is what counts. End with a short summary of what you wrote and \
+           what is left.\n\
+         {}\
+         When you are done the person runs `{bin} sync` to send atlas/ to the project's Decisions \
+         space.",
+        crate::roles::usage_lines(bin)
+    )
 }
 
 /// The rule every agent run in a new project carries: what to pick, and where to check it.
@@ -1063,18 +1120,18 @@ mod tests {
         };
         // Nothing the agent changed: nothing to commit.
         assert_eq!(
-            ai_commit(d.path(), "x", "claude", Some(true)).state,
+            ai_commit(d.path(), "x", "claude", Some(true), false).state,
             "skipped"
         );
         std::fs::write(d.path().join("b.txt"), "built by the agent").unwrap();
         // Smoke failed, or did not run: the tree stays dirty and the step says so.
         for smoke in [Some(false), None] {
-            let st = ai_commit(d.path(), "x", "claude", smoke);
+            let st = ai_commit(d.path(), "x", "claude", smoke, false);
             assert_eq!(st.state, "skipped");
             assert!(st.said.contains("left uncommitted"), "{}", st.said);
             assert_eq!(log(d.path()).lines().count(), 1);
         }
-        let st = ai_commit(d.path(), "x", "claude", Some(true));
+        let st = ai_commit(d.path(), "x", "claude", Some(true), false);
         assert_eq!(st.state, "done", "{}", st.said);
         let l = log(d.path());
         assert_eq!(l.lines().count(), 2, "{l}");
@@ -1084,6 +1141,35 @@ mod tests {
                 .unwrap()
                 .contains("AI-built changes by claude")
         );
+    }
+
+    #[test]
+    fn a_documents_project_commits_the_agents_work_with_no_smoke_test() {
+        let d = tempfile::tempdir().unwrap();
+        for a in [
+            &["init", "-q"][..],
+            &["config", "user.email", "t@example.com"],
+            &["config", "user.name", "t"],
+            &["commit", "-q", "--allow-empty", "-m", "first"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(d.path())
+                    .args(a)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        std::fs::write(d.path().join("a.md"), "a document").unwrap();
+        // Not a docs project: no smoke test, nothing committed. A docs project: committed.
+        assert_eq!(
+            ai_commit(d.path(), "x", "claude", None, false).state,
+            "skipped"
+        );
+        let st = ai_commit(d.path(), "x", "claude", None, true);
+        assert_eq!(st.state, "done", "{}", st.said);
     }
 
     #[test]
@@ -1101,6 +1187,8 @@ mod tests {
             Facts {
                 toolchain: Some("rustc 1.99.0 (b940084d7 2026-09-28)"),
                 today: "2026-11-05",
+                bin: "iohr",
+                docs_only: false,
             },
         );
         assert!(p.starts_with("Module my_shop."));
@@ -1112,6 +1200,42 @@ mod tests {
             "Today is 2026-11-05. Use the newest edition or version published as of today;"
         ));
         assert!(p.contains("if you are unsure a newer one exists, say so."));
+    }
+
+    #[test]
+    fn a_documents_project_prompt_names_the_binary_and_has_no_code_words() {
+        let a = Answers::new();
+        let vals = template::values("velebit-ai", "local", "", &a);
+        let p = agent_prompt(
+            Some("keep the test passing (@@RUN_TEST@@)"),
+            Some("build the knowledge base"),
+            "velebit-ai",
+            "blank",
+            &a,
+            &vals,
+            Facts {
+                toolchain: None,
+                today: "2026-11-06",
+                bin: "iohr-preview",
+                docs_only: true,
+            },
+        );
+        assert!(
+            !p.contains("test passing") && !p.contains(LATEST_STABLE),
+            "{p}"
+        );
+        for want in [
+            "documents, not code",
+            "one simple command per Bash call",
+            "WebFetch",
+            "`iohr-preview atlas new <prd|rfc|adr|study>",
+            "`iohr-preview memory remember",
+            "`iohr-preview sync`",
+            "build the knowledge base",
+        ] {
+            assert!(p.contains(want), "missing {want}: {p}");
+        }
+        assert!(!p.contains("`iohr "), "{p}");
     }
 
     /// The program a variant needs, on this machine's PATH?
@@ -1199,7 +1323,10 @@ mod tests {
             ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
         );
         assert_eq!(allow("go"), ["go build", "go test", "go vet"]);
-        for v in t.live_variants() {
+        // The documents variant has no program: no build commands, no toolchain.
+        let docs = t.variant("docs").unwrap();
+        assert!(docs.is_docs_only() && docs.agent_allow.is_empty() && docs.toolchain.is_empty());
+        for v in t.live_variants().into_iter().filter(|v| !v.is_docs_only()) {
             assert!(
                 !v.agent_allow.is_empty() && !v.toolchain.is_empty(),
                 "{}",
@@ -1219,7 +1346,7 @@ mod tests {
     fn the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test() {
         let tpl =
             template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
-        assert_eq!(tpl.live_variants().len(), 4);
+        assert_eq!(tpl.live_variants().len(), 5);
         for v in tpl.live_variants() {
             let (files, runner) = rendered_in("blank", "my-shop", &v.id);
             let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
@@ -1253,6 +1380,11 @@ mod tests {
             let missing: Vec<&String> = v.needs.iter().filter(|n| !have(n)).collect();
             if !missing.is_empty() {
                 eprintln!("{}: {missing:?} not on this PATH: not run", v.id);
+                continue;
+            }
+            // A documents project has nothing to run: init drops its Smoke step.
+            if v.is_docs_only() {
+                assert!(runner.as_ref().is_some_and(|r| r.test.is_empty()), "docs");
                 continue;
             }
             let tmp = tempfile::tempdir().unwrap();

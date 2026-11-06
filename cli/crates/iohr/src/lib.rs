@@ -25,6 +25,7 @@ mod card;
 mod commands;
 mod context;
 mod error;
+mod handoff;
 mod headless;
 mod hints;
 mod io_signin;

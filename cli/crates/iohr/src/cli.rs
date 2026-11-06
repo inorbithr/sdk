@@ -1733,19 +1733,28 @@ pub enum ProjectCommand {
         answers: Option<PathBuf>,
         /// Describe the project and your own agent (claude or codex, on your PATH) builds it
         /// in the new folder, from the template's agent prompt. It runs in the background of
-        /// this command, in print mode (no session opens): it may edit files and run only the language's own
-        /// build and test commands (cargo, go, python, node), search the web, and never any other
-        /// shell command; iohr draws its progress. The smoke test runs after it. Its output is
+        /// this command, in print mode (no session opens): it may edit files, read, search and fetch from the web,
+        /// and run only the language's own build and test commands (cargo, go, python, node), a few
+        /// read-only ones (git status, log and diff, ls) and this program's `atlas new`,
+        /// `atlas sync --dry-run` and `memory` commands, never any other shell command (no curl);
+        /// iohr draws its progress. The smoke test runs after it. Its output is
         /// labelled AI. `--json` passes the agent's events through as JSON lines.
         #[arg(long, value_name = "TEXT")]
         describe: Option<String>,
         /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
-        /// 40, init's own: `[ask]` in config.toml has no bound.
+        /// `[project] agent_turns`, else 150, init's own: `[ask]` in config.toml has no bound.
         #[arg(long, value_name = "N")]
         agent_turns: Option<u32>,
-        /// The most seconds the agent may run before iohr stops it. Default 600, init's own.
+        /// The most seconds the agent may run before iohr stops it. Default `[project]
+        /// agent_timeout`, else 1800, init's own. When it stops at a cap, iohr says so,
+        /// writes `.inorbit/handoff.md` and prints how to continue.
         #[arg(long, value_name = "SECONDS")]
         agent_timeout: Option<u64>,
+        /// The model the agent builds with: a Claude alias such as `sonnet` or a full model
+        /// name. Default `[project] agent_model`, else `sonnet` (a whole site needs more than
+        /// the small fast tier `iohr ask` uses). With Codex it is passed on only when named.
+        #[arg(long, value_name = "MODEL", env = "IOHR_INIT_AGENT_MODEL")]
+        agent_model: Option<String>,
         /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
         /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
         /// agent is not started (its command and prompt are printed). Every step shows as

@@ -81,6 +81,19 @@ README_TEST = "cargo test"
 TOOLCHAIN_MINOR = "1.85"
 LAYOUT = "- `src/main.rs`: the code and its one test."
 
+[[variants]]
+id = "docs"
+label = "None, documents only (atlas and memory)"
+status = "live"
+# No program, so nothing to install, build, run or test: the project is its atlas/ and its
+# memory, and `iohr sync` sends them to Decisions. No smoke test (the Smoke step is dropped).
+[variants.vars]
+SOURCE = "atlas/ (PRDs, RFCs, ADRs, studies) and .inorbit/memory/"
+IGNORE = ".DS_Store"
+RUN_TEST = "`iohr atlas sync --dry-run`"
+README_TEST = "iohr atlas sync --dry-run"
+LAYOUT = "- `atlas/`: the project's documents: PRDs, RFCs, ADRs and studies, each with front matter.\n- `.inorbit/memory/`: what the project's agents remember, one file per memory."
+
 [[steps]]
 name = "git"
 

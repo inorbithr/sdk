@@ -55,6 +55,8 @@ pub(crate) struct Done {
     pub(crate) answer: Option<String>,
     /// Set when the agent says the run failed: its short reason.
     pub(crate) error: Option<String>,
+    /// Set when the run stopped at its turn cap (`error_max_turns`): the work is on disk, unfinished.
+    pub(crate) capped: bool,
 }
 
 /// Reads one line of the agent's stream. A line that is not JSON, or an event this build does
@@ -278,6 +280,7 @@ impl ClaudeLine {
                         reason.unwrap_or_else(|| "the agent reported an error".to_owned())
                     }),
                     answer: if failed { None } else { r.result },
+                    capped: stopped == Some("error_max_turns"),
                 })]
             }
         }
@@ -516,6 +519,53 @@ pub(crate) struct Look {
 /// A string in the dim style of the terminal on stderr.
 fn dim(s: &str) -> String {
     console::style(s).for_stderr().dim().to_string()
+}
+
+/// What a caller wants to know of how a run ended, besides how it was drawn: did it stop at its
+/// turn cap, and what were the agent's last words (the text since its last tool call, else the
+/// text before it). Held in memory for one run, for the handoff note; never logged.
+#[derive(Debug, Default)]
+pub(crate) struct Tail {
+    pub(crate) capped: bool,
+    run: String,
+    last: String,
+}
+
+/// The most of the agent's words kept; the note cuts it again.
+const TAIL_MAX: usize = 6000;
+
+impl Tail {
+    pub(crate) fn see(&mut self, e: &Event) {
+        match e {
+            Event::Text(t) => {
+                if self.run.len() < TAIL_MAX {
+                    self.run.push_str(t);
+                }
+            }
+            Event::Tool { .. } => {
+                if !self.run.trim().is_empty() {
+                    self.last = std::mem::take(&mut self.run);
+                }
+                self.run.clear();
+            }
+            Event::Done(d) => {
+                self.capped |= d.capped;
+                if let Some(a) = d.answer.as_deref().filter(|a| !a.trim().is_empty()) {
+                    a.clone_into(&mut self.run);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The agent's last words, when it said any.
+    pub(crate) fn said(&self) -> String {
+        if self.run.trim().is_empty() {
+            self.last.trim().to_owned()
+        } else {
+            self.run.trim().to_owned()
+        }
+    }
 }
 
 /// Draws [`Event`]s. The answer goes to `out` (stdout) and nothing else does, so a pipe gets
@@ -845,6 +895,32 @@ mod tests {
             Some("it used all its turns before it finished")
         );
         assert_eq!(d.turns, Some(40));
+        assert!(d.capped, "the turn cap is told apart from other failures");
+        let ev = claude(r#"{"type":"result","is_error":true,"result":"Not logged in"}"#);
+        assert!(matches!(&ev[0], Event::Done(d) if !d.capped));
+    }
+
+    #[test]
+    fn the_tail_keeps_the_last_words_and_the_cap() {
+        let mut t = Tail::default();
+        for e in [
+            Event::Text("Wrote the PRD. Next: the ADRs.".into()),
+            Event::Tool {
+                id: None,
+                name: "Write".into(),
+                detail: "atlas/adr/0002.md".into(),
+            },
+            Event::Done(Done {
+                capped: true,
+                ..Done::default()
+            }),
+        ] {
+            t.see(&e);
+        }
+        assert!(t.capped);
+        assert_eq!(t.said(), "Wrote the PRD. Next: the ADRs.");
+        t.see(&Event::Text("Then this.".into()));
+        assert_eq!(t.said(), "Then this.");
     }
 
     #[test]
@@ -861,6 +937,7 @@ mod tests {
                 thinking_tokens: Some(7),
                 answer: Some("ok".into()),
                 error: None,
+                capped: false,
             })]
         );
         let ev = claude(r#"{"type":"result","is_error":true,"result":"Not logged in"}"#);

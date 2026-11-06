@@ -1251,9 +1251,26 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
         args.contains(&"WebSearch".to_owned()) && args.contains(&"WebFetch".to_owned()),
         "{args:?}"
     );
+    // The project's own commands (atlas, memory) are allowed by prefix, named by the binary
+    // that ran; no curl and no network shell.
+    assert!(
+        args.iter()
+            .any(|a| a.starts_with("Bash(") && a.contains(" atlas new:*)")),
+        "{args:?}"
+    );
+    assert!(
+        args.iter().any(|a| a.contains(" memory remember:*)")),
+        "{args:?}"
+    );
+    assert!(
+        !args
+            .iter()
+            .any(|a| a.starts_with("Bash(") && a.contains("curl")),
+        "{args:?}"
+    );
     assert!(args.contains(&"Read(./.env)".to_owned()), "{args:?}");
     assert!(
-        has("--max-turns", "40") && has("--model", "haiku"),
+        has("--max-turns", "150") && has("--model", "sonnet"),
         "{args:?}"
     );
     // The prompt is several lines (the file holds one argument line by line): the description
@@ -1362,6 +1379,37 @@ fn a_failing_or_stuck_agent_keeps_the_scaffold_exits_non_zero_and_says_how_to_re
     assert_eq!(o.status.code(), Some(1), "{t}");
     assert!(t.contains("did not finish in 1 s and was stopped"), "{t}");
     assert!(d.join("inorbit.toml").is_file());
+    // A run that hits its turn cap says so, prints how to continue and leaves a handoff note
+    // with what was asked, what was written and the agent's last words.
+    let h = tempfile::tempdir().unwrap();
+    let (o, d) = init_described(
+        h.path(),
+        &["--no-smoke", "--agent-turns", "7"],
+        "ask-claude-capped.jsonl",
+        "",
+        "1",
+    );
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(
+        t.contains("used all its 7 turns") && t.contains(".inorbit/handoff.md"),
+        "{t}"
+    );
+    assert!(
+        t.contains("ask --allow-edits \"continue the work\"") && t.contains("--agent-turns"),
+        "{t}"
+    );
+    let note = std::fs::read_to_string(d.join(".inorbit/handoff.md")).unwrap();
+    for want in [
+        "a watcher that logs a line",
+        "built.txt",
+        "> I wrote the first PRD. Left: the ADRs and the studies.",
+        "used all its 7 turns",
+    ] {
+        assert!(note.contains(want), "missing {want}: {note}");
+    }
+    // The timed-out run left a note too.
+    assert!(d.join("inorbit.toml").is_file());
     // The dry run starts nothing and shows the command it would run, bounds included.
     let h = tempfile::tempdir().unwrap();
     let (o, d) = init_described(h.path(), &["--dry-run", "--agent-turns", "9"], "", "", "0");
@@ -1374,6 +1422,41 @@ fn a_failing_or_stuck_agent_keeps_the_scaffold_exits_non_zero_and_says_how_to_re
         "{t}"
     );
     assert!(!d.exists() && !h.path().join("out/args").exists());
+}
+
+/// The documents variant of the blank template is a project of atlas and memory: no program, no
+/// smoke test, AGENTS.md names the binary that made it, and `atlas sync --dry-run` is its check.
+#[test]
+fn the_documents_language_makes_an_atlas_and_memory_project_with_no_smoke_test() {
+    let h = tempfile::tempdir().unwrap();
+    let d = h.path().join("w/kb");
+    let o = iohr(
+        h.path(),
+        &[
+            "project",
+            "init",
+            "kb",
+            "--template",
+            "blank",
+            "--lang",
+            "docs",
+            "--dir",
+            d.to_str().unwrap(),
+            "--yes",
+        ],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(!t.contains("smoke test"), "{t}");
+    for f in ["atlas", ".inorbit/memory", "AGENTS.md", "README.md"] {
+        assert!(d.join(f).exists(), "{f}: {t}");
+    }
+    assert!(!d.join("src").exists() && !d.join("tests").exists());
+    let agents = std::fs::read_to_string(d.join("AGENTS.md")).unwrap();
+    assert!(
+        agents.contains("atlas new") && agents.contains("memory remember"),
+        "{agents}"
+    );
 }
 
 /// Every template's init writes `.inorbit/space` (RFC 0103), committed with the first commit,

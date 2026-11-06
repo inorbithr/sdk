@@ -174,8 +174,9 @@ pub(crate) const SECRET_READS: &[&str] = &[
 /// stream-json` needs `--verbose`, `--include-partial-messages` streams pieces as they
 /// arrive, `--no-session-persistence` keeps nothing on disk, `--permission-mode acceptEdits`
 /// lets it edit, `--max-turns` bounds the run. An editing run takes `allow`, the commands it may
-/// run (each a prefix, `cargo test`, scoped as `Bash(cargo test:*)`), and always `WebSearch` and
-/// `WebFetch`; any other command is refused because nobody can be asked in print mode, and
+/// run (each a prefix, `cargo test`, scoped as `Bash(cargo test:*)`), and always `Read`, `Glob`,
+/// `Grep`, `Write`, `Edit`, `WebSearch` and `WebFetch` (a documents project needs no shell to
+/// fetch a site: `WebFetch` does it); any other command is refused because nobody can be asked in print mode, and
 /// `--setting-sources ""` then keeps the person's own settings from allowing more. With nothing in
 /// `allow` the shell stays denied outright (`--disallowedTools Bash`: a deny beats an allow,
 /// so the two cannot be mixed). Whatever the run may do, `SECRET_READS` stay unreadable. Codex (<https://developers.openai.com/codex/cli/reference>): `exec --json`
@@ -218,7 +219,18 @@ pub(crate) fn argv(
                 a.extend(["--setting-sources".to_owned(), String::new()]);
                 a.push("--allowedTools".to_owned());
                 a.extend(allow.iter().map(|c| format!("Bash({c}:*)")));
-                a.extend(["WebSearch".to_owned(), "WebFetch".to_owned()]);
+                a.extend(
+                    [
+                        "Read",
+                        "Glob",
+                        "Grep",
+                        "Write",
+                        "Edit",
+                        "WebSearch",
+                        "WebFetch",
+                    ]
+                    .map(str::to_owned),
+                );
             }
             a.push("--disallowedTools".to_owned());
             a.extend(denied);
@@ -400,18 +412,28 @@ mod tests {
         let e = argv(Agent::Claude, Some("haiku"), true, &allow, Some(7), "q");
         let at = e.iter().position(|x| x == "--allowedTools").unwrap();
         assert_eq!(
-            e[at + 1..at + 5],
+            e[at + 1..at + 10],
             [
                 "Bash(cargo build:*)",
                 "Bash(cargo test:*)",
+                "Read",
+                "Glob",
+                "Grep",
+                "Write",
+                "Edit",
                 "WebSearch",
                 "WebFetch"
             ]
         );
+        // No network shell and no blanket shell is ever allowed.
+        assert!(!e.iter().any(|x| x.contains("curl") || x == "Bash"));
         // A deny beats an allow, so a scoped allow means no blanket `Bash` deny, and the
         // secret files stay denied; the person's own settings cannot allow more.
         let denied = &e[e.iter().position(|x| x == "--disallowedTools").unwrap() + 1..];
         assert!(!denied.contains(&"Bash".to_owned()));
+        // The deny list is exactly the secret reads (then `--`, the question): never wider
+        // tools without it, never narrower.
+        assert_eq!(denied[..SECRET_READS.len()], *SECRET_READS);
         assert!(
             SECRET_READS
                 .iter()

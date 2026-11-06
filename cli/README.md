@@ -544,11 +544,19 @@ The order is fixed: scaffold, then the agent, then the smoke test, then the repo
 2. The agent is your own `claude` or `codex` in print mode, in the new folder, with a prompt
    from your words, the answers and the template. It may edit files and run only the
    language's own build and test commands (`cargo build|test|fmt|clippy`, `go build|test|vet`,
-   the template's Python and Node tools), and search the web; any other shell command is
-   denied and drawn dim with its reason. Its prompt carries the installed toolchain version
+   the template's Python and Node tools), this project's own `atlas new`, `atlas sync
+   --dry-run` and `memory remember|recall|list|check` (under the running binary's name),
+   read-only `git status|log|diff` and `ls`, and fetch and search the web with WebFetch and
+   WebSearch; any other shell command (curl included) is denied and drawn dim with its reason.
+   The prompt tells it to run one simple command per call and names the binary, the atlas
+   and memory conventions and that you send the result with `<bin> sync`. The `docs`
+   language ("None, documents only") makes a project of atlas and memory with no program and
+   no smoke test; its prompt has no code in it. Its prompt carries the installed toolchain version
    and today's date, and tells it to use the latest stable, secure release and check it at the
-   upstream repository and its advisories. It is bounded by `--agent-turns` (default 40) and
-   `--agent-timeout` (seconds, default 600), and the output says which values were used. The
+   upstream repository and its advisories. It is bounded by `--agent-turns` (default 150, or
+   `[project] agent_turns`), `--agent-timeout` (seconds, default 1800, or `[project]
+   agent_timeout`) and runs on `--agent-model` (default `sonnet`, env
+   `IOHR_INIT_AGENT_MODEL`, or `[project] agent_model`); the output says which values were used. The
    stream is the same as `iohr ask`: thinking dim, one row per tool, a footer labelled
    "AI-built" (AI Act Art. 50).
 3. The smoke test then runs on what the agent built, so the report is true for the result.
@@ -556,7 +564,10 @@ The order is fixed: scaffold, then the agent, then the smoke test, then the repo
    says it is AI-built (`git log` shows both). When the smoke test fails or does not run, the
    tree is left as the agent left it, uncommitted, and the report says so.
 4. If the agent fails or runs out of turns or time, `init` says so, keeps the scaffold, exits
-   non-zero and prints one line to retry.
+   non-zero and prints one line to continue (`<bin> ask --allow-edits "continue the work"`).
+   It also writes `.inorbit/handoff.md` (what was asked, the files written, the agent's last
+   words); the next `ask --allow-edits` in that folder reads it into its prompt and removes it
+   when that run succeeds. It is a first, small handoff; a fuller one builds on it.
 
 `--json` passes the agent's own events through, as `iohr ask --json` does, then an
 `iohr_summary` line (the agent, the bounds, how it ended) and the `iohr_report` line.
