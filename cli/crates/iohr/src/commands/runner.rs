@@ -385,6 +385,16 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 "stopped ({end:?}): {} heartbeats, {} failed, {} leases accepted, {} turns, {} replies delivered",
                 stats.beats, stats.failures, stats.accepted, stats.turns, stats.reported
             ));
+            if end == run_loop::End::SignInRefused {
+                let who = s
+                    .profile
+                    .as_ref()
+                    .map_or_else(|| "the default".to_owned(), ToString::to_string);
+                return Err(Error::NotSignedIn(format!(
+                    "sign-in needed for profile {who}: the API refused this runner's sign-in {} times in a row after a fresh token; sign in again (iohr login, or Io's secret), then start the runner",
+                    run_loop::REFUSED_BEFORE_EXIT
+                )));
+            }
             if renewed == Outcome::Exit {
                 // A new iohr is installed: the supervisor starts it.
                 return Err(Error::Restart);
