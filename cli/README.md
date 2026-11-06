@@ -517,6 +517,25 @@ menu starts with "Describe it, your agent builds it", and `--describe "text"` do
 The agent works in the background: `init` draws the progress itself, runs to the end and exits.
 There is no session to open or resume.
 
+### Is the toolchain behind?
+
+While you answer, `init` reads the installed Rust, Go, Node or Python version and asks that
+language's own upstream for the latest stable: Rust `static.rust-lang.org/dist/channel-rust-stable.toml`,
+Go `go.dev/dl/?mode=json`, Node `nodejs.org/dist/index.json` (the newest LTS line) and Python
+`www.python.org/api/v2/downloads/release/` (the highest stable 3.x.y). The language menu shows
+it (`cargo found · rustc 1.90.0, 1.93.0 is out`), the dry run says `would: report the toolchain
+check: ...`, and the report carries it with the command that upgrades it (`rustup update
+stable`, `brew upgrade go` when Homebrew installed it, `mise upgrade`, a download link, ...).
+
+- At a terminal, `init` asks `Upgrade Rust now with ...?` (default no) and runs the command
+  only on yes. With `--yes`, without a terminal and in a dry run it prints the command and
+  never runs it.
+- The whole lookup is bounded to about 3 seconds and runs beside the other steps. Offline, on
+  an error, on a timeout or under `--json` it is skipped and the line says `could not check`;
+  a version is never guessed and `init` never fails on it.
+- `IOHR_TOOLCHAIN_UPSTREAM=off` turns the lookup off; any other value is a base URL for the
+  routes `/rust`, `/go`, `/node` and `/python` (the tests use a local server).
+
 The order is fixed: scaffold, then the agent, then the smoke test, then the report.
 
 1. The scaffold is the `blank` template (an empty project in your language; `--template` names
