@@ -13,6 +13,7 @@
 //! the owner's rule is no token at all, so it is not built.
 
 use std::ffi::OsString;
+use std::path::Path;
 
 /// The only variables passed on, by exact name (compared in upper case: Windows is
 /// case-blind). `claude` finds its subscription sign-in through `HOME` (the macOS
@@ -150,10 +151,82 @@ pub(crate) fn contained() -> [(&'static str, &'static str); 7] {
     ]
 }
 
+/// The one variable that lets `mise` read the job's own checkout `dir` (and only it):
+/// mise refuses an untrusted `mise.toml` that sets `[env]` and has no terminal to ask,
+/// so in a fresh checkout every check (`mise run ci:changed`) and every build the model
+/// started exited 1. The model already runs this repository's build, so trusting its
+/// configuration adds nothing it could not do; nothing is written to the host's trust
+/// list, and a directory above the checkout stays untrusted. Both spellings are named
+/// when the path has a link in it (`/var` is `/private/var` on macOS).
+pub(crate) fn trusted(dir: &Path) -> (&'static str, OsString) {
+    let mut paths = vec![dir.to_path_buf()];
+    if let Ok(real) = dir.canonicalize()
+        && real != dir
+    {
+        paths.push(real);
+    }
+    let joined = std::env::join_paths(&paths).unwrap_or_else(|_| dir.as_os_str().to_owned());
+    (MISE_TRUST_VAR, joined)
+}
+
+/// mise's list of configuration directories it trusts without asking.
+pub(crate) const MISE_TRUST_VAR: &str = "MISE_TRUSTED_CONFIG_PATHS";
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests")]
     use super::*;
+
+    #[test]
+    fn mise_trusts_the_checkout_only_and_the_name_carries_no_credential() {
+        let d = tempfile::tempdir().unwrap();
+        let (k, v) = trusted(d.path());
+        assert_eq!(k, MISE_TRUST_VAR);
+        assert!(SECRET_PARTS.iter().all(|p| !k.contains(p)));
+        let named: Vec<_> = std::env::split_paths(&v).collect();
+        assert_eq!(named[0], d.path());
+        assert!(
+            named
+                .iter()
+                .all(|p| p.ends_with(d.path().file_name().unwrap()))
+        );
+        assert!(named.len() <= 2);
+    }
+
+    /// A `mise.toml` that sets `[env]` in an untrusted directory stops mise; with
+    /// `trusted` it runs. Skipped where mise is not installed.
+    #[test]
+    fn mise_reads_a_checkout_it_was_told_to_trust() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("mise.toml"),
+            "[env]\nIOHR_TRUST_PROBE = \"1\"\n[tasks.probe]\nrun = \"echo ok\"\n",
+        )
+        .unwrap();
+        let run = |extra: Option<(&str, OsString)>| {
+            let mut c = std::process::Command::new("mise");
+            c.args(["tasks", "ls"])
+                .current_dir(d.path())
+                .env_clear()
+                .envs(scrub(std::env::vars_os()))
+                .envs(contained())
+                .env("MISE_YES", "0")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null());
+            if let Some((k, v)) = extra {
+                c.env(k, v);
+            }
+            c.output()
+        };
+        let Ok(untrusted) = run(None) else {
+            return; // no mise on this host
+        };
+        assert!(!untrusted.status.success());
+        let ok = run(Some(trusted(d.path()))).unwrap();
+        assert!(ok.status.success());
+        assert!(String::from_utf8_lossy(&ok.stdout).contains("probe"));
+    }
 
     #[test]
     fn the_containment_signs_gh_and_git_out_and_carries_no_credential() {
