@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.0-alpha.36](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.35...iohr/v0.1.0-alpha.36) (2026-11-05)
+
+
+### Features
+
+* **cli:** headless iohr ask and iohr shell hook zsh for the ? prompt ([#375](https://github.com/inorbithr/sdk/issues/375)) ([b6c2943](https://github.com/inorbithr/sdk/commit/b6c2943e173a4a3f793b71669a1395b7a9b79591))
+* **cli:** one grammar for the command line: grouped, coloured help and project template list|show|path ([34f6a0f](https://github.com/inorbithr/sdk/commit/34f6a0f6cff812989c5bae8f93d2b95cf9d23214))
+* **cli:** project templates as data, your agent in init, and a real dry run ([#365](https://github.com/inorbithr/sdk/issues/365)) ([34f6a0f](https://github.com/inorbithr/sdk/commit/34f6a0f6cff812989c5bae8f93d2b95cf9d23214))
+
+
+### Bug fixes
+
+* **cli:** make the Windows CLI job green again ([#397](https://github.com/inorbithr/sdk/issues/397)) ([28db3cf](https://github.com/inorbithr/sdk/commit/28db3cf4a03191aee80211111c3fc18a63f2754b))
+* **cli:** one runner per key; pin the runner by id in config ([#389](https://github.com/inorbithr/sdk/issues/389)) ([bbbfda4](https://github.com/inorbithr/sdk/commit/bbbfda4d98c19bd4fc5d0e9df20d591051f31894))
+* **cli:** restart a runner whose binary is already the newest release ([#399](https://github.com/inorbithr/sdk/issues/399)) ([7ed11aa](https://github.com/inorbithr/sdk/commit/7ed11aa3b51332e9108ae135815f409fb4fd278f))
+* **cli:** say why a credential-store call waits (macOS Keychain prompt) ([#392](https://github.com/inorbithr/sdk/issues/392)) ([c986353](https://github.com/inorbithr/sdk/commit/c986353a4d8ae4962a3a270eba7154d496c39e47))
+* **cli:** upgrades keep a stable macOS signature so the keychain grant holds ([#391](https://github.com/inorbithr/sdk/issues/391)) ([e4a9710](https://github.com/inorbithr/sdk/commit/e4a9710096fa558abf1b10439c2bcbc441694ccb))
+
 ## [0.1.0-alpha.35](https://github.com/inorbithr/sdk/compare/iohr/v0.1.0-alpha.34...iohr/v0.1.0-alpha.35) (2026-11-05)
 
 

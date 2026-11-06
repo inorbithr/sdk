@@ -61,8 +61,10 @@ def bump(text, version):
     return "".join(out)
 
 
-def gh(*args, check=True):
-    p = subprocess.run(["gh", *args], capture_output=True, text=True)
+def gh(*args, check=True, input=None):
+    """Run gh. `input` goes to its stdin (`--input -`): a request body that can
+    be large must never travel as an argument (Linux caps one at 128 KiB)."""
+    p = subprocess.run(["gh", *args], capture_output=True, text=True, input=input)
     if check and p.returncode:
         sys.exit(f"cli-policy: gh {' '.join(args[:2])} failed: {p.stderr.strip()}")
     return p
@@ -88,9 +90,13 @@ def main(argv):
         base = gh("api", f"repos/{REPO}/git/ref/heads/main", "--jq", ".object.sha").stdout.strip()
         gh("api", "-X", "POST", f"repos/{REPO}/git/refs", "-f", f"ref=refs/heads/{branch}", "-f", f"sha={base}")
     existing = gh("api", f"repos/{REPO}/contents/{PATH}?ref={branch}", "--jq", ".sha").stdout.strip()
-    gh("api", "-X", "PUT", f"repos/{REPO}/contents/{PATH}", "-f", f"branch={branch}",
-       "-f", f"message=chore(clients): the iohr command line is {version}",
-       "-f", f"content={base64.b64encode(new.encode()).decode()}", "-f", f"sha={existing}")
+    put = {
+        "message": f"chore(clients): the iohr command line is {version}",
+        "content": base64.b64encode(new.encode()).decode(),
+        "sha": existing,
+        "branch": branch,
+    }
+    gh("api", "-X", "PUT", f"repos/{REPO}/contents/{PATH}", "--input", "-", input=json.dumps(put))
     if not gh("pr", "list", "--repo", REPO, "--head", branch, "--json", "number", "--jq", ".[].number").stdout.strip():
         body = (
             f"Moves `[clients.policy.cli] latest` to [{version}]"

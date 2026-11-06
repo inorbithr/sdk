@@ -18,6 +18,7 @@ use crate::environments::{self, Environment, Environments};
 #[derive(Debug, Parser)]
 #[command(
     name = "iohr",
+    bin_name = "iohr",
     version,
     about,
     long_about,

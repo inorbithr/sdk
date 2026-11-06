@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Unit tests of cli/release/policy.py: which line moves, and when nothing does."""
 
+import base64
 import importlib.util
+import json
 import pathlib
+import subprocess
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location(
     "policy", pathlib.Path(__file__).parent.parent / "cli/release/policy.py"
@@ -52,6 +56,53 @@ class Bump(unittest.TestCase):
     def test_not_a_version(self):
         with self.assertRaises(ValueError):
             policy.bump(TOML, "latest")
+
+
+ARG_MAX = 128 * 1024  # Linux MAX_ARG_STRLEN: the longest one argv string
+
+
+class Publish(unittest.TestCase):
+    """The PUT that writes the file must send its body on stdin, not in argv
+    (alpha.33: `OSError: [Errno 7] Argument list too long: 'gh'`)."""
+
+    def run_main(self, text):
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append((argv, kw))
+            if any(len(a) > ARG_MAX for a in argv):
+                raise OSError(7, "Argument list too long", "gh")
+            out = ""
+            if argv[2].endswith(f"contents/{policy.PATH}?ref=main"):
+                out = json.dumps({"content": base64.b64encode(text.encode()).decode()})
+            elif argv[2].endswith("/git/ref/heads/main"):
+                out = "abc123\n"
+            elif "contents/" in argv[2]:
+                out = "blobsha\n"
+            elif argv[1] == "pr":
+                out = "1\n"
+            return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
+
+        with mock.patch.object(policy.subprocess, "run", fake_run), \
+                mock.patch.dict(policy.os.environ, {"GH_TOKEN": "t"}), \
+                mock.patch("builtins.print"):
+            policy.main(["0.1.0-alpha.28"])
+        return calls
+
+    def test_a_large_policy_file_goes_over_stdin(self):
+        big = TOML + "# " + "x" * (200 * 1024) + "\n"
+        calls = self.run_main(big)
+        for argv, _ in calls:
+            self.assertTrue(all(len(a) <= ARG_MAX for a in argv), argv[:4])
+        (argv, kw), = [c for c in calls if "PUT" in c[0]]
+        self.assertEqual(argv[-2:], ["--input", "-"])
+        body = json.loads(kw["input"])
+        self.assertEqual(body["branch"], "clients-cli-0.1.0-alpha.28")
+        self.assertEqual(body["sha"], "blobsha")
+        self.assertEqual(
+            base64.b64decode(body["content"]).decode(),
+            big.replace('"0.1.0-alpha.14"', '"0.1.0-alpha.28"'),
+        )
 
 
 if __name__ == "__main__":

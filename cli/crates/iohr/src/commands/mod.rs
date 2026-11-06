@@ -2,7 +2,7 @@
 
 mod accounts;
 mod ask;
-mod asks;
+pub(crate) mod asks;
 mod atlas;
 mod auth;
 mod browser_ext;
@@ -93,7 +93,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
-        Command::Ask(args) => ask::run(g, args, out).await,
+        Command::Ask(args) => ask::run(g, &env, args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,

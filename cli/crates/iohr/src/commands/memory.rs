@@ -241,10 +241,10 @@ fn scoped(e: inorbithr::Error) -> Error {
 }
 
 fn shown(path: &Path, root: Option<&Path>) -> String {
-    root.and_then(|r| path.strip_prefix(r).ok())
-        .unwrap_or(path)
-        .display()
-        .to_string()
+    match root.and_then(|r| path.strip_prefix(r).ok()) {
+        Some(rel) => crate::paths::slashed(rel),
+        None => path.display().to_string(),
+    }
 }
 
 // ---- remember, recall, list, forget -------------------------------------------------------
