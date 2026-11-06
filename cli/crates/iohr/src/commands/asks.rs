@@ -1,0 +1,975 @@
+//! `iohr asks`: the asks agents file for you, in the terminal (RFC 0204, ADR 0215).
+//!
+//! `list` and `show` stay live on a terminal: the account's `approval.changed` events (or one
+//! ask's `Watch` stream) say something moved and the screen is drawn again; a pipe, `--json`
+//! and `--once` print once. `deny` and `question` are decisions that need no key. `approve`
+//! needs the proof of a device key, which only the phone holds, so it says so and waits
+//! until the phone has used it (ADR 0142, ADR 0215).
+//!
+//! The text of an ask is other people's text: it is printed to stdout for the person who
+//! asked to read it, with control characters dropped so it cannot move the cursor, and it is
+//! never written to a log, an error or stderr. The API client logs method, path and status
+//! only.
+
+use std::fmt::Write as _;
+use std::time::Duration;
+
+use console::{Term, measure_text_width, truncate_str};
+use serde_json::{Value, json};
+
+use crate::Env;
+use crate::cli::{AsksCommand, Global};
+use crate::context::{Session, account, session};
+use crate::error::Error;
+use crate::output::{Out, table_text};
+use crate::prompt;
+use crate::runner::approvals::{is_approval_id, note_text};
+use crate::runner::service::{HttpService, ServiceError};
+use crate::ui::{Choice, Paint, Ui};
+
+use super::{day, headline, str_of};
+
+/// The statuses the service keeps (`approvals.proto`), besides the two groups below.
+const STATUSES: &[&str] = &[
+    "pending",
+    "question",
+    "approved",
+    "denied",
+    "in_progress",
+    "done",
+    "failed",
+    "stale",
+];
+
+const SIGN_IN_HINT: &str =
+    "Asks belong to signed-in people: run `iohr login`; an API key cannot use them.";
+
+/// Why a live view returned.
+#[derive(Debug)]
+pub(crate) enum Ended {
+    /// It was asked to stop, or ran its rounds.
+    Done,
+    /// The service refuses the stream (the credential has no events scope, an older
+    /// service): the caller prints once instead.
+    NoStream(ServiceError),
+}
+
+/// How the live views wait between a stream that ended and the next one, and how many times
+/// they do it (`None` is until Ctrl-C; a test passes a number).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Pace {
+    pub(crate) backoff: Duration,
+    pub(crate) rounds: Option<usize>,
+}
+
+const LIVE: Pace = Pace {
+    backoff: Duration::from_secs(3),
+    rounds: None,
+};
+
+pub(crate) async fn run(g: &Global, env: &Env, cmd: AsksCommand, out: Out) -> Result<(), Error> {
+    let s = session(g, env).await?;
+    match cmd {
+        AsksCommand::List {
+            status,
+            kind,
+            once,
+            limit,
+            account,
+        } => list(&s, &status, kind.as_deref(), once, limit, account, out).await,
+        AsksCommand::Show { id, once, account } => show(&s, &id, once, account, out).await,
+        AsksCommand::Decide { id, account } => decide(&s, &id, account, out).await,
+        AsksCommand::Deny { id, note, account } => {
+            let note = note.as_deref().map(note_text).unwrap_or_default();
+            deny(&s, &id, &note, account, out).await
+        }
+        AsksCommand::Question { id, note, account } => {
+            let note = match note.as_deref().map(note_text) {
+                Some(n) if !n.is_empty() => n,
+                _ => ask_question_text(out)?,
+            };
+            question(&s, &id, &note, account, out).await
+        }
+        AsksCommand::Approve { id, once, account } => approve(&s, &id, once, account, out).await,
+    }
+}
+
+fn service<'a>(
+    s: &'a Session,
+    id: Option<&str>,
+    account_flag: Option<String>,
+) -> Result<HttpService<'a>, Error> {
+    if let Some(id) = id
+        && !is_approval_id(id)
+    {
+        return Err(Error::Usage(
+            "an ask id is apr_ and 26 capital letters and digits".into(),
+        ));
+    }
+    let acct = account(s, account_flag)?;
+    Ok(HttpService::new(&s.api, acct, None))
+}
+
+/// A failed call as the command's error: a refused sign-in says what to do.
+fn scoped(e: ServiceError) -> Error {
+    match e {
+        ServiceError::Api(a) if matches!(a.status(), Some(401 | 403)) => {
+            Error::with_hint(a, SIGN_IN_HINT)
+        }
+        other => other.into(),
+    }
+}
+
+/// Whether to draw a live screen: a terminal on stdout, no `--json`, no `--once`.
+fn live_wanted(once: bool, json: bool) -> bool {
+    !once && !json && Paint::stdout(json).tty()
+}
+
+// ---- list ----
+
+async fn list(
+    s: &Session,
+    status: &str,
+    kind: Option<&str>,
+    once: bool,
+    limit: u32,
+    account_flag: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    let status = match status {
+        "all" => "",
+        "open" => "open",
+        other if STATUSES.contains(&other) => other,
+        _ => {
+            return Err(Error::Usage(format!(
+                "--status is open, all, or one of {}",
+                STATUSES.join(", ")
+            )));
+        }
+    };
+    let svc = service(s, None, account_flag)?;
+    let kind = kind.unwrap_or_default();
+    let cap = limit as usize;
+    let p = Paint::stdout(out.json);
+    if live_wanted(once, out.json) {
+        let mut screen = Screen::new();
+        let mut draw = |rows: &[Value]| {
+            let mut text = list_text(p, &rows[..rows.len().min(cap)]);
+            let _ = writeln!(text, "{}", p.dim("live: Ctrl-C to stop"));
+            screen.draw(&text);
+        };
+        let run = live_list(&svc, status, kind, LIVE, &mut draw);
+        let ended = tokio::select! {
+            r = run => Some(r.map_err(scoped)?),
+            _ = tokio::signal::ctrl_c() => None,
+        };
+        match ended {
+            Some(Ended::NoStream(e)) => {
+                Out::note(&format!(
+                    "live updates are not available ({e}); printing once"
+                ));
+            }
+            _ => return Ok(()),
+        }
+    }
+    let mut rows = svc.list_approvals(status, kind).await.map_err(scoped)?;
+    rows.truncate(cap);
+    if out.json {
+        Out::print_json(&json!({ "approvals": rows }));
+    } else {
+        Out::raw(list_text(p, &rows).as_bytes());
+    }
+    Ok(())
+}
+
+/// The list's screen: a table, or one line saying nothing waits.
+fn list_text(p: Paint, asks: &[Value]) -> String {
+    if asks.is_empty() {
+        return format!("{}\n", p.dim("Nothing is waiting for you."));
+    }
+    let rows: Vec<Vec<String>> = asks
+        .iter()
+        .map(|a| {
+            vec![
+                str_of(a, "approval_id").to_owned(),
+                status_cell(p, str_of(a, "status")),
+                str_of(a, "kind").to_owned(),
+                day(str_of(a, "created_at")),
+                headline(by(a), 24),
+                headline(str_of(a, "title"), 70),
+            ]
+        })
+        .collect();
+    let head: Vec<String> = ["ASK", "STATUS", "KIND", "ASKED", "BY", "TITLE"]
+        .iter()
+        .map(|h| p.head(h))
+        .collect();
+    let head: Vec<&str> = head.iter().map(String::as_str).collect();
+    table_text(&head, &rows)
+}
+
+/// Who asked: the agent, else the person or tool behind the call.
+fn by(a: &Value) -> &str {
+    let agent = str_of(a, "agent");
+    if agent.is_empty() {
+        str_of(a, "requested_by")
+    } else {
+        agent
+    }
+}
+
+/// A status as one cell: open ones stand out, closed ones fade, a bad ending is red.
+fn status_cell(p: Paint, status: &str) -> String {
+    match status {
+        "pending" | "question" => p.mark(status),
+        "approved" | "in_progress" | "done" => p.name(status),
+        "denied" | "failed" | "stale" => p.status(status),
+        other => p.dim(other),
+    }
+}
+
+// ---- show ----
+
+async fn show(
+    s: &Session,
+    id: &str,
+    once: bool,
+    account_flag: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    let svc = service(s, Some(id), account_flag)?;
+    let p = Paint::stdout(out.json);
+    if live_wanted(once, out.json) {
+        let mut screen = Screen::new();
+        let mut draw = |a: &Value| {
+            let mut text = show_text(p, a);
+            if !closed(str_of(a, "status")) {
+                let _ = writeln!(text, "{}", p.dim("live: Ctrl-C to stop"));
+            }
+            screen.draw(&text);
+            !closed(str_of(a, "status"))
+        };
+        let run = live_one(&svc, id, LIVE, &mut draw);
+        let ended = tokio::select! {
+            r = run => Some(r.map_err(scoped)?),
+            _ = tokio::signal::ctrl_c() => None,
+        };
+        match ended {
+            Some(Ended::NoStream(e)) => {
+                Out::note(&format!(
+                    "live updates are not available ({e}); printing once"
+                ));
+            }
+            _ => return Ok(()),
+        }
+    }
+    let a = svc.get_approval(id).await.map_err(scoped)?;
+    if out.json {
+        Out::print_json(&json!({ "approval": a }));
+    } else {
+        Out::raw(show_text(p, &a).as_bytes());
+    }
+    Ok(())
+}
+
+/// Nothing more will happen to an ask in these states.
+fn closed(status: &str) -> bool {
+    matches!(status, "denied" | "done" | "failed" | "stale")
+}
+
+/// Still waiting for a decision.
+fn open(status: &str) -> bool {
+    matches!(status, "pending" | "question")
+}
+
+fn clean(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// Up to `max` lines of other people's text, each clean and cut.
+fn clean_lines(s: &str, max: usize) -> Vec<String> {
+    s.lines()
+        .map(|l| headline(&clean(l), 160))
+        .filter(|l| !l.trim().is_empty())
+        .take(max)
+        .collect()
+}
+
+/// The key and value lines under an ask's title.
+fn show_pairs(p: Paint, a: &Value) -> Vec<(String, String)> {
+    let mut kv: Vec<(String, String)> = vec![
+        ("ask".into(), str_of(a, "approval_id").to_owned()),
+        ("status".into(), status_cell(p, str_of(a, "status"))),
+        ("kind".into(), str_of(a, "kind").to_owned()),
+    ];
+    let who = headline(by(a), 60);
+    if !who.is_empty() {
+        let via = str_of(a, "via");
+        kv.push((
+            "asked by".into(),
+            if via.is_empty() {
+                who
+            } else {
+                format!("{who} via {}", headline(via, 30))
+            },
+        ));
+    }
+    for (label, key) in [
+        ("asked of", "asked_of"),
+        ("asked", "created_at"),
+        ("github", "github"),
+    ] {
+        let v = headline(str_of(a, key), 80);
+        if !v.is_empty() {
+            kv.push((label.into(), v));
+        }
+    }
+    payload_pairs(a, &mut kv);
+    for l in a
+        .get("links")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(l) = l.as_str() {
+            kv.push(("link".into(), headline(l, 120)));
+        }
+    }
+    let decided = str_of(a, "decided_by");
+    if !decided.is_empty() {
+        let on = str_of(a, "decided_on");
+        let at = str_of(a, "decided_at");
+        let mut d = headline(decided, 60);
+        if !on.is_empty() {
+            let _ = write!(d, " on {}", headline(on, 40));
+        }
+        if !at.is_empty() {
+            let _ = write!(d, ", {}", day(at));
+        }
+        kv.push(("decided".into(), d));
+    }
+    let note = str_of(a, "decision_note");
+    if !note.is_empty() {
+        kv.push(("note".into(), headline(note, 160)));
+    }
+    kv
+}
+
+/// One ask in full: what it is, who asked, what the payload names, what the choices mean,
+/// how it was decided and the timeline.
+fn show_text(p: Paint, a: &Value) -> String {
+    let mut t = String::new();
+    let _ = writeln!(t, "{}", p.name(&headline(str_of(a, "title"), 120)));
+    let kv = show_pairs(p, a);
+    let w = kv.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
+    for (k, v) in &kv {
+        let _ = writeln!(t, "{}{}  {v}", p.dim(k), " ".repeat(w - k.chars().count()));
+    }
+    let summary = clean_lines(str_of(a, "summary"), 12);
+    if !summary.is_empty() {
+        let _ = writeln!(t, "\n{}", p.head("Summary"));
+        for l in summary {
+            let _ = writeln!(t, "  {l}");
+        }
+    }
+    let means: Vec<(&str, String)> = [
+        ("Approve means", str_of(a, "approve_means")),
+        ("Deny means", str_of(a, "deny_means")),
+    ]
+    .into_iter()
+    .filter(|(_, v)| !v.is_empty())
+    .map(|(k, v)| (k, headline(v, 160)))
+    .collect();
+    if !means.is_empty() {
+        let _ = writeln!(t);
+        for (k, v) in means {
+            let _ = writeln!(t, "{}  {v}", p.dim(k));
+        }
+    }
+    let timeline = a
+        .get("timeline")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    if !timeline.is_empty() {
+        let _ = writeln!(t, "\n{}", p.head("Timeline"));
+        for e in timeline {
+            let by = headline(str_of(e, "by"), 40);
+            let mut line = format!("  {}  {}", day(str_of(e, "at")), p.name(str_of(e, "step")));
+            if !by.is_empty() {
+                let _ = write!(line, "  {by}");
+            }
+            let note = headline(str_of(e, "note"), 100);
+            if !note.is_empty() {
+                let _ = write!(line, "  {}", p.dim(&note));
+            }
+            let _ = writeln!(t, "{line}");
+        }
+    }
+    t
+}
+
+/// What the payload names (`payload.<kind>`): its text and number fields, as they come.
+fn payload_pairs(a: &Value, kv: &mut Vec<(String, String)>) {
+    let Some(body) = a
+        .get("payload")
+        .and_then(Value::as_object)
+        .and_then(|o| o.values().next())
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    for (key, v) in body {
+        let shown = match v {
+            Value::String(s) => headline(s, 120),
+            Value::Number(n) => n.to_string(),
+            Value::Array(items) => items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|s| headline(s, 40))
+                .collect::<Vec<_>>()
+                .join(", "),
+            _ => continue,
+        };
+        if !shown.is_empty() {
+            kv.push((clean(key), shown));
+        }
+    }
+}
+
+// ---- deciding ----
+
+async fn deny(
+    s: &Session,
+    id: &str,
+    note: &str,
+    account_flag: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    let svc = service(s, Some(id), account_flag)?;
+    let a = svc
+        .decide_approval(id, "deny", note)
+        .await
+        .map_err(scoped)?;
+    done(out, &a, "Denied");
+    Ok(())
+}
+
+async fn question(
+    s: &Session,
+    id: &str,
+    note: &str,
+    account_flag: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    if note.is_empty() {
+        return Err(Error::Usage("a question needs its text: --note".into()));
+    }
+    let svc = service(s, Some(id), account_flag)?;
+    let a = svc
+        .decide_approval(id, "question", note)
+        .await
+        .map_err(scoped)?;
+    done(out, &a, "Question sent; the ask stays open");
+    Ok(())
+}
+
+/// The question's text: asked for on a terminal, else a usage error.
+fn ask_question_text(out: Out) -> Result<String, Error> {
+    if !prompt::interactive() || out.json {
+        return Err(Error::Usage("a question needs its text: --note".into()));
+    }
+    let q = Ui::detect(out.json).input("Your question for the agent", "", |v| {
+        if note_text(v).is_empty() {
+            Err("a question cannot be empty".into())
+        } else {
+            Ok(())
+        }
+    })?;
+    Ok(note_text(&q))
+}
+
+/// What a decision printed: the new ask as JSON, or one line.
+fn done(out: Out, a: &Value, said: &str) {
+    if out.json {
+        Out::print_json(&json!({ "approval": a }));
+    } else {
+        let p = Paint::stdout(false);
+        Out::raw(
+            format!(
+                "{} {}  {}\n",
+                p.name(said),
+                str_of(a, "approval_id"),
+                p.dim(str_of(a, "status"))
+            )
+            .as_bytes(),
+        );
+    }
+}
+
+/// The menu: approve (on the phone), deny or question, for one open ask.
+async fn decide(
+    s: &Session,
+    id: &str,
+    account_flag: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    if !prompt::interactive() || out.json {
+        return Err(Error::Usage(
+            "`asks decide` is a menu and needs a terminal; use `asks deny`, `asks question` or `asks approve`".into(),
+        ));
+    }
+    let svc = service(s, Some(id), account_flag.clone())?;
+    let a = svc.get_approval(id).await.map_err(scoped)?;
+    let status = str_of(&a, "status").to_owned();
+    Out::raw(show_text(Paint::stdout(false), &a).as_bytes());
+    if !open(&status) {
+        return Err(Error::Failed(format!(
+            "this ask is {status}; there is nothing left to decide"
+        )));
+    }
+    let choices = [
+        choice(
+            "approve",
+            "Approve",
+            "on your phone, which holds the key",
+            'a',
+        ),
+        choice("deny", "Deny", "with a note if you like", 'd'),
+        choice("question", "Ask a question", "the ask stays open", 'w'),
+    ];
+    match Ui::select_keyed("What do you want to do?", &choices, "approve")?.as_deref() {
+        Some("approve") => approve(s, id, false, account_flag, out).await,
+        Some("deny") => {
+            let note = Ui::detect(false).input("Why? (optional, Enter to skip)", "", |_| Ok(()))?;
+            deny(s, id, &note_text(&note), account_flag, out).await
+        }
+        Some("question") => {
+            let q = ask_question_text(out)?;
+            question(s, id, &q, account_flag, out).await
+        }
+        _ => {
+            Out::note("Nothing changed.");
+            Ok(())
+        }
+    }
+}
+
+fn choice(value: &str, label: &str, hint: &str, key: char) -> Choice {
+    Choice {
+        value: value.to_owned(),
+        label: label.to_owned(),
+        hint: hint.to_owned(),
+        available: true,
+        key: Some(key),
+    }
+}
+
+async fn approve(
+    s: &Session,
+    id: &str,
+    once: bool,
+    account_flag: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    let svc = service(s, Some(id), account_flag)?;
+    let a = svc.get_approval(id).await.map_err(scoped)?;
+    let status = str_of(&a, "status");
+    if !open(status) {
+        done(out, &a, &format!("Already {status}:"));
+        return Ok(());
+    }
+    Out::note("Approve on your phone");
+    Out::note("Approving needs your phone's key. Open InOrbit there; this ask is under Needs you.");
+    let means = headline(str_of(&a, "approve_means"), 160);
+    if !means.is_empty() {
+        Out::note(&format!("Approving means: {means}"));
+    }
+    if once {
+        return Ok(());
+    }
+    Out::note("Waiting for you; Ctrl-C to stop.");
+    let mut last = a;
+    let mut draw = |a: &Value| {
+        last = a.clone();
+        open(str_of(a, "status"))
+    };
+    let run = live_one(&svc, id, LIVE, &mut draw);
+    let ended = tokio::select! {
+        r = run => Some(r.map_err(scoped)?),
+        _ = tokio::signal::ctrl_c() => None,
+    };
+    match ended {
+        None => {
+            Out::note("Stopped waiting; the ask is unchanged.");
+            Ok(())
+        }
+        Some(Ended::NoStream(e)) => Err(Error::Failed(format!(
+            "cannot watch this ask for your approval ({e}); check it with `iohr asks show {id}`"
+        ))),
+        Some(Ended::Done) => {
+            let said = match str_of(&last, "status") {
+                "approved" | "in_progress" | "done" => "Approved",
+                "denied" => "Denied",
+                _ => "Settled:",
+            };
+            done(out, &last, said);
+            Ok(())
+        }
+    }
+}
+
+// ---- the live loops ----
+
+/// The list, drawn now and again whenever an `approval.changed` event says something moved.
+/// The stream is opened before the list is read, so a change between the two is not lost; a
+/// stream that ends or fails is opened again after `pace.backoff`, and the list read again.
+pub(crate) async fn live_list(
+    svc: &HttpService<'_>,
+    status: &str,
+    kind: &str,
+    pace: Pace,
+    draw: &mut dyn FnMut(&[Value]),
+) -> Result<Ended, ServiceError> {
+    let mut round = 0_usize;
+    loop {
+        let mut stream = match svc.approval_changes().await {
+            Ok(s) => Some(s),
+            Err(e) if e.is_permanent() => return Ok(Ended::NoStream(e)),
+            Err(_) => None,
+        };
+        match svc.list_approvals(status, kind).await {
+            Ok(rows) => draw(&rows),
+            Err(e) if e.is_permanent() || round == 0 => return Err(e),
+            Err(_) => {}
+        }
+        if let Some(st) = stream.as_mut() {
+            while let Some(frame) = st.next().await {
+                if frame.is_err() {
+                    break;
+                }
+                match svc.list_approvals(status, kind).await {
+                    Ok(rows) => draw(&rows),
+                    Err(e) if e.is_permanent() => return Err(e),
+                    Err(_) => break,
+                }
+            }
+        }
+        round += 1;
+        if pace.rounds.is_some_and(|m| round >= m) {
+            return Ok(Ended::Done);
+        }
+        tokio::time::sleep(pace.backoff).await;
+    }
+}
+
+/// One ask, drawn now and on each `Watch` frame, until `draw` says to stop (it returns
+/// whether to go on).
+pub(crate) async fn live_one(
+    svc: &HttpService<'_>,
+    id: &str,
+    pace: Pace,
+    draw: &mut dyn FnMut(&Value) -> bool,
+) -> Result<Ended, ServiceError> {
+    let mut round = 0_usize;
+    loop {
+        let mut stream = match svc.watch_approval(id).await {
+            Ok(s) => Some(s),
+            Err(e) if e.is_permanent() => return Ok(Ended::NoStream(e)),
+            Err(_) => None,
+        };
+        match svc.get_approval(id).await {
+            Ok(a) => {
+                if !draw(&a) {
+                    return Ok(Ended::Done);
+                }
+            }
+            Err(e) if e.is_permanent() || round == 0 => return Err(e),
+            Err(_) => {}
+        }
+        if let Some(st) = stream.as_mut() {
+            while let Some(frame) = st.next().await {
+                let Ok(frame) = frame else { break };
+                if let Some(a) = frame.get("approval")
+                    && !draw(a)
+                {
+                    return Ok(Ended::Done);
+                }
+            }
+        }
+        round += 1;
+        if pace.rounds.is_some_and(|m| round >= m) {
+            return Ok(Ended::Done);
+        }
+        tokio::time::sleep(pace.backoff).await;
+    }
+}
+
+/// A screen redrawn in place: the last frame's lines are cleared, the new one cut to the
+/// terminal's width so no line wraps and the count of lines stays true.
+struct Screen {
+    drawn: usize,
+}
+
+impl Screen {
+    fn new() -> Self {
+        Self { drawn: 0 }
+    }
+
+    fn draw(&mut self, text: &str) {
+        let term = Term::stdout();
+        let width = usize::from(term.size().1).max(40);
+        let fitted: String = text
+            .lines()
+            .map(|l| {
+                if measure_text_width(l) > width {
+                    truncate_str(l, width - 1, "...").into_owned()
+                } else {
+                    l.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if self.drawn > 0 {
+            let _ = term.clear_last_lines(self.drawn);
+        }
+        Out::raw(format!("{fitted}\n").as_bytes());
+        self.drawn = fitted.lines().count();
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "tests fail by panicking")]
+mod tests {
+    use std::sync::Arc;
+
+    use iohr_auth::{Redacted, StaticToken};
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::context::{AnyCredential, Api};
+
+    fn ask(id: &str, status: &str, title: &str) -> Value {
+        json!({
+            "approval_id": id, "kind": "pull_request", "title": title, "status": status,
+            "agent": "builder", "created_at": "2026-11-05T09:00:00Z",
+            "summary": "Fixes the thing.\nSecond line.",
+            "payload": {"pull_request": {"repo": "inorbithr/core", "number": 12, "head": "abc123"}},
+            "links": ["https://github.com/inorbithr/core/pull/12"],
+            "approve_means": "Merge the pull request.",
+            "timeline": [{"step": "asked", "by": "builder", "at": "2026-11-05T09:00:00Z"}]
+        })
+    }
+
+    fn api(server: &MockServer) -> Api {
+        let cred = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
+            "person-token".to_owned(),
+        ))));
+        Api::new(&server.uri(), cred, false).unwrap()
+    }
+
+    const ID1: &str = "apr_01M6NZ452CGYK04BSGM9BNJD4Q";
+    const ID2: &str = "apr_01M6NZ45CZY218FHED8G63N458";
+    const ID9: &str = "apr_01M6NZ9Z0AZ5YY02R0F40YNNJ2";
+
+    const FAST: Pace = Pace {
+        backoff: Duration::from_millis(5),
+        rounds: Some(2),
+    };
+
+    #[test]
+    fn the_list_is_a_table_with_the_ask_in_it() {
+        let t = list_text(
+            Paint::plain(),
+            &[
+                ask(ID1, "pending", "Merge #12"),
+                ask(ID2, "question", "Roll"),
+            ],
+        );
+        let lines: Vec<&str> = t.lines().collect();
+        assert_eq!(lines.len(), 3, "{t}");
+        assert!(
+            lines[0].starts_with("ASK") && lines[0].contains("STATUS"),
+            "{t}"
+        );
+        assert!(
+            lines[1].contains(ID1) && lines[1].contains("pending"),
+            "{t}"
+        );
+        assert!(
+            lines[1].contains("2026-11-05") && lines[1].contains("Merge #12"),
+            "{t}"
+        );
+        assert!(!t.contains('\u{1b}'), "no colour in a pipe");
+    }
+
+    #[test]
+    fn an_empty_list_says_so() {
+        assert_eq!(
+            list_text(Paint::plain(), &[]),
+            "Nothing is waiting for you.\n"
+        );
+    }
+
+    #[test]
+    fn an_asks_text_cannot_move_the_cursor() {
+        let mut a = ask(ID1, "pending", "Merge\u{1b}[2J #12");
+        a["summary"] = json!("line\u{1b}]0;x\u{7}\nnext");
+        let t = format!(
+            "{}{}",
+            list_text(Paint::plain(), &[a.clone()]),
+            show_text(Paint::plain(), &a)
+        );
+        assert!(!t.contains('\u{1b}') && !t.contains('\u{7}'), "{t:?}");
+        assert!(t.contains("Merge[2J #12"));
+    }
+
+    #[test]
+    fn show_has_the_payload_the_timeline_and_what_approving_means() {
+        let t = show_text(Paint::plain(), &ask(ID1, "pending", "Merge #12"));
+        for want in [
+            "Merge #12",
+            ID1,
+            "pending",
+            "builder",
+            "inorbithr/core",
+            "12",
+            "abc123",
+            "https://github.com/inorbithr/core/pull/12",
+            "Summary",
+            "Fixes the thing.",
+            "Approve means",
+            "Merge the pull request.",
+            "Timeline",
+            "asked",
+        ] {
+            assert!(t.contains(want), "missing {want:?} in:\n{t}");
+        }
+    }
+
+    #[test]
+    fn a_decided_ask_shows_who_and_the_note() {
+        let mut a = ask(ID1, "denied", "Merge #12");
+        a["decided_by"] = json!("nevio");
+        a["decided_on"] = json!("terminal");
+        a["decided_at"] = json!("2026-11-06T10:00:00Z");
+        a["decision_note"] = json!("not yet");
+        let t = show_text(Paint::plain(), &a);
+        assert!(
+            t.contains("nevio on terminal, 2026-11-06") && t.contains("not yet"),
+            "{t}"
+        );
+    }
+
+    #[test]
+    fn states_are_open_or_closed() {
+        assert!(open("pending") && open("question") && !open("approved"));
+        assert!(closed("done") && closed("denied") && !closed("approved") && !closed("pending"));
+    }
+
+    #[tokio::test]
+    async fn the_live_list_draws_again_when_an_event_arrives() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/events/events"))
+            .and(query_param("types", "approval.changed"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(
+                        "data: {\"type\":\"approval.changed\",\"data\":{\"approval_id\":\"apr_1\"}}\n\n",
+                    ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/approvals"))
+            .and(query_param("status", "open"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "approvals": [ask(ID1, "pending", "Merge #12")]
+            })))
+            .mount(&server)
+            .await;
+        let api = api(&server);
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let mut frames = 0_usize;
+        let mut draw = |rows: &[Value]| {
+            assert_eq!(rows.len(), 1);
+            frames += 1;
+        };
+        let ended = live_list(&svc, "open", "", FAST, &mut draw).await.unwrap();
+        assert!(matches!(ended, Ended::Done));
+        // Per round: the first list, then one more for the event; two rounds.
+        assert_eq!(frames, 4);
+    }
+
+    #[tokio::test]
+    async fn a_refused_stream_falls_back_instead_of_failing() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/events/events"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(json!({"message": "no scope"})))
+            .mount(&server)
+            .await;
+        let api = api(&server);
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let mut draw = |_: &[Value]| panic!("nothing is drawn before the fallback");
+        let ended = live_list(&svc, "open", "", FAST, &mut draw).await.unwrap();
+        assert!(matches!(ended, Ended::NoStream(_)));
+    }
+
+    #[tokio::test]
+    async fn the_live_ask_follows_watch_frames_until_asked_to_stop() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/approvals/{ID1}/events")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(format!(
+                        "data: {}\n\n",
+                        json!({"approval": ask(ID1, "approved", "Merge #12")})
+                    )),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/approvals/{ID1}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "approval": ask(ID1, "pending", "Merge #12")
+            })))
+            .mount(&server)
+            .await;
+        let api = api(&server);
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let mut seen = Vec::new();
+        let mut draw = |a: &Value| {
+            seen.push(str_of(a, "status").to_owned());
+            open(str_of(a, "status"))
+        };
+        let ended = live_one(&svc, ID1, FAST, &mut draw).await.unwrap();
+        assert!(matches!(ended, Ended::Done), "{ended:?}");
+        assert_eq!(seen, ["pending", "approved"]);
+    }
+
+    #[tokio::test]
+    async fn a_missing_ask_is_an_error_not_a_loop() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/approvals/{ID9}/events")))
+            .respond_with(
+                ResponseTemplate::new(200).insert_header("content-type", "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/approvals/{ID9}")))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({"message": "not found"})))
+            .mount(&server)
+            .await;
+        let api = api(&server);
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let mut draw = |_: &Value| true;
+        assert!(live_one(&svc, ID9, FAST, &mut draw).await.is_err());
+    }
+}
