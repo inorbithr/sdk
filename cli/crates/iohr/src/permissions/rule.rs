@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn bad_rules_say_why() {
-        for s in ["", "Bash(", "Bash()", "Bash(ls:*x)", "(ls)", "Ba sh", "1x"] {
+        for s in ["", "Bash(", "Bash()", "Bash(ls:*x)", "(ls)", "No sh", "1x"] {
             assert!(Rule::parse(s).is_err(), "{s:?}");
         }
     }
