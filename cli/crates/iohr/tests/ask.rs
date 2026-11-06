@@ -73,6 +73,7 @@ impl Rig {
             .current_dir(self.work())
             .env_clear()
             .env("PATH", self.bin())
+            .env("IOHR_NO_BROWSER", "1")
             .env("HOME", self.home.path())
             .env("USERPROFILE", self.home.path())
             .env("FAKE_STREAM", stream.map(data).unwrap_or_default())
