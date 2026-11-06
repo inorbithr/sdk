@@ -1788,6 +1788,81 @@ impl HeadlessArgs {
     }
 }
 
+/// The flags of `project init`: one struct, boxed in [`ProjectCommand::Init`] because the
+/// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
+/// `PathBuf` is wider).
+#[derive(Debug, Args)]
+pub struct InitArgs {
+    /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
+    /// At a terminal it is asked for when missing (the folder's name is the default);
+    /// anywhere else it is required.
+    pub name: Option<String>,
+    /// The template: an id (`iohr project template list` shows them), a folder
+    /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
+    /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
+    /// else demo. A template that is coming says so and refuses. At a terminal, leaving
+    /// it out offers the templates as a menu.
+    #[arg(long)]
+    pub template: Option<String>,
+    /// Answer a template question: `--set key=value`, repeatable.
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    pub set: Vec<String>,
+    /// Answers from a .json or .toml file (a table of key to value); `--set` wins.
+    #[arg(long, value_name = "FILE")]
+    pub answers: Option<PathBuf>,
+    /// Describe the project and your own agent (claude or codex, on your PATH) builds it
+    /// in the new folder, from the template's agent prompt. It runs in the background of
+    /// this command, in print mode (no session opens): it may edit files, read, search and fetch from the web,
+    /// and run only the language's own build and test commands (cargo, go, python, node), a few
+    /// read-only ones (git status, log and diff, ls) and this program's `atlas new`,
+    /// `atlas sync --dry-run` and `memory` commands, never any other shell command (no curl);
+    /// iohr draws its progress. The smoke test runs after it. Its output is
+    /// labelled AI. `--json` passes the agent's events through as JSON lines.
+    #[arg(long, value_name = "TEXT")]
+    pub describe: Option<String>,
+    /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
+    /// `[project] agent_turns`, else 150, init's own: `[ask]` in config.toml has no bound.
+    #[arg(long, value_name = "N")]
+    pub agent_turns: Option<u32>,
+    /// The most seconds the agent may run before iohr stops it. Default `[project]
+    /// agent_timeout`, else 1800, init's own. When it stops at a cap, iohr says so,
+    /// writes `.inorbit/handoff.md` and prints how to continue.
+    #[arg(long, value_name = "SECONDS")]
+    pub agent_timeout: Option<u64>,
+    /// The model the agent builds with: a Claude alias such as `sonnet` or a full model
+    /// name. Default `[project] agent_model`, else `sonnet` (a whole site needs more than
+    /// the small fast tier `iohr ask` uses). With Codex it is passed on only when named.
+    #[arg(long, value_name = "MODEL", env = "IOHR_INIT_AGENT_MODEL")]
+    pub agent_model: Option<String>,
+    /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
+    /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
+    /// agent is not started (its command and prompt are printed). Every step shows as
+    /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
+    #[arg(long, visible_alias = "plan")]
+    pub dry_run: bool,
+    /// Answer the questions with their defaults: no menu, no confirmation.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+    /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
+    /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
+    /// when you are inside a git repository, or a path of your own. It must not exist
+    /// or be empty.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// The language, for a template that offers several (the same as `--set
+    /// language=ID`); `iohr project template show ID` lists them. At a terminal,
+    /// leaving it out offers a menu that marks the toolchains you have.
+    #[arg(long, value_name = "ID")]
+    pub lang: Option<String>,
+    /// The publisher half of the extension id (default: your account's slug, else
+    /// "local"); the private listing takes it when that step lands.
+    #[arg(long)]
+    pub publisher: Option<String>,
+    /// Skip the smoke test (it runs the project once with the language's own runtime).
+    #[arg(long)]
+    pub no_smoke: bool,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ProjectCommand {
     /// Create a project from a template.
@@ -1798,76 +1873,7 @@ pub enum ProjectCommand {
     /// and a report. Idempotent: a step already done is done again without harm, and a
     /// step that waits on an API says so instead of pretending. `create` is the same command.
     #[command(visible_alias = "create")]
-    Init {
-        /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
-        /// At a terminal it is asked for when missing (the folder's name is the default);
-        /// anywhere else it is required.
-        name: Option<String>,
-        /// The template: an id (`iohr project template list` shows them), a folder
-        /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
-        /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
-        /// else demo. A template that is coming says so and refuses. At a terminal, leaving
-        /// it out offers the templates as a menu.
-        #[arg(long)]
-        template: Option<String>,
-        /// Answer a template question: `--set key=value`, repeatable.
-        #[arg(long = "set", value_name = "KEY=VALUE")]
-        set: Vec<String>,
-        /// Answers from a .json or .toml file (a table of key to value); `--set` wins.
-        #[arg(long, value_name = "FILE")]
-        answers: Option<PathBuf>,
-        /// Describe the project and your own agent (claude or codex, on your PATH) builds it
-        /// in the new folder, from the template's agent prompt. It runs in the background of
-        /// this command, in print mode (no session opens): it may edit files, read, search and fetch from the web,
-        /// and run only the language's own build and test commands (cargo, go, python, node), a few
-        /// read-only ones (git status, log and diff, ls) and this program's `atlas new`,
-        /// `atlas sync --dry-run` and `memory` commands, never any other shell command (no curl);
-        /// iohr draws its progress. The smoke test runs after it. Its output is
-        /// labelled AI. `--json` passes the agent's events through as JSON lines.
-        #[arg(long, value_name = "TEXT")]
-        describe: Option<String>,
-        /// The most turns the agent may take (Claude only; Codex has no turn limit). Default
-        /// `[project] agent_turns`, else 150, init's own: `[ask]` in config.toml has no bound.
-        #[arg(long, value_name = "N")]
-        agent_turns: Option<u32>,
-        /// The most seconds the agent may run before iohr stops it. Default `[project]
-        /// agent_timeout`, else 1800, init's own. When it stops at a cap, iohr says so,
-        /// writes `.inorbit/handoff.md` and prints how to continue.
-        #[arg(long, value_name = "SECONDS")]
-        agent_timeout: Option<u64>,
-        /// The model the agent builds with: a Claude alias such as `sonnet` or a full model
-        /// name. Default `[project] agent_model`, else `sonnet` (a whole site needs more than
-        /// the small fast tier `iohr ask` uses). With Codex it is passed on only when named.
-        #[arg(long, value_name = "MODEL", env = "IOHR_INIT_AGENT_MODEL")]
-        agent_model: Option<String>,
-        /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
-        /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
-        /// agent is not started (its command and prompt are printed). Every step shows as
-        /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
-        #[arg(long, visible_alias = "plan")]
-        dry_run: bool,
-        /// Answer the questions with their defaults: no menu, no confirmation.
-        #[arg(short = 'y', long)]
-        yes: bool,
-        /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
-        /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
-        /// when you are inside a git repository, or a path of your own. It must not exist
-        /// or be empty.
-        #[arg(long, value_name = "DIR")]
-        dir: Option<PathBuf>,
-        /// The language, for a template that offers several (the same as `--set
-        /// language=ID`); `iohr project template show ID` lists them. At a terminal,
-        /// leaving it out offers a menu that marks the toolchains you have.
-        #[arg(long, value_name = "ID")]
-        lang: Option<String>,
-        /// The publisher half of the extension id (default: your account's slug, else
-        /// "local"); the private listing takes it when that step lands.
-        #[arg(long)]
-        publisher: Option<String>,
-        /// Skip the smoke test (it runs the project once with the language's own runtime).
-        #[arg(long)]
-        no_smoke: bool,
-    },
+    Init(Box<InitArgs>),
     /// The same as `template list`, kept so older scripts work.
     #[command(hide = true)]
     Templates,

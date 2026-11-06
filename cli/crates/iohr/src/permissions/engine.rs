@@ -128,6 +128,7 @@ fn decide_shell(rules: &RuleSet, command: Option<&str>, at: &Place) -> Verdict {
 
 /// Commands whose arguments can run or write more than they name: an "always" for one of these
 /// is the exact command, never the command word.
+#[cfg(unix)]
 const EXACT_ONLY: &[&str] = &[
     "rm",
     "rmdir",
@@ -189,6 +190,7 @@ const EXACT_ONLY: &[&str] = &[
 ];
 
 /// Commands that name a verb first: `git status`, not `git`.
+#[cfg(unix)]
 const WITH_VERB: &[&str] = &[
     "git",
     "cargo",
@@ -214,6 +216,7 @@ const WITH_VERB: &[&str] = &[
 
 /// The narrowest rule that covers this call, to offer as "always", or none when no safe rule
 /// does (a line with a substitution or a redirect, a secret file, a call with no path).
+#[cfg(unix)]
 #[must_use]
 pub(crate) fn suggest(tool: &str, input: &Value, at: &Place) -> Option<Vec<Rule>> {
     match tool {
@@ -266,6 +269,7 @@ pub(crate) fn suggest(tool: &str, input: &Value, at: &Place) -> Option<Vec<Rule>
     }
 }
 
+#[cfg(unix)]
 fn shell_rule(text: &str, words: &[String]) -> Option<Rule> {
     let first = words.first()?;
     let verb = words
@@ -385,6 +389,7 @@ mod tests {
         assert_eq!(read("lib/a.rs"), Verdict::Ask);
     }
 
+    #[cfg(unix)]
     #[test]
     fn suggestions_are_the_narrowest_rule() {
         let s = |tool: &str, input: Value| {
@@ -428,6 +433,7 @@ mod tests {
         assert_eq!(s("Read", json!({"file_path":".env"})), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_suggested_rule_covers_the_call_it_came_from() {
         for cmd in [
