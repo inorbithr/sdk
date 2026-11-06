@@ -423,7 +423,7 @@ fn the_built_in_facts_carry_the_day_they_were_checked() {
     let o = iohr(h.path(), &dir, None, &["atlas", "init"]);
     assert!(o.status.success(), "{}", text(&o));
     let pack = read(&dir, "atlas/roles/security.md");
-    assert!(pack.contains("\nchecked: 2026-11-05\n"), "{pack}");
+    assert!(pack.contains("\nchecked: 2026-11-06\n"), "{pack}");
     let mut seeded = 0;
     for e in std::fs::read_dir(dir.join(".inorbit/memory"))
         .unwrap()
@@ -433,7 +433,7 @@ fn the_built_in_facts_carry_the_day_they_were_checked() {
             continue;
         }
         let t = std::fs::read_to_string(e.path()).unwrap();
-        assert!(t.contains("\nchecked: 2026-11-05\n"), "{t}");
+        assert!(t.contains("\nchecked: 2026-11-06\n"), "{t}");
         seeded += 1;
     }
     assert!(seeded > 0);
