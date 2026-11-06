@@ -322,11 +322,21 @@ pub enum Command {
     /// `brew upgrade inorbithr/tap/iohr` (and says `brew trust inorbithr/tap` when
     /// Homebrew refuses the tap); a copy from the install script is downloaded, checked
     /// against the release's checksums and attestations and replaced in place; anything
-    /// else gets the command to run. `--check` only reports. Needs no sign-in.
+    /// else gets the command to run. Then every installed extension is upgraded to its
+    /// newest release, one at a time: one that fails does not stop the others, and one
+    /// whose release declares new privileges is left for a person unless --yes (or a
+    /// terminal) confirms them. `--check` only reports. Needs no sign-in.
     Upgrade {
         /// Only say whether a newer release exists and what would run; change nothing.
         #[arg(long)]
         check: bool,
+        /// Upgrade iohr only, not the installed extensions.
+        #[arg(long)]
+        no_extensions: bool,
+        /// Confirm the new privileges of an extension release without asking (needed
+        /// without a terminal).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
