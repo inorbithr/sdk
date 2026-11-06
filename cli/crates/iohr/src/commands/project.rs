@@ -19,6 +19,7 @@ use crate::project::folder::{self, Kind as Place, Proposal, Where};
 use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
+use crate::toolchain::{self, Lang, State};
 use crate::ui::{Choice, Nav, Ui, cancel};
 
 /// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
@@ -230,8 +231,13 @@ fn live_names(rows: &[template::Row]) -> String {
 /// The language menu: every language of the template, the live ones first, each marked with
 /// whether its toolchain is on the PATH (`have`); the cursor starts on the first live one that
 /// has its toolchain (else on the template's default). The ones still coming are listed, dim,
-/// and refused when picked.
-fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>, String) {
+/// and refused when picked. `behind` says, for a toolchain that is found, where it stands
+/// against the latest stable (`rustc 1.90.0, 1.93.0 is out`), or nothing.
+fn language_choices(
+    tpl: &Template,
+    have: impl Fn(&str) -> bool,
+    behind: impl Fn(&template::VariantDef) -> Option<String>,
+) -> (Vec<Choice>, String) {
     let found = |v: &template::VariantDef| v.needs.iter().all(|n| have(n));
     let live = tpl.live_variants();
     let recommended = live
@@ -245,7 +251,10 @@ fn language_choices(tpl: &Template, have: impl Fn(&str) -> bool) -> (Vec<Choice>
             let what = if v.needs.is_empty() {
                 "nothing to install".to_owned()
             } else if found(v) {
-                format!("{} found", v.needs.join(", "))
+                match behind(v) {
+                    Some(note) => format!("{} found \u{b7} {note}", v.needs.join(", ")),
+                    None => format!("{} found", v.needs.join(", ")),
+                }
             } else {
                 format!("{} not on your PATH", v.needs.join(", "))
             };
@@ -474,8 +483,14 @@ fn ask_question(
     let default = prev.cloned().or_else(|| q.default.clone());
     if q.key == LANGUAGE && !tpl.meta.variants.is_empty() {
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let (choices, mut initial) =
-            language_choices(tpl, |n| ask::find_on_path(n, &path).is_some());
+        let (choices, mut initial) = language_choices(
+            tpl,
+            |n| ask::find_on_path(n, &path).is_some(),
+            |v| {
+                let lang = Lang::of_toolchain(&v.toolchain)?;
+                toolchain::state(lang).map(|s| s.hint(lang))
+            },
+        );
         if let Some(p) = prev {
             initial = p.text();
         }
@@ -546,6 +561,126 @@ struct AgentRun {
     thinking: Thinking,
 }
 
+/// Starts the latest-stable lookups: every language at a terminal (the menu shows each one's
+/// state), else only the language `--lang` names (the lookup of any other starts if it is
+/// asked for). Not under `--json`.
+fn start_toolchain_check(a: &InitArgs, interactive: bool, out: Out) {
+    if out.json {
+        return;
+    }
+    let langs: Vec<Lang> = if interactive {
+        Lang::ALL.to_vec()
+    } else {
+        a.lang
+            .as_deref()
+            .and_then(lang_of_variant)
+            .into_iter()
+            .collect()
+    };
+    toolchain::start(&langs);
+}
+
+/// The language of a built-in variant id (`typescript` is Node).
+fn lang_of_variant(id: &str) -> Option<Lang> {
+    match id {
+        "rust" => Some(Lang::Rust),
+        "go" => Some(Lang::Go),
+        "typescript" => Some(Lang::Node),
+        "python" => Some(Lang::Python),
+        _ => None,
+    }
+}
+
+/// What the toolchain check did, for the report.
+struct ToolchainCheck {
+    step: project::Step,
+    /// An upgrade ran and succeeded: read the version again.
+    upgraded: bool,
+}
+
+/// Puts the check's result in the plan (a dry run says what it would do), and, when the
+/// toolchain is behind, offers the upgrade: at a terminal a yes/no question that defaults to
+/// no, and the command runs only on a yes; without a terminal, with `--yes` or in a dry run
+/// the command is printed and never run. Nothing here fails `init`.
+///
+/// # Errors
+/// The person cancelled the question.
+fn check_toolchain(
+    flow: &mut Flow,
+    interactive: bool,
+    lang: Lang,
+    state: &State,
+) -> Result<ToolchainCheck, Error> {
+    let ui = flow.ui;
+    let said = state.said(lang);
+    let step = |st: &str, text: String| project::step("toolchain", "Toolchain", st, text, "");
+    let State::Behind { latest, .. } = state else {
+        flow.gate("toolchain", &format!("report the toolchain check: {said}"));
+        let (st, text) = if matches!(state, State::Unchecked { .. }) {
+            ("skipped", said)
+        } else {
+            ("done", said)
+        };
+        return Ok(ToolchainCheck {
+            step: step(st, text),
+            upgraded: false,
+        });
+    };
+    let up = toolchain::upgrade_here(lang, latest);
+    let how = if up.run.is_some() {
+        "asked first, never run by default"
+    } else {
+        "for you to run"
+    };
+    if !flow.gate(
+        "toolchain",
+        &format!(
+            "report the toolchain check: {said}; upgrade with `{}` ({how})",
+            up.shown
+        ),
+    ) {
+        return Ok(ToolchainCheck {
+            step: step("ask", format!("{said}; upgrade with `{}`", up.shown)),
+            upgraded: false,
+        });
+    }
+    let behind = format!("{said}; upgrade with `{}`", up.shown);
+    if up.run.is_none() || !interactive {
+        ui.info(&format!("{behind} (iohr did not run it)"));
+        return Ok(ToolchainCheck {
+            step: step("ask", behind),
+            upgraded: false,
+        });
+    }
+    ui.info(&said);
+    let yes = ui.confirm(
+        &format!("Upgrade {} now with `{}`?", lang.label(), up.shown),
+        false,
+    )?;
+    if !yes {
+        return Ok(ToolchainCheck {
+            step: step("ask", behind),
+            upgraded: false,
+        });
+    }
+    match toolchain::run_upgrade(&up) {
+        Ok(()) => Ok(ToolchainCheck {
+            step: step(
+                "done",
+                format!("upgraded {} with `{}`", lang.label(), up.shown),
+            ),
+            upgraded: true,
+        }),
+        Err(why) => {
+            ui.warn(&format!("the upgrade did not finish: {why}"));
+            Ok(ToolchainCheck {
+                step: step("skipped", format!("{behind}; it did not finish: {why}")),
+                upgraded: false,
+            })
+        }
+    }
+}
+
 /// The most turns the agent gets in `init` when no flag says: init's own default, because
 /// `[ask]` in config.toml has no bound. Enough to write a small project; a wrong request cannot
 /// run away.
@@ -583,6 +718,9 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         return Err(Error::Failed(no_agent_help()));
     }
     let root = template::user_root()?;
+    // The latest stable of each installed language is looked up on threads of its own while
+    // the person answers; never under --json, and never a reason for init to fail.
+    start_toolchain_check(&a, interactive, out);
     if ui.fancy() {
         ui.intro(if dry {
             "iohr project init (dry run)"
@@ -1123,7 +1261,26 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     // (`rust-version`) and is told to the agent. A toolchain that will not run keeps the
     // variant's own default and is not told.
     let variant = lang.as_deref().and_then(|l| tpl.variant(l));
-    let toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+    // Everything that changes anything goes through `flow`.
+    let mut flow = Flow {
+        dry,
+        ui,
+        would: Vec::new(),
+    };
+    let mut toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+    // Is it behind the latest stable? (Off under --json, and when the lookup found nothing.)
+    let tool_lang = variant.and_then(|v| Lang::of_toolchain(&v.toolchain));
+    let mut tool_step = None;
+    if let Some(l) = tool_lang
+        && let Some(state) = toolchain::state(l)
+    {
+        let done = check_toolchain(&mut flow, interactive, l, &state)?;
+        if done.upgraded {
+            // The files and the agent are told the version that is there now.
+            toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+        }
+        tool_step = Some(done.step);
+    }
     if let Some((full, minor)) = toolchain.as_deref().and_then(template::version_in) {
         for (k, v) in [
             ("@@TOOLCHAIN_VERSION@@", full),
@@ -1270,12 +1427,6 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         steps.insert(st, agent_step);
     }
 
-    // Everything below that changes anything goes through `flow`.
-    let mut flow = Flow {
-        dry,
-        ui,
-        would: Vec::new(),
-    };
     let state_root = state_root()?;
     let state = state_root.join(name);
     let signed_in = flow
@@ -1292,6 +1443,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         files: files.iter().map(|(p, _)| p.clone()).collect(),
         steps: Vec::new(),
     };
+    report.steps.extend(tool_step);
     let setup = format!(
         "write {} files into {} ({})",
         files.len(),
@@ -1728,7 +1880,45 @@ fn later_line(n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{later_line, publisher_of};
+    use super::{Lang, lang_of_variant, language_choices, later_line, publisher_of};
+    use crate::template::{self, Spec};
+    use std::path::Path;
+
+    #[test]
+    fn the_picker_hint_says_where_the_installed_toolchain_stands() {
+        let tpl =
+            template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
+        let hint_of = |id: &str, behind: Option<&str>| {
+            let (choices, _) = language_choices(
+                &tpl,
+                |_| true,
+                |v| {
+                    (v.id == "rust")
+                        .then(|| behind.map(str::to_owned))
+                        .flatten()
+                },
+            );
+            choices.into_iter().find(|c| c.value == id).unwrap().hint
+        };
+        assert!(
+            hint_of("rust", Some("rustc 1.90.0, 1.93.0 is out"))
+                .starts_with("cargo found \u{b7} rustc 1.90.0, 1.93.0 is out"),
+            "{}",
+            hint_of("rust", Some("rustc 1.90.0, 1.93.0 is out"))
+        );
+        // No lookup (offline off, --json, a language with no source): the hint is as before.
+        assert!(hint_of("rust", None).starts_with("cargo found"));
+        assert!(!hint_of("rust", None).contains('\u{b7}'));
+    }
+
+    #[test]
+    fn a_variant_id_is_its_language() {
+        assert_eq!(lang_of_variant("typescript"), Some(Lang::Node));
+        assert_eq!(lang_of_variant("rust"), Some(Lang::Rust));
+        assert_eq!(lang_of_variant("go"), Some(Lang::Go));
+        assert_eq!(lang_of_variant("python"), Some(Lang::Python));
+        assert_eq!(lang_of_variant("cobol"), None);
+    }
 
     #[test]
     fn the_later_line_counts_and_points_at_verbose() {

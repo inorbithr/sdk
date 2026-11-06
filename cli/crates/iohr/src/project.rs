@@ -561,6 +561,29 @@ pub fn toolchain_line(command: &[String]) -> Option<String> {
     Some(first.chars().take(120).collect())
 }
 
+/// The version in a toolchain's first line, for the comparison with the latest stable:
+/// `rustc 1.99.0 (b940084d7 2026-09-28)` is 1.99.0, `go version go1.27.3 darwin/arm64` is
+/// 1.27.3, `Python 3.14.7` is 3.14.7, `v26.11.1` is 26.11.1; a two-part `1.27` is 1.27.0.
+/// Read with [`template::version_in`], the one parser the `@@TOOLCHAIN_VERSION@@` files
+/// use. A pre-release tag is not kept, so `1.101.0-nightly` compares as 1.101.0. `None`
+/// when the line holds no version: a version is never guessed.
+#[must_use]
+pub fn installed_version(line: &str) -> Option<semver::Version> {
+    let (full, _) = crate::template::version_in(line)?;
+    parse_lenient(&full)
+}
+
+/// `1.27` and `3` as semver, the missing parts zero.
+pub(crate) fn parse_lenient(v: &str) -> Option<semver::Version> {
+    let mut parts = v.trim().split('.');
+    let mut next = || -> Option<u64> { parts.next().map_or(Some(0), |p| p.parse().ok()) };
+    let (major, minor, patch) = (next()?, next()?, next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(semver::Version::new(major, minor, patch))
+}
+
 /// The line every prompt that has a model research or write facts carries, so it does not
 /// answer from the year its training ended. `today` is `YYYY-MM-DD`, read from the system
 /// clock ([`crate::front::today`]).
@@ -892,6 +915,28 @@ pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<
 mod tests {
     use super::*;
     use crate::template::{self, Answers, Spec};
+
+    #[test]
+    fn the_installed_version_is_read_from_each_languages_own_line() {
+        let v = |l: &str| installed_version(l).map(|v| v.to_string());
+        assert_eq!(
+            v("rustc 1.90.0 (1159e78c4 2025-09-14)").as_deref(),
+            Some("1.90.0")
+        );
+        assert_eq!(
+            v("go version go1.25.3 darwin/arm64").as_deref(),
+            Some("1.25.3")
+        );
+        assert_eq!(v("Python 3.13.7").as_deref(), Some("3.13.7"));
+        assert_eq!(v("v24.9.0").as_deref(), Some("24.9.0"));
+        // Two parts get a zero patch; a prerelease or a line with no version gives none.
+        assert_eq!(
+            v("go version go1.26 linux/amd64").as_deref(),
+            Some("1.26.0")
+        );
+        assert_eq!(v("command not found"), None);
+        assert_eq!(v(""), None);
+    }
 
     fn rendered(id: &str, name: &str) -> Vec<(String, String)> {
         rendered_in(id, name, "python").0

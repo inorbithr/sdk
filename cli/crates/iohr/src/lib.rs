@@ -33,6 +33,7 @@ mod output;
 mod paths;
 mod prompt;
 mod runner;
+mod toolchain;
 mod ui;
 
 pub use args::refuse_secrets_in_args;

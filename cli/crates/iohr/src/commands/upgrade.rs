@@ -205,6 +205,23 @@ fn command_for(method: &Method) -> String {
 }
 
 fn http(base: &str) -> Result<reqwest::Client, Error> {
+    http_within(
+        base,
+        Duration::from_secs(10),
+        Some(Duration::from_secs(30)),
+        Duration::from_secs(600),
+    )
+}
+
+/// The client with its own bounds: `connect`, then `read` between chunks (when set), then
+/// `total` for the whole request. `iohr project init`'s toolchain lookup uses it with 3
+/// seconds, so a slow network cannot hold init up.
+pub(crate) fn http_within(
+    base: &str,
+    connect: Duration,
+    read: Option<Duration>,
+    total: Duration,
+) -> Result<reqwest::Client, Error> {
     // https only, except a loopback address (a test double).
     let local = url::Url::parse(base)
         .ok()
@@ -213,18 +230,20 @@ fn http(base: &str) -> Result<reqwest::Client, Error> {
                 .map(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"))
         })
         .unwrap_or(false);
-    reqwest::Client::builder()
+    let mut b = reqwest::Client::builder()
         .user_agent(format!("iohr/{}", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(10))
-        .read_timeout(Duration::from_secs(30))
-        .timeout(Duration::from_secs(600))
-        .https_only(!local)
-        .build()
+        .connect_timeout(connect)
+        .timeout(total)
+        .https_only(!local);
+    if let Some(r) = read {
+        b = b.read_timeout(r);
+    }
+    b.build()
         .map_err(|e| Error::Failed(format!("cannot start the HTTP client: {e}")))
 }
 
 /// A body of at most `max` bytes.
-async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
+pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
     let mut resp = c
         .get(url)
         .send()
