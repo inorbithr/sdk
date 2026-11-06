@@ -659,8 +659,11 @@ impl<O: Write, E: Write> Renderer<O, E> {
                 Some(why) => writeln!(
                     self.err,
                     "{}",
-                    dim(&format!(
-                        "\u{2298} {name} {detail} \u{2014} denied, did not run: {why}"
+                    // Cut to the terminal's width so the row never wraps.
+                    dim(&console::truncate_str(
+                        &format!("\u{2298} {name} {detail} \u{2014} denied, did not run: {why}"),
+                        crate::ui::terminal_width().saturating_sub(1).max(40),
+                        "\u{2026}",
                     ))
                 ),
                 None => writeln!(
@@ -982,7 +985,7 @@ mod tests {
         let (_, fancy) = draw(true, events.clone());
         assert!(fancy.contains("\u{2298} Bash"), "{fancy}");
         assert!(
-            fancy.contains("denied, did not run: No such tool available"),
+            fancy.contains("denied, did not run: No such tool"),
             "{fancy}"
         );
         assert!(!fancy.contains('\u{23fa}'), "never the run mark: {fancy}");
@@ -1004,6 +1007,31 @@ mod tests {
             rows.contains("- Bash cd /work/demo && git status (denied, did not run: No such tool"),
             "{rows}"
         );
+    }
+
+    #[test]
+    fn a_denied_row_never_runs_past_the_terminal_width() {
+        let long = format!("which iohr cargo rustc rustup; {}", "echo x; ".repeat(30));
+        let call = format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"t9","name":"Bash","input":{{"command":"{long}"}}}}]}}}}"#
+        );
+        let result = r#"{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"Permission to use Bash with command which iohr cargo rustc has been denied because it requires approval from somebody","tool_use_id":"t9"}]}}"#;
+        let events: Vec<Event> = [call.as_str(), result]
+            .into_iter()
+            .flat_map(claude)
+            .collect();
+        let (_, fancy) = draw(true, events);
+        let plain = console::strip_ansi_codes(&fancy);
+        let row = plain
+            .lines()
+            .find(|l| l.starts_with('\u{2298}'))
+            .unwrap_or_default();
+        assert!(
+            row.chars().count() <= crate::ui::terminal_width(),
+            "{} chars: {row}",
+            row.chars().count()
+        );
+        assert!(row.ends_with('\u{2026}'), "{row}");
     }
 
     #[test]
