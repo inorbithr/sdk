@@ -33,6 +33,7 @@ Build:
 
 Agents:
   ask          Ask your own AI agent a question in this folder
+  asks         Read and answer the asks waiting for you: list, show, deny, question
   shell        Shell integration: `? question` at your prompt asks your AI agent
   runner       Run coordinator turns on this machine
   coordinator  List and file the coordinator's jobs and asks

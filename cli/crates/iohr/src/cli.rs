@@ -178,7 +178,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Agents",
-        &["ask", "shell", "runner", "coordinator", "memory"],
+        &["ask", "asks", "shell", "runner", "coordinator", "memory"],
     ),
     (
         "Operate",
@@ -284,6 +284,14 @@ pub enum Command {
     /// The coordinator's jobs and queued asks: list and file work.
     #[command(subcommand)]
     Coordinator(CoordinatorCommand),
+    /// Read and answer the asks waiting for you: list, show, deny, question.
+    ///
+    /// The asks agents file for you (a pull request to merge, a roll, a review). `list` and
+    /// `show` stay live on a terminal and print once with `--once`, `--json` or in a pipe.
+    /// You can deny an ask or put a question to its agent here; approving needs your phone's
+    /// key, so `approve` says so and waits for it.
+    #[command(subcommand)]
+    Asks(AsksCommand),
     /// Keep what a project knows as files, check it, and sync it when you choose.
     ///
     /// Memory is local first: one Markdown file per memory in `.inorbit/memory/` (committed with
@@ -2276,6 +2284,96 @@ pub enum CoordinatorJobsCommand {
         /// The queued ask this job works on.
         #[arg(long)]
         ask: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AsksCommand {
+    /// List the asks waiting for you, live on a terminal.
+    List {
+        /// open (pending and question, the default), all, or one status: pending, question,
+        /// approved, denied, `in_progress`, done, failed, stale.
+        #[arg(long, default_value = "open")]
+        status: String,
+        /// Only this kind: `pull_request`, roll, review, document, decision or run.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Print once and stop, even on a terminal.
+        #[arg(long)]
+        once: bool,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=500))]
+        limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Print how many asks are waiting for you, for a shell prompt.
+    ///
+    /// Prints "N asks" when some wait, nothing when none do, and `--json` prints `{"count": N}`.
+    /// With `--cache` the number (and nothing else) is kept in `~/.inorbit/term/asks-count`,
+    /// written whole, and the call does nothing while that file is under 30 seconds old; the
+    /// shell hook (`iohr shell hook zsh`) reads that file at the prompt and refreshes it in
+    /// the background.
+    Count {
+        /// Keep the number in `~/.inorbit/term/asks-count`; refresh it at most every 30 seconds.
+        #[arg(long)]
+        cache: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Show one ask with its timeline, live on a terminal.
+    Show {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Print once and stop, even on a terminal.
+        #[arg(long)]
+        once: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Choose what to do with an ask from a menu: approve, deny or question.
+    Decide {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Deny an ask, with a note if you like.
+    Deny {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Why (at most 500 characters); the agent reads it.
+        #[arg(long)]
+        note: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Put a question to the agent that asked; the ask stays open.
+    Question {
+        /// The ask's id (apr_...).
+        id: String,
+        /// The question (at most 500 characters); asked here when left out on a terminal.
+        #[arg(long)]
+        note: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Approve on your phone: it holds the key, this waits for you to use it.
+    Approve {
+        /// The ask's id (apr_...).
+        id: String,
+        /// Say so and stop, without waiting.
+        #[arg(long)]
+        once: bool,
         /// Act on this account: a team you belong to (default: your own).
         #[arg(long)]
         account: Option<String>,

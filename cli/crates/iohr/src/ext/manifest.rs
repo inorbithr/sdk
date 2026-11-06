@@ -114,6 +114,7 @@ pub const RESERVED: &[&str] = &[
     "accounts",
     "api",
     "ask",
+    "asks",
     "atlas",
     "auth",
     "browser",
