@@ -297,7 +297,7 @@ cites = ["https://eur-lex.europa.eu/eli/dir/2022/2555/oj", "https://digital-stra
 [[line]]
 place = "recall"
 section = "Regulations"
-text = "DORA (applying to financial entities since 17 January 2025): a major ICT incident gets an initial report within 4 hours of classifying it as major and within 24 hours of becoming aware, an intermediate report within 72 hours of the initial one, and a final report within one month of the latest intermediate one."
+text = "DORA (Regulation (EU) 2022/2554, applying since 17 January 2025): a major ICT incident gets an initial report within 4 hours of classifying it as major and within 24 hours of becoming aware, an intermediate report within 72 hours of the initial one, and a final report within one month of the latest intermediate one."
 cites = ["https://www.eiopa.europa.eu/digital-operational-resilience-act-dora_en", "https://eur-lex.europa.eu/eli/reg_del/2025/301/oj"]
 
 [[line]]
