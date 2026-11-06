@@ -434,13 +434,48 @@ const BAR_BOX_MIN: usize = 40;
 /// Each row is `› [1] Name  k  hint`: the chip, the name, its letter and the dim hint; the
 /// highlighted row has the `›` and is reversed. `cols` of 0 is unknown, taken as 80.
 fn bar_lines(prompt: &str, choices: &[Choice], at: usize, cols: usize, look: Look) -> Vec<String> {
+    bar_lines_in(&BarTop::default(), prompt, choices, at, cols, look)
+}
+
+/// What a bar carries above its rows when it is the foot of a card of its own (the permission
+/// ask, PRD 0197): the card's header line in place of the prompt's, and lines on the rail
+/// between them. Both are drawn by the caller at [`bar_width`]; the bar only places them, and
+/// only in the box (a plain bar has no rail to put them on, so the caller draws its plain line).
+#[derive(Debug, Default)]
+pub(crate) struct BarTop<'a> {
+    pub(crate) header: Option<String>,
+    pub(crate) lines: &'a [String],
+}
+
+/// Whether the bar is drawn as a box at `cols` columns (0 is unknown, taken as 80).
+#[must_use]
+pub(crate) fn bar_boxed(cols: usize, look: Look) -> bool {
+    look.fancy && (if cols == 0 { 80 } else { cols }) >= BAR_BOX_MIN
+}
+
+/// The width a bar line may take on a terminal `cols` wide: the card's rule (the terminal
+/// less one column, so no line fills the last), but never the card's floor of 40 on a terminal
+/// narrower than that.
+#[must_use]
+pub(crate) fn bar_width(cols: usize) -> usize {
+    (if cols == 0 { 80 } else { cols })
+        .saturating_sub(1)
+        .max(20)
+}
+
+/// [`bar_lines`] with a [`BarTop`]: the same rows, the same foot.
+pub(crate) fn bar_lines_in(
+    top: &BarTop<'_>,
+    prompt: &str,
+    choices: &[Choice],
+    at: usize,
+    cols: usize,
+    look: Look,
+) -> Vec<String> {
     use console::{measure_text_width, truncate_str};
     const FOOT: &str = "\u{2191}\u{2193} move \u{b7} 1-9 or letter pick \u{b7} enter \u{b7} esc";
-    let cols = if cols == 0 { 80 } else { cols };
-    let boxed = look.fancy && cols >= BAR_BOX_MIN;
-    // The card's width rule (the terminal less one column, so no line fills the last), but
-    // never the card's floor of 40 on a terminal narrower than that.
-    let width = cols.saturating_sub(1).max(20);
+    let boxed = bar_boxed(cols, look);
+    let width = bar_width(cols);
     let lead = if boxed { "\u{2502}  " } else { "" };
     let pad = choices
         .iter()
@@ -448,7 +483,9 @@ fn bar_lines(prompt: &str, choices: &[Choice], at: usize, cols: usize, look: Loo
         .max()
         .unwrap_or(0);
     let mut out = Vec::new();
-    if boxed {
+    if boxed && let Some(header) = &top.header {
+        out.push(header.clone());
+    } else if boxed {
         let fixed = measure_text_width("\u{256d}\u{2500} ") + measure_text_width(prompt) + 1;
         let fill = width.saturating_sub(fixed).max(2);
         out.push(format!(
@@ -459,6 +496,15 @@ fn bar_lines(prompt: &str, choices: &[Choice], at: usize, cols: usize, look: Loo
         ));
     } else {
         out.push(look.plain().bold().apply_to(prompt).to_string());
+    }
+    if boxed {
+        for l in top.lines {
+            if l.is_empty() {
+                out.push(look.violet().apply_to("\u{2502}").to_string());
+            } else {
+                out.push(format!("{}{l}", look.violet().apply_to(lead)));
+            }
+        }
     }
     for (i, c) in choices.iter().enumerate() {
         let on = i == at;
@@ -706,6 +752,24 @@ impl Ui {
         Self::select_drawn(prompt, choices, initial, true, |at| {
             bar_lines(prompt, choices, at, cols, look)
         })
+    }
+
+    /// The bar as the foot of a card of the caller's own (the permission ask): `rows(at)` is
+    /// the whole screen with row `at` highlighted, always the same number of lines, drawn
+    /// with the bar's keys (arrows, `1`-`9`, a row's letter, Enter, Esc, `q`, Ctrl-C). Returns
+    /// the value of the row picked, or `None` for a cancel; the card is erased either way.
+    ///
+    /// # Errors
+    ///
+    /// No terminal on stderr, or the terminal cannot be read.
+    #[cfg(unix)]
+    pub(crate) fn select_card(
+        prompt: &str,
+        choices: &[Choice],
+        initial: &str,
+        rows: impl Fn(usize) -> Vec<String>,
+    ) -> Result<Option<String>, Error> {
+        Self::select_drawn(prompt, choices, initial, true, rows)
     }
 
     /// The loop of both menus: `rows(at)` is the screen with entry `at` highlighted, always

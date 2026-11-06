@@ -211,16 +211,32 @@ fn plain(card: &Card<'_>) -> String {
 }
 
 fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
-    let badge = if matches!(card.body, Body::Failed(_)) {
-        " no answer "
-    } else {
-        " AI answer "
-    };
+    let failed = matches!(card.body, Body::Failed(_));
+    let badge = if failed { " no answer " } else { " AI answer " };
     let mut meta = vec![card.agent.to_owned(), card.model.to_owned()];
     if let Some(d) = card.elapsed {
         meta.push(format!("{:.1}s", d.as_secs_f64()));
     }
-    let mut meta = meta.join(" · ");
+    let _ = writeln!(
+        out,
+        "{}",
+        header_line(badge, failed, &meta.join(" · "), width, look)
+    );
+}
+
+/// The top line of an Io card, `╭─ ◆ Io ` then the badge, a rule and the dim `meta` at the
+/// right, `width` columns wide. The one header: the answer card, the permission ask and
+/// whatever draws an Io card next use it, so the AI label looks the same everywhere. `amber`
+/// draws the badge as a warning.
+#[must_use]
+pub(crate) fn header_line(
+    badge: &str,
+    amber: bool,
+    meta: &str,
+    width: usize,
+    look: Look,
+) -> String {
+    let mut meta = meta.to_owned();
     // "╭─ ◆ Io " + badge + " " + filler + " " + meta
     let fixed = measure_text_width("╭─ ◆ Io ") + measure_text_width(badge) + 2;
     let room = width.saturating_sub(fixed + 2);
@@ -230,19 +246,18 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
     let fill = width
         .saturating_sub(fixed + measure_text_width(&meta))
         .max(2);
-    let badge = if matches!(card.body, Body::Failed(_)) {
+    let badge = if amber {
         look.amber().bold().reverse().apply_to(badge).to_string()
     } else {
         look.badge().apply_to(badge).to_string()
     };
-    let _ = writeln!(
-        out,
+    format!(
         "{}{}{badge} {} {}",
         look.violet().apply_to("╭─ "),
         look.violet().bold().apply_to("◆ Io "),
         look.violet().apply_to("─".repeat(fill)),
         look.dim().apply_to(meta),
-    );
+    )
 }
 
 fn footer(out: &mut String, card: &Card<'_>, width: usize, look: Look) {

@@ -545,14 +545,36 @@ runs. Claude Code is started with `--permission-prompt-tool` pointing at a small
 `iohr` itself serves (`iohr permission-server`, hidden), which talks to the card over a private
 unix socket in a folder only you can open (removed when the card ends)
 (<https://code.claude.com/docs/en/cli-reference>, <https://code.claude.com/docs/en/agent-sdk/permissions>).
-Your rules decide first; a command they do not cover is shown as one line:
+Your rules decide first; a command they do not cover is asked as a small Io card on stderr,
+with the AI badge in its header, the command, the folder and the same numbered action bar as the
+`?` menu:
+
+```text
+╭─ ◆ Io  AI request  ─────────────────────────────────────────────── permission
+│  Io (AI) wants to run
+│    ls -la
+│  in my-project
+│
+│    [1] Allow once              y  this time only
+│    [2] Always in this project  a  saves a rule here
+│  › [3] No                      n  Io carries on without it
+╰─ ↑↓ move · 1-9 or letter pick · enter · esc
+```
+
+The arrows and Enter pick the highlighted row, `1`-`9` pick a row, `y` runs it once, `a` runs it
+and saves the narrowest rule (`Bash(ls:*)`, never `Bash(*)`) to `.inorbit/permissions.toml`
+(the second row is there only when such a rule can be saved), `n`, `q`, Esc, Ctrl-C or no
+answer refuses it. The bar starts on No, so a stray Enter never allows anything. Once you have
+answered, the card is erased and one result line stays (`Allowed once`, `Allowed always` or
+`Not allowed`). A long command is wrapped to three lines and the card says how many characters
+it left out. With `NO_COLOR`, `TERM=dumb`, a terminal under 40 columns, or no terminal, the ask
+is one plain line, as it was:
 
 ```text
 Io (AI) wants to run `ls -la` in my-project · y once · a always in this project · n no
 ```
 
-`y` runs it once, `a` runs it and saves the narrowest rule (`Bash(ls:*)`, never `Bash(*)`) to
-`.inorbit/permissions.toml`, `n`, Esc, Ctrl-C or no answer refuses it. Rules use Claude Code's
+Rules use Claude Code's
 grammar (<https://code.claude.com/docs/en/permissions>) in two TOML files, the project's
 `.inorbit/permissions.toml` and the user's `permissions.toml` in the iohr config folder:
 
