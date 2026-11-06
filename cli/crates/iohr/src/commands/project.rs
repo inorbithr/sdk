@@ -1325,7 +1325,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let roles = flow
         .act_async(
             "roles",
-            "import the built-in roles into InOrbit (kept local when signed out)",
+            "import the built-in roles into your InOrbit account (they stay in the project when you are signed out)",
             || super::atlas::import_for(g, env, &dir, false, false),
         )
         .await;
@@ -1629,11 +1629,7 @@ fn dry_report(
     }
     flow.ui.note(
         &format!("{} files, none written", files.len()),
-        &files
-            .iter()
-            .map(|(p, t)| format!("{p}  ({} bytes)", t.len()))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        &plan_lines(files.iter().map(|(p, t)| (p.as_str(), t.len()))).join("\n"),
     );
     if let Some(r) = agent {
         flow.ui.note(
@@ -1750,5 +1746,52 @@ mod tests {
         assert_eq!(publisher_of(None, None), "local");
         assert_eq!(publisher_of(Some("bad slug"), None), "local");
         assert_eq!(publisher_of(Some("x"), None), "local");
+    }
+}
+
+/// The dry run's file list: one line per file, except that a folder holding more than
+/// [`FOLDED`] files (the memory facts) is one line with its count and size.
+fn plan_lines<'a>(files: impl Iterator<Item = (&'a str, usize)> + Clone) -> Vec<String> {
+    const FOLDED: usize = 5;
+    let folder = |p: &'a str| p.rsplit_once('/').map_or("", |(d, _)| d);
+    let mut counts: std::collections::BTreeMap<&str, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for (p, n) in files.clone() {
+        let c = counts.entry(folder(p)).or_default();
+        c.0 += 1;
+        c.1 += n;
+    }
+    let mut shown = std::collections::BTreeSet::new();
+    let mut lines = Vec::new();
+    for (p, n) in files {
+        let d = folder(p);
+        match counts.get(d) {
+            Some(&(count, bytes)) if !d.is_empty() && count > FOLDED => {
+                if shown.insert(d) {
+                    lines.push(format!("{d}/  ({count} files, {bytes} bytes)"));
+                }
+            }
+            _ => lines.push(format!("{p}  ({n} bytes)")),
+        }
+    }
+    lines
+}
+
+#[cfg(test)]
+mod plan_lines_tests {
+    #[test]
+    fn a_folder_of_many_files_is_one_line_and_the_rest_stay_one_per_file() {
+        let mut files = vec![("README.md", 10), ("src/main.rs", 20)];
+        let facts: Vec<String> = (0..7).map(|i| format!(".inorbit/memory/f{i}.md")).collect();
+        files.extend(facts.iter().map(|p| (p.as_str(), 3)));
+        let lines = super::plan_lines(files.iter().copied());
+        assert_eq!(
+            lines,
+            [
+                "README.md  (10 bytes)",
+                "src/main.rs  (20 bytes)",
+                ".inorbit/memory/  (7 files, 21 bytes)"
+            ]
+        );
     }
 }

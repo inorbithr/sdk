@@ -117,7 +117,10 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     assert_eq!(rows.len(), 5);
     // `blank` is listed first, after the menu's "Describe it"; demo keeps its own description.
     assert_eq!(rows[0]["name"], "blank");
-    assert_eq!(rows[0]["description"], "An empty project in your language");
+    assert_eq!(
+        rows[0]["description"],
+        "A starter project in your language: one runnable file, Roles and memory"
+    );
     assert_eq!(rows[1]["name"], "demo");
     assert_eq!(rows[2]["status"], "live");
     assert_eq!(rows[3]["status"], "coming");

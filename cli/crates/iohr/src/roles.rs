@@ -664,13 +664,14 @@ fn decide<'a>(
     send
 }
 
-/// Sends the import; what InOrbit wrote as name to version, or the line saying why not.
-async fn post(api: &Api, body: &Value) -> Result<BTreeMap<String, i64>, String> {
+/// Sends the import; what InOrbit wrote as name to version, or the status and the line
+/// saying why not.
+async fn post(api: &Api, body: &Value) -> Result<BTreeMap<String, i64>, (Option<u16>, String)> {
     let v = api
         .send(Method::Post, IMPORT_PATH, &[], Some(body))
         .await
         .and_then(|r| r.json::<Value>())
-        .map_err(|e| why(&e))?;
+        .map_err(|e| (e.status(), why(&e)))?;
     Ok(v.pointer("/written")
         .and_then(Value::as_array)
         .map(|a| {
@@ -827,7 +828,20 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool, upgrade: b
     }
     let written = match post(api, &body).await {
         Ok(w) => w,
-        Err(line) => {
+        // InOrbit lints the batch as a whole, so one refused role (400) would keep every
+        // other one local: send each alone and keep only the refused ones back.
+        Err((Some(400), _)) if send.len() > 1 => {
+            let (written, refused) = one_by_one(api, &send, &parent, root_name.is_none()).await;
+            let ok: Vec<&Local> = send
+                .into_iter()
+                .filter(|f| !refused.iter().any(|(n, _)| *n == f.role.name))
+                .collect();
+            record_written(ok, &written, &remote, &mut report);
+            record_refused(&refused, &mut report);
+            root_outcome(root_name.is_none(), &written, &mut report);
+            return report;
+        }
+        Err((_, line)) => {
             for f in &send {
                 report.outcomes.push(Outcome {
                     name: f.role.name.clone(),
@@ -844,7 +858,32 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool, upgrade: b
         }
     };
     record_written(send, &written, &remote, &mut report);
-    if root_name.is_none() && written.contains_key(ROOT) {
+    root_outcome(root_name.is_none(), &written, &mut report);
+    report
+}
+
+/// A `failed` outcome with InOrbit's line for each refused role, and one message naming them.
+fn record_refused(refused: &[(String, String)], report: &mut Report) {
+    for (name, line) in refused {
+        report.outcomes.push(Outcome {
+            name: name.clone(),
+            action: "failed",
+            version: None,
+            from: None,
+            note: line.clone(),
+        });
+    }
+    let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
+    report.message = Some(format!(
+        "InOrbit refused {}; the other roles were imported. Edit the refused line and \
+         run `iohr sync`.",
+        names.join(", ")
+    ));
+}
+
+/// The root role's outcome, when the account had none and this import wrote it.
+fn root_outcome(had_none: bool, written: &BTreeMap<String, i64>, report: &mut Report) {
+    if had_none && written.contains_key(ROOT) {
         report.outcomes.push(Outcome {
             name: ROOT.to_owned(),
             action: "written",
@@ -853,7 +892,28 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool, upgrade: b
             note: "the account had no root role".to_owned(),
         });
     }
-    report
+}
+
+/// Sends each role alone, the root with the first one InOrbit takes: what was written, and
+/// each refused role with InOrbit's line.
+async fn one_by_one(
+    api: &Api,
+    send: &[&Local],
+    parent: &str,
+    mut with_root: bool,
+) -> (BTreeMap<String, i64>, Vec<(String, String)>) {
+    let mut written = BTreeMap::new();
+    let mut refused = Vec::new();
+    for f in send {
+        match post(api, &import_body(&[&f.role], parent, with_root)).await {
+            Ok(w) => {
+                with_root = with_root && !w.contains_key(ROOT);
+                written.extend(w);
+            }
+            Err((_, line)) => refused.push((f.role.name.clone(), line)),
+        }
+    }
+    (written, refused)
 }
 
 // ---------------------------------------------------------------- agent files

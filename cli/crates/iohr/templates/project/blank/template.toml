@@ -5,7 +5,7 @@
 #
 # `iohr project init --describe` and the "Describe it" menu entry use this one.
 id = "blank"
-description = "An empty project in your language"
+description = "A starter project in your language: one runnable file, Roles and memory"
 status = "live"
 default_variant = "python"
 agent_prompt = "This folder is a fresh project in @@LANGUAGE_LABEL@@ (@@SOURCE@@). Build what is described below by editing this folder. Keep it free of secrets, and keep the test passing (@@RUN_TEST@@)."
