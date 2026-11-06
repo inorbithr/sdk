@@ -11,10 +11,13 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
+use support::kept_env;
 
 /// A JWT-shaped token the profile hands out; never inspected beyond its claims.
 fn token(scopes: &[&str]) -> String {
@@ -61,18 +64,14 @@ impl Box_ {
         let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
         c.args(args)
             .env_clear()
-            .env("IOHR_NO_BROWSER", "1")
             .env("IOHR_BASE_URL", "http://127.0.0.1:9")
             .env("IOHR_CONFIG_DIR", self.dir.path().join("config"))
             .env("IOHR_DATA_DIR", self.dir.path().join("data"))
             .env("HOME", self.home())
+            .env("USERPROFILE", self.home())
             .env("IOHR_TOKEN", token(&["identity:read"]))
+            .envs(kept_env())
             .current_dir(cwd);
-        for k in ["PATH", "TMPDIR"] {
-            if let Some(v) = std::env::var_os(k) {
-                c.env(k, v);
-            }
-        }
         c
     }
 

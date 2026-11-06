@@ -6,7 +6,10 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use clap::Parser as _;
 use inorbithr::DEFAULT_BASE_URL;
@@ -20,13 +23,8 @@ fn run(args: &[&str], extra: &[(&str, &str)]) -> Output {
     let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
     c.args(args)
         .env_clear()
-        .env("IOHR_NO_BROWSER", "1")
+        .envs(kept_env())
         .env("IOHR_CONFIG_DIR", dir.path());
-    for k in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"] {
-        if let Some(v) = std::env::var_os(k) {
-            c.env(k, v);
-        }
-    }
     c.envs(extra.iter().copied());
     c.stdin(Stdio::null()).output().unwrap()
 }

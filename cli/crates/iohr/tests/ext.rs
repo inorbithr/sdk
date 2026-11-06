@@ -7,8 +7,11 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -257,7 +260,6 @@ impl Box_ {
         let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
         c.args(args)
             .env_clear()
-            .env("IOHR_NO_BROWSER", "1")
             .env("IOHR_BASE_URL", "http://127.0.0.1:9")
             .env("IOHR_CONFIG_DIR", self.dir.path().join("config"))
             .env("IOHR_DATA_DIR", self.dir.path().join("data"))
@@ -265,11 +267,10 @@ impl Box_ {
                 "IOHR_EXT_REGISTRY",
                 format!("{}/{PREFIX}", self.server.uri()),
             )
+            .envs(kept_env())
             .current_dir(self.dir.path());
-        for k in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "HOME"] {
-            if let Some(v) = std::env::var_os(k) {
-                c.env(k, v);
-            }
+        if let Some(v) = std::env::var_os("HOME") {
+            c.env("HOME", v);
         }
         c
     }

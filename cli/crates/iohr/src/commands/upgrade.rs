@@ -7,7 +7,9 @@
 //!   script does (the archive's SHA-256 against the release's `SHA256SUMS`) and then
 //!   more: the GitHub attestations of the archive are verified in process by
 //!   [`crate::ext::trust::verify_iohr_release`], the verifier extensions use, so no
-//!   `gh` is needed and the check never skips. The binary is replaced atomically.
+//!   `gh` is needed and the check never skips. The binary is replaced atomically. On
+//!   macOS, with `upgrade_sign_identity` set, an ad-hoc release is signed with that
+//!   identity before it is checked and renamed, so the keychain's grant holds ([`sign`]).
 //! - APT and everything else: prints what to run.
 //!
 //! `--check` only says whether a newer release exists and what would run.
@@ -18,7 +20,13 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
+pub(crate) mod sign;
+
+pub(crate) use sign::SignWith;
+
+use crate::Env;
 use crate::cli::Global;
+use crate::context::{Ctx, run_profile};
 use crate::error::Error;
 use crate::ext::layer;
 use crate::ext::oci::Digest;
@@ -269,6 +277,8 @@ impl Sources {
 pub(crate) struct Upstream {
     client: reqwest::Client,
     src: Sources,
+    /// How an installed binary is signed on macOS; off unless [`Upstream::signing`] says.
+    sign: SignWith,
 }
 
 impl Upstream {
@@ -278,7 +288,15 @@ impl Upstream {
         Ok(Self {
             client: http(&src.api)?,
             src,
+            sign: SignWith::Off,
         })
+    }
+
+    /// Signs what the install script path installs with `sign` (`upgrade_sign_identity`).
+    #[must_use]
+    pub(crate) fn signing(mut self, sign: SignWith) -> Self {
+        self.sign = sign;
+        self
     }
 
     /// The newest complete release for a copy installed by `method`.
@@ -344,6 +362,7 @@ impl Upstream {
                 Ok(Staged::Replace {
                     dest: dir.join("iohr"),
                     program,
+                    sign: self.sign.clone(),
                 })
             }
             Method::Apt => Err(Error::Failed(format!(
@@ -366,8 +385,12 @@ impl Upstream {
 pub(crate) enum Staged {
     /// `brew upgrade` of the tap's formula.
     Brew,
-    /// The verified program, to be renamed over `dest`.
-    Replace { dest: PathBuf, program: Vec<u8> },
+    /// The verified program, to be renamed over `dest`, signed first as `sign` says.
+    Replace {
+        dest: PathBuf,
+        program: Vec<u8>,
+        sign: SignWith,
+    },
 }
 
 impl Staged {
@@ -378,7 +401,11 @@ impl Staged {
     pub(crate) fn apply(self, version: &semver::Version) -> Result<(), Error> {
         match self {
             Self::Brew => brew(version),
-            Self::Replace { dest, program } => replace(&dest, &program, version),
+            Self::Replace {
+                dest,
+                program,
+                sign,
+            } => replace(&dest, &program, version, &sign),
         }
     }
 }
@@ -442,9 +469,9 @@ pub(crate) fn installed_version(path: &Path) -> Result<semver::Version, Error> {
         .ok_or_else(|| Error::Failed(format!("{} does not say its version", path.display())))
 }
 
-pub(crate) async fn run(g: &Global, check: bool, out: Out) -> Result<(), Error> {
+pub(crate) async fn run(g: &Global, env: &Env, check: bool, out: Out) -> Result<(), Error> {
     let (_, real, method) = detect_here()?;
-    let up = Upstream::from_process()?;
+    let up = Upstream::from_process()?.signing(sign_setting(g, env).value);
 
     let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|e| Error::Failed(format!("this build's version: {e}")))?;
@@ -490,6 +517,24 @@ pub(crate) async fn run(g: &Global, check: bool, out: Out) -> Result<(), Error> 
         Out::note(&format!("iohr is now {latest} (was {current})."));
     }
     Ok(())
+}
+
+/// `upgrade_sign_identity` as the runner reads it: `IOHR_SIGN_IDENTITY`, then the run
+/// profile's `[profiles.<name>.runner]`, then `[runner]`. A config file that cannot be
+/// read leaves signing off: it never stops an upgrade.
+fn sign_setting(g: &Global, env: &Env) -> crate::runner::settings::Setting<SignWith> {
+    let none = iohr_auth::RunnerConfig::default();
+    let ctx = Ctx::load(g).ok();
+    let profile = ctx.as_ref().and_then(|c| {
+        let name = run_profile(g, env, c)?;
+        let own = c.config.profile(&name)?.runner.as_ref()?;
+        Some((name, own))
+    });
+    crate::runner::settings::upgrade_sign_of(
+        env.sign_identity.as_deref(),
+        profile.as_ref().map(|(n, r)| (n.as_str(), *r)),
+        ctx.as_ref().map_or(&none, |c| &c.config.runner),
+    )
 }
 
 /// `brew upgrade`, and the trust message when Homebrew refuses the tap.
@@ -640,10 +685,27 @@ pub(crate) fn bundles_of(answer: &[u8]) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// Writes `program` beside `dest`, checks that it runs and says `version`, then renames
-/// it over `dest` (atomic on one filesystem). On any failure `dest` is untouched and the
-/// temporary file is removed.
-pub(crate) fn replace(dest: &Path, program: &[u8], version: &semver::Version) -> Result<(), Error> {
+/// Writes `program` beside `dest`, signs it as `sign` says (macOS, [`sign::here`]),
+/// checks that it runs and says `version`, then renames it over `dest` (atomic on one
+/// filesystem). On any failure `dest` is untouched and the temporary file is removed.
+/// Signing never fails the install: when it does not work, the program goes in as the
+/// release signed it, and one note says why.
+pub(crate) fn replace(
+    dest: &Path,
+    program: &[u8],
+    version: &semver::Version,
+    sign: &SignWith,
+) -> Result<(), Error> {
+    replace_with(dest, program, version, &|tmp: &Path| sign::here(tmp, sign))
+}
+
+/// [`replace`], with the signing step given.
+fn replace_with(
+    dest: &Path,
+    program: &[u8],
+    version: &semver::Version,
+    sign_step: &dyn Fn(&Path) -> sign::Outcome,
+) -> Result<(), Error> {
     let dir = dest
         .parent()
         .ok_or_else(|| Error::Failed("the install path has no directory".into()))?;
@@ -655,25 +717,67 @@ pub(crate) fn replace(dest: &Path, program: &[u8], version: &semver::Version) ->
                 tmp.display()
             ))
         };
-        std::fs::write(&tmp, program).map_err(|e| fail("cannot write", &e))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
-                .map_err(|e| fail("cannot make executable", &e))?;
+        let write = || -> Result<(), Error> {
+            std::fs::write(&tmp, program).map_err(|e| fail("cannot write", &e))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+                    .map_err(|e| fail("cannot make executable", &e))?;
+            }
+            Ok(())
+        };
+        let says = || -> Result<String, Error> {
+            let said = std::process::Command::new(&tmp)
+                .arg("--version")
+                .output()
+                .map_err(|e| fail("the new binary does not run:", &e))?;
+            Ok(String::from_utf8_lossy(&said.stdout).trim().to_owned())
+        };
+        let want = format!("iohr {version}");
+        write()?;
+        let mut note = None;
+        let signed = match sign_step(&tmp) {
+            sign::Outcome::Off | sign::Outcome::AlreadySigned => false,
+            sign::Outcome::Signed(name) => {
+                note = Some(format!(
+                    "signed iohr {version} with {name:?} (identifier {})",
+                    sign::IDENTIFIER
+                ));
+                true
+            }
+            sign::Outcome::Kept(why) => {
+                // A failed `codesign --force` may leave the file half changed: start again.
+                write()?;
+                note = Some(format!(
+                    "iohr {version} goes in signed as released (ad hoc), so the keychain may \
+                     ask again: {why}"
+                ));
+                false
+            }
+        };
+        let mut said = says();
+        if signed && !matches!(&said, Ok(s) if *s == want) {
+            // Signing may be what broke it: the release as published gets one more try.
+            write()?;
+            said = says();
+            note = Some(format!(
+                "iohr {version} does not run once signed, so it goes in signed as released \
+                 (ad hoc); the keychain may ask again"
+            ));
         }
-        let said = std::process::Command::new(&tmp)
-            .arg("--version")
-            .output()
-            .map_err(|e| fail("the new binary does not run:", &e))?;
-        let said = String::from_utf8_lossy(&said.stdout);
-        if said.trim() != format!("iohr {version}") {
+        let said = said?;
+        if said != want {
             return Err(Error::Failed(format!(
-                "the new binary says {:?}, not \"iohr {version}\"; nothing was installed",
-                said.trim().chars().take(64).collect::<String>()
+                "the new binary says {:?}, not \"{want}\"; nothing was installed",
+                said.chars().take(64).collect::<String>()
             )));
         }
-        std::fs::rename(&tmp, dest).map_err(|e| fail("cannot replace the binary with", &e))
+        std::fs::rename(&tmp, dest).map_err(|e| fail("cannot replace the binary with", &e))?;
+        if let Some(n) = note {
+            Out::note(&n);
+        }
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -902,23 +1006,93 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn replace_swaps_atomically_and_refuses_a_binary_that_says_another_version() {
-        use super::replace;
+        use super::{SignWith, replace};
         use std::os::unix::fs::PermissionsExt as _;
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("iohr");
         std::fs::write(&dest, "old").unwrap();
         let v = semver::Version::parse("1.2.3").unwrap();
         let wrong = b"#!/bin/sh\necho 'iohr 9.9.9'\n";
-        assert!(replace(&dest, wrong, &v).is_err());
+        // Signing off: no `codesign` or `security` runs, on macOS or anywhere else.
+        assert!(replace(&dest, wrong, &v, &SignWith::Off).is_err());
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
         let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
         assert_eq!(names.len(), 1, "the temporary file was removed");
         let right = b"#!/bin/sh\necho 'iohr 1.2.3'\n";
-        replace(&dest, right, &v).unwrap();
+        replace(&dest, right, &v, &SignWith::Off).unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), right);
         assert_eq!(
             std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
             0o755
         );
+    }
+
+    /// The signing step sees the written, executable program before the version check,
+    /// and whatever it does, the release goes in or the old binary stays.
+    #[cfg(unix)]
+    #[test]
+    fn signing_comes_before_the_check_and_never_fails_the_install() {
+        use super::replace_with;
+        use super::sign::Outcome;
+        use std::cell::Cell;
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("iohr");
+        let v = semver::Version::parse("1.2.3").unwrap();
+        let right = b"#!/bin/sh\necho 'iohr 1.2.3'\n";
+        let broken = b"#!/bin/sh\necho 'killed'\n";
+        let only_dest = |what: &str| {
+            let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+            assert_eq!(names.len(), 1, "{what}: the temporary file was removed");
+        };
+
+        // Signed: the step got the program as written and executable, and it went in.
+        std::fs::write(&dest, "old").unwrap();
+        let seen = Cell::new(false);
+        replace_with(&dest, right, &v, &|tmp| {
+            assert_eq!(std::fs::read(tmp).unwrap(), right);
+            let mode = std::fs::metadata(tmp).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755);
+            seen.set(true);
+            Outcome::Signed("Apple Development: Someone (ABC123)".into())
+        })
+        .unwrap();
+        assert!(seen.get());
+        assert_eq!(std::fs::read(&dest).unwrap(), right);
+        only_dest("signed");
+
+        // A failed signing that left the file changed: the release as published goes in.
+        std::fs::write(&dest, "old").unwrap();
+        replace_with(&dest, right, &v, &|tmp| {
+            std::fs::write(tmp, "half signed").unwrap();
+            Outcome::Kept("codesign failed".into())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), right);
+        only_dest("kept");
+
+        // Signed into something that no longer runs: the release as published goes in.
+        std::fs::write(&dest, "old").unwrap();
+        replace_with(&dest, right, &v, &|tmp| {
+            std::fs::write(tmp, broken).unwrap();
+            Outcome::Signed("Me".into())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), right);
+        only_dest("broken by signing");
+
+        // A release that says another version is refused whatever signing did.
+        std::fs::write(&dest, "old").unwrap();
+        let wrong = b"#!/bin/sh\necho 'iohr 9.9.9'\n";
+        for outcome in [
+            Outcome::Off,
+            Outcome::AlreadySigned,
+            Outcome::Signed("Me".into()),
+            Outcome::Kept("no identity".into()),
+        ] {
+            assert!(replace_with(&dest, wrong, &v, &|_| outcome.clone()).is_err());
+            assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+            only_dest("refused");
+        }
     }
 }

@@ -280,12 +280,5 @@ async fn read(
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, StoreError> + Send + 'static,
 ) -> Result<T, AuthError> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| {
-            AuthError::Store(StoreError::Failed(format!(
-                "the credential store call stopped: {e}"
-            )))
-        })?
-        .map_err(AuthError::from)
+    crate::store::off_thread(f).await.map_err(AuthError::from)
 }

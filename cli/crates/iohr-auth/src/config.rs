@@ -45,6 +45,12 @@ pub struct Config {
     /// `iohr ask` defaults (`[ask]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "AskConfig::is_empty")]
     pub ask: AskConfig,
+    /// `iohr sync` settings (`[sync]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "SyncConfig::is_empty")]
+    pub sync: SyncConfig,
+    /// `iohr memory` settings (`[memory]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "MemoryConfig::is_empty")]
+    pub memory: MemoryConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -134,13 +140,18 @@ pub struct ProjectConfig {
     /// The template a new project is made from when `--template` is not given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
+    /// A folder your projects live in (`~` is your home). When set, `iohr project init` offers
+    /// `ROOT/NAME` as a place for the new project; unset, there is no projects folder and the
+    /// default is `./NAME` in the folder you are in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
 }
 
 impl ProjectConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.template.is_none()
+        self.template.is_none() && self.root.is_none()
     }
 }
 
@@ -157,11 +168,19 @@ pub struct AskConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     /// The model the agent answers with: a Claude alias such as `haiku` (the default, the
-    /// small fast tier) or a full model name. `--model` (or `IOHR_ASK_MODEL`) wins over it.
-    /// For `codex` it is passed as `--model` only when set; Codex otherwise uses its own
-    /// configured model.
+    /// small fast tier) or a full model name. `--model` (or `IOHR_ASK_MODEL`) wins over it. For `codex` it is passed
+    /// as `--model` only when set; Codex otherwise uses its own configured model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
+    /// `--sandbox workspace-write`). Off by default; `--allow-edits` turns it on for one call.
+    /// Shell commands are never allowed by iohr.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_edits: Option<bool>,
+    /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block; the
+    /// default) or `collapse` (one line). `--thinking` wins over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
     /// How often the footer of the `?` card is the full notice instead of one short hint:
     /// `sometimes` (the default: the first card, when the notice changes and about once a
     /// day), `always` or `never` (the first card and a changed notice still show it).
@@ -180,8 +199,68 @@ impl AskConfig {
         self.via.is_none()
             && self.agent.is_none()
             && self.model.is_none()
+            && self.allow_edits.is_none()
+            && self.thinking.is_none()
             && self.hints.is_none()
             && self.menu_key.is_none()
+    }
+}
+
+/// The `[sync]` table: whether the project's `atlas/` documents may be pushed to Decisions
+/// without the person running `iohr sync` (RFC 0205). Nothing leaves the machine otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SyncConfig {
+    /// Push in the background. Off when unset: only `iohr sync` sends anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<bool>,
+}
+
+impl SyncConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.background.is_none()
+    }
+
+    /// Whether background sync is on (`background = true`).
+    #[must_use]
+    pub fn background_on(&self) -> bool {
+        self.background == Some(true)
+    }
+}
+
+/// The `[memory]` table: where `iohr memory` keeps entries by default, and whether it may
+/// talk to the account's memory service. Nothing leaves the machine unless `sync = true` or
+/// the person runs `iohr memory sync` (RFC 0205, ADR 0216).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct MemoryConfig {
+    /// The default scope: `project` (the repository's `.inorbit/memory/`, committed), `user`
+    /// (this person's notes on this machine) or `account` (the memory service, needs sync).
+    /// `project` when unset; `--scope` overrides it per command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Sync with the account's memory service. Off when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<bool>,
+    /// Days after which a memory's `checked:` date is too old for `iohr memory check`.
+    /// 180 when unset; `--checked-days` overrides it per run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_days: Option<u32>,
+}
+
+impl MemoryConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.scope.is_none() && self.sync.is_none() && self.check_days.is_none()
+    }
+
+    /// Whether sync is on (`sync = true`).
+    #[must_use]
+    pub fn sync_on(&self) -> bool {
+        self.sync == Some(true)
     }
 }
 
@@ -229,6 +308,12 @@ pub struct RunnerConfig {
     /// with code 75 and let the supervisor start it; elsewhere it is `exec`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upgrade_restart: Option<String>,
+    /// On macOS, the identity an upgrade signs the new binary with when the release is
+    /// signed ad hoc, so the keychain's "Always Allow" holds from one release to the next:
+    /// `auto` (the first Developer ID Application identity, else the first Apple
+    /// Development one), a name or SHA-1 hash `codesign` takes, or `-` (off, the default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_sign_identity: Option<String>,
     /// The only user service units (`<name>.service`) an approved `systemd.user-restart`
     /// may restart. Unset or empty, the runner refuses every one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +338,7 @@ impl RunnerConfig {
             && self.auto_upgrade.is_none()
             && self.upgrade_interval_minutes.is_none()
             && self.upgrade_restart.is_none()
+            && self.upgrade_sign_identity.is_none()
             && self.user_units.is_none()
             && self.core_checkout.is_none()
     }
@@ -741,16 +827,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("config.toml"),
-            "[project]   # my default\ntemplate = \"coordinated\"\n",
+            "[project]   # my default\ntemplate = \"coordinated\"\nroot = \"~/code\"\n",
         )
         .unwrap();
         let mut c = Config::load(dir.path()).unwrap();
         assert_eq!(c.project.template.as_deref(), Some("coordinated"));
+        assert_eq!(c.project.root.as_deref(), Some("~/code"));
         c.default = Some(name("work"));
         c.save(dir.path()).unwrap();
         let saved = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(saved.contains("[project]   # my default"), "{saved}");
         assert!(saved.contains("template = \"coordinated\""), "{saved}");
+        assert!(saved.contains("root = \"~/code\""), "{saved}");
     }
 
     #[test]
@@ -764,6 +852,7 @@ always_on = true
 auto_upgrade = false
 upgrade_interval_minutes = 30
 upgrade_restart = "exit"
+upgrade_sign_identity = "auto"
 
 [profiles.work]
 kind = "token"
@@ -785,6 +874,7 @@ capacity = 8
         assert_eq!(c.runner.auto_upgrade, Some(false));
         assert_eq!(c.runner.upgrade_interval_minutes, Some(30));
         assert_eq!(c.runner.upgrade_restart.as_deref(), Some("exit"));
+        assert_eq!(c.runner.upgrade_sign_identity.as_deref(), Some("auto"));
         let work = c.profile(&name("work")).unwrap();
         assert_eq!(
             work.runner,
@@ -806,6 +896,10 @@ capacity = 8
         );
         assert!(saved.contains("capacity = 8"), "{saved}");
         assert!(saved.contains("upgrade_interval_minutes = 30"), "{saved}");
+        assert!(
+            saved.contains("upgrade_sign_identity = \"auto\""),
+            "{saved}"
+        );
         assert!(!saved.contains("default ="), "{saved}");
         assert_eq!(Config::parse(&saved, path).unwrap(), c);
     }

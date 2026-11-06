@@ -6,9 +6,12 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod support;
+
 use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -29,17 +32,6 @@ fn token(scopes: &[&str]) -> String {
             "scp": scopes, "org": ACCOUNT, "plan": "free", "key": "key_1"
         }))
     )
-}
-
-/// What a child process needs to run at all; `SYSTEMROOT` is required for sockets on
-/// Windows. Nothing that could hold a credential is passed on.
-fn kept_env() -> Vec<(String, std::ffi::OsString)> {
-    // `IOHR_NO_BROWSER`: a test never opens a real tab on the developer's machine.
-    ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"]
-        .into_iter()
-        .filter_map(|k| std::env::var_os(k).map(|v| (k.to_owned(), v)))
-        .chain([("IOHR_NO_BROWSER".to_owned(), "1".into())])
-        .collect()
 }
 
 struct Run<'a> {
@@ -650,6 +642,8 @@ async fn verbose_output_never_shows_the_token() {
     // `runner run-key` keeps its key in the profile's store, which a bare token has not:
     // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
     // `iohr decisions` needs typed answers: `decisions_commands_never_show_the_token` runs it.
+    // `iohr sync` needs a project with an atlas: `sync_never_shows_the_token_or_a_documents_words`
+    // (tests/atlas.rs) runs it with `--verbose`.
     for args in commands {
         let mut args = args.clone();
         args.push("--verbose");
@@ -751,6 +745,7 @@ async fn verbose_output_never_shows_the_token() {
             .cmd(&args)
             .env("IOHR_TOKEN", &t)
             .env("HOME", &home)
+            .env("USERPROFILE", &home)
             .env("IOHR_EXT_ONCE", "1")
             .stdin(Stdio::null())
             .output()

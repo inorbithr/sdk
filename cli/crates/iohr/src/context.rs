@@ -68,9 +68,8 @@ where
     T: Send + 'static,
     F: FnOnce(&dyn Store) -> Result<T, StoreError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || f(store.as_ref()))
+    iohr_auth::off_thread(move || f(store.as_ref()))
         .await
-        .map_err(|e| Error::Failed(format!("the credential store call stopped: {e}")))?
         .map_err(Error::from)
 }
 
@@ -126,6 +125,12 @@ impl TokenProvider for AnyCredential {
 pub(crate) struct Shared(pub(crate) Arc<AnyCredential>);
 
 impl TokenProvider for Shared {
+    /// The client calls this once after a 401, so the retry carries a fresh token
+    /// (without it Io's cached token, stale after a sleep, was sent again for ever).
+    async fn invalidate(&self) {
+        self.0.invalidate().await;
+    }
+
     async fn token(&self) -> Result<Token, inorbithr::AuthError> {
         self.0.token().await
     }

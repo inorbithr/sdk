@@ -1,0 +1,33 @@
+# The InOrbit project record: what `iohr` and InOrbit Desktop read to know this folder is an
+# InOrbit project. It is committed with the project. It holds no secrets, ever: no tokens, keys
+# or passwords. The link to the Decisions space is beside it, in `.inorbit/` (RFC 0103).
+
+# The record's format version. `iohr` raises it when the format changes.
+version = 1
+
+# --- The project ---
+
+# The project's name. You chose it at init.
+name = "@@NAME@@"
+# Publisher and name: the project's id in InOrbit. `iohr project init` fills it.
+id = "@@ID@@"
+# What kind of project it is: project | macos-service | macos-app | ui-panel. The template sets it.
+kind = "macos-service"
+
+# --- Where it came from ---
+
+# The template `iohr project init` used.
+template = "demo"
+# That template's version when this project was made.
+template_version = 1
+# When init made it, in UTC. `iohr project init` fills it.
+created_at = "@@CREATED_AT@@"
+
+# --- InOrbit links ---
+
+# The project's Decisions space. Empty until init can create one (it needs a per-project scope).
+space_id = ""
+# The project's private Marketplace listing. Empty until you publish it.
+listing = ""
+# The project's memory namespace. Empty until per-project memory exists.
+memory_namespace = ""
