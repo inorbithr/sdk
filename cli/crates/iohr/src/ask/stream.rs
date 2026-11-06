@@ -461,6 +461,7 @@ fn denial(content: &Value) -> Option<String> {
         "requested permissions",
         "haven't granted",
         "has been denied",
+        "denied by your permission",
         "was denied",
         "requires approval",
         "not allowed",

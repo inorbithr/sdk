@@ -1119,6 +1119,20 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             project::one_line_description(describe.as_deref()),
         ));
     }
+    // The installed toolchain, read once: its version fills the files that name one
+    // (`rust-version`) and is told to the agent. A toolchain that will not run keeps the
+    // variant's own default and is not told.
+    let variant = lang.as_deref().and_then(|l| tpl.variant(l));
+    let toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+    if let Some((full, minor)) = toolchain.as_deref().and_then(template::version_in) {
+        for (k, v) in [
+            ("@@TOOLCHAIN_VERSION@@", full),
+            ("@@TOOLCHAIN_MINOR@@", minor),
+        ] {
+            vals.retain(|(x, _)| x != k);
+            vals.push((k.to_owned(), v));
+        }
+    }
     let mut files = template::render(&tpl_lang, &vals).map_err(Error::Failed)?;
     // Every project gets its InOrbit space link, whatever the template (RFC 0103).
     project::add_space_link(&mut files, None);
@@ -1203,8 +1217,11 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 &tpl.meta.id,
                 answers,
                 &vals,
+                toolchain.as_deref(),
                 &crate::front::today(),
             );
+            // The language's own build and test commands, scoped; nothing else of the shell.
+            let allow: Vec<String> = variant.map(|v| v.agent_allow.clone()).unwrap_or_default();
             // The `[ask]` model (else the small fast tier), edits to files only, never shell,
             // and init's own bounds: nothing the agent is told or says is stored here.
             let model =
@@ -1213,7 +1230,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             agent_run = Some(AgentRun {
                 agent: *ag,
                 bin: bin.clone(),
-                args: ask::argv(*ag, model.as_deref(), true, Some(max_turns), &prompt),
+                args: ask::argv(
+                    *ag,
+                    model.as_deref(),
+                    true,
+                    &allow,
+                    Some(max_turns),
+                    &prompt,
+                ),
                 prompt,
                 model,
                 max_turns,
@@ -1300,7 +1324,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         .act_async(
             "roles",
             "import the built-in roles into InOrbit (kept local when signed out)",
-            || super::atlas::import_for(g, env, &dir, false),
+            || super::atlas::import_for(g, env, &dir, false, false),
         )
         .await;
     if let Some(r) = roles.as_ref().filter(|_| !out.json) {

@@ -1075,7 +1075,7 @@ fn show_lists_the_languages_a_template_offers_in_text_and_in_json() {
         .lines()
         .find(|l| l.trim_start().starts_with("go "))
         .unwrap();
-    assert!(go.contains("live") && go.contains("Go 1.22"), "{go}");
+    assert!(go.contains("live") && go.contains("Go 1.26"), "{go}");
     let py = t
         .lines()
         .find(|l| l.trim_start().starts_with("python "))

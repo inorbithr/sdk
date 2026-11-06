@@ -426,6 +426,7 @@ pub fn agent_prompt(
     template: &str,
     answers: &crate::template::Answers,
     vals: &[(String, String)],
+    toolchain: Option<&str>,
     today: &str,
 ) -> String {
     let base = template_prompt.unwrap_or(
@@ -445,8 +446,38 @@ pub fn agent_prompt(
     if let Some(d) = describe {
         let _ = write!(p, "\n\nWhat the person wants:\n{d}");
     }
-    let _ = write!(p, "\n\n{}", dated(today));
+    // Facts iohr read before the run, so the agent does not guess them.
+    let _ = write!(
+        p,
+        "\n\nFacts read on this machine just now:\n- {}",
+        dated(today)
+    );
+    if let Some(t) = toolchain {
+        let _ = write!(p, "\n- Installed toolchain: {t}");
+    }
+    let _ = write!(p, "\n\n{LATEST_STABLE}");
     p
+}
+
+/// The rule every agent run in a new project carries: what to pick, and where to check it.
+pub const LATEST_STABLE: &str = "Use the latest stable, secure release of every language \
+     feature, tool and dependency you pick. Check it at its upstream repository (releases page \
+     or tags) and its security advisories with WebFetch or WebSearch, and name the version and \
+     where you read it.";
+
+/// What `command` prints first, for the agent's prompt (`rustc 1.99.0 (b940084d7 2026-09-28)`),
+/// else nothing: a toolchain that will not run is told nothing rather than guessed. A version
+/// command is a read, so a dry run runs it too.
+#[must_use]
+pub fn toolchain_line(command: &[String]) -> Option<String> {
+    let (prog, args) = command.split_first()?;
+    let o = Command::new(prog).args(args).output().ok()?;
+    if !o.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&o.stdout);
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(first.chars().take(120).collect())
 }
 
 /// The line every prompt that has a model research or write facts carries, so it does not
@@ -902,11 +933,14 @@ mod tests {
             "demo",
             &a,
             &vals,
+            Some("rustc 1.99.0 (b940084d7 2026-09-28)"),
             "2026-11-05",
         );
         assert!(p.starts_with("Module my_shop."));
+        assert!(p.contains("- Installed toolchain: rustc 1.99.0 (b940084d7 2026-09-28)"));
+        assert!(p.ends_with(LATEST_STABLE) && p.contains("upstream repository"));
         assert!(p.contains("- flavour: fancy") && p.contains("sell hats"));
-        assert!(p.ends_with(&dated("2026-11-05")));
+        assert!(p.contains(&dated("2026-11-05")));
         assert!(p.contains(
             "Today is 2026-11-05. Use the newest edition or version published as of today;"
         ));
@@ -943,6 +977,77 @@ mod tests {
     /// The blank template is only a README, the record, the ignore file and the language's
     /// skeleton with one test: no panel, no manifest, no heartbeat, nothing about macOS. Each
     /// language renders whole, and where its toolchain is here its own test is the smoke test.
+    #[test]
+    fn the_rust_templates_use_edition_2024_and_the_installed_minor_and_the_readme_has_no_stray_ticks()
+     {
+        for id in ["blank", "demo"] {
+            let (files, _) = rendered_in(id, "my-shop", "rust");
+            let cargo = &files.iter().find(|(p, _)| p == "Cargo.toml").unwrap().1;
+            assert!(cargo.contains("edition = \"2024\""), "{id}: {cargo}");
+            // Nothing probed in this helper, so the variant's own floor (the first release with
+            // edition 2024) stands; the real run swaps in the installed toolchain's minor.
+            assert!(cargo.contains("rust-version = \"1.85\""), "{id}: {cargo}");
+        }
+        for lang in ["rust", "go", "python", "typescript"] {
+            let (files, _) = rendered_in("blank", "my-shop", lang);
+            let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+            let block = readme
+                .split("```sh\n")
+                .nth(1)
+                .unwrap()
+                .split("```")
+                .next()
+                .unwrap();
+            assert!(
+                !block.contains('`') && !block.trim().is_empty(),
+                "{lang}: {block:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_version_is_read_out_of_the_first_line_a_toolchain_prints() {
+        for (line, full, minor) in [
+            ("rustc 1.99.0 (b940084d7 2026-09-28)", "1.99.0", "1.99"),
+            ("go version go1.27.3 darwin/arm64", "1.27.3", "1.27"),
+            ("Python 3.14.7", "3.14.7", "3.14"),
+            ("v26.11.1", "26.11.1", "26.11"),
+        ] {
+            assert_eq!(
+                template::version_in(line),
+                Some((full.into(), minor.into())),
+                "{line}"
+            );
+        }
+        assert_eq!(template::version_in("no version here"), None);
+        assert_eq!(template::version_in("build 7"), None);
+    }
+
+    #[test]
+    fn every_live_language_names_the_commands_the_agent_may_run_and_the_toolchain_to_read() {
+        let t = template::load(&Spec::Id("blank".into()), Path::new("/no-such-iohr-root")).unwrap();
+        let allow = |id: &str| t.variant(id).unwrap().agent_allow.clone();
+        assert_eq!(
+            allow("rust"),
+            ["cargo build", "cargo test", "cargo fmt", "cargo clippy"]
+        );
+        assert_eq!(allow("go"), ["go build", "go test", "go vet"]);
+        for v in t.live_variants() {
+            assert!(
+                !v.agent_allow.is_empty() && !v.toolchain.is_empty(),
+                "{}",
+                v.id
+            );
+            assert!(
+                v.agent_allow
+                    .iter()
+                    .all(|c| !c.starts_with("bash") && !c.starts_with("sh ")),
+                "{}",
+                v.id
+            );
+        }
+    }
+
     #[test]
     fn the_blank_template_is_a_plain_project_and_its_smoke_test_is_its_own_test() {
         let tpl =
