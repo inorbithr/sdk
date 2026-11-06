@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.2](https://github.com/inorbithr/sdk/compare/java/v0.3.1...java/v0.3.2) (2026-11-06)
+
+
+### Bug fixes
+
+* **repo:** keep ids and account data out of test messages, verify TLS in the pin test ([#346](https://github.com/inorbithr/sdk/issues/346)) ([518f21e](https://github.com/inorbithr/sdk/commit/518f21ead46bba023fadd577b80537db23283f9c))
+* **security:** keep ids and account data out of test messages; verify TLS in the pin test ([518f21e](https://github.com/inorbithr/sdk/commit/518f21ead46bba023fadd577b80537db23283f9c))
+
+
+### Dependencies
+
+* **java:** bump org.apache.maven.plugins:maven-surefire-plugin ([2d18eed](https://github.com/inorbithr/sdk/commit/2d18eedc18745690819e2fd8b44eb848a1394e00))
+* **java:** bump org.apache.maven.plugins:maven-surefire-plugin from 3.6.0 to 3.6.1 in /java in the java group ([#337](https://github.com/inorbithr/sdk/issues/337)) ([2d18eed](https://github.com/inorbithr/sdk/commit/2d18eedc18745690819e2fd8b44eb848a1394e00))
+
 ## [0.3.1](https://github.com/inorbithr/sdk/compare/java/v0.3.0...java/v0.3.1) (2026-10-27)
 
 
