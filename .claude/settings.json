@@ -1,53 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
-    "allow": [
-      "Bash(mise run *)",
-      "Bash(mise tasks *)",
-      "Bash(mise install)",
-      "Bash(git status *)",
-      "Bash(git diff *)",
-      "Bash(git log *)",
-      "Bash(git show *)",
-      "Bash(git branch *)",
-      "Bash(go test *)",
-      "Bash(go vet *)",
-      "Bash(go build *)",
-      "Bash(go doc *)",
-      "Bash(cargo check *)",
-      "Bash(cargo build *)",
-      "Bash(cargo test *)",
-      "Bash(cargo nextest *)",
-      "Bash(cargo clippy *)",
-      "Bash(cargo fmt *)",
-      "Bash(cargo doc *)",
-      "Bash(pnpm run *)",
-      "Bash(pnpm exec *)",
-      "Bash(uv run *)",
-      "Bash(uv sync *)",
-      "WebFetch(domain:docs.inorbit.hr)",
-      "WebFetch(domain:api.inorbit.hr)",
-      "WebFetch(domain:pkg.go.dev)",
-      "WebFetch(domain:docs.rs)",
-      "WebFetch(domain:doc.rust-lang.org)",
-      "WebFetch(domain:developer.mozilla.org)",
-      "WebFetch(domain:docs.python.org)",
-      "WebFetch(domain:www.python-httpx.org)",
-      "WebFetch(domain:docs.pydantic.dev)",
-      "WebFetch(domain:azure.github.io)",
-      "WebFetch(domain:google.aip.dev)",
-      "WebFetch(domain:code.claude.com)"
-    ],
-    "ask": [
-      "Bash(git push *)",
-      "Bash(git tag *)",
-      "Bash(go get *)",
-      "Bash(cargo add *)",
-      "Bash(pnpm add *)",
-      "Bash(uv add *)",
-      "Bash(gh release *)",
-      "Bash(gh workflow run *)"
-    ],
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)",
@@ -71,56 +24,5 @@
       "Bash(mvn *:deploy*)",
       "Bash(dotnet nuget push *)"
     ]
-  },
-  "enabledPlugins": {
-    "gopls-lsp@claude-plugins-official": true,
-    "rust-analyzer-lsp@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true,
-    "pyright-lsp@claude-plugins-official": true,
-    "inorbit@inorbit": true
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format-file.sh",
-            "timeout": 60
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-check.sh",
-            "timeout": 900
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Reminder after compaction: spec/ and generated/ are never edited by hand; a public change lands in all four languages with a conformance case; mise run ci before reporting done.'"
-          }
-        ]
-      }
-    ]
-  },
-  "extraKnownMarketplaces": {
-    "inorbit": {
-      "source": {
-        "source": "github",
-        "repo": "inorbithr/ai-kit"
-      }
-    }
   }
 }
