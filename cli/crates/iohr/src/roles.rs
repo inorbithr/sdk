@@ -838,6 +838,22 @@ mod tests {
 
     /// The service's lint, in what it can tell from the text: the budget, the override words
     /// a child's core must not hold, the privacy words and the secret shapes.
+    struct Private {
+        classified: regex::Regex,
+        benign: regex::Regex,
+        money: regex::Regex,
+        secret: regex::Regex,
+    }
+
+    impl Private {
+        fn is_match(&self, text: &str) -> bool {
+            let without = self.benign.replace_all(text, " ");
+            self.classified.is_match(&without)
+                || self.money.is_match(&without)
+                || self.secret.is_match(text)
+        }
+    }
+
     #[test]
     fn the_catalogue_passes_the_services_lint_in_what_a_client_can_check() {
         let override_words =
@@ -847,10 +863,36 @@ mod tests {
             r"(?i)\b(allow(ed|s)? to|grant(ed|s)?|permission|may now|can now|optional|unnecessary|not needed|skip (the )?(check|gate|review|tests?|ci)|auto-?approve|force-?push)\b",
         )
         .unwrap();
-        let private = regex::Regex::new(
-            r"(?i)\b(tenders?|investors?|investments?|banks?|loan|invoices?|revenue|profit|salary|salaries|taxes|finances?|equity|contracts?|classified|confidential|procurement|valuation|funding)\b|[€$£]\s*\d|\d{11}|(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S{6,}",
-        )
-        .unwrap();
+        // The service's privacy filter as it is (core `crates/coordinator/src/learning/privacy.rs`:
+        // `CLASSIFIED` and `MONEY` after `BENIGN`, then the secrets), copied whole: a partial copy
+        // let "financial entities" through and `iohr project init` kept every Role local (400).
+        let classified = regex::Regex::new(r"(?ix)
+        \b(
+            tenders? | tendering | natje[cč]aj\w* | javn\w*\s+nabav\w* | procurement | bid\s*bond | rfq | rfp
+          | investors? | investments? | invest(ed|ing|s)? | invest(ir|itor|icij)\w* | ula[gž]a\w* | ulaganj\w* | dionic\w* | dioni[cč]ar\w* | udjel\w* | term\s*sheet | cap\s*table | valuation | shareholders? | equity
+          | funding | fundrais\w* | seed\s*round | series\s*[ab] | pitch\s*deck | due\s*diligence | angel
+          | banks? | banking | iban | swift\s*code | bic | loan | credit\s*line | overdraft
+          | invoices? | revenue | profit | ebitda | salary | salaries | payroll | taxes | tax\s*return | vat\s*number
+          | finances? | finance[-_.]\w* | eporezn\w* | bank_\w* | oib | \d{11} | balance\s*sheet | p\s*&\s*l | cash\s*flow | runway | burn\s*rate | accounting | bookkeeping | company\s*financ\w* | financials?
+          | contracts? | ugovor\w* | addendum | nda\s*with
+          | kredit\w* | porez\w* | prihod\w* | dobit | pla[ćc]a | plaće | plaću | plaćanj\w* | faktur\w* | ra[cč]unovod\w* | banc\w* | bank[aeiu]\w* | nabav\w* | ponud\w* | financij\w*
+          | classified | confidential
+        )\b").unwrap();
+        let benign = regex::Regex::new(r"(?ix)\b( (api|data|page|type|interface|wire|schema|tactical|console|smart|token|erc\d*|solidity|evm|deployed|response|request|rpc|proto|service|module|ui|design)[\s_-]contracts? | contracts?[\s_-](address(es)?|calls?|abi|bytecode|code|deploy\w*|storage|events?|tests?|checks?|files?) | contracts?[\s_-](tests?|checks?|files?\.?) | tactical_contract(\.py)? | rfc\s*0082-console-contract )\b").unwrap();
+        let money = regex::Regex::new(r"(?i)(\d[\d.,]*\s*(k|m|mil|milijun\w*|million\w*|thousand|tisu[cć]\w*)?\s*(€|eur\b|eura\b|euro\w*|usd\b|dollars?\b|kn\b|kuna\b)|[€$£]\s*\d|\b(eur|usd|euro)\s*\(?\s*\d|\b(milijun|million|billion|milijard)\w*\s+(eura|euro|dollars?|usd|eur)\b)").unwrap();
+        let secret =
+            regex::Regex::new(r"(?i)(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S{6,}")
+                .unwrap();
+        let private = Private {
+            classified,
+            benign,
+            money,
+            secret,
+        };
+        assert!(
+            private.is_match("DORA (applying to financial entities since 17 January 2025)"),
+            "the copy refuses what the service refused"
+        );
         for p in catalogue() {
             assert!(
                 core_tokens(&p) <= 700,
@@ -865,6 +907,7 @@ mod tests {
             for l in &p.lines {
                 assert!(!widen.is_match(&l.text), "{}: {}", p.name, l.text);
                 assert!(!private.is_match(&l.text), "{}: {}", p.name, l.text);
+                assert!(!private.is_match(&l.section), "{}: {}", p.name, l.section);
                 for c in &l.cites {
                     assert!(!private.is_match(c), "{}: {c}", p.name);
                 }
