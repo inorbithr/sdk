@@ -27,6 +27,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
 use super::Mode;
+use super::ask_card;
 use super::engine::{self, Place, SECRET_RULE, Verdict};
 use super::rule::Rule;
 use super::store::{self, Files, Kind, Outcome, Scope};
@@ -348,10 +349,25 @@ async fn ask(sh: &Arc<Shared>, tool: &str, input: Value) -> Value {
         suggestion.is_some(),
     );
     let can_always = suggestion.is_some();
+    // The drawn card where the look is fancy and the terminal wide enough; else the plain
+    // line, which is what a script and the tests read.
+    let look = crate::card::Look::detect(crate::ui::Ui::detect(false).fancy());
+    let cols = console::Term::stderr()
+        .size_checked()
+        .map_or(0, |(_, c)| usize::from(c));
+    let drawn = ask_card::drawn_at(cols, look).then(|| ask_card::Ask {
+        wanted: wanted_parts(tool, &input),
+        folder: folder.clone(),
+        can_always,
+    });
     crate::card::pause_spin(true);
     let key = tokio::task::spawn_blocking(move || {
-        crate::card::say(&line);
-        read_choice(can_always)
+        if let Some(card) = drawn {
+            draw_and_read(&card, cols, look)
+        } else {
+            crate::card::say(&line);
+            read_choice(can_always)
+        }
     })
     .await
     .unwrap_or(Choice::No);
@@ -361,6 +377,31 @@ async fn ask(sh: &Arc<Shared>, tool: &str, input: Value) -> Value {
     crate::card::pause_spin(false);
     sh.pending.fetch_sub(1, Ordering::Relaxed);
     reply
+}
+
+/// Draws the Io card over the spinner's line, reads the answer with the action bar's keys
+/// (arrows and Enter, `1`-`9`, `y`, `a`, `n`; Esc, `q` and Ctrl-C are no), and erases the card,
+/// so the one result line of [`settle`] is all that stays. A terminal that cannot be read is a
+/// no.
+fn draw_and_read(card: &ask_card::Ask, cols: usize, look: crate::card::Look) -> Choice {
+    use std::io::Write as _;
+    // The spinner's line has no newline; the card starts on a clean one.
+    let mut err = std::io::stderr().lock();
+    let _ = write!(err, "\r\x1b[2K");
+    let _ = err.flush();
+    drop(err);
+    let picked = crate::ui::Ui::select_card(
+        "Io asks",
+        &ask_card::choices(card.can_always),
+        ask_card::INITIAL,
+        |at| ask_card::lines(card, at, cols, look),
+    );
+    // Esc, `q` and Ctrl-C leave with nothing picked, and a terminal that cannot be read
+    // is an error: both are no.
+    picked
+        .ok()
+        .flatten()
+        .map_or(Choice::No, |v| ask_card::choice_for(&v))
 }
 
 /// Reads keys until one means something. A terminal that cannot be read is a no.
@@ -460,9 +501,22 @@ pub(crate) fn card_line(what: &str, folder: &str, width: usize, can_always: bool
     )
 }
 
-/// What the call wants, in words, safe to put on a terminal: control characters become
-/// spaces (a command could carry escape codes) and a long one is cut.
-pub(crate) fn wanted(tool: &str, input: &Value) -> String {
+/// What a call wants, split for drawing: the verb phrase ("run", or "use the X tool" when
+/// there is nothing to show) and the thing, with how many characters were cut from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Wanted {
+    pub(crate) verb: String,
+    /// The command, path or pattern, cut to [`SHOWN_MAX`] characters, with no control
+    /// character in it.
+    pub(crate) thing: Option<String>,
+    /// How many characters of the thing are not shown.
+    pub(crate) more: usize,
+}
+
+/// The call's verb and thing. Every character that reaches a terminal from here is clean:
+/// control characters (a command, a path or a tool name could carry escape codes) become
+/// spaces, and a long thing is cut.
+pub(crate) fn wanted_parts(tool: &str, input: &Value) -> Wanted {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
     let (verb, thing) = match tool {
         "Bash" => ("run", text("command")),
@@ -473,20 +527,36 @@ pub(crate) fn wanted(tool: &str, input: &Value) -> String {
         "Edit" | "Write" | "NotebookEdit" => ("change", text("file_path")),
         _ => ("use the", None),
     };
-    let Some(thing) = thing else {
-        return format!("{verb} {tool} tool");
+    let clean = |s: &str| -> String {
+        s.chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect()
     };
-    let clean: String = thing
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
+    let Some(thing) = thing else {
+        return Wanted {
+            verb: format!("{verb} {} tool", clean(tool)),
+            thing: None,
+            more: 0,
+        };
+    };
+    let clean = clean(thing);
     let clean = clean.trim();
     let count = clean.chars().count();
-    if count > SHOWN_MAX {
-        let cut: String = clean.chars().take(SHOWN_MAX).collect();
-        format!("{verb} `{cut}` ({} more characters)", count - SHOWN_MAX)
-    } else {
-        format!("{verb} `{clean}`")
+    Wanted {
+        verb: verb.to_owned(),
+        thing: Some(clean.chars().take(SHOWN_MAX).collect()),
+        more: count.saturating_sub(SHOWN_MAX),
+    }
+}
+
+/// What the call wants, in words, safe to put on a terminal: control characters become
+/// spaces (a command could carry escape codes) and a long one is cut.
+pub(crate) fn wanted(tool: &str, input: &Value) -> String {
+    let w = wanted_parts(tool, input);
+    match w.thing {
+        None => w.verb,
+        Some(thing) if w.more > 0 => format!("{} `{thing}` ({} more characters)", w.verb, w.more),
+        Some(thing) => format!("{} `{thing}`", w.verb),
     }
 }
 
