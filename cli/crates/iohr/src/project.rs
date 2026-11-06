@@ -117,10 +117,9 @@ fn git(dir: &Path, args: &[&str]) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// `git init`, add everything and one commit; false when git did not answer.
-fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
-    git(dir, &["init", "-q", "-b", "main"])
-        && git(dir, &["add", "-A"])
+/// A commit by iohr, with its own identity and no signing, of everything in the folder.
+fn commit_all(dir: &Path, message: &str) -> bool {
+    git(dir, &["add", "-A"])
         && git(
             dir,
             &[
@@ -133,9 +132,83 @@ fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
                 "commit",
                 "-q",
                 "-m",
-                &format!("{name}: new project from the {template} template"),
+                message,
             ],
         )
+}
+
+/// `git init`, add everything and one commit; false when git did not answer.
+fn first_commit(dir: &Path, name: &str, template: &str) -> bool {
+    git(dir, &["init", "-q", "-b", "main"])
+        && commit_all(
+            dir,
+            &format!("{name}: new project from the {template} template"),
+        )
+}
+
+/// The agent's work, committed on its own so the scaffold and what an AI model built stay
+/// apart in `git log`. Runs after the agent and a passing smoke test; the message says so.
+/// `smoke` is the smoke test's verdict, `None` when it did not run. `skipped` when it did not
+/// pass, when the agent changed nothing, or when git did not answer.
+#[must_use]
+pub fn ai_commit(dir: &Path, name: &str, agent: &str, smoke: Option<bool>) -> Step {
+    let title = "The agent's work committed";
+    if smoke != Some(true) {
+        let why = if smoke.is_some() {
+            "the smoke test did not pass"
+        } else {
+            "no smoke test ran"
+        };
+        return step(
+            "ai-commit",
+            title,
+            "skipped",
+            format!(
+                "{why}, so what the agent built is left uncommitted in the folder; read it, fix it and commit it yourself"
+            ),
+            "",
+        );
+    }
+    let changed = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| !o.stdout.is_empty());
+    match changed {
+        Some(false) => step(
+            "ai-commit",
+            title,
+            "skipped",
+            "the agent changed nothing",
+            "",
+        ),
+        Some(true)
+            if commit_all(
+                dir,
+                &format!(
+                    "{name}: AI-built changes by {agent}\n\nBuilt by an AI model ({agent}) from the description given to `iohr project init`, after which the smoke test passed. Review it before you rely on it."
+                ),
+            ) =>
+        {
+            step(
+                "ai-commit",
+                title,
+                "done",
+                format!("a second commit, labelled AI-built ({agent}); `git log` shows it"),
+                "",
+            )
+        }
+        _ => step(
+            "ai-commit",
+            title,
+            "skipped",
+            "git did not answer; what the agent built is left uncommitted",
+            "",
+        ),
+    }
 }
 
 /// Where a project's link to its InOrbit space lives (RFC 0103, "The link"): committed, so
@@ -416,6 +489,15 @@ pub fn register_step(
     Ok((state, s))
 }
 
+/// What iohr read on this machine before the run, so the agent does not guess it.
+#[derive(Debug, Clone, Copy)]
+pub struct Facts<'a> {
+    /// The first line the language's toolchain prints for its version (`rustc --version`).
+    pub toolchain: Option<&'a str>,
+    /// Today, `YYYY-MM-DD`.
+    pub today: &'a str,
+}
+
 /// The prompt the agent gets: the template's own words, then the project, the answers and
 /// what the person described. It goes to the agent's argv and nowhere else.
 #[must_use]
@@ -426,8 +508,7 @@ pub fn agent_prompt(
     template: &str,
     answers: &crate::template::Answers,
     vals: &[(String, String)],
-    toolchain: Option<&str>,
-    today: &str,
+    facts: Facts<'_>,
 ) -> String {
     let base = template_prompt.unwrap_or(
         "This folder is a fresh InOrbit project. Build what is described below by editing this folder. Keep it free of secrets.",
@@ -450,9 +531,9 @@ pub fn agent_prompt(
     let _ = write!(
         p,
         "\n\nFacts read on this machine just now:\n- {}",
-        dated(today)
+        dated(facts.today)
     );
-    if let Some(t) = toolchain {
+    if let Some(t) = facts.toolchain {
         let _ = write!(p, "\n- Installed toolchain: {t}");
     }
     let _ = write!(p, "\n\n{LATEST_STABLE}");
@@ -922,6 +1003,45 @@ mod tests {
     }
 
     #[test]
+    fn the_agents_work_is_a_second_ai_labelled_commit_only_after_a_passing_smoke_test() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "scaffold").unwrap();
+        assert!(first_commit(d.path(), "x", "blank"));
+        let log = |dir: &Path| {
+            let o = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["log", "--format=%s"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&o.stdout).into_owned()
+        };
+        // Nothing the agent changed: nothing to commit.
+        assert_eq!(
+            ai_commit(d.path(), "x", "claude", Some(true)).state,
+            "skipped"
+        );
+        std::fs::write(d.path().join("b.txt"), "built by the agent").unwrap();
+        // Smoke failed, or did not run: the tree stays dirty and the step says so.
+        for smoke in [Some(false), None] {
+            let st = ai_commit(d.path(), "x", "claude", smoke);
+            assert_eq!(st.state, "skipped");
+            assert!(st.said.contains("left uncommitted"), "{}", st.said);
+            assert_eq!(log(d.path()).lines().count(), 1);
+        }
+        let st = ai_commit(d.path(), "x", "claude", Some(true));
+        assert_eq!(st.state, "done", "{}", st.said);
+        let l = log(d.path());
+        assert_eq!(l.lines().count(), 2, "{l}");
+        assert!(
+            l.lines()
+                .next()
+                .unwrap()
+                .contains("AI-built changes by claude")
+        );
+    }
+
+    #[test]
     fn the_agent_prompt_holds_the_template_words_the_answers_and_the_description() {
         let mut a = Answers::new();
         a.insert("flavour".into(), template::Answer::Text("fancy".into()));
@@ -933,8 +1053,10 @@ mod tests {
             "demo",
             &a,
             &vals,
-            Some("rustc 1.99.0 (b940084d7 2026-09-28)"),
-            "2026-11-05",
+            Facts {
+                toolchain: Some("rustc 1.99.0 (b940084d7 2026-09-28)"),
+                today: "2026-11-05",
+            },
         );
         assert!(p.starts_with("Module my_shop."));
         assert!(p.contains("- Installed toolchain: rustc 1.99.0 (b940084d7 2026-09-28)"));

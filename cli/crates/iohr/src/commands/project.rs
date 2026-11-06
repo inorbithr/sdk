@@ -1217,12 +1217,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 &tpl.meta.id,
                 answers,
                 &vals,
-                toolchain.as_deref(),
-                &crate::front::today(),
+                project::Facts {
+                    toolchain: toolchain.as_deref(),
+                    today: &crate::front::today(),
+                },
             );
             // The language's own build and test commands, scoped; nothing else of the shell.
             let allow: Vec<String> = variant.map(|v| v.agent_allow.clone()).unwrap_or_default();
-            // The `[ask]` model (else the small fast tier), edits to files only, never shell,
+            // The `[ask]` model (else the small fast tier), edits to files and the language's own build and test commands,
             // and init's own bounds: nothing the agent is told or says is stored here.
             let model =
                 ask::choose_model(*ag, None, cx.ask_model.as_deref()).map_err(Error::Usage)?;
@@ -1332,6 +1334,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
+    let mut agent_built = false;
     for s in &steps {
         match s.name {
             StepName::Git => {
@@ -1391,14 +1394,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             StepName::Agent => {
                 if let Some(r) = &agent_run {
                     let what = format!(
-                        "run {} once in print mode in {} (files only, never shell; at most {} turns and {} s) with the prompt below (not started in a dry run)",
+                        "run {} once in print mode in {} (it may edit files and run only the language's build and test commands; at most {} turns and {} s) with the prompt below (not started in a dry run)",
                         r.agent.name(),
                         dir.display(),
                         r.max_turns,
                         r.timeout.as_secs()
                     );
                     // The AI label is printed either way; the agent starts only past the gate.
-                    Out::note(&ask::label_for(
+                    ui.info(&ask::label_for(
                         "iohr project init",
                         "AI-built project",
                         r.agent,
@@ -1440,12 +1443,13 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                             Out::raw(format!("{line}\n").as_bytes());
                         }
                         if ended.code == 0 {
+                            agent_built = true;
                             report.steps.push(project::step(
                                 "agent",
                                 "Agent build",
                                 "done",
                                 format!(
-                                    "{} built it in {secs} s, files only, never shell; AI-built, check it",
+                                    "{} built it in {secs} s with edits and the language's build and test commands only; AI-built, check it",
                                     r.agent.name()
                                 ),
                                 "",
@@ -1476,6 +1480,18 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
     }
 
+    // The agent's work is its own commit, once the smoke test has passed it.
+    if agent_built
+        && !dry
+        && agent_failed.is_none()
+        && let Some(r) = &agent_run
+    {
+        let st = project::ai_commit(&dir, name, r.agent.name(), smoke.as_ref().map(|s| s.ok));
+        if !out.json && st.state == "skipped" {
+            ui.warn(&st.said);
+        }
+        report.steps.push(st);
+    }
     if dry {
         dry_report(
             &flow,
