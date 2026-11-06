@@ -412,9 +412,13 @@ pub fn locals(root: &Path) -> Vec<Local> {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Outcome {
     pub name: String,
-    /// `written`, `would write`, `unchanged`, `left alone`, `local` or `failed`.
+    /// `written`, `upgraded`, `would write`, `would upgrade`, `unchanged`, `left alone`, `local` or
+    /// `failed`.
     pub action: &'static str,
     pub version: Option<i64>,
+    /// For `upgraded`: the version the account had before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<i64>,
     pub note: String,
 }
 
@@ -439,7 +443,11 @@ impl Report {
             .outcomes
             .iter()
             .map(|o| {
-                let v = o.version.map_or_else(String::new, |v| format!(" v{v}"));
+                let v = match (o.from, o.version) {
+                    (Some(from), Some(to)) => format!(" v{from} \u{2192} v{to}"),
+                    (Some(from), None) => format!(" v{from} \u{2192} next"),
+                    (None, v) => v.map_or_else(String::new, |v| format!(" v{v}")),
+                };
                 let n = if o.note.is_empty() {
                     String::new()
                 } else {
@@ -489,44 +497,168 @@ fn remote_of(listed: Option<&Value>) -> BTreeMap<String, (String, i64)> {
         .unwrap_or_default()
 }
 
+/// What InOrbit's own history says about an account's copy of a role the project has no
+/// record of (a fresh project, the copy came from an earlier one).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// Its lines are the catalogue's lines as this build carries them.
+    Current,
+    /// Every version of it was an import and its lines are not this build's: an older
+    /// built-in nobody changed since.
+    OlderBuiltIn,
+    /// Something other than an import wrote a version (a learned line, a revert), or the
+    /// lines are the person's own.
+    Edited,
+}
+
+/// Reads the account's copy of `role`: its head's lines against this catalogue's, and
+/// whether every version in its history was an import (`ListPersonalityVersions` names the
+/// cause of each: `import`, `auto_applied`, `applied`, `reverted`). `None` when InOrbit does
+/// not answer, and the role is then left alone as before.
+async fn account_copy(api: &Api, role: &Role) -> Option<Provenance> {
+    let path = format!("{LIST_PATH}/{}", role.name);
+    let head = api
+        .send(Method::Get, &path, &[], None)
+        .await
+        .ok()?
+        .json::<Value>()
+        .ok()?;
+    let versions = api
+        .send(Method::Get, &format!("{path}/versions"), &[], None)
+        .await
+        .ok()?
+        .json::<Value>()
+        .ok()?;
+    let mut theirs: Vec<(String, String, String)> = head
+        .pointer("/lines")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter(|l| l.get("origin").and_then(Value::as_str) != Some("learned"))
+        .map(|l| {
+            let g = |k: &str| {
+                l.get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned()
+            };
+            (g("place"), g("section"), g("text"))
+        })
+        .collect();
+    let mut mine: Vec<(String, String, String)> = role
+        .lines
+        .iter()
+        .map(|l| (l.place.clone(), l.section.clone(), l.text.trim().to_owned()))
+        .collect();
+    mine.sort();
+    theirs.sort();
+    let all_imports = versions
+        .pointer("/versions")
+        .and_then(Value::as_array)
+        .is_some_and(|a| {
+            !a.is_empty()
+                && a.iter()
+                    .all(|v| v.get("cause").and_then(Value::as_str) == Some("import"))
+        });
+    Some(if mine == theirs {
+        Provenance::Current
+    } else if all_imports {
+        Provenance::OlderBuiltIn
+    } else {
+        Provenance::Edited
+    })
+}
+
+/// What [`account_copy`] finds for each role the account has and this project never imported.
+async fn copies_of(
+    api: &Api,
+    found: &[Local],
+    remote: &BTreeMap<String, (String, i64)>,
+) -> BTreeMap<String, Provenance> {
+    let mut copies = BTreeMap::new();
+    for f in found {
+        if f.imported_version.is_none()
+            && remote.contains_key(&f.role.name)
+            && let Some(c) = account_copy(api, &f.role).await
+        {
+            copies.insert(f.role.name.clone(), c);
+        }
+    }
+    copies
+}
+
+/// The command that takes the catalogue's version over an edited copy.
+const UPGRADE_HINT: &str = "`iohr atlas roles import --upgrade`";
+
 /// Tells each local role apart by what InOrbit has; the ones to send are returned,
-/// the others are said in the report.
+/// the others are said in the report. `copies` is what [`account_copy`] found for the roles
+/// this project has no import record of. With `upgrade`, an edited copy is sent too.
 fn decide<'a>(
     found: &'a [Local],
     remote: &BTreeMap<String, (String, i64)>,
+    copies: &BTreeMap<String, Provenance>,
+    upgrade: bool,
     report: &mut Report,
 ) -> Vec<&'a Local> {
     let mut send: Vec<&Local> = Vec::new();
     for f in found {
         let name = &f.role.name;
+        let newer = format!(
+            "catalogue v{} differs from your copy: {UPGRADE_HINT} takes it",
+            f.role.version
+        );
         let (action, version, note) = match remote.get(name) {
             None => {
                 send.push(f);
                 continue;
             }
             Some((_, head)) => match f.imported_version {
-                None => (
-                    "left alone",
-                    Some(*head),
-                    "already in your account, not from this project",
-                ),
-                Some(v) if v != *head => (
-                    "left alone",
-                    Some(*head),
-                    "changed in InOrbit since the import",
-                ),
+                None => match copies.get(name) {
+                    Some(Provenance::OlderBuiltIn) => {
+                        send.push(f);
+                        continue;
+                    }
+                    Some(Provenance::Current) => ("unchanged", Some(*head), String::new()),
+                    Some(Provenance::Edited) if upgrade => {
+                        send.push(f);
+                        continue;
+                    }
+                    Some(Provenance::Edited) => (
+                        "left alone",
+                        Some(*head),
+                        format!("you changed it; {newer}"),
+                    ),
+                    None => (
+                        "left alone",
+                        Some(*head),
+                        "already in your account, not from this project".to_owned(),
+                    ),
+                },
+                Some(v) if v != *head => {
+                    if upgrade {
+                        send.push(f);
+                        continue;
+                    }
+                    let note = if f.imported_catalogue.is_some_and(|c| c < f.role.version) {
+                        format!("changed in InOrbit since the import; {newer}")
+                    } else {
+                        "changed in InOrbit since the import".to_owned()
+                    };
+                    ("left alone", Some(*head), note)
+                }
                 Some(_) if f.imported_catalogue.is_some_and(|c| c < f.role.version) => {
                     send.push(f);
                     continue;
                 }
-                Some(_) => ("unchanged", Some(*head), ""),
+                Some(_) => ("unchanged", Some(*head), String::new()),
             },
         };
         report.outcomes.push(Outcome {
             name: name.clone(),
             action,
             version,
-            note: note.to_owned(),
+            from: None,
+            note,
         });
     }
     send
@@ -579,23 +711,62 @@ fn local_only(found: &[Local], report: &mut Report, why: &str) {
             name: f.role.name.clone(),
             action: "local",
             version: None,
+            from: None,
             note: String::new(),
         });
     }
     report.message = Some(why.to_owned());
 }
 
+/// One outcome for each role that was sent: `written` or, over an account's copy, `upgraded`
+/// with the version it had; `failed` when InOrbit did not say it was written.
+fn record_written(
+    send: Vec<&Local>,
+    written: &BTreeMap<String, i64>,
+    remote: &BTreeMap<String, (String, i64)>,
+    report: &mut Report,
+) {
+    for f in send {
+        let name = f.role.name.clone();
+        let Some(&v) = written.get(&name) else {
+            report.outcomes.push(Outcome {
+                name,
+                action: "failed",
+                version: None,
+                from: None,
+                note: "InOrbit did not say it was written".to_owned(),
+            });
+            continue;
+        };
+        let note = write_back(f, v);
+        let from = remote.get(&name).map(|(_, v)| *v);
+        report.outcomes.push(Outcome {
+            name,
+            action: if from.is_some() {
+                "upgraded"
+            } else {
+                "written"
+            },
+            version: Some(v),
+            from,
+            note,
+        });
+    }
+}
+
 /// Imports the packs of `root` into the account of `api`, one role at a time told
 /// apart by what is already there:
 /// - absent in InOrbit: imported;
-/// - present, never imported from this project: `left alone` (it is the account's own);
-/// - present and changed in InOrbit since our import: `left alone`;
-/// - present at the version we imported and the catalogue moved on: imported again;
+/// - present, never imported from this project: read its history ([`account_copy`]); an
+///   unchanged older built-in is `upgraded` (`v1 → v2`), one the person changed is `left alone`
+///   and names the command (`--upgrade`) that takes the catalogue's version;
+/// - present and changed in InOrbit since our import: `left alone`, the same hint;
+/// - present at the version we imported and the catalogue moved on: `upgraded`;
 /// - otherwise `unchanged`.
 ///
 /// With `dry`, nothing is sent and nothing written, and the report holds the body. With no
 /// `api`, every role stays local, with one message saying so. Never fails.
-pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report {
+pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool, upgrade: bool) -> Report {
     let found = locals(root);
     let mut report = Report::default();
     if found.is_empty() {
@@ -626,7 +797,10 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
         .iter()
         .find(|(_, (parent, _))| parent.is_empty())
         .map(|(n, _)| n.clone());
-    let send = decide(&found, &remote, &mut report);
+    // A role the account has and this project never imported: its history says whether it
+    // is an unchanged built-in (upgraded) or the person's own (left alone, with the command).
+    let copies = copies_of(api, &found, &remote).await;
+    let send = decide(&found, &remote, &copies, upgrade, &mut report);
     if send.is_empty() {
         return report;
     }
@@ -635,10 +809,16 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
     let body = import_body(&refs, &parent, root_name.is_none());
     if dry {
         for f in &send {
+            let from = remote.get(&f.role.name).map(|(_, v)| *v);
             report.outcomes.push(Outcome {
                 name: f.role.name.clone(),
-                action: "would write",
+                action: if from.is_some() {
+                    "would upgrade"
+                } else {
+                    "would write"
+                },
                 version: None,
+                from,
                 note: String::new(),
             });
         }
@@ -653,6 +833,7 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
                     name: f.role.name.clone(),
                     action: "failed",
                     version: None,
+                    from: None,
                     note: String::new(),
                 });
             }
@@ -662,30 +843,13 @@ pub(crate) async fn import(api: Option<&Api>, root: &Path, dry: bool) -> Report 
             return report;
         }
     };
-    for f in send {
-        let name = f.role.name.clone();
-        let Some(&v) = written.get(&name) else {
-            report.outcomes.push(Outcome {
-                name,
-                action: "failed",
-                version: None,
-                note: "InOrbit did not say it was written".to_owned(),
-            });
-            continue;
-        };
-        let note = write_back(f, v);
-        report.outcomes.push(Outcome {
-            name,
-            action: "written",
-            version: Some(v),
-            note,
-        });
-    }
+    record_written(send, &written, &remote, &mut report);
     if root_name.is_none() && written.contains_key(ROOT) {
         report.outcomes.push(Outcome {
             name: ROOT.to_owned(),
             action: "written",
             version: written.get(ROOT).copied(),
+            from: None,
             note: "the account had no root role".to_owned(),
         });
     }

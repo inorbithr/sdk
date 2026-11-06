@@ -76,10 +76,20 @@ pub struct Global {
         value_name = "WHO"
     )]
     pub sign_in: Option<SignIn>,
-    /// With `--sign-in io`: the personality named in the `x-iohr-via` attribution header
-    /// (RFC 0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`,
-    /// which `iohr ask` uses for where an answer comes from.
-    #[arg(long, global = true, env = "IOHR_VIA_PERSONALITY", value_name = "NAME")]
+    /// With `--sign-in io`: the role named in the `x-iohr-via` attribution header, such as
+    /// `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr ask` uses for
+    /// where an answer comes from.
+    #[arg(long, global = true, env = "IOHR_VIA_ROLE", value_name = "NAME")]
+    pub via_role: Option<String>,
+    /// The old name of `--via-role`, kept so scripts keep working. The header it sets is
+    /// unchanged (`personality=...`).
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_PERSONALITY",
+        value_name = "NAME",
+        hide = true
+    )]
     pub via_personality: Option<String>,
     /// With `--sign-in io`: the agent session named in `x-iohr-via`.
     #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
@@ -103,6 +113,13 @@ pub enum SignIn {
 }
 
 impl Global {
+    /// The role named for attribution: `--via-role` (`IOHR_VIA_ROLE`), else the hidden old
+    /// name `--via-personality` (`IOHR_VIA_PERSONALITY`).
+    #[must_use]
+    pub fn via_role(&self) -> Option<&String> {
+        self.via_role.as_ref().or(self.via_personality.as_ref())
+    }
+
     /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
     #[must_use]
     pub fn environment(&self) -> &'static Environment {
@@ -1462,12 +1479,17 @@ pub enum RolesCommand {
     },
     /// Import the project's roles into your InOrbit account.
     ///
-    /// The same import `iohr sync` does. A role already in your account that did not
-    /// come from this project, or that changed in InOrbit since, is left alone.
+    /// The same import `iohr sync` does. A built-in role already in your account that nobody
+    /// changed is upgraded to the catalogue's newer version; one you changed, or that is not
+    /// a built-in, is left alone (`--upgrade` takes the catalogue's version over a changed one).
     Import {
         /// Say what would be sent and send nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Also replace a copy you changed with the catalogue's newer version (InOrbit keeps
+        /// the old version, so it can be reverted).
+        #[arg(long)]
+        upgrade: bool,
         /// The project folder. Default: the nearest folder up from here that has `atlas/`.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
@@ -1711,8 +1733,9 @@ pub enum ProjectCommand {
         answers: Option<PathBuf>,
         /// Describe the project and your own agent (claude or codex, on your PATH) builds it
         /// in the new folder, from the template's agent prompt. It runs in the background of
-        /// this command, in print mode (no session opens): it may edit files, never run shell
-        /// commands, and iohr draws its progress. The smoke test runs after it. Its output is
+        /// this command, in print mode (no session opens): it may edit files and run only the language's own
+        /// build and test commands (cargo, go, python, node), search the web, and never any other
+        /// shell command; iohr draws its progress. The smoke test runs after it. Its output is
         /// labelled AI. `--json` passes the agent's events through as JSON lines.
         #[arg(long, value_name = "TEXT")]
         describe: Option<String>,

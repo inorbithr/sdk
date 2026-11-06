@@ -29,8 +29,17 @@ pub(crate) enum Event {
     Thinking(String),
     /// A piece of the answer, as it arrives.
     Text(String),
-    /// The agent used a tool: its name and the one thing it acted on.
-    Tool { name: String, detail: String },
+    /// The agent used a tool: its name and the one thing it acted on. `id` ties it to its
+    /// [`Event::ToolResult`] when the agent sends one (Claude does, Codex does not).
+    Tool {
+        id: Option<String>,
+        name: String,
+        detail: String,
+    },
+    /// A tool's result. `denied` is the reason when the agent refused the call (the tool is
+    /// disabled, or the call is not on the allow list and nobody can be asked): the call did
+    /// not run, so it is never drawn as one.
+    ToolResult { id: String, denied: Option<String> },
     /// The run ended.
     Done(Done),
 }
@@ -75,6 +84,13 @@ enum ClaudeLine {
     },
     #[serde(rename = "assistant")]
     Assistant {
+        message: ClaudeMessage,
+        #[serde(default)]
+        parent_tool_use_id: Option<String>,
+    },
+    /// The tool results the agent sends back to itself.
+    #[serde(rename = "user")]
+    User {
         message: ClaudeMessage,
         #[serde(default)]
         parent_tool_use_id: Option<String>,
@@ -133,9 +149,20 @@ struct ClaudeMessage {
 enum ClaudeContent {
     #[serde(rename = "tool_use")]
     ToolUse {
+        #[serde(default)]
+        id: Option<String>,
         name: String,
         #[serde(default)]
         input: Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        #[serde(default)]
+        tool_use_id: String,
+        #[serde(default)]
+        content: Value,
+        #[serde(default)]
+        is_error: bool,
     },
     #[serde(other)]
     Other,
@@ -184,6 +211,10 @@ impl ClaudeLine {
                 parent_tool_use_id: Some(_),
                 ..
             }
+            | Self::User {
+                parent_tool_use_id: Some(_),
+                ..
+            }
             | Self::Other => Vec::new(),
             Self::Stream { event, .. } => match event {
                 ClaudeStream::BlockStart {
@@ -202,11 +233,28 @@ impl ClaudeLine {
                 .content
                 .into_iter()
                 .filter_map(|c| match c {
-                    ClaudeContent::ToolUse { name, input } => Some(Event::Tool {
+                    ClaudeContent::ToolUse { id, name, input } => Some(Event::Tool {
+                        id,
                         detail: tool_detail(&input),
                         name,
                     }),
-                    ClaudeContent::Other => None,
+                    _ => None,
+                })
+                .collect(),
+            // A result that says the call was refused: it never ran.
+            Self::User { message, .. } => message
+                .content
+                .into_iter()
+                .filter_map(|c| match c {
+                    ClaudeContent::ToolResult {
+                        tool_use_id,
+                        content,
+                        is_error,
+                    } if !tool_use_id.is_empty() => Some(Event::ToolResult {
+                        denied: is_error.then(|| denial(&content)).flatten(),
+                        id: tool_use_id,
+                    }),
+                    _ => None,
                 })
                 .collect(),
             Self::Result(r) => {
@@ -315,14 +363,17 @@ impl CodexLine {
             // (Codex sends it only then), a message or reasoning when it is whole.
             Self::ItemStarted { item } => match item {
                 CodexItem::CommandExecution { command } => vec![Event::Tool {
+                    id: None,
                     name: "Run".to_owned(),
                     detail: short(&command),
                 }],
                 CodexItem::McpToolCall { server, tool } => vec![Event::Tool {
+                    id: None,
                     name: format!("{server}.{tool}"),
                     detail: String::new(),
                 }],
                 CodexItem::WebSearch { query } => vec![Event::Tool {
+                    id: None,
                     name: "WebSearch".to_owned(),
                     detail: short(&query),
                 }],
@@ -336,6 +387,7 @@ impl CodexLine {
                     vec![Event::ThinkingStart, Event::Thinking(format!("{text}\n"))]
                 }
                 CodexItem::FileChange { changes } => vec![Event::Tool {
+                    id: None,
                     name: "Edit".to_owned(),
                     detail: short(
                         &changes
@@ -383,6 +435,46 @@ fn tool_detail(input: &Value) -> String {
     .find_map(|k| input.get(*k).and_then(Value::as_str))
     .map(|s| s.lines().next().unwrap_or_default().trim().to_owned())
     .unwrap_or_default()
+}
+
+/// The reason a tool result gives for a refused call, when it is a refusal: Claude Code says
+/// `No such tool available: Bash. Bash is disabled for this session` for a tool taken away
+/// with `--disallowedTools`, and a permission message (`... requested permissions to use X,
+/// but you haven't granted it yet`, `Permission to use X has been denied`) for a call that is
+/// not on the allow list when nobody can be asked. Any other failed result (a missing file, a
+/// failing command) is a tool that ran and failed, and is `None`.
+fn denial(content: &Value) -> Option<String> {
+    let text = match content {
+        Value::String(s) => s.clone(),
+        Value::Array(a) => a
+            .iter()
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => String::new(),
+    };
+    let lower = text.to_ascii_lowercase();
+    let refused = [
+        "no such tool available",
+        "is disabled",
+        "permission to use",
+        "requested permissions",
+        "haven't granted",
+        "has been denied",
+        "denied by your permission",
+        "was denied",
+        "requires approval",
+        "not allowed",
+    ]
+    .iter()
+    .any(|m| lower.contains(m));
+    refused.then(|| {
+        let first = text
+            .replace("<tool_use_error>", "")
+            .replace("</tool_use_error>", "");
+        let first = first.trim().trim_start_matches("Error:").trim();
+        short(first.lines().next().unwrap_or_default())
+    })
 }
 
 /// At most 100 characters, cut with an ellipsis; applied once the path is shortened.
@@ -451,6 +543,8 @@ pub(crate) struct Renderer<O: Write, E: Write> {
     broke: bool,
     printed_text: bool,
     failed: Option<String>,
+    /// Tool calls drawn only when their result says whether they ran: id, name, detail.
+    pending: Vec<(String, String, String)>,
 }
 
 impl<O: Write, E: Write> Renderer<O, E> {
@@ -467,6 +561,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
             broke: false,
             printed_text: false,
             failed: None,
+            pending: Vec::new(),
         }
     }
 
@@ -484,6 +579,11 @@ impl<O: Write, E: Write> Renderer<O, E> {
     /// Draws one event. A closed pipe is not an error.
     pub(crate) fn draw(&mut self, event: Event) {
         self.stop_spinner();
+        // A tool whose result never came (the run ended, or the agent moved on) is drawn as
+        // the call it was, before the next thing is.
+        if !matches!(event, Event::Tool { .. } | Event::ToolResult { .. }) {
+            self.flush_tools();
+        }
         match event {
             Event::ThinkingStart => {
                 if self.look.fancy {
@@ -519,26 +619,61 @@ impl<O: Write, E: Write> Renderer<O, E> {
                 self.printed_text = true;
                 self.out_mid = !t.ends_with('\n');
             }
-            Event::Tool { name, detail } => {
-                self.broke = true;
-                if !self.look.fancy && self.look.rows {
-                    self.end_out_line();
-                    let detail = short(&self.relative(&detail));
-                    let _ = writeln!(self.err, "- {name} {detail}");
-                } else if self.look.fancy {
-                    self.end_thinking_line();
-                    self.end_out_line();
-                    let detail = short(&self.relative(&detail));
-                    let _ = writeln!(
-                        self.err,
-                        "{} {} {}",
-                        console::style("\u{23fa}").for_stderr().cyan(),
-                        console::style(name).for_stderr().bold(),
-                        dim(&detail)
-                    );
+            Event::Tool {
+                id: Some(id),
+                name,
+                detail,
+            } => self.pending.push((id, name, detail)),
+            Event::Tool { name, detail, .. } => self.tool_row(&name, &detail, None),
+            Event::ToolResult { id, denied } => {
+                if let Some(at) = self.pending.iter().position(|p| p.0 == id) {
+                    let (_, name, detail) = self.pending.remove(at);
+                    self.tool_row(&name, &detail, denied.as_deref());
                 }
             }
             Event::Done(d) => self.done(d),
+        }
+    }
+
+    fn flush_tools(&mut self) {
+        for (_, name, detail) in std::mem::take(&mut self.pending) {
+            self.tool_row(&name, &detail, None);
+        }
+    }
+
+    /// One tool row. A call the agent refused is drawn dim, marked `\u{2298}` and with its
+    /// reason, and never like a call that ran.
+    fn tool_row(&mut self, name: &str, detail: &str, denied: Option<&str>) {
+        self.broke = true;
+        let detail = short(&self.relative(detail));
+        if !self.look.fancy && self.look.rows {
+            self.end_out_line();
+            let _ = match denied {
+                Some(why) => writeln!(self.err, "- {name} {detail} (denied, did not run: {why})"),
+                None => writeln!(self.err, "- {name} {detail}"),
+            };
+        } else if self.look.fancy {
+            self.end_thinking_line();
+            self.end_out_line();
+            let _ = match denied {
+                Some(why) => writeln!(
+                    self.err,
+                    "{}",
+                    // Cut to the terminal's width so the row never wraps.
+                    dim(&console::truncate_str(
+                        &format!("\u{2298} {name} {detail} \u{2014} denied, did not run: {why}"),
+                        crate::ui::terminal_width().saturating_sub(1).max(40),
+                        "\u{2026}",
+                    ))
+                ),
+                None => writeln!(
+                    self.err,
+                    "{} {} {}",
+                    console::style("\u{23fa}").for_stderr().cyan(),
+                    console::style(name).for_stderr().bold(),
+                    dim(&detail)
+                ),
+            };
         }
     }
 
@@ -607,6 +742,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
     /// Ends the run: the answer finishes on a line of its own.
     pub(crate) fn finish(&mut self) {
         self.stop_spinner();
+        self.flush_tools();
         self.end_thinking_line();
         self.end_out_line();
     }
@@ -673,6 +809,7 @@ mod tests {
                 r#"{"type":"assistant","message":{"content":[{"type":"text","text":"x"},{"type":"tool_use","name":"Read","input":{"file_path":"README.md"}}]}}"#
             ),
             [Event::Tool {
+                id: None,
                 name: "Read".into(),
                 detail: "README.md".into()
             }]
@@ -738,6 +875,7 @@ mod tests {
                 r#"{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"bash -lc ls","status":"in_progress"}}"#
             ),
             [Event::Tool {
+                id: None,
                 name: "Run".into(),
                 detail: "bash -lc ls".into()
             }]
@@ -764,6 +902,7 @@ mod tests {
                 r#"{"type":"item.completed","item":{"id":"i4","type":"file_change","changes":[{"path":"a.rs","kind":"update"}],"status":"completed"}}"#
             ),
             [Event::Tool {
+                id: None,
                 name: "Edit".into(),
                 detail: "a.rs".into()
             }]
@@ -798,6 +937,119 @@ mod tests {
         )
     }
 
+    /// Two lines from a real Claude Code 2.1.x run with `--disallowedTools Bash`: the call,
+    /// then the result that says the tool does not exist in this session.
+    const DENIED_CALL: &str = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"cd /work/demo && git status"}}]},"parent_tool_use_id":null}"#;
+    const DENIED_RESULT: &str = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"<tool_use_error>Error: No such tool available: Bash. Bash is disabled for this session, in subagents as well as here.</tool_use_error>","is_error":true,"tool_use_id":"toolu_01"}]},"parent_tool_use_id":null}"#;
+
+    #[test]
+    fn a_refused_tool_result_is_a_denial_and_a_failing_command_is_not() {
+        assert_eq!(
+            claude(DENIED_RESULT),
+            [Event::ToolResult {
+                id: "toolu_01".into(),
+                denied: Some(
+                    "No such tool available: Bash. Bash is disabled for this session, in subagents as well as here."
+                        .into()
+                )
+            }]
+        );
+        // The permission message for a call off the allow list.
+        let off_list = r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"Claude requested permissions to use Bash, but you haven't granted it yet.","is_error":true,"tool_use_id":"t2"}]}}"#;
+        assert!(matches!(
+            &claude(off_list)[0],
+            Event::ToolResult {
+                denied: Some(_),
+                ..
+            }
+        ));
+        // A command that ran and failed, a file that is missing, and a result that is fine.
+        for ok in [
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"Exit code 1\nerror[E0308]: mismatched types","is_error":true,"tool_use_id":"t3"}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"File does not exist.","is_error":true,"tool_use_id":"t4"}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"fine","tool_use_id":"t5"}]}}"#,
+        ] {
+            assert!(
+                matches!(&claude(ok)[0], Event::ToolResult { denied: None, .. }),
+                "{ok}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_denied_call_is_drawn_dim_with_its_reason_and_never_as_a_run_line() {
+        let events: Vec<Event> = [DENIED_CALL, DENIED_RESULT]
+            .into_iter()
+            .flat_map(claude)
+            .collect();
+        let (_, fancy) = draw(true, events.clone());
+        assert!(fancy.contains("\u{2298} Bash"), "{fancy}");
+        assert!(
+            fancy.contains("denied, did not run: No such tool"),
+            "{fancy}"
+        );
+        assert!(!fancy.contains('\u{23fa}'), "never the run mark: {fancy}");
+        let look = Look {
+            fancy: false,
+            thinking: None,
+            cwd: Some("/work".into()),
+            model: None,
+            rows: true,
+            made: None,
+        };
+        let mut r = Renderer::new(Vec::new(), Vec::new(), look, None);
+        for e in events {
+            r.draw(e);
+        }
+        r.finish();
+        let rows = String::from_utf8(r.err).unwrap_or_default();
+        assert!(
+            rows.contains("- Bash cd /work/demo && git status (denied, did not run: No such tool"),
+            "{rows}"
+        );
+    }
+
+    #[test]
+    fn a_denied_row_never_runs_past_the_terminal_width() {
+        let long = format!("which iohr cargo rustc rustup; {}", "echo x; ".repeat(30));
+        let call = format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"t9","name":"Bash","input":{{"command":"{long}"}}}}]}}}}"#
+        );
+        let result = r#"{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"Permission to use Bash with command which iohr cargo rustc has been denied because it requires approval from somebody","tool_use_id":"t9"}]}}"#;
+        let events: Vec<Event> = [call.as_str(), result]
+            .into_iter()
+            .flat_map(claude)
+            .collect();
+        let (_, fancy) = draw(true, events);
+        let plain = console::strip_ansi_codes(&fancy);
+        let row = plain
+            .lines()
+            .find(|l| l.starts_with('\u{2298}'))
+            .unwrap_or_default();
+        assert!(
+            row.chars().count() <= crate::ui::terminal_width(),
+            "{} chars: {row}",
+            row.chars().count()
+        );
+        assert!(row.ends_with('\u{2026}'), "{row}");
+    }
+
+    #[test]
+    fn a_call_that_ran_is_drawn_once_its_result_arrives_and_one_without_a_result_at_the_end() {
+        let ran = r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok","tool_use_id":"toolu_01"}]}}"#;
+        let events: Vec<Event> = [DENIED_CALL, ran].into_iter().flat_map(claude).collect();
+        let (_, err) = draw(true, events);
+        assert!(
+            err.contains('\u{23fa}') && !err.contains('\u{2298}'),
+            "{err}"
+        );
+        let (_, err) = draw(true, claude(DENIED_CALL));
+        assert!(
+            err.contains('\u{23fa}'),
+            "no result: drawn as a call: {err}"
+        );
+    }
+
     #[test]
     fn plain_prints_only_the_answer_with_a_break_after_a_tool() {
         let (out, err) = draw(
@@ -807,6 +1059,7 @@ mod tests {
                 Event::Thinking("secret thought".into()),
                 Event::Text("Looking".into()),
                 Event::Tool {
+                    id: None,
                     name: "Read".into(),
                     detail: "/work/a".into(),
                 },
@@ -828,6 +1081,7 @@ mod tests {
         let (_, err) = draw(
             true,
             vec![Event::Tool {
+                id: None,
                 name: "Read".into(),
                 detail: deep,
             }],
@@ -842,6 +1096,7 @@ mod tests {
         let (_, err) = draw(
             true,
             vec![Event::Tool {
+                id: None,
                 name: "Read".into(),
                 detail: format!("/other/{}", "e".repeat(120)),
             }],
@@ -857,6 +1112,7 @@ mod tests {
                 Event::ThinkingStart,
                 Event::Thinking("a thought".into()),
                 Event::Tool {
+                    id: None,
                     name: "Read".into(),
                     detail: "/work/README.md".into(),
                 },

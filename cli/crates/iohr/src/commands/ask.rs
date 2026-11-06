@@ -54,7 +54,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     // The question is only ever an argument of the agent; nothing below prints or stores it
     // except `--dry-run`, which prints the command line you asked to see.
     let question = args.question.join(" ");
-    let command_line = ask::argv(agent, model.as_deref(), allow_edits, None, &question);
+    let command_line = ask::argv(agent, model.as_deref(), allow_edits, &[], None, &question);
     if args.dry_run {
         dry_run(via, agent, bin.as_deref(), &command_line, out);
         return Ok(());

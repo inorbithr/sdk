@@ -1075,7 +1075,7 @@ fn show_lists_the_languages_a_template_offers_in_text_and_in_json() {
         .lines()
         .find(|l| l.trim_start().starts_with("go "))
         .unwrap();
-    assert!(go.contains("live") && go.contains("Go 1.22"), "{go}");
+    assert!(go.contains("live") && go.contains("Go 1.26"), "{go}");
     let py = t
         .lines()
         .find(|l| l.trim_start().starts_with("python "))
@@ -1181,6 +1181,35 @@ fn init_described(
 }
 
 #[cfg(unix)]
+/// The scaffold's commit, then the agent's work as its own AI-labelled commit, tree clean.
+fn assert_two_commits_the_second_ai_built(d: &Path) {
+    let git = |a: &[&str]| {
+        String::from_utf8_lossy(
+            &std::process::Command::new("git")
+                .arg("-C")
+                .arg(d)
+                .args(a)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .into_owned()
+    };
+    let log = git(&["log", "--format=%s"]);
+    assert_eq!(log.lines().count(), 2, "{log}");
+    assert!(
+        log.lines()
+            .next()
+            .unwrap()
+            .contains("AI-built changes by claude"),
+        "{log}"
+    );
+    assert!(
+        git(&["status", "--porcelain"]).is_empty(),
+        "the tree is committed"
+    );
+}
+
 #[test]
 fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test() {
     if !on_path("python3") {
@@ -1207,7 +1236,19 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
     assert!(args.contains(&"-p".to_owned()), "{args:?}");
     assert!(has("--output-format", "stream-json"), "{args:?}");
     assert!(has("--permission-mode", "acceptEdits"), "{args:?}");
-    assert!(has("--disallowedTools", "Bash"), "{args:?}");
+    // The language's own commands are allowed by prefix, the web is allowed, and the rest of the
+    // shell is not (no blanket `Bash` denial, which would beat the scoped allows); secrets stay
+    // unreadable.
+    assert!(!has("--disallowedTools", "Bash"), "{args:?}");
+    assert!(
+        args.contains(&"Bash(python3 -m unittest:*)".to_owned()),
+        "{args:?}"
+    );
+    assert!(
+        args.contains(&"WebSearch".to_owned()) && args.contains(&"WebFetch".to_owned()),
+        "{args:?}"
+    );
+    assert!(args.contains(&"Read(./.env)".to_owned()), "{args:?}");
     assert!(
         has("--max-turns", "40") && has("--model", "haiku"),
         "{args:?}"
@@ -1221,7 +1262,7 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
     );
     let today = args
         .iter()
-        .find(|l| l.starts_with("Today is "))
+        .find(|l| l.starts_with("- Today is "))
         .unwrap_or_else(|| panic!("no dated line: {args:?}"));
     assert!(
         today.contains("Use the newest edition or version published as of today;")
@@ -1229,16 +1270,27 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
         "{today}"
     );
     assert!(
-        today.as_bytes()[9..13].iter().all(u8::is_ascii_digit),
+        today.as_bytes()[11..15].iter().all(u8::is_ascii_digit),
         "{today}"
     );
-    assert!(&today[9..19] >= "2026-11-05", "{today}");
+    assert!(&today[11..21] >= "2026-11-05", "{today}");
+    assert!(
+        args.iter()
+            .any(|l| l.starts_with("- Installed toolchain: Python ")),
+        "{args:?}"
+    );
+    assert!(
+        args.iter().any(|l| l.contains("upstream repository")),
+        "{args:?}"
+    );
     let cwd = std::fs::read_to_string(h.path().join("out/cwd")).unwrap();
     assert_eq!(
         std::fs::canonicalize(cwd.trim()).unwrap(),
         std::fs::canonicalize(&d).unwrap()
     );
     assert!(d.join("built.txt").is_file());
+    assert_two_commits_the_second_ai_built(&d);
+    assert!(t.contains("done: the agent's work committed"), "{t}");
     // The smoke test ran on what the agent left, and the report says so.
     assert!(t.contains("done: smoke test, `python3 -m unittest"), "{t}");
     assert!(t.contains("done: agent build"), "{t}");

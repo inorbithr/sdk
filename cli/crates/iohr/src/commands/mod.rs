@@ -62,10 +62,10 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         ));
     }
     if g.sign_in.is_none()
-        && (g.via_personality.is_some() || g.via_session.is_some() || g.via_job.is_some())
+        && (g.via_role().is_some() || g.via_session.is_some() || g.via_job.is_some())
     {
         return Err(Error::Usage(
-            "--via-personality, --via-session and --via-job need --sign-in io".into(),
+            "--via-role, --via-session and --via-job need --sign-in io".into(),
         ));
     }
     match cli.command {

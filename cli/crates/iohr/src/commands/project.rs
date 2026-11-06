@@ -1119,6 +1119,20 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             project::one_line_description(describe.as_deref()),
         ));
     }
+    // The installed toolchain, read once: its version fills the files that name one
+    // (`rust-version`) and is told to the agent. A toolchain that will not run keeps the
+    // variant's own default and is not told.
+    let variant = lang.as_deref().and_then(|l| tpl.variant(l));
+    let toolchain = variant.and_then(|v| project::toolchain_line(&v.toolchain));
+    if let Some((full, minor)) = toolchain.as_deref().and_then(template::version_in) {
+        for (k, v) in [
+            ("@@TOOLCHAIN_VERSION@@", full),
+            ("@@TOOLCHAIN_MINOR@@", minor),
+        ] {
+            vals.retain(|(x, _)| x != k);
+            vals.push((k.to_owned(), v));
+        }
+    }
     let mut files = template::render(&tpl_lang, &vals).map_err(Error::Failed)?;
     // Every project gets its InOrbit space link, whatever the template (RFC 0103).
     project::add_space_link(&mut files, None);
@@ -1203,9 +1217,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 &tpl.meta.id,
                 answers,
                 &vals,
-                &crate::front::today(),
+                project::Facts {
+                    toolchain: toolchain.as_deref(),
+                    today: &crate::front::today(),
+                },
             );
-            // The `[ask]` model (else the small fast tier), edits to files only, never shell,
+            // The language's own build and test commands, scoped; nothing else of the shell.
+            let allow: Vec<String> = variant.map(|v| v.agent_allow.clone()).unwrap_or_default();
+            // The `[ask]` model (else the small fast tier), edits to files and the language's own build and test commands,
             // and init's own bounds: nothing the agent is told or says is stored here.
             let model =
                 ask::choose_model(*ag, None, cx.ask_model.as_deref()).map_err(Error::Usage)?;
@@ -1213,7 +1232,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             agent_run = Some(AgentRun {
                 agent: *ag,
                 bin: bin.clone(),
-                args: ask::argv(*ag, model.as_deref(), true, Some(max_turns), &prompt),
+                args: ask::argv(
+                    *ag,
+                    model.as_deref(),
+                    true,
+                    &allow,
+                    Some(max_turns),
+                    &prompt,
+                ),
                 prompt,
                 model,
                 max_turns,
@@ -1300,7 +1326,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         .act_async(
             "roles",
             "import the built-in roles into InOrbit (kept local when signed out)",
-            || super::atlas::import_for(g, env, &dir, false),
+            || super::atlas::import_for(g, env, &dir, false, false),
         )
         .await;
     if let Some(r) = roles.as_ref().filter(|_| !out.json) {
@@ -1308,6 +1334,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
+    let mut agent_built = false;
     for s in &steps {
         match s.name {
             StepName::Git => {
@@ -1367,18 +1394,21 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             StepName::Agent => {
                 if let Some(r) = &agent_run {
                     let what = format!(
-                        "run {} once in print mode in {} (files only, never shell; at most {} turns and {} s) with the prompt below (not started in a dry run)",
+                        "run {} once in print mode in {} (it may edit files and run only the language's build and test commands; at most {} turns and {} s) with the prompt below (not started in a dry run)",
                         r.agent.name(),
                         dir.display(),
                         r.max_turns,
                         r.timeout.as_secs()
                     );
-                    // The AI label is printed either way; the agent starts only past the gate.
-                    Out::note(&ask::label_for(
-                        "iohr project init",
-                        "AI-built project",
-                        r.agent,
-                    ));
+                    // The AI label is printed once: in the plan pass that a real run follows
+                    // it would show twice, so only the run (or a `--dry-run`) draws it.
+                    if !preview || a.dry_run {
+                        ui.info(&ask::label_for(
+                            "iohr project init",
+                            "AI-built project",
+                            r.agent,
+                        ));
+                    }
                     if dry {
                         flow.gate("agent", &what);
                     } else if flow.gate("agent", &what) {
@@ -1416,12 +1446,13 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                             Out::raw(format!("{line}\n").as_bytes());
                         }
                         if ended.code == 0 {
+                            agent_built = true;
                             report.steps.push(project::step(
                                 "agent",
                                 "Agent build",
                                 "done",
                                 format!(
-                                    "{} built it in {secs} s, files only, never shell; AI-built, check it",
+                                    "{} built it in {secs} s with edits and the language's build and test commands only; AI-built, check it",
                                     r.agent.name()
                                 ),
                                 "",
@@ -1452,6 +1483,22 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
     }
 
+    // The agent's work is its own commit, once the smoke test has passed it.
+    if agent_built
+        && !dry
+        && agent_failed.is_none()
+        && let Some(r) = &agent_run
+    {
+        let st = project::ai_commit(&dir, name, r.agent.name(), smoke.as_ref().map(|s| s.ok));
+        if !out.json {
+            if st.state == "skipped" {
+                ui.warn(&st.said);
+            } else {
+                ui.info(&st.said);
+            }
+        }
+        report.steps.push(st);
+    }
     if dry {
         dry_report(
             &flow,
