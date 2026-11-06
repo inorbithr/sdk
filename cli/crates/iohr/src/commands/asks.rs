@@ -151,19 +151,51 @@ pub(crate) fn write_count_cache(path: &std::path::Path, count: usize) -> std::io
 /// for a slow network.
 const WAITING_SECS: u64 = 3;
 
-/// The open asks waiting for the signed-in account, for the one line under a `?` card:
-/// `Some(n)` only when `n` is above none. Signed out, offline or slow is `None`: the card
-/// says nothing then. It refreshes the prompt's cache, so the menu's Asks entry is current.
-pub(crate) async fn waiting(g: &Global, env: &Env) -> Option<usize> {
-    let fetched =
-        tokio::time::timeout(Duration::from_secs(WAITING_SECS), fetch_count(g, env, None))
-            .await
-            .ok()?
-            .ok()?;
-    if let Some(path) = count_cache_path() {
-        let _ = write_count_cache(&path, fetched);
+/// The asks that wait for the owner, as the `?` card, `asks count` and the prompt's cache
+/// all see them. `count` is the asks whose turn it is the person's; `only` is the title of
+/// the one ask when exactly one waits, so the card can name it (kept in memory, never in the
+/// cache file, a log or the JSON of `asks count`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Waiting {
+    pub(crate) count: usize,
+    pub(crate) only: Option<String>,
+}
+
+impl Waiting {
+    /// The one rule for "waiting for you": an open ask is the person's turn only while it is
+    /// `pending`. A `question` is an ask the person already answered with a note, so the turn
+    /// is the agent's and it is left out (it still shows in `asks list`).
+    fn of(rows: &[Value]) -> Self {
+        let mine: Vec<&Value> = rows
+            .iter()
+            .filter(|a| str_of(a, "status") == "pending")
+            .collect();
+        let only = match mine.as_slice() {
+            [one] => Some(headline(str_of(one, "title"), 200)).filter(|t| !t.is_empty()),
+            _ => None,
+        };
+        Self {
+            count: mine.len(),
+            only,
+        }
     }
-    (fetched > 0).then_some(fetched)
+}
+
+/// The asks waiting for the signed-in account, for the one line under a `?` card:
+/// `Some` only when there is one or more. Signed out, offline or slow is `None`: the card
+/// says nothing then. It refreshes the prompt's cache, so the menu's Asks entry is current.
+pub(crate) async fn waiting(g: &Global, env: &Env) -> Option<Waiting> {
+    let fetched = tokio::time::timeout(
+        Duration::from_secs(WAITING_SECS),
+        fetch_waiting(g, env, None),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if let Some(path) = count_cache_path() {
+        let _ = write_count_cache(&path, fetched.count);
+    }
+    (fetched.count > 0).then_some(fetched)
 }
 
 /// The count the prompt's cache holds now (none when it has none, or it is unreadable): the
@@ -201,7 +233,7 @@ async fn count(
     } else {
         None
     };
-    let fetched = fetch_count(g, env, account_flag).await;
+    let fetched = fetch_waiting(g, env, account_flag).await.map(|w| w.count);
     let Some(n) = settle(path.as_deref(), fetched)? else {
         return Ok(());
     };
@@ -246,15 +278,20 @@ fn settle(
     }
 }
 
-/// The asks waiting for you: the same call as `list` (pending and question).
+/// The asks waiting for you: the same call as `list` (pending and question), narrowed to
+/// the ones whose turn is yours by [`Waiting::of`], the only place that decides it.
 ///
 /// It reads the credential through the quiet store: the prompt and the shell hook run it in
 /// the background, where a Keychain dialog or a wait nobody sees is the wrong answer.
-async fn fetch_count(g: &Global, env: &Env, account_flag: Option<String>) -> Result<usize, Error> {
+async fn fetch_waiting(
+    g: &Global,
+    env: &Env,
+    account_flag: Option<String>,
+) -> Result<Waiting, Error> {
     let s = quiet_session(g, env).await?;
     let svc = service(&s, None, account_flag)?;
     let rows = svc.list_approvals("open", "").await.map_err(scoped)?;
-    Ok(rows.len())
+    Ok(Waiting::of(&rows))
 }
 
 fn service<'a>(
@@ -982,6 +1019,61 @@ mod tests {
         let (_d, path) = cache_file(Some("3\n"));
         assert_eq!(settle(Some(&path), Ok(5)).unwrap(), Some(5));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "5\n");
+    }
+
+    fn waiting_of(rows: &[(&str, &str)]) -> Waiting {
+        let rows: Vec<Value> = rows.iter().map(|(st, t)| ask(ID1, st, t)).collect();
+        Waiting::of(&rows)
+    }
+
+    #[test]
+    fn a_pending_ask_is_counted_and_named() {
+        let w = waiting_of(&[("pending", "Merge #12")]);
+        assert_eq!(w.count, 1);
+        assert_eq!(w.only.as_deref(), Some("Merge #12"));
+    }
+
+    #[test]
+    fn a_question_is_the_agents_turn_and_is_not_counted() {
+        let w = waiting_of(&[("question", "Roll accounts")]);
+        assert_eq!(
+            w,
+            Waiting {
+                count: 0,
+                only: None
+            }
+        );
+    }
+
+    #[test]
+    fn a_mixed_list_counts_only_the_pending_and_names_the_one() {
+        let w = waiting_of(&[("question", "Sent back"), ("pending", "Merge #12")]);
+        assert_eq!((w.count, w.only.as_deref()), (1, Some("Merge #12")));
+        let w = waiting_of(&[
+            ("pending", "A"),
+            ("question", "B"),
+            ("pending", "C"),
+            ("question", "D"),
+        ]);
+        assert_eq!((w.count, w.only), (2, None), "several keep the count");
+    }
+
+    #[test]
+    fn a_title_is_one_clean_line() {
+        let w = waiting_of(&[("pending", "Merge\u{1b}[31m #12\nsecond line")]);
+        assert_eq!(w.only.as_deref(), Some("Merge[31m #12"));
+    }
+
+    #[test]
+    fn the_cache_holds_the_pending_count_only() {
+        let (_d, path) = cache_file(None);
+        let w = waiting_of(&[
+            ("question", "B"),
+            ("pending", "Merge #12"),
+            ("pending", "C"),
+        ]);
+        assert_eq!(settle(Some(&path), Ok(w.count)).unwrap(), Some(2));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "2\n");
     }
 
     fn api(server: &MockServer) -> Api {

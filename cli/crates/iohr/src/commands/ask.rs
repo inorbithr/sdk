@@ -517,8 +517,8 @@ async fn card_run(
                 let took = Duration::from_millis(ms);
                 draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
             }
-            if let Some(n) = waiting {
-                Out::note(&waiting_line(n, h.hook, menu_key, look));
+            if let Some(w) = &waiting {
+                Out::note(&waiting_line(w, h.hook, menu_key, look, width));
             }
             if h.hook {
                 let command = card::command_of(&text);
@@ -598,15 +598,38 @@ fn draw_answer(
     card::draw(&card::render(&card, width, look));
 }
 
-/// The one quiet line under a card when asks are waiting: how to open them from here. The
-/// menu's own `a` is the key; without the hook (or its key) the command is named.
-fn waiting_line(n: usize, hook: bool, key: MenuKey, look: CardLook) -> String {
+/// The fewest columns a title is worth showing in: under this the line keeps the count.
+const TITLE_MIN: usize = 12;
+
+/// The one quiet line under a card when asks wait for the person: how to open them from
+/// here. The menu's own `a` is the key; without the hook (or its key) the command is named.
+/// One ask is named by its title, cut to the card's `width`; several keep the count. Asks
+/// the person already answered (their turn is over) are not in `waiting`.
+fn waiting_line(
+    waiting: &asks::Waiting,
+    hook: bool,
+    key: MenuKey,
+    look: CardLook,
+    width: usize,
+) -> String {
+    let n = waiting.count;
     let noun = if n == 1 { "ask" } else { "asks" };
     let how = match key.label().filter(|_| hook) {
         Some(k) => format!("{k} then a to open"),
         None => "`iohr asks list` opens them".to_owned(),
     };
-    let line = format!("{n} {noun} waiting \u{b7} {how}");
+    let head = format!("{n} {noun} waiting");
+    let tail = format!(" \u{b7} {how}");
+    let named = waiting.only.as_deref().and_then(|title| {
+        // ": " between the count and the title.
+        let room = width.checked_sub(console::measure_text_width(&head) + 2)?;
+        let room = room.checked_sub(console::measure_text_width(&tail))?;
+        (room >= TITLE_MIN).then(|| console::truncate_str(title, room, "...").into_owned())
+    });
+    let line = match named {
+        Some(title) => format!("{head}: {title}{tail}"),
+        None => format!("{head}{tail}"),
+    };
     if look.fancy {
         console::style(line).dim().to_string()
     } else {
@@ -642,5 +665,67 @@ async fn spin_while<T>(
                 frame += 1;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PLAIN: CardLook = CardLook {
+        fancy: false,
+        truecolor: false,
+    };
+
+    fn one(title: &str) -> asks::Waiting {
+        asks::Waiting {
+            count: 1,
+            only: Some(title.to_owned()),
+        }
+    }
+
+    #[test]
+    fn one_waiting_ask_is_named() {
+        let line = waiting_line(&one("Merge #12"), true, MenuKey::Down, PLAIN, 80);
+        assert_eq!(
+            line,
+            "1 ask waiting: Merge #12 \u{b7} \u{2193} then a to open"
+        );
+    }
+
+    #[test]
+    fn a_long_title_is_cut_to_the_card_width() {
+        let title = "Roll the accounts service to production after the migration has run";
+        for width in [50, 60, 80] {
+            let line = waiting_line(&one(title), true, MenuKey::Down, PLAIN, width);
+            assert!(
+                console::measure_text_width(&line) <= width,
+                "{width}: {line}"
+            );
+            assert!(line.contains("..."), "{line}");
+            assert!(line.ends_with("then a to open"), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_narrow_card_keeps_the_count_alone() {
+        let line = waiting_line(&one("Merge #12"), true, MenuKey::Down, PLAIN, 30);
+        assert_eq!(line, "1 ask waiting \u{b7} \u{2193} then a to open");
+    }
+
+    #[test]
+    fn several_keep_the_count_and_name_none() {
+        let w = asks::Waiting {
+            count: 3,
+            only: None,
+        };
+        let line = waiting_line(&w, false, MenuKey::Down, PLAIN, 80);
+        assert_eq!(line, "3 asks waiting \u{b7} `iohr asks list` opens them");
+    }
+
+    #[test]
+    fn plain_look_carries_no_escape_codes() {
+        let line = waiting_line(&one("Merge #12"), true, MenuKey::CtrlG, PLAIN, 80);
+        assert!(!line.contains('\u{1b}'), "{line:?}");
     }
 }

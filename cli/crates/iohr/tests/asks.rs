@@ -335,6 +335,55 @@ async fn asks_count_cache_is_emptied_when_the_server_refuses() {
     );
 }
 
+/// A question is an ask the person already answered with a note: the turn is the agent's, so
+/// neither `asks count` nor the prompt's cache counts it; the JSON keeps its one field.
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_count_leaves_out_the_asks_the_person_answered() {
+    let server = MockServer::start().await;
+    let rows = vec![ask("question"), ask("pending"), ask("question")];
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals"))
+        .and(query_param("account_id", ACCOUNT))
+        .and(query_param("status", "open"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "approvals": rows })))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = iohr(&server, dir.path(), &["asks", "count"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(out(&o), "1 ask\n");
+    let o = iohr(&server, dir.path(), &["asks", "count", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(v, json!({ "count": 1 }));
+    // The cache file agrees with the command, and holds no title.
+    let o = iohr(&server, dir.path(), &["asks", "count", "--cache"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let cached = std::fs::read_to_string(dir.path().join("asks-count")).unwrap();
+    assert_eq!(cached, "1\n");
+    assert!(!out(&o).contains(SECRET_TEXT) && !err(&o).contains(SECRET_TEXT));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_count_is_none_when_only_questions_are_open() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals"))
+        .and(query_param("status", "open"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "approvals": [ask("question")] })),
+        )
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = iohr(&server, dir.path(), &["asks", "count", "--cache"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(out(&o), "");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("asks-count")).unwrap(),
+        "0\n"
+    );
+}
+
 /// The zsh hook's segment reads the cache file and nothing else: the `iohr` it would call in
 /// the background is a stub that records that it ran, and the prompt never waits for it.
 #[tokio::test(flavor = "multi_thread")]
