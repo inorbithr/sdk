@@ -34,47 +34,28 @@ pub(crate) mod server;
 pub(crate) mod shell;
 pub(crate) mod store;
 /// Windows has no unix sockets: the live ask is not offered, and `iohr ask` stays read-only.
+/// No [`Session`] is ever made here (`commands/ask.rs` starts none off unix), so the type is
+/// empty: the callers that read a session compile, and nothing else of the broker exists.
 #[cfg(not(unix))]
 pub(crate) mod broker {
-    use super::Mode;
-    use super::engine::Place;
-    use super::store::Files;
+    /// A running broker, which this system cannot have.
+    pub(crate) enum Session {}
 
-    #[derive(Debug, Clone)]
-    pub(crate) struct Opts {
-        pub(crate) mode: Mode,
-        pub(crate) files: Files,
-        pub(crate) place: Place,
-        pub(crate) bin: String,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub(crate) struct Denied {
-        pub(crate) what: String,
-        pub(crate) allow: Option<String>,
-        pub(crate) by_rule: bool,
-    }
-
-    pub(crate) struct Session;
+    /// A call the rules refused, which only a running broker records.
+    pub(crate) enum Denied {}
 
     impl Session {
-        pub(crate) fn start(_: Opts) -> Result<Self, String> {
-            Err("asking before a command needs a unix system".to_owned())
-        }
         pub(crate) fn args(&self) -> Vec<String> {
-            Vec::new()
+            match *self {}
         }
         pub(crate) fn waiting(&self) -> (std::time::Duration, bool) {
-            (std::time::Duration::ZERO, false)
+            match *self {}
         }
         pub(crate) fn denied(&self) -> Vec<Denied> {
-            Vec::new()
-        }
-        pub(crate) fn mode(&self) -> Mode {
-            Mode::Deny
+            match *self {}
         }
         pub(crate) fn bin(&self) -> &str {
-            ""
+            match *self {}
         }
     }
 

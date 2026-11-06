@@ -704,6 +704,7 @@ fn body(text: &str, width: usize, look: Look) -> Vec<String> {
 static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Stops (or restarts) the spinner while a question is open.
+#[cfg(unix)]
 pub(crate) fn pause_spin(on: bool) {
     // Held while the stderr lock is taken in `spin`, so no frame lands after this returns.
     let _guard = std::io::stderr().lock();
@@ -711,6 +712,7 @@ pub(crate) fn pause_spin(on: bool) {
 }
 
 /// Writes a question's line over the spinner's, without a newline: the answer replaces it.
+#[cfg(unix)]
 pub(crate) fn say(line: &str) {
     let mut err = std::io::stderr().lock();
     let _ = write!(err, "\r\x1b[2K{line}");
@@ -718,6 +720,7 @@ pub(crate) fn say(line: &str) {
 }
 
 /// Replaces the question's line with its result and ends the line.
+#[cfg(unix)]
 pub(crate) fn say_done(line: &str) {
     let mut err = std::io::stderr().lock();
     let _ = writeln!(err, "\r\x1b[2K{line}");

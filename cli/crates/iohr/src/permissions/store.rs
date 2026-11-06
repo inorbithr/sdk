@@ -5,9 +5,11 @@
 //! permissions.log`, one JSON line per decision: when, which tool, which rule, the outcome and
 //! who. It never holds what a command printed or what a file said.
 
+#[cfg(unix)]
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
 use serde::Serialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
@@ -18,6 +20,7 @@ use super::{rule::Rule, secrets};
 pub(crate) const FILE: &str = "permissions.toml";
 /// The project's folder and the audit log in it.
 const DIR: &str = ".inorbit";
+#[cfg(unix)]
 const LOG: &str = "permissions.log";
 
 /// Which file a rule is in.
@@ -75,6 +78,7 @@ impl Files {
         }
     }
 
+    #[cfg(unix)]
     pub(crate) fn log_path(&self) -> PathBuf {
         self.root.join(DIR).join(LOG)
     }
@@ -237,6 +241,7 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
 }
 
 /// One line of the audit log.
+#[cfg(unix)]
 #[derive(Debug, Serialize)]
 struct Line<'a> {
     time: String,
@@ -247,6 +252,7 @@ struct Line<'a> {
 }
 
 /// How a decision came about.
+#[cfg(unix)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
     /// A rule allowed it.
@@ -263,6 +269,7 @@ pub(crate) enum Outcome {
     DeniedNoAnswer,
 }
 
+#[cfg(unix)]
 impl Outcome {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -279,6 +286,7 @@ impl Outcome {
 /// Appends one decision. `rule` is the rule that decided it, or the one an "always" wrote, or
 /// the tool's own words for a call no rule names; a text that looks like a secret is not kept.
 /// A failure to write is not the ask's failure: it is returned for the caller to mention.
+#[cfg(unix)]
 pub(crate) fn audit(files: &Files, tool: &str, rule: &str, outcome: Outcome) -> Result<(), String> {
     let rule = if crate::memory::text::has_secret(rule) {
         "(redacted)"
@@ -424,6 +432,7 @@ mod tests {
         assert!(rule_set(&f).unwrap_err().contains("deny"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_audit_line_has_no_content() {
         let d = tempfile::tempdir().unwrap();
