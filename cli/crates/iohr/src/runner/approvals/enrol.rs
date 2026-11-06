@@ -178,17 +178,7 @@ impl EnrolAsks for HttpService<'_> {
     }
 
     async fn get(&self, approval_id: &str) -> Result<Value, ServiceError> {
-        if !is_approval_id(approval_id) {
-            return Err(ServiceError::Refused("an approval id that is not one"));
-        }
-        let v: Value = self
-            .api
-            .get(
-                &format!("/v1/approvals/{approval_id}"),
-                &[("account_id", self.account.as_str())],
-            )
-            .await?;
-        Ok(v.get("approval").cloned().unwrap_or(Value::Null))
+        self.get_approval(approval_id).await
     }
 
     async fn enroll(

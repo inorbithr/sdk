@@ -2,6 +2,7 @@
 
 mod accounts;
 mod ask;
+mod asks;
 mod atlas;
 mod auth;
 mod browser_ext;
@@ -93,6 +94,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
         Command::Ask(args) => ask::run(g, args, out).await,
+        Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
         Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
@@ -158,6 +160,23 @@ pub(crate) async fn pages(
     }
     all.truncate(limit);
     Ok(all)
+}
+
+/// The first line of `text` for a table cell: control characters (an escape sequence
+/// from an agent's text must not reach a terminal) dropped, cut to `max` characters with
+/// `...`.
+pub(crate) fn headline(text: &str, max: usize) -> String {
+    let clean: String = text
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .collect();
+    let line = clean.lines().next().unwrap_or_default();
+    if line.chars().count() > max {
+        let cut: String = line.chars().take(max.saturating_sub(1)).collect();
+        format!("{cut}...")
+    } else {
+        line.to_owned()
+    }
 }
 
 /// A string field of a JSON object; `""` when it is missing or not a string.

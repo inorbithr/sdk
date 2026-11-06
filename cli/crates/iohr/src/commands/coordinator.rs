@@ -184,17 +184,7 @@ fn job_body(a: &JobArgs<'_>) -> Result<Value, Error> {
 /// The first line, without control characters (a brief is other people's text and must
 /// not move the cursor or recolour the terminal), cut to 70 characters.
 fn headline(brief: &str) -> String {
-    let clean: String = brief
-        .chars()
-        .filter(|c| !c.is_control() || *c == '\n')
-        .collect();
-    let line = clean.lines().next().unwrap_or_default();
-    if line.chars().count() > 70 {
-        let cut: String = line.chars().take(69).collect();
-        format!("{cut}...")
-    } else {
-        line.to_owned()
-    }
+    super::headline(brief, 70)
 }
 
 /// The list under `key`; an answer without it is an error, not an empty list. (An empty
