@@ -9,13 +9,21 @@ use crate::output::Out;
 /// The zsh hook. A file of its own, so `zsh -n` can check it and the tests can run it.
 pub(crate) const ZSH_HOOK: &str = include_str!("shell/hook.zsh");
 
-/// The file name this binary was started as, when it is a plain command name (letters,
+/// The command this binary was started as, when it is a plain command name (letters,
 /// digits, `.`, `_`, `-`): the hook is evaluated by a shell, so anything else is `iohr`.
+/// A trailing `.exe` is dropped: Windows finds `iohr.exe` when a person types `iohr`, and
+/// `iohr` is what the project's instructions and the `?` card tell them to run.
 pub(crate) fn bin_name(arg0: Option<&std::ffi::OsStr>) -> &str {
     let name = arg0
         .and_then(|a| std::path::Path::new(a).file_name())
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("iohr");
+    let name = match name.len().checked_sub(4) {
+        Some(at) if name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".exe") => {
+            &name[..at]
+        }
+        _ => name,
+    };
     let plain = !name.is_empty()
         && !name.starts_with('-')
         && name
@@ -77,6 +85,13 @@ mod tests {
         );
         assert_eq!(bin_name(Some(OsStr::new("iohr"))), "iohr");
         assert_eq!(bin_name(None), "iohr");
+        // Windows: the command people type, not the file Windows found.
+        assert_eq!(bin_name(Some(OsStr::new("iohr.exe"))), "iohr");
+        assert_eq!(
+            bin_name(Some(OsStr::new("iohr-preview.EXE"))),
+            "iohr-preview"
+        );
+        assert_eq!(bin_name(Some(OsStr::new(".exe"))), "iohr");
         for odd in [
             "/tmp/a b",
             "/tmp/x;rm",
