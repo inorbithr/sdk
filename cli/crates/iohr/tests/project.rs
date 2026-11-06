@@ -652,7 +652,7 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     assert!(out.status.success(), "{}", text(&out));
     let t = text(&out);
     assert!(
-        t.contains("would: write 35 files into ./my-shop (in the folder you are in)"),
+        t.contains("would: write 36 files into ./my-shop (in the folder you are in)"),
         "{t}"
     );
     assert!(

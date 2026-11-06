@@ -24,7 +24,7 @@ pub const DIR: &str = "atlas/roles";
 /// The day the facts built into the catalogue (`roles/*.toml`) were last checked against their
 /// sources. A pack and every memory seeded from it carry it as `checked:`. Move it only after
 /// the facts were read again against their primary sources: it is a claim, not a build date.
-pub const CHECKED: &str = "2026-11-05";
+pub const CHECKED: &str = "2026-11-06";
 /// Where the packs were written before the word became Role.
 const LEGACY_DIR: &str = "atlas/personalities";
 /// The one role every project gets, whatever its language.
@@ -894,7 +894,7 @@ mod tests {
             Some("base-engineer")
         );
         assert!(atlas::get(&text, "domain").is_some_and(|d| d.contains("tokio")));
-        assert_eq!(atlas::get(&text, "catalogue_version").as_deref(), Some("1"));
+        assert_eq!(atlas::get(&text, "catalogue_version").as_deref(), Some("2"));
         assert!(atlas::get(&text, "source").is_some_and(|s| s.starts_with("iohr ")));
         for l in &p.lines {
             for c in &l.cites {
