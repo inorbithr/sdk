@@ -66,6 +66,7 @@ impl Rule {
     }
 
     /// The tool and the specifier, from parts the code built itself.
+    #[cfg(unix)]
     pub(crate) fn of(tool: &str, spec: impl Into<String>) -> Self {
         Self {
             tool: tool.to_owned(),

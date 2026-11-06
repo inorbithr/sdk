@@ -386,6 +386,7 @@ async fn asks_count_is_none_when_only_questions_are_open() {
 
 /// The zsh hook's segment reads the cache file and nothing else: the `iohr` it would call in
 /// the background is a stub that records that it ran, and the prompt never waits for it.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn the_asks_zsh_prompt_segment_reads_the_cache_and_leaves_a_set_rprompt_alone() {
     if Command::new("zsh").arg("--version").output().is_err() {
