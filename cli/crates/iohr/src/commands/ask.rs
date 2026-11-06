@@ -303,8 +303,10 @@ fn context_of(h: &HeadlessArgs) -> Result<Context, Error> {
             .map(|d| d.display().to_string())
             .unwrap_or_default(),
     };
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     Ok(Context {
         files: headless::list_folder(Path::new(&cwd)),
+        reads: headless::can_read(Path::new(&cwd), home.as_deref()),
         cwd,
         command: h.last_command.clone().unwrap_or_default(),
         exit_code: h.exit_code,
@@ -351,6 +353,7 @@ async fn headless(
     let ctx = context_of(h)?;
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
     let read = headless::read_line(&ctx);
+    let folder = ctx.reads.then(|| Path::new(&ctx.cwd));
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
     let label = ask::label(agent);
@@ -360,7 +363,7 @@ async fn headless(
         if !out.json {
             Out::note(&label);
         }
-        let (text, duration_ms) = headless::run(bin, &message, model, started)
+        let (text, duration_ms) = headless::run(bin, &message, model, started, folder)
             .await
             .map_err(Error::Failed)?;
         if out.json {
@@ -381,7 +384,7 @@ async fn headless(
     }
     // A person reads a card.
     let look = CardLook::detect(fancy);
-    let run = headless::run(bin, &message, model, started);
+    let run = headless::run(bin, &message, model, started, folder);
     let done = if look.fancy {
         spin_while(run, agent, look, started).await?
     } else {
