@@ -8,8 +8,11 @@
   `/sync-spec`; to check that the four languages still match, use `/parity` or the
   `parity-checker` agent.
 - Verify with the narrowest task first (`mise run go:check`), then `mise run ci:changed`
-  before reporting done, and show the output (`mise run ci` before a release). A hook formats each file you edit; another runs
-  the checks for the languages you touched when you stop, and hands you the failures.
+  before reporting done, and show the output (`mise run ci` before a release).
+  `.claude/hooks/` holds two optional hooks: one formats each file you edit, the other
+  runs the checks for the languages you touched when you stop. They are not switched on
+  for everyone; turn them on, and any allow rules you want, in your own
+  `.claude/settings.local.json` (git ignores it).
   Permissions deny edits to the synced spec, generated code and changelogs: if one
   blocks you, the fix belongs upstream or in the generator, not around the rule.
 - When a convention here turns out wrong or missing, propose the edit to `AGENTS.md`
