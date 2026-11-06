@@ -53,6 +53,12 @@ impl ServiceError {
         }
     }
 
+    /// The API refused the sign-in (HTTP 401) after the client already minted a fresh
+    /// token and asked again.
+    pub(crate) fn is_unauthenticated(&self) -> bool {
+        matches!(self, Self::Api(inorbithr::Error::Api(a)) if a.status == 401)
+    }
+
     /// A coordinator older than the declared heartbeat: its REST binding refuses a body
     /// field it does not know (`unrecognized field`, HTTP 400).
     pub(crate) fn is_unknown_field(&self) -> bool {

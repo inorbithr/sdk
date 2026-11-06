@@ -197,7 +197,14 @@ pub(crate) enum End {
     MaxBeats,
     /// The service says this runner was revoked.
     Revoked,
+    /// The API kept refusing the sign-in (HTTP 401) after fresh tokens: the runner stops so
+    /// its supervisor starts it again, which reads the credential from the store anew.
+    SignInRefused,
 }
+
+/// Heartbeats in a row the API refused with a 401 even after the client minted a fresh
+/// token and asked again, before the runner gives up and exits.
+pub(crate) const REFUSED_BEFORE_EXIT: u32 = 5;
 
 /// What the loop did, for tests and the exit note.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -280,12 +287,15 @@ type LeaseAnswers = Vec<(Lease, Result<LeaseBeat, OpErr>)>;
 struct OpErr {
     msg: String,
     permanent: bool,
+    /// HTTP 401: the sign-in was refused.
+    unauthenticated: bool,
 }
 
 impl From<ServiceError> for OpErr {
     fn from(e: ServiceError) -> Self {
         Self {
             permanent: e.is_permanent(),
+            unauthenticated: e.is_unauthenticated(),
             msg: e.to_string(),
         }
     }
@@ -296,6 +306,7 @@ impl OpErr {
         Self {
             msg: msg.into(),
             permanent: false,
+            unauthenticated: false,
         }
     }
 }
@@ -567,6 +578,8 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     // Delivery attempts since the last success.
     let mut tries: u32 = 0;
     let mut failures: u32 = 0;
+    // Beats in a row the API answered with a 401 after a fresh token.
+    let mut refused: u32 = 0;
     let start = Instant::now();
     let (mut next_beat, mut next_report, mut next_lease_beat) = (start, start, start);
     let mut beat_started = start;
@@ -733,11 +746,19 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         failures = failures.saturating_add(1);
                         stats.failures += 1;
                         log(&format!("heartbeat failed ({failures} in a row): {}", e.msg));
+                        if e.unauthenticated {
+                            refused = refused.saturating_add(1);
+                            if refused >= REFUSED_BEFORE_EXIT {
+                                stop(std::mem::take(&mut busy), refresher.take()).await;
+                                return (End::SignInRefused, stats);
+                            }
+                        }
                         next_beat = Instant::now()
                             + backoff(failures, cfg.backoff_min, cfg.backoff_max, jitter());
                     }
                     Ok(beat) => {
                         failures = 0;
+                        refused = 0;
                         stats.beats += 1;
                         if beat.heartbeat_interval_seconds > 0 {
                             service_interval =
@@ -1169,6 +1190,7 @@ fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr>
         return Err(OpErr {
             msg: "the pack has no valid hash and attempt, or is another turn's".into(),
             permanent: true,
+            unauthenticated: false,
         });
     }
     // The turn is told where its checkout is; it must be the one the runner made.
@@ -1181,6 +1203,7 @@ fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr>
                 p.checkout
             ),
             permanent: true,
+            unauthenticated: false,
         });
     }
     Ok(())
@@ -1478,6 +1501,8 @@ mod tests {
         refuse_first_report: Mutex<bool>,
         /// Report deliveries that fail before one succeeds.
         report_failures: Mutex<u32>,
+        /// Heartbeats are refused with HTTP 401, every time.
+        unauthenticated: bool,
         /// Heartbeats answer `revoked` once this file exists.
         revoke_when: Option<std::path::PathBuf>,
         /// Met by the first heartbeat after an accept, and by the turn.
@@ -1596,6 +1621,17 @@ mod tests {
                         .await
                         .map_err(|_| ServiceError::Refused("no turn beside the heartbeat"))?;
                 }
+            }
+            if self.unauthenticated {
+                let body = r#"{"code":"unauthenticated","error":"a valid bearer token is required","details":[]}"#;
+                let raw = inorbithr::RawResponse::for_tests(
+                    401,
+                    inorbithr::Headers::new([]),
+                    body.as_bytes().to_vec(),
+                );
+                return Err(ServiceError::Api(inorbithr::Error::Api(Box::new(
+                    inorbithr::ApiError::parse(raw),
+                ))));
             }
             match self.beats.lock().unwrap().pop_front() {
                 Some(Err(())) => Err(down()),
@@ -2001,6 +2037,22 @@ mod tests {
         let calls = fake.calls.lock().unwrap();
         assert_eq!(calls.len(), 4);
         assert!(calls.iter().all(|c| c == "heartbeat run_1 providers=1"));
+    }
+
+    /// A 401 that stays after the client's fresh-token retry ends the loop after
+    /// `REFUSED_BEFORE_EXIT` beats, so the supervisor restarts the runner.
+    #[tokio::test]
+    async fn the_loop_ends_when_the_sign_in_stays_refused() {
+        let fake = Fake {
+            unauthenticated: true,
+            ..Fake::default()
+        };
+        let (end, stats) = tokio::time::timeout(Duration::from_secs(5), go(&fake, cfg(1000)))
+            .await
+            .unwrap();
+        assert_eq!(end, End::SignInRefused);
+        assert_eq!(stats.failures, u64::from(REFUSED_BEFORE_EXIT));
+        assert_eq!(stats.beats, 0);
     }
 
     #[tokio::test]
