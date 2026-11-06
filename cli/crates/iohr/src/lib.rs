@@ -32,6 +32,7 @@ mod io_signin;
 mod lock;
 mod output;
 mod paths;
+mod permissions;
 mod prompt;
 mod runner;
 mod toolchain;

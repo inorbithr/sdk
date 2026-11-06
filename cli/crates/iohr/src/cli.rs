@@ -195,7 +195,15 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Agents",
-        &["ask", "asks", "shell", "runner", "coordinator", "memory"],
+        &[
+            "ask",
+            "asks",
+            "permissions",
+            "shell",
+            "runner",
+            "coordinator",
+            "memory",
+        ],
     ),
     (
         "Operate",
@@ -405,6 +413,23 @@ pub enum Command {
     /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
     #[command(subcommand)]
     Shell(ShellCommand),
+    /// Rules for what Io may run or open when you ask it something.
+    ///
+    /// `iohr ask` (and `?` at your prompt) asks you before Io runs a command. Your answers
+    /// are rules in Claude Code's own grammar (`Bash(ls:*)`, `Read(./src/**)`,
+    /// `WebFetch(domain:example.com)`), kept in `.inorbit/permissions.toml` in the project
+    /// and in your config folder. A deny rule beats an allow rule, and keys, `.env` files
+    /// and credentials are never allowed by any rule or answer. Every decision is appended
+    /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
+    #[command(subcommand)]
+    Permissions(PermissionsCommand),
+    /// Serves the permission questions of one `iohr ask` run to Claude Code (not for you).
+    #[command(name = "permission-server", hide = true)]
+    PermissionServer {
+        /// The private socket of the `iohr ask` that started it.
+        #[arg(long, value_name = "PATH")]
+        socket: std::path::PathBuf,
+    },
     /// Run coordinator turns on this machine.
     ///
     /// The coordinator's runner: this machine runs coordinator turns on your own
@@ -1419,6 +1444,12 @@ pub struct AskArgs {
     /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
     #[arg(long)]
     pub allow_edits: bool,
+    /// What happens when Io wants to run a command or open a file no rule decides: `prompt`
+    /// asks you at the terminal (default at a terminal), `rules` only follows your rules and
+    /// says no to the rest (default without one), `deny` offers no commands at all. Rules:
+    /// `iohr permissions`. `[ask] permissions`.
+    #[arg(long, value_name = "HOW", env = "IOHR_ASK_PERMISSIONS")]
+    pub permissions: Option<String>,
     /// How the thinking is drawn at a terminal: `show` (streamed, dim, in a quiet block;
     /// default) or `collapse` (one line). `[ask] thinking`.
     #[arg(long, value_name = "HOW")]
@@ -1493,6 +1524,60 @@ pub enum RolesCommand {
         /// The project folder. Default: the nearest folder up from here that has `atlas/`.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
+    },
+}
+
+/// Which rule file: the project's or yours. Neither means the default for the command.
+#[derive(Debug, Clone, Copy, Args)]
+pub struct PermissionScope {
+    /// The project's `.inorbit/permissions.toml` (committed with the code).
+    #[arg(long, conflicts_with = "user")]
+    pub project: bool,
+    /// Your own file in the config folder (every project).
+    #[arg(long)]
+    pub user: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PermissionsCommand {
+    /// Show the rules, and where each one is kept.
+    List {
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Allow a command or file, like `Bash(ls:*)` or `Read(./src/**)`.
+    ///
+    /// Default: the project file. Refused for anything that could open keys, `.env` files or
+    /// credentials, and for a rule that would allow every command.
+    Allow {
+        /// The rule, in Claude Code's grammar.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Never allow a command or file; this beats any allow rule.
+    Deny {
+        /// The rule, in Claude Code's grammar.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Forget a rule, from the allow or deny list, in both files unless one is named.
+    Remove {
+        /// The rule, exactly as `list` shows it.
+        rule: String,
+        #[command(flatten)]
+        scope: PermissionScope,
+    },
+    /// Show what the rules say about one call, without running it.
+    ///
+    /// `iohr permissions check Bash 'git status'`, `... check Read ./src/main.rs`,
+    /// `... check WebFetch https://example.com`. Says allow, deny or ask, and which rule.
+    Check {
+        /// The tool: Bash, Read, Edit, Write, Grep, Glob or `WebFetch`.
+        tool: String,
+        /// The command, the file or the address.
+        input: String,
     },
 }
 

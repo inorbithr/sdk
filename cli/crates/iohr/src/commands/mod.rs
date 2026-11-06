@@ -20,6 +20,7 @@ mod lab;
 mod login;
 mod memory;
 mod openapi;
+mod permissions;
 mod profile;
 mod project;
 mod project_template;
@@ -52,8 +53,18 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         json: cli.global.json,
     };
     let g = &cli.global;
+    // The permission server speaks MCP on stdout for one `iohr ask` run: it calls no API and
+    // must print nothing else.
+    #[cfg(unix)]
+    if let Command::PermissionServer { socket } = &cli.command {
+        return crate::permissions::server::run(socket)
+            .map_err(|e| Error::Failed(format!("permission server: {}", e.kind())));
+    }
     // A tunnel reaches an environment over ssh and calls no API, so a placeholder address is no bar.
-    if !matches!(cli.command, Command::Tunnel(_)) {
+    if !matches!(
+        cli.command,
+        Command::Tunnel(_) | Command::Permissions(_) | Command::PermissionServer { .. }
+    ) {
         g.check_environment()?;
     }
     if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_) | Command::Coordinator(_)) {
@@ -96,6 +107,10 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ask(args) => ask::run(g, &env, args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
+        Command::Permissions(cmd) => permissions::run(g, cmd, out),
+        Command::PermissionServer { .. } => Err(Error::Failed(
+            "the permission server needs a unix system".to_owned(),
+        )),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
         Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
         Command::Sync(args) => atlas::sync(g, &env, &args, out).await,

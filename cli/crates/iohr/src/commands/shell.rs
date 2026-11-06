@@ -11,7 +11,7 @@ pub(crate) const ZSH_HOOK: &str = include_str!("shell/hook.zsh");
 
 /// The file name this binary was started as, when it is a plain command name (letters,
 /// digits, `.`, `_`, `-`): the hook is evaluated by a shell, so anything else is `iohr`.
-fn bin_name(arg0: Option<&std::ffi::OsStr>) -> &str {
+pub(crate) fn bin_name(arg0: Option<&std::ffi::OsStr>) -> &str {
     let name = arg0
         .and_then(|a| std::path::Path::new(a).file_name())
         .and_then(std::ffi::OsStr::to_str)

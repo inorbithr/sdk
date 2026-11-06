@@ -150,21 +150,9 @@ pub(crate) fn choose_thinking(
 /// Files an agent run that may edit is never allowed to read, whatever else it may do: the
 /// local environment files, keys and the credential folders of the common tools. Claude Code
 /// applies a `Read` deny to its own Read tool and to the shell commands it recognises as
-/// reading (`cat` of such a file is refused, checked on 2.1.318).
-pub(crate) const SECRET_READS: &[&str] = &[
-    "Read(./.env)",
-    "Read(./.env.*)",
-    "Read(**/.env)",
-    "Read(**/.env.*)",
-    "Read(**/*.pem)",
-    "Read(**/*.key)",
-    "Read(**/id_rsa*)",
-    "Read(**/id_ed25519*)",
-    "Read(~/.ssh/**)",
-    "Read(~/.aws/**)",
-    "Read(~/.config/gh/**)",
-    "Read(~/.inorbit/**)",
-];
+/// reading (`cat` of such a file is refused, checked on 2.1.318). The one list lives in
+/// [`crate::permissions::secrets`], shared with the `?` card and the permission broker.
+pub(crate) const SECRET_READS: &[&str] = crate::permissions::secrets::READ_RULES;
 
 /// The arguments that run `agent` once on `question`, streamed as JSON lines, with no session
 /// kept. One list for the real start and for `--dry-run`, so the dry run shows exactly what

@@ -182,7 +182,11 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
     let lines: Vec<&str> = err.lines().collect();
     assert_eq!(lines.len(), 1, "{err}");
     assert!(lines[0].starts_with("Io · AI answer -- Io running on Claude Code (local)"));
-    assert!(lines[0].ends_with("nothing was run."), "{err}");
+    // Without a terminal the rules decide, and the label says commands may run under them.
+    assert!(
+        lines[0].ends_with("a command runs only when you or your rules allow it."),
+        "{err}"
+    );
     assert_eq!(text(&out).matches("Rayleigh").count(), 1, "{}", text(&out));
     // A failure is a card too: exit 1, the reason, never the question or the agent's text.
     let login =
@@ -199,7 +203,11 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
 fn the_run_is_bounded_scrubbed_and_never_has_a_forbidden_flag() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
-    let out = r.run(&["ask", "--headless", "q"], OK_JSON, "0");
+    let out = r.run(
+        &["ask", "--headless", "--permissions", "deny", "q"],
+        OK_JSON,
+        "0",
+    );
     assert!(out.status.success(), "{}", text(&out));
     let args: Vec<String> = r.saw("claude.args").lines().map(str::to_owned).collect();
     for bad in [
@@ -1237,7 +1245,14 @@ fn git_facts_come_from_iohr_and_the_model_has_no_way_to_run_git() {
     git_in(&w, &["commit", "-q", "-m", "first change"]);
     std::fs::write(w.join("b.txt"), "y").unwrap();
     let out = r.run(
-        &["--json", "ask", "--headless", "where are we?"],
+        &[
+            "--json",
+            "ask",
+            "--headless",
+            "--permissions",
+            "deny",
+            "where are we?",
+        ],
         OK_JSON,
         "0",
     );
