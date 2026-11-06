@@ -328,6 +328,48 @@ mod tests {
         assert_eq!(server.received_requests().await.unwrap().len(), 2);
     }
 
+    /// The API refuses a token the cache still holds (a Mac that slept): the one retry
+    /// after the 401 must mint a fresh token, through the same `Api` the runner uses.
+    #[tokio::test]
+    async fn a_401_makes_the_api_mint_a_fresh_token_and_retry() {
+        use std::sync::Arc;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/oauth2/token"))
+            .respond_with(answer("tok-old", 900))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/oauth2/token"))
+            .respond_with(answer("tok-new", 900))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/ping"))
+            .and(header("authorization", "Bearer tok-new"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/ping"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "code": "unauthenticated", "error": "a valid bearer token is required", "details": [],
+            })))
+            .mount(&server)
+            .await;
+        let api = crate::context::Api::new(&server.uri(), Arc::new(io(&server)), false).unwrap();
+        let _: serde_json::Value = api.get("/v1/ping", &[]).await.unwrap();
+        let mints = server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/oauth2/token")
+            .count();
+        assert_eq!(mints, 2, "the 401 must mint again");
+    }
+
     /// A refused sign-in is an error that names the client and the reason, never the
     /// secret, and neither does the credential's `Debug`.
     #[tokio::test]
