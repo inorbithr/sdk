@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 
 use crate::Env;
 use crate::cli::{AsksCommand, Global};
-use crate::context::{Session, account, session};
+use crate::context::{Session, account, quiet_session, session};
 use crate::error::Error;
 use crate::output::{Out, table_text};
 use crate::prompt;
@@ -202,12 +202,9 @@ async fn count(
         None
     };
     let fetched = fetch_count(g, env, account_flag).await;
-    if let Some(path) = path {
-        // A failed refresh (signed out, offline) leaves no number: the prompt shows nothing
-        // rather than a stale one, and the file's age still limits the next try.
-        let _ = write_count_cache(&path, *fetched.as_ref().unwrap_or(&0));
-    }
-    let n = fetched?;
+    let Some(n) = settle(path.as_deref(), fetched)? else {
+        return Ok(());
+    };
     if out.json {
         Out::print_json(&json!({ "count": n }));
     } else {
@@ -216,9 +213,45 @@ async fn count(
     Ok(())
 }
 
+/// What a fetch leaves in the cache and what `count` prints. `Ok(None)` is "print nothing".
+///
+/// The credential store refusing to ask (`Error::StoreWouldAsk`, see `QuietStore`) is not a
+/// failure of the count: with `--cache` the last number stays, its file is touched so the
+/// 30 s age still limits the next try, and nothing is printed, stdout or stderr, so a
+/// prompt's background refresh never says anything. Without `--cache` the error is the
+/// answer (it says what to do). Any other failed refresh (signed out, offline) leaves no
+/// number: the prompt shows nothing rather than a stale one.
+fn settle(
+    path: Option<&std::path::Path>,
+    fetched: Result<usize, Error>,
+) -> Result<Option<usize>, Error> {
+    match (path, fetched) {
+        (Some(path), Ok(n)) => {
+            let _ = write_count_cache(path, n);
+            Ok(Some(n))
+        }
+        (Some(path), Err(Error::StoreWouldAsk(_))) => {
+            let last = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|t| t.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            let _ = write_count_cache(path, last);
+            Ok(None)
+        }
+        (Some(path), Err(e)) => {
+            let _ = write_count_cache(path, 0);
+            Err(e)
+        }
+        (None, fetched) => fetched.map(Some),
+    }
+}
+
 /// The asks waiting for you: the same call as `list` (pending and question).
+///
+/// It reads the credential through the quiet store: the prompt and the shell hook run it in
+/// the background, where a Keychain dialog or a wait nobody sees is the wrong answer.
 async fn fetch_count(g: &Global, env: &Env, account_flag: Option<String>) -> Result<usize, Error> {
-    let s = session(g, env).await?;
+    let s = quiet_session(g, env).await?;
     let svc = service(&s, None, account_flag)?;
     let rows = svc.list_approvals("open", "").await.map_err(scoped)?;
     Ok(rows.len())
@@ -889,6 +922,66 @@ mod tests {
             "approve_means": "Merge the pull request.",
             "timeline": [{"step": "asked", "by": "builder", "at": "2026-11-05T09:00:00Z"}]
         })
+    }
+
+    fn cache_file(content: Option<&str>) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("asks-count");
+        if let Some(c) = content {
+            std::fs::write(&path, c).unwrap();
+        }
+        (dir, path)
+    }
+
+    fn would_ask() -> Error {
+        Error::StoreWouldAsk("the credential store would ask".into())
+    }
+
+    #[test]
+    fn a_store_that_would_ask_keeps_the_cached_count_and_prints_nothing() {
+        let (_d, path) = cache_file(Some("3\n"));
+        let old = std::time::SystemTime::now() - Duration::from_secs(120);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(!count_cache_fresh(&path));
+        let shown = settle(Some(&path), Err(would_ask())).unwrap();
+        assert_eq!(shown, None, "nothing is printed");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "3\n");
+        assert!(count_cache_fresh(&path), "the age limits the next try");
+    }
+
+    #[test]
+    fn a_store_that_would_ask_with_no_cache_yet_leaves_zero() {
+        let (_d, path) = cache_file(None);
+        assert_eq!(settle(Some(&path), Err(would_ask())).unwrap(), None);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "0\n");
+    }
+
+    #[test]
+    fn without_cache_a_store_that_would_ask_is_the_error() {
+        assert!(matches!(
+            settle(None, Err(would_ask())),
+            Err(Error::StoreWouldAsk(_))
+        ));
+    }
+
+    #[test]
+    fn another_failed_refresh_still_clears_the_count() {
+        let (_d, path) = cache_file(Some("3\n"));
+        let r = settle(Some(&path), Err(Error::Failed("offline".into())));
+        assert!(r.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "0\n");
+    }
+
+    #[test]
+    fn a_fetched_count_is_cached_and_shown() {
+        let (_d, path) = cache_file(Some("3\n"));
+        assert_eq!(settle(Some(&path), Ok(5)).unwrap(), Some(5));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "5\n");
     }
 
     fn api(server: &MockServer) -> Api {
