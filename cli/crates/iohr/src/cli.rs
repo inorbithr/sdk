@@ -1471,12 +1471,17 @@ pub enum RolesCommand {
     },
     /// Import the project's roles into your InOrbit account.
     ///
-    /// The same import `iohr sync` does. A role already in your account that did not
-    /// come from this project, or that changed in InOrbit since, is left alone.
+    /// The same import `iohr sync` does. A built-in role already in your account that nobody
+    /// changed is upgraded to the catalogue's newer version; one you changed, or that is not
+    /// a built-in, is left alone (`--upgrade` takes the catalogue's version over a changed one).
     Import {
         /// Say what would be sent and send nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Also replace a copy you changed with the catalogue's newer version (InOrbit keeps
+        /// the old version, so it can be reverted).
+        #[arg(long)]
+        upgrade: bool,
         /// The project folder. Default: the nearest folder up from here that has `atlas/`.
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
@@ -1720,8 +1725,9 @@ pub enum ProjectCommand {
         answers: Option<PathBuf>,
         /// Describe the project and your own agent (claude or codex, on your PATH) builds it
         /// in the new folder, from the template's agent prompt. It runs in the background of
-        /// this command, in print mode (no session opens): it may edit files, never run shell
-        /// commands, and iohr draws its progress. The smoke test runs after it. Its output is
+        /// this command, in print mode (no session opens): it may edit files and run only the language's own
+        /// build and test commands (cargo, go, python, node), search the web, and never any other
+        /// shell command; iohr draws its progress. The smoke test runs after it. Its output is
         /// labelled AI. `--json` passes the agent's events through as JSON lines.
         #[arg(long, value_name = "TEXT")]
         describe: Option<String>,
