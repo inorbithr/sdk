@@ -75,7 +75,7 @@ while time.time() < deadline:
         if not d:
             break
         buf += d
-    asks = buf.count("· n no".encode())
+    asks = buf.count(spec.get("marker", "· n no").encode())
     while answered < asks and keys:
         time.sleep(0.2)
         os.write(fd, keys.pop(0).encode())
@@ -164,14 +164,32 @@ impl Rig {
     }
     /// Runs `iohr` on a pseudo-terminal, answering each ask with the next key.
     fn on_terminal(&self, args: &[&str], keys: &[&str]) -> (String, bool) {
+        self.on_terminal_with(args, keys, &[], "\u{b7} n no")
+    }
+    /// [`Self::on_terminal`] with more environment (`TERM` makes the look drawn) and the text
+    /// that tells the driver an ask is open.
+    fn on_terminal_with(
+        &self,
+        args: &[&str],
+        keys: &[&str],
+        extra: &[(&str, &str)],
+        marker: &str,
+    ) -> (String, bool) {
         let mut command = vec![env!("CARGO_BIN_EXE_iohr").to_owned()];
         command.extend(args.iter().map(|a| (*a).to_owned()));
         let env: Vec<String> = self
             .env()
             .into_iter()
+            .chain(
+                extra
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned())),
+            )
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
-        let spec = json!({"argv": command, "env": env, "cwd": self.work(), "keys": keys});
+        let spec = json!({
+            "argv": command, "env": env, "cwd": self.work(), "keys": keys, "marker": marker,
+        });
         let o = Command::new(&self.py)
             .args(["-I", "-c", PTY_DRIVER, &spec.to_string()])
             .output()
@@ -457,6 +475,78 @@ fn y_runs_it_n_refuses_it_and_a_saves_the_narrowest_rule_so_the_next_run_does_no
     assert!(
         !log.contains("hello\n") || log.contains("echo hello"),
         "{log}"
+    );
+}
+
+#[test]
+fn on_a_colour_terminal_the_ask_is_an_io_card_that_starts_on_no() {
+    let r = rig!();
+    let args = [
+        "ask",
+        "--headless",
+        "--card",
+        "--permissions",
+        "prompt",
+        "q",
+    ];
+    let term = [("TERM", "xterm-256color")];
+    let run = |keys: &[&str]| r.on_terminal_with(&args, keys, &term, "AI request");
+    // The card: the AI badge, who asks and what, the folder and the numbered rows.
+    r.calls(&json!([bash("touch made.txt")]));
+    let (screen, ok) = run(&["\r"]);
+    assert!(ok, "{screen}");
+    // The colours are the card's; what a person reads is the text between them.
+    let screen = console::strip_ansi_codes(&screen).into_owned();
+    for want in [
+        "AI request",
+        "Io (AI) wants to run",
+        "touch made.txt",
+        "in work",
+        "[1] Allow once",
+        "[2] Always in this project",
+        "[3] No",
+    ] {
+        assert!(screen.contains(want), "{want}: {screen}");
+    }
+    // Enter on the card is No: a stray Enter never allows anything.
+    assert!(screen.contains("Not allowed"), "{screen}");
+    assert!(!r.work().join("made.txt").exists());
+    // 1 is Allow once; nothing is saved.
+    r.calls(&json!([bash("echo hello")]));
+    let (screen, ok) = run(&["1"]);
+    assert!(ok, "{screen}");
+    assert!(
+        screen.contains("Allowed once") && screen.contains("allow:hello"),
+        "{screen}"
+    );
+    assert!(!r.project_file().exists());
+    // y, n and Esc-free letters still answer.
+    r.calls(&json!([bash("touch made.txt")]));
+    let (screen, _) = run(&["n"]);
+    assert!(screen.contains("Not allowed"), "{screen}");
+    assert!(!r.work().join("made.txt").exists());
+    // Up from No lands on Always; Enter takes it, and the narrowest rule is saved.
+    r.calls(&json!([bash("echo again")]));
+    let (screen, ok) = run(&["\x1b[A\r"]);
+    assert!(ok, "{screen}");
+    assert!(screen.contains("Allowed always: Bash(echo:*)"), "{screen}");
+    assert!(r.project_file().exists());
+    // With a colour-less terminal the ask is the one plain line, as before.
+    r.calls(&json!([bash("printf plain")]));
+    let (screen, ok) = r.on_terminal_with(
+        &args,
+        &["y"],
+        &[("NO_COLOR", "1"), ("TERM", "xterm")],
+        "\u{b7} n no",
+    );
+    assert!(ok, "{screen}");
+    assert!(
+        screen.contains("wants to run `printf plain` in work"),
+        "{screen}"
+    );
+    assert!(
+        !screen.contains("AI request") && !screen.contains('\u{256d}'),
+        "{screen}"
     );
 }
 

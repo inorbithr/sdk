@@ -23,6 +23,8 @@
 //! the rule grammar (<https://code.claude.com/docs/en/permissions>).
 
 #[cfg(unix)]
+pub(crate) mod ask_card;
+#[cfg(unix)]
 pub(crate) mod broker;
 pub(crate) mod engine;
 pub(crate) mod glob;
