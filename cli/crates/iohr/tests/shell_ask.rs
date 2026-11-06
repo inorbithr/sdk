@@ -772,6 +772,9 @@ def rd(t):
                 break
     return out
 screen = rd(0.5)
+limit = time.time() + 10
+while not screen and time.time() < limit:  # a slow start (a loaded machine) must not eat the key
+    screen = rd(0.2)
 # `key` is one key, or steps split by the unit separator (0x1f): keys as they are, `WINCH:` (resize) and `SIG:NAME`.
 for step in key.split("\x1f"):
     try:
@@ -856,6 +859,104 @@ fn the_menu_letters_print_one_prompt_line_or_nothing_and_copy_uses_tmux() {
             .trim(),
         "load-buffer -w -"
     );
+}
+
+// PRD 0187.1: the menu is a bar of numbered rows in a box under the card. A digit picks a row
+// at once, so do its letter and Enter on the highlighted row; Esc leaves nothing on the screen
+// and nothing on stdout; with NO_COLOR it is plain numbered lines.
+/// `text` without its `ESC [ ... letter` sequences.
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for n in chars.by_ref() {
+                if n.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[test]
+fn the_action_bar_picks_by_number_letter_or_arrows_and_esc_leaves_nothing() {
+    let r = Rig::new();
+    let cmd = ["ask", "--menu", "--command=git status", "--link=notes.md"];
+    let Some((line, screen)) = press_in_menu(&r, &cmd, "1", &[]) else {
+        return;
+    };
+    assert_eq!(line, "git status", "1 is Run: {screen:?}");
+    let plain_screen = strip_escapes(&screen);
+    for want in [
+        "\u{256d}\u{2500} What next?",
+        "[1] Run",
+        "[2] Copy",
+        "[3] Follow up",
+        "[4] Explain",
+        "[5] Open",
+        "\u{2191}\u{2193} move \u{b7} 1-9 or letter pick \u{b7} enter \u{b7} esc",
+    ] {
+        assert!(plain_screen.contains(want), "{want}: {screen:?}");
+    }
+    let (line, _) = press_in_menu(&r, &cmd, "3", &[]).unwrap();
+    assert_eq!(line, "?? ", "3 is Follow up");
+    let (line, _) = press_in_menu(&r, &cmd, "4", &[]).unwrap();
+    assert_eq!(line, "?? explain this command: git status");
+    let (line, _) = press_in_menu(&r, &cmd, "9", &[]).unwrap();
+    assert_eq!(
+        line, "",
+        "no ninth row: the bar holds, then the end of input leaves"
+    );
+    // Arrows (and j) move, Enter picks the highlighted row.
+    let (line, _) = press_in_menu(&r, &cmd, "\u{1b}[B\u{1f}\u{1b}[B\u{1f}\r", &[]).unwrap();
+    assert_eq!(line, "?? ", "Down twice from Run, then Enter");
+    let (line, _) = press_in_menu(&r, &cmd, "j\u{1f}j\u{1f}j\u{1f}k\u{1f}\r", &[]).unwrap();
+    assert_eq!(line, "?? ", "j j j k from Run is Follow up");
+    // Esc and q leave: nothing on stdout, and every line the bar drew is erased again.
+    for key in ["\u{1b}", "q"] {
+        let (line, screen) = press_in_menu(&r, &cmd, key, &[]).unwrap();
+        assert_eq!(line, "", "{key:?}");
+        let drawn = screen.matches('\n').count();
+        let erased = screen.matches("\u{1b}[2K").count();
+        assert!(
+            drawn >= 7 && erased >= 7,
+            "{key:?}: drew {drawn}, erased {erased}: {screen:?}"
+        );
+    }
+}
+
+#[test]
+fn with_no_color_the_action_bar_is_plain_numbered_lines() {
+    let r = Rig::new();
+    let cmd = ["ask", "--menu", "--command=git status"];
+    let Some((line, screen)) = press_in_menu(&r, &cmd, "2", &[("NO_COLOR", "1")]) else {
+        return;
+    };
+    assert_eq!(line, "", "2 is Copy, which prints nothing on stdout");
+    for want in [
+        "What next?",
+        "[1] Run",
+        "[2] Copy",
+        "[3] Follow up",
+        "[4] Explain",
+    ] {
+        assert!(screen.contains(want), "{want}: {screen:?}");
+    }
+    assert!(
+        !screen.contains('\u{2502}') && !screen.contains('\u{256d}'),
+        "{screen:?}"
+    );
+    // No colour or style sequences (`ESC [ ... m`); the cursor ones that erase the bar stay.
+    let mut rest = screen.as_str();
+    while let Some(i) = rest.find("\u{1b}[") {
+        rest = &rest[i + 2..];
+        let end = rest.find(|c: char| c.is_ascii_alphabetic()).unwrap();
+        assert_ne!(&rest[end..=end], "m", "colour in NO_COLOR: {screen:?}");
+    }
 }
 
 // The widget on a real zsh: the key opens the menu under a live answer on an empty line, the

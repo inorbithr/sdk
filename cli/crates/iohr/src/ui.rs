@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use console::Key;
 
+use crate::card::Look;
 use crate::error::Error;
 use crate::prompt;
 
@@ -240,8 +241,8 @@ enum Act {
     Fail(io::Error),
 }
 
-/// The loop of [`Ui::select_keyed`], with the drawing and the key source passed in so it is
-/// tested without a terminal. `draw` paints the menu with entry `at` highlighted, `clear`
+/// The loop of [`Ui::select_keyed`] and [`Ui::select_bar`], with the drawing and the key source passed in so it is
+/// tested without a terminal. `numbered` is the action bar's: digits pick, `j`/`k` move. `draw` paints the menu with entry `at` highlighted, `clear`
 /// removes it, and `read` gives the next key and whether it came in the same burst as the
 /// key before.
 ///
@@ -254,6 +255,7 @@ enum Act {
 fn run_keyed(
     choices: &[Choice],
     initial: &str,
+    numbered: bool,
     mut draw: impl FnMut(usize) -> io::Result<()>,
     mut clear: impl FnMut() -> io::Result<()>,
     mut read: impl FnMut() -> (io::Result<Key>, bool),
@@ -312,6 +314,20 @@ fn run_keyed(
                     let k = k.to_ascii_lowercase();
                     if k == 'q' {
                         break Act::Cancel;
+                    }
+                    if numbered {
+                        // The action bar: `1`-`9` pick that row at once; `j` and `k` move.
+                        if let Some(i) = k.to_digit(10).filter(|d| *d >= 1).map(|d| d as usize - 1)
+                            && i < choices.len()
+                        {
+                            break Act::Letter(i);
+                        }
+                        if k == 'j' && !choices.iter().any(|c| c.key == Some('j')) {
+                            break Act::Down;
+                        }
+                        if k == 'k' && !choices.iter().any(|c| c.key == Some('k')) {
+                            break Act::Up;
+                        }
                     }
                     if let Some(i) = choices.iter().position(|c| c.key == Some(k)) {
                         break Act::Letter(i);
@@ -407,6 +423,88 @@ fn menu_rows(choices: &[Choice], width: usize) -> Vec<String> {
             format!("{head}{}", console::style(tail).dim())
         })
         .collect()
+}
+
+/// The columns below which the action bar is one plain line per row, with no box.
+const BAR_BOX_MIN: usize = 40;
+
+/// The action bar as lines (the same count for every `at`): in a box that matches the card's
+/// frame (`╭─` header, `│` rail, `╰─` footer, its width and colours) when the look is drawn
+/// and the terminal is `cols` wide enough; otherwise one line per row, numbered all the same.
+/// Each row is `› [1] Name  k  hint`: the chip, the name, its letter and the dim hint; the
+/// highlighted row has the `›` and is reversed. `cols` of 0 is unknown, taken as 80.
+fn bar_lines(prompt: &str, choices: &[Choice], at: usize, cols: usize, look: Look) -> Vec<String> {
+    use console::{measure_text_width, truncate_str};
+    const FOOT: &str = "\u{2191}\u{2193} move \u{b7} 1-9 or letter pick \u{b7} enter \u{b7} esc";
+    let cols = if cols == 0 { 80 } else { cols };
+    let boxed = look.fancy && cols >= BAR_BOX_MIN;
+    // The card's width rule (the terminal less one column, so no line fills the last), but
+    // never the card's floor of 40 on a terminal narrower than that.
+    let width = cols.saturating_sub(1).max(20);
+    let lead = if boxed { "\u{2502}  " } else { "" };
+    let pad = choices
+        .iter()
+        .map(|c| measure_text_width(&c.label))
+        .max()
+        .unwrap_or(0);
+    let mut out = Vec::new();
+    if boxed {
+        let fixed = measure_text_width("\u{256d}\u{2500} ") + measure_text_width(prompt) + 1;
+        let fill = width.saturating_sub(fixed).max(2);
+        out.push(format!(
+            "{}{} {}",
+            look.violet().apply_to("\u{256d}\u{2500} "),
+            look.violet().bold().apply_to(prompt),
+            look.violet().apply_to("\u{2500}".repeat(fill)),
+        ));
+    } else {
+        out.push(look.plain().bold().apply_to(prompt).to_string());
+    }
+    for (i, c) in choices.iter().enumerate() {
+        let on = i == at;
+        let chip = format!("[{}]", i + 1);
+        let name = format!(
+            "{}{}",
+            c.label,
+            " ".repeat(pad - measure_text_width(&c.label))
+        );
+        let key = c.key.map_or_else(|| " ".to_owned(), String::from);
+        // "› " + chip + " " + name + "  " + key + "  ": what is left is the hint's.
+        let used = measure_text_width(lead) + 2 + measure_text_width(&chip) + 1 + pad + 2 + 1 + 2;
+        let hint = truncate_str(&c.hint, width.saturating_sub(used), "\u{2026}");
+        let head = format!("{chip} {name}");
+        let head = if on {
+            look.cyan().bold().reverse().apply_to(head).to_string()
+        } else {
+            format!(
+                "{} {}",
+                look.cyan().apply_to(chip),
+                look.plain().bold().apply_to(name)
+            )
+        };
+        let mark = if on {
+            look.violet().bold().apply_to("\u{203a}").to_string()
+        } else {
+            " ".to_owned()
+        };
+        out.push(format!(
+            "{}{mark} {head}  {}  {}",
+            look.violet().apply_to(lead),
+            look.cyan().apply_to(key),
+            look.dim().apply_to(hint),
+        ));
+    }
+    let foot = truncate_str(FOOT, width.saturating_sub(3), "\u{2026}");
+    if boxed {
+        out.push(format!(
+            "{}{}",
+            look.violet().apply_to("\u{2570}\u{2500} "),
+            look.dim().apply_to(foot)
+        ));
+    } else {
+        out.push(look.dim().apply_to(foot).to_string());
+    }
+    out
 }
 
 impl Ui {
@@ -573,7 +671,53 @@ impl Ui {
         choices: &[Choice],
         initial: &str,
     ) -> Result<Option<String>, Error> {
-        use console::{Term, style};
+        use console::style;
+        Self::select_drawn(prompt, choices, initial, false, |at| {
+            let mut rows = vec![style(prompt).bold().to_string()];
+            for (i, c) in choices.iter().enumerate() {
+                let key = c.key.map_or_else(String::new, |k| format!("{k}"));
+                rows.push(format!(
+                    "{} {} {}  {}",
+                    if i == at { "\u{203a}" } else { " " },
+                    style(key).cyan(),
+                    c.label,
+                    style(&c.hint).dim()
+                ));
+            }
+            rows
+        })
+    }
+
+    /// The action bar under a card (PRD 0187.1): [`Ui::select_keyed`]'s keys, plus a number
+    /// for each row (`1`-`9` pick it at once, `j` and `k` move), drawn by [`bar_lines`] in a
+    /// box that reads as part of the card. Esc, `q` and Ctrl-C leave (`None`) and the bar is
+    /// erased.
+    ///
+    /// # Errors
+    ///
+    /// No terminal on stderr, or the terminal cannot be read.
+    pub(crate) fn select_bar(
+        prompt: &str,
+        choices: &[Choice],
+        initial: &str,
+    ) -> Result<Option<String>, Error> {
+        let look = Look::detect(Ui::detect(false).fancy());
+        let cols = usize::from(console::Term::stderr().size().1);
+        Self::select_drawn(prompt, choices, initial, true, |at| {
+            bar_lines(prompt, choices, at, cols, look)
+        })
+    }
+
+    /// The loop of both menus: `rows(at)` is the screen with entry `at` highlighted, always
+    /// the same number of lines, so erasing it leaves nothing behind.
+    fn select_drawn(
+        prompt: &str,
+        choices: &[Choice],
+        initial: &str,
+        numbered: bool,
+        rows: impl Fn(usize) -> Vec<String>,
+    ) -> Result<Option<String>, Error> {
+        use console::Term;
         if !prompt::interactive() || choices.is_empty() {
             return Err(Error::Usage(format!(
                 "{prompt}: there is no terminal to ask on"
@@ -581,25 +725,18 @@ impl Ui {
         }
         let term = Term::stderr();
         let mut last = Instant::now();
+        let height = rows(0).len();
         run_keyed(
             choices,
             initial,
+            numbered,
             |at| {
-                term.write_line(&style(prompt).bold().to_string())?;
-                for (i, c) in choices.iter().enumerate() {
-                    let key = c.key.map_or_else(String::new, |k| format!("{k}"));
-                    let line = format!(
-                        "{} {} {}  {}",
-                        if i == at { "\u{203a}" } else { " " },
-                        style(key).cyan(),
-                        c.label,
-                        style(&c.hint).dim()
-                    );
+                for line in rows(at) {
                     term.write_line(&line)?;
                 }
                 Ok(())
             },
-            || term.clear_last_lines(choices.len() + 1),
+            || term.clear_last_lines(height),
             || {
                 // `read_key_raw`, not `read_key`: `read_key` raises SIGINT on this very
                 // process for Ctrl-C (and for any interrupted read) and the menu dies with
@@ -847,7 +984,11 @@ mod tests {
     use super::wrapped;
     use console::Key;
 
-    use super::{Choice, Paint, fancy_for, menu_rows, run_keyed};
+    use super::{Choice, Look, Paint, bar_lines, fancy_for, menu_rows, run_keyed};
+
+    fn strip(s: &str) -> String {
+        console::strip_ansi_codes(s).into_owned()
+    }
 
     fn c(value: &str, label: &str, hint: &str, available: bool) -> Choice {
         Choice {
@@ -980,12 +1121,20 @@ mod tests {
     /// the one before). Gives what it returned and the entry highlighted at each draw. A
     /// script that runs out ends the test: the menu never read past what was scripted.
     fn keyed(script: Vec<(io::Result<Key>, bool)>) -> (io::Result<Option<String>>, Vec<usize>) {
+        keyed_with(script, false)
+    }
+
+    fn keyed_with(
+        script: Vec<(io::Result<Key>, bool)>,
+        numbered: bool,
+    ) -> (io::Result<Option<String>>, Vec<usize>) {
         let drawn = RefCell::new(Vec::new());
         let reads = Cell::new(0);
         let script = RefCell::new(script.into_iter());
         let out = run_keyed(
             &choices(),
             "run",
+            numbered,
             |at| {
                 drawn.borrow_mut().push(at);
                 Ok(())
@@ -1119,5 +1268,120 @@ mod tests {
         let script = (0..2000).map(|_| interrupted()).collect();
         let (out, _) = keyed(script);
         assert_eq!(out.unwrap_err().kind(), io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn in_the_bar_a_digit_picks_that_row_and_j_k_move_but_not_in_other_menus() {
+        let (out, _) = keyed_with(vec![typed(Key::Char('3'))], true);
+        assert_eq!(out.unwrap().as_deref(), Some("follow"));
+        // A digit past the last row, and 0, do nothing; the next key decides.
+        let (out, drawn) = keyed_with(
+            vec![
+                typed(Key::Char('9')),
+                typed(Key::Char('0')),
+                typed(Key::Char('j')),
+                typed(Key::Char('j')),
+                typed(Key::Char('k')),
+                typed(Key::Enter),
+            ],
+            true,
+        );
+        assert_eq!(out.unwrap().as_deref(), Some("copy"));
+        assert_eq!(drawn, [0, 1, 2, 1]);
+        // The plain menu has no numbers.
+        let (out, drawn) = keyed_with(
+            vec![
+                typed(Key::Char('3')),
+                typed(Key::Char('j')),
+                typed(Key::Char('r')),
+            ],
+            false,
+        );
+        assert_eq!(out.unwrap().as_deref(), Some("run"));
+        assert_eq!(drawn, [0]);
+    }
+
+    fn bar_choices() -> Vec<Choice> {
+        let mut c = choices();
+        for (c, hint) in c.iter_mut().zip([
+            "put it on your prompt",
+            "to the clipboard",
+            "ask more about this answer",
+            "ask what it means",
+        ]) {
+            c.label = format!("{}{}", c.value[..1].to_uppercase(), &c.value[1..]);
+            c.hint = hint.to_owned();
+        }
+        c
+    }
+
+    const FANCY: Look = Look {
+        fancy: true,
+        truecolor: false,
+    };
+    const PLAIN: Look = Look {
+        fancy: false,
+        truecolor: false,
+    };
+
+    #[test]
+    fn the_bar_is_a_card_box_with_numbered_rows_the_letter_and_a_footer() {
+        let lines: Vec<String> = bar_lines("What next?", &bar_choices(), 2, 80, FANCY)
+            .iter()
+            .map(|l| strip(l))
+            .collect();
+        assert!(
+            lines[0].starts_with("\u{256d}\u{2500} What next? \u{2500}"),
+            "{lines:?}"
+        );
+        assert_eq!(
+            console::measure_text_width(&lines[0]),
+            79,
+            "card width: cols less one"
+        );
+        assert!(
+            lines[1].starts_with("\u{2502}    [1] Run      r  put it"),
+            "{lines:?}"
+        );
+        assert!(
+            lines[3].starts_with("\u{2502}  \u{203a} [3] Follow   f  ask more"),
+            "{lines:?}"
+        );
+        assert_eq!(lines.len(), 6);
+        assert!(lines[5].starts_with("\u{2570}\u{2500} \u{2191}\u{2193} move \u{b7} 1-9 or letter pick \u{b7} enter \u{b7} esc"), "{lines:?}");
+        // The same height for every highlight, and nothing is as wide as the terminal.
+        for cols in [40, 41, 55, 80, 200] {
+            for at in 0..4 {
+                let l = bar_lines("What next?", &bar_choices(), at, cols, FANCY);
+                assert_eq!(l.len(), 6);
+                assert!(
+                    l.iter().all(|x| console::measure_text_width(x) < cols),
+                    "{cols} {l:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plain_or_narrow_the_bar_is_one_numbered_line_per_row_with_no_box_or_escape_codes() {
+        for (look, cols) in [(PLAIN, 80), (FANCY, 39)] {
+            let lines = bar_lines("What next?", &bar_choices(), 0, cols, look);
+            let text: Vec<String> = lines.iter().map(|l| strip(l)).collect();
+            assert_eq!(text[0], "What next?");
+            assert!(text[1].starts_with("\u{203a} [1] Run"), "{text:?}");
+            assert!(text[2].starts_with("  [2] Copy"), "{text:?}");
+            assert!(
+                text.iter()
+                    .all(|l| !l.contains('\u{2502}') && !l.contains('\u{256d}')),
+                "{text:?}"
+            );
+            assert!(
+                text.iter().all(|l| console::measure_text_width(l) < cols),
+                "{text:?}"
+            );
+            if !look.fancy {
+                assert_eq!(lines, text, "no colour at all");
+            }
+        }
     }
 }

@@ -49,16 +49,16 @@ impl Look {
             s.color256(ansi)
         }
     }
-    fn violet(self) -> Style {
+    pub(crate) fn violet(self) -> Style {
         self.style((167, 139, 250), 141)
     }
     fn green(self) -> Style {
         self.style((74, 222, 128), 114)
     }
-    fn cyan(self) -> Style {
+    pub(crate) fn cyan(self) -> Style {
         self.style((125, 211, 252), 117)
     }
-    fn dim(self) -> Style {
+    pub(crate) fn dim(self) -> Style {
         self.style((139, 144, 163), 246)
     }
     fn amber(self) -> Style {
@@ -72,7 +72,7 @@ impl Look {
             s.on_color256(141)
         }
     }
-    fn plain(self) -> Style {
+    pub(crate) fn plain(self) -> Style {
         Style::new().force_styling(self.fancy)
     }
 }
