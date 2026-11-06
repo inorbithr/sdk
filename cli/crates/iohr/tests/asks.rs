@@ -38,7 +38,8 @@ fn iohr(server: &MockServer, config: &Path, args: &[&str]) -> Output {
         .env_clear()
         .env("IOHR_BASE_URL", server.uri())
         .env("IOHR_CONFIG_DIR", config)
-        .env("IOHR_TOKEN", token());
+        .env("IOHR_TOKEN", token())
+        .env("IOHR_ASKS_COUNT_FILE", config.join("asks-count"));
     for k in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"] {
         if let Some(v) = std::env::var_os(k) {
             c.env(k, v);
@@ -236,4 +237,198 @@ async fn decide_needs_a_terminal() {
     let dir = tempfile::tempdir().unwrap();
     let o = iohr(&server, dir.path(), &["asks", "decide", ID]);
     assert_eq!(o.status.code(), Some(2), "{}", err(&o));
+}
+
+async fn count_mock(server: &MockServer, n: usize) {
+    let rows: Vec<_> = (0..n).map(|_| ask("pending")).collect();
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals"))
+        .and(query_param("account_id", ACCOUNT))
+        .and(query_param("status", "open"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "approvals": rows })))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_count_prints_the_number_and_nothing_when_none_wait() {
+    let dir = tempfile::tempdir().unwrap();
+    for (n, text, json_count) in [(0, "", 0), (1, "1 ask\n", 1), (3, "3 asks\n", 3)] {
+        let server = MockServer::start().await;
+        count_mock(&server, n).await;
+        let o = iohr(&server, dir.path(), &["asks", "count"]);
+        assert!(o.status.success(), "{}", err(&o));
+        assert_eq!(out(&o), text);
+        assert!(!out(&o).contains(SECRET_TEXT) && !err(&o).contains(SECRET_TEXT));
+        let o = iohr(&server, dir.path(), &["asks", "count", "--json"]);
+        let v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+        assert_eq!(v["count"], json_count);
+    }
+    // Without --cache nothing is written.
+    assert!(!dir.path().join("asks-count").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_count_cache_holds_only_the_number_and_waits_out_its_ttl() {
+    let server = MockServer::start().await;
+    count_mock(&server, 2).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("asks-count");
+    let calls = || async { server.received_requests().await.unwrap().len() };
+
+    let o = iohr(&server, dir.path(), &["asks", "count", "--cache"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(out(&o), "2 asks\n");
+    assert_eq!(std::fs::read_to_string(&cache).unwrap(), "2\n");
+    assert_eq!(calls().await, 1);
+    // No temporary file is left beside it.
+    let names: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.to_string_lossy().ends_with(".tmp")),
+        "{names:?}"
+    );
+
+    // Fresh: no call, no output, the file is as it was.
+    let o = iohr(&server, dir.path(), &["asks", "count", "--cache"]);
+    assert!(o.status.success() && out(&o).is_empty(), "{}", err(&o));
+    assert_eq!(calls().await, 1);
+
+    // Older than 30 s: asked again and rewritten.
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(31);
+    std::fs::File::options()
+        .write(true)
+        .open(&cache)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    std::fs::write(&cache, "9\n").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&cache)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let o = iohr(&server, dir.path(), &["asks", "count", "--cache"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(calls().await, 2);
+    assert_eq!(std::fs::read_to_string(&cache).unwrap(), "2\n");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_count_cache_is_emptied_when_the_server_refuses() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/approvals"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = iohr(&server, dir.path(), &["asks", "count", "--cache"]);
+    assert!(!o.status.success());
+    assert_eq!(out(&o), "");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("asks-count")).unwrap(),
+        "0\n"
+    );
+}
+
+/// The zsh hook's segment reads the cache file and nothing else: the `iohr` it would call in
+/// the background is a stub that records that it ran, and the prompt never waits for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_asks_zsh_prompt_segment_reads_the_cache_and_leaves_a_set_rprompt_alone() {
+    if Command::new("zsh").arg("--version").output().is_err() {
+        return;
+    }
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let hook = iohr(&server, dir.path(), &["shell", "hook", "zsh"]);
+    assert!(hook.status.success(), "{}", err(&hook));
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook.stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let ran = dir.path().join("ran");
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        format!("#!/bin/sh\necho \"$*\" >> {}\n", ran.display()),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let cache = dir.path().join("cache");
+    let zsh = |script: &str| {
+        let o = Command::new("zsh")
+            .args(["-f", "-i", "-c", script])
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("HOME", dir.path())
+            .env("INORBIT_ASKS_COUNT_FILE", &cache)
+            .output()
+            .unwrap();
+        out(&o)
+    };
+    let src = format!("source {}; ", file.display());
+    // Fresh cache: shown, no refresh.
+    std::fs::write(&cache, "3\n").unwrap();
+    let t = zsh(&format!(
+        "{src}_iohr_asks_precmd; print -r -- \"[$RPROMPT]\""
+    ));
+    assert_eq!(t.trim(), "[%F{8}3 asks%f]", "{t}");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(!ran.exists());
+    // One ask is singular; a file with anything but a number shows nothing.
+    std::fs::write(&cache, "1\n").unwrap();
+    assert_eq!(
+        zsh(&format!(
+            "{src}_iohr_asks_precmd; print -r -- \"[$RPROMPT]\""
+        ))
+        .trim(),
+        "[%F{8}1 ask%f]"
+    );
+    std::fs::write(&cache, "PRIVATE text\n").unwrap();
+    assert_eq!(
+        zsh(&format!(
+            "{src}_iohr_asks_precmd; print -r -- \"[$RPROMPT]\""
+        ))
+        .trim(),
+        "[]"
+    );
+    // An RPROMPT already set is left alone.
+    std::fs::write(&cache, "3\n").unwrap();
+    let t = zsh(&format!(
+        "{src}RPROMPT=mine; _iohr_asks_precmd; print -r -- \"[$RPROMPT]\""
+    ));
+    assert_eq!(t.trim(), "[mine]");
+    // Off by the switch.
+    let t = zsh(&format!(
+        "INORBIT_ASKS_PROMPT=0; {src}_iohr_asks_precmd; print -r -- \"[$RPROMPT]\""
+    ));
+    assert_eq!(t.trim(), "[]");
+    // Stale: one background refresh, and only one for two prompts in a row.
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+    std::fs::File::options()
+        .write(true)
+        .open(&cache)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let t = zsh(&format!(
+        "{src}_iohr_asks_precmd; _iohr_asks_precmd; print -r -- \"[$RPROMPT]\""
+    ));
+    assert_eq!(
+        t.trim(),
+        "[%F{8}3 asks%f]",
+        "the stale number is still what the prompt shows"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap().trim(),
+        "asks count --cache"
+    );
 }

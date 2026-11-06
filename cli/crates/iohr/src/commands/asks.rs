@@ -68,30 +68,132 @@ const LIVE: Pace = Pace {
 };
 
 pub(crate) async fn run(g: &Global, env: &Env, cmd: AsksCommand, out: Out) -> Result<(), Error> {
-    let s = session(g, env).await?;
+    // The session is made per command: `count --cache` must not touch the credential (a
+    // Keychain read) while its cache is fresh.
     match cmd {
+        AsksCommand::Count { cache, account } => count(g, env, cache, account, out).await,
         AsksCommand::List {
             status,
             kind,
             once,
             limit,
             account,
-        } => list(&s, &status, kind.as_deref(), once, limit, account, out).await,
-        AsksCommand::Show { id, once, account } => show(&s, &id, once, account, out).await,
-        AsksCommand::Decide { id, account } => decide(&s, &id, account, out).await,
+        } => {
+            let s = session(g, env).await?;
+            list(&s, &status, kind.as_deref(), once, limit, account, out).await
+        }
+        AsksCommand::Show { id, once, account } => {
+            let s = session(g, env).await?;
+            show(&s, &id, once, account, out).await
+        }
+        AsksCommand::Decide { id, account } => {
+            let s = session(g, env).await?;
+            decide(&s, &id, account, out).await
+        }
         AsksCommand::Deny { id, note, account } => {
+            let s = session(g, env).await?;
             let note = note.as_deref().map(note_text).unwrap_or_default();
             deny(&s, &id, &note, account, out).await
         }
         AsksCommand::Question { id, note, account } => {
+            let s = session(g, env).await?;
             let note = match note.as_deref().map(note_text) {
                 Some(n) if !n.is_empty() => n,
                 _ => ask_question_text(out)?,
             };
             question(&s, &id, &note, account, out).await
         }
-        AsksCommand::Approve { id, once, account } => approve(&s, &id, once, account, out).await,
+        AsksCommand::Approve { id, once, account } => {
+            let s = session(g, env).await?;
+            approve(&s, &id, once, account, out).await
+        }
     }
+}
+
+// ---- count ----
+
+/// How long a cached count is current: the shell hook asks again after this.
+const COUNT_TTL: Duration = Duration::from_secs(30);
+
+/// The prompt's cache: `~/.inorbit/term/asks-count`, the number and nothing else (no ask's
+/// text, id or title ever goes in it). `IOHR_ASKS_COUNT_FILE` moves it (tests, odd homes).
+fn count_cache_path() -> Option<std::path::PathBuf> {
+    if let Some(p) = std::env::var_os("IOHR_ASKS_COUNT_FILE").filter(|p| !p.is_empty()) {
+        return Some(p.into());
+    }
+    etcetera::home_dir()
+        .ok()
+        .map(|h| h.join(".inorbit").join("term").join("asks-count"))
+}
+
+/// Whether the cache file was written less than [`COUNT_TTL`] ago.
+fn count_cache_fresh(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < COUNT_TTL)
+}
+
+/// Writes the count whole: a temporary file beside the cache, then a rename, so the prompt
+/// never reads half a number. The folder is made owner-only when it is new.
+fn write_count_cache(path: &std::path::Path, count: usize) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".asks-count.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, format!("{count}\n"))?;
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// "3 asks", "1 ask", nothing for none.
+fn count_text(n: usize) -> String {
+    match n {
+        0 => String::new(),
+        1 => "1 ask\n".to_owned(),
+        n => format!("{n} asks\n"),
+    }
+}
+
+async fn count(
+    g: &Global,
+    env: &Env,
+    cache: bool,
+    account_flag: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    let path = if cache {
+        let path = count_cache_path()
+            .ok_or_else(|| Error::Usage("--cache needs a home folder to write to".into()))?;
+        if count_cache_fresh(&path) {
+            return Ok(());
+        }
+        Some(path)
+    } else {
+        None
+    };
+    let fetched = fetch_count(g, env, account_flag).await;
+    if let Some(path) = path {
+        // A failed refresh (signed out, offline) leaves no number: the prompt shows nothing
+        // rather than a stale one, and the file's age still limits the next try.
+        let _ = write_count_cache(&path, *fetched.as_ref().unwrap_or(&0));
+    }
+    let n = fetched?;
+    if out.json {
+        Out::print_json(&json!({ "count": n }));
+    } else {
+        Out::raw(count_text(n).as_bytes());
+    }
+    Ok(())
+}
+
+/// The asks waiting for you: the same call as `list` (pending and question).
+async fn fetch_count(g: &Global, env: &Env, account_flag: Option<String>) -> Result<usize, Error> {
+    let s = session(g, env).await?;
+    let svc = service(&s, None, account_flag)?;
+    let rows = svc.list_approvals("open", "").await.map_err(scoped)?;
+    Ok(rows.len())
 }
 
 fn service<'a>(

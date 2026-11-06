@@ -2310,6 +2310,21 @@ pub enum AsksCommand {
         #[arg(long)]
         account: Option<String>,
     },
+    /// Print how many asks are waiting for you, for a shell prompt.
+    ///
+    /// Prints "N asks" when some wait, nothing when none do, and `--json` prints `{"count": N}`.
+    /// With `--cache` the number (and nothing else) is kept in `~/.inorbit/term/asks-count`,
+    /// written whole, and the call does nothing while that file is under 30 seconds old; the
+    /// shell hook (`iohr shell hook zsh`) reads that file at the prompt and refreshes it in
+    /// the background.
+    Count {
+        /// Keep the number in `~/.inorbit/term/asks-count`; refresh it at most every 30 seconds.
+        #[arg(long)]
+        cache: bool,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
     /// Show one ask with its timeline, live on a terminal.
     Show {
         /// The ask's id (apr_...).
