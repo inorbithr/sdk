@@ -10,6 +10,12 @@
 # on an empty line (`[ask] menu_key`) opens a menu: Run puts the answer's command on the
 # prompt line for you to read and run with Enter, Copy, Follow up, Explain, Open. Nothing
 # in the menu runs a command.
+#
+# The right prompt shows "3 asks" in grey when asks wait for you (`iohr asks count`). The
+# prompt only reads the number from ~/.inorbit/term/asks-count: it never waits for the
+# network. When that file is more than 30 seconds old a background `asks count --cache`
+# refreshes it (at most once in 30 seconds), and the next prompt shows the new number. An
+# RPROMPT you set yourself is left alone; INORBIT_ASKS_PROMPT=0 turns the segment off.
 if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_live
   typeset -gA _iohr_card_prev
@@ -90,7 +96,41 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     fi
   }
 
+  # The asks segment. Reads one small file, never the network; the refresh is detached
+  # (`&!`) so it is not a job of this shell and prints nothing.
+  zmodload -F zsh/stat b:zstat 2>/dev/null
+  zmodload zsh/datetime 2>/dev/null
+  typeset -g _iohr_asks_rp _iohr_asks_try=0
+  _iohr_asks_precmd() {
+    [[ ${INORBIT_ASKS_PROMPT-} == 0 ]] && return 0
+    local f=${INORBIT_ASKS_COUNT_FILE:-$HOME/.inorbit/term/asks-count}
+    local n= now=${EPOCHSECONDS:-0} mt=0 plural=s
+    local -a st
+    if [[ -r $f ]]; then
+      n=$(<$f) 2>/dev/null
+      zstat -A st +mtime -- $f 2>/dev/null && mt=${st[1]}
+    fi
+    # Stale or missing: refresh in the background, at most once in 30 seconds.
+    if (( now > 0 && now - mt > 30 && now - _iohr_asks_try > 30 )); then
+      _iohr_asks_try=$now
+      command __IOHR_BIN__ asks count --cache >/dev/null 2>&1 &!
+    fi
+    # Only a number is ever shown; anything else in the file is ignored.
+    [[ $n == <1-> ]] || n=
+    # An RPROMPT that is not ours is somebody's choice: leave it as it is.
+    if [[ -z $RPROMPT || $RPROMPT == $_iohr_asks_rp ]]; then
+      if [[ -n $n ]]; then
+        [[ $n == 1 ]] && plural=
+        _iohr_asks_rp="%F{8}$n ask$plural%f"
+      else
+        _iohr_asks_rp=
+      fi
+      RPROMPT=$_iohr_asks_rp
+    fi
+  }
+
   autoload -Uz add-zsh-hook
+  add-zsh-hook precmd _iohr_asks_precmd
   # First, so the exit status it reads is the last command's.
   add-zsh-hook precmd _iohr_ask_precmd
   precmd_functions=(_iohr_ask_precmd ${precmd_functions:#_iohr_ask_precmd})
