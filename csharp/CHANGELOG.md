@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.1](https://github.com/inorbithr/sdk/compare/csharp/v0.4.0...csharp/v0.4.1) (2026-11-06)
+
+
+### Documentation
+
+* **docs:** READMEs match today's SDKs and CLI ([#323](https://github.com/inorbithr/sdk/issues/323)) ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+* **sdk:** READMEs match today's SDKs and CLI ([52970cb](https://github.com/inorbithr/sdk/commit/52970cb8a0f0484e1312b543c0fc17e8a17e1712))
+
+
+### Dependencies
+
+* **csharp:** Bump the csharp group with 1 update ([#339](https://github.com/inorbithr/sdk/issues/339)) ([afdaa4d](https://github.com/inorbithr/sdk/commit/afdaa4da4ee56066903e8e8f808d64101aa7c137))
+
 ## [0.4.0](https://github.com/inorbithr/sdk/compare/csharp/v0.3.1...csharp/v0.4.0) (2026-10-28)
 
 
