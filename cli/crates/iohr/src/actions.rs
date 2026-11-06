@@ -177,7 +177,7 @@ pub(crate) fn menu(command: Option<&str>, link: Option<&str>, cwd: &Path) -> Res
         crate::commands::asks::cached_count(),
     );
     let first = all.first().map_or("", |c| c.value.as_str()).to_owned();
-    let Some(picked) = Ui::select_keyed("What next?", &all, &first)? else {
+    let Some(picked) = Ui::select_bar("What next?", &all, &first)? else {
         return Ok(());
     };
     let say = |line: &str| Out::note(line);
