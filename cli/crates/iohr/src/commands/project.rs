@@ -7,7 +7,7 @@ use crate::Env;
 use crate::ask::stream::{Look, Thinking};
 use crate::ask::{self, Agent};
 use crate::atlas;
-use crate::cli::{Global, ProjectCommand, TemplateCommand};
+use crate::cli::{Global, InitArgs, ProjectCommand, TemplateCommand};
 use crate::commands::ask::Run;
 use crate::context::{Ctx, session};
 use crate::error::Error;
@@ -52,65 +52,9 @@ const DESCRIBE: &str = "@describe";
 /// The template a described project is made from, unless one is named.
 const DESCRIBE_TEMPLATE: &str = "blank";
 
-/// What the person said to `init`, as the flags carry it.
-struct InitArgs {
-    name: Option<String>,
-    template: Option<String>,
-    set: Vec<String>,
-    answers: Option<PathBuf>,
-    describe: Option<String>,
-    agent_model: Option<String>,
-    agent_turns: Option<u32>,
-    agent_timeout: Option<u64>,
-    dry_run: bool,
-    yes: bool,
-    dir: Option<PathBuf>,
-    lang: Option<String>,
-    publisher: Option<String>,
-    no_smoke: bool,
-}
-
 pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        ProjectCommand::Init {
-            name,
-            template,
-            set,
-            answers,
-            describe,
-            agent_model,
-            agent_turns,
-            agent_timeout,
-            dry_run,
-            yes,
-            dir,
-            lang,
-            publisher,
-            no_smoke,
-        } => {
-            init(
-                g,
-                env,
-                InitArgs {
-                    name,
-                    template,
-                    set,
-                    answers,
-                    describe,
-                    agent_model,
-                    agent_turns,
-                    agent_timeout,
-                    dry_run,
-                    yes,
-                    dir,
-                    lang,
-                    publisher,
-                    no_smoke,
-                },
-                out,
-            )
-            .await
-        }
+        ProjectCommand::Init(a) => init(g, env, *a, out).await,
         // The old name of `template list`: the same handler, so the output is identical.
         ProjectCommand::Templates => template_command(g, TemplateCommand::List, out),
         ProjectCommand::Template { cmd } => template_command(g, cmd, out),

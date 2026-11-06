@@ -20,8 +20,12 @@ use crate::headless::{self, Answer, Context};
 use crate::hints;
 use crate::output::Out;
 use crate::permissions::Mode;
-use crate::permissions::broker::{self, Opts, Session};
+#[cfg(unix)]
+use crate::permissions::broker::Opts;
+use crate::permissions::broker::{self, Session};
+#[cfg(unix)]
 use crate::permissions::engine::Place;
+#[cfg(unix)]
 use crate::permissions::store::Files;
 use crate::ui::Ui;
 use crate::{Env, prompt};
@@ -522,21 +526,32 @@ fn permission_session(
     if mode == Mode::Deny || !ctx.reads {
         return Ok(None);
     }
+    // No unix sockets, no live ask: off unix `iohr ask` stays read-only (see
+    // `permissions::broker`), so there is no session to start.
+    #[cfg(unix)]
+    return start_broker(mode, chosen, ctx).map(Some);
+    #[cfg(not(unix))]
+    Ok(None)
+}
+
+/// Starts the broker. A broker that cannot start is an error, never a fall back to something
+/// more permissive.
+#[cfg(unix)]
+fn start_broker(mode: Mode, chosen: &Chosen<'_>, ctx: &Context) -> Result<Session, Error> {
     let place = Place::at(Path::new(&ctx.cwd));
     let bin = crate::commands::shell::bin_name(std::env::args_os().next().as_deref()).to_owned();
     let files = Files::find(Path::new(&ctx.cwd), chosen.dir);
-    match Session::start(Opts {
+    Session::start(Opts {
         mode,
         files,
         place,
         bin,
-    }) {
-        Ok(s) => Ok(Some(s)),
-        Err(why) if cfg!(unix) => Err(Error::Failed(format!(
+    })
+    .map_err(|why| {
+        Error::Failed(format!(
             "cannot start the permission ask: {why}; run with `--permissions deny` to go on without commands"
-        ))),
-        Err(_) => Ok(None),
-    }
+        ))
+    })
 }
 
 /// The lines after an answer for what Io wanted and could not be allowed: with a rule to

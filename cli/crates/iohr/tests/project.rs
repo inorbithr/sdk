@@ -1213,6 +1213,7 @@ fn assert_two_commits_the_second_ai_built(d: &Path) {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test() {
     if !on_path("python3") {
