@@ -46,7 +46,9 @@ iohr whoami
 opens one and waits up to 5 minutes for it to come back to `http://127.0.0.1:<port>`.
 Over SSH, in a container or without a display it prints a link and a code instead:
 open the link in any browser, on any device, and enter the code. `--web` and `--device`
-choose one. Only enter a code you started yourself.
+choose one. Only enter a code you started yourself. `IOHR_NO_BROWSER=1` (any non-empty
+value) makes every command behave as if no browser can be opened and print its link
+instead; the test suites set it.
 
 The sign-in always starts on your own account, so `iohr login` then picks the account the
 profile acts for, first match wins: `--account <id|slug>` (a team you belong to), the
