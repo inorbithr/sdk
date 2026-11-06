@@ -1521,6 +1521,7 @@ fn a_language_iohr_does_not_know_is_a_usage_error_and_writes_nothing() {
     let out_dir = dir.path().join("gen");
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_iohr"))
         .env_clear()
+        .env("IOHR_NO_BROWSER", "1")
         .env("IOHR_CONFIG_DIR", dir.path())
         .args(["sdk", "generate", "--lang", "cobol", "--from"])
         .arg(format!("public={}", doc.display()))
