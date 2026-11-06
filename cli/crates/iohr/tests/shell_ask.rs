@@ -111,9 +111,11 @@ fn json_is_the_documented_shape_and_never_the_question() {
             "exit_code",
             "label",
             "model",
+            "questions",
             "via"
         ]
     );
+    assert_eq!(v["questions"], serde_json::json!([]));
     assert_eq!(v["answer"], "It is Rayleigh scattering.");
     assert_eq!(v["agent"], "claude");
     assert_eq!(v["via"], "local");
@@ -1026,4 +1028,160 @@ fn bash_and_fish_say_not_built_yet_and_exit_1() {
         assert!(e.contains("not built yet") && e.contains("zsh"), "{e}");
     }
     assert_eq!(hook("nushell").status.code(), Some(2));
+}
+
+// ---------------------------------------------------------------- the card asks back
+
+const ASKS_BACK: &str = "The work is in src.\n```questions\n{\"questions\":[{\"about\":\"purpose\",\"ask\":\"What is this project for?\",\"choices\":[\"A CLI tool\",\"A web service\",\"other\"]}]}\n```\n";
+
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+#[test]
+fn a_questions_block_is_in_json_and_never_in_the_answer() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    std::fs::create_dir_all(r.work().join(".inorbit")).unwrap();
+    let out = r.run(
+        &["--json", "ask", "--headless", "where are we?"],
+        &answer_json(ASKS_BACK),
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["answer"], "The work is in src.");
+    let q = &v["questions"][0];
+    assert_eq!(q["about"], "purpose");
+    assert_eq!(q["ask"], "What is this project for?");
+    // "other" is the card's own key, never one of the model's choices.
+    assert_eq!(
+        q["choices"],
+        serde_json::json!(["A CLI tool", "A web service"])
+    );
+    assert_eq!(v["questions"].as_array().unwrap().len(), 1);
+    // Nothing was kept: only the person's answer is ever written, and iohr writes it.
+    assert!(!r.work().join(".inorbit/memory").exists());
+}
+
+#[test]
+fn without_a_terminal_the_questions_are_plain_lines_and_the_answer_stays_clean() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    std::fs::create_dir_all(r.work().join(".inorbit")).unwrap();
+    let out = r.run(
+        &["ask", "--headless", "where are we?"],
+        &answer_json(ASKS_BACK),
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "The work is in src.\n"
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("Question for you: What is this project for?")
+            && err.contains("[1] A CLI tool"),
+        "{err}"
+    );
+    assert!(!err.contains("```"), "{err}");
+}
+
+#[test]
+fn the_model_is_told_to_ask_only_inside_a_project_and_a_folder_outside_one_gets_none() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    // A project: the notes block is there, so the model may ask.
+    std::fs::create_dir_all(r.work().join(".inorbit")).unwrap();
+    let out = r.run(&["--json", "ask", "--headless", "q"], OK_JSON, "0");
+    assert!(out.status.success(), "{}", text(&out));
+    let m = r.saw("claude.stdin");
+    assert!(m.contains("<project>\nnothing is written down yet"), "{m}");
+    // Not a project: no <project> block, so there is nowhere to keep an answer.
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let out = r.run(&["--json", "ask", "--headless", "q"], OK_JSON, "0");
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!r.saw("claude.stdin").contains("<project>\nnothing"));
+}
+
+#[test]
+fn git_facts_come_from_iohr_and_the_model_has_no_way_to_run_git() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let w = r.work();
+    git_in(&w, &["init", "-q", "-b", "trunk"]);
+    std::fs::write(w.join("a.txt"), "x").unwrap();
+    git_in(&w, &["add", "a.txt"]);
+    git_in(&w, &["commit", "-q", "-m", "first change"]);
+    std::fs::write(w.join("b.txt"), "y").unwrap();
+    let out = r.run(
+        &["--json", "ask", "--headless", "where are we?"],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let m = r.saw("claude.stdin");
+    assert!(m.contains("<git>\nbranch: trunk"), "{m}");
+    assert!(m.contains("first change"), "{m}");
+    assert!(m.contains("1 untracked"), "{m}");
+    // The model gets no tools at all: git was read by iohr, not by it.
+    let args = r.saw("claude.args");
+    let lines: Vec<&str> = args.lines().collect();
+    let at = lines.iter().position(|l| *l == "--tools").unwrap();
+    assert_eq!(lines[at + 1], "", "{args}");
+    // The brief says what to do with the facts.
+    assert!(
+        args.contains("never say you cannot run git or see the history"),
+        "{args}"
+    );
+    assert!(
+        !args.contains("Bash") && !args.contains("--allowedTools"),
+        "{args}"
+    );
+    // The label says it was read.
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["label"]
+            .as_str()
+            .unwrap()
+            .contains("the git branch, last commits and change counts")
+    );
+}
+
+#[test]
+fn the_menu_offers_asks_only_when_some_wait_and_puts_the_list_on_the_prompt() {
+    let r = Rig::new();
+    let count = r.home.path().join("asks-count");
+    let file = count.to_str().unwrap();
+    let cmd = ["ask", "--menu", "--command=git status"];
+    // None waiting: the key is not offered, so it prints nothing.
+    std::fs::write(&count, "0\n").unwrap();
+    let Some((line, _)) = press_in_menu(&r, &cmd, "a", &[("IOHR_ASKS_COUNT_FILE", file)]) else {
+        return;
+    };
+    assert_eq!(line, "");
+    // Two waiting: the entry is there, says how many, and fills the prompt with the command.
+    std::fs::write(&count, "2\n").unwrap();
+    let (line, screen) = press_in_menu(&r, &cmd, "a", &[("IOHR_ASKS_COUNT_FILE", file)]).unwrap();
+    assert_eq!(line, "iohr asks list", "{screen:?}");
+    assert!(screen.contains("2 waiting"), "{screen:?}");
 }

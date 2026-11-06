@@ -117,7 +117,7 @@ const COUNT_TTL: Duration = Duration::from_secs(30);
 
 /// The prompt's cache: `~/.inorbit/term/asks-count`, the number and nothing else (no ask's
 /// text, id or title ever goes in it). `IOHR_ASKS_COUNT_FILE` moves it (tests, odd homes).
-fn count_cache_path() -> Option<std::path::PathBuf> {
+pub(crate) fn count_cache_path() -> Option<std::path::PathBuf> {
     if let Some(p) = std::env::var_os("IOHR_ASKS_COUNT_FILE").filter(|p| !p.is_empty()) {
         return Some(p.into());
     }
@@ -137,7 +137,7 @@ fn count_cache_fresh(path: &std::path::Path) -> bool {
 
 /// Writes the count whole: a temporary file beside the cache, then a rename, so the prompt
 /// never reads half a number. The folder is made owner-only when it is new.
-fn write_count_cache(path: &std::path::Path, count: usize) -> std::io::Result<()> {
+pub(crate) fn write_count_cache(path: &std::path::Path, count: usize) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".asks-count.{}.tmp", std::process::id()));
@@ -145,6 +145,34 @@ fn write_count_cache(path: &std::path::Path, count: usize) -> std::io::Result<()
     std::fs::rename(&tmp, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
+}
+
+/// How long the `?` card waits for the count before it shows none: the card never holds up
+/// for a slow network.
+const WAITING_SECS: u64 = 3;
+
+/// The open asks waiting for the signed-in account, for the one line under a `?` card:
+/// `Some(n)` only when `n` is above none. Signed out, offline or slow is `None`: the card
+/// says nothing then. It refreshes the prompt's cache, so the menu's Asks entry is current.
+pub(crate) async fn waiting(g: &Global, env: &Env) -> Option<usize> {
+    let fetched =
+        tokio::time::timeout(Duration::from_secs(WAITING_SECS), fetch_count(g, env, None))
+            .await
+            .ok()?
+            .ok()?;
+    if let Some(path) = count_cache_path() {
+        let _ = write_count_cache(&path, fetched);
+    }
+    (fetched > 0).then_some(fetched)
+}
+
+/// The count the prompt's cache holds now (none when it has none, or it is unreadable): the
+/// `?` menu reads it to offer the Asks entry without a call of its own.
+pub(crate) fn cached_count() -> usize {
+    count_cache_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// "3 asks", "1 ask", nothing for none.

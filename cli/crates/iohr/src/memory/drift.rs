@@ -32,16 +32,58 @@ pub struct Report {
     pub skipped: Option<String>,
 }
 
-fn git(root: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
+/// Seconds a git call may take before it is stopped (a hung network disk never stalls a card).
+const GIT_SECS: u64 = 5;
+
+/// One read-only git call in `root`: no pager, no file-system monitor, no optional locks (a
+/// status never writes the index), never a prompt, a time limit. None when git cannot run,
+/// exits non-zero or takes too long. The one runner of `iohr ask`'s git facts and the drift
+/// check.
+pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
+    use std::io::Read as _;
+    use std::time::{Duration, Instant};
+    let mut child = Command::new("git")
+        .args([
+            "--no-pager",
+            "--no-optional-locks",
+            "-c",
+            "core.fsmonitor=false",
+        ])
         .arg("-C")
         .arg(root)
         .args(args)
-        .output()
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .ok()?;
-    out.status
+    let mut stdout = child.stdout.take()?;
+    // Read on a thread so a large output never fills the pipe while this waits.
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let deadline = Instant::now() + Duration::from_secs(GIT_SECS);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                return None;
+            }
+        }
+    };
+    let bytes = reader.join().ok()?;
+    status
         .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        .then(|| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Whether `root` is inside a git work tree.

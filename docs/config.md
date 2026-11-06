@@ -541,6 +541,23 @@ With `--json` the agent's own event lines are passed through untouched, one per 
 by one `{"type":"iohr_summary",...}` line (agent, via, exit code, duration). Either way the
 command exits with the agent's code, and with 1 when the agent reports a failed run.
 
+The card asks back instead of stopping at "not known". Inside a project (a folder with `.git` or
+`.inorbit` above it) iohr reads, itself and with the git command line, the branch, the last five
+commits (one line each) and the `git status --porcelain` counts, and puts them in the prompt as
+facts; the model has no tools and is told never to say it cannot run git while they are there.
+When an answer needs something only you can tell (what the project is for), the model may add
+up to two questions, each with two to four short choices; iohr validates them (a broken block is
+dropped and never shown) and draws them under the answer: keys `1` to `4` pick a choice, `o` types
+your own, `s` skips that question, Esc or `q` skips all, and a skip saves nothing. An answer is
+kept by iohr, never the model: a note in `.inorbit/memory/` (refused when it looks like a
+secret) and, for the purpose, `[project] description` in `inorbit.toml`; the answer is then
+refreshed once, with the note in hand, and never asks again. With no terminal, or under `--json`,
+the questions are plain lines on stderr (`Question for you: ... [1] ... [2] ...`; nothing is
+saved, `iohr memory remember` keeps one) and `--json` carries them in `questions`. When the
+account has open asks, one dim line under the card says how many wait and that Down then `a` opens
+them (the menu's Asks entry puts `iohr asks list` on the prompt); offline or signed out it says
+nothing.
+
 The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes it: a terminal
 resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
 do not close it or pick an action. Only a real terminal error closes it, with one line on stderr.
@@ -548,8 +565,8 @@ do not close it or pick an action. Only a real terminal error closes it, with on
 The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
 read, that nothing was run, that an AI model under your own subscription got the folder, and
 to check the answer) on the first card ever, whenever that text changes, and about once a
-day; every other card closes with one short hint, taken in turn from "`??` follows up",
-"`iohr ask --help` for flags" and "`[ask] model` in config picks the model". `INORBIT_ASK=0` in the
+day; every other card closes with one short hint, taken in turn from "`??` follows up" and
+"`iohr ask --help` for flags" (the header already names the agent and the model). `INORBIT_ASK=0` in the
 environment turns `?` off; the card does not say so. `hints = "always"` shows the full disclosure every time; `"never"` shows it
 on the first card and when the text changes, and nothing otherwise. The one small file it
 keeps for this, `ask-card.json` in the config directory (`--config-dir`, `IOHR_CONFIG_DIR`),

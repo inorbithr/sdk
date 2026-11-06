@@ -10,16 +10,19 @@ use tokio::io::AsyncBufReadExt as _;
 use crate::actions::{self, MenuKey};
 use crate::ask::stream::{self, Look, Renderer};
 use crate::ask::{self, Agent, Via};
+use crate::askback;
 use crate::card::{self, Body, Card, Look as CardLook};
 use crate::cli::{AskArgs, Global, HeadlessArgs};
+use crate::commands::asks;
 use crate::context::Ctx;
 use crate::error::Error;
 use crate::headless::{self, Answer, Context};
 use crate::hints;
 use crate::output::Out;
 use crate::ui::Ui;
+use crate::{Env, prompt};
 
-pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error> {
+pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
         return menu(&args);
     }
@@ -78,6 +81,7 @@ pub(crate) async fn run(g: &Global, args: AskArgs, out: Out) -> Result<(), Error
             &question,
             &args.headless,
             out,
+            (g, env),
         )
         .await;
     }
@@ -295,16 +299,24 @@ fn headless_wanted(h: &HeadlessArgs) -> bool {
     !h.interactive && (h.headless || h.card || h.hook || h.has_context())
 }
 
-/// What the shell hook told this call, as the context the prompt is built from.
-fn context_of(h: &HeadlessArgs) -> Result<Context, Error> {
+/// What the shell hook told this call, as the context the prompt is built from, and the
+/// project the folder is in (where an answer to a question is kept), when it is in one. The
+/// git facts and the project's notes are iohr's own reads, never the model's.
+fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>), Error> {
     let cwd = match &h.cwd {
         Some(c) => c.clone(),
         None => std::env::current_dir()
             .map(|d| d.display().to_string())
             .unwrap_or_default(),
     };
-    Ok(Context {
+    let root = crate::memory::find_root(Path::new(&cwd));
+    let ctx = Context {
         files: headless::list_folder(Path::new(&cwd)),
+        git: askback::git_facts(Path::new(&cwd)),
+        project: root
+            .as_deref()
+            .map(askback::project_notes)
+            .unwrap_or_default(),
         cwd,
         command: h.last_command.clone().unwrap_or_default(),
         exit_code: h.exit_code,
@@ -315,7 +327,9 @@ fn context_of(h: &HeadlessArgs) -> Result<Context, Error> {
             None => String::new(),
         },
         prior: h.prior_question.clone().zip(h.prior_answer.clone()),
-    })
+        refresh: false,
+    };
+    Ok((ctx, root))
 }
 
 /// What the settings and flags settled for one call.
@@ -338,17 +352,16 @@ async fn headless(
     question: &str,
     h: &HeadlessArgs,
     out: Out,
+    (g, env): (&Global, &Env),
 ) -> Result<(), Error> {
     let Chosen {
         bin,
         agent,
         via,
         model,
-        hints,
-        menu_key,
-        dir,
+        ..
     } = *chosen;
-    let ctx = context_of(h)?;
+    let (ctx, root) = context_of(h)?;
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
     let read = headless::read_line(&ctx);
     let fancy = Ui::detect(out.json).fancy();
@@ -363,10 +376,12 @@ async fn headless(
         let (text, duration_ms) = headless::run(bin, &message, model, started)
             .await
             .map_err(Error::Failed)?;
+        let (text, questions) = askback::split(&text);
         if out.json {
             Out::print_json(&Answer {
                 command: card::command_of(&text),
                 text,
+                questions,
                 agent: agent.name(),
                 via: via.name(),
                 label,
@@ -376,16 +391,83 @@ async fn headless(
             });
         } else {
             Out::raw(format!("{text}\n").as_bytes());
+            // No terminal to ask on: the questions are plain lines, apart from the answer.
+            for line in askback::plain_lines(&questions) {
+                Out::note(&line);
+            }
         }
         return Ok(());
     }
     // A person reads a card.
+    card_run(
+        chosen,
+        question,
+        h,
+        (g, env),
+        Prepared {
+            ctx,
+            root,
+            message,
+            read,
+            label,
+            started,
+            fancy,
+            stdout_tty,
+        },
+    )
+    .await
+}
+
+/// What `headless` settled before it knew whether a card or a plain answer was wanted.
+struct Prepared {
+    ctx: Context,
+    root: Option<std::path::PathBuf>,
+    message: String,
+    read: String,
+    label: String,
+    started: Instant,
+    fancy: bool,
+    stdout_tty: bool,
+}
+
+/// The card: the model runs under a spinner while the asks waiting are counted, the answer is
+/// drawn, a question the model asked back is put to the person (kept, then the answer is
+/// refreshed once), and the one line about waiting asks closes it.
+async fn card_run(
+    chosen: &Chosen<'_>,
+    question: &str,
+    h: &HeadlessArgs,
+    (g, env): (&Global, &Env),
+    prepared: Prepared,
+) -> Result<(), Error> {
+    let Chosen {
+        bin,
+        agent,
+        model,
+        hints,
+        menu_key,
+        dir,
+        ..
+    } = *chosen;
+    let Prepared {
+        mut ctx,
+        root,
+        message,
+        read,
+        label,
+        started,
+        fancy,
+        stdout_tty,
+    } = prepared;
     let look = CardLook::detect(fancy);
     let run = headless::run(bin, &message, model, started);
-    let done = if look.fancy {
-        spin_while(run, agent, look, started).await?
+    // The asks waiting are looked up while the model thinks, so they add no time.
+    let (done, waiting) = if look.fancy {
+        let (done, waiting) =
+            tokio::join!(spin_while(run, agent, look, started), asks::waiting(g, env));
+        (done?, waiting)
     } else {
-        run.await
+        (run.await, None)
     };
     let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
     // Only a card that is drawn moves the footer on.
@@ -395,7 +477,7 @@ async fn headless(
     } else {
         hints::Footer::Full
     };
-    let mut shown = Card {
+    let shown = Card {
         agent: agent.display(),
         model,
         elapsed: None,
@@ -412,31 +494,118 @@ async fn headless(
         body: Body::Failed(""),
     };
     let width = card::stderr_width();
+    let cwd = Path::new(&ctx.cwd).to_path_buf();
     match &done {
-        Ok((text, duration_ms)) => {
-            let command = card::command_of(text);
-            let link = card::link_of(text, Path::new(&ctx.cwd));
-            // The row promises a key that only the hook binds, so only the hook draws it.
-            let row = (h.hook && look.fancy)
-                .then(|| actions::row(menu_key, command.is_some(), link.is_some()))
-                .flatten();
-            shown.elapsed = Some(Duration::from_millis(*duration_ms));
-            shown.row = row.as_deref();
-            shown.body = Body::Answer(text);
-            card::draw(&card::render(&shown, width, look));
+        Ok((raw, duration_ms)) => {
+            let (mut text, questions) = askback::split(raw);
+            let took = Duration::from_millis(*duration_ms);
+            draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
+            // The model asked back: ask the person, keep the answer, and answer once more.
+            let can_ask = look.fancy
+                && prompt::interactive()
+                && (h.hook || h.card || !h.headless)
+                && !questions.is_empty();
+            if let Some(root) = root.as_deref().filter(|_| can_ask)
+                && let Some((again, ms)) =
+                    ask_back(chosen, question, &mut ctx, (root, &questions), look).await?
+            {
+                text = again;
+                let took = Duration::from_millis(ms);
+                draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
+            }
+            if let Some(n) = waiting {
+                Out::note(&waiting_line(n, h.hook, menu_key, look));
+            }
             if h.hook {
-                Out::raw(actions::record(text, command.as_deref(), link.as_deref()).as_bytes());
+                let command = card::command_of(&text);
+                let link = card::link_of(&text, &cwd);
+                Out::raw(actions::record(&text, command.as_deref(), link.as_deref()).as_bytes());
             } else if !stdout_tty {
                 Out::raw(format!("{text}\n").as_bytes());
             }
             Ok(())
         }
         Err(why) => {
-            shown.elapsed = Some(started.elapsed());
-            shown.body = Body::Failed(why);
-            card::draw(&card::render(&shown, width, look));
+            let failed = Card {
+                elapsed: Some(started.elapsed()),
+                body: Body::Failed(why),
+                ..shown
+            };
+            card::draw(&card::render(&failed, width, look));
             Err(Error::Child(1))
         }
+    }
+}
+
+/// Puts the model's questions to the person, keeps what they answer (iohr writes it, the
+/// model writes nothing) and asks the model once more with it in hand. `Some((answer, ms))`
+/// is the refreshed answer; `None` when they skipped or the refresh failed (the first answer
+/// stands, and a note says why).
+async fn ask_back(
+    chosen: &Chosen<'_>,
+    question: &str,
+    ctx: &mut Context,
+    (root, questions): (&Path, &[askback::Question]),
+    look: CardLook,
+) -> Result<Option<(String, u64)>, Error> {
+    let Some(answers) = askback::ask_person(questions) else {
+        return Ok(None);
+    };
+    for line in askback::save(root, &answers) {
+        Out::note(&line);
+    }
+    ctx.project = askback::project_notes(root);
+    ctx.refresh = true;
+    let again = headless::assemble(question, ctx).map_err(Error::Usage)?;
+    let started = Instant::now();
+    let run = headless::run(chosen.bin, &again, chosen.model, started);
+    match spin_while(run, chosen.agent, look, started).await? {
+        // The second answer asks nothing: a question in it is dropped.
+        Ok((raw, ms)) => Ok(Some((askback::split(&raw).0, ms))),
+        Err(why) => {
+            Out::note(&format!("could not refresh the answer: {why}"));
+            Ok(None)
+        }
+    }
+}
+
+/// Draws one answer card: the row under it only when the hook is there to bind its key.
+fn draw_answer(
+    shown: &Card<'_>,
+    text: &str,
+    took: Duration,
+    (h, look, menu_key): (&HeadlessArgs, CardLook, MenuKey),
+    cwd: &Path,
+    width: usize,
+) {
+    let command = card::command_of(text);
+    let link = card::link_of(text, cwd);
+    // The row promises a key that only the hook binds, so only the hook draws it.
+    let row = (h.hook && look.fancy)
+        .then(|| actions::row(menu_key, command.is_some(), link.is_some()))
+        .flatten();
+    let card = Card {
+        elapsed: Some(took),
+        row: row.as_deref(),
+        body: Body::Answer(text),
+        ..shown.clone()
+    };
+    card::draw(&card::render(&card, width, look));
+}
+
+/// The one quiet line under a card when asks are waiting: how to open them from here. The
+/// menu's own `a` is the key; without the hook (or its key) the command is named.
+fn waiting_line(n: usize, hook: bool, key: MenuKey, look: CardLook) -> String {
+    let noun = if n == 1 { "ask" } else { "asks" };
+    let how = match key.label().filter(|_| hook) {
+        Some(k) => format!("{k} then a to open"),
+        None => "`iohr asks list` opens them".to_owned(),
+    };
+    let line = format!("{n} {noun} waiting \u{b7} {how}");
+    if look.fancy {
+        console::style(line).dim().to_string()
+    } else {
+        line
     }
 }
 
