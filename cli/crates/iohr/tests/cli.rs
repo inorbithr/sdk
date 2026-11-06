@@ -3432,7 +3432,7 @@ async fn coordinator_jobs_create_signs_in_as_io_with_a_via_header() {
         spawn_with_stdin(&mut c, "Fix the thing\n")
     };
 
-    let o = as_io(&["--via-personality", "improver", "--via-session", "ab12cd34"]);
+    let o = as_io(&["--via-role", "improver", "--via-session", "ab12cd34"]);
     assert_eq!(code(&o), 0, "{}", text(&o));
     assert!(!text(&o).contains(IO_SECRET) && !text(&o).contains("TOKENSIGNATUREMARKER"));
     let seen = server.received_requests().await.unwrap();
@@ -3453,7 +3453,7 @@ async fn coordinator_jobs_create_signs_in_as_io_with_a_via_header() {
     let mut c = r.cmd(&[create.as_slice(), &["--sign-in", "io"]].concat());
     c.env("IOHR_ISSUER", server.uri())
         .env("IOHR_CLIENT_SECRET_FILE", &secret)
-        .env("IOHR_VIA_PERSONALITY", "improver")
+        .env("IOHR_VIA_ROLE", "improver")
         .env("IOHR_VIA_JOB", "job_01M6");
     let o = spawn_with_stdin(&mut c, "Fix the thing\n");
     assert_eq!(code(&o), 0, "{}", text(&o));
@@ -3467,9 +3467,28 @@ async fn coordinator_jobs_create_signs_in_as_io_with_a_via_header() {
         "personality=improver; job=job_01M6"
     );
 
+    // The old names still work, and the header is the same (`--via-personality` is a hidden alias).
+    let o = as_io(&["--via-personality", "improver", "--via-session", "ab12cd34"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let seen = server.received_requests().await.unwrap();
+    let call = seen
+        .iter()
+        .rfind(|q| q.url.path() == "/v1/coordinator/jobs")
+        .unwrap();
+    assert_eq!(
+        call.headers.get("x-iohr-via").unwrap().to_str().unwrap(),
+        "personality=improver; session=ab12cd34"
+    );
+    let mut c = r.cmd(&[create.as_slice(), &["--sign-in", "io"]].concat());
+    c.env("IOHR_ISSUER", server.uri())
+        .env("IOHR_CLIENT_SECRET_FILE", &secret)
+        .env("IOHR_VIA_PERSONALITY", "improver");
+    let o = spawn_with_stdin(&mut c, "Fix the thing\n");
+    assert_eq!(code(&o), 0, "{}", text(&o));
+
     // A bad value is refused before any sign-in call.
     let before = server.received_requests().await.unwrap().len();
-    let o = as_io(&["--via-personality", "im prover;x=y"]);
+    let o = as_io(&["--via-role", "im prover;x=y"]);
     assert_eq!(code(&o), 2, "{}", text(&o));
     assert_eq!(server.received_requests().await.unwrap().len(), before);
 
@@ -3477,7 +3496,7 @@ async fn coordinator_jobs_create_signs_in_as_io_with_a_via_header() {
     let o = r.with_token_and_stdin(
         &token(&[]),
         "x\n",
-        &[create.as_slice(), &["--via-personality", "improver"]].concat(),
+        &[create.as_slice(), &["--via-role", "improver"]].concat(),
     );
     assert_eq!(code(&o), 2, "{}", text(&o));
     assert!(text(&o).contains("--sign-in io"), "{}", text(&o));
@@ -3556,13 +3575,7 @@ async fn coordinator_io_paths_never_show_the_secret_or_the_token() {
         ],
     ];
     for mut args in commands {
-        args.extend([
-            "--sign-in",
-            "io",
-            "--via-personality",
-            "improver",
-            "--verbose",
-        ]);
+        args.extend(["--sign-in", "io", "--via-role", "improver", "--verbose"]);
         let mut c = r.cmd(&args);
         c.env("IOHR_ISSUER", server.uri())
             .env("IOHR_CLIENT_SECRET_FILE", &secret);

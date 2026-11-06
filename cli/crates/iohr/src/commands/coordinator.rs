@@ -1,7 +1,7 @@
 //! `iohr coordinator`: the coordinator's jobs and queued asks over the public API
 //! (RFC 0120, RFC 0138). The coordinator serves signed-in people, so these need a
 //! person's profile (`iohr login`), not an API key, or Io with `--sign-in io` (RFC 0065.2),
-//! so jobs an agent files are Io's, attributed to a personality by `--via-personality`.
+//! so jobs an agent files are Io's, attributed to a role by `--via-role`.
 
 use std::io::Read as _;
 

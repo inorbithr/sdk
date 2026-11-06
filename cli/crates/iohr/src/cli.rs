@@ -76,10 +76,20 @@ pub struct Global {
         value_name = "WHO"
     )]
     pub sign_in: Option<SignIn>,
-    /// With `--sign-in io`: the personality named in the `x-iohr-via` attribution header
-    /// (RFC 0065.2), such as `improver`. Attribution only, it grants nothing. Not `--via`,
-    /// which `iohr ask` uses for where an answer comes from.
-    #[arg(long, global = true, env = "IOHR_VIA_PERSONALITY", value_name = "NAME")]
+    /// With `--sign-in io`: the role named in the `x-iohr-via` attribution header, such as
+    /// `improver`. Attribution only, it grants nothing. Not `--via`, which `iohr ask` uses for
+    /// where an answer comes from.
+    #[arg(long, global = true, env = "IOHR_VIA_ROLE", value_name = "NAME")]
+    pub via_role: Option<String>,
+    /// The old name of `--via-role`, kept so scripts keep working. The header it sets is
+    /// unchanged (`personality=...`).
+    #[arg(
+        long,
+        global = true,
+        env = "IOHR_VIA_PERSONALITY",
+        value_name = "NAME",
+        hide = true
+    )]
     pub via_personality: Option<String>,
     /// With `--sign-in io`: the agent session named in `x-iohr-via`.
     #[arg(long, global = true, env = "IOHR_VIA_SESSION", value_name = "ID")]
@@ -103,6 +113,13 @@ pub enum SignIn {
 }
 
 impl Global {
+    /// The role named for attribution: `--via-role` (`IOHR_VIA_ROLE`), else the hidden old
+    /// name `--via-personality` (`IOHR_VIA_PERSONALITY`).
+    #[must_use]
+    pub fn via_role(&self) -> Option<&String> {
+        self.via_role.as_ref().or(self.via_personality.as_ref())
+    }
+
     /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
     #[must_use]
     pub fn environment(&self) -> &'static Environment {

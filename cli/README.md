@@ -734,13 +734,13 @@ keychain item the Mac bridge uses (`iohr-mcp-bridge-io`). A profile (`--profile`
 default) still holds the runner's keys and settings, and `--account` names the account.
 Nothing else changes: without the flag the runner signs in as your profile does.
 `--sign-in io` also works on `iohr coordinator ...` (every other command refuses it), so an
-agent's jobs and asks are Io's, not the person's who runs it. To say which personality made
-the call, add `--via-personality NAME` (`IOHR_VIA_PERSONALITY`), and optionally
+agent's jobs and asks are Io's, not the person's who runs it. To say which role made
+the call, add `--via-role NAME` (`IOHR_VIA_ROLE`; the old `--via-personality` and `IOHR_VIA_PERSONALITY` still work), and optionally
 `--via-session ID` (`IOHR_VIA_SESSION`) and `--via-job ID` (`IOHR_VIA_JOB`): they set the
 `x-iohr-via` header (`personality=improver; session=...; job=...`), which is attribution only and
 grants nothing. Each value is 1 to 64 of `A-Z a-z 0-9 . _ : -`, else the call is refused. (`--via` is
 taken: `iohr ask --via` says where an answer comes from.) These flags need `--sign-in io`.
-Example: `iohr --sign-in io --via-personality improver coordinator jobs create --kind chore --brief -`.
+Example: `iohr --sign-in io --via-role improver coordinator jobs create --kind chore --brief -`.
 A runner of Io's that holds a person's provider sign-in (the person signed in to `claude`
 on that machine) names that person at registration:
 `iohr --sign-in io runner register --holder <subject>`. The person must be Io's seat

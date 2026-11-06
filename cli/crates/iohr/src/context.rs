@@ -223,7 +223,7 @@ impl inorbithr::middleware::Middleware for ViaMw {
 pub(crate) fn via_header(global: &Global) -> Result<Option<String>, Error> {
     let mut parts = Vec::new();
     for (key, flag, v) in [
-        ("personality", "--via-personality", &global.via_personality),
+        ("personality", "--via-role", &global.via_role().cloned()),
         ("session", "--via-session", &global.via_session),
         ("job", "--via-job", &global.via_job),
     ] {
