@@ -14,7 +14,7 @@ use support::kept_env;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use wiremock::matchers::{body_partial_json, method, path};
+use wiremock::matchers::{body_partial_json, body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SPACE: &str = "lab_1";
@@ -599,6 +599,59 @@ async fn a_refused_import_never_fails_init_and_says_it_once() {
     assert!(o.status.success(), "{t}");
     assert_eq!(t.matches("stay local").count(), 1, "{t}");
     assert!(dir.join("atlas/roles/security.md").is_file());
+}
+
+/// InOrbit lints an import as a whole: one refused role must not keep the others local.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_refused_role_keeps_only_itself_local_and_the_others_are_imported() {
+    let h = tempfile::tempdir().unwrap();
+    let dir = fresh_rust_project(h.path());
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(ROLES))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "personalities": [] })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(IMPORT))
+        .and(body_string_contains(r#""name":"security""#))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": {"code": "failed_precondition", "message": "a line is refused by the privacy filter"}
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(IMPORT))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "written": [{"name": "base-engineer", "version": 1}, {"name": "rust-engineer", "version": 1}]
+        })))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let o = iohr(h.path(), &dir, Some(&server.uri()), &["atlas", "init"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("InOrbit refused security"), "{t}");
+    assert!(!t.contains("stay local ("), "{t}");
+    let sent = imports(&server.received_requests().await.unwrap());
+    let alone = sent
+        .iter()
+        .filter(|b| {
+            b["personalities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["name"] == "rust-engineer")
+        })
+        .count();
+    assert_eq!(alone, 2, "the batch, then rust-engineer alone: {sent:?}");
+    let rust = read(&dir, "atlas/roles/rust-engineer.md");
+    assert!(rust.contains("imported_version"), "{rust}");
+    let security = read(&dir, "atlas/roles/security.md");
+    assert!(!security.contains("imported_version"), "{security}");
 }
 
 /// An account that already holds `security` (and its root) at version 1, from an earlier
