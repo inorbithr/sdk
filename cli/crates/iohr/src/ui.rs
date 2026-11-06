@@ -337,7 +337,7 @@ fn plain(line: &str) {
 }
 
 /// The width of the terminal on stderr, 80 when it is not known.
-fn terminal_width() -> usize {
+pub(crate) fn terminal_width() -> usize {
     usize::from(console::Term::stderr().size().1).max(40)
 }
 

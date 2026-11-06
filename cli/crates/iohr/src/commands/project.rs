@@ -1400,12 +1400,15 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                         r.max_turns,
                         r.timeout.as_secs()
                     );
-                    // The AI label is printed either way; the agent starts only past the gate.
-                    ui.info(&ask::label_for(
-                        "iohr project init",
-                        "AI-built project",
-                        r.agent,
-                    ));
+                    // The AI label is printed once: in the plan pass that a real run follows
+                    // it would show twice, so only the run (or a `--dry-run`) draws it.
+                    if !preview || a.dry_run {
+                        ui.info(&ask::label_for(
+                            "iohr project init",
+                            "AI-built project",
+                            r.agent,
+                        ));
+                    }
                     if dry {
                         flow.gate("agent", &what);
                     } else if flow.gate("agent", &what) {
@@ -1487,8 +1490,12 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         && let Some(r) = &agent_run
     {
         let st = project::ai_commit(&dir, name, r.agent.name(), smoke.as_ref().map(|s| s.ok));
-        if !out.json && st.state == "skipped" {
-            ui.warn(&st.said);
+        if !out.json {
+            if st.state == "skipped" {
+                ui.warn(&st.said);
+            } else {
+                ui.info(&st.said);
+            }
         }
         report.steps.push(st);
     }
