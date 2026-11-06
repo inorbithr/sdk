@@ -1274,6 +1274,14 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     if let Some(l) = tool_lang
         && let Some(state) = toolchain::state(l)
     {
+        // A lookup that ran out of time under load has not read the installed version; this
+        // function has (the line above), so the report still names what is installed.
+        let state = match state {
+            State::Unchecked { installed: None } => State::Unchecked {
+                installed: toolchain.as_deref().and_then(project::installed_version),
+            },
+            other => other,
+        };
         let done = check_toolchain(&mut flow, interactive, l, &state)?;
         if done.upgraded {
             // The files and the agent are told the version that is there now.

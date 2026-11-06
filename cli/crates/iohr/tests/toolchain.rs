@@ -42,15 +42,20 @@ fn fake_toolchain(home: &Path) -> std::path::PathBuf {
 }
 
 fn init(home: &Path, upstream: &str, extra: &[&str]) -> Output {
+    init_named(home, "xx", upstream, extra)
+}
+
+/// `init` of project `name` (a project folder each, so one run never meets another's files).
+fn init_named(home: &Path, name: &str, upstream: &str, extra: &[&str]) -> Output {
     let base = std::env::var_os("PATH").unwrap_or_default();
     let mut paths = vec![home.join("bin")];
     paths.extend(std::env::split_paths(&base));
-    let d = home.join("w/xx");
+    let d = home.join("w").join(name);
     Command::new(env!("CARGO_BIN_EXE_iohr"))
         .args([
             "project",
             "init",
-            "xx",
+            name,
             "--template",
             "blank",
             "--lang",
@@ -229,10 +234,11 @@ async fn a_current_toolchain_is_said_so_and_off_asks_nobody() {
         t.contains("Rust 1.99.1 is the latest stable (1.99.1)"),
         "{t}"
     );
-    // The same run with the lookup off asks nobody (the one request is the first run's).
-    std::fs::remove_dir_all(h.path().join("w/xx")).unwrap();
+    // The same run with the lookup off asks nobody (the one request is the first run's). It is
+    // a project of its own: the first run's folder may still be settling (git's background
+    // maintenance after the commit), so it is never removed or reused here.
     let home = h.path().to_path_buf();
-    let off = tokio::task::spawn_blocking(move || init(&home, "off", &[]))
+    let off = tokio::task::spawn_blocking(move || init_named(&home, "yy", "off", &[]))
         .await
         .unwrap();
     assert!(off.status.success(), "{}", text(&off));
