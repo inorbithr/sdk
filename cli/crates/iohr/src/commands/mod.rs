@@ -12,7 +12,7 @@ mod connectors;
 mod coordinator;
 mod decisions;
 mod domains;
-mod ext;
+pub(crate) mod ext;
 mod ext_catalogue;
 mod ext_packages;
 mod lab;
@@ -91,7 +91,11 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
-        Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
+        Command::Upgrade {
+            check,
+            no_extensions,
+            yes,
+        } => upgrade::run(g, &env, check, !no_extensions, yes, out).await,
         Command::Ask(args) => ask::run(g, args, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,

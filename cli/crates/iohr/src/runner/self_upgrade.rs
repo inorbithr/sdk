@@ -63,6 +63,7 @@ use tokio::sync::watch;
 use super::drain::Drain;
 use super::settings::RestartMode;
 use super::supervisor::{self, Restart, Supervisor};
+use crate::commands::ext::upgrades;
 use crate::commands::upgrade::{self, Method, SignWith, Upstream};
 use crate::error::Error;
 
@@ -130,6 +131,12 @@ pub(crate) trait Source {
     ) -> Result<(), String>;
     /// What the file at `here.exe` says its version is.
     fn installed(&self, here: &Here) -> Result<Version, String>;
+    /// The extension pass of `iohr upgrade`: every installed extension to its newest
+    /// release, one failing never stopping the others. The lines to log (a summary, then
+    /// what changed or went wrong). A source with no extensions has none.
+    async fn extensions(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Why a release cannot be made ready.
@@ -467,7 +474,15 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
                 _ = stop.changed() => return Outcome::Stopped,
                 () = tokio::time::sleep(wait) => {}
             }
-            let tried = match self.check().await {
+            let found = self.check().await;
+            // Extensions are kept current on the same schedule as the binary (before a
+            // restart, which would end this process), unless upgrades are off.
+            if !matches!(found, Check::Disabled) {
+                for line in self.source.extensions().await {
+                    log(&line);
+                }
+            }
+            let tried = match found {
                 Check::Disabled | Check::Current(_) => {
                     failures = 0;
                     None
@@ -512,6 +527,9 @@ impl<S: Source, L: Ledger, R: Restarter> Upgrader<S, L, R> {
 /// policy in use says.
 pub(crate) struct RealSource {
     pub(crate) policy: watch::Receiver<Policy>,
+    /// What the extension pass reads (the data directory, the registry settings).
+    pub(crate) g: crate::cli::Global,
+    pub(crate) env: crate::Env,
 }
 
 impl Source for RealSource {
@@ -569,6 +587,19 @@ impl Source for RealSource {
 
     fn installed(&self, here: &Here) -> Result<Version, String> {
         upgrade::installed_version(&here.exe).map_err(|e| e.to_string())
+    }
+
+    async fn extensions(&self) -> Vec<String> {
+        // New privileges are never confirmed here (no `--yes`, no terminal): such a
+        // release is reported and left for a person.
+        let rows = match crate::commands::ext::store(&self.g) {
+            Ok(store) => upgrades::all(&self.g, &self.env, &store, None, None, false).await,
+            Err(e) => Err(e),
+        };
+        match rows {
+            Ok(rows) => upgrades::lines(&rows),
+            Err(e) => vec![format!("extensions were not upgraded: {e}")],
+        }
     }
 }
 
