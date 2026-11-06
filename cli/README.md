@@ -520,12 +520,19 @@ The order is fixed: scaffold, then the agent, then the smoke test, then the repo
    another on purpose). Its `agent_prompt` says only "a fresh project in <language>; build what
    is described below; keep it free of secrets; keep `<test>` passing".
 2. The agent is your own `claude` or `codex` in print mode, in the new folder, with a prompt
-   from your words, the answers and the template. It may edit files (`--allow-edits`, the same
-   as `iohr ask`: files only, never a shell), is bounded by `--agent-turns` (default 40) and
+   from your words, the answers and the template. It may edit files and run only the
+   language's own build and test commands (`cargo build|test|fmt|clippy`, `go build|test|vet`,
+   the template's Python and Node tools), and search the web; any other shell command is
+   denied and drawn dim with its reason. Its prompt carries the installed toolchain version
+   and today's date, and tells it to use the latest stable, secure release and check it at the
+   upstream repository and its advisories. It is bounded by `--agent-turns` (default 40) and
    `--agent-timeout` (seconds, default 600), and the output says which values were used. The
    stream is the same as `iohr ask`: thinking dim, one row per tool, a footer labelled
    "AI-built" (AI Act Art. 50).
 3. The smoke test then runs on what the agent built, so the report is true for the result.
+   When it passes, what the agent built is committed on its own, a second commit whose message
+   says it is AI-built (`git log` shows both). When the smoke test fails or does not run, the
+   tree is left as the agent left it, uncommitted, and the report says so.
 4. If the agent fails or runs out of turns or time, `init` says so, keeps the scaffold, exits
    non-zero and prints one line to retry.
 
@@ -595,9 +602,15 @@ catalogue is data in the binary, labelled origin `doctrine`, and `inorbit.toml` 
 names in `[roles]`.
 
 Signed in, init imports them through `POST /v1/coordinator/personalities/import` and prints one
-line each (`written v1`, `unchanged`, `left alone`). A role already in your account that
-this project did not import, or one you changed in InOrbit since, is left alone; the catalogue
-only replaces what it wrote itself. When the account has no root role, `base-engineer`
+line each (`written v1`, `upgraded v1 → v2`, `unchanged`, `left alone`). A role already in your
+account that an earlier project put there is read from its history (`ListPersonalityVersions`):
+when every version of it was an import and its lines are an older catalogue's, nobody changed
+it, and it is upgraded (`v1 → v2`). A copy you changed (a version that is not an import, or
+lines of your own), or one you changed in InOrbit since this project's import, is left alone;
+the line says the catalogue's version differs and names the command that takes it,
+`iohr atlas roles import --upgrade`, which is your go to replace the changed copy. Provenance is
+read from that history; there is no built-in marker on the server, so a role whose history
+cannot be read stays `left alone`. The catalogue never replaces your changes on its own. When the account has no root role, `base-engineer`
 comes with them. Only the account owner or an admin may import. Signed out, offline or refused,
 init still succeeds, says so once and keeps the files; `iohr sync` (or
 `iohr atlas roles import`) imports later. `--json` reports each role.
