@@ -921,18 +921,36 @@ async fn one_by_one(
 /// The marker that says the section is in an agent-instructions file.
 pub const AGENTS_MARK: &str = "<!-- iohr:memory -->";
 
-/// The short section of CLAUDE.md or AGENTS.md: how the project's agents use its memory.
-/// Memory is local first, so nothing here needs a sign-in.
+/// How an agent works with this project's documents, memory and sync, with `bin` as the
+/// command that made the project (`iohr`, or `iohr-preview`). One text for the agent files
+/// and for the prompt of an agent `init` starts, so they never differ.
 #[must_use]
-pub fn agents_section() -> String {
+pub fn usage_lines(bin: &str) -> String {
     format!(
-        "\n{AGENTS_MARK}\n## Project memory and roles\n\n\
-         - Before work, run `iohr memory recall \"<topic>\"`. After a lesson, run \
-         `iohr memory remember \"<fact>\" --why \"<reason>\"`. Memories are files in \
-         `.inorbit/memory/`, committed with the code; no sign-in is needed. \
-         `iohr memory check` finds the wrong and the stale ones. See \
+        "- Documents: PRDs, RFCs, ADRs and studies are Markdown files in `atlas/prd/`, \
+         `atlas/rfc/`, `atlas/adr/` and `atlas/studies/`, each starting with front matter \
+         (`title`, `status`, `date`, `public`, `summary`). Make one with `{bin} atlas new \
+         <prd|rfc|adr|study> \"<title>\"`: it takes the next free number and writes the front \
+         matter and the headings; then edit the file and write a one-sentence `summary`. A file \
+         that still says \"Stub\" is a starter: rewrite it rather than add another.\n\
+         - Memory: before work, run `{bin} memory recall \"<topic>\"`. After a lesson, run \
+         `{bin} memory remember \"<fact>\" --why \"<reason>\"`. Memories are files in \
+         `.inorbit/memory/`, one per memory, committed with the code; no sign-in is needed. \
+         `{bin} memory check` finds the wrong and the stale ones. See \
          `.inorbit/memory/README.md`.\n\
+         - Sync: the person sends `atlas/` to the project's Decisions space with `{bin} sync`. \
+         `{bin} atlas sync --dry-run` lists what would be sent and sends nothing.\n\
          - The built-in roles for this project are in `atlas/roles/`.\n"
+    )
+}
+
+/// The short section of CLAUDE.md or AGENTS.md: how the project's agents use its documents,
+/// memory and sync. Memory is local first, so nothing here needs a sign-in.
+#[must_use]
+pub fn agents_section(bin: &str) -> String {
+    format!(
+        "\n{AGENTS_MARK}\n## Project documents, memory and roles\n\n{}",
+        usage_lines(bin)
     )
 }
 
@@ -947,18 +965,18 @@ fn instruction_files(files: &[(String, String)]) -> Vec<usize> {
 
 /// Adds the memory section to the agent-instructions file among a template's files, or an
 /// `AGENTS.md` when the template ships none.
-pub fn add_agents(files: &mut Vec<(String, String)>) {
+pub fn add_agents(files: &mut Vec<(String, String)>, bin: &str) {
     let found = instruction_files(files);
     if found.is_empty() {
         files.push((
             "AGENTS.md".to_owned(),
-            format!("# Agent instructions\n{}", agents_section()),
+            format!("# Agent instructions\n{}", agents_section(bin)),
         ));
         return;
     }
     for i in found {
         if !files[i].1.contains(AGENTS_MARK) {
-            files[i].1.push_str(&agents_section());
+            files[i].1.push_str(&agents_section(bin));
         }
     }
 }
@@ -970,7 +988,7 @@ pub fn add_agents(files: &mut Vec<(String, String)>) {
 /// # Errors
 ///
 /// A message saying what could not be written.
-pub fn ensure_agents(root: &Path) -> Result<Vec<String>, String> {
+pub fn ensure_agents(root: &Path, bin: &str) -> Result<Vec<String>, String> {
     let mut wrote = Vec::new();
     let mut any = false;
     for name in ["AGENTS.md", "CLAUDE.md"] {
@@ -986,14 +1004,17 @@ pub fn ensure_agents(root: &Path) -> Result<Vec<String>, String> {
         if !next.ends_with('\n') {
             next.push('\n');
         }
-        next.push_str(&agents_section());
+        next.push_str(&agents_section(bin));
         std::fs::write(&path, next).map_err(|e| format!("cannot write {name}: {e}"))?;
         wrote.push(name.to_owned());
     }
     if !any {
         let path = root.join("AGENTS.md");
-        std::fs::write(&path, format!("# Agent instructions\n{}", agents_section()))
-            .map_err(|e| format!("cannot write AGENTS.md: {e}"))?;
+        std::fs::write(
+            &path,
+            format!("# Agent instructions\n{}", agents_section(bin)),
+        )
+        .map_err(|e| format!("cannot write AGENTS.md: {e}"))?;
         wrote.push("AGENTS.md".to_owned());
     }
     Ok(wrote)
@@ -1215,16 +1236,33 @@ mod tests {
         ];
         add_record(&mut files, Some("rust"));
         add_record(&mut files, Some("rust"));
-        add_agents(&mut files);
-        add_agents(&mut files);
+        add_agents(&mut files, "iohr");
+        add_agents(&mut files, "iohr");
         assert_eq!(files[0].1.matches("[roles]").count(), 1);
         assert!(files[0].1.contains("\"rust-engineer\""));
         assert_eq!(files[1].1.matches(AGENTS_MARK).count(), 1);
         assert!(files[1].1.contains("iohr memory recall"));
         assert_eq!(files.len(), 2, "a shipped file is extended, none is added");
         let mut none: Vec<(String, String)> = Vec::new();
-        add_agents(&mut none);
+        add_agents(&mut none, "iohr");
         assert_eq!(none[0].0, "AGENTS.md");
         assert!(none[0].1.contains(".inorbit/memory/README.md"));
+    }
+
+    #[test]
+    fn the_agent_file_names_the_binary_that_made_the_project() {
+        let mut files: Vec<(String, String)> = Vec::new();
+        add_agents(&mut files, "iohr-preview");
+        let text = &files[0].1;
+        for want in [
+            "`iohr-preview atlas new <prd|rfc|adr|study>",
+            "`iohr-preview memory remember",
+            "`iohr-preview memory recall",
+            "`iohr-preview sync`",
+            "`iohr-preview atlas sync --dry-run`",
+        ] {
+            assert!(text.contains(want), "missing {want}: {text}");
+        }
+        assert!(!text.contains("`iohr "), "no bare iohr left: {text}");
     }
 }

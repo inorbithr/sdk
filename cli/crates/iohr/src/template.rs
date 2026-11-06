@@ -235,6 +235,16 @@ pub struct VariantDef {
     pub vars: BTreeMap<String, String>,
 }
 
+impl VariantDef {
+    /// A documents-only variant: nothing to build, run or test (`blank --lang docs`). Its
+    /// project is the atlas and the memory, so it has no smoke test and the agent is told no
+    /// code words.
+    #[must_use]
+    pub fn is_docs_only(&self) -> bool {
+        self.build.is_empty() && self.run.is_empty() && self.test.is_empty()
+    }
+}
+
 /// The first `major.minor[.patch]` in `line`: the version and its `major.minor`. `rustc 1.99.0
 /// (b940084d7 2026-09-28)` is `("1.99.0", "1.99")`.
 #[must_use]

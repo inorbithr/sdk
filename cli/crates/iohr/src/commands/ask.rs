@@ -22,6 +22,45 @@ use crate::output::Out;
 use crate::ui::Ui;
 use crate::{Env, prompt};
 
+/// How an editing run ended, for the closing lines.
+struct Done<'a> {
+    via: Via,
+    agent: Agent,
+    code: i32,
+    failure: Option<String>,
+    started: Instant,
+    note_root: Option<&'a std::path::Path>,
+}
+
+/// The closing lines of a streamed run: the JSON summary, the agent's reason when it failed, and
+/// the handoff note it went on from, removed when it ended well.
+fn finish(d: &Done<'_>, out: Out) {
+    let (code, via, agent) = (d.code, d.via, d.agent);
+    let duration_ms = u64::try_from(d.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    if out.json {
+        // One more line in the stream, so a program reading the lines knows how it ended.
+        let line = serde_json::json!({
+            "type": "iohr_summary",
+            "via": via.name(),
+            "agent": agent.name(),
+            "exit_code": code,
+            "duration_ms": duration_ms,
+        });
+        Out::raw(format!("{line}\n").as_bytes());
+    }
+    if let Some(f) = &d.failure {
+        Out::note(&format!("iohr ask: the agent reports: {f}"));
+    }
+    if let (0, Some(root)) = (code, d.note_root) {
+        // The run went on from the note and ended well: the note is done with.
+        crate::handoff::clear(root);
+        Out::note(&format!(
+            "iohr ask: went on from {} and removed it",
+            crate::handoff::FILE
+        ));
+    }
+}
+
 pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
         return menu(&args);
@@ -54,6 +93,10 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     // The question is only ever an argument of the agent; nothing below prints or stores it
     // except `--dry-run`, which prints the command line you asked to see.
     let question = args.question.join(" ");
+    // An editing run in a project that has a handoff note (an earlier run stopped at its cap)
+    // goes on from it: the note leads the prompt.
+    let (note_root, question) =
+        crate::handoff::continue_from(allow_edits && !args.dry_run, question);
     let command_line = ask::argv(agent, model.as_deref(), allow_edits, &[], None, &question);
     if args.dry_run {
         dry_run(via, agent, bin.as_deref(), &command_line, out);
@@ -109,21 +152,17 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
         timeout: None,
     })
     .await?;
-    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    if out.json {
-        // One more line in the stream, so a program reading the lines knows how it ended.
-        let line = serde_json::json!({
-            "type": "iohr_summary",
-            "via": via.name(),
-            "agent": agent.name(),
-            "exit_code": code,
-            "duration_ms": duration_ms,
-        });
-        Out::raw(format!("{line}\n").as_bytes());
-    }
-    if let Some(f) = failure {
-        Out::note(&format!("iohr ask: the agent reports: {f}"));
-    }
+    finish(
+        &Done {
+            via,
+            agent,
+            code,
+            failure,
+            started,
+            note_root: note_root.as_deref(),
+        },
+        out,
+    );
     ended(code)
 }
 
@@ -188,6 +227,10 @@ pub(crate) struct Ended {
     pub(crate) failure: Option<String>,
     /// iohr stopped the agent because `timeout` passed.
     pub(crate) timed_out: bool,
+    /// The agent stopped at its turn cap: its work is on disk, unfinished.
+    pub(crate) turn_capped: bool,
+    /// The agent's last words (empty when it said none), for the handoff note.
+    pub(crate) last_said: String,
 }
 
 /// Runs the agent once with its JSON stream piped to iohr and draws it as it arrives (or, with
@@ -232,12 +275,19 @@ pub(crate) async fn stream(run: Run<'_>) -> Result<Ended, Error> {
     let deadline = tokio::time::sleep(timeout.unwrap_or(Duration::from_hours(8760)));
     tokio::pin!(deadline);
     let mut timed_out = false;
+    let mut tail = stream::Tail::default();
     loop {
         tokio::select! {
             line = lines.next_line() => match line {
-                Ok(Some(l)) if json => Out::raw(format!("{l}\n").as_bytes()),
+                Ok(Some(l)) if json => {
+                    Out::raw(format!("{l}\n").as_bytes());
+                    for e in stream::parse(agent, &l) {
+                        tail.see(&e);
+                    }
+                }
                 Ok(Some(l)) => {
                     for e in stream::parse(agent, &l) {
+                        tail.see(&e);
                         render.draw(e);
                     }
                 }
@@ -278,6 +328,8 @@ pub(crate) async fn stream(run: Run<'_>) -> Result<Ended, Error> {
         code,
         failure,
         timed_out,
+        turn_capped: tail.capped,
+        last_said: tail.said(),
     })
 }
 

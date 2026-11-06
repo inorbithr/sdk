@@ -145,13 +145,27 @@ pub struct ProjectConfig {
     /// default is `./NAME` in the folder you are in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    /// The model the agent of `iohr project init` builds with (`--agent-model`, or
+    /// `IOHR_INIT_AGENT_MODEL`, wins over it). Unset: `sonnet` for Claude.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
+    /// The most turns that agent may take (`--agent-turns` wins over it). Unset: 150.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_turns: Option<u32>,
+    /// The most seconds that agent may run (`--agent-timeout` wins over it). Unset: 1800.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_timeout: Option<u64>,
 }
 
 impl ProjectConfig {
     /// Whether nothing is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.template.is_none() && self.root.is_none()
+        self.template.is_none()
+            && self.root.is_none()
+            && self.agent_model.is_none()
+            && self.agent_turns.is_none()
+            && self.agent_timeout.is_none()
     }
 }
 
@@ -827,18 +841,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("config.toml"),
-            "[project]   # my default\ntemplate = \"coordinated\"\nroot = \"~/code\"\n",
+            "[project]   # my default\ntemplate = \"coordinated\"\nroot = \"~/code\"\nagent_model = \"opus\"\nagent_turns = 90\nagent_timeout = 900\n",
         )
         .unwrap();
         let mut c = Config::load(dir.path()).unwrap();
         assert_eq!(c.project.template.as_deref(), Some("coordinated"));
         assert_eq!(c.project.root.as_deref(), Some("~/code"));
+        assert_eq!(c.project.agent_model.as_deref(), Some("opus"));
+        assert_eq!(
+            (c.project.agent_turns, c.project.agent_timeout),
+            (Some(90), Some(900))
+        );
         c.default = Some(name("work"));
         c.save(dir.path()).unwrap();
         let saved = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(saved.contains("[project]   # my default"), "{saved}");
         assert!(saved.contains("template = \"coordinated\""), "{saved}");
         assert!(saved.contains("root = \"~/code\""), "{saved}");
+        assert!(saved.contains("agent_turns = 90"), "{saved}");
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::cli::{Global, ProjectCommand, TemplateCommand};
 use crate::commands::ask::Run;
 use crate::context::{Ctx, session};
 use crate::error::Error;
+use crate::handoff::{self, Stop};
 use crate::output::Out;
 use std::fmt::Write as _;
 
@@ -58,6 +59,7 @@ struct InitArgs {
     set: Vec<String>,
     answers: Option<PathBuf>,
     describe: Option<String>,
+    agent_model: Option<String>,
     agent_turns: Option<u32>,
     agent_timeout: Option<u64>,
     dry_run: bool,
@@ -76,6 +78,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
             set,
             answers,
             describe,
+            agent_model,
             agent_turns,
             agent_timeout,
             dry_run,
@@ -94,6 +97,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
                     set,
                     answers,
                     describe,
+                    agent_model,
                     agent_turns,
                     agent_timeout,
                     dry_run,
@@ -548,6 +552,24 @@ fn ask_question(
     }
 }
 
+/// The iohr commands an `init` agent may run, by the name the binary runs under: new documents,
+/// the dry-run listing of what `sync` would send, and memory. Each is a prefix, so `sync` itself
+/// (which writes to Decisions) is not among them: the person runs that.
+fn init_allow(bin: &str) -> Vec<String> {
+    [
+        "atlas new",
+        "atlas sync --dry-run",
+        "memory remember",
+        "memory recall",
+        "memory list",
+        "memory check",
+    ]
+    .iter()
+    .map(|c| format!("{bin} {c}"))
+    .chain(["git status", "git log", "git diff", "ls"].map(str::to_owned))
+    .collect()
+}
+
 /// The agent and the prompt it would get, when one is to run.
 struct AgentRun {
     agent: Agent,
@@ -681,12 +703,17 @@ fn check_toolchain(
     }
 }
 
-/// The most turns the agent gets in `init` when no flag says: init's own default, because
-/// `[ask]` in config.toml has no bound. Enough to write a small project; a wrong request cannot
-/// run away.
-const AGENT_TURNS: u32 = 40;
-/// The most seconds the agent gets in `init` when no flag says (init's own default).
-const AGENT_SECONDS: u64 = 600;
+/// The most turns the agent gets in `init` when neither a flag nor `[project] agent_turns` says:
+/// init's own default, because `[ask]` in config.toml has no bound. Enough to fetch a site and
+/// write a knowledge base; a wrong request still cannot run away.
+const AGENT_TURNS: u32 = 150;
+/// The most seconds the agent gets in `init` when neither a flag nor `[project] agent_timeout`
+/// says (init's own default).
+const AGENT_SECONDS: u64 = 1800;
+/// The Claude model an `init` agent run uses when neither the flag (`--agent-model`,
+/// `IOHR_INIT_AGENT_MODEL`) nor `[project] agent_model` names one: a build of many files needs
+/// more than the small fast tier `iohr ask` answers with.
+const AGENT_MODEL: &str = "sonnet";
 
 #[allow(
     clippy::too_many_lines,
@@ -709,7 +736,9 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             "--describe needs words: what do you want built?".into(),
         ));
     }
-    if a.agent_turns == Some(0) || a.agent_timeout == Some(0) {
+    if a.agent_turns.or(cfg.project.agent_turns) == Some(0)
+        || a.agent_timeout.or(cfg.project.agent_timeout) == Some(0)
+    {
         return Err(Error::Usage(
             "--agent-turns and --agent-timeout need a number above 0".into(),
         ));
@@ -737,7 +766,15 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         ui,
         interactive,
         agent: &agent,
-        ask_model: cfg.ask.model.clone(),
+        agent_model: a.agent_model.clone().or(cfg.project.agent_model.clone()),
+        agent_turns: a
+            .agent_turns
+            .or(cfg.project.agent_turns)
+            .unwrap_or(AGENT_TURNS),
+        agent_timeout: a
+            .agent_timeout
+            .or(cfg.project.agent_timeout)
+            .unwrap_or(AGENT_SECONDS),
         ask_thinking: cfg.ask.thinking.clone(),
         out,
     };
@@ -1196,7 +1233,11 @@ struct Exec<'a> {
     ui: Ui,
     interactive: bool,
     agent: &'a Option<(Agent, PathBuf)>,
-    ask_model: Option<String>,
+    /// `--agent-model`, `IOHR_INIT_AGENT_MODEL`, else `[project] agent_model`.
+    agent_model: Option<String>,
+    /// The turn cap and the time cap: the flag, else `[project]`, else init's own default.
+    agent_turns: u32,
+    agent_timeout: u64,
     ask_thinking: Option<String>,
     out: Out,
 }
@@ -1261,6 +1302,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     // (`rust-version`) and is told to the agent. A toolchain that will not run keeps the
     // variant's own default and is not told.
     let variant = lang.as_deref().and_then(|l| tpl.variant(l));
+    let docs_only = variant.is_some_and(template::VariantDef::is_docs_only);
+    // What this binary is called: the agent runs it by that name, AGENTS.md names it.
+    let me = super::shell::running_bin();
     // Everything that changes anything goes through `flow`.
     let mut flow = Flow {
         dry,
@@ -1310,6 +1354,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             lang: lang.as_deref(),
             describe: describe.as_deref(),
             created_at: &created_at,
+            bin: &me,
         },
     );
     let programs = template::programs(tpl, &vals);
@@ -1342,7 +1387,8 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
 
     // The steps, and the agent that will run, if one will.
     let mut steps = tpl.steps();
-    if a.no_smoke {
+    // A documents-only language has no program: no smoke test, the plan says nothing about one.
+    if a.no_smoke || docs_only {
         steps.retain(|s| s.name != StepName::Smoke);
     }
     let step_prompt = steps
@@ -1385,15 +1431,23 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 project::Facts {
                     toolchain: toolchain.as_deref(),
                     today: &crate::front::today(),
+                    bin: &me,
+                    docs_only,
                 },
             );
-            // The language's own build and test commands, scoped; nothing else of the shell.
-            let allow: Vec<String> = variant.map(|v| v.agent_allow.clone()).unwrap_or_default();
-            // The `[ask]` model (else the small fast tier), edits to files and the language's own build and test commands,
-            // and init's own bounds: nothing the agent is told or says is stored here.
-            let model =
-                ask::choose_model(*ag, None, cx.ask_model.as_deref()).map_err(Error::Usage)?;
-            let max_turns = a.agent_turns.unwrap_or(AGENT_TURNS);
+            // The language's own build and test commands, scoped, and iohr's own document and
+            // memory commands by the name this binary runs under; nothing else of the shell.
+            let mut allow: Vec<String> = variant.map(|v| v.agent_allow.clone()).unwrap_or_default();
+            allow.extend(init_allow(&me));
+            // Init's own model (sonnet unless named), edits to files, the commands above and
+            // init's own bounds: nothing the agent is told or says is stored here.
+            let model = ask::choose_model(
+                *ag,
+                cx.agent_model.as_deref(),
+                (*ag == Agent::Claude).then_some(AGENT_MODEL),
+            )
+            .map_err(Error::Usage)?;
+            let max_turns = cx.agent_turns;
             agent_run = Some(AgentRun {
                 agent: *ag,
                 bin: bin.clone(),
@@ -1408,7 +1462,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 prompt,
                 model,
                 max_turns,
-                timeout: Duration::from_secs(a.agent_timeout.unwrap_or(AGENT_SECONDS)),
+                timeout: Duration::from_secs(cx.agent_timeout),
                 thinking: ask::choose_thinking(None, cx.ask_thinking.as_deref())
                     .map_err(Error::Usage)?,
             });
@@ -1495,6 +1549,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
     let mut agent_built = false;
+    let mut stop_note: Option<String> = None;
     for s in &steps {
         match s.name {
             StepName::Git => {
@@ -1554,8 +1609,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             StepName::Agent => {
                 if let Some(r) = &agent_run {
                     let what = format!(
-                        "run {} once in print mode in {} (it may edit files and run only the language's build and test commands; at most {} turns and {} s) with the prompt below (not started in a dry run)",
+                        "run {} ({}) once in print mode in {} (it may edit files, fetch pages and run only the language's build and test commands and iohr's atlas and memory commands; at most {} turns and {} s) with the prompt below (not started in a dry run)",
                         r.agent.name(),
+                        r.model.as_deref().unwrap_or("its own model"),
                         dir.display(),
                         r.max_turns,
                         r.timeout.as_secs()
@@ -1612,17 +1668,42 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 "Agent build",
                                 "done",
                                 format!(
-                                    "{} built it in {secs} s with edits and the language's build and test commands only; AI-built, check it",
-                                    r.agent.name()
+                                    "{} built it in {secs} s with edits{}; AI-built, check it",
+                                    r.agent.name(),
+                                    if docs_only {
+                                        ", the project's atlas and memory commands and the web"
+                                    } else {
+                                        " and the language's build and test commands only"
+                                    }
                                 ),
                                 "",
                             ));
                         } else {
-                            let why = if ended.timed_out {
-                                format!(
-                                    "it did not finish in {} s and was stopped",
-                                    r.timeout.as_secs()
-                                )
+                            let stopped = if ended.timed_out {
+                                Some(Stop::Time(r.timeout.as_secs()))
+                            } else {
+                                ended.turn_capped.then_some(Stop::Turns)
+                            };
+                            let why = if let Some(st) = stopped {
+                                let why = st.said(r.max_turns);
+                                // The work so far is on disk: leave a short note for the run
+                                // that goes on from it (`ask --allow-edits` reads it).
+                                match handoff::write(
+                                    &dir,
+                                    describe.as_deref().unwrap_or("the template's prompt"),
+                                    &ended.last_said,
+                                    &why,
+                                    &me,
+                                ) {
+                                    Ok(n) => {
+                                        stop_note = Some(format!(
+                                            "{n} files are in the folder; {} says what is left",
+                                            handoff::FILE
+                                        ));
+                                    }
+                                    Err(e) => ui.warn(&format!("no handoff note: {e}")),
+                                }
+                                why
                             } else {
                                 ended.failure.clone().unwrap_or_else(|| {
                                     format!("it exited with code {}", ended.code)
@@ -1649,7 +1730,13 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         && agent_failed.is_none()
         && let Some(r) = &agent_run
     {
-        let st = project::ai_commit(&dir, name, r.agent.name(), smoke.as_ref().map(|s| s.ok));
+        let st = project::ai_commit(
+            &dir,
+            name,
+            r.agent.name(),
+            smoke.as_ref().map(|s| s.ok),
+            docs_only,
+        );
         if !out.json {
             if st.state == "skipped" {
                 ui.warn(&st.said);
@@ -1728,8 +1815,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     }
     if let Some(why) = agent_failed {
         // The scaffold stays; one line says how to go on from it.
+        let kept = stop_note.map_or_else(String::new, |n| format!(" ({n})"));
         return Err(Error::Failed(format!(
-            "the agent did not finish: {why}. The project is kept in {}; retry the agent there with `cd {} && iohr ask --allow-edits \"what you want\"`",
+            "the agent did not finish: {why}. The project is kept in {}{kept}; continue with `cd {} && {me} ask --allow-edits \"continue the work\"` (it reads the note), or raise the caps with --agent-turns and --agent-timeout",
             place.shown, place.shown
         )));
     }
@@ -1795,7 +1883,10 @@ fn dry_report(
         flow.ui.note(
             "The agent would get (AI)",
             &format!(
-                "cd {}\n{}\n\n{}",
+                "model {}, at most {} turns and {} s\n\ncd {}\n{}\n\n{}",
+                r.model.as_deref().unwrap_or("its own"),
+                r.max_turns,
+                r.timeout.as_secs(),
                 report.dir.display(),
                 ask::shell_line(
                     &r.bin.display().to_string(),
