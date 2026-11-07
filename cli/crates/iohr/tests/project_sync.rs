@@ -334,3 +334,60 @@ fn no_sync_skips_the_space_and_a_dry_run_changes_nothing() {
     );
     assert!(!other.exists());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_roles_go_to_the_account_only_with_the_account_step() {
+    let roles = |reqs: &[wiremock::Request]| {
+        reqs.iter()
+            .filter(|r| r.url.path().starts_with("/v1/coordinator/personalities"))
+            .count()
+    };
+    // Signed in but local only: not one call to the roles API, and a line that says so.
+    let server = MockServer::start().await;
+    me(&server).await;
+    let h = tempfile::tempdir().unwrap();
+    let dir: PathBuf = h.path().join("work/shop");
+    let d = dir.to_str().unwrap();
+    let o = iohr(
+        h.path(),
+        h.path(),
+        Some(&server.uri()),
+        &init_args(d, &["--no-sync"]),
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    let said = text(&o);
+    assert!(
+        said.contains("built-in roles stay in atlas/roles/"),
+        "{said}"
+    );
+    assert!(said.contains("--no-sync"), "{said}");
+    let got = server.received_requests().await.unwrap();
+    assert_eq!(roles(&got), 0, "no roles call: {got:?}");
+    assert!(got.iter().all(|r| r.method.as_str() == "GET"), "{got:?}");
+    // Signed out: the same, with its own reason.
+    let o = iohr(
+        h.path(),
+        h.path(),
+        None,
+        &init_args(h.path().join("work/two").to_str().unwrap(), &[]),
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("you are not signed in"), "{}", text(&o));
+    // With the account step the roles are imported (the list is read first).
+    let server = MockServer::start().await;
+    me(&server).await;
+    listing(&server, &[space("lab_shop1", SELF, "shop", "project")]).await;
+    let three = h.path().join("work/three");
+    let o = iohr(
+        h.path(),
+        h.path(),
+        Some(&server.uri()),
+        &init_args(three.to_str().unwrap(), &[]),
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    let got = server.received_requests().await.unwrap();
+    assert!(
+        roles(&got) > 0,
+        "the account step imports the roles: {got:?}"
+    );
+}

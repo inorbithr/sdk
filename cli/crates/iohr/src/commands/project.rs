@@ -1336,6 +1336,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
     // Reads only, so a dry run finds the same problems a real one would.
     project::check_target(&dir, &files).map_err(Error::Failed)?;
+    // Init run again in the folder it made: files already there are left alone, nothing is
+    // committed over them.
+    let rerun = project::is_rerun(&dir, &files);
     project::check_manifest(&files).map_err(Error::Failed)?;
     if !a.no_smoke
         && let Some(v) = lang.as_deref().and_then(|l| tpl.variant(l))
@@ -1569,25 +1572,46 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         None => {}
     }
-    // The built-in roles (security and the language's engineer): imported when signed in.
-    let roles_sp = (!dry && ui.fancy()).then(|| ui.step("Importing the built-in roles"));
-    let roles = flow
-        .act_async(
-            "roles",
-            "import the built-in roles into your InOrbit account (they stay in the project when you are signed out)",
-            || super::atlas::import_for(g, env, &dir, false, false),
-        )
-        .await;
-    match (roles.as_ref().filter(|_| !out.json), roles_sp) {
-        // Drawn: one line that says how it went, the role names in it.
-        (Some(r), Some(sp)) if !r.outcomes.is_empty() || r.message.is_some() => {
-            let (mark, said) = super::atlas::roles_result(r);
-            sp.end(mark, &said);
+    // The built-in roles (security and the language's engineer) go to the account only as part
+    // of the account step above: a local-only init (`--no-sync`) or one without a sign-in
+    // leaves them in the folder, says so, and makes no call. `iohr sync` imports them later.
+    let roles_skip = if a.space.no_sync {
+        Some("init is local only (--no-sync)")
+    } else if !dry && signed_in.is_none() {
+        Some("you are not signed in")
+    } else {
+        None
+    };
+    let roles = if let Some(why) = roles_skip {
+        let said = format!(
+            "the built-in roles stay in atlas/roles/, nothing was sent to your account ({why}); `iohr sync` imports them"
+        );
+        ui.info(&format!("Roles: {said}"));
+        report
+            .steps
+            .push(project::step("roles", "Roles", "skipped", said, ""));
+        None
+    } else {
+        let roles_sp = (!dry && ui.fancy()).then(|| ui.step("Importing the built-in roles"));
+        let roles = flow
+            .act_async(
+                "roles",
+                "import the built-in roles into your InOrbit account (they stay in the project when you are signed out)",
+                || super::atlas::import_for(g, env, &dir, false, false),
+            )
+            .await;
+        match (roles.as_ref().filter(|_| !out.json), roles_sp) {
+            // Drawn: one line that says how it went, the role names in it.
+            (Some(r), Some(sp)) if !r.outcomes.is_empty() || r.message.is_some() => {
+                let (mark, said) = super::atlas::roles_result(r);
+                sp.end(mark, &said);
+            }
+            (Some(r), None) => super::atlas::show_report(ui, r),
+            (_, Some(sp)) => sp.clear(),
+            (None, None) => {}
         }
-        (Some(r), None) => super::atlas::show_report(ui, r),
-        (_, Some(sp)) => sp.clear(),
-        (None, None) => {}
-    }
+        roles
+    };
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
     let mut agent_built = false;
@@ -1597,7 +1621,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             StepName::Git => {
                 let sp = (!dry).then(|| ui.step("Making a git repository"));
                 let r = flow.act("git", "make a git repository with one commit", || {
-                    project::git_step(&dir, name, &tpl.meta.id)
+                    project::git_step(&dir, name, &tpl.meta.id, rerun)
                 });
                 if let Some(st) = r {
                     if let Some(sp) = sp {

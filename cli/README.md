@@ -435,7 +435,7 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 
 ## A project of your own
 
-`iohr project init NAME` (also `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
+`iohr project init NAME` (also `iohr init NAME` and `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
 and tells you what you now have. The local half is real: `~/development/NAME` from a template
 (`--template demo`: a private macOS service that heartbeats and serves a tiny panel, with the
 manifest of `iohr ext init`; `--template coordinated`: the same, plus a `coordination.toml` that
@@ -444,6 +444,14 @@ names your account's Planner plan and an `ask` example you can file with
 `~/.inorbit/projects/NAME/` (never in the repository), a Keychain slot reserved by name, and a
 smoke test that runs the project once and reads its heartbeat back, with no token channel, so
 its token ask is refused: the proof the channel is its only credential.
+
+Run it again in the folder it made and it succeeds: a file that is already there is left
+alone (reported as unchanged, or as left alone when you changed it), nothing is written
+twice and nothing of yours is committed for you. A folder that is not that project is
+still refused. The built-in roles go to your account only with the account step, so
+`--no-sync`, or no sign-in, leaves them in `atlas/roles/` with a plain line saying so
+(`iohr sync` imports them later). The template's `rust-version` is the toolchain you have
+installed, and an agent started with `--describe` is told to keep it as the minimum.
 
 At a terminal, `init` is guided: it asks for the name when it is missing (the folder's name is
 the default), offers the templates as a menu (templates that are coming are listed dimmed and
