@@ -19,12 +19,18 @@ use crate::cli::{Global, PanelArgs, PanelAuto, PanelVariant, PanelView};
 use crate::error::Error;
 use crate::output::Out;
 
-mod cells;
-mod input;
-mod model;
-mod proxy;
-mod screen;
 mod workloads;
+// The live panel is a pty proxy (rustix, unix terminals); off unix only the static designs run.
+#[cfg(unix)]
+mod cells;
+#[cfg(unix)]
+mod input;
+#[cfg(unix)]
+mod model;
+#[cfg(unix)]
+mod proxy;
+#[cfg(unix)]
+mod screen;
 
 /// The panel's width in columns, frame included.
 pub(crate) const WIDTH: usize = 34;
@@ -523,6 +529,7 @@ fn draw(variant: PanelVariant, rows: &[String], cols: usize) -> String {
 /// `iohr panel`: the floating band over a shell (or the command after `--`); `--demo` runs it
 /// on stub asks (`--variant float`) or draws one of the static designs.
 pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
+    #[cfg(unix)]
     if std::env::var_os(proxy::LEADER).is_some() {
         return proxy::session_leader(&args.command);
     }
@@ -530,6 +537,12 @@ pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Err
         demo(g, &args);
         return Ok(());
     }
+    live(g, env, args).await
+}
+
+/// The floating panel over a shell, on a pseudo-terminal.
+#[cfg(unix)]
+async fn live(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
     let initial = args.view.map_or(model::View::Rest, |v| match v {
         PanelView::Rest => model::View::Rest,
         PanelView::Menu => model::View::Menu,
@@ -549,6 +562,15 @@ pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Err
         },
     )
     .await
+}
+
+/// Off unix there is no pseudo-terminal to proxy: the live panel is not built, and the static
+/// designs (`--demo --variant rail|accordion|band`) still draw.
+#[cfg(not(unix))]
+async fn live(_g: &Global, _env: Env, _args: PanelArgs) -> Result<(), Error> {
+    Err(Error::Failed(
+        "the floating panel needs a unix terminal; `--demo --variant rail|accordion|band` draws the static designs".into(),
+    ))
 }
 
 /// The static designs, drawn once on stub data (`--demo`).
