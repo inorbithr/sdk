@@ -18,6 +18,11 @@ fn iohr(home: &Path, args: &[&str]) -> Output {
 
 /// The same, run from `cwd`.
 fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
+    iohr_env(home, cwd, &[], args)
+}
+
+/// The same, with `vars` set in the environment as well.
+fn iohr_env(home: &Path, cwd: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
     let path = std::env::var_os("PATH").unwrap_or_default();
     // The run's HOME is a temp folder, so the toolchain manager keeps pointing at the real one
     // (the smoke test runs the language's own test command).
@@ -38,6 +43,7 @@ fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("IOHR_CONFIG_DIR", home.join("config"))
+        .envs(vars.iter().copied())
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -74,8 +80,8 @@ fn create_is_init() {
     assert!(out.status.success(), "{}", text(&out));
     assert!(dir.join("extension.toml").is_file());
     assert!(
-        !dir.join("coordination.toml").exists(),
-        "the built-in default is demo"
+        dir.join("coordination.toml").is_file(),
+        "the built-in default is coordinated (RFC 0211)"
     );
     assert!(
         h.path()
@@ -105,7 +111,7 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     }
     assert!(
         t.lines()
-            .find(|l| l.starts_with("demo"))
+            .find(|l| l.starts_with("coordinated"))
             .unwrap()
             .contains('*')
     );
@@ -127,9 +133,9 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
 }
 
 #[test]
-fn the_flag_beats_the_config_which_beats_demo() {
+fn the_flag_beats_the_config_which_beats_coordinated() {
     let h = tempfile::tempdir().unwrap();
-    config(h.path(), "[project]\ntemplate = \"coordinated\"\n");
+    config(h.path(), "[project]\ntemplate = \"demo\"\n");
 
     // The config's template when there is no flag.
     let first = h.path().join("a");
@@ -145,7 +151,7 @@ fn the_flag_beats_the_config_which_beats_demo() {
         ],
     );
     assert!(out.status.success(), "{}", text(&out));
-    assert!(first.join("coordination.toml").is_file());
+    assert!(!first.join("coordination.toml").exists());
 
     // The flag over the config.
     let second = h.path().join("b");
@@ -156,14 +162,14 @@ fn the_flag_beats_the_config_which_beats_demo() {
             "create",
             "proj-b",
             "--template",
-            "demo",
+            "coordinated",
             "--dir",
             second.to_str().unwrap(),
             "--no-smoke",
         ],
     );
     assert!(out.status.success(), "{}", text(&out));
-    assert!(!second.join("coordination.toml").exists());
+    assert!(second.join("coordination.toml").is_file());
 
     // The listing marks the configured default.
     let out = iohr(h.path(), &["project", "templates", "--json"]);
@@ -175,7 +181,7 @@ fn the_flag_beats_the_config_which_beats_demo() {
         .filter(|t| t["default"] == true)
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(default, ["coordinated"]);
+    assert_eq!(default, ["demo"]);
 }
 
 #[test]
@@ -924,8 +930,8 @@ fn template_list_columns_and_a_piped_run_has_no_footer_or_colour() {
         ["NAME", "STATUS", "ORIGIN", "DEFAULT", "DESCRIPTION"],
         "{t}"
     );
-    let demo = t.lines().find(|l| l.starts_with("demo")).unwrap();
-    assert!(demo.contains(" * "), "the default is marked: {demo}");
+    let def = t.lines().find(|l| l.starts_with("coordinated")).unwrap();
+    assert!(def.contains(" * "), "the default is marked: {def}");
     assert!(!t.contains("(default)"), "{t}");
     assert!(t.contains("user: ~/.inorbit/templates/probe"), "{t}");
     assert!(!t.contains("Next:"), "a pipe gets data only: {t}");
@@ -1044,7 +1050,7 @@ fn show_json_carries_everything() {
 
     let built_in = iohr(
         home.path(),
-        &["project", "template", "show", "demo", "--json"],
+        &["project", "template", "show", "coordinated", "--json"],
     );
     let built_in: serde_json::Value = serde_json::from_slice(&built_in.stdout).unwrap();
     assert_eq!(built_in["origin"]["kind"], "built-in");
@@ -1544,4 +1550,168 @@ fn every_blank_language_passes_the_smoke_test_through_init() {
         );
         assert!(!t.to_lowercase().contains("macos"), "{lang}: {t}");
     }
+}
+
+/// `project create` with the default template, signed out (no token anywhere), as JSON.
+fn made(h: &Path, name: &str, extra: &[&str]) -> (Output, std::path::PathBuf, serde_json::Value) {
+    let dir = h.join(name);
+    let mut args = vec![
+        "project",
+        "create",
+        name,
+        "--dir",
+        dir.to_str().unwrap(),
+        "--no-smoke",
+        "--json",
+    ];
+    args.extend_from_slice(extra);
+    let out = iohr(h, &args);
+    let v = serde_json::from_slice(&out.stdout).unwrap_or(serde_json::Value::Null);
+    (out, dir, v)
+}
+
+fn plan_step(v: &serde_json::Value) -> serde_json::Value {
+    v["steps"]
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["id"] == "plan"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
+}
+
+#[test]
+fn init_signed_out_leaves_the_plan_id_empty_and_says_how_to_set_it() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "plain", &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    // The default template is the coordinated one.
+    let manifest = std::fs::read_to_string(dir.join("coordination.toml")).unwrap();
+    let t: toml::Table = manifest.parse().unwrap();
+    assert_eq!(t["plan"]["id"].as_str(), Some(""));
+    let st = plan_step(&v);
+    assert_eq!(st["state"], "skipped", "{v}");
+    let said = st["said"].as_str().unwrap();
+    assert!(said.starts_with("you are not signed in;"), "{said}");
+    assert!(
+        said.contains("iohr coordinator plan create plain --external-id project:plain"),
+        "{said}"
+    );
+    // The project itself is fine.
+    assert!(dir.join("extension.toml").is_file());
+}
+
+/// A session that exists but cannot be used is not "not signed in": a token for another
+/// audience says so, and init still finishes with the step skipped.
+#[test]
+fn init_with_a_token_for_another_audience_says_why_the_plan_was_skipped() {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
+    let bad = format!(
+        "{}.{}.SIG",
+        enc(serde_json::json!({"alg": "RS256"})),
+        enc(serde_json::json!({"sub": "x", "aud": ["somewhere-else"], "exp": 4_102_444_800_i64}))
+    );
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("aud");
+    let out = iohr_env(
+        h.path(),
+        h.path(),
+        &[("IOHR_TOKEN", bad.as_str())],
+        &[
+            "project",
+            "create",
+            "aud",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--no-smoke",
+            "--json",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let said = plan_step(&v)["said"].as_str().unwrap().to_owned();
+    assert!(
+        said.contains("your session cannot be used") && said.contains("not for the InOrbit API"),
+        "{said}"
+    );
+    assert!(!said.contains("not signed in"), "{said}");
+    assert!(dir.join("extension.toml").is_file());
+}
+
+#[test]
+fn init_no_plan_and_plan_id_and_dry_run() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "none", &["--no-plan"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(plan_step(&v)["state"], "skipped");
+    assert!(
+        plan_step(&v)["said"]
+            .as_str()
+            .unwrap()
+            .contains("--no-plan")
+    );
+    assert!(
+        std::fs::read_to_string(dir.join("coordination.toml"))
+            .unwrap()
+            .contains("id = \"\"")
+    );
+
+    // A named plan is written as given when you are signed out, and said to be unchecked.
+    let (out, dir, v) = made(h.path(), "named", &["--plan-id", "plan_01OWN"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(plan_step(&v)["state"], "done", "{v}");
+    assert!(
+        plan_step(&v)["said"]
+            .as_str()
+            .unwrap()
+            .contains("not checked")
+    );
+    let t: toml::Table = std::fs::read_to_string(dir.join("coordination.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(t["plan"]["id"].as_str(), Some("plan_01OWN"));
+    // The template's own comments survive the edit.
+    assert!(
+        std::fs::read_to_string(dir.join("coordination.toml"))
+            .unwrap()
+            .contains('#')
+    );
+
+    // A plan id that is not a slug is refused, and so are the two flags together.
+    let (out, dir, _) = made(h.path(), "bad", &["--plan-id", "../x"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(!dir.exists(), "nothing is written for a refused id");
+    let (out, _, _) = made(h.path(), "both", &["--no-plan", "--plan-id", "plan_1"]);
+    assert!(!out.status.success());
+
+    // A dry run writes nothing and makes no call: the step is a `would`.
+    let dir = h.path().join("dry");
+    let out = iohr(
+        h.path(),
+        &[
+            "project",
+            "create",
+            "dry",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--dry-run",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!dir.exists());
+    assert!(
+        text(&out).contains("Planner plan"),
+        "the plan step is in the plan: {}",
+        text(&out)
+    );
+}
+
+#[test]
+fn the_demo_template_has_no_plan_step() {
+    let h = tempfile::tempdir().unwrap();
+    let (out, dir, v) = made(h.path(), "plaindemo", &["--template", "demo"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!dir.join("coordination.toml").exists());
+    assert!(plan_step(&v).is_null(), "{v}");
 }

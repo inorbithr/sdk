@@ -1,4 +1,4 @@
 id = "coordinated"
-description = "The demo, wired for coordination: a coordination.toml naming your Planner plan and an ask example"
+description = "The default: the demo, wired to a Planner plan that init makes, and an ask example"
 status = "live"
 extends = "demo"

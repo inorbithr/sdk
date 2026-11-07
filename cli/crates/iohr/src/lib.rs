@@ -33,6 +33,7 @@ mod lock;
 mod output;
 mod paths;
 mod permissions;
+mod planner;
 mod prompt;
 mod runner;
 mod toolchain;
