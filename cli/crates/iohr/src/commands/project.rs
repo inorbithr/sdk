@@ -2095,8 +2095,8 @@ pub(super) fn step_line(st: &project::Step) -> (Mark, String) {
     (mark, said)
 }
 
-/// The drawn ending: what is left to do in one line (`--verbose` lists it), and an outro
-/// with the next commands. Nothing here claims a step that did not happen.
+/// The drawn ending: the next commands, and under `--verbose` what init did not do. Nothing
+/// here claims a step that did not happen.
 fn finish(
     ui: Ui,
     verbose: bool,
@@ -2106,21 +2106,8 @@ fn finish(
     smoke: Option<&Smoke>,
     signed_in: Option<&str>,
 ) {
-    let later: Vec<String> = lines(r, smoke, signed_in)
-        .into_iter()
-        .filter(|l| l.starts_with("not yet:"))
-        .collect();
-    let asked: Vec<String> = lines(r, smoke, signed_in)
-        .into_iter()
-        .filter(|l| l.starts_with("asked:"))
-        .collect();
-    for a in &asked {
-        ui.info(a);
-    }
-    if verbose {
-        ui.note("Comes later", &later.join("\n"));
-    } else if !later.is_empty() {
-        ui.info(&later_line(later.len()));
+    if verbose && let Some(body) = not_built_yet(&lines(r, smoke, signed_in)) {
+        ui.note("Not built yet (RFC 0127.1, RFC 0127.2)", &body);
     }
     let next = next_lines(is_extension(r), runs_in_ext_dev(lang));
     let width = next.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
@@ -2133,15 +2120,21 @@ fn finish(
     ui.outro("Done.");
 }
 
-/// The one line that replaces the list of what waits on an API that does not exist yet.
-fn later_line(n: usize) -> String {
-    let things = if n == 1 { "thing comes" } else { "things come" };
-    format!("{n} {things} later (RFC 0127.x): run with --verbose to list them")
+/// What init does not do, listed only under `--verbose`: the steps that wait on an API that
+/// does not exist yet (`not yet:`) and the editor's own ask (`asked:`), which Desktop makes,
+/// not init. The default output says nothing about them; the outro already says Code asks first.
+fn not_built_yet(lines: &[String]) -> Option<String> {
+    let picked: Vec<&str> = lines
+        .iter()
+        .map(String::as_str)
+        .filter(|l| l.starts_with("not yet:") || l.starts_with("asked:"))
+        .collect();
+    (!picked.is_empty()).then(|| picked.join("\n"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Lang, lang_of_variant, language_choices, later_line, publisher_of};
+    use super::{Lang, lang_of_variant, language_choices, not_built_yet, publisher_of};
     use crate::template::{self, Spec};
     use std::path::Path;
 
@@ -2182,12 +2175,25 @@ mod tests {
     }
 
     #[test]
-    fn the_later_line_counts_and_points_at_verbose() {
+    fn only_steps_init_did_not_do_are_listed_and_only_when_there_are_some() {
+        let lines: Vec<String> = [
+            "done: wrote inorbit.toml",
+            "asked: the editor may open it",
+            "not yet: a Keychain slot for the project's own token",
+            "not yet: its own monitors",
+        ]
+        .map(String::from)
+        .to_vec();
         assert_eq!(
-            later_line(5),
-            "5 things come later (RFC 0127.x): run with --verbose to list them"
+            not_built_yet(&lines).as_deref(),
+            Some(
+                "asked: the editor may open it\nnot yet: a Keychain slot for the project's own token\nnot yet: its own monitors"
+            )
         );
-        assert!(later_line(1).starts_with("1 thing comes later"));
+        assert_eq!(
+            not_built_yet(&["done: wrote inorbit.toml".to_owned()]),
+            None
+        );
     }
 
     #[test]
