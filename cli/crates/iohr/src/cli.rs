@@ -120,6 +120,14 @@ impl Global {
         self.via_role.as_ref().or(self.via_personality.as_ref())
     }
 
+    /// The name of the environment this run targets: `--env`, `IOHR_ENV`, else the default.
+    #[must_use]
+    pub fn environment_name(&self) -> &str {
+        self.env
+            .as_deref()
+            .unwrap_or_else(|| Environments::builtin().default_name())
+    }
+
     /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
     #[must_use]
     pub fn environment(&self) -> &'static Environment {
@@ -182,6 +190,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     (
         "Build",
         &[
+            "init",
             "project",
             "atlas",
             "sync",
@@ -382,6 +391,11 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Create a project: the same as `iohr project init`.
+    ///
+    /// Sets up a project of your own and creates it in InOrbit under your team, for the
+    /// environment `--env` names, linked in `.inorbit/space`. See `iohr project init --help`.
+    Init(Box<InitArgs>),
     /// Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder.
     ///
     /// The atlas: plain files in the project's `atlas/` folder (PRDs, RFCs, ADRs and studies as
@@ -1857,7 +1871,8 @@ pub struct InitArgs {
     /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
     /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
     /// when you are inside a git repository, or a path of your own. It must not exist
-    /// or be empty.
+    /// or be empty, or be the folder this project was made in: run again there, init
+    /// leaves every file that is already there alone and commits nothing.
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
     /// The language, for a template that offers several (the same as `--set
@@ -1872,6 +1887,46 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// Where the project lives in InOrbit: team, who reads it, or none.
+    #[command(flatten)]
+    pub space: InitSpaceArgs,
+}
+
+/// The flags of `project init` that say where the project lives in InOrbit.
+#[derive(Debug, Args)]
+pub struct InitSpaceArgs {
+    /// The team the project lives under in InOrbit: an account's id or slug
+    /// (`iohr accounts list` shows yours). Default: the account you are signed in on; at a
+    /// terminal, with more than one account, init asks. The environment is the global
+    /// `--env` (`production` by default, or `local`).
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` (everyone in it; only you in your own
+    /// account, the default) or `managers` (its owners and admins). At a terminal, init asks.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Keep the project on this machine: do not create it in InOrbit or queue that.
+    #[arg(long)]
+    pub no_sync: bool,
+}
+
+/// The flags of `project sync`.
+#[derive(Debug, Args)]
+pub struct ProjectSyncArgs {
+    /// The project folder. Default: the folder you are in.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// The team the project lives under: an account's id or slug. Default: what init
+    /// queued, else the account you are signed in on.
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` or `managers`. Default: what init
+    /// queued, else `team`.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Say what would be made or linked and change nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1881,10 +1936,19 @@ pub enum ProjectCommand {
     /// Set up a project of your own: sign-in checked, the folder scaffolded from a
     /// template with its manifest, a git repository with one commit, its own state under
     /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
-    /// and a report. Idempotent: a step already done is done again without harm, and a
-    /// step that waits on an API says so instead of pretending. `create` is the same command.
+    /// and a report. Idempotent: run again in the folder it made, it leaves every file that
+    /// is already there as it is and says which, and a step that waits on an API says so
+    /// instead of pretending. `iohr init` and `create` are the same command.
     #[command(visible_alias = "create")]
     Init(Box<InitArgs>),
+    /// Create the project in InOrbit, or link to it, from its folder.
+    ///
+    /// The part of `init` that makes the project in InOrbit: a Decisions space of kind
+    /// project under your team, for the environment `--env` names. Idempotent: it finds the
+    /// space by the project's name and links to it, so a repeat, a retry after init could not
+    /// reach InOrbit, and a teammate who cloned the project all end at the same space. The
+    /// link is written to `.inorbit/space` (production, committed) or `.inorbit/space.local`.
+    Sync(ProjectSyncArgs),
     /// The same as `template list`, kept so older scripts work.
     #[command(hide = true)]
     Templates,

@@ -581,6 +581,14 @@ async fn a_refused_import_never_fails_init_and_says_it_once() {
     let h = tempfile::tempdir().unwrap();
     let dir = h.path().join("work/made");
     let server = MockServer::start().await;
+    // Signed in: the roles go to the account with the account step, so init has an account.
+    Mock::given(method("GET"))
+        .and(path("/v1/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "subject": "ak_tok1", "kind": "client", "scopes": []
+        })))
+        .mount(&server)
+        .await;
     mount_roles(&server, serde_json::json!({ "personalities": [] }), 403).await;
     let o = iohr(
         h.path(),
