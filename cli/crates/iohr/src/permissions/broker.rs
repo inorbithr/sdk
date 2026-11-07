@@ -11,8 +11,9 @@
 //! `PermissionResult`).
 //!
 //! One mechanism for every mode: the rules decide first ([`super::engine::decide`]; the secret
-//! list beats everything), then in `prompt` mode the person is asked at the terminal and in
-//! `rules` mode nobody is. No answer, Ctrl-C, a broken rule file and any failure here are a no.
+//! list beats everything), then in `manual` mode the person is asked at the terminal, in `auto`
+//! mode a command iohr can read is allowed unasked (one it cannot read is refused), and in
+//! `rules` mode nobody is asked. No answer, Ctrl-C, a broken rule file and any failure here are a no.
 //! Every decision goes to `.inorbit/permissions.log` (never output or file contents).
 
 use std::fmt::Write as _;
@@ -35,6 +36,8 @@ use super::store::{self, Files, Kind, Outcome, Scope};
 /// The MCP server's name and its one tool, as Claude Code names them.
 pub(crate) const SERVER: &str = "iohrperm";
 pub(crate) const TOOL: &str = "approve";
+/// What the audit log says refused a command `auto` mode could not read.
+const UNREADABLE: &str = "(command cannot be checked)";
 /// The longest request line read from the socket.
 const LINE_MAX: u64 = 1024 * 1024;
 /// How much of a command is shown on the card, in characters.
@@ -174,6 +177,11 @@ impl Session {
     pub(crate) fn bin(&self) -> &str {
         &self.shared.opts.bin
     }
+
+    /// The mode this broker decides in.
+    pub(crate) fn mode(&self) -> Mode {
+        self.shared.opts.mode
+    }
 }
 
 impl Drop for Session {
@@ -267,7 +275,19 @@ async fn decide_call(sh: &Arc<Shared>, req: &Value) -> Value {
                 ))
             }
         }
-        Verdict::Ask if o.mode == Mode::Prompt => ask(sh, tool, input).await,
+        Verdict::Ask if o.mode == Mode::Manual => ask(sh, tool, input).await,
+        Verdict::Ask if o.mode == Mode::Auto => {
+            if engine::checkable(tool, &input) {
+                audit(files, tool, &input, tool, Outcome::AllowedAuto);
+                json!({"behavior": "allow", "updatedInput": input})
+            } else {
+                audit(files, tool, &input, UNREADABLE, Outcome::DeniedByRule);
+                note_denied(sh, tool, &input, &o.place, true);
+                refuse(
+                    "Auto mode does not run a command iohr cannot check against the deny rules and the secret list (a substitution, a redirect). Write it plainly, or carry on without it.",
+                )
+            }
+        }
         Verdict::Ask => {
             audit(files, tool, &input, tool, Outcome::DeniedNoAnswer);
             note_denied(sh, tool, &input, &o.place, false);

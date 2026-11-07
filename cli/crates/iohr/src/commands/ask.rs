@@ -26,7 +26,7 @@ use crate::permissions::broker::{self, Session};
 use crate::permissions::engine::Place;
 #[cfg(unix)]
 use crate::permissions::store::Files;
-use crate::permissions::{Mode, trust};
+use crate::permissions::{Mode, Words, trust};
 use crate::ui::Ui;
 use crate::{Env, prompt};
 
@@ -98,7 +98,24 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
         .map_err(Error::Usage)?;
     let thinking = ask::choose_thinking(args.thinking.as_deref(), cfg.thinking.as_deref())
         .map_err(Error::Usage)?;
-    let allow_edits = args.allow_edits || cfg.allow_edits.unwrap_or(false);
+    // The streamed run has no permission broker, so the mode maps onto what print mode can do:
+    // `plan` reads and changes nothing, `auto` is `--allow-edits` (edits yes, the shell still
+    // no: commands need the card's broker), and `--allow-edits` alone is as before.
+    let mode = Mode::choose(
+        Words {
+            mode: args.mode.as_deref(),
+            permissions: args.permissions.as_deref(),
+        },
+        Words {
+            mode: cfg.mode.as_deref(),
+            permissions: cfg.permissions.as_deref(),
+        },
+        prompt::interactive(),
+    )
+    .map_err(Error::Usage)?;
+    let plan = mode == Mode::Plan;
+    let allow_edits =
+        !plan && (args.allow_edits || cfg.allow_edits.unwrap_or(false) || mode == Mode::Auto);
     built(via, agent, &args)?;
     let hints = hints::Mode::parse(cfg.hints.as_deref()).map_err(Error::Usage)?;
     let menu_key = MenuKey::parse(cfg.menu_key.as_deref()).map_err(Error::Usage)?;
@@ -111,7 +128,14 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     // goes on from it: the note leads the prompt.
     let (note_root, question) =
         crate::handoff::continue_from(allow_edits && !args.dry_run, question);
-    let command_line = ask::argv(agent, model.as_deref(), allow_edits, &[], None, &question);
+    let command_line = ask::argv(
+        agent,
+        model.as_deref(),
+        (allow_edits, plan),
+        &[],
+        None,
+        &question,
+    );
     if args.dry_run {
         dry_run(via, agent, bin.as_deref(), &command_line, out);
         return Ok(());
@@ -134,7 +158,16 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
                 hints,
                 menu_key,
                 dir: &ctx.dir,
-                permissions: (args.permissions.as_deref(), cfg.permissions.as_deref()),
+                modes: (
+                    Words {
+                        mode: args.mode.as_deref(),
+                        permissions: args.permissions.as_deref(),
+                    },
+                    Words {
+                        mode: cfg.mode.as_deref(),
+                        permissions: cfg.permissions.as_deref(),
+                    },
+                ),
             },
             &question,
             &args.headless,
@@ -410,8 +443,9 @@ struct Chosen<'a> {
     hints: hints::Mode,
     menu_key: MenuKey,
     dir: &'a Path,
-    /// `--permissions` and `[ask] permissions`, as written; settled in [`headless`].
-    permissions: (Option<&'a str>, Option<&'a str>),
+    /// The flag layer (`--mode`, `--permissions`) and `[ask]`, as written; [`Mode::choose`]
+    /// settles them in [`headless`].
+    modes: (Words<'a>, Words<'a>),
 }
 
 /// One capped `claude -p` run (see [`headless`]), shown one way (RFC 0203.1): `--json` is the
@@ -434,15 +468,16 @@ async fn headless(
     } = *chosen;
     let (mut ctx, root) = context_of(h)?;
     let terminal = !out.json && prompt::interactive();
-    trust_home(chosen, &mut ctx, terminal)?;
+    let mode = chosen_mode(chosen, terminal)?;
+    trust_home(chosen, &mut ctx, mode, terminal)?;
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
     // The live ask (PRD 0197): only where the run may read the folder (or in the home folder
     // with the person asked), and only when the person did not turn it off. A person is asked
     // only at a terminal and not for `--json`.
-    let session = permission_session(chosen, &ctx, terminal)?;
-    let read = headless::read_line(&ctx, session.is_some());
+    let session = permission_session(chosen, &ctx, mode)?;
+    let read = headless::read_line(&ctx, mode, session.is_some());
     let label = ask::label(agent);
     let started = Instant::now();
     if out.json || !(h.hook || (fancy && (h.card || stdout_tty))) {
@@ -450,7 +485,14 @@ async fn headless(
         if !out.json {
             Out::note(&label);
         }
-        let ran = run_at((bin, model), &message, started, &ctx, session.as_ref()).await;
+        let ran = run_at(
+            (bin, model),
+            &message,
+            started,
+            &ctx,
+            (session.as_ref(), mode),
+        )
+        .await;
         if !out.json {
             for line in refused_lines(session.as_ref()) {
                 Out::note(&line);
@@ -495,6 +537,7 @@ async fn headless(
             fancy,
             stdout_tty,
             session,
+            mode,
         },
     )
     .await
@@ -512,24 +555,30 @@ struct Prepared {
     stdout_tty: bool,
     /// The live permission ask, when the run may run commands; dropped when the card ends.
     session: Option<Session>,
+    /// The mode this run settled on.
+    mode: Mode,
 }
 
-/// Settles how this run handles calls no rule decides and starts the broker for it. `None`
-/// when the mode is `deny`, when the folder is not readable (the run has no tools then; the
-/// home folder is the exception at a terminal: `Bash` alone, each command asked) or
-/// when this system has no unix sockets. A broker that cannot start is an error the person
-/// sees, never a silent fall back to something more permissive.
+/// The mode this run is in: the flags, then `[ask]`, then the terminal ([`Mode::choose`]).
+fn chosen_mode(chosen: &Chosen<'_>, terminal: bool) -> Result<Mode, Error> {
+    let (flag, config) = chosen.modes;
+    Mode::choose(flag, config, terminal).map_err(Error::Usage)
+}
+
+/// Starts the broker the `mode` calls for. `None` when the mode runs no commands (`plan` and
+/// `deny`), when the folder is not readable (the run has no tools then; the home folder is the
+/// exception in `manual` at a terminal: `Bash` alone, each command asked) or when this system
+/// has no unix sockets. A broker that cannot start is an error the person sees, never a
+/// silent fall back to something more permissive.
 fn permission_session(
     chosen: &Chosen<'_>,
     ctx: &Context,
-    terminal: bool,
+    mode: Mode,
 ) -> Result<Option<Session>, Error> {
-    let (flag, config) = chosen.permissions;
-    let mode = Mode::choose(flag, config, terminal).map_err(Error::Usage)?;
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let shell_at_home =
-        mode == Mode::Prompt && headless::is_home(Path::new(&ctx.cwd), home.as_deref());
-    if mode == Mode::Deny || !(ctx.reads || shell_at_home) {
+        mode == Mode::Manual && headless::is_home(Path::new(&ctx.cwd), home.as_deref());
+    if !mode.runs_commands() || !(ctx.reads || shell_at_home) {
         return Ok(None);
     }
     // No unix sockets, no live ask: off unix `iohr ask` stays read-only (see
@@ -544,13 +593,16 @@ fn permission_session(
 /// every command is asked anyway, Io asks once whether to trust it, the way Claude Code asks
 /// about a folder; a yes gives this run the file tools beside the asked commands (secrets stay
 /// blocked by `permissions::secrets`). A yes for always is kept in `trusted.toml` in the
-/// user's iohr folder. No terminal, `--json` or a mode other than asking: no question, no reads.
-fn trust_home(chosen: &Chosen<'_>, ctx: &mut Context, terminal: bool) -> Result<(), Error> {
-    if ctx.reads || !terminal {
-        return Ok(());
-    }
-    let (flag, config) = chosen.permissions;
-    if Mode::choose(flag, config, terminal).map_err(Error::Usage)? != Mode::Prompt {
+/// user's iohr folder. No terminal, `--json` or a mode that runs nothing for the answer's sake
+/// (`plan`, `deny`, `rules`): no question, no reads. `auto` asks it too: it is a question
+/// about the folder, not about a command.
+fn trust_home(
+    chosen: &Chosen<'_>,
+    ctx: &mut Context,
+    mode: Mode,
+    terminal: bool,
+) -> Result<(), Error> {
+    if ctx.reads || !terminal || !matches!(mode, Mode::Manual | Mode::Auto) {
         return Ok(());
     }
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
@@ -599,7 +651,7 @@ async fn run_at(
     message: &str,
     started: Instant,
     ctx: &Context,
-    session: Option<&Session>,
+    (session, mode): (Option<&Session>, Mode),
 ) -> Result<(String, u64), String> {
     let folder = run_dir(ctx, session);
     headless::run(
@@ -610,6 +662,7 @@ async fn run_at(
         folder.as_deref(),
         ctx.reads,
         session,
+        mode == Mode::Plan,
     )
     .await
 }
@@ -694,9 +747,16 @@ async fn card_run(
         fancy,
         stdout_tty,
         session,
+        mode,
     } = prepared;
     let look = CardLook::detect(fancy);
-    let run = run_at((bin, model), &message, started, &ctx, session.as_ref());
+    let run = run_at(
+        (bin, model),
+        &message,
+        started,
+        &ctx,
+        (session.as_ref(), mode),
+    );
     // The asks waiting are looked up while the model thinks, so they add no time.
     let (done, waiting) = if look.fancy {
         let (done, waiting) =
@@ -715,6 +775,7 @@ async fn card_run(
     let shown = Card {
         agent: agent.display(),
         model,
+        mode: mode.shown(),
         elapsed: None,
         follows: h.prior_question.as_deref(),
         read: &read,
@@ -747,7 +808,7 @@ async fn card_run(
                     &mut ctx,
                     (root, &questions),
                     look,
-                    session.as_ref(),
+                    (session.as_ref(), mode),
                 )
                 .await?
             {
@@ -781,7 +842,7 @@ async fn ask_back(
     ctx: &mut Context,
     (root, questions): (&Path, &[askback::Question]),
     look: CardLook,
-    session: Option<&Session>,
+    how: (Option<&Session>, Mode),
 ) -> Result<Option<(String, u64)>, Error> {
     let Some(answers) = askback::ask_person(questions) else {
         return Ok(None);
@@ -793,7 +854,7 @@ async fn ask_back(
     ctx.refresh = true;
     let again = headless::assemble(question, ctx).map_err(Error::Usage)?;
     let started = Instant::now();
-    let run = run_at((chosen.bin, chosen.model), &again, started, ctx, session);
+    let run = run_at((chosen.bin, chosen.model), &again, started, ctx, how);
     match spin_while(run, chosen.agent, look, started).await? {
         // The second answer asks nothing: a question in it is dropped.
         Ok((raw, ms)) => Ok(Some((askback::split(&raw).0, ms))),

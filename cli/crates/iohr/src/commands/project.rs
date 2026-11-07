@@ -1398,7 +1398,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 args: ask::argv(
                     *ag,
                     model.as_deref(),
-                    true,
+                    (true, false),
                     &allow,
                     Some(max_turns),
                     &prompt,
