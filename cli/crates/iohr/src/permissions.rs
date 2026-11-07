@@ -47,6 +47,8 @@ pub(crate) mod broker {
     /// A call the rules refused, which only a running broker records.
     pub(crate) enum Denied {}
 
+    use super::Settled;
+
     impl Session {
         pub(crate) fn args(&self) -> Vec<String> {
             match *self {}
@@ -63,6 +65,9 @@ pub(crate) mod broker {
         pub(crate) fn mode(&self) -> super::Mode {
             match *self {}
         }
+        pub(crate) fn settled(&self) -> Vec<Settled> {
+            match *self {}
+        }
     }
 
     pub(crate) fn denied_lines(_: &[Denied], _: &str) -> Vec<String> {
@@ -71,6 +76,96 @@ pub(crate) mod broker {
 }
 
 use std::fmt;
+
+use rule::Rule;
+
+/// What the person chose for one ask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Grant {
+    /// Allowed this time; nothing saved.
+    Once,
+    /// Allowed, and a rule saved in the project file.
+    Always,
+    /// Not allowed.
+    No,
+}
+
+/// The result of one ask the person answered, kept so the answer card it led to can show it
+/// (the ask is answered while the model still runs; the card is drawn after). Plain words
+/// first; the rule and the file are detail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Settled {
+    pub(crate) grant: Grant,
+    /// What was allowed or refused, short (`ls`, `git status`, `read /tmp/x`).
+    pub(crate) subject: String,
+    /// The rules saved, as written in the rule file; empty unless `grant` is `Always`.
+    pub(crate) rules: Vec<String>,
+    /// The project rule file, relative to the folder; empty unless `grant` is `Always`.
+    pub(crate) file: String,
+    /// Why "always" could not be saved, when it could not (the grant is then `Once`).
+    pub(crate) not_saved: Option<String>,
+}
+
+impl Settled {
+    /// The one status line, in plain words.
+    pub(crate) fn sentence(&self) -> String {
+        let s = &self.subject;
+        match (self.grant, &self.not_saved) {
+            (Grant::Always, _) => format!("{s} allowed in this project from now on"),
+            (Grant::Once, Some(why)) => {
+                format!("{s} allowed this time (could not save the rule: {why})")
+            }
+            (Grant::Once, None) => format!("{s} allowed this time"),
+            (Grant::No, _) => format!("{s} not allowed"),
+        }
+    }
+
+    /// The rule and the file, for the dim line under the sentence; only for a saved rule.
+    pub(crate) fn detail(&self) -> Option<String> {
+        (self.grant == Grant::Always && !self.rules.is_empty())
+            .then(|| format!("{} \u{b7} {}", self.rules.join(", "), self.file))
+    }
+
+    /// The command that takes a saved rule back, for output with no action row.
+    pub(crate) fn undo_command(&self, bin: &str) -> Option<String> {
+        (self.grant == Grant::Always && !self.rules.is_empty()).then(|| {
+            self.rules
+                .iter()
+                .map(|r| format!("{bin} permissions remove '{r}'"))
+                .collect::<Vec<_>>()
+                .join(" && ")
+        })
+    }
+
+    /// The structured form `--json` carries, never the sentence.
+    pub(crate) fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "grant": match self.grant {
+                Grant::Once => "once",
+                Grant::Always => "always",
+                Grant::No => "no",
+            },
+            "subject": self.subject,
+            "rules": self.rules,
+            "file": (!self.file.is_empty()).then_some(&self.file),
+            "saved": self.grant == Grant::Always,
+            "not_saved": self.not_saved,
+        })
+    }
+}
+
+/// What a saved rule lets through, in a few words: a command prefix rule (`Bash(ls:*)`) is
+/// the command (`ls`), several are joined, any other rule is written as it is.
+pub(crate) fn rules_subject(rules: &[Rule]) -> String {
+    rules
+        .iter()
+        .map(|r| match (r.tool(), r.spec()) {
+            ("Bash", Some(spec)) => spec.strip_suffix(":*").unwrap_or(spec).to_owned(),
+            _ => r.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// How `iohr ask` handles a tool call no rule decides (PRD 0197). The first three are the modes
 /// a person switches between (`--mode`, shift+tab in the `?` hook, [`CYCLE`]); `deny` and `rules`
@@ -210,6 +305,46 @@ impl fmt::Display for Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn settled(grant: Grant, rules: &[&str], not_saved: Option<&str>) -> Settled {
+        Settled {
+            grant,
+            subject: "ls".into(),
+            rules: rules.iter().map(|r| (*r).to_owned()).collect(),
+            file: ".inorbit/permissions.toml".into(),
+            not_saved: not_saved.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_result_is_a_plain_sentence_with_the_rule_and_the_file_apart() {
+        let a = settled(Grant::Always, &["Bash(ls:*)"], None);
+        assert_eq!(a.sentence(), "ls allowed in this project from now on");
+        assert_eq!(
+            a.detail().as_deref(),
+            Some("Bash(ls:*) \u{b7} .inorbit/permissions.toml")
+        );
+        assert_eq!(
+            a.undo_command("iohr").as_deref(),
+            Some("iohr permissions remove 'Bash(ls:*)'")
+        );
+        assert_eq!(a.json()["grant"], "always");
+        assert_eq!(a.json()["rules"][0], "Bash(ls:*)");
+        let once = settled(Grant::Once, &[], None);
+        assert_eq!(once.sentence(), "ls allowed this time");
+        assert!(once.detail().is_none() && once.undo_command("iohr").is_none());
+        let unsaved = settled(Grant::Once, &[], Some("read-only folder"));
+        assert!(
+            unsaved
+                .sentence()
+                .contains("could not save the rule: read-only folder")
+        );
+        assert_eq!(settled(Grant::No, &[], None).sentence(), "ls not allowed");
+        let mut no = settled(Grant::No, &[], None);
+        no.file.clear();
+        assert!(no.json()["file"].is_null());
+        assert_eq!(no.json()["saved"], false);
+    }
 
     fn flag<'a>(mode: Option<&'a str>, permissions: Option<&'a str>) -> Words<'a> {
         Words { mode, permissions }

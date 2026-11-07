@@ -11,7 +11,7 @@ use crate::actions::{self, MenuKey};
 use crate::ask::stream::{self, Look, Renderer};
 use crate::ask::{self, Agent, Via};
 use crate::askback;
-use crate::card::{self, Body, Card, Look as CardLook};
+use crate::card::{self, Body, Card, Look as CardLook, Status};
 use crate::cli::{AskArgs, Global, HeadlessArgs};
 use crate::commands::asks;
 use crate::context::Ctx;
@@ -25,8 +25,8 @@ use crate::permissions::broker::{self, Session};
 #[cfg(unix)]
 use crate::permissions::engine::Place;
 #[cfg(unix)]
-use crate::permissions::store::Files;
-use crate::permissions::{Mode, Words, trust};
+use crate::permissions::store::{self, Files};
+use crate::permissions::{Grant, Mode, Settled, Words, trust};
 use crate::ui::Ui;
 use crate::{Env, prompt};
 
@@ -87,7 +87,7 @@ fn built(via: Via, agent: Agent, args: &AskArgs) -> Result<(), Error> {
 
 pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
-        return menu(&args);
+        return menu(g, &args);
     }
     let ctx = Ctx::load(g)?;
     let cfg = ctx.config.ask;
@@ -199,12 +199,24 @@ fn ended(code: i32) -> Result<(), Error> {
 }
 
 /// `--menu`: the menu under a card asks no model and needs no sign-in or agent.
-fn menu(args: &AskArgs) -> Result<(), Error> {
+fn menu(g: &Global, args: &AskArgs) -> Result<(), Error> {
     let cwd = args.headless.cwd.as_deref().map_or_else(
         || std::env::current_dir().unwrap_or_default(),
         std::path::PathBuf::from,
     );
-    actions::menu(args.command.as_deref(), args.link.as_deref(), &cwd)
+    // Undo takes back only what the project file still holds, so the row never promises more.
+    let files = Files::find(&cwd, &Ctx::load(g)?.dir);
+    let undo: Vec<String> = args
+        .undo
+        .iter()
+        .filter(|r| !r.is_empty())
+        .cloned()
+        .collect();
+    let undo = actions::Takeback {
+        rules: store::saved_project_allows(&files, &undo),
+        files: &files,
+    };
+    actions::menu(args.command.as_deref(), args.link.as_deref(), &cwd, &undo)
 }
 
 /// `--dry-run`: the exact command line, one object under `--json`; nothing is started.
@@ -473,6 +485,9 @@ async fn headless(
         )
         .await;
         if !out.json {
+            for line in settled_lines(session.as_ref(), 0) {
+                Out::note(&line);
+            }
             for line in refused_lines(session.as_ref()) {
                 Out::note(&line);
             }
@@ -490,6 +505,10 @@ async fn headless(
                 model: model.to_owned(),
                 exit_code: 0,
                 duration_ms,
+                permissions: settled_of(session.as_ref(), 0)
+                    .iter()
+                    .map(Settled::json)
+                    .collect(),
             });
         } else {
             Out::raw(format!("{text}\n").as_bytes());
@@ -684,6 +703,67 @@ fn refused_lines(session: Option<&Session>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// What the person answered at the terminal, from the `from`th answer on (a card drawn after
+/// an earlier one shows only what is new).
+fn settled_of(session: Option<&Session>, from: usize) -> Vec<Settled> {
+    session
+        .map(|s| s.settled().into_iter().skip(from).collect())
+        .unwrap_or_default()
+}
+
+/// The rules the person saved with "always" in this run, each once: what the Undo action
+/// takes back.
+fn saved_rules(session: Option<&Session>) -> Vec<String> {
+    let mut rules: Vec<String> = Vec::new();
+    for r in settled_of(session, 0)
+        .into_iter()
+        .filter(|s| s.grant == Grant::Always)
+        .flat_map(|s| s.rules)
+    {
+        if !rules.contains(&r) {
+            rules.push(r);
+        }
+    }
+    rules
+}
+
+/// The permission results as notes, for output with no card to hold them (a plain look, a
+/// pipe): the sentence, then for a saved rule the rule, the file and the command that undoes
+/// it, because there is no action row there to carry an Undo.
+fn settled_lines(session: Option<&Session>, from: usize) -> Vec<String> {
+    let bin = session.map_or("iohr", Session::bin);
+    settled_of(session, from)
+        .iter()
+        .map(|s| {
+            let mut line = s.sentence();
+            if let (Some(detail), Some(undo)) = (s.detail(), s.undo_command(bin)) {
+                line = format!("{line} ({detail}). Undo: {undo}");
+            }
+            line
+        })
+        .collect()
+}
+
+/// The permission results as the card's status rows. Where the hook binds the action row,
+/// Undo is there; without it the row's detail names the command that undoes the rule.
+fn statuses(session: Option<&Session>, from: usize, hook: bool) -> Vec<Status> {
+    let bin = session.map_or("iohr", Session::bin);
+    settled_of(session, from)
+        .iter()
+        .map(|s| {
+            let detail = match (s.detail(), s.undo_command(bin)) {
+                (Some(d), Some(undo)) if !hook => Some(format!("{d} \u{b7} undo: {undo}")),
+                (d, _) => d,
+            };
+            Status {
+                text: s.sentence(),
+                detail,
+                refused: s.grant == Grant::No,
+            }
+        })
+        .collect()
+}
+
 /// A failed run is a card too; the exit code is the agent's.
 fn draw_failed(
     shown: &Card<'_>,
@@ -706,6 +786,12 @@ fn closing_notes(
     waiting: Option<&asks::Waiting>,
     (h, menu_key, look, width): (&HeadlessArgs, MenuKey, CardLook, usize),
 ) {
+    // A drawn card holds the permission results itself; a plain look has none to hold them.
+    if !look.fancy {
+        for line in settled_lines(session, 0) {
+            Out::note(&line);
+        }
+    }
     for line in refused_lines(session) {
         Out::note(&line);
     }
@@ -714,11 +800,12 @@ fn closing_notes(
     }
 }
 
-/// The line the shell hook reads back: the answer's one command and link.
-fn record_hook(text: &str, cwd: &Path) {
+/// The line the shell hook reads back: the answer's one command and link, and the rules the
+/// person saved in this run (what Undo takes back).
+fn record_hook(text: &str, cwd: &Path, undo: &[String]) {
     let command = card::command_of(text);
     let link = card::link_of(text, cwd);
-    Out::raw(actions::record(text, command.as_deref(), link.as_deref()).as_bytes());
+    Out::raw(actions::record(text, command.as_deref(), link.as_deref(), undo).as_bytes());
 }
 
 /// The card: the model runs under a spinner while the asks waiting are counted, the answer is
@@ -770,6 +857,11 @@ async fn card_run(
     } else {
         hints::Footer::Full
     };
+    // The permission results of the run so far, drawn in the card; a second card (after the
+    // model's question is answered) shows only what came after.
+    let seen = settled_of(session.as_ref(), 0).len();
+    let status = statuses(session.as_ref(), 0, h.hook);
+    let undo = saved_rules(session.as_ref());
     let shown = Card {
         agent: agent.display(),
         model,
@@ -785,6 +877,7 @@ async fn card_run(
             hints::Footer::Full => None,
         },
         row: None,
+        status: &status,
         body: Body::Failed(""),
     };
     let width = card::stderr_width();
@@ -793,7 +886,8 @@ async fn card_run(
         Ok((raw, duration_ms)) => {
             let (mut text, questions) = askback::split(raw);
             let took = Duration::from_millis(*duration_ms);
-            draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
+            let ctx_of = (cwd.as_path(), !undo.is_empty());
+            draw_answer(&shown, &text, took, (h, look, menu_key), ctx_of, width);
             // The model asked back: ask the person, keep the answer, and answer once more.
             let can_ask = look.fancy
                 && prompt::interactive()
@@ -804,8 +898,9 @@ async fn card_run(
                     ask_back(chosen, question, &mut ctx, (root, &questions), look, how).await?
             {
                 text = again;
+                let how = (seen, h, look, menu_key);
                 let took = Duration::from_millis(ms);
-                draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
+                draw_again(&shown, session.as_ref(), how, (&text, took), (&cwd, width));
             }
             closing_notes(
                 session.as_ref(),
@@ -813,7 +908,7 @@ async fn card_run(
                 (h, menu_key, look, width),
             );
             if h.hook {
-                record_hook(&text, &cwd);
+                record_hook(&text, &cwd, &saved_rules(session.as_ref()));
             } else if !stdout_tty {
                 Out::raw(format!("{text}\n").as_bytes());
             }
@@ -821,6 +916,24 @@ async fn card_run(
         }
         Err(why) => Err(draw_failed(&shown, why, started, (width, look))),
     }
+}
+
+/// The card once more after the model's question was answered: the same card with only the
+/// permission results that came since (`seen` is how many the first card showed).
+fn draw_again(
+    shown: &Card<'_>,
+    session: Option<&Session>,
+    (seen, h, look, menu_key): (usize, &HeadlessArgs, CardLook, MenuKey),
+    (text, took): (&str, Duration),
+    (cwd, width): (&Path, usize),
+) {
+    let fresh = statuses(session, seen, h.hook);
+    let again = Card {
+        status: &fresh,
+        ..shown.clone()
+    };
+    let undo = !saved_rules(session).is_empty();
+    draw_answer(&again, text, took, (h, look, menu_key), (cwd, undo), width);
 }
 
 /// Puts the model's questions to the person, keeps what they answer (iohr writes it, the
@@ -856,20 +969,21 @@ async fn ask_back(
     }
 }
 
-/// Draws one answer card: the row under it only when the hook is there to bind its key.
+/// Draws one answer card: the row under it only when the hook is there to bind its key
+/// (`undo` adds the action that takes back a rule saved in this run).
 fn draw_answer(
     shown: &Card<'_>,
     text: &str,
     took: Duration,
     (h, look, menu_key): (&HeadlessArgs, CardLook, MenuKey),
-    cwd: &Path,
+    (cwd, undo): (&Path, bool),
     width: usize,
 ) {
     let command = card::command_of(text);
     let link = card::link_of(text, cwd);
     // The row promises a key that only the hook binds, so only the hook draws it.
     let row = (h.hook && look.fancy)
-        .then(|| actions::row(menu_key, command.is_some(), link.is_some()))
+        .then(|| actions::row(menu_key, command.is_some(), link.is_some(), undo))
         .flatten();
     let card = Card {
         elapsed: Some(took),

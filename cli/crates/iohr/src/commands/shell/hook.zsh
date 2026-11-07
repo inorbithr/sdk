@@ -24,7 +24,7 @@
 # refreshes it (at most once in 30 seconds), and the next prompt shows the new number. An
 # RPROMPT you set yourself is left alone; INORBIT_ASKS_PROMPT=0 turns the segment off.
 if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
-  typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_live
+  typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_live
   typeset -gA _iohr_card_prev
   # The keys that open the menu, from `[ask] menu_key` (none when it is off).
   typeset -ga _iohr_card_keys=(__IOHR_MENU_KEYS__)
@@ -59,7 +59,7 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     fi
     local out
     zle -I
-    out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" </dev/tty 2>/dev/tty)
+    out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" --undo="$_iohr_ask_undo" </dev/tty 2>/dev/tty)
     if [[ -n $out ]]; then
       BUFFER=$out
       CURSOR=${#BUFFER}
@@ -111,18 +111,21 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     [[ -n $_iohr_ask_mode ]] && a+=(--mode "$_iohr_ask_mode")
     [[ -n $last ]] && a+=(--last-command "${last[1,1024]}" --exit-code "$rc")
     (( follow )) && [[ -n $_iohr_ask_pq ]] && a+=(--prior-question "$_iohr_ask_pq" --prior-answer "$_iohr_ask_pa")
-    local rec rs=$'\x1e' rest
+    local rec rs=$'\x1e' rest tail
     # The card goes to the terminal on stderr. The record on stdout is the answer (kept for
-    # `??`), the command it suggests and the link it names, separated by a 0x1e character.
+    # `??`), the command it suggests, the link it names and the permission rules this run saved
+    # (what Undo takes back), separated by a 0x1e character.
     if rec=$("${a[@]}" -- "$q"); then
       rest=${rec#*$rs}
       _iohr_ask_pq=$q
       _iohr_ask_pa=${rec%%$rs*}
       _iohr_ask_cmd=${rest%%$rs*}
-      _iohr_ask_link=${rest#*$rs}
+      tail=${rest#*$rs}
+      _iohr_ask_link=${tail%%$rs*}
+      if [[ $tail == *$rs* ]]; then _iohr_ask_undo=${tail#*$rs}; else _iohr_ask_undo=; fi
       _iohr_ask_live=1
     else
-      _iohr_ask_pq= _iohr_ask_pa= _iohr_ask_cmd= _iohr_ask_link= _iohr_ask_live=
+      _iohr_ask_pq= _iohr_ask_pa= _iohr_ask_cmd= _iohr_ask_link= _iohr_ask_undo= _iohr_ask_live=
     fi
   }
 

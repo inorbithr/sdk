@@ -1433,8 +1433,8 @@ pub struct AskArgs {
     pub question: Vec<String>,
     #[command(flatten)]
     pub headless: HeadlessArgs,
-    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain
-    /// or Open with a letter or the arrows. It asks no model, runs nothing, and prints the one
+    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain,
+    /// Open or Undo with a letter or the arrows. It asks no model, runs nothing, and prints the one
     /// line to put on the prompt (or nothing) on stdout.
     #[arg(long, conflicts_with_all = ["interactive", "headless", "card", "hook"])]
     pub menu: bool,
@@ -1444,6 +1444,15 @@ pub struct AskArgs {
     /// With `--menu`: the file (relative to `--cwd`) or `https://` link the answer named.
     #[arg(long, value_name = "LINK", requires = "menu")]
     pub link: Option<String>,
+    /// With `--menu`: the permission rules this answer's run saved, separated by the unit
+    /// separator (U+001F). Undo takes back the ones the project file still holds.
+    #[arg(
+        long,
+        value_name = "RULES",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub undo: Vec<String>,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,

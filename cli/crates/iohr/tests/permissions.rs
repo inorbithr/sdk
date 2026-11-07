@@ -524,26 +524,35 @@ fn y_runs_it_n_refuses_it_and_a_saves_the_narrowest_rule_so_the_next_run_does_no
         "{screen}"
     );
     assert!(screen.contains("y once"), "{screen}");
-    assert!(screen.contains("Allowed once"), "{screen}");
+    assert!(screen.contains("echo hello allowed this time"), "{screen}");
     assert!(screen.contains("allow:hello"), "{screen}");
     assert!(!r.project_file().exists());
     // n: it does not run.
     r.calls(&json!([bash("touch made.txt")]));
     let (screen, ok) = r.on_terminal(&args, &["n"]);
     assert!(ok, "{screen}");
-    assert!(screen.contains("Not allowed"), "{screen}");
+    assert!(screen.contains("touch made.txt not allowed"), "{screen}");
     assert!(screen.contains("deny:"), "{screen}");
     assert!(!r.work().join("made.txt").exists());
     // An unknown key keeps waiting; Enter is no.
     let (screen, _) = r.on_terminal(&args, &["x\r"]);
-    assert!(screen.contains("Not allowed"), "{screen}");
+    assert!(screen.contains("touch made.txt not allowed"), "{screen}");
     assert!(!r.work().join("made.txt").exists());
     // a: the rule is the narrowest, never a blanket, and the next run goes without asking.
     r.calls(&json!([bash("echo again")]));
     let (screen, ok) = r.on_terminal(&args, &["a"]);
     assert!(ok, "{screen}");
-    assert!(screen.contains("Allowed always: Bash(echo:*)"), "{screen}");
-    assert!(screen.contains("permissions remove"), "{screen}");
+    // With no card to carry an Undo action the plain note names the command that does it.
+    assert!(
+        screen.contains("echo allowed in this project from now on"),
+        "{screen}"
+    );
+    assert!(screen.contains("Bash(echo:*)"), "{screen}");
+    assert!(
+        screen.contains("permissions remove 'Bash(echo:*)'"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Allowed always"), "{screen}");
     let file = std::fs::read_to_string(r.project_file()).unwrap();
     assert!(
         file.contains("Bash(echo:*)") && !file.contains("Bash(*)"),
@@ -563,6 +572,41 @@ fn y_runs_it_n_refuses_it_and_a_saves_the_narrowest_rule_so_the_next_run_does_no
 }
 
 #[test]
+fn undo_in_the_cards_menu_takes_the_saved_rule_back_through_the_one_remover() {
+    let r = rig!();
+    let ask = [
+        "ask",
+        "--headless",
+        "--card",
+        "--permissions",
+        "prompt",
+        "q",
+    ];
+    r.calls(&json!([bash("echo again")]));
+    let (screen, ok) = r.on_terminal(&ask, &["a"]);
+    assert!(ok, "{screen}");
+    let file = std::fs::read_to_string(r.project_file()).unwrap();
+    assert!(file.contains("Bash(echo:*)"), "{file}");
+    // The hook hands the rule to the menu; `u` is Undo and the rule is gone from the file.
+    let work = r.work().display().to_string();
+    let menu = ["ask", "--menu", "--cwd", &work, "--undo", "Bash(echo:*)"];
+    let term = [("TERM", "xterm-256color")];
+    let (screen, _) = r.on_terminal_with(&menu, &["u"], &term, "What next?");
+    let screen = console::strip_ansi_codes(&screen).into_owned();
+    assert!(screen.contains("Undo"), "{screen}");
+    assert!(
+        screen.contains("echo is no longer allowed in this project"),
+        "{screen}"
+    );
+    let file = std::fs::read_to_string(r.project_file()).unwrap();
+    assert!(!file.contains("Bash(echo:*)"), "{file}");
+    // The next run asks again: the rule really is gone, not hidden.
+    r.calls(&json!([bash("echo again")]));
+    let (screen, _) = r.on_terminal(&ask, &["n"]);
+    assert!(screen.contains("wants to run"), "{screen}");
+}
+
+#[test]
 fn on_a_colour_terminal_the_ask_is_an_io_card_that_starts_on_no() {
     let r = rig!();
     let args = [
@@ -574,13 +618,15 @@ fn on_a_colour_terminal_the_ask_is_an_io_card_that_starts_on_no() {
         "q",
     ];
     let term = [("TERM", "xterm-256color")];
-    let run = |keys: &[&str]| r.on_terminal_with(&args, keys, &term, "AI request");
+    // The colours are the card's; what a person reads is the text between them.
+    let run = |keys: &[&str]| {
+        let (screen, ok) = r.on_terminal_with(&args, keys, &term, "AI request");
+        (console::strip_ansi_codes(&screen).into_owned(), ok)
+    };
     // The card: the AI badge, who asks and what, the folder and the numbered rows.
     r.calls(&json!([bash("touch made.txt")]));
     let (screen, ok) = run(&["\r"]);
     assert!(ok, "{screen}");
-    // The colours are the card's; what a person reads is the text between them.
-    let screen = console::strip_ansi_codes(&screen).into_owned();
     for want in [
         "AI request",
         "Io (AI) wants to run",
@@ -593,27 +639,53 @@ fn on_a_colour_terminal_the_ask_is_an_io_card_that_starts_on_no() {
         assert!(screen.contains(want), "{want}: {screen}");
     }
     // Enter on the card is No: a stray Enter never allows anything.
-    assert!(screen.contains("Not allowed"), "{screen}");
+    // The answer card carries the result as a quiet status row inside it, not a loose line.
+    assert!(
+        screen.contains("\u{2717} touch made.txt not allowed"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Not allowed"), "{screen}");
     assert!(!r.work().join("made.txt").exists());
     // 1 is Allow once; nothing is saved.
     r.calls(&json!([bash("echo hello")]));
     let (screen, ok) = run(&["1"]);
     assert!(ok, "{screen}");
     assert!(
-        screen.contains("Allowed once") && screen.contains("allow:hello"),
+        screen.contains("\u{2713} echo hello allowed this time") && screen.contains("allow:hello"),
         "{screen}"
     );
     assert!(!r.project_file().exists());
     // y, n and Esc-free letters still answer.
     r.calls(&json!([bash("touch made.txt")]));
     let (screen, _) = run(&["n"]);
-    assert!(screen.contains("Not allowed"), "{screen}");
+    assert!(
+        screen.contains("\u{2717} touch made.txt not allowed"),
+        "{screen}"
+    );
     assert!(!r.work().join("made.txt").exists());
     // Up from No lands on Always; Enter takes it, and the narrowest rule is saved.
     r.calls(&json!([bash("echo again")]));
     let (screen, ok) = run(&["\x1b[A\r"]);
     assert!(ok, "{screen}");
-    assert!(screen.contains("Allowed always: Bash(echo:*)"), "{screen}");
+    // In the card: the plain sentence, then the rule and the file dimmed under it. Nothing
+    // of it is loose above the card, and the undo is the card's own action.
+    assert!(
+        screen.contains("\u{2713} echo allowed in this project from now on"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Bash(echo:*) \u{b7} .inorbit/permissions.toml"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Allowed always"), "{screen}");
+    let card_at = screen.find("AI answer").unwrap_or_default();
+    assert!(
+        screen
+            .find("allowed in this project from now on")
+            .unwrap_or_default()
+            > card_at,
+        "{screen}"
+    );
     assert!(r.project_file().exists());
     // With a colour-less terminal the ask is the one plain line, as before.
     r.calls(&json!([bash("printf plain")]));

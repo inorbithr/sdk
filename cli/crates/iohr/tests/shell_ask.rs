@@ -111,6 +111,7 @@ fn json_is_the_documented_shape_and_never_the_question() {
             "exit_code",
             "label",
             "model",
+            "permissions",
             "questions",
             "via"
         ]
@@ -453,7 +454,7 @@ fn the_answer_is_printed_once_with_a_model_from_the_environment() {
 // Off a terminal (a pipe, or NO_COLOR) the hook's card is plain: no escape, no row under it,
 // and the record on stdout is the answer, the command and the link, in that order.
 #[test]
-fn the_hook_record_is_three_fields_and_the_plain_card_has_no_row() {
+fn the_hook_record_is_four_fields_and_the_plain_card_has_no_row() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
     std::fs::write(r.work().join("notes.md"), "x").unwrap();
@@ -475,13 +476,15 @@ fn the_hook_record_is_three_fields_and_the_plain_card_has_no_row() {
         assert!(out.status.success(), "{}", text(&out));
         let stdout = String::from_utf8(out.stdout.clone()).unwrap();
         let f: Vec<&str> = stdout.split('\u{1e}').collect();
-        assert_eq!(f.len(), 3, "{stdout:?}");
+        assert_eq!(f.len(), 4, "{stdout:?}");
         assert!(
             f[0].contains("run:") && f[0].contains("git status"),
             "{f:?}"
         );
         assert_eq!(f[1], "git status");
         assert_eq!(f[2], "notes.md");
+        // Nobody was asked, so no rule was saved and Undo has nothing to take back.
+        assert_eq!(f[3], "");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
             !err.contains('\u{1b}') && !err.contains("to choose"),
