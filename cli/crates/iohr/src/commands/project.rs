@@ -20,6 +20,7 @@ use super::project_template;
 use crate::project::folder::{self, Kind as Place, Proposal, Where};
 use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
+use crate::roles::runtime;
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
 use crate::toolchain::{self, Lang, State};
 use crate::ui::{Choice, Mark, Nav, Ui, cancel};
@@ -528,6 +529,8 @@ struct AgentRun {
     /// The arguments of the print-mode run ([`ask::argv`]), the prompt last.
     args: Vec<String>,
     model: Option<String>,
+    /// The Role it builds in (`--role`), as `--json` names it.
+    role: Option<serde_json::Value>,
     max_turns: u32,
     timeout: Duration,
     thinking: Thinking,
@@ -708,6 +711,25 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         });
     }
 
+    // The Role, before anything is made: a name that is nowhere ends the run here (a dry run
+    // asks nobody, so it looks in the project and the built-in catalogue only).
+    let role = match a.role.as_deref() {
+        Some(name) => Some(
+            runtime::resolve(
+                g,
+                env,
+                runtime::Lookup {
+                    name,
+                    job: None,
+                    root: crate::memory::find_root(&std::env::current_dir().unwrap_or_default())
+                        .as_deref(),
+                    online: !dry,
+                },
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let here = Where::here(cfg.project.root.clone());
     let cx = Exec {
         g,
@@ -726,6 +748,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             .or(cfg.project.agent_timeout)
             .unwrap_or(AGENT_SECONDS),
         ask_thinking: cfg.ask.thinking.clone(),
+        role,
         out,
     };
     let mut wiz = Wizard {
@@ -1211,6 +1234,8 @@ struct Exec<'a> {
     agent_turns: u32,
     agent_timeout: u64,
     ask_thinking: Option<String>,
+    /// The Role the agent builds in (`--role`, RFC 0211), found before the plan starts.
+    role: Option<runtime::Applied>,
     out: Out,
 }
 
@@ -1425,8 +1450,12 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             // init's own bounds: nothing the agent is told or says is stored here.
             let model = ask::choose_model(
                 *ag,
-                cx.agent_model.as_deref(),
-                (*ag == Agent::Claude).then_some(AGENT_MODEL),
+                ask::ModelChoice {
+                    flag: cx.agent_model.as_deref(),
+                    role: cx.role.as_ref().and_then(|r| r.model.as_deref()),
+                    default: Some(AGENT_MODEL),
+                    ..ask::ModelChoice::default()
+                },
             )
             .map_err(Error::Usage)?;
             let max_turns = cx.agent_turns;
@@ -1439,10 +1468,15 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                     (true, false),
                     &allow,
                     Some(max_turns),
+                    cx.role
+                        .as_ref()
+                        .map(runtime::Applied::system_text)
+                        .as_deref(),
                     &prompt,
                 ),
                 prompt,
                 model,
+                role: cx.role.as_ref().map(runtime::Applied::json),
                 max_turns,
                 timeout: Duration::from_secs(cx.agent_timeout),
                 thinking: ask::choose_thinking(None, cx.ask_thinking.as_deref())
@@ -1769,6 +1803,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 "timed_out": ended.timed_out,
                                 "max_turns": r.max_turns,
                                 "timeout_seconds": r.timeout.as_secs(),
+                                "role": r.role,
                             });
                             Out::raw(format!("{line}\n").as_bytes());
                         }
@@ -1906,6 +1941,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             "answered": answers.keys().collect::<Vec<_>>(),
             "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
             "roles": roles,
+            "role": cx.role.as_ref().map(runtime::Applied::json),
             "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
         });
         if ran {
@@ -2010,6 +2046,7 @@ fn dry_report(
                 "cwd": report.dir,
                 "prompt": r.prompt,
                 "model": r.model,
+                "role": r.role,
                 "max_turns": r.max_turns,
                 "timeout_seconds": r.timeout.as_secs(),
             })),

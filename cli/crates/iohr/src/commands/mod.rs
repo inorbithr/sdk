@@ -10,7 +10,7 @@ mod call;
 mod config;
 mod connections;
 mod connectors;
-mod coordinator;
+pub(crate) mod coordinator;
 mod coordinator_plan;
 mod decisions;
 mod domains;
