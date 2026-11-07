@@ -1720,8 +1720,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         report.steps.push(st);
     }
-    // Extensions that fit the project: offered at a terminal, a hint line otherwise.
-    super::init_extensions::offer(
+    // Extensions that fit the project: one more step, offered at a terminal, a hint
+    // line otherwise.
+    if let Some(st) = super::init_extensions::offer(
         g,
         env,
         ui,
@@ -1733,7 +1734,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             describe: describe.as_deref(),
         },
     )
-    .await;
+    .await
+    {
+        report.steps.push(st);
+    }
     if dry {
         dry_report(
             &flow,
@@ -1931,7 +1935,7 @@ async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
 
 /// How a finished report step reads on the terminal: its mark and one line. Only `done` is a
 /// check; a step that was skipped or waits on a decision says so in its line.
-fn step_line(st: &project::Step) -> (Mark, String) {
+pub(super) fn step_line(st: &project::Step) -> (Mark, String) {
     let mark = Mark::of(&st.state);
     let said = match st.state.as_str() {
         "done" => format!("{}: {}", st.title, st.said),

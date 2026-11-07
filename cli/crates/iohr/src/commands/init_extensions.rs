@@ -16,7 +16,7 @@ use crate::Env;
 use crate::cli::{ExtCommand, Global};
 use crate::error::Error;
 use crate::output::Out;
-use crate::ui::Ui;
+use crate::ui::{Mark, Ui};
 
 /// What init knows about the project.
 pub(crate) struct Signals<'a> {
@@ -187,9 +187,50 @@ pub(crate) fn respond(
     Ok(install)
 }
 
+/// How the offer ended, as init's report step (`done`, `skipped` or `failed`), which init
+/// draws as a check, a warning or a cross like its other steps. `lines` is what the offer
+/// said; `installed` and `failed` are what `ext install` did. `drawn` is whether the step
+/// line itself carries `lines` (else they were printed as notes already).
+pub(crate) fn summary(
+    lines: &[String],
+    installed: &[String],
+    failed: &[String],
+    drawn: bool,
+) -> crate::project::Step {
+    let said = |base: String| {
+        if drawn && !lines.is_empty() {
+            format!("{base}; {}", lines.join(" "))
+        } else {
+            base
+        }
+    };
+    if !failed.is_empty() {
+        crate::project::step(
+            "extensions",
+            "Extensions",
+            "failed",
+            said(failed.join("; ")),
+            "",
+        )
+    } else if !installed.is_empty() {
+        let base = format!("installed {}", installed.join(", "));
+        crate::project::step("extensions", "Extensions", "done", said(base), "")
+    } else {
+        let base = "none installed".to_owned();
+        let base = if drawn || lines.is_empty() {
+            base
+        } else {
+            format!("{base}, the install line is printed above")
+        };
+        crate::project::step("extensions", "Extensions", "skipped", said(base), "")
+    }
+}
+
 /// The one call init makes: reads the catalogue when something fits, offers or hints,
 /// and installs what the person said yes to through `ext install`. It never fails the
-/// init: a catalogue that cannot be read or an install that fails is one line.
+/// init: a catalogue that cannot be read or an install that fails is one line. It returns
+/// the report step to add when it offered or hinted at something, drawn here like init's
+/// other steps on a terminal.
 pub(crate) async fn offer(
     g: &Global,
     env: &Env,
@@ -198,10 +239,10 @@ pub(crate) async fn offer(
     dry: bool,
     interactive: bool,
     signals: &Signals<'_>,
-) {
+) -> Option<crate::project::Step> {
     let how = mode(dry, out.json, interactive);
     if how == Mode::Skip || !RULES.iter().any(|r| (r.fits)(signals)) {
-        return;
+        return None;
     }
     let bin = super::shell::running_bin();
     let listings = match super::ext_catalogue::listings(g, env).await {
@@ -210,10 +251,17 @@ pub(crate) async fn offer(
             Out::note(&format!(
                 "Could not read the extensions catalogue ({e}); `{bin} ext search` lists what fits."
             ));
-            return;
+            return None;
         }
     };
     let offers = plan(signals, &listings);
+    if offers.is_empty() {
+        return None;
+    }
+    // On a drawn terminal the step line carries what was said; elsewhere each line is a
+    // note, the stable text scripts read.
+    let drawn = ui.fancy() && !out.json;
+    let mut lines: Vec<String> = Vec::new();
     let ids = respond(
         how,
         &bin,
@@ -221,20 +269,21 @@ pub(crate) async fn offer(
         // Installing is never the default.
         |o| ui.confirm(&format!("Install {}? It {}.", o.id, o.why), false),
         |line| {
-            if how == Mode::Ask {
-                ui.info(line);
-            } else {
+            if !drawn {
                 Out::note(line);
             }
+            lines.push(line.to_owned());
         },
     );
     let ids = match ids {
         Ok(ids) => ids,
         Err(e) => {
             Out::note(&format!("Skipped the extension offer: {e}"));
-            return;
+            return None;
         }
     };
+    let mut installed = Vec::new();
+    let mut failed = Vec::new();
     for id in ids {
         let cmd = ExtCommand::Install {
             extension: id.clone(),
@@ -244,12 +293,23 @@ pub(crate) async fn offer(
             interfaces: Vec::new(),
             all_interfaces: false,
         };
-        if let Err(e) = super::ext::run(g, env, cmd, out).await {
-            ui.warn(&format!(
-                "Could not install {id}: {e}. `{bin} ext install {id}` tries again."
-            ));
+        match super::ext::run(g, env, cmd, out).await {
+            Ok(()) => installed.push(id),
+            Err(e) => failed.push(format!(
+                "could not install {id}: {e}; `{bin} ext install {id}` tries again"
+            )),
         }
     }
+    let st = summary(&lines, &installed, &failed, drawn);
+    if drawn {
+        let (mark, said) = super::project::step_line(&st);
+        match mark {
+            Mark::Ok => ui.done(&said),
+            Mark::Warn => ui.warn(&said),
+            Mark::Fail => ui.failed(&said),
+        }
+    }
+    Some(st)
 }
 
 #[cfg(test)]
@@ -380,5 +440,30 @@ mod tests {
             |_| {},
         );
         assert_eq!(install.unwrap_or_default(), ["inorbit/agent"]);
+    }
+
+    #[test]
+    fn the_offer_ends_as_one_report_step_with_the_mark_of_what_happened() {
+        let said = vec!["inorbit/crawler is coming, not released yet: it reads.".to_owned()];
+        let ok = summary(&said, &["inorbit/agent".into()], &[], true);
+        assert_eq!((ok.id.as_str(), ok.state.as_str()), ("extensions", "done"));
+        assert!(
+            ok.said.starts_with("installed inorbit/agent"),
+            "{}",
+            ok.said
+        );
+        let skipped = summary(&said, &[], &[], true);
+        assert_eq!(skipped.state, "skipped");
+        assert!(skipped.said.contains("coming"), "{}", skipped.said);
+        let bad = summary(
+            &[],
+            &[],
+            &["could not install inorbit/agent: no".into()],
+            false,
+        );
+        assert_eq!(bad.state, "failed");
+        // Printed as notes already: the step does not say the lines twice.
+        let noted = summary(&said, &[], &[], false);
+        assert!(!noted.said.contains("coming"), "{}", noted.said);
     }
 }
