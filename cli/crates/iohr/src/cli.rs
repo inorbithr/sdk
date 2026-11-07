@@ -1254,13 +1254,15 @@ pub enum ExtCommand {
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=200))]
         page_size: Option<u32>,
     },
-    /// Show one extension in the catalogue.
+    /// Show one extension in the catalogue, or list them all.
     ///
     /// One extension in the catalogue: what it does, its publisher, signer, scopes,
     /// privileges in plain words, evidence, versions and the line that installs it.
+    /// With no name, the catalogue itself, the list `ext search` prints (a listing not
+    /// released yet reads "coming").
     Show {
-        /// PUBLISHER/NAME, such as inorbit/agent.
-        extension: String,
+        /// PUBLISHER/NAME, such as inorbit/agent (default: list the catalogue).
+        extension: Option<String>,
     },
     /// Verify and install an extension.
     ///

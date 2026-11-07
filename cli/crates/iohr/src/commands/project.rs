@@ -1720,6 +1720,20 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         report.steps.push(st);
     }
+    // Extensions that fit the project: offered at a terminal, a hint line otherwise.
+    super::init_extensions::offer(
+        g,
+        env,
+        ui,
+        out,
+        dry,
+        interactive,
+        &super::init_extensions::Signals {
+            template: &tpl.meta.id,
+            describe: describe.as_deref(),
+        },
+    )
+    .await;
     if dry {
         dry_report(
             &flow,
