@@ -38,6 +38,8 @@ Agents:
   permissions  Rules for what Io may run or open when you ask it something
   shell        Shell integration: `? question` at your prompt asks your AI agent
   runner       Run coordinator turns on this machine
+  session      Open this project's session: one process hosts its Roles while iohr is open
+  stop         Stop this project's session host
   coordinator  List and file the coordinator's jobs and asks
   memory       Keep what a project knows as files, check it, and sync it when you choose
 
