@@ -829,9 +829,11 @@ fn split_answer(raw: &str, cwd: &Path) -> (String, Vec<askback::Question>, Vec<S
 /// more permissive.
 #[cfg(unix)]
 fn start_broker(mode: Mode, chosen: &Chosen<'_>, ctx: &Context) -> Result<Session, Error> {
-    let place = Place::at(Path::new(&ctx.cwd));
+    // The commands run where the run starts, so the rules are judged from the same folder.
+    let at = scope_dir(ctx);
+    let place = Place::at(&at);
     let bin = crate::commands::shell::bin_name(std::env::args_os().next().as_deref()).to_owned();
-    let files = Files::find(Path::new(&ctx.cwd), chosen.dir);
+    let files = Files::find(&at, chosen.dir);
     Session::start(Opts {
         mode,
         files,
@@ -866,14 +868,20 @@ async fn run_at(
     .await
 }
 
-/// Where the run starts: the folder when it may read it or run commands there, else none
+/// The folder the run's file tools and its asked commands are anchored to: the working folder,
+/// except when that one is too broad to read (the home folder) and the person allowed another:
+/// then only the allowed one, so a yes for `~/Downloads` never reads the rest of home.
+fn scope_dir(ctx: &Context) -> std::path::PathBuf {
+    match &ctx.also {
+        Some(also) if !ctx.reads => also.clone(),
+        _ => std::path::PathBuf::from(&ctx.cwd),
+    }
+}
+
+/// Where the run starts: [`scope_dir`] when it may read there or run commands, else none
 /// (the temp folder).
 fn run_dir(ctx: &Context, session: Option<&Session>) -> Option<std::path::PathBuf> {
-    if ctx.reads || session.is_some() {
-        return Some(std::path::PathBuf::from(&ctx.cwd));
-    }
-    // Only a folder the person allowed: the run starts there, where its tools may read.
-    ctx.also.clone()
+    (ctx.reads || ctx.also.is_some() || session.is_some()).then(|| scope_dir(ctx))
 }
 
 /// The lines after an answer for what Io wanted and could not be allowed: with a rule to
@@ -1451,6 +1459,50 @@ mod tests {
             count: 1,
             only: Some(title.to_owned()),
         }
+    }
+
+    #[test]
+    fn an_allowed_folder_beside_the_home_folder_is_the_only_read_scope() {
+        let home = Context {
+            cwd: "/home/me".into(),
+            reads: false,
+            also: Some("/home/me/Downloads".into()),
+            ..Context::default()
+        };
+        // With or without a session (the shell), the run starts in the allowed folder, never home.
+        assert_eq!(scope_dir(&home), Path::new("/home/me/Downloads"));
+        assert_eq!(run_dir(&home, None), Some("/home/me/Downloads".into()));
+        // The broker is built over `scope_dir`, so the shell is anchored there too.
+        let args =
+            headless::args("haiku", (home.reads, home.also.as_deref()), None, false).unwrap();
+        assert!(!args.iter().any(|a| a.starts_with("--add-dir")));
+        // Home alone with a session (the shell, no file tools) stays at home; with nothing, no folder.
+        let shell = Context {
+            also: None,
+            ..home.clone()
+        };
+        assert_eq!(scope_dir(&shell), Path::new("/home/me"));
+        assert_eq!(run_dir(&shell, None), None);
+    }
+
+    #[test]
+    fn a_readable_working_folder_stays_the_run_folder_and_the_allowed_one_is_added() {
+        let project = Context {
+            cwd: "/work/p".into(),
+            reads: true,
+            also: Some("/data/x".into()),
+            ..Context::default()
+        };
+        assert_eq!(scope_dir(&project), Path::new("/work/p"));
+        assert_eq!(run_dir(&project, None), Some("/work/p".into()));
+        let args = headless::args(
+            "haiku",
+            (project.reads, project.also.as_deref()),
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(args.contains(&"--add-dir=/data/x".to_owned()));
     }
 
     #[test]
