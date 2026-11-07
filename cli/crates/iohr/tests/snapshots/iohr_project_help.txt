@@ -71,3 +71,9 @@ Global options:
           With `--sign-in io`: the coordinator job named in `x-iohr-via`
           
           [env: IOHR_VIA_JOB=]
+
+Examples:
+  # A new project from the default template.
+  iohr project init my-shop
+  # The templates `project init` offers.
+  iohr project template list
