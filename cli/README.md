@@ -127,7 +127,9 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
-| `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
+| `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--session DIR] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
+| `iohr session [DIR] [--json]` | Open a session on a project (platform RFC 0213): starts the project's one session host if none runs (this same `iohr` as `runner run --session DIR`, a process of its own that hosts the project's Roles and the runner's turn loop), joins it, and stays open until Ctrl-C or SIGTERM. The host stops when the last session has left (a shell that is killed counts as left), on `iohr stop`, or on SIGTERM; a host nobody joins within 30 s ends by itself. With `--json` it prints `{project, host_pid, roles}`; notes go to stderr. Needs a registered runner (`iohr runner register`). S1: no tasks are accepted yet, a claimed task fails "not built". Unix only |
+| `iohr stop [DIR] [--wait S] [--json]` | Stop the project's session host and wait up to `--wait` seconds (0 to 600, default 15) for it to end; each Role finishes the task it holds first. Prints `stopped` only when the host's lock is free, `stopping` while a Role still holds a task; says on stderr that no host runs when none does, and exits 0 either way; `--json` prints `{project, state, host_pid}` with `state` one of `not running`, `stopped`, `stopping`. Makes no API call; Unix only |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
@@ -980,6 +982,47 @@ installed for the account, or the platform is older than the call; the log says 
 Any other refusal (the App lacks a permission, the lease was not confirmed) leaves the
 lease unaccepted, so another runner can take it.
 
+### Session mode
+
+`iohr session` is the way into a project's Roles (platform RFC 0213). Opening it starts
+one host process for the project: `iohr runner run --session DIR`, which is the same runner
+(heartbeats, the 90 s server-side lease, turns on your `claude -p`, no self-upgrade while it
+hosts) plus the project's Roles at work on one local queue. The host stops when the last
+session has left, when a shell that was killed has left, on `iohr stop`, and on SIGTERM
+(exit 0). It keeps no more than one host per project: a lock the kernel frees when the
+process dies, so a crash leaves nothing to clean up.
+
+The queue is a DuckDB file, `queue.duckdb`, in `session/<project hash>/` below the data
+directory (`IOHR_DATA_DIR`, else the platform's own), beside the host's socket and log
+(`host.log`, the host's own output). The host is the only process that opens it; shells talk
+to the host over its socket. The folder must be yours and mode 0700 (the host refuses one that
+is not, or that is a link) and the socket is mode 0600; a socket path over 103 bytes is refused
+with a message naming the fix, and a host holds at most 64 connections (more are answered
+`error busy`). The queue holds `roles`, `tasks` and an append-only `task_events`. A task is
+`queued`, `claimed`, `running`, then `done` or `failed`; a Role takes the next task in one
+statement, with a lease of 90 s that its heartbeat renews. A statement that meets another
+Role's edit of the same row is tried again, not failed.
+
+Leases are timed on a monotonic clock of the host process, never the wall clock, so a laptop
+that sleeps or a clock that is set back cannot make a live Role's task look abandoned. While a
+host runs, a task is taken from its Role only when that Role's thread has ended and its lease
+has run out; a check every few seconds does that and also fails a task that was tried 3 times.
+A host that starts holds the lock alone, so every claim left in the file is an orphan: each
+goes back to `queued` with the attempt counted, and after 3 attempts becomes `failed` with the
+reason. A task is meant to be worked once at a time; a host killed in the middle of one runs
+it again on the next start (at least once), so a handler must be safe to repeat.
+
+`iohr stop` makes the host drain: each Role finishes the task it holds and takes no more, and
+until the last is done the host still answers `status` with `stopping` and still holds its
+lock. `--wait` polls that lock, so "stopped" is said only when the host has really ended, and
+"stopping" when the wait ran out first.
+
+This is slice S1 of RFC 0213: no tasks are accepted yet, and a claimed task fails "not built".
+Nothing in the command line puts a task in the queue (the socket takes `enqueue`, the `?`
+prompt does not send there yet), and a Role that claims a task fails it with a reason saying
+its turn handler is not built. No launchd or systemd unit
+starts a session host at login.
+
 ### Staying current
 
 `run` looks for a newer `iohr` release about hourly, and when there is one it takes no new
@@ -1139,6 +1182,8 @@ Each runtime dependency, and why (SR-20):
 | zeroize | Secrets are wiped from memory when dropped |
 | rpassword | `iohr connections add` and `reconnect`: a secret field typed on the terminal without echo (Unix and Windows consoles); with rtoolbox, two small crates and no new transitive dependency |
 | etcetera | The platform's config directory |
+| duckdb (bundled, Unix only) | The session host's durable task queue (RFC 0213): tasks and Roles survive a restart of the host or the machine, and Roles take work at the same time on connections of one process. Bundled so no system library is needed; it builds DuckDB from C++ source (bigger binary, longer first build) |
+| rustix (`process`, `fs`; Unix only) | The current user's id (`process`) and the session host's one-per-project lock, `flock` (`fs`): safe calls, no `unsafe` code |
 | base64, sha2 | Reading a token's claims to name its account; the PKCE S256 challenge |
 | getrandom | Request ids and retry jitter |
 | typify, schemars, syn, quote, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and quote add each model's constructor and setters, prettyplease prints them) |

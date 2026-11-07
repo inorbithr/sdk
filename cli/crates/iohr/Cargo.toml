@@ -50,9 +50,11 @@ toml_edit.workspace = true
 url.workspace = true
 zeroize.workspace = true
 
-# The current user's id, to check who owns a trusted file (a safe call, no unsafe code).
+# The current user's id, to check who owns a trusted file, and the session host's lock (safe
+# calls, no unsafe code); and the session host's durable task queue (RFC 0213).
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
+duckdb.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
