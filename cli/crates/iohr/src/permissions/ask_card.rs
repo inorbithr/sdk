@@ -4,7 +4,7 @@
 //! enough ([`drawn_at`]); everywhere else the ask stays the one plain line of
 //! [`super::broker::card_line`], which scripts and the tests read.
 //!
-//! [`lines`] is pure (the width and the look are arguments) so the layout is tested. It reuses
+//! [`lines_with`] is pure (the width and the look are arguments) so the layout is tested. It reuses
 //! [`crate::card::header_line`] for the header and [`crate::ui`]'s bar for the rows, the keys
 //! and the box; nothing here draws a second box or reads keys of its own.
 
@@ -39,16 +39,19 @@ pub(crate) fn drawn_at(cols: usize, look: Look) -> bool {
     ui::bar_boxed(cols, look)
 }
 
-/// The rows: Allow once, Always in this project (only when a rule can be saved), No. The
-/// letters are the old keys, so `y`, `a` and `n` still answer.
-pub(crate) fn choices(can_always: bool) -> Vec<ui::Choice> {
-    let row = |value: &str, label: &str, hint: &str, key: char| ui::Choice {
+fn row(value: &str, label: &str, hint: &str, key: char) -> ui::Choice {
+    ui::Choice {
         value: value.to_owned(),
         label: label.to_owned(),
         hint: hint.to_owned(),
         available: true,
         key: Some(key),
-    };
+    }
+}
+
+/// The rows: Allow once, Always in this project (only when a rule can be saved), No. The
+/// letters are the old keys, so `y`, `a` and `n` still answer.
+pub(crate) fn choices(can_always: bool) -> Vec<ui::Choice> {
     let mut out = vec![row(ONCE, "Allow once", "this time only", 'y')];
     if can_always {
         out.push(row(
@@ -60,6 +63,16 @@ pub(crate) fn choices(can_always: bool) -> Vec<ui::Choice> {
     }
     out.push(row(NO, "No", "Io carries on without it", 'n'));
     out
+}
+
+/// The rows of the folder-trust ask ([`super::trust`]): the same keys and answers as a
+/// command's, with "always" meaning this folder is remembered as trusted.
+pub(crate) fn trust_choices() -> Vec<ui::Choice> {
+    vec![
+        row(ONCE, "Allow once", "this time only", 'y'),
+        row(ALWAYS, "Always trust this folder", "remembers it", 'a'),
+        row(NO, "No", "Io answers without reading files", 'n'),
+    ]
 }
 
 /// The row the bar starts on: No, so a stray Enter never allows anything.
@@ -112,9 +125,23 @@ fn wrap_code(text: &str, width: usize, max: usize) -> (Vec<String>, usize) {
 }
 
 /// The card as the screen lines with row `at` highlighted: always the same count for every
-/// `at`, none as wide as the terminal. `cols` is the terminal's width (0: unknown).
+/// `at`, none as wide as the terminal. `cols` is the terminal's width (0: unknown). The live
+/// ask draws through [`lines_with`] with the rows it shows; this is the command ask's rows.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn lines(ask: &Ask, at: usize, cols: usize, look: Look) -> Vec<String> {
+    lines_with(ask, &choices(ask.can_always), at, cols, look)
+}
+
+/// The card with these rows: a command's ([`choices`]) or the folder-trust ask's ([`trust_choices`]).
+#[must_use]
+pub(crate) fn lines_with(
+    ask: &Ask,
+    rows: &[ui::Choice],
+    at: usize,
+    cols: usize,
+    look: Look,
+) -> Vec<String> {
     let width = ui::bar_width(cols);
     let inner = width.saturating_sub(3);
     let header = card::header_line(" AI request ", false, "permission", width, look);
@@ -149,14 +176,7 @@ pub(crate) fn lines(ask: &Ask, at: usize, cols: usize, look: Look) -> Vec<String
         header: Some(header),
         lines: &body,
     };
-    ui::bar_lines_in(
-        &top,
-        "Io (AI) asks",
-        &choices(ask.can_always),
-        at,
-        cols,
-        look,
-    )
+    ui::bar_lines_in(&top, "Io (AI) asks", rows, at, cols, look)
 }
 
 #[cfg(test)]
