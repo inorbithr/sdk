@@ -565,8 +565,16 @@ The arrows and Enter pick the highlighted row, `1`-`9` pick a row, `y` runs it o
 and saves the narrowest rule (`Bash(ls:*)`, never `Bash(*)`) to `.inorbit/permissions.toml`
 (the second row is there only when such a rule can be saved), `n`, `q`, Esc, Ctrl-C or no
 answer refuses it. The bar starts on No, so a stray Enter never allows anything. Once you have
-answered, the card is erased and one result line stays (`Allowed once`, `Allowed always` or
-`Not allowed`). A long command is wrapped to three lines and the card says how many characters
+answered, the question is erased and its result goes inside the answer card it led to, as one
+quiet row above the footer in plain words (`✓ ls allowed in this project from now on`,
+`✓ ls allowed this time`, `✗ rm not allowed`); after an always, the rule and the file it went
+to sit dimmed under it (`Bash(ls:*) · .inorbit/permissions.toml`). An always is also an Undo in
+the card's action row (below): it takes the rule back through the code `iohr permissions remove`
+uses, and says so under the card. With no action row (no colour, no hook) the result is a plain
+line on stderr instead, and for an always it ends with the command that undoes it
+(`iohr permissions remove 'Bash(ls:*)'`). `--json` carries the results in `permissions`, an array
+(empty when nobody was asked, which is always so under `--json`) of `{grant, subject, rules,
+file, saved, not_saved}`, with `grant` one of `once`, `always` or `no`. A long command is wrapped to three lines and the card says how many characters
 it left out. With `NO_COLOR`, `TERM=dumb`, a terminal under 40 columns, or no terminal, the ask
 is one plain line, as it was:
 
@@ -649,14 +657,18 @@ Today the key is read and nothing else: `iohr` has no background process to hang
 on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
 background loop is the next slice (RFC 0205).
 
-Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open",
+Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open · Undo",
 with only what the answer has: Run and Copy when it suggested one command, Open when it named
-an https link or a file in the folder. The key in `menu_key` opens the menu (`iohr ask
---menu`, letters `r c f e o`, Esc leaves it). Run puts the command on the prompt line and
+an https link or a file in the folder, Undo when the run saved a permission rule that the project
+file still holds. The key in `menu_key` opens the menu (`iohr ask
+--menu`, letters `r c f e o u`, Esc leaves it; the hook passes the rules to `--undo`). Run puts the command on the prompt line and
 nothing else: Enter still runs it, and iohr never does. Copy sends it to the clipboard
 through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside
 tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener and refuses an
-executable, a file that runs when opened, and a path outside the folder. The suggested
+executable, a file that runs when opened, and a path outside the folder. Undo removes the rule
+and says `ls is no longer allowed in this project` under the card (it is drawn by then, so it is
+not redrawn). The hook's record has four fields (answer, command, link, the saved rules) cut
+by a 0x1e character. The suggested
 command is the last single-line fence of the answer in a shell language; `iohr --json ask`
 carries it as `command` (null when there is none). A pipe or `NO_COLOR` gets no row.
 

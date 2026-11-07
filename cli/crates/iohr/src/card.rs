@@ -86,6 +86,16 @@ pub(crate) enum Body<'a> {
     Failed(&'a str),
 }
 
+/// One quiet row under the answer: what happened that the person chose, such as a command
+/// they allowed. Plain words in `text`; `detail` (a rule, a file) is dimmed under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Status {
+    pub(crate) text: String,
+    pub(crate) detail: Option<String>,
+    /// A refusal, drawn in amber rather than green.
+    pub(crate) refused: bool,
+}
+
 /// One card.
 #[derive(Debug, Clone)]
 pub(crate) struct Card<'a> {
@@ -108,6 +118,9 @@ pub(crate) struct Card<'a> {
     pub(crate) hint: Option<&'a str>,
     /// The action row under the answer ([`crate::actions::row`]); drawn only by a fancy look.
     pub(crate) row: Option<&'a str>,
+    /// The status rows between the answer and the action row (the permission results of this
+    /// run); drawn only by a fancy look, the plain look prints them as notes.
+    pub(crate) status: &'a [Status],
     pub(crate) body: Body<'a>,
 }
 
@@ -187,6 +200,19 @@ pub(crate) fn render(card: &Card<'_>, width: usize, look: Look) -> String {
         }
     }
     let _ = writeln!(out, "{rail_end}");
+    for st in card.status {
+        let text = console::truncate_str(&st.text, inner.saturating_sub(2), "…");
+        let (mark, style) = if st.refused {
+            ("✗", look.amber())
+        } else {
+            ("✓", look.green())
+        };
+        let _ = writeln!(out, "{rail}{} {text}", style.apply_to(mark));
+        if let Some(d) = &st.detail {
+            let d = console::truncate_str(d, inner.saturating_sub(2), "…");
+            let _ = writeln!(out, "{rail}  {}", look.dim().apply_to(d));
+        }
+    }
     if let Some(row) = card.row {
         let row = console::truncate_str(row, inner, "…");
         let _ = writeln!(out, "{rail}{}", look.cyan().apply_to(row));
@@ -734,14 +760,6 @@ pub(crate) fn say(line: &str) {
     let _ = err.flush();
 }
 
-/// Replaces the question's line with its result and ends the line.
-#[cfg(unix)]
-pub(crate) fn say_done(line: &str) {
-    let mut err = std::io::stderr().lock();
-    let _ = writeln!(err, "\r\x1b[2K{line}");
-    let _ = err.flush();
-}
-
 /// One spinner frame on stderr, over the line before it.
 pub(crate) fn spin(frame: usize, elapsed: Duration, agent: &str, look: Look) {
     let f = FRAMES[frame % FRAMES.len()];
@@ -797,6 +815,7 @@ mod tests {
             full: true,
             hint: Some("`??` follows up."),
             row: None,
+            status: &[],
             body: Body::Answer(text),
         }
     }
@@ -907,6 +926,39 @@ mod tests {
         assert!(out.starts_with("╭─ ◆ Io  no answer  ─"), "{out}");
         assert!(out.contains("│  claude is not signed in"), "{out}");
         assert!(out.contains("Nothing was run."), "{out}");
+    }
+
+    #[test]
+    fn a_permission_result_is_a_quiet_row_inside_the_card_above_the_action_row() {
+        let status = [
+            Status {
+                text: "ls allowed in this project from now on".into(),
+                detail: Some("Bash(ls:*) \u{b7} .inorbit/permissions.toml".into()),
+                refused: false,
+            },
+            Status {
+                text: "rm not allowed".into(),
+                detail: None,
+                refused: true,
+            },
+        ];
+        let mut c = card("Done.");
+        c.status = &status;
+        c.row = Some("Run   \u{2193} to choose");
+        let out = strip(&render(&c, 70, FANCY));
+        let at = |needle: &str| out.find(needle).unwrap_or(usize::MAX);
+        assert!(
+            out.contains("│  \u{2713} ls allowed in this project from now on"),
+            "{out}"
+        );
+        assert!(
+            out.contains("│    Bash(ls:*) \u{b7} .inorbit/permissions.toml"),
+            "{out}"
+        );
+        assert!(out.contains("│  \u{2717} rm not allowed"), "{out}");
+        assert!(at("Done.") < at("allowed in this project") && at("not allowed") < at("to choose"));
+        // The plain look has no row to carry it; the caller prints a note instead.
+        assert!(!render(&c, 70, PLAIN).contains("allowed"));
     }
 
     #[test]
