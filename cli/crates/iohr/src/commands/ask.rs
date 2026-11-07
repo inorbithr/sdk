@@ -11,7 +11,7 @@ use crate::actions::{self, MenuKey};
 use crate::ask::stream::{self, Look, Renderer};
 use crate::ask::{self, Agent, Via};
 use crate::askback;
-use crate::card::{self, Body, Card, Look as CardLook};
+use crate::card::{self, Body, Card, Look as CardLook, Status};
 use crate::cli::{AskArgs, Global, HeadlessArgs};
 use crate::commands::asks;
 use crate::context::Ctx;
@@ -25,8 +25,8 @@ use crate::permissions::broker::{self, Session};
 #[cfg(unix)]
 use crate::permissions::engine::Place;
 #[cfg(unix)]
-use crate::permissions::store::Files;
-use crate::permissions::{Mode, trust};
+use crate::permissions::store::{self, Files};
+use crate::permissions::{Grant, Mode, Settled, Words, trust};
 use crate::ui::Ui;
 use crate::{Env, prompt};
 
@@ -87,7 +87,7 @@ fn built(via: Via, agent: Agent, args: &AskArgs) -> Result<(), Error> {
 
 pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
-        return menu(&args);
+        return menu(g, &args);
     }
     let ctx = Ctx::load(g)?;
     let cfg = ctx.config.ask;
@@ -98,7 +98,8 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
         .map_err(Error::Usage)?;
     let thinking = ask::choose_thinking(args.thinking.as_deref(), cfg.thinking.as_deref())
         .map_err(Error::Usage)?;
-    let allow_edits = args.allow_edits || cfg.allow_edits.unwrap_or(false);
+    let named = words(&args, &cfg);
+    let (allow_edits, plan) = streamed(named, &args, &cfg, prompt::interactive())?;
     built(via, agent, &args)?;
     let hints = hints::Mode::parse(cfg.hints.as_deref()).map_err(Error::Usage)?;
     let menu_key = MenuKey::parse(cfg.menu_key.as_deref()).map_err(Error::Usage)?;
@@ -111,7 +112,14 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     // goes on from it: the note leads the prompt.
     let (note_root, question) =
         crate::handoff::continue_from(allow_edits && !args.dry_run, question);
-    let command_line = ask::argv(agent, model.as_deref(), allow_edits, &[], None, &question);
+    let command_line = ask::argv(
+        agent,
+        model.as_deref(),
+        (allow_edits, plan),
+        &[],
+        None,
+        &question,
+    );
     if args.dry_run {
         dry_run(via, agent, bin.as_deref(), &command_line, out);
         return Ok(());
@@ -134,7 +142,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
                 hints,
                 menu_key,
                 dir: &ctx.dir,
-                permissions: (args.permissions.as_deref(), cfg.permissions.as_deref()),
+                modes: named,
             },
             &question,
             &args.headless,
@@ -191,12 +199,24 @@ fn ended(code: i32) -> Result<(), Error> {
 }
 
 /// `--menu`: the menu under a card asks no model and needs no sign-in or agent.
-fn menu(args: &AskArgs) -> Result<(), Error> {
+fn menu(g: &Global, args: &AskArgs) -> Result<(), Error> {
     let cwd = args.headless.cwd.as_deref().map_or_else(
         || std::env::current_dir().unwrap_or_default(),
         std::path::PathBuf::from,
     );
-    actions::menu(args.command.as_deref(), args.link.as_deref(), &cwd)
+    // Undo takes back only what the project file still holds, so the row never promises more.
+    let files = Files::find(&cwd, &Ctx::load(g)?.dir);
+    let undo: Vec<String> = args
+        .undo
+        .iter()
+        .filter(|r| !r.is_empty())
+        .cloned()
+        .collect();
+    let undo = actions::Takeback {
+        rules: store::saved_project_allows(&files, &undo),
+        files: &files,
+    };
+    actions::menu(args.command.as_deref(), args.link.as_deref(), &cwd, &undo)
 }
 
 /// `--dry-run`: the exact command line, one object under `--json`; nothing is started.
@@ -284,6 +304,10 @@ pub(crate) async fn stream(run: Run<'_>) -> Result<Ended, Error> {
         )));
     };
     let spinner = (!json).then(|| ui.step(waiting));
+    // The live view draws the closing words on stderr, so it is for a person: with stdout
+    // piped, the agent's words go there as they always did.
+    let mut look = look;
+    look.summary &= std::io::IsTerminal::is_terminal(&std::io::stdout());
     let mut render = Renderer::new(std::io::stdout(), std::io::stderr(), look, spinner);
     let mut lines = tokio::io::BufReader::new(stdout).lines();
     // No limit is a year away, far inside what the timer takes.
@@ -410,8 +434,9 @@ struct Chosen<'a> {
     hints: hints::Mode,
     menu_key: MenuKey,
     dir: &'a Path,
-    /// `--permissions` and `[ask] permissions`, as written; settled in [`headless`].
-    permissions: (Option<&'a str>, Option<&'a str>),
+    /// The flag layer (`--mode`, `--permissions`) and `[ask]`, as written; [`Mode::choose`]
+    /// settles them in [`headless`].
+    modes: (Words<'a>, Words<'a>),
 }
 
 /// One capped `claude -p` run (see [`headless`]), shown one way (RFC 0203.1): `--json` is the
@@ -434,15 +459,16 @@ async fn headless(
     } = *chosen;
     let (mut ctx, root) = context_of(h)?;
     let terminal = !out.json && prompt::interactive();
-    trust_home(chosen, &mut ctx, terminal)?;
+    let mode = chosen_mode(chosen, terminal)?;
+    trust_home(chosen, &mut ctx, mode, terminal);
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
     // The live ask (PRD 0197): only where the run may read the folder (or in the home folder
     // with the person asked), and only when the person did not turn it off. A person is asked
     // only at a terminal and not for `--json`.
-    let session = permission_session(chosen, &ctx, terminal)?;
-    let read = headless::read_line(&ctx, session.is_some());
+    let session = permission_session(chosen, &ctx, mode)?;
+    let read = headless::read_line(&ctx, mode, session.is_some());
     let label = ask::label(agent);
     let started = Instant::now();
     if out.json || !(h.hook || (fancy && (h.card || stdout_tty))) {
@@ -450,8 +476,18 @@ async fn headless(
         if !out.json {
             Out::note(&label);
         }
-        let ran = run_at((bin, model), &message, started, &ctx, session.as_ref()).await;
+        let ran = run_at(
+            (bin, model),
+            &message,
+            started,
+            &ctx,
+            (session.as_ref(), mode),
+        )
+        .await;
         if !out.json {
+            for line in settled_lines(session.as_ref(), 0) {
+                Out::note(&line);
+            }
             for line in refused_lines(session.as_ref()) {
                 Out::note(&line);
             }
@@ -469,6 +505,10 @@ async fn headless(
                 model: model.to_owned(),
                 exit_code: 0,
                 duration_ms,
+                permissions: settled_of(session.as_ref(), 0)
+                    .iter()
+                    .map(Settled::json)
+                    .collect(),
             });
         } else {
             Out::raw(format!("{text}\n").as_bytes());
@@ -495,6 +535,7 @@ async fn headless(
             fancy,
             stdout_tty,
             session,
+            mode,
         },
     )
     .await
@@ -512,24 +553,30 @@ struct Prepared {
     stdout_tty: bool,
     /// The live permission ask, when the run may run commands; dropped when the card ends.
     session: Option<Session>,
+    /// The mode this run settled on.
+    mode: Mode,
 }
 
-/// Settles how this run handles calls no rule decides and starts the broker for it. `None`
-/// when the mode is `deny`, when the folder is not readable (the run has no tools then; the
-/// home folder is the exception at a terminal: `Bash` alone, each command asked) or
-/// when this system has no unix sockets. A broker that cannot start is an error the person
-/// sees, never a silent fall back to something more permissive.
+/// The mode this run is in: the flags, then `[ask]`, then the terminal ([`Mode::choose`]).
+fn chosen_mode(chosen: &Chosen<'_>, terminal: bool) -> Result<Mode, Error> {
+    let (flag, config) = chosen.modes;
+    Mode::choose(flag, config, terminal).map_err(Error::Usage)
+}
+
+/// Starts the broker the `mode` calls for. `None` when the mode runs no commands (`plan` and
+/// `deny`), when the folder is not readable (the run has no tools then; the home folder is the
+/// exception in `manual` at a terminal: `Bash` alone, each command asked) or when this system
+/// has no unix sockets. A broker that cannot start is an error the person sees, never a
+/// silent fall back to something more permissive.
 fn permission_session(
     chosen: &Chosen<'_>,
     ctx: &Context,
-    terminal: bool,
+    mode: Mode,
 ) -> Result<Option<Session>, Error> {
-    let (flag, config) = chosen.permissions;
-    let mode = Mode::choose(flag, config, terminal).map_err(Error::Usage)?;
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let shell_at_home =
-        mode == Mode::Prompt && headless::is_home(Path::new(&ctx.cwd), home.as_deref());
-    if mode == Mode::Deny || !(ctx.reads || shell_at_home) {
+        mode == Mode::Manual && headless::is_home(Path::new(&ctx.cwd), home.as_deref());
+    if !mode.runs_commands() || !(ctx.reads || shell_at_home) {
         return Ok(None);
     }
     // No unix sockets, no live ask: off unix `iohr ask` stays read-only (see
@@ -540,23 +587,52 @@ fn permission_session(
     Ok(None)
 }
 
+/// The words that name a mode: the flag layer (`--mode`, `--permissions`, and their environment)
+/// and the `[ask]` layer.
+fn words<'a>(args: &'a AskArgs, cfg: &'a iohr_auth::AskConfig) -> (Words<'a>, Words<'a>) {
+    (
+        Words {
+            mode: args.mode.as_deref(),
+            permissions: args.permissions.as_deref(),
+        },
+        Words {
+            mode: cfg.mode.as_deref(),
+            permissions: cfg.permissions.as_deref(),
+        },
+    )
+}
+
+/// What the mode means for the streamed run, which has no permission broker so it maps onto
+/// what print mode can do: `(allow_edits, plan)`. `plan` reads and changes nothing, `auto` is
+/// `--allow-edits` (edits yes, the shell still no: commands need the card's broker), and
+/// `--allow-edits` alone is as before.
+fn streamed(
+    (flag, config): (Words<'_>, Words<'_>),
+    args: &AskArgs,
+    cfg: &iohr_auth::AskConfig,
+    terminal: bool,
+) -> Result<(bool, bool), Error> {
+    let mode = Mode::choose(flag, config, terminal).map_err(Error::Usage)?;
+    let plan = mode == Mode::Plan;
+    let edits = args.allow_edits || cfg.allow_edits.unwrap_or(false) || mode == Mode::Auto;
+    Ok((!plan && edits, plan))
+}
+
 /// The home folder is too broad to read unasked (`headless::can_read`). At a terminal, where
 /// every command is asked anyway, Io asks once whether to trust it, the way Claude Code asks
 /// about a folder; a yes gives this run the file tools beside the asked commands (secrets stay
 /// blocked by `permissions::secrets`). A yes for always is kept in `trusted.toml` in the
-/// user's iohr folder. No terminal, `--json` or a mode other than asking: no question, no reads.
-fn trust_home(chosen: &Chosen<'_>, ctx: &mut Context, terminal: bool) -> Result<(), Error> {
-    if ctx.reads || !terminal {
-        return Ok(());
-    }
-    let (flag, config) = chosen.permissions;
-    if Mode::choose(flag, config, terminal).map_err(Error::Usage)? != Mode::Prompt {
-        return Ok(());
+/// user's iohr folder. No terminal, `--json` or a mode that runs nothing for the answer's sake
+/// (`plan`, `deny`, `rules`): no question, no reads. `auto` asks it too: it is a question
+/// about the folder, not about a command.
+fn trust_home(chosen: &Chosen<'_>, ctx: &mut Context, mode: Mode, terminal: bool) {
+    if ctx.reads || !terminal || !matches!(mode, Mode::Manual | Mode::Auto) {
+        return;
     }
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let cwd = Path::new(&ctx.cwd);
     if !headless::is_home(cwd, home.as_deref()) {
-        return Ok(());
+        return;
     }
     ctx.reads = trust::is_trusted(chosen.dir, cwd)
         || match trust::ask(cwd) {
@@ -570,7 +646,6 @@ fn trust_home(chosen: &Chosen<'_>, ctx: &mut Context, terminal: bool) -> Result<
             trust::Answer::Once => true,
             trust::Answer::No => false,
         };
-    Ok(())
 }
 
 /// Starts the broker. A broker that cannot start is an error, never a fall back to something
@@ -599,7 +674,7 @@ async fn run_at(
     message: &str,
     started: Instant,
     ctx: &Context,
-    session: Option<&Session>,
+    (session, mode): (Option<&Session>, Mode),
 ) -> Result<(String, u64), String> {
     let folder = run_dir(ctx, session);
     headless::run(
@@ -609,7 +684,7 @@ async fn run_at(
         started,
         folder.as_deref(),
         ctx.reads,
-        session,
+        (session, mode == Mode::Plan),
     )
     .await
 }
@@ -626,6 +701,67 @@ fn refused_lines(session: Option<&Session>) -> Vec<String> {
     session
         .map(|s| broker::denied_lines(&s.denied(), s.bin()))
         .unwrap_or_default()
+}
+
+/// What the person answered at the terminal, from the `from`th answer on (a card drawn after
+/// an earlier one shows only what is new).
+fn settled_of(session: Option<&Session>, from: usize) -> Vec<Settled> {
+    session
+        .map(|s| s.settled().into_iter().skip(from).collect())
+        .unwrap_or_default()
+}
+
+/// The rules the person saved with "always" in this run, each once: what the Undo action
+/// takes back.
+fn saved_rules(session: Option<&Session>) -> Vec<String> {
+    let mut rules: Vec<String> = Vec::new();
+    for r in settled_of(session, 0)
+        .into_iter()
+        .filter(|s| s.grant == Grant::Always)
+        .flat_map(|s| s.rules)
+    {
+        if !rules.contains(&r) {
+            rules.push(r);
+        }
+    }
+    rules
+}
+
+/// The permission results as notes, for output with no card to hold them (a plain look, a
+/// pipe): the sentence, then for a saved rule the rule, the file and the command that undoes
+/// it, because there is no action row there to carry an Undo.
+fn settled_lines(session: Option<&Session>, from: usize) -> Vec<String> {
+    let bin = session.map_or("iohr", Session::bin);
+    settled_of(session, from)
+        .iter()
+        .map(|s| {
+            let mut line = s.sentence();
+            if let (Some(detail), Some(undo)) = (s.detail(), s.undo_command(bin)) {
+                line = format!("{line} ({detail}). Undo: {undo}");
+            }
+            line
+        })
+        .collect()
+}
+
+/// The permission results as the card's status rows. Where the hook binds the action row,
+/// Undo is there; without it the row's detail names the command that undoes the rule.
+fn statuses(session: Option<&Session>, from: usize, hook: bool) -> Vec<Status> {
+    let bin = session.map_or("iohr", Session::bin);
+    settled_of(session, from)
+        .iter()
+        .map(|s| {
+            let detail = match (s.detail(), s.undo_command(bin)) {
+                (Some(d), Some(undo)) if !hook => Some(format!("{d} \u{b7} undo: {undo}")),
+                (d, _) => d,
+            };
+            Status {
+                text: s.sentence(),
+                detail,
+                refused: s.grant == Grant::No,
+            }
+        })
+        .collect()
 }
 
 /// A failed run is a card too; the exit code is the agent's.
@@ -650,6 +786,12 @@ fn closing_notes(
     waiting: Option<&asks::Waiting>,
     (h, menu_key, look, width): (&HeadlessArgs, MenuKey, CardLook, usize),
 ) {
+    // A drawn card holds the permission results itself; a plain look has none to hold them.
+    if !look.fancy {
+        for line in settled_lines(session, 0) {
+            Out::note(&line);
+        }
+    }
     for line in refused_lines(session) {
         Out::note(&line);
     }
@@ -658,11 +800,12 @@ fn closing_notes(
     }
 }
 
-/// The line the shell hook reads back: the answer's one command and link.
-fn record_hook(text: &str, cwd: &Path) {
+/// The line the shell hook reads back: the answer's one command and link, and the rules the
+/// person saved in this run (what Undo takes back).
+fn record_hook(text: &str, cwd: &Path, undo: &[String]) {
     let command = card::command_of(text);
     let link = card::link_of(text, cwd);
-    Out::raw(actions::record(text, command.as_deref(), link.as_deref()).as_bytes());
+    Out::raw(actions::record(text, command.as_deref(), link.as_deref(), undo).as_bytes());
 }
 
 /// The card: the model runs under a spinner while the asks waiting are counted, the answer is
@@ -694,9 +837,11 @@ async fn card_run(
         fancy,
         stdout_tty,
         session,
+        mode,
     } = prepared;
     let look = CardLook::detect(fancy);
-    let run = run_at((bin, model), &message, started, &ctx, session.as_ref());
+    let how = (session.as_ref(), mode);
+    let run = run_at((bin, model), &message, started, &ctx, how);
     // The asks waiting are looked up while the model thinks, so they add no time.
     let (done, waiting) = if look.fancy {
         let (done, waiting) =
@@ -712,9 +857,15 @@ async fn card_run(
     } else {
         hints::Footer::Full
     };
+    // The permission results of the run so far, drawn in the card; a second card (after the
+    // model's question is answered) shows only what came after.
+    let seen = settled_of(session.as_ref(), 0).len();
+    let status = statuses(session.as_ref(), 0, h.hook);
+    let undo = saved_rules(session.as_ref());
     let shown = Card {
         agent: agent.display(),
         model,
+        mode: mode.shown(),
         elapsed: None,
         follows: h.prior_question.as_deref(),
         read: &read,
@@ -726,6 +877,7 @@ async fn card_run(
             hints::Footer::Full => None,
         },
         row: None,
+        status: &status,
         body: Body::Failed(""),
     };
     let width = card::stderr_width();
@@ -734,26 +886,21 @@ async fn card_run(
         Ok((raw, duration_ms)) => {
             let (mut text, questions) = askback::split(raw);
             let took = Duration::from_millis(*duration_ms);
-            draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
+            let ctx_of = (cwd.as_path(), !undo.is_empty());
+            draw_answer(&shown, &text, took, (h, look, menu_key), ctx_of, width);
             // The model asked back: ask the person, keep the answer, and answer once more.
             let can_ask = look.fancy
                 && prompt::interactive()
                 && (h.hook || h.card || !h.headless)
                 && !questions.is_empty();
             if let Some(root) = root.as_deref().filter(|_| can_ask)
-                && let Some((again, ms)) = ask_back(
-                    chosen,
-                    question,
-                    &mut ctx,
-                    (root, &questions),
-                    look,
-                    session.as_ref(),
-                )
-                .await?
+                && let Some((again, ms)) =
+                    ask_back(chosen, question, &mut ctx, (root, &questions), look, how).await?
             {
                 text = again;
+                let how = (seen, h, look, menu_key);
                 let took = Duration::from_millis(ms);
-                draw_answer(&shown, &text, took, (h, look, menu_key), &cwd, width);
+                draw_again(&shown, session.as_ref(), how, (&text, took), (&cwd, width));
             }
             closing_notes(
                 session.as_ref(),
@@ -761,7 +908,7 @@ async fn card_run(
                 (h, menu_key, look, width),
             );
             if h.hook {
-                record_hook(&text, &cwd);
+                record_hook(&text, &cwd, &saved_rules(session.as_ref()));
             } else if !stdout_tty {
                 Out::raw(format!("{text}\n").as_bytes());
             }
@@ -769,6 +916,24 @@ async fn card_run(
         }
         Err(why) => Err(draw_failed(&shown, why, started, (width, look))),
     }
+}
+
+/// The card once more after the model's question was answered: the same card with only the
+/// permission results that came since (`seen` is how many the first card showed).
+fn draw_again(
+    shown: &Card<'_>,
+    session: Option<&Session>,
+    (seen, h, look, menu_key): (usize, &HeadlessArgs, CardLook, MenuKey),
+    (text, took): (&str, Duration),
+    (cwd, width): (&Path, usize),
+) {
+    let fresh = statuses(session, seen, h.hook);
+    let again = Card {
+        status: &fresh,
+        ..shown.clone()
+    };
+    let undo = !saved_rules(session).is_empty();
+    draw_answer(&again, text, took, (h, look, menu_key), (cwd, undo), width);
 }
 
 /// Puts the model's questions to the person, keeps what they answer (iohr writes it, the
@@ -781,7 +946,7 @@ async fn ask_back(
     ctx: &mut Context,
     (root, questions): (&Path, &[askback::Question]),
     look: CardLook,
-    session: Option<&Session>,
+    how: (Option<&Session>, Mode),
 ) -> Result<Option<(String, u64)>, Error> {
     let Some(answers) = askback::ask_person(questions) else {
         return Ok(None);
@@ -793,7 +958,7 @@ async fn ask_back(
     ctx.refresh = true;
     let again = headless::assemble(question, ctx).map_err(Error::Usage)?;
     let started = Instant::now();
-    let run = run_at((chosen.bin, chosen.model), &again, started, ctx, session);
+    let run = run_at((chosen.bin, chosen.model), &again, started, ctx, how);
     match spin_while(run, chosen.agent, look, started).await? {
         // The second answer asks nothing: a question in it is dropped.
         Ok((raw, ms)) => Ok(Some((askback::split(&raw).0, ms))),
@@ -804,20 +969,21 @@ async fn ask_back(
     }
 }
 
-/// Draws one answer card: the row under it only when the hook is there to bind its key.
+/// Draws one answer card: the row under it only when the hook is there to bind its key
+/// (`undo` adds the action that takes back a rule saved in this run).
 fn draw_answer(
     shown: &Card<'_>,
     text: &str,
     took: Duration,
     (h, look, menu_key): (&HeadlessArgs, CardLook, MenuKey),
-    cwd: &Path,
+    (cwd, undo): (&Path, bool),
     width: usize,
 ) {
     let command = card::command_of(text);
     let link = card::link_of(text, cwd);
     // The row promises a key that only the hook binds, so only the hook draws it.
     let row = (h.hook && look.fancy)
-        .then(|| actions::row(menu_key, command.is_some(), link.is_some()))
+        .then(|| actions::row(menu_key, command.is_some(), link.is_some(), undo))
         .flatten();
     let card = Card {
         elapsed: Some(took),

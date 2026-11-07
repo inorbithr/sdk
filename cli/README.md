@@ -108,7 +108,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
-| `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
+| `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show` with no name lists the same catalogue, listings not yet released marked coming; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
 | `iohr ext install [--lock FILE] [--no-service] \| service \| list \| upgrade \| remove \| verify \| sync` | Extensions: install (`NAME` from the registry, or `PUBLISHER/NAME` through the catalogue), verify and pin them; one that declares privileges for its system service asks first unless `--yes`; one with a system service of its own (`inorbit/capture`) offers to set it up with sudo after installing (it lists the interfaces it detects and suggests one; `--interface` repeatable, or `--all-interfaces`), and `iohr ext service NAME` does it later; `iohr <name> ...` runs one |
 | `iohr ext init \| dev \| lint` | Build an extension locally (PRD 0084): `init PUBLISHER/NAME --lang rust\|python\|shell [--dir DIR]` scaffolds a folder (manifest with every field, entry point on the token channel, self-test, README, signing release workflow; a name holding `tbd` is refused); `dev [PATH] [--test]` runs it, or its tests, with the token channel for exactly the manifest's scopes, its secrets, `STATE` and `CACHE` under `~/.inorbit/ext-dev/NAME/` and its output timestamped, never touching installed extensions; `lint [PATH] [--preview] [--json]` checks `extension.toml` and says what it may do in plain words. Offline, except the token channel's sign-in |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
@@ -119,11 +119,12 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
 | `iohr ext packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (`iohr packages` still works, hidden from the help) |
-| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--allow-edits] [--permissions prompt\|rules\|deny] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, read-only file tools, no write access, a scrubbed environment, the question on stdin; a Bash tool only through your permission rules, and at a terminal Io asks with a small Io card (numbered bar, arrows or 1-9, `y` once, `a` always in this project, `n` no, starting on No; one plain line under `NO_COLOR` or without a terminal) before it runs a command the rules do not cover, with `--permissions rules` or `deny` or `IOHR_ASK_PERMISSIONS` or `[ask] permissions` choosing the mode), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, questions, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null; `questions` are the at most two questions the model asked back, each `{about, ask, choices}`, or `[]`). Inside a project the prompt carries iohr's own git facts (branch, last 5 commits, change counts) and the project's notes; at a terminal the card asks the questions, keeps the answer in `.inorbit/memory/` and `inorbit.toml` and refreshes the answer once, and a dim line says when asks are waiting `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
-| `iohr ask --menu --command C [--link L]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open, and Asks when some wait) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
+| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--mode manual\|plan\|auto] [--allow-edits] [--permissions prompt\|rules\|deny] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, read-only file tools, no write access, a scrubbed environment, the question on stdin; a Bash tool only through your permission rules, and at a terminal Io asks with a small Io card (numbered bar, arrows or 1-9, `y` once, `a` always in this project, `n` no, starting on No; one plain line under `NO_COLOR` or without a terminal) before it runs a command the rules do not cover, with `--mode manual\|plan\|auto` (or `IOHR_ASK_MODE` or `[ask] mode`) choosing how: manual asks before each command, plan is read only and answers with a plan, auto runs what your rules do not forbid without asking, deny rules and secrets still winning; `--permissions rules` or `deny` or `IOHR_ASK_PERMISSIONS` or `[ask] permissions` still work), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, questions, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null; `questions` are the at most two questions the model asked back, each `{about, ask, choices}`, or `[]`). Inside a project the prompt carries iohr's own git facts (branch, last 5 commits, change counts) and the project's notes; at a terminal the card asks the questions, keeps the answer in `.inorbit/memory/` and `inorbit.toml` and refreshes the answer once, and a dim line says when asks are waiting `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
+
+| `iohr ask --menu --command C [--link L] [--undo RULES]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open, Undo for a permission the run saved, and Asks when some wait) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
 | `iohr asks count [--cache] [--json] [--account A]` | How many asks wait for you: "3 asks", nothing for none; only asks whose turn is yours (`pending`) count, one you already answered with a note (`question`) is the agent's turn and is left out (`iohr asks list` still shows it), `{"count": N}` with `--json`; `--cache` keeps just the number in `~/.inorbit/term/asks-count` and does nothing while that file is under 30 seconds old (the shell hook's prompt segment uses it). It reads the sign-in through a quiet credential store: no Keychain dialog (macOS interaction is switched off) and no wait past 1.5 s; when the store would ask, `--cache` keeps the last number and prints nothing, without `--cache` it exits 1 saying so |
 | `iohr permissions list\|allow RULE\|deny RULE\|remove RULE\|check TOOL INPUT [--project\|--user] [--json]` | The rules for what Io may run or open when you ask it something (Claude Code's rule grammar) in `.inorbit/permissions.toml` and the user file in the iohr config folder; `allow` refuses rules that could open a secret file and a blanket `Bash(*)` (exit 2); `check` prints `allow`, `deny` or `ask` and the rule; every ask decision is logged to `.inorbit/permissions.log` (no output, no contents); see `docs/config.md`, section 4.5 |
-| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
+| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu; Shift+Tab on a `?` line cycles manual, plan and auto): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--env production|local`
@@ -317,6 +318,7 @@ pins and runs. The first is the InOrbit agent:
 
 ```sh
 iohr ext search agent                    # the catalogue: what you may install
+iohr ext show                            # no name: the whole catalogue, coming ones marked
 iohr ext show inorbit/agent              # publisher, signer, scopes, privileges, versions
 iohr ext install inorbit/agent           # or inorbit/agent@0.1.0, or just: agent
 iohr agent status                        # runs the installed program
@@ -329,6 +331,12 @@ once (an admin or owner of the account is needed; anyone else is refused with th
 reason). A key or token profile hands out its own token when it holds the scopes, and is
 refused when it does not. Minting is bounded at 30 s, then the program gets a `503` that
 says why (ADR 0012, point 6).
+
+`iohr project init` looks at the template and the `--describe` text, finds the catalogue
+listings that fit (a rule table in `commands/init_extensions.rs`) and, at a terminal, asks
+whether to install each one (default no) through the same path as `iohr ext install`. With
+`--yes`, `--json` or no terminal it prints one `iohr ext install ...` line and installs
+nothing. A listing marked coming is never offered for install.
 
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A
@@ -428,7 +436,7 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 
 ## A project of your own
 
-`iohr project init NAME` (also `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
+`iohr project init NAME` (also `iohr init NAME` and `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
 and tells you what you now have. The local half is real: `~/development/NAME` from a template
 (`--template demo`: a private macOS service that heartbeats and serves a tiny panel, with the
 manifest of `iohr ext init`; `--template coordinated`: the same, plus a `coordination.toml` that
@@ -437,6 +445,14 @@ names your account's Planner plan and an `ask` example you can file with
 `~/.inorbit/projects/NAME/` (never in the repository), a Keychain slot reserved by name, and a
 smoke test that runs the project once and reads its heartbeat back, with no token channel, so
 its token ask is refused: the proof the channel is its only credential.
+
+Run it again in the folder it made and it succeeds: a file that is already there is left
+alone (reported as unchanged, or as left alone when you changed it), nothing is written
+twice and nothing of yours is committed for you. A folder that is not that project is
+still refused. The built-in roles go to your account only with the account step, so
+`--no-sync`, or no sign-in, leaves them in `atlas/roles/` with a plain line saying so
+(`iohr sync` imports them later). The template's `rust-version` is the toolchain you have
+installed, and an agent started with `--describe` is told to keep it as the minimum.
 
 At a terminal, `init` is guided: it asks for the name when it is missing (the folder's name is
 the default), offers the templates as a menu (templates that are coming are listed dimmed and
@@ -591,13 +607,14 @@ Every template writes two committed files, neither holding a secret:
   keys are grouped as the project (`name`, `id`, `kind`: `project`, `macos-service`,
   `macos-app` or `ui-panel`), where it came from (`template`, `template_version`,
   `created_at`) and the InOrbit links (`space_id`, `listing`, `memory_namespace`, each empty
-  until the step that fills it exists). It was `inorbit-project.toml`; nothing in the CLI reads
+  until the step that fills it exists; `iohr init` fills `space_id`). It was `inorbit-project.toml`; nothing in the CLI reads
   the record, so there is no fallback for the old name.
 - `.inorbit/space` is the link to an InOrbit space (platform RFC 0103, "The link"): `id` and
   `name` as `key = "value"` lines. `init` writes it from the shared scaffold step for every
   template. Until the space exists it holds empty values and a comment naming the plugin
-  command `/inorbit:link <space>`; the CLI has no link command of its own. `.inorbit/` is never
-  ignored, and `git init` commits it.
+  command `/inorbit:link <space>`; `iohr init` and `iohr project sync` fill it. `.inorbit/` is
+  committed, except `.inorbit/space.*` (the local environment's link), which its own
+  `.gitignore` keeps out.
 
 ### The atlas, and `iohr sync`
 
@@ -726,7 +743,40 @@ printed instead, still labelled AI. Every step reads `would: ...`, and it ends w
 `dry run: nothing was changed`. With `--json` the plan is data: `files` (path and bytes),
 `steps`, and `agent` (command and prompt). Every action goes through one gate that checks it.
 
-The steps that need InOrbit (the project as a Decisions space, its private listing, its own
+### The project in InOrbit: `iohr init` and `iohr project sync`
+
+`iohr init NAME` is `iohr project init NAME`. Signed in, it makes the project's space in
+InOrbit before it writes anything, so the first commit holds the link: a Decisions space of
+kind `project` (RFC 0127.1), named like the folder. The team and who can read it:
+
+```sh
+iohr init my-shop --team acme --visibility managers   # under the team acme; owners and admins read it
+iohr init my-shop --visibility team                   # everyone in the account (the default)
+iohr --env local init my-shop                         # the local environment, a link of its own
+iohr project sync                                     # make or find the space later, from the folder
+iohr init my-shop --no-sync                           # make nothing in InOrbit
+```
+
+At a terminal, a missing `--team` or `--visibility` is asked as a menu (a personal account
+is "personal"; a team you are not in is refused before anything is made). The sync is
+idempotent: the space is found by account and name, so a second run, or a teammate's clone,
+never makes a second one; a clone whose sign-in cannot open the linked space is told to ask a
+team owner or admin. The link is `.inorbit/space` for production (committed, and `space_id` in
+`inorbit.toml` is filled) and `.inorbit/space.local` for `--env local`, kept out of git by
+`.inorbit/.gitignore`. The project then shows under Projects in the app and the console, and
+the team opens it from the link.
+
+Init never fails for the sync. Not signed in, offline, or a server that is down or refuses the
+call (401, 403, 408, 425, 429, 5xx) is a `queued` step with the answers kept in
+`~/.inorbit/projects/NAME/space-sync.<env>.toml`; `iohr project sync` completes it and clears
+it. Any other refusal is a failed step with the reason. `--dry-run` says `would:` and calls
+nothing.
+
+Still `not yet` (the platform has no API for them): a space's members, per-project scopes and
+tokens, and the project summary (`POST /v1/decisions/projects`), so the chosen visibility is
+the space's access floor (the whole account or its managers), not a member list.
+
+The other steps that need InOrbit (its private listing, its own
 scopes and tokens, a memory namespace, monitors and notifications) are reported as `not yet`,
 each with the API it waits on; nothing is skipped in silence, and a step that needs your or an
 admin's say becomes an ask. Every step is re-runnable, and nothing is overwritten. Then
@@ -747,7 +797,10 @@ on Claude Code (local), an AI model, under your own subscription; ...` and a lin
 what was read. `?? and the second one` asks a follow-up with the last question and answer as
 context. A line such as `?.txt` or `? ` alone runs as it always did. An accept-line widget you
 already have is kept and called for every other line. `INORBIT_ASK=0` turns it off for the
-session. Inside the InOrbit app (`INORBIT_TERM`) the hook asks the app to draw the answer
+session. Shift+Tab on a `?` line switches the mode of the answers between manual (asks before each
+command), plan (read only, a plan and nothing run) and auto (runs what your rules do not forbid);
+it says which under the prompt and every question carries it (`--mode`; `[ask] mode` and
+`IOHR_ASK_MODE` set where it starts). Inside the InOrbit app (`INORBIT_TERM`) the hook asks the app to draw the answer
 (an OSC `7727;ask` escape) instead of printing it.
 
 What goes to your provider: the question, the folder's path, the names at the top of that folder

@@ -120,6 +120,14 @@ impl Global {
         self.via_role.as_ref().or(self.via_personality.as_ref())
     }
 
+    /// The name of the environment this run targets: `--env`, `IOHR_ENV`, else the default.
+    #[must_use]
+    pub fn environment_name(&self) -> &str {
+        self.env
+            .as_deref()
+            .unwrap_or_else(|| Environments::builtin().default_name())
+    }
+
     /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
     #[must_use]
     pub fn environment(&self) -> &'static Environment {
@@ -182,6 +190,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     (
         "Build",
         &[
+            "init",
             "project",
             "atlas",
             "sync",
@@ -382,6 +391,11 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Create a project: the same as `iohr project init`.
+    ///
+    /// Sets up a project of your own and creates it in InOrbit under your team, for the
+    /// environment `--env` names, linked in `.inorbit/space`. See `iohr project init --help`.
+    Init(Box<InitArgs>),
     /// Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder.
     ///
     /// The atlas: plain files in the project's `atlas/` folder (PRDs, RFCs, ADRs and studies as
@@ -1254,13 +1268,15 @@ pub enum ExtCommand {
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=200))]
         page_size: Option<u32>,
     },
-    /// Show one extension in the catalogue.
+    /// Show one extension in the catalogue, or list them all.
     ///
     /// One extension in the catalogue: what it does, its publisher, signer, scopes,
     /// privileges in plain words, evidence, versions and the line that installs it.
+    /// With no name, the catalogue itself, the list `ext search` prints (a listing not
+    /// released yet reads "coming").
     Show {
-        /// PUBLISHER/NAME, such as inorbit/agent.
-        extension: String,
+        /// PUBLISHER/NAME, such as inorbit/agent (default: list the catalogue).
+        extension: Option<String>,
     },
     /// Verify and install an extension.
     ///
@@ -1417,8 +1433,8 @@ pub struct AskArgs {
     pub question: Vec<String>,
     #[command(flatten)]
     pub headless: HeadlessArgs,
-    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain
-    /// or Open with a letter or the arrows. It asks no model, runs nothing, and prints the one
+    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain,
+    /// Open or Undo with a letter or the arrows. It asks no model, runs nothing, and prints the one
     /// line to put on the prompt (or nothing) on stdout.
     #[arg(long, conflicts_with_all = ["interactive", "headless", "card", "hook"])]
     pub menu: bool,
@@ -1428,6 +1444,15 @@ pub struct AskArgs {
     /// With `--menu`: the file (relative to `--cwd`) or `https://` link the answer named.
     #[arg(long, value_name = "LINK", requires = "menu")]
     pub link: Option<String>,
+    /// With `--menu`: the permission rules this answer's run saved, separated by the unit
+    /// separator (U+001F). Undo takes back the ones the project file still holds.
+    #[arg(
+        long,
+        value_name = "RULES",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub undo: Vec<String>,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,
@@ -1439,14 +1464,23 @@ pub struct AskArgs {
     /// only when you name one.
     #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
     pub model: Option<String>,
+    /// How Io works: `manual` asks before each command (default at a terminal), `plan` reads
+    /// and proposes a plan and changes nothing (Claude's plan mode; Codex's read-only
+    /// sandbox), `auto` runs commands no rule decides without asking (a deny rule and the
+    /// secret list still win). In the shell hook shift+tab on a `?` line switches between
+    /// them. Beats `--permissions`. `[ask] mode`, `IOHR_ASK_MODE`.
+    #[arg(long, value_name = "MODE", env = "IOHR_ASK_MODE")]
+    pub mode: Option<String>,
     /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
     /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits
-    /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
+    /// rather than ask. Shell commands are never allowed by iohr. It is the plain run's `--mode
+    /// auto` (`--mode plan` wins over it). `[ask] allow_edits`.
     #[arg(long)]
     pub allow_edits: bool,
-    /// What happens when Io wants to run a command or open a file no rule decides: `prompt`
-    /// asks you at the terminal (default at a terminal), `rules` only follows your rules and
-    /// says no to the rest (default without one), `deny` offers no commands at all. Rules:
+    /// What happens when Io wants to run a command or open a file no rule decides: `manual`
+    /// (or `prompt`) asks you at the terminal (default at a terminal), `plan` and `auto` are
+    /// the modes of `--mode`, `rules` only follows your rules and says no to the rest (default
+    /// without a terminal), `deny` offers no commands at all. `--mode` wins over it. Rules:
     /// `iohr permissions`. `[ask] permissions`.
     #[arg(long, value_name = "HOW", env = "IOHR_ASK_PERMISSIONS")]
     pub permissions: Option<String>,
@@ -1846,7 +1880,8 @@ pub struct InitArgs {
     /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
     /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
     /// when you are inside a git repository, or a path of your own. It must not exist
-    /// or be empty.
+    /// or be empty, or be the folder this project was made in: run again there, init
+    /// leaves every file that is already there alone and commits nothing.
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
     /// The language, for a template that offers several (the same as `--set
@@ -1861,6 +1896,46 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// Where the project lives in InOrbit: team, who reads it, or none.
+    #[command(flatten)]
+    pub space: InitSpaceArgs,
+}
+
+/// The flags of `project init` that say where the project lives in InOrbit.
+#[derive(Debug, Args)]
+pub struct InitSpaceArgs {
+    /// The team the project lives under in InOrbit: an account's id or slug
+    /// (`iohr accounts list` shows yours). Default: the account you are signed in on; at a
+    /// terminal, with more than one account, init asks. The environment is the global
+    /// `--env` (`production` by default, or `local`).
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` (everyone in it; only you in your own
+    /// account, the default) or `managers` (its owners and admins). At a terminal, init asks.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Keep the project on this machine: do not create it in InOrbit or queue that.
+    #[arg(long)]
+    pub no_sync: bool,
+}
+
+/// The flags of `project sync`.
+#[derive(Debug, Args)]
+pub struct ProjectSyncArgs {
+    /// The project folder. Default: the folder you are in.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// The team the project lives under: an account's id or slug. Default: what init
+    /// queued, else the account you are signed in on.
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` or `managers`. Default: what init
+    /// queued, else `team`.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Say what would be made or linked and change nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1870,10 +1945,19 @@ pub enum ProjectCommand {
     /// Set up a project of your own: sign-in checked, the folder scaffolded from a
     /// template with its manifest, a git repository with one commit, its own state under
     /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
-    /// and a report. Idempotent: a step already done is done again without harm, and a
-    /// step that waits on an API says so instead of pretending. `create` is the same command.
+    /// and a report. Idempotent: run again in the folder it made, it leaves every file that
+    /// is already there as it is and says which, and a step that waits on an API says so
+    /// instead of pretending. `iohr init` and `create` are the same command.
     #[command(visible_alias = "create")]
     Init(Box<InitArgs>),
+    /// Create the project in InOrbit, or link to it, from its folder.
+    ///
+    /// The part of `init` that makes the project in InOrbit: a Decisions space of kind
+    /// project under your team, for the environment `--env` names. Idempotent: it finds the
+    /// space by the project's name and links to it, so a repeat, a retry after init could not
+    /// reach InOrbit, and a teammate who cloned the project all end at the same space. The
+    /// link is written to `.inorbit/space` (production, committed) or `.inorbit/space.local`.
+    Sync(ProjectSyncArgs),
     /// The same as `template list`, kept so older scripts work.
     #[command(hide = true)]
     Templates,
