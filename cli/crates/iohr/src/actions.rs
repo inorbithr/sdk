@@ -1,6 +1,8 @@
 //! What a person can do with a `?` answer (RFC 0203.1): the row under the card, the menu
-//! behind the key, and the record the hook reads. Nothing here runs a command: Run only puts
-//! it on the prompt line, and the person's own Enter runs it.
+//! behind the key, and the record the hook reads. `iohr` never runs the command itself: Run
+//! hands it back to the hook marked `run` (see [`RUN`]), and the hook sends it through the
+//! shell's own accept-line, so it is a command of the person's own prompt. Before that, a
+//! command a rule denies is never run, and a risky or unreadable one asks for a yes first.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -16,8 +18,9 @@ use crate::error::Error;
 use crate::headless::OutputHow;
 use crate::output::Out;
 use crate::permissions::{
+    engine::{self, Place, Verdict},
     rule::Rule,
-    rules_subject,
+    rules_subject, shell,
     store::{self, Files},
     trust,
 };
@@ -28,6 +31,10 @@ use crate::ui::{Choice, Ui};
 /// Separates the answer, the command and the link in the hook's record. A control character
 /// no answer may contain (it is stripped from the answer), so one `$(...)` carries all three.
 pub(crate) const RS: char = '\u{1e}';
+
+/// The marker after the command, behind [`RS`], that tells the hook to run it at once (every
+/// other line the menu prints is only put on the prompt, or asked as a question).
+pub(crate) const RUN: &str = "run";
 
 /// The key that opens the menu under a card (`[ask] menu_key`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,16 +120,39 @@ pub(crate) struct Extras {
     pub(crate) attach: bool,
 }
 
+/// What the answer's command allows: Run and Copy, Copy only (it still holds a placeholder,
+/// see [`placeholder`]), or neither (the answer has no command).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Offer {
+    None,
+    CopyOnly,
+    Runnable,
+}
+
+impl Offer {
+    /// What `command` allows in `cwd`.
+    pub(crate) fn of(command: Option<&str>, cwd: &Path) -> Self {
+        match command {
+            None => Self::None,
+            Some(c) if placeholder(c, cwd) => Self::CopyOnly,
+            Some(_) => Self::Runnable,
+        }
+    }
+}
+
 /// The line under the card: the actions on offer and the key. Run and Copy need a command,
 /// Open a link, Undo a rule this answer's run saved, Attach output a failed command that the
 /// question asks about, Allow a folder Io asked to read and the next steps it suggested; Follow
 /// up, Explain and Add folder (one more folder for Io to read) are always there. None when
 /// there is no key.
-pub(crate) fn row(key: MenuKey, has_command: bool, has: Extras, next: &Next<'_>) -> Option<String> {
+pub(crate) fn row(key: MenuKey, command: Offer, has: Extras, next: &Next<'_>) -> Option<String> {
     let key = key.label()?;
     let mut names: Vec<String> = Vec::new();
-    if has_command {
-        names.extend(["Run".to_owned(), "Copy".to_owned()]);
+    if command != Offer::None {
+        if command == Offer::Runnable {
+            names.push("Run".to_owned());
+        }
+        names.push("Copy".to_owned());
     }
     if next.allow.is_some() {
         names.push("Allow".to_owned());
@@ -176,8 +206,8 @@ pub(crate) fn record(
     )
 }
 
-/// Why a command deserves a second look before Enter, in a few words; None when nothing
-/// stands out. Only a hint on the menu: the command is never run by `iohr` either way.
+/// Why a command deserves a second look before it runs, in a few words; None when nothing
+/// stands out. On the menu it is the reason Run asks for a yes first.
 pub(crate) fn risk(command: &str) -> Option<&'static str> {
     let words: Vec<&str> = command.split_whitespace().collect();
     let has = |w: &str| words.contains(&w);
@@ -199,7 +229,12 @@ pub(crate) fn risk(command: &str) -> Option<&'static str> {
     }
 }
 
-fn choices(command: Option<&str>, has: Extras, asks: usize, next: &Next<'_>) -> Vec<Choice> {
+fn choices(
+    command: Option<(&str, bool)>,
+    has: Extras,
+    asks: usize,
+    next: &Next<'_>,
+) -> Vec<Choice> {
     let pick = |value: &str, label: &str, hint: &str, key: char| Choice {
         value: value.to_owned(),
         label: label.to_owned(),
@@ -208,12 +243,14 @@ fn choices(command: Option<&str>, has: Extras, asks: usize, next: &Next<'_>) -> 
         key: Some(key),
     };
     let mut out = Vec::new();
-    if let Some(c) = command {
+    if let Some((c, can_run)) = command {
         let hint = match risk(c) {
-            Some(why) => format!("put it on your prompt; it {why}, read it first"),
-            None => "put it on your prompt; Enter runs it".to_owned(),
+            Some(why) => format!("runs it after a yes; it {why}, read it first"),
+            None => "runs it now, at your prompt".to_owned(),
         };
-        out.push(pick("run", "Run", &hint, 'r'));
+        if can_run {
+            out.push(pick("run", "Run", &hint, 'r'));
+        }
         out.push(pick("copy", "Copy", "the command to the clipboard", 'c'));
     }
     if let Some(folder) = next.allow {
@@ -408,9 +445,10 @@ fn paste(a: &Attach<'_>) -> Option<String> {
 }
 
 /// The menu for `iohr ask --menu`: draws on stderr, reads the terminal, and prints on stdout
-/// the one line for the prompt (Run: the command; Follow up, Explain: a `??` question to
-/// finish), or nothing (Copy, Open, a cancel). The caller is a shell widget that only ever
-/// puts that line in its buffer.
+/// the one line for the prompt (Run: the command and [`RUN`]; Follow up: a bare `??` to
+/// finish; the other choices: a `??` question or command to put at once), or nothing (Copy,
+/// Open, a cancel). The caller is a shell widget that puts that line in its buffer; only a
+/// `?` question or a Run is accepted at once, and `iohr` itself runs nothing here.
 ///
 /// # Errors
 ///
@@ -429,14 +467,20 @@ pub(crate) fn menu(
         undo: !undo.rules.is_empty(),
         attach: attach.is_some(),
     };
-    let all = choices(command, has, crate::commands::asks::cached_count(), next);
+    let can_run = command.is_some_and(|c| !placeholder(c, cwd));
+    let all = choices(
+        command.map(|c| (c, can_run)),
+        has,
+        crate::commands::asks::cached_count(),
+        next,
+    );
     let first = all.first().map_or("", |c| c.value.as_str()).to_owned();
     let Some(picked) = Ui::select_bar("What next?", &all, &first)? else {
         return Ok(());
     };
     let say = |line: &str| Out::note(line);
     let typed = match (picked.as_str(), command, link) {
-        ("run", Some(c), _) => Some(c.to_owned()),
+        ("run", Some(c), _) if can_run => run_now(c, cwd, undo.files),
         ("copy", Some(c), _) => {
             match copy(c) {
                 Ok(how) => say(&how),
@@ -480,6 +524,109 @@ pub(crate) fn menu(
         Out::raw(typed.as_bytes());
     }
     Ok(())
+}
+
+/// Whether the command still holds something the person has to fill in before it can run: a
+/// `path/to/...` or `<...>` word, a `your-...` or `YOUR_...` word, or a folder that is not
+/// there for a command that only goes to or looks at one (`cd`, `ls`, `cat`...). Such a command
+/// is Copy only. A best effort on the words [`shell::split`] reads; a word it cannot judge
+/// is not a placeholder, because a missing Run is cheap and a wrong refusal is not.
+pub(crate) fn placeholder(command: &str, cwd: &Path) -> bool {
+    const LOOKS: [&str; 8] = ["cd", "ls", "cat", "less", "head", "tail", "bat", "tree"];
+    let named = |w: &str| {
+        let lower = w.to_ascii_lowercase();
+        let angle = w.len() > 2
+            && w.starts_with('<')
+            && w.ends_with('>')
+            && !w[1..w.len() - 1].contains(['<', '>']);
+        angle
+            || lower.contains("path/to/")
+            || lower.starts_with("your-")
+            || lower.starts_with("your_")
+            || lower.contains("/your-")
+            || lower.contains("/your_")
+    };
+    // `TOKEN=YOUR_TOKEN` and `--repo=<url>` hold the template after the `=`.
+    if command
+        .split_whitespace()
+        .any(|w| named(w) || w.split_once('=').is_some_and(|(_, v)| named(v)))
+    {
+        return true;
+    }
+    shell::split(command).parts.iter().any(|part| {
+        let mut words = part.words.iter();
+        words
+            .next()
+            .is_some_and(|first| LOOKS.contains(&first.as_str()))
+            && part.words[1..].iter().any(|w| {
+                let plain = !w.starts_with('-')
+                    && !w.contains(['$', '*', '?', '[', '{', '~', '`'])
+                    && !w.is_empty();
+                plain && !cwd.join(w).exists()
+            })
+    })
+}
+
+/// Run: whether the command may go to the prompt's accept-line now, and the line the hook
+/// reads for it. A rule that denies it, a rule file that cannot be read, never run it (said on
+/// stderr). A command a risk hint names, or one `iohr` cannot read well enough to hold against
+/// the rules (a substitution, a redirect) and no rule allows, is shown and needs a yes first.
+/// A plain command runs at once: choosing Run is the person's go, as typing the line would be.
+fn run_now(command: &str, cwd: &Path, files: &Files) -> Option<String> {
+    let rules = match store::rule_set(files) {
+        Ok(r) => r,
+        Err(why) => {
+            Out::note(&format!(
+                "not run: the permission rules cannot be read ({why})"
+            ));
+            return None;
+        }
+    };
+    let input = serde_json::json!({ "command": command });
+    let verdict = engine::decide(&rules, "Bash", &input, &Place::at(cwd));
+    let allowed = match &verdict {
+        Verdict::Deny(rule) => {
+            Out::note(&format!("not run: the rule {rule} does not allow it"));
+            return None;
+        }
+        Verdict::Allow(_) => true,
+        Verdict::Ask => false,
+    };
+    let why = risk(command).or_else(|| {
+        (!engine::checkable("Bash", &input) && !allowed)
+            .then_some("has a substitution or a redirect Io cannot read")
+    });
+    if let Some(why) = why {
+        Out::note(&format!("It would run in {}: {command}", cwd.display()));
+        if !confirm(why) {
+            return None;
+        }
+    }
+    Some(format!("{command}{RS}{RUN}"))
+}
+
+/// The yes before a risky command runs: Esc, a cancel and no terminal are all a no.
+fn confirm(why: &str) -> bool {
+    let choice = |value: &str, label: &str, hint: &str, key: char| Choice {
+        value: value.to_owned(),
+        label: label.to_owned(),
+        hint: hint.to_owned(),
+        available: true,
+        key: Some(key),
+    };
+    let rows = [
+        choice("no", "No", "leave it", 'n'),
+        choice(
+            "yes",
+            "Yes, run it",
+            &format!("it {why}; it runs at once"),
+            'y',
+        ),
+    ];
+    matches!(
+        Ui::select_bar("Run it?", &rows, "no"),
+        Ok(Some(v)) if v == "yes"
+    )
 }
 
 /// Allow: keeps the yes for `folder` (the same `trusted.toml` the terminal card writes) and
@@ -712,7 +859,7 @@ mod tests {
         assert_eq!(
             row(
                 MenuKey::Down,
-                true,
+                Offer::Runnable,
                 Extras {
                     link: true,
                     ..Extras::default()
@@ -727,7 +874,7 @@ mod tests {
         assert_eq!(
             row(
                 MenuKey::Down,
-                false,
+                Offer::None,
                 Extras {
                     undo: true,
                     ..Extras::default()
@@ -738,13 +885,19 @@ mod tests {
             Some("Follow up \u{b7} Explain \u{b7} Undo \u{b7} Add folder   \u{2193} to choose")
         );
         assert_eq!(
-            row(MenuKey::CtrlG, false, Extras::default(), &Next::default()).as_deref(),
+            row(
+                MenuKey::CtrlG,
+                Offer::None,
+                Extras::default(),
+                &Next::default()
+            )
+            .as_deref(),
             Some("Follow up \u{b7} Explain \u{b7} Add folder   ctrl-g to choose")
         );
         assert_eq!(
             row(
                 MenuKey::Off,
-                true,
+                Offer::Runnable,
                 Extras {
                     link: true,
                     undo: true,
@@ -782,7 +935,7 @@ mod tests {
             steps: &steps,
         };
         assert_eq!(
-            row(MenuKey::Down, false, Extras::default(), &next).as_deref(),
+            row(MenuKey::Down, Offer::None, Extras::default(), &next).as_deref(),
             Some(
                 "Allow \u{b7} Read api/ \u{b7} Search for TODO \u{b7} Follow up \u{b7} Explain \u{b7} Add folder   \u{2193} to choose"
             )
@@ -802,6 +955,38 @@ mod tests {
         // Nothing to allow and no step: the bar is as it was.
         let none = choices(None, Extras::default(), 0, &Next::default());
         assert_eq!(none.len(), 3);
+    }
+
+    #[test]
+    fn a_recursive_read_is_a_choice_of_its_own_and_every_step_asks_a_whole_question() {
+        let steps = [
+            Step::Read("atlas".into()),
+            Step::ReadAll("atlas".into()),
+            Step::Search("TODO".into()),
+            Step::Run("cargo test".into()),
+        ];
+        let next = Next {
+            allow: None,
+            steps: &steps,
+        };
+        let row = row(MenuKey::Down, Offer::None, Extras::default(), &next).unwrap();
+        assert!(
+            row.starts_with("Read atlas/ \u{b7} Read atlas/ (all) \u{b7} Search for TODO"),
+            "{row}"
+        );
+        let c = choices(None, Extras::default(), 0, &next);
+        assert_eq!(c[1].label, "Read atlas/ (all)");
+        assert!(c[1].hint.contains("every folder under it"));
+        // The hook asks a chosen line at once only when it is a whole `?` or `??` question: a
+        // step is one (the same shape the hook's own regex takes), and a command is not.
+        for s in &steps {
+            let q = s.question();
+            let rest = q.strip_prefix("?? ").unwrap_or_else(|| panic!("{q}"));
+            assert!(
+                rest.chars().next().is_some_and(|c| !c.is_whitespace()),
+                "{q}"
+            );
+        }
     }
 
     #[test]
@@ -831,7 +1016,7 @@ mod tests {
             allow: None,
             steps: &steps,
         };
-        let r = row(MenuKey::Down, false, Extras::default(), &next).unwrap();
+        let r = row(MenuKey::Down, Offer::None, Extras::default(), &next).unwrap();
         assert!(r.contains("...") && !r.contains(&long), "{r}");
         assert_eq!(
             choices(None, Extras::default(), 0, &next)[0].label,
@@ -938,5 +1123,96 @@ mod tests {
         assert_eq!(trust::standing(user.path()).len(), 0);
         let _ = allow(Some(&folder), "q", user.path(), true);
         assert_eq!(trust::standing(user.path()), [folder]);
+    }
+
+    #[test]
+    fn a_placeholder_is_a_template_word_or_a_folder_that_is_not_there() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("api")).unwrap();
+        for command in [
+            "cd path/to/your/repo && git log --oneline -5",
+            "git clone <repo-url>",
+            "export TOKEN=YOUR_TOKEN",
+            "cd your-project",
+            "cat ./your_file.txt",
+            "cd nowhere/at/all",
+            "ls missing",
+        ] {
+            assert!(placeholder(command, d.path()), "{command}");
+        }
+        for command in [
+            "git status",
+            "cd api && ls",
+            "ls",
+            "ls -la",
+            "mkdir -p new/folder",
+            "echo a > out.txt",
+            "cd ..",
+            "cat *.md",
+            "cd $HOME",
+            "git log --oneline -5",
+        ] {
+            assert!(!placeholder(command, d.path()), "{command}");
+        }
+    }
+
+    #[test]
+    fn a_command_with_a_placeholder_is_copy_only_in_the_row_and_the_bar() {
+        let d = tempfile::tempdir().unwrap();
+        let offer = Offer::of(Some("cd path/to/repo"), d.path());
+        assert_eq!(offer, Offer::CopyOnly);
+        assert_eq!(Offer::of(Some("ls"), d.path()), Offer::Runnable);
+        assert_eq!(Offer::of(None, d.path()), Offer::None);
+        let row = row(MenuKey::Down, offer, Extras::default(), &Next::default()).unwrap();
+        assert!(row.starts_with("Copy \u{b7} Follow up"), "{row}");
+        let bar = choices(
+            Some(("cd path/to/repo", false)),
+            Extras::default(),
+            0,
+            &Next::default(),
+        );
+        let values: Vec<&str> = bar.iter().map(|c| c.value.as_str()).collect();
+        assert!(
+            values.contains(&"copy") && !values.contains(&"run"),
+            "{values:?}"
+        );
+    }
+
+    #[test]
+    fn run_hands_back_a_plain_command_with_the_marker_and_never_a_denied_one() {
+        let d = tempfile::tempdir().unwrap();
+        let files = Files {
+            root: d.path().join("proj"),
+            user_dir: d.path().join("cfg"),
+        };
+        let cwd = d.path();
+        assert_eq!(
+            run_now("git status", cwd, &files),
+            Some(format!("git status{RS}{RUN}"))
+        );
+        // A risky command asks, and with no terminal to answer on that is a no.
+        assert_eq!(run_now("rm -rf build", cwd, &files), None);
+        assert_eq!(run_now("echo $(whoami)", cwd, &files), None);
+        // A rule that allows an unreadable line is the person's yes already.
+        let allow = Rule::parse("Bash(echo:*)").unwrap();
+        store::add(
+            &files,
+            store::Scope::Project,
+            store::Kind::Allow,
+            &allow,
+            &Place::at(cwd),
+        )
+        .unwrap();
+        assert!(run_now("echo hi", cwd, &files).is_some());
+        let deny = Rule::parse("Bash(git:*)").unwrap();
+        store::add(
+            &files,
+            store::Scope::Project,
+            store::Kind::Deny,
+            &deny,
+            &Place::at(cwd),
+        )
+        .unwrap();
+        assert_eq!(run_now("git status", cwd, &files), None, "denied");
     }
 }

@@ -178,7 +178,7 @@ pub(crate) struct Card<'a> {
     /// The disclosure sentences that close a full footer.
     pub(crate) notice: &'a str,
     /// Whether the footer is the full disclosure (`read` and `notice`), or only `hint`. The
-    /// "AI answer" label in the header is on every card either way.
+    /// header's right side (engine, model, mode) is on every card either way.
     pub(crate) full: bool,
     /// The one-line label printed instead of a card when the look is plain.
     pub(crate) label: &'a str,
@@ -306,7 +306,9 @@ fn plain(card: &Card<'_>) -> String {
 
 fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
     let failed = matches!(card.body, Body::Failed(_));
-    let badge = if failed { " no answer " } else { " AI answer " };
+    // A good answer has no badge: the header is `Io` and the engine, model and mode on the right
+    // (they name the AI); only a failure is marked.
+    let badge = if failed { " no answer " } else { "" };
     let mut meta = vec![card.agent.to_owned(), card.model.to_owned()];
     if let Some(m) = card.mode {
         meta.push(format!("{m} mode"));
@@ -321,8 +323,8 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
     );
 }
 
-/// The top line of an Io card, `╭─ ◆ Io ` then the badge, a rule and the dim `meta` at the
-/// right, `width` columns wide. The one header: the answer card, the permission ask and
+/// The top line of an Io card, `╭─ ◆ Io ` then the badge (none when it is empty), a rule and
+/// the dim `meta` at the right, `width` columns wide. The one header: the answer card, the permission ask and
 /// whatever draws an Io card next use it, so the AI label looks the same everywhere. `amber`
 /// draws the badge as a warning.
 #[must_use]
@@ -334,8 +336,9 @@ pub(crate) fn header_line(
     look: Look,
 ) -> String {
     let mut meta = meta.to_owned();
-    // "╭─ ◆ Io " + badge + " " + filler + " " + meta
-    let fixed = measure_text_width("╭─ ◆ Io ") + measure_text_width(badge) + 2;
+    // "╭─ ◆ Io " + badge + " " + filler + " " + meta (no badge: no space after it either)
+    let gap = if badge.is_empty() { "" } else { " " };
+    let fixed = measure_text_width("╭─ ◆ Io ") + measure_text_width(badge) + gap.len() + 1;
     let room = width.saturating_sub(fixed + 2);
     if measure_text_width(&meta) > room {
         meta = console::truncate_str(&meta, room, "…").into_owned();
@@ -349,7 +352,7 @@ pub(crate) fn header_line(
         look.badge().apply_to(badge).to_string()
     };
     format!(
-        "{}{}{badge} {} {}",
+        "{}{}{badge}{gap}{} {}",
         look.violet().apply_to("╭─ "),
         look.violet().bold().apply_to("◆ Io "),
         look.violet().apply_to("─".repeat(fill)),
@@ -1038,7 +1041,8 @@ mod tests {
                     ```sh\n$ cargo nextest run -p iohr --test project\n```";
         let out = strip(&render(&card(text), 60, FANCY));
         let lines: Vec<&str> = out.lines().collect();
-        assert!(lines[0].starts_with("╭─ ◆ Io  AI answer  ─"), "{out}");
+        assert!(lines[0].starts_with("╭─ ◆ Io ─"), "{out}");
+        assert!(!lines[0].contains("AI answer"), "{out}");
         assert!(
             lines[0].ends_with("Claude Code (local) · haiku · 1.8s"),
             "{out}"
@@ -1066,12 +1070,15 @@ mod tests {
     }
 
     #[test]
-    fn a_short_footer_is_one_line_and_the_label_stays_in_the_header() {
+    fn a_short_footer_is_one_line_and_the_header_still_names_the_model() {
         let mut c = card("Hi.");
         c.full = false;
         let out = strip(&render(&c, 60, FANCY));
         let lines: Vec<&str> = out.lines().collect();
-        assert!(lines[0].contains("AI answer"), "{out}");
+        assert!(
+            lines[0].contains("Claude Code (local) · haiku"),
+            "the model still names the AI: {out}"
+        );
         assert_eq!(lines.last(), Some(&"╰─ ?? follows up."), "{out}");
         assert!(
             !out.contains("Read:") && !out.contains("subscription"),
@@ -1080,7 +1087,7 @@ mod tests {
         c.hint = None;
         let bare = strip(&render(&c, 60, FANCY));
         assert_eq!(bare.lines().last(), Some("╰─"), "{bare}");
-        assert!(bare.lines().next().is_some_and(|l| l.contains("AI answer")));
+        assert!(bare.lines().next().is_some_and(|l| l.contains("haiku")));
     }
 
     #[test]

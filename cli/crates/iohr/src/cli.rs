@@ -1512,7 +1512,8 @@ pub struct AskArgs {
     pub headless: HeadlessArgs,
     /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain,
     /// Open or Undo with a letter or the arrows. It asks no model, runs nothing, and prints the one
-    /// line to put on the prompt (or nothing) on stdout.
+    /// line for the hook (or nothing) on stdout: Run's command ends with a 0x1e character and
+    /// `run`, which the hook executes at once.
     #[arg(long, conflicts_with_all = ["interactive", "headless", "card", "hook"])]
     pub menu: bool,
     /// With `--menu`: the command the answer suggested.
