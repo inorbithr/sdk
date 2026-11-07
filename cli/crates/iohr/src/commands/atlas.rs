@@ -15,9 +15,8 @@ use crate::commands::decisions::{create_in, decisions, save_text, scoped};
 use crate::context::{Api, Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
-use crate::project::read_space_link;
 use crate::roles::{self, Report};
-use crate::ui::Ui;
+use crate::ui::{Mark, Ui};
 use inorbithr::public::DecisionsGetDocumentParams as GetDocumentParams;
 
 const MESSAGE: &str = "Synced from atlas by iohr sync";
@@ -160,6 +159,44 @@ pub(crate) fn show_report(ui: Ui, report: &Report) {
         return;
     }
     ui.note("Roles", &lines.join("\n"));
+}
+
+/// How the roles step of `init` ended, in one line: imported (a check), or kept in the folder
+/// only because nobody is signed in or a role did not go (a warning, with the fix `message` says).
+pub(crate) fn roles_result(report: &Report) -> (Mark, String) {
+    let names = |failed: bool| {
+        report
+            .outcomes
+            .iter()
+            .filter(|o| (o.action == "failed") == failed)
+            .map(|o| o.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let listed = |failed: bool| {
+        let n = names(failed);
+        if n.is_empty() {
+            String::new()
+        } else {
+            format!(" ({n})")
+        }
+    };
+    let fix = report.message.clone().unwrap_or_else(|| {
+        "the roles stay in atlas/roles/; run `iohr login`, then `iohr sync` imports them".to_owned()
+    });
+    if report.outcomes.iter().any(|o| o.action == "failed") {
+        (
+            Mark::Warn,
+            format!("Roles not imported{}: {fix}", listed(true)),
+        )
+    } else if report.signed_in {
+        (Mark::Ok, format!("Roles in your account: {}", names(false)))
+    } else {
+        (
+            Mark::Warn,
+            format!("Roles kept in atlas/roles/{}: {fix}", listed(false)),
+        )
+    }
 }
 
 async fn roles_cmd(g: &Global, env: &Env, cmd: RolesCommand, out: Out) -> Result<(), Error> {
@@ -374,7 +411,7 @@ async fn sync_documents(
     let space = args
         .space
         .clone()
-        .or_else(|| read_space_link(&root).map(|(id, _)| id))
+        .or_else(|| crate::project::space::read_link_for(&root, g.environment_name()).map(|(id, _)| id))
         .ok_or_else(|| {
             Error::Usage(
                 "no Decisions space: give `--space ID`, or link the project with `/inorbit:link <space>`"
@@ -578,5 +615,66 @@ async fn sync_one(
             ))
         }
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::roles_result;
+    use crate::roles::{Outcome, Report};
+    use crate::ui::Mark;
+
+    fn outcome(name: &str, action: &'static str) -> Outcome {
+        Outcome {
+            name: name.to_owned(),
+            action,
+            version: None,
+            from: None,
+            note: String::new(),
+        }
+    }
+
+    #[test]
+    fn roles_in_the_account_are_a_check_and_roles_kept_local_are_a_warning_with_the_fix() {
+        let ok = Report {
+            outcomes: vec![
+                outcome("security", "written"),
+                outcome("python-engineer", "written"),
+            ],
+            signed_in: true,
+            ..Report::default()
+        };
+        assert_eq!(
+            roles_result(&ok),
+            (
+                Mark::Ok,
+                "Roles in your account: security, python-engineer".to_owned()
+            )
+        );
+        let local = Report {
+            outcomes: vec![outcome("security", "local")],
+            signed_in: false,
+            message: Some("Not signed in: run `iohr login`.".to_owned()),
+            ..Report::default()
+        };
+        let (mark, said) = roles_result(&local);
+        assert_eq!(mark, Mark::Warn);
+        assert_eq!(
+            said,
+            "Roles kept in atlas/roles/ (security): Not signed in: run `iohr login`."
+        );
+        let failed = Report {
+            outcomes: vec![outcome("security", "failed")],
+            signed_in: true,
+            message: Some("InOrbit answered 500".to_owned()),
+            ..Report::default()
+        };
+        assert_eq!(
+            roles_result(&failed),
+            (
+                Mark::Warn,
+                "Roles not imported (security): InOrbit answered 500".to_owned()
+            )
+        );
     }
 }

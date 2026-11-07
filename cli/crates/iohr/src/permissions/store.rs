@@ -232,6 +232,33 @@ pub(crate) fn remove(files: &Files, scope: Option<Scope>, rule: &Rule) -> Result
     Ok(gone)
 }
 
+/// Of `texts` (rules as the status row's record wrote them), the ones still saved as allow
+/// rules in the project file: what Undo may take back. Text that does not parse or is no
+/// longer there is left out, so Undo is offered only where it does something.
+pub(crate) fn saved_project_allows(files: &Files, texts: &[String]) -> Vec<Rule> {
+    let Ok(all) = entries(files) else {
+        return Vec::new();
+    };
+    texts
+        .iter()
+        .filter_map(|t| Rule::parse(t).ok())
+        .filter(|r| {
+            all.iter()
+                .any(|e| e.scope == Scope::Project && e.kind == Kind::Allow && e.rule == *r)
+        })
+        .collect()
+}
+
+/// Takes `rules` back out of the project file: the same [`remove`] that `iohr permissions
+/// remove --project` calls. Returns how many entries went.
+pub(crate) fn take_back(files: &Files, rules: &[Rule]) -> Result<usize, String> {
+    let mut gone = 0;
+    for rule in rules {
+        gone += remove(files, Some(Scope::Project), rule)?;
+    }
+    Ok(gone)
+}
+
 fn write(path: &Path, text: &str) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
@@ -259,6 +286,8 @@ pub(crate) enum Outcome {
     AllowedByRule,
     /// The person said yes once.
     AllowedOnce,
+    /// `auto` mode: no rule decided it and nobody was asked.
+    AllowedAuto,
     /// The person said always: a rule was written.
     AllowedAlways,
     /// A rule or the secret list refused it.
@@ -275,6 +304,7 @@ impl Outcome {
         match self {
             Self::AllowedByRule => "allowed by rule",
             Self::AllowedOnce => "allowed once",
+            Self::AllowedAuto => "allowed, auto mode",
             Self::AllowedAlways => "allowed always",
             Self::DeniedByRule => "denied by rule",
             Self::DeniedByPerson => "denied by person",
