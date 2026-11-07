@@ -1871,7 +1871,8 @@ pub struct InitArgs {
     /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
     /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
     /// when you are inside a git repository, or a path of your own. It must not exist
-    /// or be empty.
+    /// or be empty, or be the folder this project was made in: run again there, init
+    /// leaves every file that is already there alone and commits nothing.
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
     /// The language, for a template that offers several (the same as `--set
@@ -1935,8 +1936,9 @@ pub enum ProjectCommand {
     /// Set up a project of your own: sign-in checked, the folder scaffolded from a
     /// template with its manifest, a git repository with one commit, its own state under
     /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
-    /// and a report. Idempotent: a step already done is done again without harm, and a
-    /// step that waits on an API says so instead of pretending. `create` is the same command.
+    /// and a report. Idempotent: run again in the folder it made, it leaves every file that
+    /// is already there as it is and says which, and a step that waits on an API says so
+    /// instead of pretending. `iohr init` and `create` are the same command.
     #[command(visible_alias = "create")]
     Init(Box<InitArgs>),
     /// Create the project in InOrbit, or link to it, from its folder.
