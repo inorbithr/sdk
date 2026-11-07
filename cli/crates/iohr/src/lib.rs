@@ -39,6 +39,8 @@ mod permissions;
 mod planner;
 mod prompt;
 mod runner;
+#[cfg(unix)]
+mod session;
 mod steps;
 mod toolchain;
 mod ui;

@@ -15,6 +15,7 @@ use tokio::sync::watch;
 use crate::Env;
 use crate::cli::SignIn;
 use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
+use crate::commands::session;
 use crate::context::{Ctx, account as resolve_account, blocking, io_session, run_profile, session};
 use crate::error::Error;
 use crate::output::Out;
@@ -243,14 +244,17 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             capacity,
             kinds,
             no_auto_upgrade,
+            session,
             account,
         } => {
             let account = resolve_account(&s, account.account)?;
-            // Checked before anything is sent: a bad setting stops the start.
+            // Checked before anything is sent: a bad setting stops the start. A session
+            // host (RFC 0213) is started by `iohr session` and ends with it: it never
+            // upgrades itself or restarts into a new binary under a person's open terminal.
             let flags = Flags {
                 capacity,
                 kinds,
-                no_auto_upgrade,
+                no_auto_upgrade: no_auto_upgrade || session.is_some(),
                 sign_identity: env.sign_identity.clone(),
                 ..Flags::default()
             };
@@ -286,6 +290,19 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 let _ = tokio::signal::ctrl_c().await;
                 let _ = on_ctrl_c.send(true);
             });
+            // The session host (RFC 0213) beside the turns: when it ends (the last session
+            // left, `iohr stop`) so does the runner, and SIGTERM stops both.
+            let hosted = match &session {
+                Some(project) => {
+                    let ended = tx.clone();
+                    let host = session::start_host(g, project, move || {
+                        let _ = ended.send(true);
+                    })?;
+                    stop_on_sigterm(tx.clone());
+                    Some(host)
+                }
+                None => None,
+            };
             let declared = Declared::of(&set);
             let at_once = declared
                 .capacity
@@ -385,6 +402,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 "stopped ({end:?}): {} heartbeats, {} failed, {} leases accepted, {} turns, {} replies delivered",
                 stats.beats, stats.failures, stats.accepted, stats.turns, stats.reported
             ));
+            if let Some(host) = hosted {
+                host.finish()?;
+            }
             if end == run_loop::End::SignInRefused {
                 let who = s
                     .profile
@@ -1132,6 +1152,21 @@ fn show_runner(r: &RunnerInfo, out: Out, what: &str) {
         ]);
     }
 }
+
+/// Stops the runner on SIGTERM, which a session host gets from `kill` and from a supervisor.
+#[cfg(unix)]
+fn stop_on_sigterm(tx: Arc<watch::Sender<bool>>) {
+    use tokio::signal::unix::{SignalKind, signal};
+    if let Ok(mut term) = signal(SignalKind::terminate()) {
+        tokio::spawn(async move {
+            term.recv().await;
+            let _ = tx.send(true);
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn stop_on_sigterm(_: Arc<watch::Sender<bool>>) {}
 
 #[cfg(test)]
 mod tests {

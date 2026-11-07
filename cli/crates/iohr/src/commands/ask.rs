@@ -26,7 +26,6 @@ use crate::permissions::broker::Opts;
 use crate::permissions::broker::{self, Session};
 #[cfg(unix)]
 use crate::permissions::engine::Place;
-#[cfg(unix)]
 use crate::permissions::store::{self, Files};
 use crate::permissions::{Grant, Mode, Settled, Words, trust};
 use crate::roles::runtime;
