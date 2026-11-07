@@ -372,10 +372,9 @@ pub struct Local {
     pub imported_catalogue: Option<u32>,
 }
 
-/// The packs of `root` that name a role of the catalogue.
-#[must_use]
-pub fn locals(root: &Path) -> Vec<Local> {
-    let cat = catalogue();
+/// The pack files of `root` (`atlas/roles/*.md`), by name: the one list `locals` and the
+/// runtime's role lookup both read.
+pub(crate) fn pack_paths(root: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(root.join(DIR)) else {
         return Vec::new();
     };
@@ -386,6 +385,13 @@ pub fn locals(root: &Path) -> Vec<Local> {
         .collect();
     names.sort();
     names
+}
+
+/// The packs of `root` that name a role of the catalogue.
+#[must_use]
+pub fn locals(root: &Path) -> Vec<Local> {
+    let cat = catalogue();
+    pack_paths(root)
         .into_iter()
         .filter_map(|path| {
             let text = std::fs::read_to_string(&path).ok()?;
@@ -405,6 +411,8 @@ pub fn locals(root: &Path) -> Vec<Local> {
         })
         .collect()
 }
+
+pub(crate) mod runtime;
 
 // ---------------------------------------------------------------- the import
 
