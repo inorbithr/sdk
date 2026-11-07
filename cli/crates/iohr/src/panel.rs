@@ -1,5 +1,6 @@
-//! The terminal panel's design, drawn on stub data (design round: nothing here talks to the
-//! platform and nothing is wired to a shell).
+//! The terminal panel's static design drawings (`--demo --variant rail|accordion|band`), on
+//! stub data: nothing here talks to the platform and nothing is wired to a shell. The live
+//! panel is in [`proxy`]; the stub tree these drawings show is the one in [`workloads`].
 //!
 //! The panel is a vertical menu at the top right of the terminal, in the one palette of
 //! [`crate::card::Look`] (violet frame, cyan key chips, dim hints, a reversed selected row).

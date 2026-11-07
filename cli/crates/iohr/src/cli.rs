@@ -463,7 +463,10 @@ pub enum Command {
     /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
     #[command(subcommand)]
     Permissions(PermissionsCommand),
-    /// Draws the terminal panel's design on stub data (a design round, not the panel).
+    /// Runs your shell with the floating InOrbit panel over it (menu, approvals, workloads).
+    ///
+    /// `--demo` fills the panel with labelled stub data; `--demo --variant rail|accordion|band`
+    /// prints the older static design drawings instead.
     #[command(hide = true)]
     Panel(PanelArgs),
     /// Serves the permission questions of one `iohr ask` run to Claude Code (not for you).
@@ -1800,7 +1803,8 @@ pub struct SyncArgs {
 }
 
 /// `iohr panel`: runs your shell (or the command after `--`) with the floating panel over its
-/// top right corner. `--demo` draws a design on stub data instead.
+/// top right corner. `--demo` runs it on labelled stub data (with an older `--variant`, it
+/// draws that static design instead).
 #[derive(Debug, Args)]
 pub struct PanelArgs {
     /// Stub data: draw a static design (see `--variant`), or with `--variant float` run the

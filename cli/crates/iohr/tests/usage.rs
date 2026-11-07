@@ -232,3 +232,18 @@ fn a_command_that_needs_a_subcommand_gets_the_report_not_clap_help() {
     let v: serde_json::Value = serde_json::from_str(&stderr(&json)).unwrap();
     assert_eq!(v["error"], "`iohr token` needs a subcommand");
 }
+
+#[test]
+fn the_panel_help_describes_the_live_panel_not_a_design_round() {
+    let o = run(&[("NO_COLOR", "1")], &["panel", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    let out = String::from_utf8(o.stdout).unwrap();
+    assert_eq!(
+        out.lines().next(),
+        Some(
+            "Runs your shell with the floating InOrbit panel over it (menu, approvals, workloads)."
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("design round"), "{out}");
+}
