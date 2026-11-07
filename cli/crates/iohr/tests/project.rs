@@ -18,6 +18,11 @@ fn iohr(home: &Path, args: &[&str]) -> Output {
 
 /// The same, run from `cwd`.
 fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
+    iohr_env(home, cwd, &[], args)
+}
+
+/// The same, with `vars` set in the environment as well.
+fn iohr_env(home: &Path, cwd: &Path, vars: &[(&str, &str)], args: &[&str]) -> Output {
     let path = std::env::var_os("PATH").unwrap_or_default();
     // The run's HOME is a temp folder, so the toolchain manager keeps pointing at the real one
     // (the smoke test runs the language's own test command).
@@ -38,6 +43,7 @@ fn iohr_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("IOHR_CONFIG_DIR", home.join("config"))
+        .envs(vars.iter().copied())
         .stdin(Stdio::null())
         .output()
         .unwrap()
@@ -1584,11 +1590,51 @@ fn init_signed_out_leaves_the_plan_id_empty_and_says_how_to_set_it() {
     let st = plan_step(&v);
     assert_eq!(st["state"], "skipped", "{v}");
     let said = st["said"].as_str().unwrap();
+    assert!(said.starts_with("you are not signed in;"), "{said}");
     assert!(
         said.contains("iohr coordinator plan create plain --external-id project:plain"),
         "{said}"
     );
     // The project itself is fine.
+    assert!(dir.join("extension.toml").is_file());
+}
+
+/// A session that exists but cannot be used is not "not signed in": a token for another
+/// audience says so, and init still finishes with the step skipped.
+#[test]
+fn init_with_a_token_for_another_audience_says_why_the_plan_was_skipped() {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
+    let bad = format!(
+        "{}.{}.SIG",
+        enc(serde_json::json!({"alg": "RS256"})),
+        enc(serde_json::json!({"sub": "x", "aud": ["somewhere-else"], "exp": 4_102_444_800_i64}))
+    );
+    let h = tempfile::tempdir().unwrap();
+    let dir = h.path().join("aud");
+    let out = iohr_env(
+        h.path(),
+        h.path(),
+        &[("IOHR_TOKEN", bad.as_str())],
+        &[
+            "project",
+            "create",
+            "aud",
+            "--dir",
+            dir.to_str().unwrap(),
+            "--no-smoke",
+            "--json",
+        ],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let said = plan_step(&v)["said"].as_str().unwrap().to_owned();
+    assert!(
+        said.contains("your session cannot be used") && said.contains("not for the InOrbit API"),
+        "{said}"
+    );
+    assert!(!said.contains("not signed in"), "{said}");
     assert!(dir.join("extension.toml").is_file());
 }
 

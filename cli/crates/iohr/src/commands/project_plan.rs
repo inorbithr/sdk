@@ -10,7 +10,7 @@ use std::path::Path;
 
 use toml_edit::{DocumentMut, value};
 
-use crate::context::{Api, session};
+use crate::context::{Api, Ctx, run_profile, session};
 use crate::planner::{Plans, plan_segment};
 use crate::project::{Step, step};
 use crate::{Env, cli::Global};
@@ -48,6 +48,29 @@ fn later(name: &str) -> String {
     )
 }
 
+/// What the step can call the Planner with: a session, or the reason there is none.
+enum Access<'a> {
+    In(&'a Api),
+    /// No session, and why, in words fit to follow "not checked:" or begin a sentence.
+    Without(String),
+}
+
+/// The session init would call with. Only a machine with no profile and no token is "not
+/// signed in"; any other refusal (a token for another audience, an expired one, a store
+/// that cannot be read) says what it is.
+async fn access(g: &Global, env: &Env) -> Result<crate::context::Session, String> {
+    let ctx = Ctx::load(g).map_err(|e| first_line(&e.to_string()))?;
+    if env.token.is_none() && run_profile(g, env, &ctx).is_none() {
+        return Err("you are not signed in".to_owned());
+    }
+    session(g, env).await.map_err(|e| {
+        format!(
+            "your session cannot be used ({})",
+            first_line(&e.to_string())
+        )
+    })
+}
+
 /// The step: make or find the plan and write its id. `None` when the project has no
 /// `coordination.toml`, so there is nowhere to write one.
 pub(crate) async fn run(
@@ -70,23 +93,17 @@ pub(crate) async fn run(
             "",
         ));
     }
-    let api = session(g, env).await.ok();
-    Some(
-        settle(
-            api.as_ref().map(|s| &s.api),
-            &file,
-            &text,
-            name,
-            chosen,
-            title,
-        )
-        .await,
-    )
+    let session = access(g, env).await;
+    let api = match &session {
+        Ok(s) => Access::In(&s.api),
+        Err(why) => Access::Without(why.clone()),
+    };
+    Some(settle(&api, &file, &text, name, chosen, title).await)
 }
 
 /// [`run`] on a manifest already read: the choice, the write and the report.
 async fn settle(
-    api: Option<&Api>,
+    api: &Access<'_>,
     file: &Path,
     text: &str,
     name: &str,
@@ -106,21 +123,21 @@ async fn settle(
         return step("plan", title, "done", format!("already set: {id}"), "");
     }
     let (id, said) = match (chosen, api) {
-        (Some(id), Some(api)) => match Plans::new(api, None).get(id).await {
+        (Some(id), Access::In(api)) => match Plans::new(api, None).get(id).await {
             Ok(_) => (id.to_owned(), format!("chosen: {id}")),
             Err(e) => {
+                // The files are already written when this runs: say so, and how to attach it.
                 return fail(format!(
-                    "the plan {id} was not found or cannot be seen ({}); {}",
+                    "the plan {id} was not found or cannot be seen ({}); the project's files are written, and {MANIFEST} has no plan yet: put a plan id you can see under [plan] id, or {}",
                     first_line(&e.to_string()),
                     later(name)
                 ));
             }
         },
-        (Some(id), None) => (
-            id.to_owned(),
-            format!("chosen: {id} (not checked: you are not signed in)"),
-        ),
-        (None, Some(api)) => match Plans::new(api, None)
+        (Some(id), Access::Without(why)) => {
+            (id.to_owned(), format!("chosen: {id} (not checked: {why})"))
+        }
+        (None, Access::In(api)) => match Plans::new(api, None)
             .create(name, Some(&format!("project:{name}")), None)
             .await
         {
@@ -147,12 +164,12 @@ async fn settle(
                 );
             }
         },
-        (None, None) => {
+        (None, Access::Without(why)) => {
             return step(
                 "plan",
                 title,
                 "skipped",
-                format!("you are not signed in; {}", later(name)),
+                format!("{why}; {}", later(name)),
                 "",
             );
         }
@@ -231,7 +248,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let f = manifest(d.path());
         let a = api(&server);
-        let st = settle(Some(&a), &f, FILE, "my-shop", None, "t").await;
+        let st = settle(&Access::In(&a), &f, FILE, "my-shop", None, "t").await;
         assert_eq!(st.state, "done", "{}", st.said);
         assert!(st.said.starts_with("made: plan_01SHOP"), "{}", st.said);
         let written = std::fs::read_to_string(&f).unwrap();
@@ -239,7 +256,7 @@ mod tests {
 
         // Run again on the written file: it keeps the id and makes no second plan (the
         // mock allows one call).
-        let again = settle(Some(&a), &f, &written, "my-shop", None, "t").await;
+        let again = settle(&Access::In(&a), &f, &written, "my-shop", None, "t").await;
         assert_eq!(again.state, "done");
         assert_eq!(again.said, "already set: plan_01SHOP");
     }
@@ -248,7 +265,15 @@ mod tests {
     async fn signed_out_or_refused_leaves_the_id_empty_and_says_how_to_set_it() {
         let d = tempfile::tempdir().unwrap();
         let f = manifest(d.path());
-        let st = settle(None, &f, FILE, "my-shop", None, "t").await;
+        let st = settle(
+            &Access::Without("you are not signed in".to_owned()),
+            &f,
+            FILE,
+            "my-shop",
+            None,
+            "t",
+        )
+        .await;
         assert_eq!(st.state, "skipped");
         assert!(
             st.said
@@ -271,7 +296,7 @@ mod tests {
             .mount(&server)
             .await;
         let a = api(&server);
-        let st = settle(Some(&a), &f, FILE, "my-shop", None, "t").await;
+        let st = settle(&Access::In(&a), &f, FILE, "my-shop", None, "t").await;
         assert_eq!(st.state, "skipped", "{}", st.said);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), FILE);
     }
@@ -298,22 +323,52 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let f = manifest(d.path());
         let a = api(&server);
-        let ok = settle(Some(&a), &f, FILE, "p", Some("plan_01OK"), "t").await;
+        let ok = settle(&Access::In(&a), &f, FILE, "p", Some("plan_01OK"), "t").await;
         assert_eq!(ok.state, "done", "{}", ok.said);
         assert_eq!(
             plan_id_in(&std::fs::read_to_string(&f).unwrap()).as_deref(),
             Some("plan_01OK")
         );
-        let f2 = manifest(&d.path().join(".."));
-        let gone = settle(Some(&a), &f2, FILE, "p", Some("plan_01GONE"), "t").await;
+        let inner = d.path().join("p");
+        std::fs::create_dir(&inner).unwrap();
+        let f2 = manifest(&inner);
+        let gone = settle(&Access::In(&a), &f2, FILE, "p", Some("plan_01GONE"), "t").await;
         assert_eq!(gone.state, "failed");
+        assert!(
+            gone.said.contains("files are written") && gone.said.contains("[plan] id"),
+            "{}",
+            gone.said
+        );
         assert_eq!(std::fs::read_to_string(&f2).unwrap(), FILE);
-        let bad = settle(Some(&a), &f2, FILE, "p", Some("../x"), "t").await;
+        let bad = settle(&Access::In(&a), &f2, FILE, "p", Some("../x"), "t").await;
         assert_eq!(bad.state, "failed");
         // Signed out, a chosen id is written as given and said to be unchecked.
-        let off = settle(None, &f2, FILE, "p", Some("plan_01OFF"), "t").await;
+        let off = settle(
+            &Access::Without("you are not signed in".to_owned()),
+            &f2,
+            FILE,
+            "p",
+            Some("plan_01OFF"),
+            "t",
+        )
+        .await;
         assert_eq!(off.state, "done");
         assert!(off.said.contains("not checked"), "{}", off.said);
-        std::fs::remove_file(&f2).unwrap();
+        // A session that cannot be used says why, not "not signed in".
+        let bad = settle(
+            &Access::Without("your session cannot be used (wrong audience)".to_owned()),
+            &f2,
+            FILE,
+            "p",
+            None,
+            "t",
+        )
+        .await;
+        assert_eq!(bad.state, "skipped");
+        assert!(
+            bad.said.contains("wrong audience") && !bad.said.contains("not signed in"),
+            "{}",
+            bad.said
+        );
     }
 }

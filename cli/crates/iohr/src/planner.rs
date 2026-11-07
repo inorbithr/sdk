@@ -357,8 +357,8 @@ impl<'a> Plans<'a> {
             if !held.is_empty() && held != step.holder {
                 let until = item.get("held_until").and_then(Value::as_str).unwrap_or("");
                 return Err(Error::Failed(format!(
-                    "item {} is held by {held} until {until}; wait, or claim it with --force",
-                    step.item
+                    "item {} is held by {held} until {until}; wait, or take it over with `iohr coordinator item claim {} {} --force`",
+                    step.item, step.plan, step.item
                 )));
             }
         } else {
@@ -379,8 +379,8 @@ impl<'a> Plans<'a> {
         .await
         .map_err(|e| match e {
             Error::Api { error, .. } if error.status() == Some(409) => Error::Failed(format!(
-                "item {} is held by another holder; wait, or claim it with --force",
-                step.item
+                "item {} is held by another holder; wait, or take it over with `iohr coordinator item claim {} {} --force`",
+                step.item, step.plan, step.item
             )),
             other => other,
         })?;
@@ -396,8 +396,13 @@ impl<'a> Plans<'a> {
             }
             Err(e) => {
                 // Reporting the failure must not hide it: the work's error is the one
-                // the caller gets, whatever happens to the notes.
-                let _ = self.fail(step, &e.to_string()).await;
+                // the caller gets; a failure to report it is said on stderr beside it.
+                if let Err(second) = self.fail(step, &e.to_string()).await {
+                    crate::output::Out::note(&format!(
+                        "item {} could not be put back to proposed on the plan: {second}",
+                        step.item
+                    ));
+                }
                 Err(e)
             }
         }
