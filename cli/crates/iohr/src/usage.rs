@@ -9,8 +9,16 @@
 //! the same text without styling. Everything goes to stderr.
 //!
 //! The AI line is an offer and nothing more: it prints an `iohr ask` command with the failed
-//! command and the error text filled in. Nothing is run and nothing is sent when an error is
+//! command and what was wrong filled in. Nothing is run and nothing is sent when an error is
 //! printed; the model is asked only if the person runs that line.
+//!
+//! No value typed on the line is ever repeated: not in the AI line, not in the JSON, not in
+//! the text on the terminal. A clap error is rebuilt from its kind, the command path and the
+//! NAME of the argument or flag (clap's `InvalidArg`, which is the argument's own name, never
+//! the value), so the words say "invalid value for --days" and not which value. A usage error
+//! a command raises itself is free text that may repeat a value; it is shown on the terminal
+//! as raised, and the AI line and the JSON carry a fixed value-free line in its place (the
+//! one message known to be free of values, [`NOT_A_COMMAND`], is passed on as it is).
 
 use std::ffi::OsString;
 use std::io::Write as _;
@@ -25,16 +33,30 @@ use crate::ui::Paint;
 /// The code of the envelope a usage error is printed as under `--json`.
 const CODE: &str = "usage";
 
+/// The message for a word that is no command and no installed extension. It names no word:
+/// what was typed is not repeated, so it is the one runtime usage message passed on as raised.
+pub(crate) const NOT_A_COMMAND: &str = "that is not an iohr command or an installed extension\n\
+     `iohr --help` lists the commands; `iohr ext install PUBLISHER/NAME` installs an extension";
+
+/// What replaces a runtime usage message in the AI line and the JSON: those messages are free
+/// text, and some repeat a value that was typed.
+const WITHHELD: &str = "the arguments were refused (a usage error)";
+const WITHHELD_NOTE: &str = "The reason is left out of this line because it can repeat a value you typed; run the command without --json to read it.";
+
 /// How much of the error goes into the AI line: a question, not a log.
 const ASK_ERROR_CHARS: usize = 300;
 
 /// What a usage error says, before it is drawn as text or JSON.
 #[derive(Debug)]
 struct Report {
-    /// What was wrong, in one line.
+    /// What was wrong, in one line. Free of typed values: it goes into the AI line and the JSON.
     headline: String,
-    /// More lines about it: the missing arguments and what each is, or clap's tips.
+    /// More lines about it: the missing arguments and what each is, or tips. Free of typed
+    /// values as well.
     notes: Vec<String>,
+    /// For a usage error a command raised: the message as raised, which the terminal shows in
+    /// place of the headline and notes. It may repeat a typed value, so it goes nowhere else.
+    shown: Option<(String, Vec<String>)>,
     /// The command that failed, `iohr api`.
     command: String,
     /// Its usage, `iohr api [OPTIONS] <METHOD> <PATH>`.
@@ -49,12 +71,9 @@ struct Report {
 /// are not errors: clap prints them itself, as before.
 #[must_use]
 pub fn report_clap(args: &[OsString], json: bool, e: &clap::Error) -> ExitCode {
-    if matches!(
-        e.kind(),
-        ErrorKind::DisplayHelp
-            | ErrorKind::DisplayVersion
-            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-    ) {
+    // Help and version are what was asked for. A bare `iohr token` is not: it is a command
+    // that needs more, so it gets the report (the subcommands listed, the examples, exit 2).
+    if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
         e.exit()
     }
     let root = tree(json);
@@ -67,8 +86,23 @@ pub fn report_clap(args: &[OsString], json: bool, e: &clap::Error) -> ExitCode {
 #[must_use]
 pub fn report_message(args: &[OsString], json: bool, message: &str) -> ExitCode {
     let root = tree(json);
-    let (headline, notes) = split_lines(message);
-    emit(&build(&root, args, headline, notes), json)
+    let mut report = if message == NOT_A_COMMAND {
+        let (headline, notes) = split_lines(message);
+        build(&root, args, headline, notes)
+    } else {
+        let mut r = build(
+            &root,
+            args,
+            WITHHELD.to_owned(),
+            vec![WITHHELD_NOTE.to_owned()],
+        );
+        r.shown = Some(split_lines(message));
+        r
+    };
+    if report.shown.as_ref().is_some_and(|(h, _)| h.is_empty()) {
+        report.shown = None;
+    }
+    emit(&report, json)
 }
 
 fn emit(report: &Report, json: bool) -> ExitCode {
@@ -134,6 +168,7 @@ fn build(root: &clap::Command, args: &[OsString], headline: String, notes: Vec<S
     let (_, examples) = examples::for_path(&path);
     let said = headline.replace('\'', "\"");
     Report {
+        shown: None,
         ask: ask_line(&command, &said),
         headline,
         notes,
@@ -143,9 +178,10 @@ fn build(root: &clap::Command, args: &[OsString], headline: String, notes: Vec<S
     }
 }
 
-/// The offer: `iohr ask '<question>'`, the command that failed and what iohr said filled in.
-/// The command is its name only (`iohr api`), never the arguments: a value typed on the line
-/// may be a secret, and the line is meant to be pasted, shared and kept in shell history.
+/// The offer: `iohr ask '<question>'`, the command that failed and what was wrong filled in.
+/// The command is its name only (`iohr api`), never the arguments, and `said` is the headline,
+/// which holds no typed value: a value on the line may be a secret, and this line is meant to
+/// be pasted, shared and kept in shell history.
 fn ask_line(command: &str, said: &str) -> String {
     let said: String = said
         .split_whitespace()
@@ -171,32 +207,130 @@ fn split_lines(message: &str) -> (String, Vec<String>) {
     (headline, notes)
 }
 
-/// What clap said, in our words where we can be plainer (a missing argument), else its own
-/// text without the "error:" label, the usage and the "for more information" line.
+/// What clap said, rebuilt in our words from the error's kind, the command and the NAME of the
+/// argument. Clap's own text is never used: it quotes the value that was typed (an unexpected
+/// argument, an invalid value, an unknown subcommand). `InvalidArg` is the argument's name for
+/// every kind handled here except an unknown argument, where it is the typed word, so that one
+/// is only told apart (a flag or not) and never repeated.
 fn clap_words(e: &clap::Error, cmd: &clap::Command) -> (String, Vec<String>) {
-    if e.kind() == ErrorKind::MissingRequiredArgument
-        && let Some(names) = strings(e.get(ContextKind::InvalidArg))
-        && !names.is_empty()
-    {
-        let width = names.iter().map(String::len).max().unwrap_or(0);
-        let notes = names
-            .iter()
-            .map(|n| match describe(cmd, n) {
-                Some(help) => format!("{n:width$}  {help}"),
-                None => n.clone(),
-            })
-            .collect();
-        let name = cmd.get_bin_name().unwrap_or("iohr");
-        return (format!("`{name}` is missing {}", join_and(&names)), notes);
+    let name = cmd.get_bin_name().unwrap_or("iohr").to_owned();
+    let arg = strings(e.get(ContextKind::InvalidArg)).and_then(|v| v.into_iter().next());
+    let tips = |kind, lead: &str| -> Vec<String> {
+        strings(e.get(kind))
+            .filter(|v| !v.is_empty())
+            .map(|v| format!("{lead} {}", join_and(&v)))
+            .into_iter()
+            .collect()
+    };
+    match e.kind() {
+        ErrorKind::MissingRequiredArgument => {
+            let names = strings(e.get(ContextKind::InvalidArg)).unwrap_or_default();
+            if names.is_empty() {
+                return (format!("`{name}` is missing an argument"), Vec::new());
+            }
+            (
+                format!("`{name}` is missing {}", join_and(&names)),
+                described(cmd, &names),
+            )
+        }
+        ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand | ErrorKind::MissingSubcommand => {
+            needs_words(cmd, &name)
+        }
+        ErrorKind::UnknownArgument => {
+            let flag = arg.as_deref().is_some_and(|a| a.starts_with('-'));
+            let headline = if flag {
+                format!("`{name}` got a flag it does not have")
+            } else {
+                format!("`{name}` got an unexpected argument")
+            };
+            (headline, tips(ContextKind::SuggestedArg, "did you mean"))
+        }
+        ErrorKind::InvalidSubcommand => (
+            format!("`{name}` has no such subcommand"),
+            tips(ContextKind::SuggestedSubcommand, "did you mean"),
+        ),
+        ErrorKind::InvalidValue | ErrorKind::ValueValidation => (
+            format!(
+                "invalid value for {}",
+                arg.unwrap_or_else(|| "an argument".to_owned())
+            ),
+            tips(ContextKind::ValidValue, "possible values:"),
+        ),
+        ErrorKind::ArgumentConflict => {
+            let prior = strings(e.get(ContextKind::PriorArg)).unwrap_or_default();
+            let a = arg.unwrap_or_else(|| "an argument".to_owned());
+            let headline = if prior.is_empty() {
+                format!("{a} cannot be used here")
+            } else {
+                format!("{a} cannot be used with {}", join_and(&prior))
+            };
+            (headline, Vec::new())
+        }
+        kind => {
+            let what = match kind {
+                ErrorKind::TooManyValues => "too many values for",
+                ErrorKind::TooFewValues => "too few values for",
+                ErrorKind::WrongNumberOfValues => "the wrong number of values for",
+                ErrorKind::NoEquals => "needs `=` in",
+                _ => "did not accept its arguments:",
+            };
+            let which = match kind {
+                ErrorKind::TooManyValues
+                | ErrorKind::TooFewValues
+                | ErrorKind::WrongNumberOfValues
+                | ErrorKind::NoEquals => arg.unwrap_or_else(|| "an argument".to_owned()),
+                _ => "see the usage below".to_owned(),
+            };
+            (format!("`{name}` {what} {which}"), Vec::new())
+        }
     }
-    let full = e.to_string();
-    let body = full.split_once("Usage:").map_or(full.as_str(), |(b, _)| b);
-    let (headline, notes) = split_lines(body);
-    let headline = headline
-        .strip_prefix("error:")
-        .map_or(headline.as_str(), str::trim)
-        .to_owned();
-    (headline, notes)
+}
+
+/// What a command needs when it was run with nothing: its subcommands, each with its first help
+/// line (what clap's help listed), or else the arguments it requires.
+fn needs_words(cmd: &clap::Command, name: &str) -> (String, Vec<String>) {
+    let mut visible: Vec<&clap::Command> = cmd
+        .get_subcommands()
+        .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+        .collect();
+    visible.sort_by_key(|s| s.get_display_order());
+    let subs: Vec<(String, String)> = visible
+        .into_iter()
+        .map(|s| {
+            let about = s.get_about().map(ToString::to_string).unwrap_or_default();
+            (
+                s.get_name().to_owned(),
+                about.lines().next().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    if !subs.is_empty() {
+        let width = subs.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+        let notes = subs
+            .iter()
+            .map(|(n, a)| format!("{n:width$}  {a}").trim_end().to_owned())
+            .collect();
+        return (format!("`{name}` needs a subcommand"), notes);
+    }
+    let names: Vec<String> = cmd
+        .get_arguments()
+        .filter(|a| a.is_required_set())
+        .map(ToString::to_string)
+        .collect();
+    let notes = described(cmd, &names);
+    (format!("`{name}` needs arguments"), notes)
+}
+
+/// One note per argument name: the name, then the first line of its help when it has one.
+fn described(cmd: &clap::Command, names: &[String]) -> Vec<String> {
+    let width = names.iter().map(String::len).max().unwrap_or(0);
+    names
+        .iter()
+        .map(|n| match describe(cmd, n) {
+            Some(help) => format!("{n:width$}  {help}"),
+            None => n.clone(),
+        })
+        .collect()
 }
 
 fn strings(value: Option<&ContextValue>) -> Option<Vec<String>> {
@@ -244,8 +378,12 @@ fn describe(cmd: &clap::Command, name: &str) -> Option<String> {
 /// help is, and the AI offer. `paint` is plain with no terminal, `NO_COLOR` or `--json`.
 fn text(r: &Report, paint: Paint) -> String {
     use std::fmt::Write as _;
-    let mut out = format!("{} {}\n", paint.bad("error:"), r.headline);
-    for note in &r.notes {
+    let (headline, notes) = match &r.shown {
+        Some((h, n)) => (h, n),
+        None => (&r.headline, &r.notes),
+    };
+    let mut out = format!("{} {headline}\n", paint.bad("error:"));
+    for note in notes {
         let _ = writeln!(out, "  {note}");
     }
     let _ = write!(out, "\n{} {}\n", paint.head("Usage:"), r.usage);
@@ -357,11 +495,34 @@ mod tests {
     }
 
     #[test]
-    fn another_error_keeps_claps_words_without_its_labels() {
+    fn another_error_is_told_by_kind_and_name_without_claps_text() {
         let r = report_for(&["api", "--nope", "GET", "/v1/me"]);
-        assert!(r.headline.contains("--nope"), "{r:?}");
+        assert_eq!(r.headline, "`iohr api` got a flag it does not have");
         assert!(!r.headline.starts_with("error"), "{r:?}");
-        assert!(!r.headline.contains("Usage"), "{r:?}");
+        let r = report_for(&["whoami", "VALUE"]);
+        assert_eq!(r.headline, "`iohr whoami` got an unexpected argument");
+        let r = report_for(&[
+            "token", "create", "--name", "x", "--scope", "s", "--days", "VALUE",
+        ]);
+        assert_eq!(r.headline, "invalid value for --days <DAYS>");
+        let r = report_for(&["token", "creat"]);
+        assert_eq!(r.headline, "`iohr token` has no such subcommand");
+        assert_eq!(r.notes, ["did you mean create"]);
+        for r in [r, report_for(&["api", "--nope", "VALUE"])] {
+            assert!(!format!("{r:?}").contains("VALUE"), "{r:?}");
+        }
+    }
+
+    #[test]
+    fn a_bare_command_lists_what_it_needs() {
+        let r = report_for(&["token"]);
+        assert_eq!(r.headline, "`iohr token` needs a subcommand");
+        assert!(
+            r.notes[0].starts_with("create  Create an API token"),
+            "{:?}",
+            r.notes
+        );
+        assert_eq!(r.notes.len(), 3, "{:?}", r.notes);
     }
 
     #[test]
@@ -380,23 +541,35 @@ mod tests {
     }
 
     #[test]
-    fn nothing_typed_on_the_line_comes_back_in_the_report() {
-        // `--config api_key=...` is refused at run time with a usage message; the value must
-        // not reach the line meant to be pasted and kept in shell history, nor the envelope.
-        let a = args(&[
-            "connections",
-            "add",
-            "incident-io",
-            "--config",
-            "api_key=SECRETMARKER",
-        ]);
+    fn a_runtime_message_is_shown_but_never_reaches_the_ask_or_the_envelope() {
+        let a = args(&["profile", "use", "SECRETMARKER"]);
         let root = tree(false);
-        let (headline, notes) = split_lines("api_key is a secret and is never an argument");
-        let r = build(&root, &a, headline, notes);
-        assert!(r.ask.contains("I ran `iohr connections add`"), "{}", r.ask);
-        assert!(
-            !format!("{r:?}{}{}", envelope(&r), text(&r, Paint::plain())).contains("SECRETMARKER")
+        let message = "there is no profile SECRETMARKER";
+        let mut r = build(
+            &root,
+            &a,
+            WITHHELD.to_owned(),
+            vec![WITHHELD_NOTE.to_owned()],
         );
+        r.shown = Some(split_lines(message));
+        assert!(r.ask.contains("I ran `iohr profile use`"), "{}", r.ask);
+        assert!(!r.ask.contains("SECRETMARKER"), "{}", r.ask);
+        assert!(!envelope(&r).contains("SECRETMARKER"), "{}", envelope(&r));
+        // The person at the terminal sees the reason as raised.
+        let t = text(&r, Paint::plain());
+        assert!(t.contains("error: there is no profile SECRETMARKER"), "{t}");
+        assert!(!t.contains(WITHHELD), "{t}");
+    }
+
+    #[test]
+    fn the_one_message_without_values_is_passed_on_as_it_is() {
+        let (h, n) = split_lines(NOT_A_COMMAND);
+        let r = build(&tree(false), &args(&["SECRETMARKER"]), h, n);
+        assert_eq!(
+            r.headline,
+            "that is not an iohr command or an installed extension"
+        );
+        assert!(!format!("{r:?}{}", envelope(&r)).contains("SECRETMARKER"));
     }
 
     #[test]

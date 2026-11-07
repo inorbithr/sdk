@@ -98,7 +98,7 @@ fn an_unknown_flag_gets_the_same_help() {
     );
     assert_eq!(o.status.code(), Some(2));
     let err = stderr(&o);
-    assert!(err.contains("unexpected argument '--nope' found"), "{err}");
+    assert!(err.contains("got a flag it does not have"), "{err}");
     assert!(err.contains("iohr api GET /v1/me"), "{err}");
     assert!(!err.contains("For more information"), "{err}");
 }
@@ -108,7 +108,8 @@ fn an_unknown_command_falls_back_to_the_top_level_examples() {
     let o = run(&[("NO_COLOR", "1")], &["whoamii"]);
     assert_eq!(o.status.code(), Some(2));
     let err = stderr(&o);
-    assert!(err.contains("whoamii"), "{err}");
+    assert!(err.contains("not an iohr command"), "{err}");
+    assert!(!err.contains("whoamii"), "{err}");
     assert!(err.contains("Examples:"), "{err}");
     assert!(err.contains("More: iohr --help"), "{err}");
 }
@@ -123,4 +124,111 @@ fn help_and_version_are_not_errors() {
     assert!(o.stderr.is_empty(), "{:?}", o.stderr);
     let o = run(&[], &["--version"]);
     assert_eq!(o.status.code(), Some(0));
+}
+
+/// A value that looks like a secret, typed into a slot that does not take it.
+const SECRET: &str = "sk_live_SECRET";
+
+/// The line `iohr ask '...'` of a text report.
+fn ask_line(err: &str) -> &str {
+    err.lines()
+        .find(|l| l.trim_start().starts_with("iohr ask '"))
+        .unwrap_or_else(|| panic!("no AI line in:\n{err}"))
+}
+
+/// Runs `args` as text and as `--json`; the secret is in neither the AI line nor anywhere in
+/// the JSON, and the exit code is 2. Returns the text stderr for more checks.
+fn never_echoed(secret: &str, args: &[&str]) -> String {
+    let text = run(&[("NO_COLOR", "1")], args);
+    assert_eq!(text.status.code(), Some(2), "{}", stderr(&text));
+    assert!(text.stdout.is_empty(), "{:?}", text.stdout);
+    let err = stderr(&text);
+    assert!(
+        !ask_line(&err).contains(secret),
+        "the secret is in the AI line:\n{err}"
+    );
+    let mut with_json = args.to_vec();
+    with_json.push("--json");
+    let json = run(&[], &with_json);
+    assert_eq!(json.status.code(), Some(2), "{}", stderr(&json));
+    assert!(json.stdout.is_empty(), "{:?}", json.stdout);
+    let out = stderr(&json);
+    assert!(!out.contains(secret), "the secret is in the JSON:\n{out}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["code"], "usage", "{out}");
+    err
+}
+
+#[test]
+fn an_unexpected_positional_is_not_repeated() {
+    let err = never_echoed(SECRET, &["whoami", SECRET]);
+    // Not on the terminal either: one rule for every usage error clap finds.
+    assert!(!err.contains(SECRET), "{err}");
+    assert!(
+        err.contains("`iohr whoami` got an unexpected argument"),
+        "{err}"
+    );
+}
+
+#[test]
+fn an_invalid_flag_value_is_not_repeated() {
+    let err = never_echoed(
+        SECRET,
+        &[
+            "token", "create", "--name", "x", "--scope", "s", "--days", SECRET,
+        ],
+    );
+    assert!(!err.contains(SECRET), "{err}");
+    assert!(err.contains("invalid value for --days <DAYS>"), "{err}");
+    // The values clap accepts are ours to list; the typed one is not.
+    let err = never_echoed(SECRET, &["auth", "token", "--format", SECRET]);
+    assert!(err.contains("invalid value for --format <FORMAT>"), "{err}");
+    assert!(err.contains("possible values: text and json"), "{err}");
+}
+
+#[test]
+fn an_unknown_command_is_not_repeated() {
+    let err = never_echoed(SECRET, &[SECRET]);
+    assert!(!err.contains(SECRET), "{err}");
+    assert!(err.contains("not an iohr command"), "{err}");
+    // A nested one, clap's own error.
+    let err = never_echoed(SECRET, &["token", SECRET]);
+    assert!(!err.contains(SECRET), "{err}");
+    assert!(err.contains("`iohr token` has no such subcommand"), "{err}");
+}
+
+#[test]
+fn a_usage_error_a_command_raises_is_not_repeated_in_the_ai_line_or_the_json() {
+    // `profile use` raises "there is no profile NAME" at run time; the terminal shows it as
+    // raised, the line meant to be pasted and the JSON do not.
+    let err = never_echoed("sk_live_secret", &["profile", "use", "sk_live_secret"]);
+    assert!(err.contains("there is no profile"), "{err}");
+    assert!(
+        ask_line(&err).contains("the arguments were refused"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_command_that_needs_a_subcommand_gets_the_report_not_clap_help() {
+    let o = run(&[("NO_COLOR", "1")], &["token"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(o.stdout.is_empty(), "{:?}", o.stdout);
+    let err = stderr(&o);
+    for part in [
+        "error: `iohr token` needs a subcommand",
+        "create  Create an API token",
+        "revoke  Revoke an API token",
+        "Usage: iohr token [OPTIONS] <COMMAND>",
+        "Examples:",
+        "iohr token create --name ci --scope decisions:read",
+        "More: iohr token --help",
+        "iohr ask 'I ran `iohr token` and iohr said:",
+    ] {
+        assert!(err.contains(part), "{part:?} missing from:\n{err}");
+    }
+    let json = run(&[], &["token", "--json"]);
+    assert_eq!(json.status.code(), Some(2));
+    let v: serde_json::Value = serde_json::from_str(&stderr(&json)).unwrap();
+    assert_eq!(v["error"], "`iohr token` needs a subcommand");
 }

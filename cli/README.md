@@ -153,9 +153,15 @@ A usage error (exit 2) helps instead of only refusing. It says in plain words wh
 or wrong, prints the usage line, shows two to four real examples for that command (the same
 `Examples:` that end its `--help`, from one table in `src/examples.rs`; a test parses every
 one and checks the `iohr api` routes against `spec/openapi.json`), points at `--help`, and
-offers one line to get AI help: `iohr ask '...'` with the command name and the error filled in.
-That line is an offer. Nothing runs and nothing is sent unless you run it, and it never repeats
-the arguments you typed (a value may be a secret). It goes to stderr; stdout stays data only.
+offers one line to get AI help: `iohr ask '...'` with the command name and what was wrong filled
+in. That line is an offer. Nothing runs and nothing is sent unless you run it. A value you typed
+is never repeated in that line or in the JSON (a value may be a secret): an error `iohr` finds in
+the arguments names the argument or flag (`invalid value for --days <DAYS>`), never the value.
+A usage error a command raises while it runs may quote what you typed on the terminal, as `iohr
+profile use NAME` does; that quote is left out of the AI line and the JSON, which say only that
+the arguments were refused. A bare `iohr token` is a usage error too: it lists the subcommands
+with the examples, exits 2 and prints nothing on stdout. Everything goes to stderr; stdout stays
+data only.
 Under `--json` it is one line in the platform's error envelope, for example
 `{"code":"usage","error":"`iohr api` is missing <METHOD> and <PATH>","details":[{"type":"usage","command":"iohr api","usage":"...","notes":[...],"examples":[{"command":"iohr api GET /v1/me","what":"..."}],"help":"iohr api --help","ask_ai":"iohr ask '...'"}]}`.
 With no terminal, `NO_COLOR` or `TERM=dumb` it is plain text.
