@@ -864,27 +864,16 @@ impl Ui {
         })
     }
 
-    /// The bar as the foot of a card of the caller's own (the permission ask): `rows(at)` is
-    /// the whole screen with row `at` highlighted, always the same number of lines, drawn
-    /// with the bar's keys (arrows, `1`-`9`, a row's letter, Enter, Esc, `q`, Ctrl-C). Returns
-    /// the value of the row picked, or `None` for a cancel; the card is erased either way.
+    /// The loop of every menu: `rows(at)` is the screen with entry `at` highlighted, always
+    /// the same number of lines, so erasing it leaves nothing behind. Drawn with the bar's keys
+    /// (arrows, `1`-`9` when `numbered`, a row's letter, Enter, Esc, `q`, Ctrl-C); returns the
+    /// value of the row picked, or `None` for a cancel. The bar under a card of the caller's own
+    /// (the permission ask) calls it with its rows.
     ///
     /// # Errors
     ///
     /// No terminal on stderr, or the terminal cannot be read.
-    #[cfg(unix)]
-    pub(crate) fn select_card(
-        prompt: &str,
-        choices: &[Choice],
-        initial: &str,
-        rows: impl Fn(usize) -> Vec<String>,
-    ) -> Result<Option<String>, Error> {
-        Self::select_drawn(prompt, choices, initial, true, rows)
-    }
-
-    /// The loop of both menus: `rows(at)` is the screen with entry `at` highlighted, always
-    /// the same number of lines, so erasing it leaves nothing behind.
-    fn select_drawn(
+    pub(crate) fn select_drawn(
         prompt: &str,
         choices: &[Choice],
         initial: &str,
@@ -930,10 +919,6 @@ impl Ui {
     /// # Errors
     ///
     /// No terminal, or the person cancelled.
-    #[allow(
-        dead_code,
-        reason = "the plain form of input_step: other commands (and the card-actions work) ask with it"
-    )]
     pub(crate) fn input(
         self,
         prompt: &str,

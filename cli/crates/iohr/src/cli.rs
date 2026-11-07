@@ -1881,9 +1881,16 @@ pub struct HeadlessArgs {
     pub prior_answer: Option<String>,
     /// A folder you allow Io to read for this question, besides the one it is asked in: the
     /// answer to the card's "needs your OK to read" note, for a run with no terminal to ask on
-    /// (a script, `--json`, the app). Secrets stay blocked.
-    #[arg(long, value_name = "FOLDER", conflicts_with = "interactive")]
-    pub read: Option<std::path::PathBuf>,
+    /// (a script, `--json`, the app). Repeat it for more folders; `--add-dir` is the same flag,
+    /// as in Claude Code. `IOHR_ASK_READ` (a path list) and `[ask] read` add to these. Secrets
+    /// stay blocked.
+    #[arg(
+        long,
+        visible_alias = "add-dir",
+        value_name = "FOLDER",
+        conflicts_with = "interactive"
+    )]
+    pub read: Vec<std::path::PathBuf>,
 }
 
 impl HeadlessArgs {
@@ -1895,7 +1902,7 @@ impl HeadlessArgs {
             || self.exit_code.is_some()
             || self.output_file.is_some()
             || self.prior_question.is_some()
-            || self.read.is_some()
+            || !self.read.is_empty()
     }
 }
 
@@ -2933,6 +2940,39 @@ mod grammar_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn read_repeats_and_add_dir_is_the_same_flag() {
+        use clap::Parser as _;
+        let cli = super::Cli::try_parse_from([
+            "iohr",
+            "ask",
+            "--read",
+            "/a",
+            "--add-dir",
+            "/b",
+            "--add-dir=/c",
+            "what is in them",
+        ])
+        .unwrap();
+        let super::Command::Ask(a) = cli.command else {
+            panic!("not ask")
+        };
+        let got: Vec<_> = a
+            .headless
+            .read
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        assert_eq!(got, ["/a", "/b", "/c"]);
+        assert!(a.headless.has_context());
+        // Not given: no folders and no context of its own.
+        let cli = super::Cli::try_parse_from(["iohr", "ask", "hi"]).unwrap();
+        let super::Command::Ask(a) = cli.command else {
+            panic!("not ask")
+        };
+        assert_eq!(a.headless.read.len(), 0);
     }
 
     #[test]

@@ -217,6 +217,13 @@ pub struct AskConfig {
     /// shift+tab switch from it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// Folders `iohr ask` may always read besides the one it is asked in, the way Claude Code's
+    /// `--add-dir` adds them: a leading `~/` is your home folder. Each must exist, be listable
+    /// and hold no secrets, or the question is refused; secret files inside stay blocked.
+    /// `--read` (alias `--add-dir`) and `IOHR_ASK_READ` (an OS path list) add to it, never
+    /// replace it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<Vec<String>>,
 }
 
 impl AskConfig {
@@ -232,6 +239,7 @@ impl AskConfig {
             && self.menu_key.is_none()
             && self.mode.is_none()
             && self.permissions.is_none()
+            && self.read.is_none()
     }
 }
 
@@ -849,6 +857,24 @@ mod tests {
         assert!(text.contains("account = \"acc_1\""));
         assert!(!text.contains("token =") && !text.contains("secret"));
         assert_eq!(Config::load(dir.path()).unwrap(), c);
+    }
+
+    #[test]
+    fn the_ask_read_folders_are_read_and_a_table_with_only_them_is_not_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[ask]\nread = [\"~/notes\", \"/srv/docs\"]\n",
+        )
+        .unwrap();
+        let c = Config::load(dir.path()).unwrap();
+        assert_eq!(
+            c.ask.read.as_deref(),
+            Some(&["~/notes".to_owned(), "/srv/docs".to_owned()][..])
+        );
+        assert!(!c.ask.is_empty());
+        assert!(Config::default().ask.read.is_none());
+        assert!(Config::default().ask.is_empty());
     }
 
     #[test]
