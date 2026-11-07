@@ -598,13 +598,14 @@ Every template writes two committed files, neither holding a secret:
   keys are grouped as the project (`name`, `id`, `kind`: `project`, `macos-service`,
   `macos-app` or `ui-panel`), where it came from (`template`, `template_version`,
   `created_at`) and the InOrbit links (`space_id`, `listing`, `memory_namespace`, each empty
-  until the step that fills it exists). It was `inorbit-project.toml`; nothing in the CLI reads
+  until the step that fills it exists; `iohr init` fills `space_id`). It was `inorbit-project.toml`; nothing in the CLI reads
   the record, so there is no fallback for the old name.
 - `.inorbit/space` is the link to an InOrbit space (platform RFC 0103, "The link"): `id` and
   `name` as `key = "value"` lines. `init` writes it from the shared scaffold step for every
   template. Until the space exists it holds empty values and a comment naming the plugin
-  command `/inorbit:link <space>`; the CLI has no link command of its own. `.inorbit/` is never
-  ignored, and `git init` commits it.
+  command `/inorbit:link <space>`; `iohr init` and `iohr project sync` fill it. `.inorbit/` is
+  committed, except `.inorbit/space.*` (the local environment's link), which its own
+  `.gitignore` keeps out.
 
 ### The atlas, and `iohr sync`
 
@@ -733,7 +734,40 @@ printed instead, still labelled AI. Every step reads `would: ...`, and it ends w
 `dry run: nothing was changed`. With `--json` the plan is data: `files` (path and bytes),
 `steps`, and `agent` (command and prompt). Every action goes through one gate that checks it.
 
-The steps that need InOrbit (the project as a Decisions space, its private listing, its own
+### The project in InOrbit: `iohr init` and `iohr project sync`
+
+`iohr init NAME` is `iohr project init NAME`. Signed in, it makes the project's space in
+InOrbit before it writes anything, so the first commit holds the link: a Decisions space of
+kind `project` (RFC 0127.1), named like the folder. The team and who can read it:
+
+```sh
+iohr init my-shop --team acme --visibility managers   # under the team acme; owners and admins read it
+iohr init my-shop --visibility team                   # everyone in the account (the default)
+iohr --env local init my-shop                         # the local environment, a link of its own
+iohr project sync                                     # make or find the space later, from the folder
+iohr init my-shop --no-sync                           # make nothing in InOrbit
+```
+
+At a terminal, a missing `--team` or `--visibility` is asked as a menu (a personal account
+is "personal"; a team you are not in is refused before anything is made). The sync is
+idempotent: the space is found by account and name, so a second run, or a teammate's clone,
+never makes a second one; a clone whose sign-in cannot open the linked space is told to ask a
+team owner or admin. The link is `.inorbit/space` for production (committed, and `space_id` in
+`inorbit.toml` is filled) and `.inorbit/space.local` for `--env local`, kept out of git by
+`.inorbit/.gitignore`. The project then shows under Projects in the app and the console, and
+the team opens it from the link.
+
+Init never fails for the sync. Not signed in, offline, or a server that is down or refuses the
+call (401, 403, 408, 425, 429, 5xx) is a `queued` step with the answers kept in
+`~/.inorbit/projects/NAME/space-sync.<env>.toml`; `iohr project sync` completes it and clears
+it. Any other refusal is a failed step with the reason. `--dry-run` says `would:` and calls
+nothing.
+
+Still `not yet` (the platform has no API for them): a space's members, per-project scopes and
+tokens, and the project summary (`POST /v1/decisions/projects`), so the chosen visibility is
+the space's access floor (the whole account or its managers), not a member list.
+
+The other steps that need InOrbit (its private listing, its own
 scopes and tokens, a memory namespace, monitors and notifications) are reported as `not yet`,
 each with the API it waits on; nothing is skipped in silence, and a step that needs your or an
 admin's say becomes an ask. Every step is re-runnable, and nothing is overwritten. Then

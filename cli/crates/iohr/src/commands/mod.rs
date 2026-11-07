@@ -24,6 +24,7 @@ mod openapi;
 mod permissions;
 mod profile;
 mod project;
+mod project_space;
 mod project_template;
 mod runner;
 mod sdk;
@@ -39,7 +40,7 @@ use clap::CommandFactory as _;
 use crate::Env;
 use crate::cli::{
     AccountsCommand, AuthCommand, BrowserCommand, Cli, Command, ExtCommand, LabCommand,
-    OpenapiCommand, SdkCommand,
+    OpenapiCommand, ProjectCommand, SdkCommand,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -113,6 +114,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
             "the permission server needs a unix system".to_owned(),
         )),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
+        Command::Init(args) => project::run(g, &env, ProjectCommand::Init(args), out).await,
         Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
         Command::Sync(args) => atlas::sync(g, &env, &args, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),

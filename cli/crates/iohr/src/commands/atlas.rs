@@ -15,7 +15,6 @@ use crate::commands::decisions::{create_in, decisions, save_text, scoped};
 use crate::context::{Api, Ctx, session};
 use crate::error::Error;
 use crate::output::Out;
-use crate::project::read_space_link;
 use crate::roles::{self, Report};
 use crate::ui::{Mark, Ui};
 use inorbithr::public::DecisionsGetDocumentParams as GetDocumentParams;
@@ -412,7 +411,7 @@ async fn sync_documents(
     let space = args
         .space
         .clone()
-        .or_else(|| read_space_link(&root).map(|(id, _)| id))
+        .or_else(|| crate::project::space::read_link_for(&root, g.environment_name()).map(|(id, _)| id))
         .ok_or_else(|| {
             Error::Usage(
                 "no Decisions space: give `--space ID`, or link the project with `/inorbit:link <space>`"
