@@ -75,14 +75,18 @@ fn an_unknown_environment_is_refused_from_the_flag_and_from_the_variable() {
     let o = run(&["--env", "staging", "whoami"], &[]);
     assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
     assert!(
-        stderr(&o).contains("unknown environment 'staging'"),
+        stderr(&o).contains("invalid value for --env <NAME>")
+            && stderr(&o).contains("`production` or `local`")
+            && !stderr(&o).contains("staging"),
         "{}",
         stderr(&o)
     );
     let o = run(&["whoami"], &[("IOHR_ENV", "staging")]);
     assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
     assert!(
-        stderr(&o).contains("unknown environment 'staging'"),
+        stderr(&o).contains("invalid value for --env <NAME>")
+            && stderr(&o).contains("`production` or `local`")
+            && !stderr(&o).contains("staging"),
         "{}",
         stderr(&o)
     );

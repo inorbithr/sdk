@@ -1262,7 +1262,7 @@ pub fn answer(
     for k in given.keys() {
         if !questions.iter().any(|q| &q.key == k) {
             return Err(Error::Usage(format!(
-                "no question named `{k}` in the `{}` template",
+                "a --set key names no question in the `{}` template",
                 t.meta.id
             )));
         }

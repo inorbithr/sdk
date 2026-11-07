@@ -120,9 +120,9 @@ impl Scope {
             "project" => Ok(Self::Project),
             "user" => Ok(Self::User),
             "account" => Ok(Self::Account),
-            other => Err(Error::Usage(format!(
-                "scope is `project`, `user` or `account`, not `{other}`"
-            ))),
+            _ => Err(Error::Usage(
+                "scope is `project`, `user` or `account`".to_owned(),
+            )),
         }
     }
 }

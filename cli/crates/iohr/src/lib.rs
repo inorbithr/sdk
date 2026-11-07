@@ -25,6 +25,7 @@ mod card;
 mod commands;
 mod context;
 mod error;
+mod examples;
 mod handoff;
 mod headless;
 mod hints;
@@ -38,10 +39,12 @@ mod prompt;
 mod runner;
 mod toolchain;
 mod ui;
+mod usage;
 
 pub use args::refuse_secrets_in_args;
 pub use commands::run;
 pub use error::Error;
+pub use usage::{report_clap as report_usage_clap, report_message as report_usage_message};
 
 use iohr_auth::Redacted;
 

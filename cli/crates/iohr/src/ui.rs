@@ -74,6 +74,19 @@ impl Paint {
         )
     }
 
+    /// For this run's stderr, where errors go: the same rules as [`Paint::stdout`], on the
+    /// stream the error is written to.
+    #[must_use]
+    pub(crate) fn stderr(json: bool) -> Self {
+        use std::io::IsTerminal as _;
+        Self::from_parts(
+            io::stderr().is_terminal() && !json,
+            json,
+            std::env::var("NO_COLOR").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+        )
+    }
+
     /// Pure, for tests: the same rules as [`Paint::stdout`] with the facts given.
     #[must_use]
     pub(crate) fn from_parts(
@@ -132,6 +145,12 @@ impl Paint {
     #[must_use]
     pub(crate) fn dim(self, text: &str) -> String {
         self.apply(text, console::StyledObject::dim)
+    }
+
+    /// Something wrong, as the `error:` label: bold red.
+    #[must_use]
+    pub(crate) fn bad(self, text: &str) -> String {
+        self.apply(text, |s| s.red().bold())
     }
 
     /// A mark that matters, such as the default's `*`: bold yellow.
