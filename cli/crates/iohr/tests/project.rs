@@ -1633,9 +1633,9 @@ fn init_no_plan_and_plan_id_and_dry_run() {
     );
 
     // A plan id that is not a slug is refused, and so are the two flags together.
-    let (out, _, v) = made(h.path(), "bad", &["--plan-id", "../x"]);
-    assert!(!out.status.success(), "{}", text(&out));
-    assert_eq!(plan_step(&v)["state"], "failed", "{v}");
+    let (out, dir, _) = made(h.path(), "bad", &["--plan-id", "../x"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(!dir.exists(), "nothing is written for a refused id");
     let (out, _, _) = made(h.path(), "both", &["--no-plan", "--plan-id", "plan_1"]);
     assert!(!out.status.success());
 

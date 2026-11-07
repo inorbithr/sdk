@@ -1212,6 +1212,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let (g, env, a, ui, interactive, agent, out) =
         (cx.g, cx.env, cx.a, cx.ui, cx.interactive, cx.agent, cx.out);
     let dry = a.dry_run || preview;
+    // A plan id that cannot be one is refused before anything is written.
+    if let Some(id) = a.plan.plan_id.as_deref() {
+        crate::planner::plan_segment(id)?;
+    }
     // The plan: everything below is derived from the answers, and changes nothing but through `flow`.
     let publisher = publisher_of(a.publisher.as_deref(), None);
     let Resolved {
@@ -1788,6 +1792,12 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         return Err(Error::Failed(format!(
             "the agent did not finish: {why}. The project is kept in {}{kept}; continue with `cd {} && {me} ask --allow-edits \"continue the work\"` (it reads the note), or raise the caps with --agent-turns and --agent-timeout",
             place.shown, place.shown
+        )));
+    }
+    if let Some(st) = report.steps.iter().find(|s| s.id == "plan" && s.state == "failed") {
+        return Err(Error::Failed(format!(
+            "{}. The project is kept in {}",
+            st.said, place.shown
         )));
     }
     match smoke {
