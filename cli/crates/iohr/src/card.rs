@@ -92,6 +92,9 @@ pub(crate) struct Card<'a> {
     /// The agent, as people read it: "Claude Code (local)".
     pub(crate) agent: &'a str,
     pub(crate) model: &'a str,
+    /// The `?` mode this answer ran in (`manual`, `plan` or `auto`), shown in the header
+    /// so the mode is never a guess; none for a run outside the three.
+    pub(crate) mode: Option<&'a str>,
     pub(crate) elapsed: Option<Duration>,
     /// The earlier question this one follows up, if any.
     pub(crate) follows: Option<&'a str>,
@@ -214,6 +217,9 @@ fn header(out: &mut String, card: &Card<'_>, width: usize, look: Look) {
     let failed = matches!(card.body, Body::Failed(_));
     let badge = if failed { " no answer " } else { " AI answer " };
     let mut meta = vec![card.agent.to_owned(), card.model.to_owned()];
+    if let Some(m) = card.mode {
+        meta.push(format!("{m} mode"));
+    }
     if let Some(d) = card.elapsed {
         meta.push(format!("{:.1}s", d.as_secs_f64()));
     }
@@ -789,6 +795,7 @@ mod tests {
         Card {
             agent: "Claude Code (local)",
             model: "haiku",
+            mode: None,
             elapsed: Some(Duration::from_millis(1840)),
             follows: None,
             read: "Read: your question, the folder's path; nothing was run.",
@@ -803,6 +810,28 @@ mod tests {
 
     fn strip(s: &str) -> String {
         console::strip_ansi_codes(s).into_owned()
+    }
+
+    #[test]
+    fn the_header_names_a_plan_or_auto_mode_and_stays_quiet_for_none() {
+        let head = |c: &Card<'_>| {
+            strip(&render(c, 70, FANCY))
+                .lines()
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        let plain = card("x");
+        assert!(!head(&plain).contains("mode"), "{}", head(&plain));
+        let planned = Card {
+            mode: Some("plan"),
+            ..card("x")
+        };
+        assert!(
+            head(&planned).ends_with("Claude Code (local) · haiku · plan mode · 1.8s"),
+            "{}",
+            head(&planned)
+        );
     }
 
     #[test]

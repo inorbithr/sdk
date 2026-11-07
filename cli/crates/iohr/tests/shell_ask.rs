@@ -545,6 +545,60 @@ fn the_zsh_hook_has_its_key_lines() {
     assert!(!t.contains("eval \"$answer\"") && !t.contains("eval $answer"));
     // Evaluated twice, or beside the app's own hook, it installs once.
     assert!(t.contains("${+widgets[_iohr_ask_prev_accept]}") && t.contains("_inorbit_accept"));
+    // The mode key (PRD 0197): Shift+Tab, the ring in the order manual, plan, auto, and the
+    // mode goes to every ask as `--mode`. Nothing is left to fill in.
+    assert!(t.contains("_iohr_ask_ring=(manual plan auto)"), "{t}");
+    assert!(
+        t.contains("bindkey -M $_iohr_km -- '^[[Z' _iohr_ask_cycle"),
+        "{t}"
+    );
+    assert!(t.contains("a+=(--mode \"$_iohr_ask_mode\")"), "{t}");
+    // With nothing named it starts in manual, the mode a terminal gets anyway, so it is shown.
+    assert!(t.contains("_iohr_ask_mode='manual'"), "{t}");
+    assert!(!t.contains("__IOHR_"), "{t}");
+}
+
+// The hook starts in the mode `IOHR_ASK_MODE` or `[ask] mode` name; `deny` and `rules` are not
+// of the switch, so the hook starts empty and the config keeps its say.
+#[test]
+fn the_hook_starts_in_the_mode_the_environment_or_config_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfgdir = dir.path().join("cfg");
+    std::fs::create_dir_all(&cfgdir).unwrap();
+    let hook_with = |cfg: &str, env: &[(&str, &str)]| {
+        std::fs::write(cfgdir.join("config.toml"), cfg).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_iohr"))
+            .args(["shell", "hook", "zsh"])
+            .env_clear()
+            .envs(env.iter().copied())
+            .env("HOME", dir.path())
+            .env("IOHR_CONFIG_DIR", &cfgdir)
+            .output()
+            .unwrap()
+    };
+    let start = |o: &Output| {
+        let t = String::from_utf8_lossy(&o.stdout).into_owned();
+        t.lines()
+            .find(|l| l.contains("typeset -g _iohr_ask_mode="))
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    };
+    let o = hook_with("[ask]\nmode = \"plan\"\n", &[]);
+    assert_eq!(start(&o), "typeset -g _iohr_ask_mode='plan'");
+    // The environment beats the file.
+    let o = hook_with("[ask]\nmode = \"plan\"\n", &[("IOHR_ASK_MODE", "auto")]);
+    assert_eq!(start(&o), "typeset -g _iohr_ask_mode='auto'");
+    // Nothing named: manual, what a terminal gets anyway.
+    let o = hook_with("", &[]);
+    assert_eq!(start(&o), "typeset -g _iohr_ask_mode='manual'");
+    // An older word that is not of the switch starts empty.
+    let o = hook_with("[ask]\npermissions = \"deny\"\n", &[]);
+    assert_eq!(start(&o), "typeset -g _iohr_ask_mode=''");
+    // A bad word is a usage error here, as it is in `iohr ask`.
+    let o = hook_with("", &[("IOHR_ASK_MODE", "wild")]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("manual, plan or auto"));
 }
 
 // Installed under another name (the preview channel's `iohr-preview`), the hook asks that
@@ -1025,6 +1079,67 @@ fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
         "the line was not run: {on_line:?}"
     );
     assert!(out[7].contains("RAN-2"), "Enter runs it: {:?}", out[7]);
+}
+
+// Shift+Tab on a `?` line goes on from manual (where every shell starts) to plan, auto and round
+// again, says which, and every
+// question after it carries `--mode`. On another line the key is the shell's own.
+#[test]
+fn shift_tab_on_a_question_line_cycles_the_mode_and_every_ask_carries_it() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.path().join("asks.log");
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> {log}\nprintf 'the answer\\036ls\\036notes.md'\n",
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let tab = "RAW:\u{1b}[Z";
+    let out = drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {}", file.display()),
+            // Not a question line: Shift+Tab leaves the mode alone.
+            "RAW:abc".to_owned(),
+            tab.to_owned(),
+            "RAW:\u{15}".to_owned(),
+            "RAW:? hi".to_owned(),
+            tab.to_owned(),
+            tab.to_owned(),
+            tab.to_owned(),
+            tab.to_owned(),
+            "RAW:\u{15}".to_owned(),
+            "RAW:? one".to_owned(),
+            tab.to_owned(),
+            "RAW:\r".to_owned(),
+            // The mode lasts: the next question carries it too.
+            "? two".to_owned(),
+        ],
+    );
+    for (at, mode) in [(5, "plan"), (6, "auto"), (7, "manual"), (8, "plan")] {
+        assert!(
+            out[at].contains(&format!("ask mode: {mode}")),
+            "{at}: {out:?}"
+        );
+    }
+    assert!(!out[2].contains("ask mode"), "{out:?}");
+    let asked = std::fs::read_to_string(&log).unwrap_or_default();
+    let modes: Vec<&str> = asked.lines().filter(|l| l.contains("--headless")).collect();
+    assert_eq!(modes.len(), 2, "{asked}");
+    assert!(modes.iter().all(|l| l.contains("--mode auto")), "{asked}");
 }
 
 // The owner's bug (RFC 0203.1): the menu "does not hold, just exits". It must wait for a

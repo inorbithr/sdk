@@ -1439,14 +1439,23 @@ pub struct AskArgs {
     /// only when you name one.
     #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
     pub model: Option<String>,
+    /// How Io works: `manual` asks before each command (default at a terminal), `plan` reads
+    /// and proposes a plan and changes nothing (Claude's plan mode; Codex's read-only
+    /// sandbox), `auto` runs commands no rule decides without asking (a deny rule and the
+    /// secret list still win). In the shell hook shift+tab on a `?` line switches between
+    /// them. Beats `--permissions`. `[ask] mode`, `IOHR_ASK_MODE`.
+    #[arg(long, value_name = "MODE", env = "IOHR_ASK_MODE")]
+    pub mode: Option<String>,
     /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
     /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits
-    /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
+    /// rather than ask. Shell commands are never allowed by iohr. It is the plain run's `--mode
+    /// auto` (`--mode plan` wins over it). `[ask] allow_edits`.
     #[arg(long)]
     pub allow_edits: bool,
-    /// What happens when Io wants to run a command or open a file no rule decides: `prompt`
-    /// asks you at the terminal (default at a terminal), `rules` only follows your rules and
-    /// says no to the rest (default without one), `deny` offers no commands at all. Rules:
+    /// What happens when Io wants to run a command or open a file no rule decides: `manual`
+    /// (or `prompt`) asks you at the terminal (default at a terminal), `plan` and `auto` are
+    /// the modes of `--mode`, `rules` only follows your rules and says no to the rest (default
+    /// without a terminal), `deny` offers no commands at all. `--mode` wins over it. Rules:
     /// `iohr permissions`. `[ask] permissions`.
     #[arg(long, value_name = "HOW", env = "IOHR_ASK_PERMISSIONS")]
     pub permissions: Option<String>,
