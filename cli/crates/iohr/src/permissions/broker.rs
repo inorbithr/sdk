@@ -384,18 +384,25 @@ async fn ask(sh: &Arc<Shared>, tool: &str, input: Value) -> Value {
 /// so the one result line of [`settle`] is all that stays. A terminal that cannot be read is a
 /// no.
 fn draw_and_read(card: &ask_card::Ask, cols: usize, look: crate::card::Look) -> Choice {
+    draw_and_read_rows(card, &ask_card::choices(card.can_always), cols, look)
+}
+
+/// [`draw_and_read`] with other rows under the card (the folder-trust ask's).
+pub(crate) fn draw_and_read_rows(
+    card: &ask_card::Ask,
+    rows: &[crate::ui::Choice],
+    cols: usize,
+    look: crate::card::Look,
+) -> Choice {
     use std::io::Write as _;
     // The spinner's line has no newline; the card starts on a clean one.
     let mut err = std::io::stderr().lock();
     let _ = write!(err, "\r\x1b[2K");
     let _ = err.flush();
     drop(err);
-    let picked = crate::ui::Ui::select_card(
-        "Io asks",
-        &ask_card::choices(card.can_always),
-        ask_card::INITIAL,
-        |at| ask_card::lines(card, at, cols, look),
-    );
+    let picked = crate::ui::Ui::select_card("Io asks", rows, ask_card::INITIAL, |at| {
+        ask_card::lines_with(card, rows, at, cols, look)
+    });
     // Esc, `q` and Ctrl-C leave with nothing picked, and a terminal that cannot be read
     // is an error: both are no.
     picked
