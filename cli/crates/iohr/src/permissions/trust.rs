@@ -33,6 +33,17 @@ pub(crate) fn is_trusted(user_dir: &Path, folder: &Path) -> bool {
     canonical(folder).is_some_and(|f| load(user_dir).folders.contains(&f))
 }
 
+/// The folders the person said yes for always, as kept (canonical when they were written).
+/// A folder that is gone or a file that is broken gives none; callers check each again.
+#[must_use]
+pub(crate) fn folders(user_dir: &Path) -> Vec<PathBuf> {
+    load(user_dir)
+        .folders
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// Keeps `folder` as trusted. Written whole, so a broken file is replaced by a good one.
 pub(crate) fn remember(user_dir: &Path, folder: &Path) -> Result<PathBuf, String> {
     let f = canonical(folder).ok_or("the folder cannot be found")?;
@@ -164,6 +175,23 @@ mod tests {
         assert!(is_trusted(user.path(), home.path()));
         assert!(!is_trusted(user.path(), other.path()));
         assert_eq!(load(user.path()).folders.len(), 1);
+    }
+
+    #[test]
+    fn the_kept_folders_are_listed_in_the_order_they_were_kept() {
+        let user = tempfile::tempdir().unwrap();
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        assert_eq!(folders(user.path()).len(), 0);
+        remember(user.path(), a.path()).unwrap();
+        remember(user.path(), b.path()).unwrap();
+        remember(user.path(), a.path()).unwrap();
+        assert_eq!(
+            folders(user.path()),
+            [
+                a.path().canonicalize().unwrap(),
+                b.path().canonicalize().unwrap()
+            ]
+        );
     }
 
     #[test]

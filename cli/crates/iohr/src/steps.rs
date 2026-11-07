@@ -251,7 +251,11 @@ mod tests {
         let (_, steps) = split(text, d.path(), None);
         assert_eq!(steps, vec![Step::Read("svc".into())]);
         // The same through the folder the question names: the real path is judged.
-        assert!(crate::access::named_folder("explain keys/", d.path(), None).is_none());
+        assert!(
+            crate::access::named_folders("explain keys/", d.path(), None)
+                .next()
+                .is_none()
+        );
     }
 
     #[test]

@@ -3,11 +3,12 @@
 //! it on the prompt line, and the person's own Enter runs it.
 
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use base64::Engine as _;
 
+use crate::access;
 use crate::attach;
 use crate::browser;
 use crate::card;
@@ -20,6 +21,7 @@ use crate::permissions::{
     store::{self, Files},
     trust,
 };
+use crate::prompt;
 use crate::steps::Step;
 use crate::ui::{Choice, Ui};
 
@@ -114,7 +116,8 @@ pub(crate) struct Extras {
 /// The line under the card: the actions on offer and the key. Run and Copy need a command,
 /// Open a link, Undo a rule this answer's run saved, Attach output a failed command that the
 /// question asks about, Allow a folder Io asked to read and the next steps it suggested; Follow
-/// up and Explain are always there. None when there is no key.
+/// up, Explain and Add folder (one more folder for Io to read) are always there. None when
+/// there is no key.
 pub(crate) fn row(key: MenuKey, has_command: bool, has: Extras, next: &Next<'_>) -> Option<String> {
     let key = key.label()?;
     let mut names: Vec<String> = Vec::new();
@@ -135,6 +138,7 @@ pub(crate) fn row(key: MenuKey, has_command: bool, has: Extras, next: &Next<'_>)
     if has.undo {
         names.push("Undo".to_owned());
     }
+    names.push("Add folder".to_owned());
     Some(format!("{}   {key} to choose", names.join(" \u{b7} ")))
 }
 
@@ -269,6 +273,12 @@ fn choices(command: Option<&str>, has: Extras, asks: usize, next: &Next<'_>) -> 
             'u',
         ));
     }
+    out.push(pick(
+        "addfolder",
+        "Add folder",
+        "let Io also read another folder from now on (secrets stay blocked), then ask again",
+        'd',
+    ));
     if asks > 0 {
         out.push(pick(
             "asks",
@@ -448,6 +458,7 @@ pub(crate) fn menu(
             None
         }
         ("allow", ..) => allow(next.allow, asked, user_dir),
+        ("addfolder", ..) => add_folder(cwd, asked, user_dir),
         (step, ..) if step.starts_with("step") => step[4..]
             .parse::<usize>()
             .ok()
@@ -488,6 +499,47 @@ fn allow(folder: Option<&Path>, asked: &str, user_dir: &Path) -> Option<String> 
     }
     let q = plain(asked);
     (!q.trim().is_empty()).then(|| format!("? {}", q.trim()))
+}
+
+/// Add folder: asks for a folder (a leading `~/` is the home folder; one that is missing,
+/// cannot be listed or is a secret place is refused where it is typed) and keeps the yes the
+/// way Allow does. A cancelled question gives nothing.
+fn add_folder(cwd: &Path, asked: &str, user_dir: &Path) -> Option<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let (at, h) = (cwd.to_path_buf(), home.clone());
+    let ui = Ui::detect(false);
+    let typed = if ui.fancy() {
+        ui.input("Folder for Io to read", "", move |v| {
+            if v.is_empty() {
+                return Err("type a folder".to_owned());
+            }
+            folder_to_add(v, &at, h.as_deref()).map(|_| ())
+        })
+        .ok()?
+    } else {
+        prompt::line("Folder for Io to read").ok()?
+    };
+    let real = match folder_to_add(&typed, cwd, home.as_deref()) {
+        Ok(real) => real,
+        Err(why) => {
+            Out::note(&format!("{}: {why}", plain(&typed)));
+            return None;
+        }
+    };
+    allow(Some(&real), asked, user_dir)
+}
+
+/// The folder `typed` names, as Io may read it, or why not: the same check
+/// ([`access::allowable_at`]) every other way of granting a folder goes through.
+pub(crate) fn folder_to_add(
+    typed: &str,
+    cwd: &Path,
+    home: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let at = access::expand_home(Path::new(typed.trim()), home);
+    access::allowable_at(&at, cwd, home).ok_or_else(|| {
+        "not a folder Io may read (it must exist, be listable and not hold secrets)".to_owned()
+    })
 }
 
 /// Copies `text` and says how. It tries each way there is, because only some can be checked:
@@ -635,8 +687,8 @@ mod tests {
                 .filter_map(|c| c.key)
                 .collect()
         };
-        assert_eq!(keys(0), ['f', 'e']);
-        assert_eq!(keys(3), ['f', 'e', 'a']);
+        assert_eq!(keys(0), ['f', 'e', 'd']);
+        assert_eq!(keys(3), ['f', 'e', 'd', 'a']);
         assert!(
             choices(None, Extras::default(), 3, &Next::default())
                 .last()
@@ -660,7 +712,7 @@ mod tests {
             )
             .as_deref(),
             Some(
-                "Run \u{b7} Copy \u{b7} Follow up \u{b7} Explain \u{b7} Open   \u{2193} to choose"
+                "Run \u{b7} Copy \u{b7} Follow up \u{b7} Explain \u{b7} Open \u{b7} Add folder   \u{2193} to choose"
             )
         );
         assert_eq!(
@@ -674,11 +726,11 @@ mod tests {
                 &Next::default()
             )
             .as_deref(),
-            Some("Follow up \u{b7} Explain \u{b7} Undo   \u{2193} to choose")
+            Some("Follow up \u{b7} Explain \u{b7} Undo \u{b7} Add folder   \u{2193} to choose")
         );
         assert_eq!(
             row(MenuKey::CtrlG, false, Extras::default(), &Next::default()).as_deref(),
-            Some("Follow up \u{b7} Explain   ctrl-g to choose")
+            Some("Follow up \u{b7} Explain \u{b7} Add folder   ctrl-g to choose")
         );
         assert_eq!(
             row(
@@ -723,12 +775,15 @@ mod tests {
         assert_eq!(
             row(MenuKey::Down, false, Extras::default(), &next).as_deref(),
             Some(
-                "Allow \u{b7} Read api/ \u{b7} Search for TODO \u{b7} Follow up \u{b7} Explain   \u{2193} to choose"
+                "Allow \u{b7} Read api/ \u{b7} Search for TODO \u{b7} Follow up \u{b7} Explain \u{b7} Add folder   \u{2193} to choose"
             )
         );
         let c = choices(None, Extras::default(), 0, &next);
         let values: Vec<&str> = c.iter().map(|c| c.value.as_str()).collect();
-        assert_eq!(values, ["allow", "step0", "step1", "follow", "explain"]);
+        assert_eq!(
+            values,
+            ["allow", "step0", "step1", "follow", "explain", "addfolder"]
+        );
         assert_eq!(c[0].key, Some('l'));
         assert!(c[0].hint.contains("/home/me") && c[0].hint.contains("secrets stay blocked"));
         assert_eq!(c[1].label, "Read api/");
@@ -737,7 +792,26 @@ mod tests {
         assert!(c.iter().all(|c| !c.hint.contains("grep")));
         // Nothing to allow and no step: the bar is as it was.
         let none = choices(None, Extras::default(), 0, &Next::default());
-        assert_eq!(none.len(), 2);
+        assert_eq!(none.len(), 3);
+    }
+
+    #[test]
+    fn the_folder_to_add_is_a_real_readable_one_and_a_tilde_is_home() {
+        let home = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let docs = home.path().join("docs");
+        std::fs::create_dir(&docs).unwrap();
+        std::fs::create_dir(home.path().join(".ssh")).unwrap();
+        std::fs::write(home.path().join("file.txt"), "x").unwrap();
+        let add = |typed: &str| folder_to_add(typed, work.path(), Some(home.path()));
+        assert_eq!(add("~/docs"), Ok(docs.canonicalize().unwrap()));
+        assert_eq!(
+            add(&format!("  {}  ", docs.display())),
+            Ok(docs.canonicalize().unwrap())
+        );
+        assert!(add("~/missing").is_err());
+        assert!(add("~/file.txt").is_err(), "a file is not a folder");
+        assert!(add("~/.ssh").is_err(), "a secret place is never added");
     }
 
     #[test]

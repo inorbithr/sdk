@@ -639,21 +639,12 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     if Command::new("zsh").arg("--version").output().is_err() {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let n = Command::new("zsh").arg("-n").arg(&file).output().unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
+    let n = Command::new("zsh").arg("-n").arg(file).output().unwrap();
     assert!(n.status.success(), "{}", String::from_utf8_lossy(&n.stderr));
     // The precmd, with a fake `iohr` that prints its arguments.
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        "#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'the answer\\036ls -la\\036README.md'\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    z.fake("#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'the answer\\036ls -la\\036README.md'\n");
     let zsh = |script: &str| {
         Command::new("zsh")
             .args(["-f", "-i", "-c", script])
@@ -700,6 +691,37 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.starts_with("\u{1b}]7727;ask;6;"), "{out:?}");
     assert!(!String::from_utf8_lossy(&o.stderr).contains("ARGS:"));
+}
+
+/// Whether `program` runs here (a test that needs it returns when it does not).
+fn have(program: &str) -> bool {
+    Command::new(program).arg("--version").output().is_ok()
+}
+
+/// A folder with the hook file and a `bin` for a fake `iohr`, for the tests that source the
+/// zsh hook.
+struct Zsh {
+    dir: tempfile::TempDir,
+    file: PathBuf,
+    bin: PathBuf,
+}
+
+impl Zsh {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hook.zsh");
+        std::fs::write(&file, hook("zsh").stdout).unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        Self { dir, file, bin }
+    }
+
+    /// The `iohr` the hook finds on its PATH: `script` is the whole program.
+    fn fake(&self, script: impl AsRef<[u8]>) {
+        let fake = self.bin.join("iohr");
+        std::fs::write(&fake, script).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 /// Drives a real interactive zsh on a pty (python3's `pty`; the test is skipped where zsh
@@ -764,29 +786,19 @@ sys.stdout.write("\x00".join(shown))
 
 #[test]
 fn evaluating_the_hook_twice_keeps_enter_working_and_wires_accept_line_once() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        "#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer >&2\necho the answer\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let z = Zsh::new();
+    let (file, bin) = (&z.file, &z.bin);
+    z.fake("#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer >&2\necho the answer\n");
     let f = file.display();
     // A second `source ~/.zshrc`, then once more with a shell variable of the old guard
     // unset (state a plugin may reset): the wiring must not copy our own widget into the one
     // accept-line calls, or Enter loops until FUNCNEST.
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {f}"),
             format!("source {f}"),
@@ -1037,30 +1049,22 @@ fn with_no_color_the_action_bar_is_plain_numbered_lines() {
 // with no answer yet, the key does what it did.
 #[test]
 fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
     let log = dir.path().join("menu.log");
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
+    z.fake(
         format!(
             "#!/bin/sh\ncase \"$*\" in\n*--menu*) echo \"$*\" >> {log}; printf '%s' 'echo RAN-$((1+1))';;\n*) printf 'the answer\\036echo RAN-$((1+1))\\036notes.md';;\nesac\n",
             log = log.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let down = "RAW:\u{1b}[B";
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             // No answer yet: Down is the shell's own, the menu is not asked.
@@ -1097,30 +1101,20 @@ fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
 // question after it carries `--mode`. On another line the key is the shell's own.
 #[test]
 fn shift_tab_on_a_question_line_cycles_the_mode_and_every_ask_carries_it() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
     let log = dir.path().join("asks.log");
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        format!(
-            "#!/bin/sh\necho \"$*\" >> {log}\nprintf 'the answer\\036ls\\036notes.md'\n",
-            log = log.display()
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    z.fake(format!(
+        "#!/bin/sh\necho \"$*\" >> {log}\nprintf 'the answer\\036ls\\036notes.md'\n",
+        log = log.display()
+    ));
     let tab = "RAW:\u{1b}[Z";
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             // Not a question line: Shift+Tab leaves the mode alone.
@@ -1186,29 +1180,21 @@ fn the_menu_holds_through_resizes_signals_and_application_cursor_keys() {
 // a resize reach the shell's group while it is open, and the menu still waits for the letter.
 #[test]
 fn the_menu_under_zsh_holds_through_signals_and_a_resize() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (file, bin) = (&z.file, &z.bin);
     // The answer is fake; the menu is the real binary.
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
+    z.fake(
         format!(
             "#!/bin/sh\ncase \"$*\" in\n*--menu*) exec {real} \"$@\";;\n*) printf 'the answer\\036git status\\036notes.md';;\nesac\n",
             real = env!("CARGO_BIN_EXE_iohr")
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             "? a question".to_owned(),
@@ -1556,6 +1542,106 @@ fn a_folder_the_question_names_outside_the_work_folder_is_asked_for_too() {
     }
 }
 
+// More folders to read, from every source (RFC 0203): `--read` and its alias `--add-dir` repeat,
+// `IOHR_ASK_READ` is a path list and `[ask] read` a config list. Each folder is one `--add-dir=`
+// to the agent, and a secret place from any source is a usage error.
+#[test]
+fn folders_to_read_come_from_flags_the_env_and_the_config_and_secrets_stay_refused() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    let work = home.join("work");
+    let dirs: Vec<_> = ["one", "two", "three", "four"]
+        .iter()
+        .map(|n| {
+            let d = home.join(n);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        })
+        .collect();
+    let added = |r: &Rig| -> Vec<String> {
+        sent_args(r)
+            .into_iter()
+            .filter(|a| a.starts_with("--add-dir="))
+            .collect()
+    };
+    let want = |ds: &[&std::path::PathBuf]| -> Vec<String> {
+        ds.iter()
+            .map(|d| format!("--add-dir={}", d.display()))
+            .collect()
+    };
+    let cwd = work.to_str().unwrap();
+    let ask = |r: &Rig, extra: &[&str], env: &[(&str, &str)]| {
+        let mut a = vec!["--json", "ask", "--headless", "--cwd", cwd];
+        a.extend_from_slice(extra);
+        a.push("what is in these");
+        r.run_env(&a, &answer_json("Files."), "0", env)
+    };
+
+    // Flags: `--read` and `--add-dir` repeat and mix.
+    let out = ask(
+        &r,
+        &[
+            "--read",
+            dirs[0].to_str().unwrap(),
+            "--add-dir",
+            dirs[1].to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[0], &dirs[1]]));
+
+    // Env: a path list.
+    let list = std::env::join_paths([&dirs[2], &dirs[3]]).unwrap();
+    let out = ask(&r, &[], &[("IOHR_ASK_READ", list.to_str().unwrap())]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[2], &dirs[3]]));
+
+    // Config: `[ask] read`, a `~/` is the home folder.
+    std::fs::create_dir_all(home.join("config")).unwrap();
+    std::fs::write(
+        home.join("config").join("config.toml"),
+        "[ask]\nread = [\"~/one\", \"~/two\"]\n",
+    )
+    .unwrap();
+    let out = ask(&r, &[], &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[0], &dirs[1]]));
+
+    // All three add up, none twice.
+    let out = ask(
+        &r,
+        &["--read", dirs[0].to_str().unwrap()],
+        &[("IOHR_ASK_READ", dirs[2].to_str().unwrap())],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[0], &dirs[2], &dirs[1]]));
+    assert!(
+        sent_args(&r)
+            .iter()
+            .any(|a| a.starts_with("--disallowedTools=Read(")),
+        "secrets stay denied beside every added folder"
+    );
+
+    // A secret place from any source is refused and the agent is not started with it.
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    std::fs::write(r.out().join("claude.args"), "").unwrap();
+    let secret = home.join(".ssh");
+    let out = ask(&r, &["--add-dir", secret.to_str().unwrap()], &[]);
+    assert!(!out.status.success(), "flag: {}", text(&out));
+    let out = ask(&r, &[], &[("IOHR_ASK_READ", secret.to_str().unwrap())]);
+    assert!(!out.status.success(), "env: {}", text(&out));
+    std::fs::write(
+        home.join("config").join("config.toml"),
+        "[ask]\nread = [\"~/.ssh\"]\n",
+    )
+    .unwrap();
+    let out = ask(&r, &[], &[]);
+    assert!(!out.status.success(), "config: {}", text(&out));
+    assert!(sent_args(&r).is_empty(), "the agent never started");
+}
+
 // The answer's next steps are actions in the bar, never a shell line to copy: in the JSON, and
 // as the sixth field of the hook's record, and the block is not shown in the answer.
 #[test]
@@ -1897,24 +1983,16 @@ fn a_paste_is_kept_scrubbed_and_nothing_is_run() {
 // the output never goes with another command or another ask.
 #[test]
 fn the_hook_carries_attached_output_to_the_next_ask_only() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
     let log = dir.path().join("calls.log");
     let seen = dir.path().join("seen.txt");
-    let fake = bin.join("iohr");
-    // --menu: logs its arguments, writes the file it was given and prints the question and
     // the kind. Otherwise (an ask): logs its arguments and what the output file held.
-    std::fs::write(
-        &fake,
-        format!(
-            r#"#!/bin/sh
+    z.fake(format!(
+        r#"#!/bin/sh
 echo "$*" >> {log}
 case "$*" in
 *--menu*)
@@ -1927,16 +2005,13 @@ case "$*" in
   printf 'the answerecho hinotes.md';;
 esac
 "#,
-            log = log.display(),
-            seen = seen.display()
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        log = log.display(),
+        seen = seen.display()
+    ));
     let down = "RAW:\u{1b}[B";
     drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             "false".to_owned(),
@@ -1987,18 +2062,9 @@ fn the_hook_sends_no_output_for_another_command_and_drops_a_menu_that_attached_n
     if Command::new("zsh").arg("--version").output().is_err() {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        "#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'a\\036\\036'\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
+    z.fake("#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'a\\036\\036'\n");
     let stale = dir.path().join("stale");
     std::fs::write(&stale, "old output").unwrap();
     let o = Command::new("zsh")

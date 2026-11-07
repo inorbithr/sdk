@@ -90,13 +90,16 @@ fn word_path(word: &str) -> Option<&str> {
         .then_some(w)
 }
 
-/// The first folder the question names (`/etc/nginx`, `~/Downloads/x`, `../api`, `src/`)
-/// that exists, can be listed, is not the folder it was asked in and is not a secret place.
-/// A bare name such as `Downloads` is the model's to offer, not guessed here.
-#[must_use]
-pub(crate) fn named_folder(question: &str, cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
+/// The folders the question names (`/etc/nginx`, `~/Downloads/x`, `../api`, `src/`), in order,
+/// each one that exists, can be listed, is not the folder it was asked in and is not a secret
+/// place. A bare name such as `Downloads` is the model's to offer, not guessed here.
+pub(crate) fn named_folders<'a>(
+    question: &'a str,
+    cwd: &'a Path,
+    home: Option<&'a Path>,
+) -> impl Iterator<Item = PathBuf> + 'a {
     let here = cwd.canonicalize().ok();
-    question.split_whitespace().find_map(|word| {
+    question.split_whitespace().filter_map(move |word| {
         let w = word_path(word)?;
         let at = if w == "~" {
             home?.to_path_buf()
@@ -108,6 +111,19 @@ pub(crate) fn named_folder(question: &str, cwd: &Path, home: Option<&Path>) -> O
         let real = allowable_at(&at, cwd, home)?;
         (Some(&real) != here.as_ref()).then_some(real)
     })
+}
+
+/// `path` with a leading `~` or `~/` taken from `home`; any other path as it is. Config and
+/// environment values are written with it, as a question is.
+#[must_use]
+pub(crate) fn expand_home(path: &Path, home: Option<&Path>) -> PathBuf {
+    match (path.to_str(), home) {
+        (Some("~"), Some(h)) => h.to_path_buf(),
+        (Some(p), Some(h)) => p
+            .strip_prefix("~/")
+            .map_or_else(|| path.to_path_buf(), |r| h.join(r)),
+        _ => path.to_path_buf(),
+    }
 }
 
 /// `folder` as the system names it, when Io may be allowed to read it: it exists, is a folder
@@ -128,21 +144,24 @@ pub(crate) fn allowable(folder: &Path, cwd: &Path) -> bool {
 }
 
 /// What Io still needs a yes for: the folder the question names when the run cannot already
-/// open it (`reads` says the run may open files in the working folder, `also` is a folder
-/// already allowed besides it), else the working folder itself when it is too broad. None
+/// open it (`reads` says the run may open files in the working folder, `also` are the folders
+/// already allowed besides it, the named one or one above it among them), else the working folder itself when it is too broad. None
 /// when the run can read what the question is about.
 #[must_use]
 pub(crate) fn needed(
     question: &str,
     cwd: &Path,
     home: Option<&Path>,
-    (reads, also): (bool, Option<&Path>),
+    (reads, also): (bool, &[PathBuf]),
 ) -> Option<Request> {
-    if let Some(folder) = named_folder(question, cwd, home) {
-        let inside = reads && cwd.canonicalize().is_ok_and(|c| folder.starts_with(c));
-        if inside || also == Some(folder.as_path()) {
-            return None;
-        }
+    let here = cwd.canonicalize().ok();
+    let mut named = named_folders(question, cwd, home).peekable();
+    if named.peek().is_some() {
+        // The first folder the run cannot open yet; none when it can open all of them.
+        let folder = named.find(|f| {
+            let inside = reads && here.as_ref().is_some_and(|c| f.starts_with(c));
+            !(inside || also.iter().any(|a| f.starts_with(a)))
+        })?;
         return Some(Request {
             folder,
             is_cwd: false,
@@ -203,11 +222,11 @@ mod tests {
     #[test]
     fn a_broad_folder_is_asked_for_and_never_answered_blind() {
         let (_d, home) = tree();
-        let r = needed("explain this directory", &home, Some(&home), (false, None)).unwrap();
+        let r = needed("explain this directory", &home, Some(&home), (false, &[])).unwrap();
         assert_eq!(r.why, Why::Home);
         assert!(r.is_cwd && r.askable());
         assert_eq!(r.folder, home);
-        let root = needed("what is here", Path::new("/"), None, (false, None)).unwrap();
+        let root = needed("what is here", Path::new("/"), None, (false, &[])).unwrap();
         assert_eq!(root.why, Why::Root);
         assert!(root.askable());
     }
@@ -217,18 +236,18 @@ mod tests {
         let (_d, home) = tree();
         let work = home.join("work");
         assert_eq!(
-            needed("explain this directory", &work, Some(&home), (true, None)),
+            needed("explain this directory", &work, Some(&home), (true, &[])),
             None
         );
         // Granted already: home with its yes in hand.
-        assert_eq!(needed("explain", &home, Some(&home), (true, None)), None);
+        assert_eq!(needed("explain", &home, Some(&home), (true, &[])), None);
     }
 
     #[test]
     fn an_unreadable_folder_is_said_not_asked() {
         let (_d, home) = tree();
         let gone = home.join("gone");
-        let r = needed("explain", &gone, Some(&home), (false, None)).unwrap();
+        let r = needed("explain", &gone, Some(&home), (false, &[])).unwrap();
         assert_eq!(r.why, Why::Unreadable);
         assert!(!r.askable());
         assert!(note(&r, Some("\u{2193}")).contains("cannot open"));
@@ -239,18 +258,18 @@ mod tests {
         let (_d, home) = tree();
         let work = home.join("work");
         let q = format!("what is in {}/Downloads/x?", home.display());
-        let r = needed(&q, &work, Some(&home), (true, None)).unwrap();
+        let r = needed(&q, &work, Some(&home), (true, &[])).unwrap();
         assert_eq!(r.why, Why::Named);
         assert!(!r.is_cwd);
         assert_eq!(r.folder, home.join("Downloads/x"));
         // `~/` and `../` name folders too.
-        let tilde = needed("list ~/Downloads", &work, Some(&home), (true, None)).unwrap();
+        let tilde = needed("list ~/Downloads", &work, Some(&home), (true, &[])).unwrap();
         assert_eq!(tilde.folder, home.join("Downloads"));
         let up = needed(
             "look at ../Downloads please",
             &work,
             Some(&home),
-            (true, None),
+            (true, &[]),
         )
         .unwrap();
         assert_eq!(up.folder, home.join("Downloads"));
@@ -261,16 +280,59 @@ mod tests {
         let (_d, home) = tree();
         let work = home.join("work");
         assert_eq!(
-            needed("explain api/", &work, Some(&home), (true, None)),
+            needed("explain api/", &work, Some(&home), (true, &[])),
             None
         );
         let down = home.join("Downloads");
         assert_eq!(
-            needed("list ~/Downloads", &work, Some(&home), (true, Some(&down))),
+            needed(
+                "list ~/Downloads",
+                &work,
+                Some(&home),
+                (true, std::slice::from_ref(&down))
+            ),
             None
         );
         // Home is broad: a folder inside it is still asked for until home itself is allowed.
-        assert!(needed("explain work/api", &home, Some(&home), (false, None)).is_some());
+        assert!(needed("explain work/api", &home, Some(&home), (false, &[])).is_some());
+    }
+
+    #[test]
+    fn a_folder_is_allowed_by_any_of_several_or_by_one_it_sits_in() {
+        let (_d, home) = tree();
+        let work = home.join("work");
+        let (down, api) = (home.join("Downloads"), work.join("api"));
+        let also = [api, down];
+        assert_eq!(
+            needed("list ~/Downloads/x", &work, Some(&home), (true, &also)),
+            None
+        );
+        assert_eq!(
+            needed("list ~/Downloads", &work, Some(&home), (true, &also)),
+            None
+        );
+        std::fs::create_dir_all(home.join("Other")).unwrap();
+        let r = needed("list ~/Other", &work, Some(&home), (true, &also)).unwrap();
+        assert_eq!(r.folder, home.join("Other"));
+    }
+
+    #[test]
+    fn a_leading_tilde_is_the_home_folder_and_nothing_else_is_changed() {
+        let home = Path::new("/home/me");
+        assert_eq!(expand_home(Path::new("~"), Some(home)), home);
+        assert_eq!(
+            expand_home(Path::new("~/a/b"), Some(home)),
+            home.join("a/b")
+        );
+        assert_eq!(
+            expand_home(Path::new("/x/~/y"), Some(home)),
+            Path::new("/x/~/y")
+        );
+        assert_eq!(
+            expand_home(Path::new("~me/x"), Some(home)),
+            Path::new("~me/x")
+        );
+        assert_eq!(expand_home(Path::new("~/a"), None), Path::new("~/a"));
     }
 
     #[test]
@@ -283,11 +345,14 @@ mod tests {
             "what is Downloads",
             "explain ../nothing-here",
         ] {
-            assert_eq!(named_folder(q, &work, Some(&home)), None, "{q}");
+            assert_eq!(named_folders(q, &work, Some(&home)).next(), None, "{q}");
         }
         // A file is not a folder.
         std::fs::write(work.join("a.txt"), "x").unwrap();
-        assert_eq!(named_folder("read ./a.txt", &work, Some(&home)), None);
+        assert_eq!(
+            named_folders("read ./a.txt", &work, Some(&home)).next(),
+            None
+        );
     }
 
     #[test]
@@ -295,7 +360,10 @@ mod tests {
         let (_d, home) = tree();
         std::fs::create_dir_all(home.join(".ssh")).unwrap();
         let work = home.join("work");
-        assert_eq!(named_folder("list ~/.ssh", &work, Some(&home)), None);
+        assert_eq!(
+            named_folders("list ~/.ssh", &work, Some(&home)).next(),
+            None
+        );
     }
 
     #[test]
