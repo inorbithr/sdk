@@ -13,9 +13,12 @@ fn main() -> ExitCode {
         return fail(&e);
     }
     let json = args.iter().any(|a| a == "--json");
-    let cli = match iohr::cli::command(json).try_get_matches_from(args) {
-        Ok(matches) => Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit()),
-        Err(e) => e.exit(),
+    let parsed = iohr::cli::command(json)
+        .try_get_matches_from(&args)
+        .and_then(|matches| Cli::from_arg_matches(&matches));
+    let cli = match parsed {
+        Ok(cli) => cli,
+        Err(e) => return iohr::report_usage_clap(&args, json, &e),
     };
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -26,6 +29,9 @@ fn main() -> ExitCode {
     };
     match runtime.block_on(run(cli, Env::from_process())) {
         Ok(()) => ExitCode::SUCCESS,
+        Err(iohr::Error::Usage(message)) if !message.is_empty() => {
+            iohr::report_usage_message(&args, json, &message)
+        }
         Err(e) => fail(&e),
     }
 }

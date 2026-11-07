@@ -149,6 +149,17 @@ hidden from the help.
     systemd supervisor starts it (`upgrade_restart = "exit"`); that is not a failure
 ```
 
+A usage error (exit 2) helps instead of only refusing. It says in plain words what was missing
+or wrong, prints the usage line, shows two to four real examples for that command (the same
+`Examples:` that end its `--help`, from one table in `src/examples.rs`; a test parses every
+one and checks the `iohr api` routes against `spec/openapi.json`), points at `--help`, and
+offers one line to get AI help: `iohr ask '...'` with the command name and the error filled in.
+That line is an offer. Nothing runs and nothing is sent unless you run it, and it never repeats
+the arguments you typed (a value may be a secret). It goes to stderr; stdout stays data only.
+Under `--json` it is one line in the platform's error envelope, for example
+`{"code":"usage","error":"`iohr api` is missing <METHOD> and <PATH>","details":[{"type":"usage","command":"iohr api","usage":"...","notes":[...],"examples":[{"command":"iohr api GET /v1/me","what":"..."}],"help":"iohr api --help","ask_ai":"iohr ask '...'"}]}`.
+With no terminal, `NO_COLOR` or `TERM=dumb` it is plain text.
+
 ## Your login in other programs
 
 `iohr auth token` prints the active profile's access token, refreshing a signed-in
