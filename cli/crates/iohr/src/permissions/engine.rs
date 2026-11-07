@@ -84,6 +84,21 @@ pub(crate) fn decide(rules: &RuleSet, tool: &str, input: &Value, at: &Place) -> 
     }
 }
 
+/// Whether iohr can read the call well enough to hold it against the deny rules and the secret
+/// list. A shell line with a substitution, a redirect or nothing in it cannot be read that way
+/// (see [`shell::split`]); `auto` mode refuses it instead of running it unchecked.
+#[must_use]
+pub(crate) fn checkable(tool: &str, input: &Value) -> bool {
+    if tool != "Bash" {
+        return true;
+    }
+    input
+        .get("command")
+        .and_then(Value::as_str)
+        .map(shell::split)
+        .is_some_and(|l| !l.opaque && !l.parts.is_empty())
+}
+
 fn is_file_tool(tool: &str) -> bool {
     ["Read", "Edit", "Write", "Grep", "Glob", "NotebookEdit"].contains(&tool)
 }
