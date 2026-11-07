@@ -368,6 +368,7 @@ agent = "claude"
 model = "haiku"
 allow_edits = false
 permissions = "prompt"
+mode = "manual"
 thinking = "show"
 hints = "sometimes"
 menu_key = "down"
@@ -530,13 +531,38 @@ and drawn as a card.
 | `permissions` | What the `?` card may run: `prompt` (the person's rules decide, then Io asks in the terminal), `rules` (the rules only; the rest is refused and listed after the answer) or `deny` (no commands at all, the earlier behaviour); `IOHR_ASK_PERMISSIONS` and `--permissions` win over it | `prompt` at a terminal, `rules` without one (and under `--json`) | `iohr ask --headless`, `--card` |
 | `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
+| `mode` | The mode of every answer (PRD 0197): `manual` (rules first, then Io asks before each command), `plan` (read only: Io answers with a plan, changes nothing and runs nothing) or `auto` (a command no rule decides runs without asking; a deny rule, the secret list and a command `iohr` cannot read to check them still refuse it); `IOHR_ASK_MODE` and `--mode` win over it, and it beats `permissions` | `manual` at a terminal, `rules` without one | `iohr ask`, `iohr shell hook zsh` |
 | `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
 
-Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--permissions`, `--thinking`, `--dry-run`. In the streamed
+Flags: `--agent`, `--via`, `--model`, `--mode`, `--allow-edits`, `--permissions`, `--thinking`, `--dry-run`. In the streamed
 run a shell command is never allowed, with or without `--allow-edits`; the agent's default
 permissions stay in force. The headless run (the `?` card) can run a command only through the
 permission rules below. `--dry-run` prints the exact command line and starts nothing (with
 `--json` it is one object with `dry_run`, `via`, `agent`, `found`, `program` and `args`).
+
+#### Modes: manual, plan, auto
+
+`--mode manual|plan|auto` (or `IOHR_ASK_MODE`, or `[ask] mode`) picks how Io treats a call no rule
+decides. The flag and the environment beat the file; inside one layer `mode` beats the older
+`permissions`. `--permissions` takes the same three words (and still `prompt` for manual, `rules`
+and `deny`), and `--allow-edits` keeps its meaning, so nothing that worked stops working.
+
+| Mode | On the `?` card (headless) | In the streamed run | Codex |
+|---|---|---|---|
+| `manual` | Rules first, then Io asks before each command at a terminal (without one it is `rules`). The default. | The agent's own permissions | default sandbox |
+| `plan` | Read-only tools, `--permission-mode plan` and a brief that asks for a plan: no shell, no broker, no edits, also beside `--allow-edits` | `--permission-mode plan`, the shell and the secret reads closed | `--sandbox read-only` (Codex has no plan mode) |
+| `auto` | A command no rule decides runs without asking. A deny rule and the secret list still win and are never weakened; a command that cannot be read to check them (a `$(...)`, a backtick, a redirect) is refused, and the audit log says `allowed, auto mode` or `command cannot be checked` | The same as `--allow-edits` (files only): the streamed run has no broker, so a shell command stays refused | as `--allow-edits` |
+
+The card says the mode in its header (`manual mode`, `plan mode`, `auto mode`) and under `plan` or
+`auto` the line that says what was read says what was and was not run. `--dry-run` prints the
+streamed command line only: the broker's flags are added when a card run starts.
+
+In a shell with the hook (`iohr shell hook zsh`), Shift+Tab on a line that starts with `?` (or a
+bare `?`) goes to the next mode, manual to plan to auto and back to manual, and says which under
+the prompt; on any other line the key does what it did before. The shell starts in the mode
+`IOHR_ASK_MODE` or `[ask] mode` name (`manual` when they say nothing) and keeps the one you
+chose until it ends; every question carries it as `--mode`. Read when the hook is printed, so
+open a new shell after a change to the config.
 
 #### Asking before Io runs a command
 
