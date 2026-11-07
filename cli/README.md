@@ -104,7 +104,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to; a later `iohr login` keeps it |
 | `iohr coordinator jobs list \| create`, `asks list \| create` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks, queue an ask (`asks create --kind K --body -`; the kind is required so the planner can file it); `--account <id>` on `jobs list|create` and `asks list` acts on a team you belong to (default: your own account; needs the coordinator release that accepts `account_id`). `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key, or `--sign-in io` to file as Io (below) |
-| `iohr coordinator plan list \| show \| create`, `item add \| claim \| release \| note \| done \| fail \| run` | The Planner's plans, items, claims and notes (RFC 0166, RFC 0211). `plan create TITLE --external-id project:NAME` makes a plan or returns the one with that id (the output says `created`); `plan show PLAN` lists its items and latest notes. `item PLAN ITEM` commands write the item: `add` (title, kind, body; an existing item keeps what you do not set), `claim` (default holder `iohr:<profile>`, 3600 s; another holder's live claim is refused, `--force` takes it), `note` (text or `-` for standard input, up to 2000 characters), `done` (`--note`), and `fail REASON`, which notes the failure, sets the item back to `proposed` and releases it (the Planner has no failed status). `item run PLAN ITEM -- COMMAND` is a build step as a Planner item: it adds the item when missing, claims it, runs the command, then notes and marks it done, or notes the failure and puts it back; an item already `done` is skipped (a build resumes), and the command's exit code is this command's. The note names the program, never its arguments. `--account <id>` acts on a team. Needs a person's `iohr login` |
+| `iohr coordinator plan list \| show \| create`, `item add \| claim \| release \| note \| done \| fail \| run` | The Planner's plans, items, claims and notes (RFC 0166, RFC 0211). `plan create TITLE --external-id project:NAME` makes a plan or returns the one with that id (the output says `created`); `plan show PLAN` lists its items and latest notes. `item PLAN ITEM` commands write the item: `add` (title, kind, body; an existing item keeps what you do not set), `claim` (default holder `iohr:<profile>`, 3600 s; another holder's live claim is refused, `--force` takes it), `note` (text or `-` for standard input, up to 2000 characters), `done` (`--note`), and `fail --reason TEXT`, which notes the failure, sets the item back to `proposed` and releases it (the Planner has no failed status). `item run PLAN ITEM -- COMMAND` is a build step as a Planner item: it adds the item when missing, claims it, runs the command, then notes and marks it done, or notes the failure and puts it back; an item already `done` is skipped (a build resumes), and the command's exit code is this command's. The note names the program, never its arguments. `--account <id>` acts on a team. Needs a person's `iohr login` |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s for up to `--timeout` seconds (600) |
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
@@ -431,10 +431,10 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 
 `iohr project init NAME` (also `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
 and tells you what you now have. The local half is real: `~/development/NAME` from a template
-(`--template demo`: a private macOS service that heartbeats and serves a tiny panel, with the
-manifest of `iohr ext init`; `--template coordinated`: the same, plus a `coordination.toml` that
-names your account's Planner plan and an `ask` example you can file with
-`iohr coordinator asks create`), a git repository with one commit, the project's own state under
+(by default `coordinated`: a private macOS service that heartbeats and serves a tiny panel, with the
+manifest of `iohr ext init`, plus a `coordination.toml` that names the project's Planner plan and an
+`ask` example you can file with `iohr coordinator asks create`; `--template demo` is the same
+without the `coordination.toml`), a git repository with one commit, the project's own state under
 `~/.inorbit/projects/NAME/` (never in the repository), a Keychain slot reserved by name, and a
 smoke test that runs the project once and reads its heartbeat back, with no token channel, so
 its token ask is refused: the proof the channel is its only credential.
@@ -456,6 +456,21 @@ iohr project template list --json
 iohr project template show demo   # what it asks, its languages, which files it writes, its steps
 cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 ```
+
+The coordinated template adds one step, "The project's Planner plan" (RFC 0211): init makes the
+plan, or finds the one it made before (its `external_id` is `project:NAME`, so a second run makes no
+second plan), and writes its `plan_...` id under `[plan]` in `coordination.toml`.
+
+| Flag | What it does |
+|---|---|
+| `--plan-id PLAN` | Use this plan instead of making one. Signed in, init checks you can see it first; a plan it cannot find fails that step, and the message says the files are already written and how to put the id in by hand. Signed out, the id is written as given and said to be unchecked. |
+| `--no-plan` | Skip the Planner step; `[plan] id` stays empty. Cannot be combined with `--plan-id`. |
+
+Signed out (no profile and no `IOHR_TOKEN`), offline or refused, init still works: the Planner
+step is skipped, it prints how to set the id later (`iohr login`, then `iohr coordinator plan
+create NAME --external-id project:NAME`, and put the id under `[plan]`), and the exit code is 0.
+A session that exists but cannot be used (a token for another audience, an expired one) is
+skipped the same way, and the message names the real reason instead of "not signed in".
 
 `iohr project template list` lists every template (`iohr project templates` is the same command,
 kept for older scripts); `macos-app` and `ui-panel` are `coming` and

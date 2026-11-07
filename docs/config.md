@@ -502,6 +502,9 @@ upgraded by `brew` and keeps the signature it ships with. Other systems ignore t
 ### 4.4 The project table
 
 `iohr project init` (alias `create`) reads `[project]`; its `--template` flag wins over it.
+The coordinated template, the default, also makes the project's Planner plan; `--plan-id PLAN`
+uses one you have and `--no-plan` skips the step (signed out it is skipped on its own, with
+exit code 0; `cli/README.md`, "A project of your own").
 The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 | Key | Values | Default | Read by |
