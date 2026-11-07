@@ -1,7 +1,7 @@
 //! Folder trust for `?` (PRD 0197): the home folder is too broad to read without asking, so
-//! at a terminal Io asks once, the way Claude Code asks whether to trust a folder. A yes for
-//! always is kept in `trusted.toml` beside the user's permission rules; a yes for this time
-//! keeps nothing. No terminal, no key or any failure is a no.
+//! at a terminal Io asks once, on the same Io card as a command's ask, the way Claude Code
+//! asks whether to trust a folder. A yes for always is kept in `trusted.toml` beside the
+//! user's permission rules; a yes for this time keeps nothing. No terminal, no key or any failure is a no.
 
 use std::path::{Path, PathBuf};
 
@@ -57,34 +57,70 @@ pub(crate) enum Answer {
     No,
 }
 
-/// The answer a key gives, or none for a key that means nothing.
+/// The answer a key gives, or none for a key that means nothing. The keys of the card and of
+/// a command's ask: `y` once, `a` always, `n` (and Enter, Esc, `q`, Ctrl-C) no.
 #[must_use]
 pub(crate) fn answer_of(key: &console::Key) -> Option<Answer> {
+    use console::Key;
     match key {
-        console::Key::Char('y' | 'a') | console::Key::Enter => Some(Answer::Always),
-        console::Key::Char('o' | '1') => Some(Answer::Once),
-        console::Key::Char('n') | console::Key::Escape | console::Key::CtrlC => Some(Answer::No),
+        Key::Char('y' | 'Y') => Some(Answer::Once),
+        Key::Char('a' | 'A') => Some(Answer::Always),
+        Key::Char('n' | 'N' | 'q' | 'Q' | '\u{3}') | Key::Enter | Key::Escape | Key::CtrlC => {
+            Some(Answer::No)
+        }
         _ => None,
     }
 }
 
-/// Asks at the terminal whether Io may read files in `folder`. Only call it at a terminal.
-pub(crate) fn ask(folder: &Path) -> Answer {
-    let term = console::Term::stderr();
-    let shown: String = folder
+/// What Io asks to do, as the card says it.
+const WANTS: &str = "read files here to answer (secrets stay blocked)";
+
+/// `folder` with no control character in it, for the terminal.
+fn shown(folder: &Path) -> String {
+    folder
         .display()
         .to_string()
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    let lines = [
-        format!("Io wants to read files in {shown} to answer (secrets stay blocked)."),
-        "Trust this folder?  [y] yes, remember  ·  [o] only this time  ·  [n] no".to_owned(),
-    ];
-    for l in &lines {
-        if term.write_line(l).is_err() {
-            return Answer::No;
+        .collect()
+}
+
+/// Asks at the terminal whether Io may read files in `folder`, on the same Io card as a
+/// command's ask (one prompt, one design); a terminal too narrow or plain for the card gets
+/// one line with the same keys. Only call it at a terminal.
+pub(crate) fn ask(folder: &Path) -> Answer {
+    #[cfg(unix)]
+    {
+        use super::ask_card;
+        use super::broker::{self, Choice, Wanted};
+        let look = crate::card::Look::detect(crate::ui::Ui::detect(false).fancy());
+        let cols = console::Term::stderr()
+            .size_checked()
+            .map_or(0, |(_, c)| usize::from(c));
+        if ask_card::drawn_at(cols, look) {
+            let card = ask_card::Ask {
+                wanted: Wanted {
+                    verb: WANTS.to_owned(),
+                    thing: Some(shown(folder)),
+                    more: 0,
+                },
+                folder: "your home folder".to_owned(),
+                can_always: true,
+            };
+            return match broker::draw_and_read_rows(&card, &ask_card::trust_choices(), cols, look) {
+                Choice::Once => Answer::Once,
+                Choice::Always => Answer::Always,
+                Choice::No => Answer::No,
+            };
         }
+    }
+    let term = console::Term::stderr();
+    let line = format!(
+        "Io (AI) wants to {WANTS} in {} \u{b7} y once \u{b7} a always trust this folder \u{b7} n no",
+        shown(folder)
+    );
+    if term.write_line(&line).is_err() {
+        return Answer::No;
     }
     loop {
         match term.read_key_raw() {
@@ -124,12 +160,49 @@ mod tests {
     }
 
     #[test]
-    fn keys_mean_always_once_or_no() {
+    fn keys_are_the_command_asks_keys() {
         use console::Key;
-        assert_eq!(answer_of(&Key::Char('y')), Some(Answer::Always));
-        assert_eq!(answer_of(&Key::Char('o')), Some(Answer::Once));
+        assert_eq!(answer_of(&Key::Char('y')), Some(Answer::Once));
+        assert_eq!(answer_of(&Key::Char('a')), Some(Answer::Always));
         assert_eq!(answer_of(&Key::Char('n')), Some(Answer::No));
+        // A stray Enter never trusts a folder.
+        assert_eq!(answer_of(&Key::Enter), Some(Answer::No));
         assert_eq!(answer_of(&Key::CtrlC), Some(Answer::No));
         assert_eq!(answer_of(&Key::Char('x')), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_trust_ask_is_the_io_card_with_its_own_rows() {
+        use crate::permissions::ask_card;
+        use crate::permissions::broker::Wanted;
+        let card = ask_card::Ask {
+            wanted: Wanted {
+                verb: WANTS.to_owned(),
+                thing: Some("/Users/ana".to_owned()),
+                more: 0,
+            },
+            folder: "your home folder".to_owned(),
+            can_always: true,
+        };
+        let look = crate::card::Look {
+            fancy: true,
+            truecolor: false,
+        };
+        let rows = ask_card::trust_choices();
+        let l: Vec<String> = ask_card::lines_with(&card, &rows, 2, 90, look)
+            .iter()
+            .map(|x| console::strip_ansi_codes(x).into_owned())
+            .collect();
+        let all = l.join("\n");
+        assert!(l[0].contains("AI request"), "{all}");
+        assert!(all.contains("Io (AI) wants to read files here"), "{all}");
+        assert!(all.contains("/Users/ana"), "{all}");
+        assert!(all.contains("Always trust this folder"), "{all}");
+        assert!(!all.contains("Always in this project"), "{all}");
+        assert_eq!(
+            ask_card::choice_for(&rows[1].value),
+            crate::permissions::broker::Choice::Always
+        );
     }
 }
