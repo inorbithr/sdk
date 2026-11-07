@@ -183,7 +183,8 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
             agent.install_hint()
         )));
     };
-    if headless_wanted(&args.headless) {
+    let folders = folders_from_everywhere(&args.headless.read, &cfg);
+    if headless_wanted(&args.headless) || folders_need_tools(&args.headless, &folders) {
         return headless(
             &Chosen {
                 bin: &bin,
@@ -196,6 +197,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
                 dir: &ctx.dir,
                 modes: named,
                 role: role.as_ref(),
+                folders,
             },
             &question,
             &args.headless,
@@ -203,6 +205,9 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
             (g, env),
         )
         .await;
+    }
+    if !folders.is_empty() {
+        Out::note(FOLDERS_IGNORED);
     }
     Out::note(&ask::label(agent));
     let started = Instant::now();
@@ -298,10 +303,11 @@ fn menu(g: &Global, args: &AskArgs) -> Result<(), Error> {
             to,
         });
     // Only a folder Io could be allowed to read, and only steps that decode, are offered.
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let allow = args
         .access
         .as_deref()
-        .filter(|f| access::allowable(f, &cwd));
+        .filter(|f| access::allowable_at(f, &cwd, home.as_deref(), access::Source::Card).is_ok());
     let steps: Vec<Step> = args
         .step
         .iter()
@@ -497,6 +503,15 @@ fn exit_code(s: std::process::ExitStatus) -> i32 {
     s.code().unwrap_or(1)
 }
 
+/// `IOHR_ASK_READ` and `[ask] read` select the run that has file tools, as `--read` does: the
+/// streamed run has no secret denies and no folder grants, so it is never given them.
+fn folders_need_tools(h: &HeadlessArgs, folders: &[(access::Source, std::path::PathBuf)]) -> bool {
+    !folders.is_empty() && !h.interactive
+}
+
+/// What `--interactive` says when folders were named: it streams without them.
+const FOLDERS_IGNORED: &str = "--interactive streams the run without folder grants: --read, IOHR_ASK_READ and [ask] read are ignored";
+
 /// Answer once and print as a card or plain text (the `?` prompt hook, a script, the app),
 /// instead of streaming the run? Only when asked for: `--headless`, `--card`, `--hook` or a
 /// context flag. `--interactive` says no even then.
@@ -528,7 +543,8 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
         Context {
             files: headless::list_folder(Path::new(&cwd)),
             reads: headless::can_read(Path::new(&cwd), home.as_deref()),
-            also: None,
+            also: Vec::new(),
+            granted: Vec::new(),
             git: askback::git_facts(Path::new(&cwd)),
             project: root
                 .as_deref()
@@ -571,6 +587,70 @@ struct Chosen<'a> {
     modes: (Words<'a>, Words<'a>),
     /// The Role the run works in (`--role`).
     role: Option<&'a runtime::Applied>,
+    /// The folders asked for besides the working one and where each came from: [`asked_folders`].
+    folders: Vec<(access::Source, std::path::PathBuf)>,
+}
+
+/// The most folders one ask may read besides the working one. A flag, variable or config
+/// list over it is refused; trusted folders beyond it are left out.
+const MAX_FOLDERS: usize = 8;
+
+/// Where a folder asked for came from.
+const FROM_FLAG: access::Source = access::Source::Flag;
+const FROM_ENV: access::Source = access::Source::Env;
+const FROM_CONFIG: access::Source = access::Source::Config;
+
+/// How an error names where a folder was asked for.
+fn asked_by(source: access::Source) -> &'static str {
+    match source {
+        access::Source::Flag => "--read",
+        access::Source::Env => "IOHR_ASK_READ",
+        access::Source::Config => "[ask] read",
+        access::Source::Trust => "trusted.toml",
+        access::Source::Card => "the card",
+    }
+}
+
+/// The folders asked for beside the working one, with their source: the flags (`--read`,
+/// `--add-dir`), then `IOHR_ASK_READ` (an OS path list: `:` apart on Unix, `;` on Windows),
+/// then `[ask] read`. The sources add up; a leading `~/` in the last two is the home folder.
+/// Nothing here is checked: [`grant_access`] runs every one through the same rules.
+fn asked_folders(
+    flags: &[std::path::PathBuf],
+    env: Option<&std::ffi::OsStr>,
+    config: &[String],
+    home: Option<&Path>,
+) -> Vec<(access::Source, std::path::PathBuf)> {
+    let from_env = env
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| (FROM_ENV, access::expand_home(&p, home)));
+    let from_config = config
+        .iter()
+        .filter(|p| !p.trim().is_empty())
+        .map(|p| (FROM_CONFIG, access::expand_home(Path::new(p.trim()), home)));
+    flags
+        .iter()
+        .map(|p| (FROM_FLAG, p.clone()))
+        .chain(from_env)
+        .chain(from_config)
+        .collect()
+}
+
+/// The folders asked for from the flags, `IOHR_ASK_READ` and `[ask] read` ([`asked_folders`]).
+fn folders_from_everywhere(
+    flags: &[std::path::PathBuf],
+    cfg: &iohr_auth::AskConfig,
+) -> Vec<(access::Source, std::path::PathBuf)> {
+    asked_folders(
+        flags,
+        std::env::var_os("IOHR_ASK_READ").as_deref(),
+        cfg.read.as_deref().unwrap_or_default(),
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .as_deref(),
+    )
 }
 
 /// One capped `claude -p` run (see [`headless`]), shown one way (RFC 0203.1): `--json` is the
@@ -593,13 +673,8 @@ async fn headless(
     }
     let terminal = !out.json && prompt::interactive();
     let mode = chosen_mode(chosen, terminal)?;
-    let pending = grant_access(
-        chosen,
-        &mut ctx,
-        (mode, terminal),
-        question,
-        h.read.as_deref(),
-    )?;
+    let pending = grant_access(chosen, &mut ctx, (mode, terminal), question)?;
+    audit_grants(chosen, &ctx, out);
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
@@ -701,7 +776,7 @@ fn permission_session(
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let shell_at_home =
         mode == Mode::Manual && headless::is_home(Path::new(&ctx.cwd), home.as_deref());
-    if !mode.runs_commands() || !(ctx.reads || ctx.also.is_some() || shell_at_home) {
+    if !mode.runs_commands() || !(ctx.reads || !ctx.also.is_empty() || shell_at_home) {
         return Ok(None);
     }
     // No unix sockets, no live ask: off unix `iohr ask` stays read-only (see
@@ -747,72 +822,120 @@ fn streamed(
 /// question names outside the working one are too broad or too far to read unasked
 /// ([`access::needed`]). At a terminal, where every command is asked anyway, Io asks on the
 /// permission card whether it may read that folder; a yes for always is kept in `trusted.toml`
-/// in the user's iohr folder, a yes for this time keeps nothing. `--read <folder>` is a yes
-/// for this run (the way without a terminal). A yes gives the file tools beside the asked
-/// commands (secrets stay blocked by `permissions::secrets`); a no, no terminal, `--json` or a
-/// mode that runs nothing for the answer's sake (`plan`, `deny`, `rules`) leaves the request
+/// in the user's iohr folder, a yes for this time keeps nothing.
+///
+/// A folder is granted from five places, and they add up: `--read` (alias `--add-dir`, as
+/// often as you like), `IOHR_ASK_READ`, `[ask] read` (all three a yes for this run, the way
+/// without a terminal: [`Chosen::folders`]), the folders in `trusted.toml` (when the working
+/// folder is itself readable; the home folder and the root are never added this way), and the
+/// card's Add folder, which keeps its yes in `trusted.toml`. Every one goes through
+/// [`access::allowable_at`] first, so none is a folder that is missing, cannot be listed or is
+/// a secret place, and the secret file rules (`permissions::secrets`) apply inside all of them.
+/// A yes gives the file tools beside the asked commands; a no, no terminal, `--json` or a mode
+/// that runs nothing for the answer's sake (`plan`, `deny`, `rules`) leaves the request
 /// pending: the card says what Io needs and offers Allow, and the run answers from the names.
 ///
 /// # Errors
 ///
-/// `--read` names something that is not a folder Io may read.
+/// A folder asked for (flag, variable or config) is not one Io may read, or there are more
+/// than [`MAX_FOLDERS`] of them.
 fn grant_access(
     chosen: &Chosen<'_>,
     ctx: &mut Context,
     (mode, terminal): (Mode, bool),
     question: &str,
-    yes: Option<&Path>,
 ) -> Result<Option<access::Request>, Error> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let cwd = std::path::PathBuf::from(&ctx.cwd);
-    if let Some(folder) = yes {
-        let real = access::allowable_at(folder, &cwd, home.as_deref()).ok_or_else(|| {
-            Error::Usage(format!(
-                "--read {}: not a folder Io may read (it must exist, be listable and not hold secrets)",
-                folder.display()
-            ))
+    if chosen.folders.len() > MAX_FOLDERS {
+        return Err(Error::Usage(format!(
+            "{} folders asked for to read; at most {MAX_FOLDERS}",
+            chosen.folders.len()
+        )));
+    }
+    for (source, folder) in &chosen.folders {
+        let real = access::allowable_at(folder, &cwd, home.as_deref(), *source).map_err(|why| {
+            Error::Usage(format!("{} {}: {why}", asked_by(*source), folder.display()))
         })?;
-        apply_grant(ctx, &real);
+        apply_grant(ctx, &real, *source);
     }
-    let Some(req) = access::needed(
-        question,
-        &cwd,
-        home.as_deref(),
-        (ctx.reads, ctx.also.as_deref()),
-    ) else {
-        return Ok(None);
-    };
-    if !req.askable() {
-        return Ok(Some(req));
+    if ctx.reads {
+        // The folders added with Add folder stand for every ask; each is checked again, as a
+        // flag is, and the home folder, the root and anything broad are never added this way.
+        for folder in trust::standing(chosen.dir) {
+            if ctx.also.len() < MAX_FOLDERS
+                && let Ok(real) =
+                    access::allowable_at(&folder, &cwd, home.as_deref(), access::Source::Trust)
+            {
+                apply_grant(ctx, &real, access::Source::Trust);
+            }
+        }
     }
-    let may_ask = terminal && matches!(mode, Mode::Manual | Mode::Auto);
-    let yes = trust::is_trusted(chosen.dir, &req.folder)
-        || (may_ask
-            && match trust::ask(&req.folder) {
-                trust::Answer::Always => {
-                    if let Err(why) = trust::remember(chosen.dir, &req.folder) {
-                        let _ = console::Term::stderr()
-                            .write_line(&format!("Trusted for this time only: {why}"));
-                    }
-                    true
+    // One folder at a time: a question can name several, and each is granted or left pending.
+    loop {
+        let Some(req) = access::needed(question, &cwd, home.as_deref(), (ctx.reads, &ctx.also))
+        else {
+            return Ok(None);
+        };
+        if !req.askable() {
+            return Ok(Some(req));
+        }
+        let may_ask = terminal && matches!(mode, Mode::Manual | Mode::Auto);
+        let kept = trust::is_trusted(chosen.dir, &req.folder);
+        let asked = (!kept && may_ask).then(|| match trust::ask(&req.folder) {
+            trust::Answer::Always => {
+                if let Err(why) = trust::remember(chosen.dir, &req.folder) {
+                    let _ = console::Term::stderr()
+                        .write_line(&format!("Trusted for this time only: {why}"));
                 }
-                trust::Answer::Once => true,
-                trust::Answer::No => false,
-            });
-    if yes {
-        apply_grant(ctx, &req.folder);
-        return Ok(None);
+                true
+            }
+            trust::Answer::Once => true,
+            trust::Answer::No => false,
+        });
+        if !(kept || asked == Some(true)) || ctx.also.len() >= MAX_FOLDERS {
+            return Ok(Some(req));
+        }
+        let source = if kept {
+            access::Source::Trust
+        } else {
+            access::Source::Card
+        };
+        apply_grant(ctx, &req.folder, source);
     }
-    Ok(Some(req))
 }
 
-/// Gives the run the file tools for `folder`: the working folder itself, or a folder beside it.
-fn apply_grant(ctx: &mut Context, folder: &Path) {
-    let here = Path::new(&ctx.cwd).canonicalize().ok();
-    if here.as_deref() == Some(folder) {
-        ctx.reads = true;
+/// Gives the run the file tools for `folder`: the working folder itself, or a folder beside it
+/// (once: a repeat of one already there adds nothing), and notes where the yes came from for
+/// the audit line, `--json` and the label.
+fn apply_grant(ctx: &mut Context, folder: &Path, source: access::Source) {
+    let here = access::canonical(Path::new(&ctx.cwd));
+    let new = if here.as_deref() == Some(folder) {
+        !std::mem::replace(&mut ctx.reads, true)
+    } else if ctx.also.iter().any(|a| a == folder) {
+        false
     } else {
-        ctx.also = Some(folder.to_path_buf());
+        ctx.also.push(folder.to_path_buf());
+        true
+    };
+    if new {
+        ctx.granted.push(access::Grant {
+            source,
+            folder: folder.to_path_buf(),
+        });
+    }
+}
+
+/// One `permissions.log` line for each folder the run was given: the source of the yes and
+/// the path, never anything in it. A log that cannot be written is said, not an error.
+fn audit_grants(chosen: &Chosen<'_>, ctx: &Context, out: Out) {
+    let files = store::Files::find(Path::new(&ctx.cwd), chosen.dir);
+    for g in &ctx.granted {
+        if let Err(why) = store::audit_folder(&files, g.source.name(), &g.folder)
+            && !out.json
+        {
+            Out::note(&format!("could not write the permission log: {why}"));
+        }
     }
 }
 
@@ -862,17 +985,18 @@ async fn run_at(
         model,
         started,
         folder.as_deref(),
-        (ctx.reads, ctx.also.as_deref()),
+        (ctx.reads, &ctx.also),
         (session, mode == Mode::Plan),
     )
     .await
 }
 
 /// The folder the run's file tools and its asked commands are anchored to: the working folder,
-/// except when that one is too broad to read (the home folder) and the person allowed another:
-/// then only the allowed one, so a yes for `~/Downloads` never reads the rest of home.
+/// except when that one is too broad to read (the home folder) and the person allowed others:
+/// then only the first allowed one (the rest are added by name, `headless::args`), so a yes
+/// for `~/Downloads` never reads the rest of home.
 fn scope_dir(ctx: &Context) -> std::path::PathBuf {
-    match &ctx.also {
+    match ctx.also.first() {
         Some(also) if !ctx.reads => also.clone(),
         _ => std::path::PathBuf::from(&ctx.cwd),
     }
@@ -881,7 +1005,7 @@ fn scope_dir(ctx: &Context) -> std::path::PathBuf {
 /// Where the run starts: [`scope_dir`] when it may read there or run commands, else none
 /// (the temp folder).
 fn run_dir(ctx: &Context, session: Option<&Session>) -> Option<std::path::PathBuf> {
-    (ctx.reads || ctx.also.is_some() || session.is_some()).then(|| scope_dir(ctx))
+    (ctx.reads || !ctx.also.is_empty() || session.is_some()).then(|| scope_dir(ctx))
 }
 
 /// The lines after an answer for what Io wanted and could not be allowed: with a rule to
@@ -1466,19 +1590,18 @@ mod tests {
         let home = Context {
             cwd: "/home/me".into(),
             reads: false,
-            also: Some("/home/me/Downloads".into()),
+            also: vec!["/home/me/Downloads".into()],
             ..Context::default()
         };
         // With or without a session (the shell), the run starts in the allowed folder, never home.
         assert_eq!(scope_dir(&home), Path::new("/home/me/Downloads"));
         assert_eq!(run_dir(&home, None), Some("/home/me/Downloads".into()));
         // The broker is built over `scope_dir`, so the shell is anchored there too.
-        let args =
-            headless::args("haiku", (home.reads, home.also.as_deref()), None, false).unwrap();
+        let args = headless::args("haiku", (home.reads, &home.also), None, false).unwrap();
         assert!(!args.iter().any(|a| a.starts_with("--add-dir")));
         // Home alone with a session (the shell, no file tools) stays at home; with nothing, no folder.
         let shell = Context {
-            also: None,
+            also: Vec::new(),
             ..home.clone()
         };
         assert_eq!(scope_dir(&shell), Path::new("/home/me"));
@@ -1490,18 +1613,12 @@ mod tests {
         let project = Context {
             cwd: "/work/p".into(),
             reads: true,
-            also: Some("/data/x".into()),
+            also: vec!["/data/x".into()],
             ..Context::default()
         };
         assert_eq!(scope_dir(&project), Path::new("/work/p"));
         assert_eq!(run_dir(&project, None), Some("/work/p".into()));
-        let args = headless::args(
-            "haiku",
-            (project.reads, project.also.as_deref()),
-            None,
-            false,
-        )
-        .unwrap();
+        let args = headless::args("haiku", (project.reads, &project.also), None, false).unwrap();
         assert!(args.contains(&"--add-dir=/data/x".to_owned()));
     }
 
@@ -1547,7 +1664,7 @@ mod tests {
     // ---- ask instead of "I can't" (RFC 0203)
 
     struct Tree {
-        _d: tempfile::TempDir,
+        dir: tempfile::TempDir,
         /// The folder the question is asked in.
         work: std::path::PathBuf,
         /// A folder beside it that a question can name.
@@ -1564,7 +1681,7 @@ mod tests {
         std::fs::create_dir_all(&other).unwrap();
         std::fs::write(work.join("a.txt"), "x").unwrap();
         Tree {
-            _d: d,
+            dir: d,
             work,
             other,
             user,
@@ -1590,6 +1707,7 @@ mod tests {
             dir,
             role: None,
             modes: (Words::default(), Words::default()),
+            folders: Vec::new(),
         }
     }
 
@@ -1600,29 +1718,17 @@ mod tests {
         let mut ctx = ctx_in(&t.work, true);
         let q = format!("what is in {}", t.other.display());
         // No terminal, so Io cannot ask here: the request goes back, the run stays as it was.
-        let pending = grant_access(
-            &chosen(&t.user, bin),
-            &mut ctx,
-            (Mode::Manual, false),
-            &q,
-            None,
-        )
-        .unwrap()
-        .unwrap();
+        let pending = grant_access(&chosen(&t.user, bin), &mut ctx, (Mode::Manual, false), &q)
+            .unwrap()
+            .unwrap();
         assert_eq!(pending.folder, t.other);
         assert!(!pending.is_cwd && pending.askable());
-        assert_eq!(ctx.also, None);
+        assert_eq!(ctx.also.len(), 0);
         // Deny never asks, even at a terminal: no prompt is drawn and the request is kept.
-        let pending = grant_access(
-            &chosen(&t.user, bin),
-            &mut ctx,
-            (Mode::Deny, true),
-            &q,
-            None,
-        )
-        .unwrap();
+        let pending =
+            grant_access(&chosen(&t.user, bin), &mut ctx, (Mode::Deny, true), &q).unwrap();
         assert!(pending.is_some());
-        assert_eq!(ctx.also, None);
+        assert_eq!(ctx.also.len(), 0);
     }
 
     #[test]
@@ -1632,18 +1738,12 @@ mod tests {
         trust::remember(&t.user, &t.other).unwrap();
         let mut ctx = ctx_in(&t.work, true);
         let q = format!("what is in {}", t.other.display());
-        let pending = grant_access(
-            &chosen(&t.user, bin),
-            &mut ctx,
-            (Mode::Manual, false),
-            &q,
-            None,
-        )
-        .unwrap();
+        let pending =
+            grant_access(&chosen(&t.user, bin), &mut ctx, (Mode::Manual, false), &q).unwrap();
         assert!(pending.is_none());
-        assert_eq!(ctx.also.as_deref(), Some(t.other.as_path()));
+        assert_eq!(ctx.also, vec![t.other.clone()]);
         // The run then has tools for it, secrets still denied (see the headless tests).
-        let args = headless::args("haiku", (ctx.reads, ctx.also.as_deref()), None, false).unwrap();
+        let args = headless::args("haiku", (ctx.reads, &ctx.also), None, false).unwrap();
         assert!(args.contains(&format!("--add-dir={}", t.other.display())));
         assert!(
             args.iter()
@@ -1667,7 +1767,6 @@ mod tests {
             &mut ctx,
             (Mode::Manual, false),
             "explain this directory",
-            None,
         )
         .unwrap()
         .unwrap();
@@ -1680,7 +1779,6 @@ mod tests {
             &mut ctx,
             (Mode::Manual, false),
             "explain this directory",
-            None,
         )
         .unwrap();
         assert!(pending.is_none());
@@ -1693,29 +1791,161 @@ mod tests {
         let bin = Path::new("claude");
         let mut ctx = ctx_in(&t.work, true);
         let q = format!("what is in {}", t.other.display());
-        let pending = grant_access(
-            &chosen(&t.user, bin),
-            &mut ctx,
-            (Mode::Manual, false),
-            &q,
-            Some(&t.other),
-        )
-        .unwrap();
+        let mut yes = chosen(&t.user, bin);
+        yes.folders = vec![(FROM_FLAG, t.other.clone())];
+        let pending = grant_access(&yes, &mut ctx, (Mode::Manual, false), &q).unwrap();
         assert!(pending.is_none());
-        assert_eq!(ctx.also.as_deref(), Some(t.other.as_path()));
+        assert_eq!(ctx.also, vec![t.other.clone()]);
         assert!(!trust::is_trusted(&t.user, &t.other), "one run only");
         for bad in [t.work.join("a.txt"), t.work.join("nope")] {
             let mut ctx = ctx_in(&t.work, true);
-            let err = grant_access(
-                &chosen(&t.user, bin),
-                &mut ctx,
-                (Mode::Manual, false),
-                "q",
-                Some(&bad),
-            )
-            .unwrap_err();
+            let mut no = chosen(&t.user, bin);
+            no.folders = vec![(FROM_FLAG, bad.clone())];
+            let err = grant_access(&no, &mut ctx, (Mode::Manual, false), "q").unwrap_err();
             assert!(matches!(err, Error::Usage(_)), "{bad:?}");
         }
+    }
+
+    /// Runs one ask over `folders` as `chosen` says, in `work` with the file tools.
+    fn granted(
+        t: &Tree,
+        folders: Vec<(access::Source, std::path::PathBuf)>,
+        question: &str,
+    ) -> Result<Context, Error> {
+        let mut ctx = ctx_in(&t.work, true);
+        let mut c = chosen(&t.user, Path::new("claude"));
+        c.folders = folders;
+        grant_access(&c, &mut ctx, (Mode::Manual, false), question)?;
+        Ok(ctx)
+    }
+
+    fn third(t: &Tree) -> std::path::PathBuf {
+        let p = t.dir.path().canonicalize().unwrap().join("third");
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_four_sources_name_folders_and_each_grants_one_beside_the_working_folder() {
+        let t = tree();
+        let home = t.dir.path().canonicalize().unwrap();
+        let (other, third) = (t.other.clone(), third(&t));
+        // Flags, then IOHR_ASK_READ (a path list), then [ask] read, each tagged with its source.
+        let env = std::env::join_paths([&other, &third]).unwrap();
+        let all = asked_folders(
+            std::slice::from_ref(&other),
+            Some(&env),
+            &["~/third".to_owned(), "  ".to_owned()],
+            Some(&home),
+        );
+        assert_eq!(
+            all,
+            [
+                (FROM_FLAG, other.clone()),
+                (FROM_ENV, other.clone()),
+                (FROM_ENV, third.clone()),
+                (FROM_CONFIG, third.clone()),
+            ]
+        );
+        // Each source alone reaches the run, with no question naming the folder.
+        for source in [FROM_FLAG, FROM_ENV, FROM_CONFIG] {
+            let ctx = granted(&t, vec![(source, other.clone())], "what is this").unwrap();
+            assert_eq!(ctx.also, vec![other.clone()], "{source:?}");
+        }
+        // Several at once, none twice.
+        let ctx = granted(&t, all, "what is this").unwrap();
+        assert_eq!(ctx.also, [other.clone(), third]);
+        // The trust store is the fourth: a folder added there as standing is granted on every ask.
+        trust::add_standing(&t.user, &other).unwrap();
+        let ctx = granted(&t, Vec::new(), "what is this").unwrap();
+        assert_eq!(ctx.also, [other]);
+    }
+
+    #[test]
+    fn an_empty_env_and_config_add_nothing() {
+        let all = asked_folders(&[], Some(std::ffi::OsStr::new("")), &[], None);
+        assert_eq!(all.len(), 0);
+        assert_eq!(asked_folders(&[], None, &[String::new()], None).len(), 0);
+    }
+
+    #[test]
+    fn a_trusted_folder_is_not_granted_without_the_file_tools_or_when_it_is_gone() {
+        let t = tree();
+        trust::add_standing(&t.user, &t.other).unwrap();
+        // The working folder itself cannot be read (no tools): nothing is added behind that.
+        let mut ctx = ctx_in(&t.work, false);
+        grant_access(
+            &chosen(&t.user, Path::new("claude")),
+            &mut ctx,
+            (Mode::Manual, false),
+            "what is this",
+        )
+        .unwrap();
+        assert_eq!(ctx.also.len(), 0);
+        // A trusted folder that was removed since is skipped, not an error.
+        std::fs::remove_dir(&t.other).unwrap();
+        let ctx = granted(&t, Vec::new(), "what is this").unwrap();
+        assert_eq!(ctx.also.len(), 0);
+    }
+
+    #[test]
+    fn a_secret_place_is_refused_from_every_source_and_never_trusted_in() {
+        let t = tree();
+        let secret = t.dir.path().canonicalize().unwrap().join(".ssh");
+        std::fs::create_dir_all(&secret).unwrap();
+        for source in [FROM_FLAG, FROM_ENV, FROM_CONFIG] {
+            let err = granted(&t, vec![(source, secret.clone())], "q").unwrap_err();
+            let Error::Usage(why) = err else {
+                panic!("{source:?}: not a usage error")
+            };
+            assert!(why.starts_with(asked_by(source)), "{why}");
+        }
+        // The card's own check says the same, and a folder in the trust store that is secret is skipped.
+        assert!(folder_to_add_is_refused(&t, &secret));
+        trust::add_standing(&t.user, &secret).unwrap();
+        let ctx = granted(&t, Vec::new(), "what is this").unwrap();
+        assert_eq!(ctx.also.len(), 0);
+    }
+
+    fn folder_to_add_is_refused(t: &Tree, typed: &Path) -> bool {
+        crate::actions::folder_to_add(&typed.display().to_string(), &t.work, None).is_err()
+    }
+
+    #[test]
+    fn more_folders_than_the_cap_are_refused_whole() {
+        let t = tree();
+        let many = (0..=MAX_FOLDERS)
+            .map(|_| (FROM_ENV, t.other.clone()))
+            .collect();
+        let err = granted(&t, many, "q").unwrap_err();
+        assert!(matches!(err, Error::Usage(_)));
+        let ok = (0..MAX_FOLDERS)
+            .map(|_| (FROM_ENV, t.other.clone()))
+            .collect();
+        assert!(granted(&t, ok, "q").is_ok());
+    }
+
+    #[test]
+    fn a_question_naming_two_folders_needs_both_and_the_asked_one_covers_only_itself() {
+        let t = tree();
+        let third = third(&t);
+        let q = format!("compare {} and {}", t.other.display(), third.display());
+        // One folder given: the other is still asked for.
+        let mut ctx = ctx_in(&t.work, true);
+        let mut c = chosen(&t.user, Path::new("claude"));
+        c.folders = vec![(FROM_FLAG, t.other.clone())];
+        let pending = grant_access(&c, &mut ctx, (Mode::Manual, false), &q)
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.folder, third);
+        // Both given: nothing is asked.
+        let ctx = granted(
+            &t,
+            vec![(FROM_FLAG, t.other.clone()), (FROM_ENV, third.clone())],
+            &q,
+        )
+        .unwrap();
+        assert_eq!(ctx.also, [t.other.clone(), third]);
     }
 
     #[test]
@@ -1735,5 +1965,63 @@ mod tests {
     fn plain_look_carries_no_escape_codes() {
         let line = waiting_line(&one("Merge #12"), true, MenuKey::CtrlG, PLAIN, 80);
         assert!(!line.contains('\u{1b}'), "{line:?}");
+    }
+
+    #[test]
+    fn every_folder_granted_is_audited_with_its_source_and_listed_in_json() {
+        let t = tree();
+        let third = third(&t);
+        let ctx = granted(
+            &t,
+            vec![(FROM_ENV, t.other.clone()), (FROM_CONFIG, third.clone())],
+            "what is this",
+        )
+        .unwrap();
+        let sent = ctx.sent("what is this");
+        let json = serde_json::to_value(&sent).unwrap();
+        assert_eq!(json["folders"][0]["source"], "env");
+        assert_eq!(json["folders"][0]["path"], t.other.display().to_string());
+        assert_eq!(json["folders"][1]["source"], "config");
+        // One log line per folder, in the project's log.
+        let c = chosen(&t.user, Path::new("claude"));
+        audit_grants(&c, &ctx, Out { json: true });
+        let log = std::fs::read_to_string(store::Files::find(&t.work, &t.user).log_path()).unwrap();
+        let lines: Vec<serde_json::Value> = log
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2, "{log}");
+        assert_eq!(lines[0]["source"], "env");
+        assert_eq!(lines[1]["source"], "config");
+        assert_eq!(lines[1]["path"], third.display().to_string());
+        assert!(!log.contains("a.txt"), "never contents or names inside");
+    }
+
+    #[test]
+    fn a_standing_folder_is_granted_on_every_ask_and_one_yes_for_a_question_is_not() {
+        let t = tree();
+        // A yes for one question (Always on the card) grants nothing on a later ask.
+        trust::remember(&t.user, &t.other).unwrap();
+        let ctx = granted(&t, Vec::new(), "what is this").unwrap();
+        assert_eq!(ctx.also.len(), 0, "per-question only");
+        // Add folder is standing: granted with no question naming it, tagged `trust`.
+        trust::add_standing(&t.user, &t.other).unwrap();
+        let ctx = granted(&t, Vec::new(), "what is this").unwrap();
+        assert_eq!(ctx.also, std::slice::from_ref(&t.other));
+        assert_eq!(ctx.granted[0].source, access::Source::Trust);
+    }
+
+    #[test]
+    fn a_standing_folder_that_became_broad_is_skipped_and_an_env_home_is_refused() {
+        let t = tree();
+        let home = t.dir.path().canonicalize().unwrap();
+        // A hand-edited standing list naming the root is not granted.
+        trust::add_standing(&t.user, Path::new("/")).unwrap();
+        let ctx = granted(&t, Vec::new(), "what is this").unwrap();
+        assert_eq!(ctx.also.len(), 0);
+        // Only the flag and the card may name home; env and config never.
+        assert!(access::allowable_at(&home, &t.work, Some(&home), FROM_ENV).is_err());
+        assert!(access::allowable_at(&home, &t.work, Some(&home), FROM_CONFIG).is_err());
+        assert!(access::allowable_at(&home, &t.work, Some(&home), FROM_FLAG).is_ok());
     }
 }
