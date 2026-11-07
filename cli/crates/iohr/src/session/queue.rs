@@ -9,9 +9,21 @@
 //! <https://duckdb.org/docs/current/connect/concurrency>).
 //!
 //! A task is `queued`, then `claimed` by a Role (a lease starts), `running`, and ends `done`
-//! or `failed`. A claim whose lease ran out goes back to `queued` ([`Queue::recover`]) until
-//! it has been tried [`Queue::max_attempts`] times, then it is `failed` with the reason.
-//! Every change appends a row to `task_events`, which is never edited.
+//! or `failed`. Every change appends a row to `task_events`, which is never edited.
+//!
+//! Two clocks, on purpose. The lease runs on [`tick`], the host's own monotonic clock, which
+//! neither a clock step nor a laptop's sleep moves (the threads sleep with it), so a Role that
+//! is alive is never judged late. Stamps (`created_at`, `updated_at`, the events) are wall
+//! clock, for people to read. A lease is only meaningful to the process that wrote it, so:
+//!
+//! - a new host holds the lock, which means no other host is alive: every claim in the file is
+//!   an orphan, and [`Queue::recover_all`] gives each back at once, whatever its lease says;
+//! - while a host runs, a claim is taken from its Role only when that Role has `stopped` (its
+//!   thread ended) and the lease has run out ([`Queue::claim`], [`Queue::recover`]). A Role
+//!   that is alive keeps its task, and a task is never run by two Roles.
+//!
+//! A task given back goes to `queued` until it has been tried [`MAX_ATTEMPTS`] times, then it
+//! is `failed` with the reason.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -120,11 +132,34 @@ CREATE TABLE IF NOT EXISTS task_events (
 );
 ";
 
-/// A claim can be taken by a Role when it is waiting, or its lease ran out.
-const TAKEABLE: &str =
-    "(state = 'queued' OR (state IN ('claimed', 'running') AND lease_until < $3))";
+/// The Role that holds a claim is not alive: it has `stopped`, or this host never ran it.
+macro_rules! owner_gone {
+    () => {
+        "claimed_by NOT IN (SELECT role FROM roles WHERE state <> 'stopped')"
+    };
+}
 
-/// The current time in milliseconds since the epoch.
+/// A claim can be taken by a Role when it is waiting, or its lease ran out and its Role is
+/// gone. `$3` is the lease clock, [`tick`].
+const TAKEABLE: &str = concat!(
+    "(state = 'queued' OR (state IN ('claimed', 'running') AND lease_until < $3 AND ",
+    owner_gone!(),
+    "))"
+);
+
+/// The lease clock: milliseconds on this process's monotonic clock since it first asked.
+/// It never goes back, and it does not run while the machine sleeps (neither do the threads
+/// that renew leases). Leases written with it mean nothing to another process.
+pub(crate) fn tick() -> i64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let ms = START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_millis();
+    i64::try_from(ms).unwrap_or(i64::MAX)
+}
+
+/// The current wall-clock time in milliseconds since the epoch, for stamps.
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -234,17 +269,19 @@ impl Queue {
 
     /// The next task for `role` (its own, a hint of a Role this host does not run, or none),
     /// claimed for `lease`; `None` when nothing waits. One statement: of two Roles claiming
-    /// at once, one wins the row and the other, after the retry, takes the next.
+    /// at once, one wins the row and the other, after the retry, takes the next. `tick` is
+    /// the lease clock ([`tick`]).
     pub(crate) fn claim(
         &self,
         role: &str,
         lease: Duration,
-        now: i64,
+        tick: i64,
     ) -> Result<Option<Task>, QueueError> {
-        let until = now.saturating_add(lease_ms(lease));
+        let until = tick.saturating_add(lease_ms(lease));
+        let now = now_ms();
         let sql = format!(
             "UPDATE tasks SET state = 'claimed', claimed_by = $1, lease_until = $2, \
-                 attempts = attempts + 1, updated_at = $3 \
+                 attempts = attempts + 1, updated_at = $5 \
              WHERE id = (SELECT id FROM tasks WHERE {TAKEABLE} AND attempts < $4 \
                  AND (role_hint IS NULL OR role_hint = '' OR role_hint = $1 \
                       OR role_hint NOT IN (SELECT role FROM roles WHERE state <> 'stopped')) \
@@ -253,7 +290,7 @@ impl Queue {
              RETURNING id, external_id, role_hint, payload, attempts"
         );
         self.retrying(|tx| {
-            let got = tx.query_row(&sql, params![role, until, now, MAX_ATTEMPTS], |r| {
+            let got = tx.query_row(&sql, params![role, until, tick, MAX_ATTEMPTS, now], |r| {
                 Ok(Task {
                     id: r.get(0)?,
                     external_id: r.get(1)?,
@@ -285,16 +322,17 @@ impl Queue {
         )
     }
 
-    /// A Role is still working on `id`: the lease runs on. `false` when the task is no
-    /// longer its own (the lease ran out and another Role has it).
+    /// A Role is still working on `id`: the lease runs on (`tick` is the lease clock).
+    /// `false` when the task is no longer its own.
     pub(crate) fn heartbeat(
         &self,
         id: i64,
         role: &str,
         lease: Duration,
-        now: i64,
+        tick: i64,
     ) -> Result<bool, QueueError> {
-        let until = now.saturating_add(lease_ms(lease));
+        let until = tick.saturating_add(lease_ms(lease));
+        let now = now_ms();
         self.retrying(|tx| {
             let n = tx.execute(
                 "UPDATE tasks SET lease_until = $1, updated_at = $2 \
@@ -368,22 +406,45 @@ impl Queue {
         })
     }
 
-    /// What the host does when it opens the file: a claim whose lease ran out goes back to
-    /// `queued`, or is `failed` when it has been tried [`MAX_ATTEMPTS`] times.
-    pub(crate) fn recover(&self, now: i64) -> Result<Recovered, QueueError> {
+    /// While the host runs: a claim whose lease ran out (`tick` is the lease clock) and whose
+    /// Role has stopped goes back to `queued`, or is `failed` when it has been tried
+    /// [`MAX_ATTEMPTS`] times. A claim of a Role that is alive is left alone.
+    pub(crate) fn recover(&self, tick: i64) -> Result<Recovered, QueueError> {
+        let sql = concat!(
+            "SELECT id, attempts FROM tasks WHERE state IN ('claimed', 'running') \
+             AND lease_until < $1 AND ",
+            owner_gone!()
+        );
+        self.give_back(sql, Some(tick), "the lease ran out")
+    }
+
+    /// What a host does first, holding the lock: no other host is alive, so every claim in
+    /// the file is an orphan (its lease was written by a process that is gone, on a clock
+    /// this one does not share). Each is given back at once.
+    pub(crate) fn recover_all(&self) -> Result<Recovered, QueueError> {
+        let sql = "SELECT id, attempts FROM tasks WHERE state IN ('claimed', 'running')";
+        self.give_back(sql, None, "the host that held it stopped")
+    }
+
+    fn give_back(
+        &self,
+        select: &str,
+        tick: Option<i64>,
+        cause: &str,
+    ) -> Result<Recovered, QueueError> {
+        let now = now_ms();
         self.retrying(|tx| {
-            let mut stmt = tx.prepare(
-                "SELECT id, attempts FROM tasks \
-                 WHERE state IN ('claimed', 'running') AND lease_until < $1",
-            )?;
-            let stale: Vec<(i64, i32)> = stmt
-                .query_map(params![now], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<_, _>>()?;
+            let mut stmt = tx.prepare(select)?;
+            let map = |r: &duckdb::Row<'_>| Ok((r.get::<_, i64>(0)?, r.get::<_, i32>(1)?));
+            let stale: Vec<(i64, i32)> = match tick {
+                Some(t) => stmt.query_map(params![t], map)?.collect::<Result<_, _>>()?,
+                None => stmt.query_map([], map)?.collect::<Result<_, _>>()?,
+            };
             drop(stmt);
             let mut out = Recovered::default();
             for (id, attempts) in stale {
                 if attempts >= MAX_ATTEMPTS {
-                    let why = format!("the lease ran out after {attempts} tries");
+                    let why = format!("{cause}, after {attempts} tries");
                     tx.execute(
                         "UPDATE tasks SET state = 'failed', lease_until = NULL, reason = $1, \
                          updated_at = $2 WHERE id = $3",
@@ -397,7 +458,7 @@ impl Queue {
                          updated_at = $1 WHERE id = $2",
                         params![now, id],
                     )?;
-                    event(tx, id, now, "requeued", Some("the lease ran out"))?;
+                    event(tx, id, now, "requeued", Some(cause))?;
                     out.requeued += 1;
                 }
             }
@@ -512,7 +573,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Instant;
 
-    const SHORT: Duration = Duration::from_millis(800);
+    const SHORT: Duration = Duration::from_secs(60);
 
     fn put(q: &Queue, external: Option<&str>, hint: Option<&str>) -> i64 {
         q.enqueue(
@@ -530,6 +591,19 @@ mod tests {
     fn roles(q: &Queue, names: &[&str]) {
         let names: Vec<String> = names.iter().map(ToString::to_string).collect();
         q.register_roles(&names, now_ms()).unwrap();
+    }
+
+    /// The lease clock is the host's own: it counts from the process's start, so it is not
+    /// the wall clock (a clock step cannot move it), and it never goes back.
+    #[test]
+    fn the_lease_clock_is_monotonic_and_is_not_the_wall_clock() {
+        let a = tick();
+        std::thread::sleep(Duration::from_millis(20));
+        let b = tick();
+        assert!(b >= a + 20, "{a} then {b}");
+        // Milliseconds since this process began its work: far from the epoch's 1.7e12.
+        assert!(b < 10_i64.pow(11), "{b}");
+        assert!(now_ms() > 10_i64.pow(12));
     }
 
     #[test]
@@ -603,6 +677,8 @@ mod tests {
         let id = put(&q, None, None);
         let lease = Duration::from_millis(1000);
         q.claim("rust", lease, 0).unwrap().unwrap();
+        // Its Role's thread ended, so only the lease is left to wait for.
+        q.role_state("rust", "stopped", 1).unwrap();
         // Not run out yet: nothing happens.
         assert_eq!(q.recover(999).unwrap(), Recovered::default());
         assert_eq!(
@@ -626,19 +702,49 @@ mod tests {
         assert!(q.claim("rust", lease, 9000).unwrap().is_none());
     }
 
+    /// A live Role's claim is never taken from it, however late its heartbeat is: that would
+    /// run one task twice. An expired claim is taken only when its Role has stopped.
     #[test]
-    fn a_claim_that_ran_out_can_be_taken_by_another_role_without_recovery() {
+    fn an_expired_claim_is_taken_only_from_a_role_that_has_stopped() {
         let q = Queue::open_in_memory().unwrap();
         roles(&q, &["rust", "security"]);
         let id = put(&q, None, None);
         q.claim("rust", Duration::from_millis(10), 0)
             .unwrap()
             .unwrap();
-        let t = q.claim("security", LEASE, 11).unwrap().unwrap();
+        q.role_state("rust", "working", 1).unwrap();
+        // The lease ran out, but the Role is alive: not another Role's, not recovery's.
+        assert!(q.claim("security", LEASE, 11).unwrap().is_none());
+        assert_eq!(q.recover(11).unwrap(), Recovered::default());
+        assert_eq!(q.task(id).unwrap().unwrap().0, "claimed");
+        // Its thread is gone: now the claim can go to another Role.
+        q.role_state("rust", "stopped", 12).unwrap();
+        let t = q.claim("security", LEASE, 13).unwrap().unwrap();
         assert_eq!((t.id, t.attempts), (id, 2));
         // The first Role's late answer does not count: the task is another's now.
-        assert!(!q.complete(id, "rust", None, 12).unwrap());
-        assert!(q.complete(id, "security", None, 13).unwrap());
+        assert!(!q.complete(id, "rust", None, 14).unwrap());
+        assert!(q.complete(id, "security", None, 15).unwrap());
+    }
+
+    /// What a new host does with the file it finds: the lock says no other host is alive, so
+    /// every claim in it is an orphan, whatever its lease says (it was written by a process
+    /// that is gone, on a clock this one does not share).
+    #[test]
+    fn a_new_host_takes_back_every_claim_at_once_and_fails_the_exhausted_ones() {
+        let q = Queue::open_in_memory().unwrap();
+        roles(&q, &["rust"]);
+        let id = put(&q, None, None);
+        let waiting = put(&q, None, None);
+        for n in 1..=MAX_ATTEMPTS {
+            // Killed with a lease that has most of its time left.
+            let t = q.claim("rust", LEASE, 0).unwrap().unwrap();
+            assert_eq!((t.id, t.attempts), (id, n));
+            let back = q.recover_all().unwrap();
+            let want = if n < MAX_ATTEMPTS { (1, 0) } else { (0, 1) };
+            assert_eq!((back.requeued, back.failed), want, "try {n}");
+        }
+        assert_eq!(q.task(id).unwrap().unwrap().0, "failed");
+        assert_eq!(q.task(waiting).unwrap().unwrap().0, "queued");
     }
 
     /// A statement that meets another connection's uncommitted edit of the same row is
@@ -714,7 +820,7 @@ mod tests {
         let q = Queue::open(&dir.join("queue.duckdb")).unwrap();
         roles(&q, &["rust"]);
         put(&q, Some("ask_kill"), None);
-        let t = q.claim("rust", SHORT, now_ms()).unwrap().unwrap();
+        let t = q.claim("rust", SHORT, tick()).unwrap().unwrap();
         assert!(q.start(t.id, "rust", now_ms()).unwrap());
         std::fs::write(dir.join("claimed"), t.id.to_string()).unwrap();
         std::thread::sleep(Duration::from_secs(120));
@@ -751,14 +857,12 @@ mod tests {
         child.kill().unwrap();
         child.wait().unwrap();
 
-        // The next host opens the same file: the claim is still held (its lease runs on).
+        // The next host opens the same file: the claim is still held, its lease has most of
+        // its time left, and the host that made it is gone. It is given back at once.
         let q = Queue::open(&dir.path().join("queue.duckdb")).unwrap();
         assert_eq!(q.task(id).unwrap().unwrap().0, "running");
-        assert_eq!(q.recover(now_ms()).unwrap(), Recovered::default());
-        // Once the lease has run out, recovery gives it back.
-        std::thread::sleep(SHORT + Duration::from_millis(300));
         assert_eq!(
-            q.recover(now_ms()).unwrap(),
+            q.recover_all().unwrap(),
             Recovered {
                 requeued: 1,
                 failed: 0

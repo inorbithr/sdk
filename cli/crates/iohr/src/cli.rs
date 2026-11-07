@@ -105,6 +105,27 @@ pub struct Global {
     pub data_dir: Option<PathBuf>,
 }
 
+/// The global flags that take a value, as they are typed (`--profile`, `-p`), read from the
+/// definition above so a new one is never forgotten. Code that walks a raw command line
+/// uses it to tell a flag's value from the command (`iohr --profile session session`).
+#[must_use]
+pub fn global_value_flags() -> Vec<OsString> {
+    let command = Global::augment_args(clap::Command::new("iohr"));
+    let mut flags = Vec::new();
+    for arg in command.get_arguments() {
+        if !arg.get_action().takes_values() {
+            continue;
+        }
+        if let Some(long) = arg.get_long() {
+            flags.push(OsString::from(format!("--{long}")));
+        }
+        if let Some(short) = arg.get_short() {
+            flags.push(OsString::from(format!("-{short}")));
+        }
+    }
+    flags
+}
+
 /// Who signs in when it is not a person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SignIn {
@@ -486,12 +507,17 @@ pub enum Command {
     /// stops or the machine restarts). The command stays open as the session and prints
     /// nothing on stdout; Ctrl-C, SIGTERM or the terminal closing leaves it. The host stops
     /// when the last session has left, or on `iohr stop`.
+    ///
+    /// Slice S1 of RFC 0213: no tasks are accepted from the server yet, and a task a Role
+    /// claims fails with "not built". The host, its Roles, the durable queue and the session
+    /// link work; `iohr ask --work` and the real handler come next.
     Session(SessionArgs),
     /// Stop this project's session host.
     ///
     /// Tells the project's session host to stop. Each Role finishes the task it holds, then
-    /// the host ends. A task cut short by a crash instead is taken again by the next host,
-    /// once its 90 second lease has run out.
+    /// the host ends; `--wait` (15 seconds by default) waits until it has, and says
+    /// `stopping` when it has not yet. A task cut short by a crash instead is taken again by
+    /// the next host as soon as it starts.
     Stop(StopArgs),
     /// Install the InOrbit Trails browser extension.
     ///

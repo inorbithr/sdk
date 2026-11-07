@@ -6,12 +6,22 @@
 //!
 //! - `session`: joins; the answer is `ready <pid>`, and the host stops when the last joined
 //!   connection closes (a shell that is killed closes it too, so nothing can be left behind).
-//! - `status`: `ok <pid> sessions=<n>`.
+//! - `status`: `ok <pid> sessions=<n>`, or `ok <pid> stopping` once the host drains.
 //! - `stop`: `stopping`; every Role finishes the task it holds, then the host ends.
 //! - `enqueue <json>`: adds a task (`external_id`, `role_hint`, `payload`) and answers
 //!   `queued <id> new` or `queued <id> repeated` (the same `external_id` adds nothing).
+//!
+//! Anything else is answered `error ...`, and so is every request past [`MAX_CONNECTIONS`]
+//! (`error busy`).
+//!
+//! Stopping has two steps. `stop` (the flag the caller passes in, set by a signal, `stop`, the
+//! last session leaving, or a host nobody joined) *drains*: the Roles finish the task they hold
+//! and take no more. The socket is kept answering all through, so a shell that asks sees
+//! `stopping`, not a silence, and `iohr stop` can wait for the lock. Only when the Roles are
+//! done does `down` end the acceptor and close every connection.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -24,6 +34,10 @@ use super::queue::{NewTask, Queue, QueueError, Recovered, Task, now_ms};
 
 /// The longest request line the host reads.
 const MAX_LINE: u64 = 64 * 1024;
+
+/// How many connections a host holds at once (every one is a thread). Sessions are one per
+/// open shell, so this is far more than a person opens.
+pub(crate) const MAX_CONNECTIONS: usize = 64;
 
 /// How the host paces itself, beyond the pool's.
 #[derive(Debug, Clone, Copy)]
@@ -82,29 +96,31 @@ where
     // The lock is ours, so a socket file left here belongs to a host that died.
     let _ = std::fs::remove_file(&paths.sock);
     let queue = Queue::open(&paths.db)?;
-    let recovered = queue.recover(now_ms())?;
+    // The lock is ours: no other host is alive, so every claim in the file is an orphan.
+    let recovered = queue.recover_all()?;
     queue.register_roles(roles, now_ms())?;
     let listener = UnixListener::bind(&paths.sock)?;
+    // The folder is the owner's alone already; the socket says so too.
+    std::fs::set_permissions(&paths.sock, std::fs::Permissions::from_mode(0o600))?;
     listener.set_nonblocking(true)?;
-    let sessions = AtomicUsize::new(0);
-    let joined = AtomicBool::new(false);
+    let net = Net {
+        stop,
+        down: AtomicBool::new(false),
+        sessions: AtomicUsize::new(0),
+        connections: AtomicUsize::new(0),
+        joined: AtomicBool::new(false),
+    };
     ready(recovered);
     let accept_queue = queue.handle()?;
     let result = std::thread::scope(|scope| {
-        let (listening, counted, seen) = (&listener, &sessions, &joined);
+        let (listening, shared) = (&listener, &net);
         let acceptor = scope.spawn(move || {
-            accept(
-                listening,
-                &accept_queue,
-                stop,
-                counted,
-                seen,
-                options.first_join,
-            );
+            accept(listening, &accept_queue, shared, options.first_join);
         });
         let out = pool::run(&queue, roles, handler, stop, options.pace);
-        // Whatever ended the Roles, the acceptor and every connection end with them.
-        stop.store(true, Ordering::Relaxed);
+        // The Roles are done (whatever ended them): now the acceptor and every connection end.
+        stop.store(true, Ordering::SeqCst);
+        net.down.store(true, Ordering::SeqCst);
         let _ = acceptor.join();
         out
     });
@@ -112,25 +128,56 @@ where
     Ok(result?)
 }
 
-fn accept(
-    listener: &UnixListener,
-    queue: &Queue,
-    stop: &AtomicBool,
-    sessions: &AtomicUsize,
-    joined: &AtomicBool,
-    first_join: Duration,
-) {
+/// What the acceptor and the connections share.
+struct Net<'a> {
+    /// The host drains: Roles finish what they hold and take nothing more.
+    stop: &'a AtomicBool,
+    /// The Roles are done: connections close.
+    down: AtomicBool,
+    /// Open `session` connections.
+    sessions: AtomicUsize,
+    /// Every open connection.
+    connections: AtomicUsize,
+    /// Somebody has joined, ever.
+    joined: AtomicBool,
+}
+
+impl Net<'_> {
+    fn draining(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+    }
+}
+
+/// Counts a connection while it lives.
+struct Held<'a>(&'a AtomicUsize);
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn accept(listener: &UnixListener, queue: &Queue, net: &Net<'_>, first_join: Duration) {
     let started = Instant::now();
     std::thread::scope(|scope| {
-        while !stop.load(Ordering::Relaxed) {
+        while !net.down.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((stream, _)) => {
+                    if net.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                        net.connections.fetch_sub(1, Ordering::SeqCst);
+                        refuse(stream);
+                        continue;
+                    }
+                    let held = Held(&net.connections);
                     let Ok(handle) = queue.handle() else { continue };
-                    scope.spawn(move || talk(stream, &handle, stop, sessions, joined));
+                    scope.spawn(move || {
+                        let _held = held;
+                        talk(stream, &handle, net);
+                    });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if !joined.load(Ordering::Relaxed) && started.elapsed() > first_join {
-                        stop.store(true, Ordering::Relaxed);
+                    if !net.joined.load(Ordering::Relaxed) && started.elapsed() > first_join {
+                        net.stop.store(true, Ordering::SeqCst);
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
@@ -140,12 +187,19 @@ fn accept(
     });
 }
 
+/// Says the host is full, without reading anything and without a thread.
+fn refuse(mut stream: UnixStream) {
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
+    let _ = writeln!(stream, "error busy");
+}
+
 /// Reads one line, waiting in short steps so a stopping host is noticed. `None` at the end of
-/// the connection, an error, a line over [`MAX_LINE`], or when the host stops.
-fn read_line(reader: &mut BufReader<UnixStream>, stop: &AtomicBool) -> Option<Vec<u8>> {
+/// the connection, an error, a line over [`MAX_LINE`], or when the host is down.
+fn read_line(reader: &mut BufReader<UnixStream>, down: &AtomicBool) -> Option<Vec<u8>> {
     let mut line = Vec::new();
     loop {
-        if stop.load(Ordering::Relaxed) {
+        if down.load(Ordering::Relaxed) {
             return None;
         }
         let mut limited = reader.by_ref().take(MAX_LINE);
@@ -164,45 +218,41 @@ fn read_line(reader: &mut BufReader<UnixStream>, stop: &AtomicBool) -> Option<Ve
     }
 }
 
-fn talk(
-    stream: UnixStream,
-    queue: &Queue,
-    stop: &AtomicBool,
-    sessions: &AtomicUsize,
-    joined: &AtomicBool,
-) {
+fn talk(stream: UnixStream, queue: &Queue, net: &Net<'_>) {
     let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
     let mut reader = BufReader::new(stream);
-    let Some(line) = read_line(&mut reader, stop) else {
+    let Some(line) = read_line(&mut reader, &net.down) else {
         return;
     };
     let line = String::from_utf8_lossy(&line);
     let line = line.trim_end();
     let (word, rest) = line.split_once(' ').unwrap_or((line, ""));
     let reply = match word {
+        "session" if net.draining() => "error stopping".to_owned(),
         "session" => {
             // Counted before the answer, so a shell that sees `ready` is in the count.
-            sessions.fetch_add(1, Ordering::SeqCst);
-            joined.store(true, Ordering::SeqCst);
+            net.sessions.fetch_add(1, Ordering::SeqCst);
+            net.joined.store(true, Ordering::SeqCst);
             let _ = writeln!(out, "ready {}", std::process::id());
             // Held until the shell's end closes, however it closes.
-            while read_line(&mut reader, stop).is_some() {}
-            if sessions.fetch_sub(1, Ordering::SeqCst) == 1 {
-                stop.store(true, Ordering::SeqCst);
+            while read_line(&mut reader, &net.down).is_some() {}
+            if net.sessions.fetch_sub(1, Ordering::SeqCst) == 1 {
+                net.stop.store(true, Ordering::SeqCst);
             }
             return;
         }
+        "status" if net.draining() => format!("ok {} stopping", std::process::id()),
         "status" => format!(
             "ok {} sessions={}",
             std::process::id(),
-            sessions.load(Ordering::SeqCst)
+            net.sessions.load(Ordering::SeqCst)
         ),
         "stop" => {
-            stop.store(true, Ordering::SeqCst);
+            net.stop.store(true, Ordering::SeqCst);
             "stopping".to_owned()
         }
         "enqueue" => match serde_json::from_str::<Enqueue>(rest) {
@@ -234,6 +284,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::super::link::{self, Stopped};
+    use super::super::queue::{LEASE, MAX_ATTEMPTS};
     use super::*;
 
     fn roles() -> Vec<String> {
@@ -256,26 +307,46 @@ mod tests {
         stop: std::sync::Arc<AtomicBool>,
         done: mpsc::Receiver<Result<(), HostError>>,
         ran: std::sync::Arc<Mutex<Vec<String>>>,
+        /// Set when a handler call has returned.
+        finished: std::sync::Arc<AtomicBool>,
         _dir: tempfile::TempDir,
     }
 
     impl Running {
         fn start(first_join: Duration) -> Self {
+            Self::start_busy(first_join, Duration::ZERO)
+        }
+
+        /// A host whose handler takes `busy` for every task.
+        fn start_busy(first_join: Duration, busy: Duration) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let paths = Paths::in_dir(dir.path().join("h"));
             paths.create().unwrap();
-            Self::start_in(dir, paths, first_join)
+            Self::start_with(dir, paths, first_join, busy)
         }
 
         fn start_in(dir: tempfile::TempDir, paths: Paths, first_join: Duration) -> Self {
+            Self::start_with(dir, paths, first_join, Duration::ZERO)
+        }
+
+        fn start_with(
+            dir: tempfile::TempDir,
+            paths: Paths,
+            first_join: Duration,
+            busy: Duration,
+        ) -> Self {
             let stop = std::sync::Arc::new(AtomicBool::new(false));
             let ran = std::sync::Arc::new(Mutex::new(Vec::new()));
+            let finished = std::sync::Arc::new(AtomicBool::new(false));
             let (ready_tx, ready_rx) = mpsc::channel();
             let (done_tx, done_rx) = mpsc::channel();
             {
                 let (paths, stop, ran) = (paths.clone(), stop.clone(), ran.clone());
+                let finished = finished.clone();
                 let handler = move |t: &Task, role: &str| {
                     ran.lock().unwrap().push(format!("{role}:{}", t.payload));
+                    std::thread::sleep(busy);
+                    finished.store(true, Ordering::SeqCst);
                     Ok("ok".to_owned())
                 };
                 std::thread::spawn(move || {
@@ -303,6 +374,7 @@ mod tests {
                         stop,
                         done: rx,
                         ran,
+                        finished,
                         _dir: dir,
                     };
                 }
@@ -313,6 +385,7 @@ mod tests {
                 stop,
                 done: done_rx,
                 ran,
+                finished,
                 _dir: dir,
             }
         }
@@ -376,6 +449,125 @@ mod tests {
         assert!(seen.join().unwrap(), "the session learns the host stopped");
         assert!(host.ended(SOON).unwrap().is_ok());
         assert_eq!(link::stop(&host.paths, SOON), Stopped::NotRunning);
+    }
+
+    /// `iohr stop` must not say "stopped" while a Role is still working: the host keeps
+    /// answering `status` (as stopping) through the drain, and `stop` returns only when the
+    /// lock is free. The handler takes longer than the 5 s a shell waits for one answer.
+    #[test]
+    fn stop_waits_for_a_busy_role_and_status_answers_while_it_drains() {
+        let host = Running::start_busy(LONG, Duration::from_secs(6));
+        let pid = std::process::id();
+        let queued = link::ask(
+            &host.paths,
+            r#"enqueue {"external_id":"a","payload":"slow"}"#,
+        );
+        assert!(queued.unwrap().starts_with("queued"));
+        let give_up = Instant::now() + SOON;
+        while host.ran.lock().unwrap().is_empty() {
+            assert!(Instant::now() < give_up, "no Role took the task");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Told to stop, with no time to wait: the Role is still busy, so it says so.
+        assert_eq!(
+            link::stop(&host.paths, Duration::from_millis(300)),
+            Stopped::Stopping(pid)
+        );
+        assert!(!host.finished.load(Ordering::SeqCst));
+        // Draining, the host still answers, and says what it is doing.
+        assert_eq!(
+            link::ask(&host.paths, "status").unwrap(),
+            format!("ok {pid} stopping")
+        );
+        // Waiting returns only after the Role has finished its task.
+        assert_eq!(
+            link::stop(&host.paths, Duration::from_secs(30)),
+            Stopped::Gone(pid)
+        );
+        assert!(
+            host.finished.load(Ordering::SeqCst),
+            "stopped while a Role was busy"
+        );
+        assert!(host.ended(SOON).unwrap().is_ok());
+        assert!(!host.paths.sock.exists());
+        assert_eq!(link::stop(&host.paths, SOON), Stopped::NotRunning);
+    }
+
+    #[test]
+    fn the_socket_is_for_its_owner_alone() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let host = Running::start(LONG);
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&host.paths.sock), 0o600);
+        assert_eq!(mode(&host.paths.dir), 0o700);
+    }
+
+    /// A host holds at most [`MAX_CONNECTIONS`] connections: the next one is told so and
+    /// dropped, the others go on, and a place is free again once a session leaves.
+    #[test]
+    fn connections_are_capped_and_a_place_frees_up_when_one_leaves() {
+        let host = Running::start(LONG);
+        let mut open: Vec<_> = (0..MAX_CONNECTIONS)
+            .map(|_| link::join(&host.paths).unwrap())
+            .collect();
+        assert_eq!(link::ask(&host.paths, "status").unwrap(), "error busy");
+        open.pop();
+        let give_up = Instant::now() + SOON;
+        loop {
+            let said = link::ask(&host.paths, "status").unwrap();
+            if said.starts_with("ok ") {
+                assert!(
+                    said.ends_with(&format!("sessions={}", MAX_CONNECTIONS - 1)),
+                    "{said}"
+                );
+                break;
+            }
+            assert!(Instant::now() < give_up, "no place freed: {said}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// A host started on a file where a task was killed on its last try must not leave it
+    /// `running` for ever: the lock says nobody else holds it, so it fails at once instead of
+    /// waiting for a lease that no one renews.
+    #[test]
+    fn a_task_killed_on_its_last_try_is_failed_by_the_next_host_not_left_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path().join("h"));
+        paths.create().unwrap();
+        let id = {
+            let q = Queue::open(&paths.db).unwrap();
+            q.register_roles(&roles(), now_ms()).unwrap();
+            let id = q
+                .enqueue(
+                    &NewTask {
+                        external_id: None,
+                        role_hint: None,
+                        payload: "p",
+                    },
+                    now_ms(),
+                )
+                .unwrap()
+                .id;
+            for n in 1..=MAX_ATTEMPTS {
+                let t = q.claim("rust", LEASE, now_ms()).unwrap().unwrap();
+                assert_eq!(t.attempts, n);
+                q.start(id, "rust", now_ms()).unwrap();
+                if n < MAX_ATTEMPTS {
+                    // Killed, and the next host came back after the lease.
+                    q.recover_all().unwrap();
+                }
+            }
+            // Killed on the third try, and the next host starts within the lease.
+            id
+        };
+        let host = Running::start_in(dir, paths, LONG);
+        host.stop.store(true, Ordering::SeqCst);
+        assert!(host.ended(SOON).unwrap().is_ok());
+        let q = Queue::open(&host.paths.db).unwrap();
+        let (state, attempts, _) = q.task(id).unwrap().unwrap();
+        assert_eq!((state.as_str(), attempts), ("failed", MAX_ATTEMPTS));
+        assert!(host.ran.lock().unwrap().is_empty(), "it must not run again");
     }
 
     #[test]

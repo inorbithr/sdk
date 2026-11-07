@@ -2,13 +2,17 @@
 //! taking the next task for it, renewing the lease while it works, and finishing it.
 //!
 //! What a task does is the `handler`'s: `Ok(reference)` is `done`, `Err(reason)` is
-//! `failed`. A handler that never returns (the host was killed) leaves the claim to run out;
-//! the next host recovers it ([`super::queue::Queue::recover`]).
+//! `failed`. A handler that never returns because the host was killed leaves its claim to the
+//! next host, which gives every claim back when it starts
+//! ([`super::queue::Queue::recover_all`]). A Role whose thread ends (an error, a panic) is
+//! marked `stopped`, and while the host runs a reaper gives back what such a Role held once
+//! its lease has run out ([`super::queue::Queue::recover`]), failing it when it has been tried
+//! too often. A Role that is alive is never robbed of its task.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use super::queue::{Queue, QueueError, Task, now_ms};
+use super::queue::{Queue, QueueError, Task, now_ms, tick};
 
 /// How the pool paces itself.
 #[derive(Debug, Clone, Copy)]
@@ -55,7 +59,18 @@ where
         .iter()
         .map(|name| queue.handle().map(|h| (name.as_str(), h)))
         .collect::<Result<Vec<_>, _>>()?;
+    let over = AtomicBool::new(false);
+    let reaping = queue.handle()?;
     std::thread::scope(|scope| {
+        let ended = &over;
+        let reaper = scope.spawn(move || -> Result<(), QueueError> {
+            // Looks as often as an idle Role does, and ends with the last Role.
+            while !ended.load(Ordering::Relaxed) {
+                nap(pace.poll, ended);
+                reaping.recover(tick())?;
+            }
+            Ok(())
+        });
         let workers: Vec<_> = conns
             .into_iter()
             .map(|(role, q)| scope.spawn(move || work(&q, role, handler, stop, pace)))
@@ -66,6 +81,10 @@ where
             if let Ok(Err(e)) = w.join() {
                 first = Err(e);
             }
+        }
+        over.store(true, Ordering::Relaxed);
+        if let Ok(Err(e)) = reaper.join() {
+            first = first.and(Err(e));
         }
         first
     })
@@ -81,8 +100,11 @@ fn work<H>(
 where
     H: Fn(&Task, &str) -> Result<String, String> + Sync,
 {
+    // However this thread ends (an error, a panic), its Role is marked `stopped`: that is what
+    // lets its claim be given back.
+    let _stopped = MarkStopped { q, role };
     while !stop.load(Ordering::Relaxed) {
-        let Some(task) = q.claim(role, pace.lease, now_ms())? else {
+        let Some(task) = q.claim(role, pace.lease, tick())? else {
             q.role_state(role, "idle", now_ms())?;
             nap(pace.poll, stop);
             continue;
@@ -95,7 +117,20 @@ where
             Err(why) => q.fail(task.id, role, &why, now_ms())?,
         };
     }
-    q.role_state(role, "stopped", now_ms())
+    Ok(())
+}
+
+/// Marks a Role `stopped` when its thread ends, however it ends.
+struct MarkStopped<'a> {
+    q: &'a Queue,
+    role: &'a str,
+}
+
+impl Drop for MarkStopped<'_> {
+    fn drop(&mut self) {
+        // Nothing more can be done about a failure here: the next host gives every claim back.
+        let _ = self.q.role_state(self.role, "stopped", now_ms());
+    }
 }
 
 /// Runs `work` while a second connection renews the lease every third of it.
@@ -110,24 +145,34 @@ fn with_heartbeat<T>(
     let done = AtomicBool::new(false);
     let finished = &done;
     std::thread::scope(|scope| {
+        // Set however `work` ends: a handler that panics must not leave the ticker renewing
+        // the lease for ever (the scope would wait on it, and the task would never be given back).
+        let _end = End(finished);
         let ticker = scope.spawn(move || -> Result<(), QueueError> {
             while !finished.load(Ordering::Relaxed) {
                 nap(lease / 3, finished);
-                if !finished.load(Ordering::Relaxed)
-                    && !beat.heartbeat(id, role, lease, now_ms())?
-                {
+                if !finished.load(Ordering::Relaxed) && !beat.heartbeat(id, role, lease, tick())? {
                     return Ok(());
                 }
             }
             Ok(())
         });
         let out = work();
-        done.store(true, Ordering::Relaxed);
+        finished.store(true, Ordering::Relaxed);
         match ticker.join() {
             Ok(Ok(())) | Err(_) => Ok(out),
             Ok(Err(e)) => Err(e),
         }
     })
+}
+
+/// Sets a flag when dropped.
+struct End<'a>(&'a AtomicBool);
+
+impl Drop for End<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
@@ -137,7 +182,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     use super::*;
-    use crate::session::queue::NewTask;
+    use crate::session::queue::{LEASE, MAX_ATTEMPTS, NewTask};
 
     const ROLES: [&str; 4] = ["rust", "security", "docs", "release"];
 
@@ -250,6 +295,95 @@ mod tests {
         assert_eq!(
             q.task(ids[0]).unwrap(),
             Some(("done".to_owned(), 1, Some("slow".to_owned())))
+        );
+    }
+
+    fn hinted(q: &Queue, hint: &str) -> i64 {
+        q.enqueue(
+            &NewTask {
+                external_id: None,
+                role_hint: Some(hint),
+                payload: "p",
+            },
+            now_ms(),
+        )
+        .unwrap()
+        .id
+    }
+
+    fn short_lease() -> Pace {
+        Pace {
+            lease: Duration::from_millis(300),
+            poll: Duration::from_millis(5),
+        }
+    }
+
+    /// A Role whose handler panics is marked `stopped` (and the heartbeat of its task ends
+    /// with it, so the host does not hang); its task, once the lease has run out, goes to a
+    /// Role that is alive.
+    #[test]
+    fn a_role_that_dies_is_marked_stopped_and_its_task_goes_to_another() {
+        let q = Queue::open_in_memory().unwrap();
+        let roles = names(2);
+        q.register_roles(&roles, now_ms()).unwrap();
+        let id = hinted(&q, "rust");
+        let stop = AtomicBool::new(false);
+        let handler = |_: &Task, role: &str| {
+            assert!(role != "rust", "the Role's thread dies here, on purpose");
+            stop.store(true, Ordering::Relaxed);
+            Ok("by security".to_owned())
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let own = q.handle().unwrap();
+            let (roles, handler, stop) = (&roles, &handler, &stop);
+            scope.spawn(move || {
+                let _ = tx.send(run(&own, roles, handler, stop, short_lease()));
+            });
+            let ended = rx.recv_timeout(Duration::from_secs(20));
+            stop.store(true, Ordering::Relaxed);
+            assert!(ended.is_ok(), "the host hung on a Role that died");
+        });
+        assert_eq!(
+            q.task(id).unwrap(),
+            Some(("done".to_owned(), 2, Some("by security".to_owned())))
+        );
+        assert_eq!(q.role_state_of("rust").unwrap().as_deref(), Some("stopped"));
+    }
+
+    /// A task whose Role died on its last try stays `claimed` for good unless something
+    /// looks: the reaper does, while the host runs, and fails it with the reason.
+    #[test]
+    fn the_reaper_fails_what_a_dead_role_held_on_its_last_try() {
+        let q = Queue::open_in_memory().unwrap();
+        let roles = names(2);
+        q.register_roles(&roles, now_ms()).unwrap();
+        let id = hinted(&q, "rust");
+        for _ in 1..MAX_ATTEMPTS {
+            q.claim("rust", LEASE, tick()).unwrap().unwrap();
+            q.recover_all().unwrap();
+        }
+        let stop = AtomicBool::new(false);
+        let handler = |_: &Task, role: &str| -> Result<String, String> {
+            panic!("{role}'s thread dies here, on purpose");
+        };
+        std::thread::scope(|scope| {
+            let own = q.handle().unwrap();
+            let (roles, handler, stop) = (&roles, &handler, &stop);
+            scope.spawn(move || run(&own, roles, handler, stop, short_lease()));
+            let give_up = Instant::now() + Duration::from_secs(20);
+            while q.task(id).unwrap().unwrap().0 != "failed" {
+                assert!(Instant::now() < give_up, "{:?}", q.task(id));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            stop.store(true, Ordering::Relaxed);
+        });
+        let last = q.events(id).unwrap().pop().unwrap();
+        assert_eq!(last.0, "failed");
+        assert!(last.1.unwrap().contains("after 3 tries"));
+        assert_eq!(
+            q.role_state_of("security").unwrap().as_deref(),
+            Some("stopped")
         );
     }
 

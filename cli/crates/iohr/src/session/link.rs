@@ -4,7 +4,7 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use super::lifecycle::Paths;
+use super::lifecycle::{Paths, is_held};
 
 /// How long a host gets to answer one line.
 const ANSWER: Duration = Duration::from_secs(5);
@@ -88,7 +88,10 @@ pub(crate) enum Stopped {
     Stopping(u32),
 }
 
-/// Tells the host to stop and waits up to `wait` for it to go.
+/// Tells the host to stop and waits up to `wait` for it to go. It is gone when its lock is
+/// free: a host that drains still holds the lock (and still answers `status` with `stopping`),
+/// so "it no longer answers" is not taken for "it ended". Without a wait, the answer is
+/// `Stopping` for a host that has been told and is still draining.
 pub(crate) fn stop(paths: &Paths, wait: Duration) -> Stopped {
     let Some(pid) = running(paths) else {
         return Stopped::NotRunning;
@@ -99,11 +102,13 @@ pub(crate) fn stop(paths: &Paths, wait: Duration) -> Stopped {
         Err(_) => return Stopped::Gone(pid),
     }
     let end = Instant::now() + wait;
-    while Instant::now() < end {
-        if running(paths).is_none() {
+    loop {
+        if !is_held(paths) {
             return Stopped::Gone(pid);
+        }
+        if Instant::now() >= end {
+            return Stopped::Stopping(pid);
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    Stopped::Stopping(pid)
 }

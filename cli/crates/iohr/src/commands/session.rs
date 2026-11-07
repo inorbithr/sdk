@@ -153,17 +153,34 @@ mod unix {
         }
     }
 
-    /// The command line of the host `iohr session` starts: this command line with `session`
-    /// replaced by `runner run`, so every global flag (`--profile`, `--env`, ...) carries over,
-    /// and `--session <project>` added.
+    /// The command line of the host `iohr session` starts: this command line with the
+    /// `session` command replaced by `runner run`, so every global flag (`--profile`,
+    /// `--env`, ...) carries over, and `--session <project>` added. The command is the first
+    /// word that is not a flag and not a flag's value, so a profile, a data folder or a project
+    /// folder called `session` is left alone.
     fn host_args(argv: &[OsString], dir: Option<&Path>, project: &Path) -> Vec<OsString> {
-        let at = argv.iter().position(|a| a == "session");
+        let takes_value = crate::cli::global_value_flags();
+        let mut at = None;
+        let mut i = 0;
+        while i < argv.len() {
+            let word = &argv[i];
+            if takes_value.contains(word) {
+                // `--profile session`: the next word is this flag's value.
+                i += 2;
+                continue;
+            }
+            if !word.to_string_lossy().starts_with('-') {
+                at = Some(i);
+                break;
+            }
+            i += 1;
+        }
         let mut out: Vec<OsString> = Vec::new();
         for (i, a) in argv.iter().enumerate() {
             if Some(i) == at {
                 out.push("runner".into());
                 out.push("run".into());
-            } else if Some(i) > at && dir.is_some_and(|d| a == d.as_os_str()) {
+            } else if at.is_some_and(|c| i > c) && dir.is_some_and(|d| a == d.as_os_str()) {
                 // The folder is passed as the flag's value instead.
             } else {
                 out.push(a.clone());
@@ -247,7 +264,7 @@ mod unix {
             }));
         }
         Out::note(&format!(
-            "session open: host {} runs {} Role(s) ({}); Ctrl-C leaves, the host stops when the last session has left",
+            "session open: host {} runs {} Role(s) ({}); S1: no tasks are accepted yet, and a claimed task fails \"not built\"; Ctrl-C leaves, the host stops when the last session has left",
             joined.host_pid,
             roles.len(),
             roles.join(", ")
@@ -313,6 +330,45 @@ mod unix {
             assert_eq!(
                 host_args(&os(&["session", "--env", "local"]), None, p),
                 os(&["runner", "run", "--env", "local", "--session", "/p"])
+            );
+        }
+
+        /// A flag's value can be the word `session` (a profile of that name), and so can the
+        /// folder: only the command itself is replaced.
+        #[test]
+        fn a_value_called_session_is_not_the_command() {
+            let p = Path::new("session");
+            assert_eq!(
+                host_args(
+                    &os(&["--profile", "session", "session", "session"]),
+                    Some(p),
+                    p
+                ),
+                os(&[
+                    "--profile",
+                    "session",
+                    "runner",
+                    "run",
+                    "--session",
+                    "session"
+                ])
+            );
+            assert_eq!(
+                host_args(&os(&["--data-dir", "session", "-v", "session"]), None, p),
+                os(&[
+                    "--data-dir",
+                    "session",
+                    "-v",
+                    "runner",
+                    "run",
+                    "--session",
+                    "session"
+                ])
+            );
+            // The `=` form is one word, and is never mistaken for the command either.
+            assert_eq!(
+                host_args(&os(&["--profile=session", "session"]), None, p),
+                os(&["--profile=session", "runner", "run", "--session", "session"])
             );
         }
     }

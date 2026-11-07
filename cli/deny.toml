@@ -29,9 +29,14 @@ allow = [
   "MIT-0",
   "Unicode-3.0",
   "Unlicense",
-  # foldhash (hashbrown, under duckdb): permissive, OSI approved (RFC 0213).
-  "Zlib",
 ]
+
+# foldhash (hashbrown, under duckdb): Zlib, permissive and OSI approved (RFC 0213). Allowed for
+# this one crate and version only, so no other crate can bring Zlib in unseen.
+[[licenses.exceptions]]
+name = "foldhash"
+version = "0.1.5"
+allow = ["Zlib"]
 
 [bans]
 multiple-versions = "warn"
