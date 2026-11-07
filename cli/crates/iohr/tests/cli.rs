@@ -1055,6 +1055,29 @@ fn profile_of(dir: &Path) -> toml::Table {
         .clone()
 }
 
+/// A store that cannot keep the secret fails the sign-in before a code is shown, so a
+/// person never approves a sign-in that is then lost.
+#[tokio::test(flavor = "multi_thread")]
+async fn login_checks_the_store_before_it_shows_a_code() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_person_server(&server, me_with_teams("")).await;
+    // A file where the secrets directory goes: nothing can be written there.
+    std::fs::write(dir.path().join("secrets"), "").unwrap();
+    let login = login_as_me(&r, &server.uri(), &[]);
+    assert_ne!(code(&login), 0, "{}", text(&login));
+    assert!(!text(&login).contains("ABCD2345"), "{}", text(&login));
+    let asked = server.received_requests().await.unwrap_or_default();
+    assert!(
+        !asked.iter().any(|q| q.url.path() == "/oauth2/device/auth"),
+        "the device flow started"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn login_takes_the_servers_default_account_when_the_person_belongs_to_it() {
     let server = MockServer::start().await;
