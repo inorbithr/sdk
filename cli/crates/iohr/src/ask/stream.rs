@@ -514,6 +514,11 @@ pub(crate) struct Look {
     pub(crate) rows: bool,
     /// What the footer says the AI made: `AI answer` when unset.
     pub(crate) made: Option<&'static str>,
+    /// The live view of a run a person waits on (`iohr project init`), only with `fancy`: a
+    /// spinner on the tool that runs now, a check mark row for each tool that finished, and the
+    /// agent's closing words held back and drawn as rendered Markdown once, with the footer.
+    /// Narration between tool calls is not drawn; the summary is what the agent says last.
+    pub(crate) summary: bool,
 }
 
 /// A string in the dim style of the terminal on stderr.
@@ -595,10 +600,20 @@ pub(crate) struct Renderer<O: Write, E: Write> {
     failed: Option<String>,
     /// Tool calls drawn only when their result says whether they ran: id, name, detail.
     pending: Vec<(String, String, String)>,
+    /// The live view: the spinner that shows what runs now, and the closing words held back.
+    live: Option<Live>,
+}
+
+/// The state of the live view of a run ([`Look::summary`]).
+#[derive(Default)]
+struct Live {
+    bar: Option<crate::ui::Step>,
+    text: String,
 }
 
 impl<O: Write, E: Write> Renderer<O, E> {
     pub(crate) fn new(out: O, err: E, look: Look, spinner: Option<crate::ui::Step>) -> Self {
+        let look_live = look.fancy && look.summary;
         Self {
             out,
             err,
@@ -612,6 +627,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
             printed_text: false,
             failed: None,
             pending: Vec::new(),
+            live: (look_live).then(Live::default),
         }
     }
 
@@ -628,6 +644,10 @@ impl<O: Write, E: Write> Renderer<O, E> {
 
     /// Draws one event. A closed pipe is not an error.
     pub(crate) fn draw(&mut self, event: Event) {
+        if self.live.is_some() {
+            self.draw_live(event);
+            return;
+        }
         self.stop_spinner();
         // A tool whose result never came (the run ended, or the agent moved on) is drawn as
         // the call it was, before the next thing is.
@@ -766,7 +786,17 @@ impl<O: Write, E: Write> Renderer<O, E> {
             self.failed = Some(e);
             return;
         }
+        self.footer(&d);
+    }
+
+    /// The footer: model, time, turns, cost and what the AI made, dim.
+    fn footer(&mut self, d: &Done) {
         if self.look.fancy || self.look.rows {
+            let rail = if self.live.is_some() {
+                "\u{2502}  "
+            } else {
+                ""
+            };
             let ms = d.duration_ms.unwrap_or_else(|| {
                 u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
             });
@@ -785,13 +815,18 @@ impl<O: Write, E: Write> Renderer<O, E> {
                 parts.push(format!("{t} thinking tokens"));
             }
             parts.push(self.look.made.unwrap_or("AI answer").to_owned());
-            let _ = writeln!(self.err, "{}", dim(&parts.join(" \u{b7} ")));
+            let _ = writeln!(
+                self.err,
+                "{}",
+                dim(&format!("{rail}{}", parts.join(" \u{b7} ")))
+            );
         }
     }
 
     /// Ends the run: the answer finishes on a line of its own.
     pub(crate) fn finish(&mut self) {
         self.stop_spinner();
+        self.live_end();
         self.flush_tools();
         self.end_thinking_line();
         self.end_out_line();
@@ -822,6 +857,176 @@ impl<O: Write, E: Write> Renderer<O, E> {
             .and_then(|r| r.strip_prefix('/'))
             .unwrap_or(detail)
             .to_owned()
+    }
+}
+
+/// A finished tool call as one live row: a check mark, the tool and what it touched, cut to
+/// `width`. A call the agent was refused is dim, marked `\u{2298}`, with the reason.
+fn live_row(name: &str, detail: &str, denied: Option<&str>, width: usize) -> String {
+    if let Some(why) = denied {
+        return dim(&console::truncate_str(
+            &format!("\u{2298} {name} {detail} \u{2014} denied, did not run: {why}"),
+            width,
+            "\u{2026}",
+        ));
+    }
+    let full = format!("{name} {detail}");
+    let said = console::truncate_str(&full, width.saturating_sub(3), "\u{2026}");
+    let (head, rest) = said
+        .split_once(' ')
+        .map_or((said.as_ref(), ""), |(h, r)| (h, r));
+    format!(
+        "{}  {} {}",
+        console::style("\u{2713}").for_stderr().green().bold(),
+        console::style(head).for_stderr().bold(),
+        dim(rest)
+    )
+}
+
+/// The agent's closing words as the lines of the summary block: Markdown drawn for a terminal,
+/// wrapped to `width` less the rail, each line behind the rail.
+fn summary_lines(text: &str, width: usize) -> Vec<String> {
+    let rail = dim("\u{2502}  ");
+    crate::card::body(
+        text.trim(),
+        width.saturating_sub(3).max(30),
+        crate::card::Look::detect(true),
+    )
+    .into_iter()
+    .map(|l| {
+        if l.is_empty() {
+            dim("\u{2502}")
+        } else {
+            format!("{rail}{l}")
+        }
+    })
+    .collect()
+}
+
+impl<O: Write, E: Write> Renderer<O, E> {
+    /// Says what runs now on the live spinner, starting it when it is not showing.
+    fn live_say(&mut self, what: &str) {
+        let what = console::truncate_str(
+            what,
+            crate::ui::terminal_width().saturating_sub(8),
+            "\u{2026}",
+        );
+        if let Some(live) = self.live.as_mut() {
+            match &live.bar {
+                Some(b) => b.say(&what),
+                None => live.bar = Some(crate::ui::Ui::detect(false).step(&what)),
+            }
+        }
+    }
+
+    /// The spinner is gone for a moment, so a row can be drawn above it.
+    fn live_pause(&mut self) {
+        if let Some(b) = self.live.as_mut().and_then(|l| l.bar.take()) {
+            b.clear();
+        }
+    }
+
+    fn live_tool_row(&mut self, name: &str, detail: &str, denied: Option<&str>) {
+        self.live_pause();
+        let detail = short(&self.relative(detail));
+        let row = live_row(
+            name,
+            &detail,
+            denied,
+            crate::ui::terminal_width().saturating_sub(1),
+        );
+        let _ = writeln!(self.err, "{row}");
+        let _ = self.err.flush();
+        self.live_say("Thinking");
+    }
+
+    fn draw_live(&mut self, event: Event) {
+        // The spinner the caller started stands in until the first event; the live one takes over.
+        self.stop_spinner();
+        match event {
+            Event::ThinkingStart | Event::Thinking(_) => self.live_say("Thinking"),
+            Event::Text(t) => {
+                if let Some(live) = self.live.as_mut() {
+                    live.text.push_str(&t);
+                }
+                self.live_say("Writing the summary");
+            }
+            Event::Tool {
+                id: Some(id),
+                name,
+                detail,
+            } => {
+                // What was said before a tool call is narration, not the summary.
+                if let Some(live) = self.live.as_mut() {
+                    live.text.clear();
+                }
+                let shown = short(&self.relative(&detail));
+                self.live_say(&format!("{name} {shown}"));
+                self.pending.push((id, name, detail));
+            }
+            Event::Tool { name, detail, .. } => {
+                if let Some(live) = self.live.as_mut() {
+                    live.text.clear();
+                }
+                self.broke = true;
+                self.live_tool_row(&name, &detail, None);
+            }
+            Event::ToolResult { id, denied } => {
+                if let Some(at) = self.pending.iter().position(|p| p.0 == id) {
+                    let (_, name, detail) = self.pending.remove(at);
+                    self.live_tool_row(&name, &detail, denied.as_deref());
+                }
+            }
+            Event::Done(d) => {
+                for (_, name, detail) in std::mem::take(&mut self.pending) {
+                    self.live_tool_row(&name, &detail, None);
+                }
+                self.live_pause();
+                if let Some(e) = d.error {
+                    self.failed = Some(e);
+                    return;
+                }
+                if let (Some(live), Some(a)) = (self.live.as_mut(), d.answer.as_deref())
+                    && live.text.trim().is_empty()
+                {
+                    a.clone_into(&mut live.text);
+                }
+                self.live_summary();
+                self.footer(&d);
+            }
+        }
+    }
+
+    /// Draws the held closing words, once.
+    fn live_summary(&mut self) {
+        let text = self
+            .live
+            .as_mut()
+            .map(|l| std::mem::take(&mut l.text))
+            .unwrap_or_default();
+        if text.trim().is_empty() {
+            return;
+        }
+        let _ = writeln!(self.err, "{}", dim("\u{2502}"));
+        for l in summary_lines(&text, crate::ui::terminal_width()) {
+            let _ = writeln!(self.err, "{l}");
+        }
+        let _ = writeln!(self.err, "{}", dim("\u{2502}"));
+        self.printed_text = true;
+    }
+
+    /// The run ended without a result event (a closed stream): what was held back is drawn
+    /// now, and the spinner goes.
+    fn live_end(&mut self) {
+        if self.live.is_none() {
+            return;
+        }
+        self.live_pause();
+        for (_, name, detail) in std::mem::take(&mut self.pending) {
+            self.live_tool_row(&name, &detail, None);
+        }
+        self.live_pause();
+        self.live_summary();
     }
 }
 
@@ -1002,6 +1207,7 @@ mod tests {
             model: Some("haiku".into()),
             rows: false,
             made: None,
+            summary: false,
         };
         let mut r = Renderer::new(Vec::new(), Vec::new(), look, None);
         for e in events {
@@ -1073,6 +1279,7 @@ mod tests {
             model: None,
             rows: true,
             made: None,
+            summary: false,
         };
         let mut r = Renderer::new(Vec::new(), Vec::new(), look, None);
         for e in events {
@@ -1241,5 +1448,137 @@ mod tests {
             ..Done::default()
         }));
         assert_eq!(r.failure(), Some("Not logged in"));
+    }
+
+    /// A run drawn live: one `look` with the live view on, events in, `(stdout, stderr)` out.
+    fn live(events: Vec<Event>) -> (String, String) {
+        let look = Look {
+            fancy: true,
+            thinking: Some(Thinking::Show),
+            cwd: Some("/work".into()),
+            model: Some("haiku".into()),
+            rows: true,
+            made: Some("AI-built"),
+            summary: true,
+        };
+        let mut r = Renderer::new(Vec::new(), Vec::new(), look, None);
+        for e in events {
+            r.draw(e);
+        }
+        r.finish();
+        (
+            String::from_utf8(r.out).unwrap_or_default(),
+            console::strip_ansi_codes(&String::from_utf8(r.err).unwrap_or_default()).into_owned(),
+        )
+    }
+
+    fn tool(id: &str, name: &str, detail: &str) -> Event {
+        Event::Tool {
+            id: Some(id.into()),
+            name: name.into(),
+            detail: detail.into(),
+        }
+    }
+
+    #[test]
+    fn a_live_row_is_a_check_mark_the_tool_and_its_target_cut_to_the_width() {
+        assert_eq!(
+            live_row("Write", "src/app.py", None, 80),
+            "\u{2713}  Write src/app.py"
+        );
+        let cut = live_row("Write", &"x".repeat(200), None, 30);
+        assert_eq!(console::measure_text_width(&cut), 30, "{cut}");
+        assert!(cut.ends_with('\u{2026}'));
+        let denied = live_row("Bash", "git push", Some("not allowed"), 80);
+        assert_eq!(
+            denied,
+            "\u{2298} Bash git push \u{2014} denied, did not run: not allowed"
+        );
+    }
+
+    #[test]
+    fn the_summary_is_markdown_for_a_terminal_behind_the_rail() {
+        let lines = summary_lines(
+            "## What I built\n\nA **watcher** with `src/app.py`:\n\n- one\n- two\n\n```sh\npython3 src/app.py\n```\n",
+            60,
+        );
+        let text = console::strip_ansi_codes(&lines.join("\n")).into_owned();
+        assert!(
+            !text.contains("##") && !text.contains("**") && !text.contains('`'),
+            "{text}"
+        );
+        assert!(
+            text.contains("What I built") && text.contains("\u{2022} one"),
+            "{text}"
+        );
+        assert!(text.contains("python3 src/app.py"), "{text}");
+        assert!(
+            lines.iter().all(|l| l.starts_with('\u{2502}')),
+            "every line sits behind the rail: {text}"
+        );
+        assert!(
+            lines.iter().all(|l| console::measure_text_width(l) <= 60),
+            "no line is wider than the terminal: {text}"
+        );
+    }
+
+    #[test]
+    fn the_live_view_draws_check_rows_then_the_summary_once_and_keeps_stdout_empty() {
+        let (out, err) = live(vec![
+            Event::Text("Let me look first.".into()),
+            tool("t1", "Read", "/work/README.md"),
+            Event::ToolResult {
+                id: "t1".into(),
+                denied: None,
+            },
+            tool("t2", "Bash", "git push"),
+            Event::ToolResult {
+                id: "t2".into(),
+                denied: Some("not allowed".into()),
+            },
+            Event::Text("## Done\n\nIt **works**.".into()),
+            Event::Done(Done {
+                duration_ms: Some(4200),
+                turns: Some(3),
+                ..Done::default()
+            }),
+        ]);
+        assert_eq!(out, "", "the answer is on stderr in the live view");
+        assert!(err.contains("\u{2713}  Read README.md"), "{err}");
+        assert!(err.contains("\u{2298} Bash git push"), "{err}");
+        assert!(
+            !err.contains("Let me look first"),
+            "narration is not the summary: {err}"
+        );
+        assert_eq!(err.matches("Done").count(), 1, "{err}");
+        assert!(err.contains("It works."), "{err}");
+        assert!(
+            err.contains("haiku \u{b7} 4.2s \u{b7} 3 turns \u{b7} AI-built"),
+            "{err}"
+        );
+        assert!(err.find("Read README.md") < err.find("It works."), "{err}");
+    }
+
+    #[test]
+    fn a_live_run_that_ends_without_a_result_still_draws_what_it_held() {
+        let (_, err) = live(vec![Event::Text("It **ends** here.".into())]);
+        assert!(err.contains("It ends here."), "{err}");
+    }
+
+    #[test]
+    fn a_live_failure_is_kept_for_the_caller_and_draws_no_summary() {
+        let look = Look {
+            fancy: true,
+            summary: true,
+            ..Look::default()
+        };
+        let mut r = Renderer::new(Vec::new(), Vec::new(), look, None);
+        r.draw(Event::Done(Done {
+            error: Some("boom".into()),
+            ..Done::default()
+        }));
+        r.finish();
+        assert_eq!(r.failure(), Some("boom"));
+        assert_eq!(String::from_utf8(r.err).unwrap_or_default(), "");
     }
 }

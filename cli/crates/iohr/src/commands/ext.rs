@@ -217,7 +217,13 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ExtCommand, out: Out) -> Res
             )
             .await
         }
-        ExtCommand::Show { extension } => ext_catalogue::show(g, env, &extension, out).await,
+        ExtCommand::Show {
+            extension: Some(extension),
+        } => ext_catalogue::show(g, env, &extension, out).await,
+        // No name: the same listing `ext search` prints, never a second renderer.
+        ExtCommand::Show { extension: None } => {
+            ext_catalogue::search(g, env, None, None, false, None, out).await
+        }
         ExtCommand::List => list(&store, out),
         ExtCommand::Packages => crate::commands::ext_packages::packages(g, env, &store, out).await,
         ExtCommand::Upgrade { name, lock, yes } => {
