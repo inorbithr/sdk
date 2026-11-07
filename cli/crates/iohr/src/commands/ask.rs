@@ -11,12 +11,13 @@ use crate::actions::{self, MenuKey};
 use crate::ask::stream::{self, Look, Renderer};
 use crate::ask::{self, Agent, Via};
 use crate::askback;
+use crate::attach;
 use crate::card::{self, Body, Card, Look as CardLook, Status};
 use crate::cli::{AskArgs, Global, HeadlessArgs};
 use crate::commands::asks;
 use crate::context::Ctx;
 use crate::error::Error;
-use crate::headless::{self, Answer, Context};
+use crate::headless::{self, Answer, Context, OutputHow};
 use crate::hints;
 use crate::output::Out;
 #[cfg(unix)]
@@ -216,7 +217,35 @@ fn menu(g: &Global, args: &AskArgs) -> Result<(), Error> {
         rules: store::saved_project_allows(&files, &undo),
         files: &files,
     };
-    actions::menu(args.command.as_deref(), args.link.as_deref(), &cwd, &undo)
+    // The offer to attach output stands only for a failed command and a question that asks why.
+    let failed = args
+        .failed_command
+        .as_deref()
+        .zip(args.failed_exit)
+        .and_then(|(command, code)| {
+            attach::offer(
+                args.asked.as_deref().unwrap_or_default(),
+                command,
+                Some(code),
+                false,
+            )
+        });
+    let attach = args
+        .output_to
+        .as_deref()
+        .zip(failed.as_ref())
+        .map(|(to, f)| actions::Attach {
+            failed: f,
+            asked: args.asked.as_deref().unwrap_or_default(),
+            to,
+        });
+    actions::menu(
+        args.command.as_deref(),
+        args.link.as_deref(),
+        &cwd,
+        &undo,
+        attach.as_ref(),
+    )
 }
 
 /// `--dry-run`: the exact command line, one object under `--json`; nothing is started.
@@ -402,26 +431,34 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
     };
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let root = crate::memory::find_root(Path::new(&cwd));
-    let ctx = Context {
-        files: headless::list_folder(Path::new(&cwd)),
-        reads: headless::can_read(Path::new(&cwd), home.as_deref()),
-        git: askback::git_facts(Path::new(&cwd)),
-        project: root
-            .as_deref()
-            .map(askback::project_notes)
-            .unwrap_or_default(),
-        cwd,
-        command: h.last_command.clone().unwrap_or_default(),
-        exit_code: h.exit_code,
-        output: match &h.output_file {
-            // Only the kind of failure: the path is the person's, what is in it is not said.
-            Some(f) => std::fs::read_to_string(f)
-                .map_err(|e| Error::Usage(format!("cannot read --output-file: {}", e.kind())))?,
-            None => String::new(),
-        },
-        prior: h.prior_question.clone().zip(h.prior_answer.clone()),
-        refresh: false,
-    };
+    let ctx =
+        Context {
+            files: headless::list_folder(Path::new(&cwd)),
+            reads: headless::can_read(Path::new(&cwd), home.as_deref()),
+            git: askback::git_facts(Path::new(&cwd)),
+            project: root
+                .as_deref()
+                .map(askback::project_notes)
+                .unwrap_or_default(),
+            cwd,
+            command: h.last_command.clone().unwrap_or_default(),
+            exit_code: h.exit_code,
+            output: match &h.output_file {
+                // Only the kind of failure: the path is the person's, what is in it is not said.
+                // Secrets are scrubbed here, whatever put the output in the file.
+                Some(f) => attach::scrub(&std::fs::read_to_string(f).map_err(|e| {
+                    Error::Usage(format!("cannot read --output-file: {}", e.kind()))
+                })?),
+                None => String::new(),
+            },
+            output_how: match h.output_kind.as_deref() {
+                Some("captured") => OutputHow::Captured,
+                Some("pasted") => OutputHow::Pasted,
+                _ => OutputHow::Attached,
+            },
+            prior: h.prior_question.clone().zip(h.prior_answer.clone()),
+            refresh: false,
+        };
     Ok((ctx, root))
 }
 
@@ -509,11 +546,15 @@ async fn headless(
                     .iter()
                     .map(Settled::json)
                     .collect(),
+                context: ctx.sent(question),
             });
         } else {
             Out::raw(format!("{text}\n").as_bytes());
             // No terminal to ask on: the questions are plain lines, apart from the answer.
             for line in askback::plain_lines(&questions) {
+                Out::note(&line);
+            }
+            if let Some(line) = attach_note(&ctx, question, h, (MenuKey::Off, false)) {
                 Out::note(&line);
             }
         }
@@ -785,6 +826,7 @@ fn closing_notes(
     session: Option<&Session>,
     waiting: Option<&asks::Waiting>,
     (h, menu_key, look, width): (&HeadlessArgs, MenuKey, CardLook, usize),
+    attach: Option<&str>,
 ) {
     // A drawn card holds the permission results itself; a plain look has none to hold them.
     if !look.fancy {
@@ -795,9 +837,60 @@ fn closing_notes(
     for line in refused_lines(session) {
         Out::note(&line);
     }
+    if let Some(line) = attach {
+        Out::note(line);
+    }
     if let Some(w) = waiting {
         Out::note(&waiting_line(w, h.hook, menu_key, look, width));
     }
+}
+
+/// The one line that says the last command's output was not sent and how to send it, where the
+/// card's action row does not (it is drawn only by a fancy look under the hook): `None` when
+/// nothing is offered (the command did not fail, the question does not ask why, or output is
+/// attached already). `(key, drawn)` is the menu key and whether the row is on screen.
+/// Whether Attach output is on offer for this ask, and the plain note that says so when the
+/// card draws no row of its own.
+fn attach_offer(
+    ctx: &Context,
+    question: &str,
+    h: &HeadlessArgs,
+    (key, fancy): (MenuKey, bool),
+) -> (bool, Option<String>) {
+    let offered = attach::offer(
+        question,
+        &ctx.command,
+        ctx.exit_code,
+        !ctx.output.is_empty(),
+    )
+    .is_some();
+    (
+        offered,
+        attach_note(ctx, question, h, (key, h.hook && fancy)),
+    )
+}
+
+fn attach_note(
+    ctx: &Context,
+    question: &str,
+    h: &HeadlessArgs,
+    (key, drawn): (MenuKey, bool),
+) -> Option<String> {
+    attach::offer(
+        question,
+        &ctx.command,
+        ctx.exit_code,
+        !ctx.output.is_empty(),
+    )?;
+    if drawn {
+        return None;
+    }
+    Some(match key.label().filter(|_| h.hook) {
+        Some(k) => format!(
+            "Its output was not sent. {k} then w re-runs the command with its output captured (you are asked first), p pastes it."
+        ),
+        None => "Its output was not sent. To include it, save it to a file and ask again with --output-file FILE; secrets in it are redacted.".to_owned(),
+    })
 }
 
 /// The line the shell hook reads back: the answer's one command and link, and the rules the
@@ -811,6 +904,30 @@ fn record_hook(text: &str, cwd: &Path, undo: &[String]) {
 /// The card: the model runs under a spinner while the asks waiting are counted, the answer is
 /// drawn, a question the model asked back is put to the person (kept, then the answer is
 /// refreshed once), and the one line about waiting asks closes it.
+/// The footer a card shows: a plain look has none to move on (its label discloses).
+fn footer_for(look: CardLook, (dir, hints): (&Path, hints::Mode), notice: &str) -> hints::Footer {
+    if look.fancy {
+        hints::next(dir, hints, notice, hints::now())
+    } else {
+        hints::Footer::Full
+    }
+}
+
+/// Runs the model; on a drawn card the asks waiting are looked up beside it.
+async fn think(
+    run: impl std::future::Future<Output = Result<(String, u64), String>>,
+    (agent, look, started): (Agent, CardLook, Instant),
+    (g, env): (&Global, &Env),
+) -> Result<(Result<(String, u64), String>, Option<asks::Waiting>), Error> {
+    if look.fancy {
+        let (done, waiting) =
+            tokio::join!(spin_while(run, agent, look, started), asks::waiting(g, env));
+        Ok((done?, waiting))
+    } else {
+        Ok((run.await, None))
+    }
+}
+
 async fn card_run(
     chosen: &Chosen<'_>,
     question: &str,
@@ -843,25 +960,17 @@ async fn card_run(
     let how = (session.as_ref(), mode);
     let run = run_at((bin, model), &message, started, &ctx, how);
     // The asks waiting are looked up while the model thinks, so they add no time.
-    let (done, waiting) = if look.fancy {
-        let (done, waiting) =
-            tokio::join!(spin_while(run, agent, look, started), asks::waiting(g, env));
-        (done?, waiting)
-    } else {
-        (run.await, None)
-    };
+    let (done, waiting) = think(run, (agent, look, started), (g, env)).await?;
     let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
     // Only a drawn card moves the footer on: a plain look has none (its label discloses).
-    let footer = if look.fancy {
-        hints::next(dir, hints, &notice, hints::now())
-    } else {
-        hints::Footer::Full
-    };
+    let footer = footer_for(look, (dir, hints), &notice);
     // The permission results of the run so far, drawn in the card; a second card (after the
     // model's question is answered) shows only what came after.
-    let seen = settled_of(session.as_ref(), 0).len();
+    let (seen, undo) = (
+        settled_of(session.as_ref(), 0).len(),
+        saved_rules(session.as_ref()),
+    );
     let status = statuses(session.as_ref(), 0, h.hook);
-    let undo = saved_rules(session.as_ref());
     let shown = Card {
         agent: agent.display(),
         model,
@@ -881,12 +990,15 @@ async fn card_run(
         body: Body::Failed(""),
     };
     let width = card::stderr_width();
-    let cwd = Path::new(&ctx.cwd).to_path_buf();
+    let (cwd, (offered, note)) = (
+        Path::new(&ctx.cwd).to_path_buf(),
+        attach_offer(&ctx, question, h, (menu_key, look.fancy)),
+    );
     match &done {
         Ok((raw, duration_ms)) => {
             let (mut text, questions) = askback::split(raw);
             let took = Duration::from_millis(*duration_ms);
-            let ctx_of = (cwd.as_path(), !undo.is_empty());
+            let ctx_of = (cwd.as_path(), !undo.is_empty(), offered);
             draw_answer(&shown, &text, took, (h, look, menu_key), ctx_of, width);
             // The model asked back: ask the person, keep the answer, and answer once more.
             let can_ask = look.fancy
@@ -900,12 +1012,19 @@ async fn card_run(
                 text = again;
                 let how = (seen, h, look, menu_key);
                 let took = Duration::from_millis(ms);
-                draw_again(&shown, session.as_ref(), how, (&text, took), (&cwd, width));
+                draw_again(
+                    &shown,
+                    session.as_ref(),
+                    how,
+                    (&text, took),
+                    (&cwd, width, offered),
+                );
             }
             closing_notes(
                 session.as_ref(),
                 waiting.as_ref(),
                 (h, menu_key, look, width),
+                note.as_deref(),
             );
             if h.hook {
                 record_hook(&text, &cwd, &saved_rules(session.as_ref()));
@@ -925,7 +1044,7 @@ fn draw_again(
     session: Option<&Session>,
     (seen, h, look, menu_key): (usize, &HeadlessArgs, CardLook, MenuKey),
     (text, took): (&str, Duration),
-    (cwd, width): (&Path, usize),
+    (cwd, width, offered): (&Path, usize, bool),
 ) {
     let fresh = statuses(session, seen, h.hook);
     let again = Card {
@@ -933,7 +1052,14 @@ fn draw_again(
         ..shown.clone()
     };
     let undo = !saved_rules(session).is_empty();
-    draw_answer(&again, text, took, (h, look, menu_key), (cwd, undo), width);
+    draw_answer(
+        &again,
+        text,
+        took,
+        (h, look, menu_key),
+        (cwd, undo, offered),
+        width,
+    );
 }
 
 /// Puts the model's questions to the person, keeps what they answer (iohr writes it, the
@@ -976,14 +1102,21 @@ fn draw_answer(
     text: &str,
     took: Duration,
     (h, look, menu_key): (&HeadlessArgs, CardLook, MenuKey),
-    (cwd, undo): (&Path, bool),
+    (cwd, undo, attach): (&Path, bool, bool),
     width: usize,
 ) {
     let command = card::command_of(text);
     let link = card::link_of(text, cwd);
     // The row promises a key that only the hook binds, so only the hook draws it.
     let row = (h.hook && look.fancy)
-        .then(|| actions::row(menu_key, command.is_some(), link.is_some(), undo))
+        .then(|| {
+            let has = actions::Extras {
+                link: link.is_some(),
+                undo,
+                attach,
+            };
+            actions::row(menu_key, command.is_some(), has)
+        })
         .flatten();
     let card = Card {
         elapsed: Some(took),
