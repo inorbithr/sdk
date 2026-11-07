@@ -1,7 +1,7 @@
 //! The Secure Enclave key, through a small Swift helper (`helper.swift`).
 //!
 //! Why a helper: this crate forbids `unsafe`, and a plain command line tool cannot keep an
-//! enclave key in the keychain (no entitlement; the system answers -34018). CryptoKit can hand
+//! enclave key in the keychain (no entitlement; the system answers -34018). `CryptoKit` can hand
 //! out an opaque blob for a key that lives in the enclave, which is what is kept on disk. The
 //! helper is compiled once with the system's `swiftc` (Xcode or the command line tools) into
 //! the key's folder, named by a hash of its source so a changed source is a new binary, and
@@ -39,9 +39,13 @@ impl SecureEnclave {
     fn run(&self, args: &[&str], extra: &[&str], stdin: Option<&str>) -> Result<String, String> {
         let mut cmd = Command::new(&self.helper);
         cmd.args(args).arg(&self.blob).args(extra);
-        cmd.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("cannot start the Secure Enclave helper: {}", e.kind()))?;
@@ -57,7 +61,11 @@ impl SecureEnclave {
         }
         // The helper's own words: they name the cause, never the message it signed.
         let why = String::from_utf8_lossy(&out.stderr);
-        Err(why.lines().next().unwrap_or("the Secure Enclave helper failed").to_owned())
+        Err(why
+            .lines()
+            .next()
+            .unwrap_or("the Secure Enclave helper failed")
+            .to_owned())
     }
 }
 
@@ -81,7 +89,8 @@ impl DeviceSigner for SecureEnclave {
 
 /// `dir/helper-<hash>`, compiled from [`SOURCE`] when it is not there.
 fn build_helper(dir: &Path) -> Result<PathBuf, String> {
-    let hash = &format!("{:x}", Sha256::digest(SOURCE.as_bytes()))[..16];
+    let digest = crate::runner::claude::hex(&Sha256::digest(SOURCE.as_bytes()));
+    let hash = &digest[..16];
     let out = dir.join(format!("helper-{hash}"));
     if out.is_file() {
         return Ok(out);
@@ -106,11 +115,12 @@ fn build_helper(dir: &Path) -> Result<PathBuf, String> {
         let why = String::from_utf8_lossy(&built.stderr);
         return Err(format!(
             "the Secure Enclave helper did not build: {}",
-            why.lines().find(|l| l.contains("error")).unwrap_or("swiftc failed")
+            why.lines()
+                .find(|l| l.contains("error"))
+                .unwrap_or("swiftc failed")
         ));
     }
-    std::fs::rename(&tmp, &out)
-        .map_err(|e| format!("cannot place the helper: {}", e.kind()))?;
+    std::fs::rename(&tmp, &out).map_err(|e| format!("cannot place the helper: {}", e.kind()))?;
     let _ = std::fs::remove_file(&src);
     Ok(out)
 }

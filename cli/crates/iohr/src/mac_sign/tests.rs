@@ -67,19 +67,36 @@ fn the_message_is_core_s_decision_vector() {
 #[test]
 fn a_signed_decision_verifies_against_the_public_key_over_that_message() {
     let signer = TestSigner::new();
-    let d = Decision {
+    let d = ToSign {
         approval_id: "apr_01M6NZ452CGYK04BSGM9BNJD4Q",
         payload_sha256: "c0ffee",
         decision: "approve",
         note: "",
     };
-    let proof = sign_decision(&signer, "apk_1", &d, "approve \"Plan\" (c0ffee)", 1_800_000_000, "bm9uY2U")
-        .expect("signs");
+    let proof = sign_decision(
+        &signer,
+        "apk_1",
+        &d,
+        "approve \"Plan\" (c0ffee)",
+        1_800_000_000,
+        "bm9uY2U",
+    )
+    .expect("signs");
     assert_eq!(proof["key_id"], "apk_1");
     assert_eq!(proof["signed_at"], 1_800_000_000);
     assert_eq!(proof["nonce"], "bm9uY2U");
-    let message = decision_message(d.approval_id, "c0ffee", "approve", "", 1_800_000_000, "bm9uY2U", "apk_1");
-    let public = B64URL.decode(signer.public_key().expect("public")).expect("b64");
+    let message = decision_message(
+        d.approval_id,
+        "c0ffee",
+        "approve",
+        "",
+        1_800_000_000,
+        "bm9uY2U",
+        "apk_1",
+    );
+    let public = B64URL
+        .decode(signer.public_key().expect("public"))
+        .expect("b64");
     let sig = B64URL
         .decode(proof["signature"].as_str().expect("signature"))
         .expect("b64");
@@ -92,8 +109,18 @@ fn a_signed_decision_verifies_against_the_public_key_over_that_message() {
     assert_eq!(seen[0].0, message);
     assert_eq!(seen[0].1, "approve \"Plan\" (c0ffee)");
     // And the proof does not verify against another message (another ask, another time).
-    let other = decision_message(d.approval_id, "c0ffee", "approve", "", 1_800_000_001, "bm9uY2U", "apk_1");
-    let public = B64URL.decode(signer.public_key().expect("public")).expect("b64");
+    let other = decision_message(
+        d.approval_id,
+        "c0ffee",
+        "approve",
+        "",
+        1_800_000_001,
+        "bm9uY2U",
+        "apk_1",
+    );
+    let public = B64URL
+        .decode(signer.public_key().expect("public"))
+        .expect("b64");
     assert!(
         UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, public)
             .verify(other.as_bytes(), &sig)
@@ -105,7 +132,12 @@ fn a_signed_decision_verifies_against_the_public_key_over_that_message() {
 fn a_refused_touch_id_makes_no_proof() {
     let mut signer = TestSigner::new();
     signer.refuse = true;
-    let d = Decision { approval_id: "apr_1", payload_sha256: "ab", decision: "approve", note: "" };
+    let d = ToSign {
+        approval_id: "apr_1",
+        payload_sha256: "ab",
+        decision: "approve",
+        note: "",
+    };
     let e = sign_decision(&signer, "apk_1", &d, "r", 1, "n").expect_err("refused");
     assert!(e.contains("refused"), "{e}");
 }
@@ -135,7 +167,10 @@ fn a_merge_goes_to_the_phone_on_a_mac_and_a_review_goes_to_the_mac() {
 fn a_machine_that_cannot_sign_hands_every_ask_to_the_phone() {
     // What Windows and Linux are: `can_sign_here` is false, whatever the ask is.
     for kind in ["review", "document", "decision", "run", "pull_request"] {
-        assert!(matches!(route(&ask(kind, "Plan"), false), Route::Phone(_)), "{kind}");
+        assert!(
+            matches!(route(&ask(kind, "Plan"), false), Route::Phone(_)),
+            "{kind}"
+        );
     }
     assert_eq!(
         route(&ask("review", "Plan"), false),
@@ -177,20 +212,6 @@ fn the_enrol_request_names_the_mac_and_carries_the_phone_s_countersignature() {
 }
 
 #[test]
-fn the_countersign_message_is_the_one_core_checks() {
-    let p = Proof {
-        key_id: " apk_phone ".to_owned(),
-        signed_at: 5,
-        nonce: " n ".to_owned(),
-        signature: String::new(),
-    };
-    assert_eq!(
-        countersign_message(" PUB ", &p),
-        "iohr-approval-key-v1\nPUB\n5\nn\napk_phone"
-    );
-}
-
-#[test]
 fn the_touch_id_line_is_clean_short_and_carries_the_hash_start() {
     let r = touch_reason("Plan\u{1b}[2J for\nthe week", "approve", "0123456789abcdef");
     assert_eq!(r, "approve \"Plan[2J forthe week\" (01234567)");
@@ -214,7 +235,10 @@ fn the_key_record_is_kept_private_and_removed_with_the_key() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        let mode = std::fs::metadata(dir.join("key.json")).expect("meta").permissions().mode();
+        let mode = std::fs::metadata(dir.join("key.json"))
+            .expect("meta")
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o077, 0, "{mode:o}");
     }
     std::fs::write(store::blob(&dir), b"blob").expect("blob");

@@ -3,8 +3,10 @@
 //! `list` and `show` stay live on a terminal: the account's `approval.changed` events (or one
 //! ask's `Watch` stream) say something moved and the screen is drawn again; a pipe, `--json`
 //! and `--once` print once. `deny` and `question` are decisions that need no key. `approve`
-//! needs the proof of a device key, which only the phone holds, so it says so and waits
-//! until the phone has used it (ADR 0142, ADR 0215).
+//! needs the proof of a device key: a Mac with an enrolled Secure Enclave key signs the asks
+//! its tier allows after Touch ID (`key`, RFC 0113); a merge, a roll, a migration and an
+//! auto-approve rule, and every machine that is not a Mac, hand it to the phone, so
+//! `approve` says so and waits until the phone has used it (ADR 0142, ADR 0215).
 //!
 //! The text of an ask is other people's text: it is printed to stdout for the person who
 //! asked to read it, with control characters dropped so it cannot move the cursor, and it is
@@ -710,7 +712,8 @@ fn done(out: Out, a: &Value, said: &str) {
     }
 }
 
-/// The menu: approve (on the phone), deny or question, for one open ask.
+/// The menu: approve (here when this Mac may sign it, else on the phone), deny or question,
+/// for one open ask.
 async fn decide(
     g: &Global,
     s: &Session,
@@ -736,7 +739,7 @@ async fn decide(
         choice(
             "approve",
             "Approve",
-            "on your phone, which holds the key",
+            "with Touch ID on a Mac that has a key, else on your phone",
             'a',
         ),
         choice("deny", "Deny", "with a note if you like", 'd'),
@@ -793,15 +796,16 @@ async fn approve(
         key::Attempt::Phone(why) => why,
     };
     Out::note("Approve on your phone");
-    match why {
-        Some(why) => Out::note(&format!(
+    if let Some(why) = why {
+        Out::note(&format!(
             "{why}: it needs your phone's key. Open InOrbit there; this ask is under Needs you."
-        )),
-        None => {
-            Out::note("Approving needs your phone's key. Open InOrbit there; this ask is under Needs you.");
-            if mac_sign::can_sign_here() {
-                Out::note("To approve the smaller asks from this Mac, run `iohr asks key enroll`.");
-            }
+        ));
+    } else {
+        Out::note(
+            "Approving needs your phone's key. Open InOrbit there; this ask is under Needs you.",
+        );
+        if mac_sign::can_sign_here() {
+            Out::note("To approve the smaller asks from this Mac, run `iohr asks key enroll`.");
         }
     }
     let means = headline(str_of(&a, "approve_means"), 160);
@@ -967,7 +971,7 @@ mod tests {
     use std::sync::Arc;
 
     use iohr_auth::{Redacted, StaticToken};
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{body_partial_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -1310,5 +1314,67 @@ mod tests {
         let svc = HttpService::new(&api, "acc_1".into(), None);
         let mut draw = |_: &Value| true;
         assert!(live_one(&svc, ID9, FAST, &mut draw).await.is_err());
+    }
+    #[tokio::test]
+    async fn a_signed_approval_carries_its_proof_and_a_plain_one_never_does() {
+        let server = MockServer::start().await;
+        let proof = json!({
+            "key_id": "apk_1", "signed_at": 9, "nonce": "n", "signature": "sig"
+        });
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/approvals/{ID1}/decision")))
+            .and(body_partial_json(json!({
+                "account_id": "acc_1", "decision": "approve", "proof": proof
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "approval": ask(ID1, "approved", "Review the plan")
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let signed_api = api(&server);
+        let svc = HttpService::new(&signed_api, "acc_1".into(), None);
+        let got = svc.decide_signed(ID1, "approve", "", &proof).await.unwrap();
+        assert_eq!(got["status"], "approved");
+        // A denial sends no proof field at all.
+        let plain = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/approvals/{ID1}/decision")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "approval": ask(ID1, "denied", "x")
+            })))
+            .mount(&plain)
+            .await;
+        let plain_api = api(&plain);
+        let svc = HttpService::new(&plain_api, "acc_1".into(), None);
+        svc.decide_approval(ID1, "deny", "no").await.unwrap();
+        let sent = plain.received_requests().await.unwrap();
+        let body: Value = serde_json::from_slice(&sent[0].body).unwrap();
+        assert!(body.get("proof").is_none(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn enrolling_posts_the_body_and_revoking_refuses_a_foreign_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/approvals/keys"))
+            .and(body_partial_json(
+                json!({"platform": "macos", "public_key": "pk"}),
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"key": {"key_id": "apk_9"}})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = api(&server);
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let key = svc
+            .enroll_key(&json!({"platform": "macos", "public_key": "pk"}))
+            .await
+            .unwrap();
+        assert_eq!(key["key_id"], "apk_9");
+        assert!(svc.revoke_key("../x").await.is_err());
+        assert!(svc.revoke_key("key_1").await.is_err());
     }
 }

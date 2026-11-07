@@ -26,9 +26,6 @@ mod secure_enclave;
 /// The platform the service records a Mac key under (its allow-list: ios, android, macos).
 pub(crate) const PLATFORM: &str = "macos";
 
-/// The first line of what a phone key signs to countersign a new key (core `KEY_TAG`).
-pub(crate) const KEY_TAG: &str = "iohr-approval-key-v1";
-
 /// A key that signs for a person. The Mac's lives in the Secure Enclave; a test's in memory.
 pub(crate) trait DeviceSigner {
     /// Makes the key when this machine has none (behind the fingerprints enrolled now) and
@@ -79,7 +76,7 @@ pub(crate) const fn can_sign_here() -> bool {
 }
 
 /// What is decided: the fields a decision proof signs, besides the key and the time.
-pub(crate) struct Decision<'a> {
+pub(crate) struct ToSign<'a> {
     pub(crate) approval_id: &'a str,
     pub(crate) payload_sha256: &'a str,
     pub(crate) decision: &'a str,
@@ -94,7 +91,7 @@ pub(crate) struct Decision<'a> {
 pub(crate) fn sign_decision(
     signer: &dyn DeviceSigner,
     key_id: &str,
-    d: &Decision<'_>,
+    d: &ToSign<'_>,
     reason: &str,
     signed_at: i64,
     nonce: &str,
@@ -126,19 +123,6 @@ pub(crate) fn fresh_nonce() -> Result<String, String> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes).map_err(|e| format!("no randomness for a nonce: {e}"))?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
-}
-
-/// What a phone key signs to countersign `public_key` (core `key_message`), so a person can
-/// see exactly what the phone is asked to sign.
-pub(crate) fn countersign_message(public_key: &str, p: &Proof) -> String {
-    [
-        KEY_TAG,
-        public_key.trim(),
-        &p.signed_at.to_string(),
-        p.nonce.trim(),
-        p.key_id.trim(),
-    ]
-    .join("\n")
 }
 
 /// The `EnrollKey` request for this Mac's key. With a `countersign` from an enrolled phone key

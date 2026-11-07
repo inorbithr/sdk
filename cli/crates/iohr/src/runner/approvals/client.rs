@@ -140,11 +140,20 @@ impl HttpService<'_> {
 
     /// Revokes a device key (`RevokeKey`).
     pub(crate) async fn revoke_key(&self, key_id: &str) -> Result<(), ServiceError> {
-        if !key_id.starts_with("apk_") || !key_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        if !key_id.starts_with("apk_")
+            || !key_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
             return Err(ServiceError::Refused("a key id that is not one"));
         }
         self.api
-            .send(Method::Delete, &format!("/v1/approvals/keys/{key_id}"), &[], None)
+            .send(
+                Method::Delete,
+                &format!("/v1/approvals/keys/{key_id}"),
+                &[],
+                None,
+            )
             .await?;
         Ok(())
     }

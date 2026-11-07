@@ -14,7 +14,7 @@ use crate::cli::{AsksKeyCommand, Global};
 use crate::context::{Ctx, account, session};
 use crate::error::Error;
 use crate::mac_sign::store::{self, Enrolled};
-use crate::mac_sign::{self, Decision, Route};
+use crate::mac_sign::{self, Route, ToSign};
 use crate::runner::approvals::proof_from_json;
 use crate::ui::Paint;
 
@@ -68,7 +68,7 @@ pub(super) async fn attempt(
     let proof = mac_sign::sign_decision(
         signer.as_ref(),
         &enrolled.key_id,
-        &Decision {
+        &ToSign {
             approval_id: id,
             payload_sha256: hash,
             decision: "approve",
@@ -97,12 +97,7 @@ fn now() -> i64 {
 }
 
 /// `iohr asks key ...`.
-pub(super) async fn run(
-    g: &Global,
-    env: &Env,
-    cmd: AsksKeyCommand,
-    out: Out,
-) -> Result<(), Error> {
+pub(super) async fn run(g: &Global, env: &Env, cmd: AsksKeyCommand, out: Out) -> Result<(), Error> {
     let ctx = Ctx::load(g)?;
     let dir = store::dir(&ctx.dir);
     match cmd {
@@ -227,20 +222,23 @@ async fn enroll(
     )
     .map_err(Error::Failed)?;
     let active_at = str_of(&key, "active_at").to_owned();
-    let signed = countersign.is_some();
+    let countered = countersign.is_some();
     if out.json {
         Out::print_json(&json!({
             "key_id": key_id, "label": label, "public_key": public,
-            "active_at": active_at, "countersigned": signed,
+            "active_at": active_at, "countersigned": countered,
         }));
     } else {
         Out::pairs(&[
             ("key_id", key_id),
             ("label", label),
             ("active_at", active_at),
-            ("countersigned", if signed { "yes" } else { "no" }.to_owned()),
+            (
+                "countersigned",
+                if countered { "yes" } else { "no" }.to_owned(),
+            ),
         ]);
-        if !signed {
+        if !countered {
             Out::note(
                 "Not countersigned by your phone: the key is active at the time above (at once if it is your first key).",
             );

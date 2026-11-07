@@ -81,10 +81,16 @@ fn text<'a>(v: &'a Value, key: &str) -> &'a str {
 /// The first sensitive thing `s` says: its words, lower-cased and cut at anything that is not a
 /// letter or a digit; `auto-approve` is read as one word.
 fn said(s: &str) -> Option<&'static str> {
-    let lower = s.to_lowercase().replace("auto-approve", "autoapprove").replace("auto approve", "autoapprove");
-    lower
-        .split(|c: char| !c.is_alphanumeric())
-        .find_map(|w| WORDS.iter().find(|(start, _)| w.starts_with(start)).map(|(_, why)| *why))
+    let lower = s
+        .to_lowercase()
+        .replace("auto-approve", "autoapprove")
+        .replace("auto approve", "autoapprove");
+    lower.split(|c: char| !c.is_alphanumeric()).find_map(|w| {
+        WORDS
+            .iter()
+            .find(|(start, _)| w.starts_with(start))
+            .map(|(_, why)| *why)
+    })
 }
 
 #[cfg(test)]
@@ -99,14 +105,29 @@ mod tests {
 
     #[test]
     fn a_merge_a_roll_a_migration_and_an_auto_approve_rule_stay_on_the_phone() {
-        assert_eq!(classify(&ask("pull_request", "Fix a typo")), Tier::Phone("a merge"));
-        assert_eq!(classify(&ask("roll", "Roll protocol")), Tier::Phone("a roll"));
+        assert_eq!(
+            classify(&ask("pull_request", "Fix a typo")),
+            Tier::Phone("a merge")
+        );
+        assert_eq!(
+            classify(&ask("roll", "Roll protocol")),
+            Tier::Phone("a roll")
+        );
         let mut roll_like = ask("decision", "Ship it");
         roll_like["payload"] = json!({"migrations": ["20261101_x.sql"]});
         assert_eq!(classify(&roll_like), Tier::Phone("a migration"));
-        assert_eq!(classify(&ask("decision", "Migrate the cases tables")), Tier::Phone("a migration"));
-        assert_eq!(classify(&ask("decision", "Merge PR 12 into main")), Tier::Phone("a merge"));
-        assert_eq!(classify(&ask("decision", "Roll back the edge")), Tier::Phone("a roll"));
+        assert_eq!(
+            classify(&ask("decision", "Migrate the cases tables")),
+            Tier::Phone("a migration")
+        );
+        assert_eq!(
+            classify(&ask("decision", "Merge PR 12 into main")),
+            Tier::Phone("a merge")
+        );
+        assert_eq!(
+            classify(&ask("decision", "Roll back the edge")),
+            Tier::Phone("a roll")
+        );
         assert_eq!(
             classify(&ask("decision", "Turn on Auto-Approve for docs PRs")),
             Tier::Phone("an auto-approve rule")
@@ -133,14 +154,21 @@ mod tests {
     #[test]
     fn a_kind_nobody_named_fails_closed() {
         assert!(matches!(classify(&ask("", "x")), Tier::Phone(_)));
-        assert!(matches!(classify(&ask("runner_enrollment", "x")), Tier::Phone(_)));
+        assert!(matches!(
+            classify(&ask("runner_enrollment", "x")),
+            Tier::Phone(_)
+        ));
         assert!(matches!(classify(&Value::Null), Tier::Phone(_)));
     }
 
     #[test]
     fn a_review_a_document_a_decision_and_a_run_may_be_signed_here() {
         for kind in ["review", "document", "decision", "run"] {
-            assert_eq!(classify(&ask(kind, "Plan for the scroll bar")), Tier::Mac, "{kind}");
+            assert_eq!(
+                classify(&ask(kind, "Plan for the scroll bar")),
+                Tier::Mac,
+                "{kind}"
+            );
         }
     }
 }
