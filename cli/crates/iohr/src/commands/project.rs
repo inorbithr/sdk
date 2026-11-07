@@ -1496,7 +1496,16 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         .act_async(
             "plan",
             "create or find the project's Planner plan and write its id into coordination.toml",
-            || super::project_plan::run(g, env, &dir, name, a.plan.plan_id.as_deref(), a.plan.no_plan),
+            || {
+                super::project_plan::run(
+                    g,
+                    env,
+                    &dir,
+                    name,
+                    a.plan.plan_id.as_deref(),
+                    a.plan.no_plan,
+                )
+            },
         )
         .await
         .flatten();
