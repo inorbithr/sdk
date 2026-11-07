@@ -19,7 +19,6 @@ use crate::error::Error;
 use crate::headless::{self, Answer, Context};
 use crate::hints;
 use crate::output::Out;
-use crate::permissions::Mode;
 #[cfg(unix)]
 use crate::permissions::broker::Opts;
 use crate::permissions::broker::{self, Session};
@@ -27,6 +26,7 @@ use crate::permissions::broker::{self, Session};
 use crate::permissions::engine::Place;
 #[cfg(unix)]
 use crate::permissions::store::Files;
+use crate::permissions::{Mode, trust};
 use crate::ui::Ui;
 use crate::{Env, prompt};
 
@@ -432,14 +432,16 @@ async fn headless(
         model,
         ..
     } = *chosen;
-    let (ctx, root) = context_of(h)?;
+    let (mut ctx, root) = context_of(h)?;
+    let terminal = !out.json && prompt::interactive();
+    trust_home(chosen, &mut ctx, terminal)?;
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
-    let folder = ctx.reads.then(|| Path::new(&ctx.cwd));
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
-    // The live ask (PRD 0197): only where the run may read the folder, and only when the
-    // person did not turn it off. A person is asked only at a terminal and not for `--json`.
-    let session = permission_session(chosen, &ctx, !out.json && prompt::interactive())?;
+    // The live ask (PRD 0197): only where the run may read the folder (or in the home folder
+    // with the person asked), and only when the person did not turn it off. A person is asked
+    // only at a terminal and not for `--json`.
+    let session = permission_session(chosen, &ctx, terminal)?;
     let read = headless::read_line(&ctx, session.is_some());
     let label = ask::label(agent);
     let started = Instant::now();
@@ -448,7 +450,7 @@ async fn headless(
         if !out.json {
             Out::note(&label);
         }
-        let ran = headless::run(bin, &message, model, started, folder, session.as_ref()).await;
+        let ran = run_at((bin, model), &message, started, &ctx, session.as_ref()).await;
         if !out.json {
             for line in refused_lines(session.as_ref()) {
                 Out::note(&line);
@@ -513,7 +515,8 @@ struct Prepared {
 }
 
 /// Settles how this run handles calls no rule decides and starts the broker for it. `None`
-/// when the mode is `deny`, when the folder is not readable (the run has no tools then) or
+/// when the mode is `deny`, when the folder is not readable (the run has no tools then; the
+/// home folder is the exception at a terminal: `Bash` alone, each command asked) or
 /// when this system has no unix sockets. A broker that cannot start is an error the person
 /// sees, never a silent fall back to something more permissive.
 fn permission_session(
@@ -523,7 +526,10 @@ fn permission_session(
 ) -> Result<Option<Session>, Error> {
     let (flag, config) = chosen.permissions;
     let mode = Mode::choose(flag, config, terminal).map_err(Error::Usage)?;
-    if mode == Mode::Deny || !ctx.reads {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let shell_at_home =
+        mode == Mode::Prompt && headless::is_home(Path::new(&ctx.cwd), home.as_deref());
+    if mode == Mode::Deny || !(ctx.reads || shell_at_home) {
         return Ok(None);
     }
     // No unix sockets, no live ask: off unix `iohr ask` stays read-only (see
@@ -532,6 +538,39 @@ fn permission_session(
     return start_broker(mode, chosen, ctx).map(Some);
     #[cfg(not(unix))]
     Ok(None)
+}
+
+/// The home folder is too broad to read unasked (`headless::can_read`). At a terminal, where
+/// every command is asked anyway, Io asks once whether to trust it, the way Claude Code asks
+/// about a folder; a yes gives this run the file tools beside the asked commands (secrets stay
+/// blocked by `permissions::secrets`). A yes for always is kept in `trusted.toml` in the
+/// user's iohr folder. No terminal, `--json` or a mode other than asking: no question, no reads.
+fn trust_home(chosen: &Chosen<'_>, ctx: &mut Context, terminal: bool) -> Result<(), Error> {
+    if ctx.reads || !terminal {
+        return Ok(());
+    }
+    let (flag, config) = chosen.permissions;
+    if Mode::choose(flag, config, terminal).map_err(Error::Usage)? != Mode::Prompt {
+        return Ok(());
+    }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let cwd = Path::new(&ctx.cwd);
+    if !headless::is_home(cwd, home.as_deref()) {
+        return Ok(());
+    }
+    ctx.reads = trust::is_trusted(chosen.dir, cwd)
+        || match trust::ask(cwd) {
+            trust::Answer::Always => {
+                if let Err(why) = trust::remember(chosen.dir, cwd) {
+                    let _ = console::Term::stderr()
+                        .write_line(&format!("Trusted for this time only: {why}"));
+                }
+                true
+            }
+            trust::Answer::Once => true,
+            trust::Answer::No => false,
+        };
+    Ok(())
 }
 
 /// Starts the broker. A broker that cannot start is an error, never a fall back to something
@@ -552,6 +591,33 @@ fn start_broker(mode: Mode, chosen: &Chosen<'_>, ctx: &Context) -> Result<Sessio
             "cannot start the permission ask: {why}; run with `--permissions deny` to go on without commands"
         ))
     })
+}
+
+/// One capped run where `ctx` says: in the folder when it may read it or run commands there.
+async fn run_at(
+    (bin, model): (&Path, &str),
+    message: &str,
+    started: Instant,
+    ctx: &Context,
+    session: Option<&Session>,
+) -> Result<(String, u64), String> {
+    let folder = run_dir(ctx, session);
+    headless::run(
+        bin,
+        message,
+        model,
+        started,
+        folder.as_deref(),
+        ctx.reads,
+        session,
+    )
+    .await
+}
+
+/// Where the run starts: the folder when it may read it or run commands there, else none
+/// (the temp folder).
+fn run_dir(ctx: &Context, session: Option<&Session>) -> Option<std::path::PathBuf> {
+    (ctx.reads || session.is_some()).then(|| std::path::PathBuf::from(&ctx.cwd))
 }
 
 /// The lines after an answer for what Io wanted and could not be allowed: with a rule to
@@ -630,9 +696,7 @@ async fn card_run(
         session,
     } = prepared;
     let look = CardLook::detect(fancy);
-    let folder = ctx.reads.then(|| std::path::PathBuf::from(&ctx.cwd));
-    let (folder, session_ref) = (folder.as_deref(), session.as_ref());
-    let run = headless::run(bin, &message, model, started, folder, session_ref);
+    let run = run_at((bin, model), &message, started, &ctx, session.as_ref());
     // The asks waiting are looked up while the model thinks, so they add no time.
     let (done, waiting) = if look.fancy {
         let (done, waiting) =
@@ -729,15 +793,7 @@ async fn ask_back(
     ctx.refresh = true;
     let again = headless::assemble(question, ctx).map_err(Error::Usage)?;
     let started = Instant::now();
-    let folder = ctx.reads.then(|| std::path::PathBuf::from(&ctx.cwd));
-    let run = headless::run(
-        chosen.bin,
-        &again,
-        chosen.model,
-        started,
-        folder.as_deref(),
-        session,
-    );
+    let run = run_at((chosen.bin, chosen.model), &again, started, ctx, session);
     match spin_while(run, chosen.agent, look, started).await? {
         // The second answer asks nothing: a question in it is dropped.
         Ok((raw, ms)) => Ok(Some((askback::split(&raw).0, ms))),

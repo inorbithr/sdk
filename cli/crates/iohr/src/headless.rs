@@ -286,8 +286,18 @@ pub(crate) fn can_read(dir: &std::path::Path, home: Option<&std::path::Path>) ->
     if real.parent().is_none() || !real.is_dir() || std::fs::read_dir(&real).is_err() {
         return false;
     }
-    home.and_then(|h| h.canonicalize().ok())
-        .is_none_or(|h| h != real)
+    !is_home(&real, home)
+}
+
+/// Whether `dir` is the home folder. There the run never gets the file tools (too broad), but
+/// at a terminal it may still get `Bash` behind the person's yes for every command no rule
+/// allows, so `? list this folder` can run `ls` (PRD 0197).
+#[must_use]
+pub(crate) fn is_home(dir: &std::path::Path, home: Option<&std::path::Path>) -> bool {
+    let (Ok(real), Some(h)) = (dir.canonicalize(), home.and_then(|h| h.canonicalize().ok())) else {
+        return false;
+    };
+    real == h
 }
 
 /// The one message the model gets. The question must fit whole (the error says so, never
@@ -391,14 +401,14 @@ pub(crate) fn brief_with_bash(lines: usize) -> String {
 
 /// With a `session` the run also has `Bash`, every call of which goes to the person's
 /// terminal through the session's permission prompt tool (PRD 0197; the flags are in
-/// <https://code.claude.com/docs/en/cli-reference>). Without one it is read-only.
+/// <https://code.claude.com/docs/en/cli-reference>). Without one it is read-only. A session
+/// without `reads` (the home folder) gets `Bash` alone, never the file tools.
 pub(crate) fn args(
     model: &str,
     reads: bool,
     session: Option<&Session>,
 ) -> Result<Vec<String>, String> {
     let turns = MAX_TURNS.to_string();
-    let session = session.filter(|_| reads);
     let brief = if session.is_some() {
         brief_with_bash(crate::card::stderr_lines())
     } else {
@@ -422,11 +432,11 @@ pub(crate) fn args(
     .iter()
     .map(|s| (*s).to_owned())
     .collect();
-    if reads {
-        let tools = if session.is_some() {
-            format!("{READ_TOOLS},Bash")
-        } else {
-            READ_TOOLS.to_owned()
+    if reads || session.is_some() {
+        let tools = match (reads, session.is_some()) {
+            (true, true) => format!("{READ_TOOLS},Bash"),
+            (true, false) => READ_TOOLS.to_owned(),
+            (false, _) => "Bash".to_owned(),
         };
         v.extend(["--restricted".to_owned(), "--tools".to_owned(), tools]);
         if let Some(s) = session {
@@ -506,11 +516,12 @@ pub(crate) async fn run(
     model: &str,
     started: Instant,
     folder: Option<&std::path::Path>,
+    reads: bool,
     session: Option<&Session>,
 ) -> Result<(String, u64), String> {
-    let args = args(model, folder.is_some(), session)?;
+    let args = args(model, reads, session)?;
     // The file tools are confined to the working directory, so the run starts in the
-    // folder it may read; with no tools it starts in the temp folder.
+    // folder it may read or run commands in; with no tools it starts in the temp folder.
     let dir = folder.map_or_else(std::env::temp_dir, std::path::Path::to_path_buf);
     let mut child = tokio::process::Command::new(bin)
         .args(&args)
@@ -868,6 +879,14 @@ mod tests {
             "the root is too broad"
         );
         assert!(!can_read(std::path::Path::new("/nonexistent/x"), None));
+        assert!(
+            is_home(d.path(), Some(d.path())),
+            "home is where the trust prompt asks"
+        );
+        let below = d.path().join("project");
+        std::fs::create_dir(&below).unwrap();
+        assert!(!is_home(&below, Some(d.path())));
+        assert!(!is_home(d.path(), None));
         let f = d.path().join("f.txt");
         std::fs::write(&f, "x").unwrap();
         assert!(!can_read(&f, None), "a file is not a folder");
