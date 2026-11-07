@@ -21,6 +21,7 @@ Account:
   config       Settings besides profiles: where extensions come from, which keys may sign them
 
 Build:
+  init         Create a project: the same as `iohr project init`
   project      Create projects and manage project templates
   atlas        Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder
   sync         Send the project's atlas documents to its Decisions space

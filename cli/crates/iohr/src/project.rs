@@ -21,6 +21,7 @@ use crate::template::Runner;
 
 /// The template used when neither `--template` nor `[project] template` names one.
 pub mod folder;
+pub mod space;
 pub(crate) mod wizard;
 
 pub const DEFAULT_TEMPLATE: &str = "demo";
@@ -61,7 +62,8 @@ pub fn choose_template(flag: Option<&str>, configured: Option<&str>) -> String {
 pub struct Step {
     pub id: String,
     pub title: String,
-    /// `done`, `skipped`, `not-yet`, `failed` or `ask`.
+    /// `done`, `skipped`, `not-yet`, `queued`, `failed` or `ask`. `queued` is a step that
+    /// could not happen yet (no network, not signed in) and is kept to run later.
     pub state: String,
     pub said: String,
     /// The API or decision a `not-yet` step waits on.
@@ -248,6 +250,13 @@ pub fn add_space_link(files: &mut Vec<(String, String)>, space: Option<(&str, &s
     if !files.iter().any(|(p, _)| p == SPACE_FILE) {
         files.push((SPACE_FILE.to_owned(), space_link(space)));
     }
+    // A link to a space on a local stack stays on the machine (`space::link_file`).
+    if !files.iter().any(|(p, _)| p == space::GITIGNORE_FILE) {
+        files.push((
+            space::GITIGNORE_FILE.to_owned(),
+            space::GITIGNORE_TEXT.to_owned(),
+        ));
+    }
 }
 
 /// The space a folder is linked to, from [`SPACE_FILE`]: `(id, name)`. `None` when the file is
@@ -296,13 +305,6 @@ pub fn cloud_steps(name: &str) -> Vec<Step> {
             "ask",
             "InOrbit Desktop asks you before Code may open a folder: Code › Allow a repository…, or New project does it with your confirm",
             "",
-        ),
-        step(
-            "space",
-            "The project in InOrbit: a Decisions space of kind project",
-            "not-yet",
-            "decisions_create_space works for a person today; init does it once a project has a scope of its own",
-            "POST /v1/decisions/projects (RFC 0115), a project scope",
         ),
         step(
             "listing",
@@ -947,6 +949,12 @@ pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<
         match s.state.as_str() {
             "skipped" => out.push(format!("skipped: {} ({})", s.title.to_lowercase(), s.said)),
             "ask" => out.push(format!("asked: {} ({})", s.title.to_lowercase(), s.said)),
+            "queued" => out.push(format!(
+                "queued: {} ({}); {}",
+                s.title.to_lowercase(),
+                s.said,
+                s.needs
+            )),
             _ => {}
         }
     }
