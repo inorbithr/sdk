@@ -2,8 +2,10 @@
 version = 1
 
 [plan]
-# The Planner plan of your account this project's work belongs to ("plan_..."). Empty until
-# you set it; `iohr project init` cannot choose it for you.
+# The Planner plan of your account this project's work belongs to ("plan_..."). `iohr project
+# init` makes it (named @@NAME@@) or finds the one it made before, and writes its id here. Signed
+# out it stays empty: sign in, then `iohr coordinator plan create @@NAME@@ --external-id
+# project:@@NAME@@` and put the id here, or run init with `--plan-id`.
 id = ""
 # The item inside that plan this project's asks attach to (optional).
 item = ""
