@@ -246,12 +246,12 @@ impl Store {
         Self { root }
     }
 
-    /// The platform's data directory for `iohr`, plus `extensions`.
+    /// The platform's data directory for iohr: what `IOHR_DATA_DIR` overrides. Extensions and
+    /// the session host's queue (RFC 0213) live below it.
     ///
     /// # Errors
-    ///
-    /// [`ExtError::Io`] when the home directory cannot be found.
-    pub fn default_root() -> Result<PathBuf, ExtError> {
+    /// When the home directory cannot be found.
+    pub fn data_root() -> Result<PathBuf, ExtError> {
         use etcetera::app_strategy::{AppStrategy as _, AppStrategyArgs, choose_native_strategy};
         let args = AppStrategyArgs {
             top_level_domain: "hr".into(),
@@ -259,13 +259,22 @@ impl Store {
             app_name: "iohr".into(),
         };
         choose_native_strategy(args)
-            .map(|s| s.data_dir().join("extensions"))
+            .map(|s| s.data_dir())
             .map_err(|_| {
                 ExtError::Io(
-                    "cannot find the home directory to keep extensions in; set IOHR_DATA_DIR"
+                    "cannot find the home directory to keep iohr's data in; set IOHR_DATA_DIR"
                         .into(),
                 )
             })
+    }
+
+    /// The platform's data directory for `iohr`, plus `extensions`.
+    ///
+    /// # Errors
+    ///
+    /// [`ExtError::Io`] when the home directory cannot be found.
+    pub fn default_root() -> Result<PathBuf, ExtError> {
+        Self::data_root().map(|d| d.join("extensions"))
     }
 
     /// This machine's lock.

@@ -31,6 +31,7 @@ mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
+mod session;
 pub(crate) mod shell;
 mod token;
 mod tunnel;
@@ -124,6 +125,8 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,
         Command::Runner(cmd) => Box::pin(runner::run(g, &env, cmd, out)).await,
+        Command::Session(args) => session::open(g, &args, out).await,
+        Command::Stop(args) => session::stop(g, &args, out).await,
         Command::Browser(BrowserCommand::Install(args)) => {
             browser_ext::install(g, &args, out);
             Ok(())
