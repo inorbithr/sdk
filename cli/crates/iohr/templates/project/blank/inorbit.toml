@@ -25,7 +25,8 @@ created_at = "@@CREATED_AT@@"
 
 # --- InOrbit links ---
 
-# The project's Decisions space. Empty until init can create one (it needs a per-project scope).
+# The project's Decisions space. `iohr init` fills it; empty when it could not reach InOrbit
+# (`iohr project sync` does it later).
 space_id = ""
 # The project's private Marketplace listing. Empty until you publish it.
 listing = ""
