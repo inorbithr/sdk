@@ -39,7 +39,7 @@ pub(crate) const LEASE: Duration = Duration::from_secs(90);
 pub(crate) const MAX_ATTEMPTS: i32 = 3;
 
 /// How many times a statement is tried again after a conflict before it gives up.
-const CONFLICT_RETRIES: u32 = 12;
+const CONFLICT_RETRIES: u32 = 24;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum QueueError {
@@ -89,13 +89,30 @@ pub(crate) struct Queue {
 
 /// How long to wait before try number `tries`: up to `2 ms << tries` (at most 128 ms), a
 /// random part of it, so threads that met each other do not meet again at the same moment.
+/// The randomness is the clock, a counter every call moves on and the calling thread, run
+/// through a mixer: a coarse clock (a loaded Linux runner) gives two threads the same
+/// nanoseconds, and they must still wait differently.
 fn backoff(tries: u32) -> Duration {
-    let span = 2u64 << tries.min(6);
+    static CALLS: AtomicU64 = AtomicU64::new(0);
     let noise = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::from(d.subsec_nanos()));
-    let mixed = noise ^ (noise >> 7) ^ (u64::from(tries) << 13);
-    Duration::from_micros(span * 500 + mixed % (span * 500))
+    let mut thread = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&std::thread::current().id(), &mut thread);
+    let salt = std::hash::Hasher::finish(&thread) ^ CALLS.fetch_add(1, Ordering::Relaxed);
+    backoff_from(tries, noise, salt)
+}
+
+/// The wait for try number `tries` from a clock reading and a salt (splitmix64 mixes them).
+fn backoff_from(tries: u32, noise: u64, salt: u64) -> Duration {
+    let span = 2u64 << tries.min(6);
+    let mut z = noise
+        .wrapping_add(salt.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+        .wrapping_add(u64::from(tries) << 13);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    Duration::from_micros(span * 500 + z % (span * 500))
 }
 
 const SCHEMA: &str = "
@@ -774,6 +791,22 @@ mod tests {
         assert_eq!(done.unwrap(), 1);
         assert!(tries >= 2, "the first attempt must have met the conflict");
         assert!(q.conflicts() >= 1);
+    }
+
+    /// A coarse clock gives two threads the same reading: their waits must still differ, or
+    /// they meet again and again until the retries run out (a loaded CI runner did this).
+    #[test]
+    fn two_threads_with_the_same_clock_reading_wait_differently() {
+        let waits: std::collections::HashSet<_> = (0..8u64)
+            .map(|salt| backoff_from(3, 123_456_789, salt))
+            .collect();
+        assert!(waits.len() >= 6, "{waits:?}");
+        for w in &waits {
+            assert!(
+                *w >= Duration::from_millis(8) && *w < Duration::from_millis(16),
+                "{w:?}"
+            );
+        }
     }
 
     /// Four threads editing one row at once (a heavier load than the host ever makes: one
