@@ -440,7 +440,7 @@ pub(crate) async fn process_gone(pid: i32) -> bool {
 /// `kill -KILL -<pgid>`. The crate forbids `unsafe`, so the shell's `kill` does it. No `--`:
 /// dash (Debian and Ubuntu's `/bin/sh`) reads it as a pid and refuses, and the error goes to
 /// /dev/null, so the group would survive without a word.
-fn kill_group(pgid: u32) {
+pub(crate) fn kill_group(pgid: u32) {
     let _ = std::process::Command::new("/bin/sh")
         .args(["-c", "kill -KILL \"-$0\" 2>/dev/null", &pgid.to_string()])
         .stdin(Stdio::null())

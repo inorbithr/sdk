@@ -446,7 +446,7 @@ pub enum Command {
     /// JSON lines. Nothing is changed unless you pass `--allow-edits` (files only); shell
     /// commands are never allowed. iohr never stores the question or the answer. Defaults
     /// come from `[ask]` in config.toml; the flags win for one call.
-    Ask(AskArgs),
+    Ask(Box<AskArgs>),
     /// Shell integration: `? question` at your prompt asks your AI agent.
     ///
     /// `iohr shell hook zsh` prints what makes `? question` at your prompt ask your own AI
@@ -1479,6 +1479,21 @@ pub struct AskArgs {
         value_delimiter = '\u{1f}'
     )]
     pub undo: Vec<String>,
+    /// With `--menu`: the question that was asked, so Attach output can put it back on the
+    /// prompt to ask again with the output.
+    #[arg(long, value_name = "QUESTION", requires = "menu")]
+    pub asked: Option<String>,
+    /// With `--menu`: the last command, when it failed. With `--failed-exit` and `--asked`
+    /// (a failure question) the menu offers to re-run it with its output captured, or to
+    /// paste the output.
+    #[arg(long, value_name = "COMMAND", requires = "menu")]
+    pub failed_command: Option<String>,
+    /// With `--menu`: the exit status of `--failed-command`.
+    #[arg(long, value_name = "N", allow_hyphen_values = true, requires = "menu")]
+    pub failed_exit: Option<i32>,
+    /// With `--menu`: the file (private, made by the hook) the attached output is written to.
+    #[arg(long, value_name = "FILE", requires = "menu")]
+    pub output_to: Option<std::path::PathBuf>,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,
@@ -1822,9 +1837,20 @@ pub struct HeadlessArgs {
         conflicts_with = "interactive"
     )]
     pub exit_code: Option<i32>,
-    /// A file with that command's output; only its last 200 lines or 8 KiB are used.
+    /// A file with that command's output; only its last 200 lines or 8 KiB are used, and
+    /// secrets in it are redacted first. Without it the card says the output was not sent.
     #[arg(long, value_name = "FILE", conflicts_with = "interactive")]
     pub output_file: Option<std::path::PathBuf>,
+    /// Where `--output-file` came from, for the card's footer and `--json`: `attached` (a
+    /// file you gave, the default), `captured` (a re-run you allowed) or `pasted`.
+    #[arg(
+        long,
+        value_name = "HOW",
+        value_parser = ["attached", "captured", "pasted"],
+        requires = "output_file",
+        conflicts_with = "interactive"
+    )]
+    pub output_kind: Option<String>,
     /// An earlier question this one follows up (with `--prior-answer`).
     #[arg(
         long,

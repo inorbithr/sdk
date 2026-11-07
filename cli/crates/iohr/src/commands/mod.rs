@@ -108,7 +108,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
-        Command::Ask(args) => ask::run(g, &env, args, out).await,
+        Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
         Command::Permissions(cmd) => permissions::run(g, cmd, out),
