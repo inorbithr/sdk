@@ -5,11 +5,9 @@
 //! permissions.log`, one JSON line per decision: when, which tool, which rule, the outcome and
 //! who. It never holds what a command printed or what a file said.
 
-#[cfg(unix)]
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
 use serde::Serialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
@@ -20,7 +18,6 @@ use super::{rule::Rule, secrets};
 pub(crate) const FILE: &str = "permissions.toml";
 /// The project's folder and the audit log in it.
 const DIR: &str = ".inorbit";
-#[cfg(unix)]
 const LOG: &str = "permissions.log";
 
 /// Which file a rule is in.
@@ -78,7 +75,6 @@ impl Files {
         }
     }
 
-    #[cfg(unix)]
     pub(crate) fn log_path(&self) -> PathBuf {
         self.root.join(DIR).join(LOG)
     }
@@ -268,7 +264,6 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
 }
 
 /// One line of the audit log.
-#[cfg(unix)]
 #[derive(Debug, Serialize)]
 struct Line<'a> {
     time: String,
@@ -276,6 +271,13 @@ struct Line<'a> {
     rule: &'a str,
     outcome: &'a str,
     who: String,
+    /// For a folder granted: where the yes came from (`flag`, `env`, `config`, `trust` or
+    /// `card`). Absent on a tool decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<&'a str>,
+    /// For a folder granted: its path, never anything inside it. Absent on a tool decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
 }
 
 /// How a decision came about.
@@ -323,18 +325,58 @@ pub(crate) fn audit(files: &Files, tool: &str, rule: &str, outcome: Outcome) -> 
     } else {
         rule
     };
-    let who = std::env::var("USER")
+    append(
+        files,
+        &Line {
+            time: crate::front::now(),
+            tool,
+            rule,
+            outcome: outcome.as_str(),
+            who: who(),
+            source: None,
+            path: None,
+        },
+    )
+}
+
+/// Records that a folder was given to a run to read: one line with the `source` of the yes
+/// (`flag`, `env`, `config`, `trust` or `card`) and the folder's `path`, never anything in it.
+/// A failure to write is returned for the caller to mention, never the ask's failure.
+///
+/// # Errors
+///
+/// The log could not be written.
+pub(crate) fn audit_folder(files: &Files, source: &str, path: &Path) -> Result<(), String> {
+    let path = path.display().to_string();
+    let path: String = path
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    append(
+        files,
+        &Line {
+            time: crate::front::now(),
+            tool: "folder",
+            rule: "folder granted",
+            outcome: "allowed",
+            who: who(),
+            source: Some(source),
+            path: Some(&path),
+        },
+    )
+}
+
+/// Who the line says did it: the login name, or `local`.
+fn who() -> String {
+    std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .ok()
         .filter(|u| !u.is_empty() && u.chars().all(|c| c.is_ascii_graphic()))
-        .unwrap_or_else(|| "local".to_owned());
-    let line = Line {
-        time: crate::front::now(),
-        tool,
-        rule,
-        outcome: outcome.as_str(),
-        who,
-    };
+        .unwrap_or_else(|| "local".to_owned())
+}
+
+/// Appends `line` to the project's `permissions.log`.
+fn append(files: &Files, line: &Line<'_>) -> Result<(), String> {
     let path = files.log_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.kind().to_string())?;
@@ -344,7 +386,7 @@ pub(crate) fn audit(files: &Files, tool: &str, rule: &str, outcome: Outcome) -> 
         .append(true)
         .open(&path)
         .map_err(|e| e.kind().to_string())?;
-    let mut text = serde_json::to_string(&line).map_err(|e| e.to_string())?;
+    let mut text = serde_json::to_string(line).map_err(|e| e.to_string())?;
     text.push('\n');
     f.write_all(text.as_bytes())
         .map_err(|e| e.kind().to_string())
@@ -487,5 +529,27 @@ mod tests {
         assert!(lines[0]["time"].as_str().unwrap().contains('T'));
         assert!(lines[0]["who"].as_str().is_some());
         assert!(!text.contains("sk-ant"), "{text}");
+    }
+
+    #[test]
+    fn a_granted_folder_is_one_line_with_its_source_and_path_and_nothing_else() {
+        let d = tempfile::tempdir().unwrap();
+        let f = files(d.path());
+        audit_folder(&f, "flag", Path::new("/srv/docs")).unwrap();
+        audit_folder(&f, "trust", Path::new("/srv/we\nird")).unwrap();
+        let text = std::fs::read_to_string(f.log_path()).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        assert_eq!(lines[0]["source"], "flag");
+        assert_eq!(lines[0]["path"], "/srv/docs");
+        assert_eq!(lines[0]["outcome"], "allowed");
+        assert_eq!(lines[1]["source"], "trust");
+        assert_eq!(
+            lines[1]["path"], "/srv/we ird",
+            "a control character is a space"
+        );
     }
 }
