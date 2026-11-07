@@ -29,12 +29,15 @@ use crate::permissions::engine::Place;
 #[cfg(unix)]
 use crate::permissions::store::{self, Files};
 use crate::permissions::{Grant, Mode, Settled, Words, trust};
+use crate::roles::runtime;
 use crate::steps::{self, Step};
 use crate::ui::Ui;
 use crate::{Env, prompt};
 
 /// How an editing run ended, for the closing lines.
 struct Done<'a> {
+    /// The Role the run worked in (`--role`), as `--json` names it.
+    role: Option<serde_json::Value>,
     via: Via,
     agent: Agent,
     code: i32,
@@ -50,13 +53,16 @@ fn finish(d: &Done<'_>, out: Out) {
     let duration_ms = u64::try_from(d.started.elapsed().as_millis()).unwrap_or(u64::MAX);
     if out.json {
         // One more line in the stream, so a program reading the lines knows how it ended.
-        let line = serde_json::json!({
+        let mut line = serde_json::json!({
             "type": "iohr_summary",
             "via": via.name(),
             "agent": agent.name(),
             "exit_code": code,
             "duration_ms": duration_ms,
         });
+        if let (Some(role), Some(o)) = (&d.role, line.as_object_mut()) {
+            o.insert("role".to_owned(), role.clone());
+        }
         Out::raw(format!("{line}\n").as_bytes());
     }
     if let Some(f) = &d.failure {
@@ -88,6 +94,46 @@ fn built(via: Via, agent: Agent, args: &AskArgs) -> Result<(), Error> {
     Ok(())
 }
 
+/// The model of the run: the flag, then `[ask] model`, then the Role's, then the agent's own.
+fn model_of(
+    agent: Agent,
+    args: &AskArgs,
+    configured: Option<&str>,
+    role: Option<&runtime::Applied>,
+) -> Result<Option<String>, Error> {
+    ask::choose_model(
+        agent,
+        ask::ModelChoice {
+            flag: args.model.as_deref(),
+            configured,
+            role: role.and_then(|r| r.model.as_deref()),
+            default: None,
+        },
+    )
+    .map_err(Error::Usage)
+}
+
+/// The Role the run works in (`--role`, RFC 0211): the project's pack, the account's, or the
+/// built-in one. Its model comes after the flag and `[ask] model`; its text joins the prompt.
+async fn role_of(g: &Global, env: &Env, args: &AskArgs) -> Result<Option<runtime::Applied>, Error> {
+    let Some(name) = args.role.as_deref() else {
+        return Ok(None);
+    };
+    let root = crate::memory::find_root(&role_cwd(&args.headless));
+    runtime::resolve(
+        g,
+        env,
+        runtime::Lookup {
+            name,
+            job: args.job.as_deref(),
+            root: root.as_deref(),
+            online: !args.dry_run,
+        },
+    )
+    .await
+    .map(Some)
+}
+
 pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
         return menu(g, &args);
@@ -97,8 +143,8 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     let via = ask::choose_via(args.via.as_deref(), cfg.via.as_deref()).map_err(Error::Usage)?;
     let agent =
         ask::choose_agent(args.agent.as_deref(), cfg.agent.as_deref()).map_err(Error::Usage)?;
-    let model = ask::choose_model(agent, args.model.as_deref(), cfg.model.as_deref())
-        .map_err(Error::Usage)?;
+    let role = role_of(g, env, &args).await?;
+    let model = model_of(agent, &args, cfg.model.as_deref(), role.as_ref())?;
     let thinking = ask::choose_thinking(args.thinking.as_deref(), cfg.thinking.as_deref())
         .map_err(Error::Usage)?;
     let named = words(&args, &cfg);
@@ -115,16 +161,19 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     // goes on from it: the note leads the prompt.
     let (note_root, question) =
         crate::handoff::continue_from(allow_edits && !args.dry_run, question);
+    let role_text = role.as_ref().map(runtime::Applied::system_text);
+    let role_json = role.as_ref().map(runtime::Applied::json);
     let command_line = ask::argv(
         agent,
         model.as_deref(),
         (allow_edits, plan),
         &[],
         None,
+        role_text.as_deref(),
         &question,
     );
     if args.dry_run {
-        dry_run(via, agent, bin.as_deref(), &command_line, out);
+        dry_run(via, agent, bin.as_deref(), &command_line, role_json, out);
         return Ok(());
     }
     let Some(bin) = bin else {
@@ -146,6 +195,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
                 menu_key,
                 dir: &ctx.dir,
                 modes: named,
+                role: role.as_ref(),
             },
             &question,
             &args.headless,
@@ -157,15 +207,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     Out::note(&ask::label(agent));
     let started = Instant::now();
     let ui = Ui::detect(out.json);
-    let look = Look {
-        fancy: ui.fancy(),
-        thinking: Some(thinking),
-        cwd: std::env::current_dir()
-            .ok()
-            .map(|d| d.display().to_string()),
-        model,
-        ..Look::default()
-    };
+    let look = look_of(ui, thinking, model);
     let Ended { code, failure, .. } = stream(Run {
         agent,
         bin: &bin,
@@ -180,6 +222,7 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
     .await?;
     finish(
         &Done {
+            role: role_json,
             via,
             agent,
             code,
@@ -190,6 +233,19 @@ pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Resul
         out,
     );
     ended(code)
+}
+
+/// How the plain run draws the agent's stream: in this folder, with this model.
+fn look_of(ui: Ui, thinking: stream::Thinking, model: Option<String>) -> Look {
+    Look {
+        fancy: ui.fancy(),
+        thinking: Some(thinking),
+        cwd: std::env::current_dir()
+            .ok()
+            .map(|d| d.display().to_string()),
+        model,
+        ..Look::default()
+    }
 }
 
 /// The agent's exit code as this command's result.
@@ -267,17 +323,28 @@ fn menu(g: &Global, args: &AskArgs) -> Result<(), Error> {
 }
 
 /// `--dry-run`: the exact command line, one object under `--json`; nothing is started.
-fn dry_run(via: Via, agent: Agent, bin: Option<&Path>, command_line: &[String], out: Out) {
+fn dry_run(
+    via: Via,
+    agent: Agent,
+    bin: Option<&Path>,
+    command_line: &[String],
+    role: Option<serde_json::Value>,
+    out: Out,
+) {
     let program = bin.map_or_else(|| agent.name().to_owned(), |b| b.display().to_string());
     if out.json {
-        Out::print_json(&serde_json::json!({
+        let mut v = serde_json::json!({
             "dry_run": true,
             "via": via.name(),
             "agent": agent.name(),
             "found": bin.is_some(),
             "program": program,
             "args": command_line,
-        }));
+        });
+        if let (Some(role), Some(o)) = (role, v.as_object_mut()) {
+            o.insert("role".to_owned(), role);
+        }
+        Out::print_json(&v);
     } else {
         Out::raw(format!("{}\n", ask::shell_line(&program, command_line)).as_bytes());
     }
@@ -440,6 +507,14 @@ fn headless_wanted(h: &HeadlessArgs) -> bool {
 /// What the shell hook told this call, as the context the prompt is built from, and the
 /// project the folder is in (where an answer to a question is kept), when it is in one. The
 /// git facts and the project's notes are iohr's own reads, never the model's.
+/// The folder a run starts in: `--cwd`, else the current one.
+fn role_cwd(h: &HeadlessArgs) -> std::path::PathBuf {
+    h.cwd.as_deref().map_or_else(
+        || std::env::current_dir().unwrap_or_default(),
+        std::path::PathBuf::from,
+    )
+}
+
 fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>), Error> {
     let cwd = match &h.cwd {
         Some(c) => c.clone(),
@@ -477,6 +552,7 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
             },
             prior: h.prior_question.clone().zip(h.prior_answer.clone()),
             refresh: false,
+            role: String::new(),
         };
     Ok((ctx, root))
 }
@@ -493,6 +569,8 @@ struct Chosen<'a> {
     /// The flag layer (`--mode`, `--permissions`) and `[ask]`, as written; [`Mode::choose`]
     /// settles them in [`headless`].
     modes: (Words<'a>, Words<'a>),
+    /// The Role the run works in (`--role`).
+    role: Option<&'a runtime::Applied>,
 }
 
 /// One capped `claude -p` run (see [`headless`]), shown one way (RFC 0203.1): `--json` is the
@@ -510,6 +588,9 @@ async fn headless(
         bin, agent, model, ..
     } = *chosen;
     let (mut ctx, root) = context_of(h)?;
+    if let Some(r) = chosen.role {
+        ctx.role = r.system_text();
+    }
     let terminal = !out.json && prompt::interactive();
     let mode = chosen_mode(chosen, terminal)?;
     let pending = grant_access(
@@ -994,6 +1075,7 @@ fn print_answer(
             permissions: settled_of(session, 0).iter().map(Settled::json).collect(),
             access: pending.map(access::Request::shown),
             next: steps.iter().map(Step::shown).collect(),
+            role: chosen.role.map(runtime::Applied::json),
             context: ctx.sent(question),
         });
         return;
@@ -1454,6 +1536,7 @@ mod tests {
             hints: hints::Mode::default(),
             menu_key: MenuKey::Down,
             dir,
+            role: None,
             modes: (Words::default(), Words::default()),
         }
     }

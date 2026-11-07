@@ -1517,6 +1517,13 @@ pub struct AskArgs {
     /// only when you name one.
     #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
     pub model: Option<String>,
+    /// Work in a Role: its text joins the prompt and its model is used when you name none
+    /// (project `atlas/roles/`, then your account, then the built-in catalogue).
+    #[arg(long, value_name = "NAME")]
+    pub role: Option<String>,
+    /// With `--role`: the job whose brief the Role compiles (its core, then matching recall).
+    #[arg(long, value_name = "ID", requires = "role")]
+    pub job: Option<String>,
     /// How Io works: `manual` asks before each command (default at a terminal), `plan` reads
     /// and proposes a plan and changes nothing (Claude's plan mode; Codex's read-only
     /// sandbox), `auto` runs commands no rule decides without asking (a deny rule and the
@@ -1952,6 +1959,11 @@ pub struct InitArgs {
     /// the small fast tier `iohr ask` uses). With Codex it is passed on only when named.
     #[arg(long, value_name = "MODEL", env = "IOHR_INIT_AGENT_MODEL")]
     pub agent_model: Option<String>,
+    /// Build in a Role: its text joins the agent's prompt and its model is used when you
+    /// name none (the new project's `atlas/roles/`, then your account, then the built-in
+    /// catalogue).
+    #[arg(long, value_name = "NAME")]
+    pub role: Option<String>,
     /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
     /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
     /// agent is not started (its command and prompt are printed). Every step shows as
