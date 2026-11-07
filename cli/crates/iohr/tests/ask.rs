@@ -331,6 +331,86 @@ fn a_missing_agent_names_the_install_step_and_starts_nothing() {
     assert!(!t.contains("the-secret-question"), "{t}");
 }
 
+// PRD 0197: `--mode` and `[ask] mode` reach the agent. Plan is Claude's plan mode with the
+// shell and the secret reads closed, and Codex's read-only sandbox (it has no plan mode) even
+// beside `--allow-edits`; auto is what `--allow-edits` was on this path (no broker, no shell).
+#[test]
+fn the_mode_reaches_claude_and_codex_and_plan_beats_allow_edits() {
+    let r = Rig::new();
+    fake_agent(&r.bin(), "claude");
+    fake_agent(&r.bin(), "codex");
+    assert!(
+        r.run(&["ask", "--mode", "plan", "--allow-edits", "q"], "0")
+            .status
+            .success()
+    );
+    let a = r.args("claude");
+    assert!(has_pair(&a, "--permission-mode", "plan"), "{a:?}");
+    assert!(!a.iter().any(|x| x == "acceptEdits"), "{a:?}");
+    assert!(
+        a.iter().any(|x| x == "Bash") && a.iter().any(|x| x == "--disallowedTools"),
+        "{a:?}"
+    );
+    assert!(r.run(&["ask", "--mode", "auto", "q"], "0").status.success());
+    assert!(has_pair(
+        &r.args("claude"),
+        "--permission-mode",
+        "acceptEdits"
+    ));
+    // Manual is the default: nothing added.
+    assert!(
+        r.run(&["ask", "--mode", "manual", "q"], "0")
+            .status
+            .success()
+    );
+    assert!(!r.args("claude").iter().any(|x| x == "--permission-mode"));
+    // The config says it when no flag does; the flag beats the config.
+    r.config("[ask]\nmode = \"plan\"\n");
+    assert!(r.run(&["ask", "q"], "0").status.success());
+    assert!(has_pair(&r.args("claude"), "--permission-mode", "plan"));
+    assert!(
+        r.run(&["ask", "--mode", "manual", "q"], "0")
+            .status
+            .success()
+    );
+    assert!(!r.args("claude").iter().any(|x| x == "--permission-mode"));
+    // Codex has no plan mode: the read-only sandbox, also beside `--allow-edits`.
+    let out = r.run(
+        &[
+            "ask",
+            "--agent",
+            "codex",
+            "--mode",
+            "plan",
+            "--allow-edits",
+            "q",
+        ],
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(has_pair(&r.args("codex"), "--sandbox", "read-only"));
+}
+
+#[test]
+fn a_bad_mode_is_a_usage_error_that_names_the_three() {
+    let r = Rig::new();
+    fake_agent(&r.bin(), "claude");
+    let out = r.run(&["ask", "--mode", "wild", "q"], "0");
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(
+        text(&out).contains("manual, plan or auto"),
+        "{}",
+        text(&out)
+    );
+    assert!(r.saw("claude.args").is_none(), "nothing may start");
+    let out = r.run(&["ask", "--dry-run", "--mode", "plan", "q"], "0");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("--permission-mode plan"),
+        "{}",
+        text(&out)
+    );
+}
+
 #[test]
 fn codex_runs_exec_json_read_only_and_its_events_draw_like_claudes() {
     let r = Rig::new();
