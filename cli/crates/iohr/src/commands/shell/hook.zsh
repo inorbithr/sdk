@@ -11,6 +11,13 @@
 # prompt line for you to read and run with Enter, Copy, Follow up, Explain, Open. Nothing
 # in the menu runs a command.
 #
+# The mode of the answers (PRD 0197): manual (ask before each command), plan (read only, a plan
+# and no command) or auto (run what your rules do not forbid, without asking). Shift+Tab on a
+# `?` line (or a bare `?`) goes to the next one and says which; on any other line it does what
+# it did before. The mode starts as `[ask] mode` / IOHR_ASK_MODE say, manual when they
+# say nothing (empty for the older `deny` and `rules`, which stay the config's), and lasts for
+# this shell.
+#
 # The right prompt shows "3 asks" in grey when asks wait for you (`iohr asks count`). The
 # prompt only reads the number from ~/.inorbit/term/asks-count: it never waits for the
 # network. When that file is more than 30 seconds old a background `asks count --cache`
@@ -22,6 +29,12 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   # The keys that open the menu, from `[ask] menu_key` (none when it is off).
   typeset -ga _iohr_card_keys=(__IOHR_MENU_KEYS__)
   typeset -g _iohr_ask_re='^[[:space:]]*\?\??[[:space:]]+[^[:space:]]'
+  # The mode of the answers, set when the hook is printed (from `[ask] mode` and the
+  # environment), then one word of the ring below, passed to every ask as `--mode`.
+  typeset -g _iohr_ask_mode='__IOHR_ASK_MODE__'
+  typeset -ga _iohr_ask_ring=(__IOHR_MODES__)
+  typeset -gA _iohr_mode_prev
+  typeset -g _iohr_ask_mode_re='^[[:space:]]*\?\??[[:space:]]*$'
 
   # The widget: a question line is kept, the shell is handed an empty line, and the answer
   # is printed by the precmd below, before the next prompt (a widget cannot print safely).
@@ -54,6 +67,22 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     zle reset-prompt
   }
 
+  # Shift+Tab: the next mode of the ring, on a `?` line only. Everywhere else the key keeps
+  # the widget it had (completion backwards, usually).
+  _iohr_ask_cycle() {
+    if [[ ${INORBIT_ASK-} == 0 || $BUFFER == *$'\n'* ]] ||
+       ! [[ $BUFFER =~ $_iohr_ask_re || $BUFFER =~ $_iohr_ask_mode_re ]]; then
+      zle ${_iohr_mode_prev[$KEYMAP]:-reverse-menu-complete}
+      return
+    fi
+    local i next=1
+    for (( i = 1; i <= ${#_iohr_ask_ring}; i++ )); do
+      [[ ${_iohr_ask_ring[i]} == $_iohr_ask_mode ]] && next=$(( i % ${#_iohr_ask_ring} + 1 ))
+    done
+    _iohr_ask_mode=${_iohr_ask_ring[next]}
+    zle -M "ask mode: $_iohr_ask_mode (shift+tab for the next)"
+  }
+
   _iohr_ask_precmd() {
     local rc=$?
     [[ -n $_iohr_ask_q ]] || return 0
@@ -79,6 +108,7 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     fi
     # __IOHR_BIN__ is the name of the binary that printed this hook (iohr, iohr-preview).
     local -a a=(command __IOHR_BIN__ ask --headless --hook --cwd "$PWD")
+    [[ -n $_iohr_ask_mode ]] && a+=(--mode "$_iohr_ask_mode")
     [[ -n $last ]] && a+=(--last-command "${last[1,1024]}" --exit-code "$rc")
     (( follow )) && [[ -n $_iohr_ask_pq ]] && a+=(--prior-question "$_iohr_ask_pq" --prior-answer "$_iohr_ask_pa")
     local rec rs=$'\x1e' rest
@@ -161,5 +191,18 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
       done
     done
     unset _iohr_km _iohr_seq _iohr_cur
+  fi
+  # The mode key (Shift+Tab, `^[[Z`), once per keymap, with the same guard.
+  if (( ! ${+widgets[_iohr_ask_cycle]} )); then
+    zle -N _iohr_ask_cycle
+    local _iohr_km _iohr_cur
+    for _iohr_km in emacs viins; do
+      _iohr_cur=$(bindkey -M $_iohr_km -- '^[[Z' 2>/dev/null)
+      _iohr_cur=${_iohr_cur##* }
+      [[ -n $_iohr_cur && $_iohr_cur != undefined-key && $_iohr_cur != _iohr_ask_cycle ]] &&
+        _iohr_mode_prev[$_iohr_km]=$_iohr_cur
+      bindkey -M $_iohr_km -- '^[[Z' _iohr_ask_cycle
+    done
+    unset _iohr_km _iohr_cur
   fi
 fi

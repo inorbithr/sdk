@@ -5,6 +5,7 @@ use crate::cli::{Global, HookShell, ShellCommand};
 use crate::context::Ctx;
 use crate::error::Error;
 use crate::output::Out;
+use crate::permissions::{Mode, Words};
 
 /// The zsh hook. A file of its own, so `zsh -n` can check it and the tests can run it.
 pub(crate) const ZSH_HOOK: &str = include_str!("shell/hook.zsh");
@@ -47,16 +48,40 @@ fn key_words(key: MenuKey) -> String {
         .join(" ")
 }
 
+/// The mode the hook starts in: what `IOHR_ASK_MODE` / `IOHR_ASK_PERMISSIONS` and `[ask]` name,
+/// when it is one of the three of the switch; empty otherwise (a `deny` or `rules` choice stays
+/// the config's, and the first Shift+Tab goes to the first mode of the ring). A bad word is an
+/// error here as it is in `iohr ask`.
+fn start_mode(ctx: &Ctx) -> Result<&'static str, Error> {
+    let env = |k: &str| std::env::var(k).ok();
+    let (mode, perms) = (env("IOHR_ASK_MODE"), env("IOHR_ASK_PERMISSIONS"));
+    let flag = Words {
+        mode: mode.as_deref(),
+        permissions: perms.as_deref(),
+    };
+    let ask = &ctx.config.ask;
+    let config = Words {
+        mode: ask.mode.as_deref(),
+        permissions: ask.permissions.as_deref(),
+    };
+    Ok(Mode::choose(flag, config, true)
+        .map_err(Error::Usage)?
+        .shown()
+        .unwrap_or(""))
+}
+
 pub(crate) fn run(g: &Global, cmd: &ShellCommand) -> Result<(), Error> {
     let ShellCommand::Hook { shell } = cmd;
     match *shell {
         HookShell::Zsh => {
             // Text that is evaluated: printed as it is, also under `--json`. It calls back the
             // binary that printed it, so `iohr-preview shell hook zsh` asks `iohr-preview`.
-            let key = MenuKey::parse(Ctx::load(g)?.config.ask.menu_key.as_deref())
-                .map_err(Error::Usage)?;
+            let ctx = Ctx::load(g)?;
+            let key = MenuKey::parse(ctx.config.ask.menu_key.as_deref()).map_err(Error::Usage)?;
             let hook = ZSH_HOOK
                 .replace("__IOHR_BIN__", &running_bin())
+                .replace("__IOHR_ASK_MODE__", start_mode(&ctx)?)
+                .replace("__IOHR_MODES__", &Mode::ring())
                 .replace("__IOHR_MENU_KEYS__", &key_words(key));
             Out::raw(hook.as_bytes());
             Ok(())
