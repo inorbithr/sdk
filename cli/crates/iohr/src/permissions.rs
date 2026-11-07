@@ -35,6 +35,7 @@ pub(crate) mod secrets;
 pub(crate) mod server;
 pub(crate) mod shell;
 pub(crate) mod store;
+pub(crate) mod trust;
 /// Windows has no unix sockets: the live ask is not offered, and `iohr ask` stays read-only.
 /// No [`Session`] is ever made here (`commands/ask.rs` starts none off unix), so the type is
 /// empty: the callers that read a session compile, and nothing else of the broker exists.
