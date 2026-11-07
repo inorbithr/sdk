@@ -697,8 +697,15 @@ refused with a message), keeps it under `standing` in `trusted.toml` and puts th
 Only Add folder writes `standing`; those folders are read on every later ask in a folder Io may read, each checked
 again and each written to `permissions.log`. Allow and Always on a card keep a yes under `folders` for the question
 that names that folder only. Take either back by removing it from `trusted.toml`. The key in `menu_key` opens the menu (`iohr ask
---menu`, letters `r c f e o u d`, Esc leaves it; the hook passes the rules to `--undo`). Run puts the command on the prompt line and
-nothing else: Enter still runs it, and iohr never does. Copy sends it to the clipboard
+--menu`, letters `r c f e o u d`, Esc leaves it; the hook passes the rules to `--undo`). Run executes the command at once, with no second Enter: `iohr`
+prints it with a `run` marker (after a 0x1e character) and the hook hands it to the shell's accept-line, so it runs as a line
+you typed (`iohr` itself never runs it). First the permission rules judge it: a command a deny rule matches is never run
+(it says which rule), nothing runs while the rule file cannot be read, and a command that names a risk (`sudo`, `rm -rf`, a
+download piped to a shell, a forced git change) or that iohr cannot read against the rules (a substitution, a redirect) and no
+allow rule covers asks "Run it?" first (it starts on No). A plain command just runs. A command that still holds a
+placeholder (`path/to/...`, `<...>`, `your-...`, `YOUR_...`, or a folder that does not exist for `cd`, `ls`, `cat`
+and the like) gets Copy only, with no Run. Follow up puts a bare `?? ` on the line to finish; the other choices
+(a step, Explain, Allow) are asked at once. Copy sends it to the clipboard
 through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside
 tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener and refuses an
 executable, a file that runs when opened, and a path outside the folder. Undo removes the rule

@@ -1138,8 +1138,8 @@ fn with_no_color_the_action_bar_is_plain_numbered_lines() {
 }
 
 // The widget on a real zsh: the key opens the menu under a live answer on an empty line, the
-// line it prints lands in the buffer and nothing runs until Enter; with text on the line, or
-// with no answer yet, the key does what it did.
+// line it prints (no `run` marker) lands in the buffer and nothing runs until Enter; with text on
+// the line, or with no answer yet, the key does what it did.
 #[test]
 fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
     if !have("zsh") || !have("python3") {
