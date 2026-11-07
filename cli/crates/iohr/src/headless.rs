@@ -123,6 +123,9 @@ pub(crate) struct Context {
     /// question, `--read`, `IOHR_ASK_READ`, `[ask] read`, the trust store or the card's Add
     /// folder), canonical and without repeats: the file tools may open files inside them too.
     pub(crate) also: Vec<std::path::PathBuf>,
+    /// Every folder the run was given and where the yes came from, in the order given: the
+    /// audit line, `--json` and the label name them. Only [`crate::commands::ask`] adds to it.
+    pub(crate) granted: Vec<crate::access::Grant>,
     pub(crate) command: String,
     pub(crate) exit_code: Option<i32>,
     pub(crate) output: String,
@@ -183,6 +186,9 @@ pub(crate) struct Answer {
 pub(crate) struct Sent {
     /// The folder's path was sent.
     pub(crate) folder: String,
+    /// The folders besides it the run may read, each with where the yes came from (`flag`,
+    /// `env`, `config`, `trust` or `card`); their paths were sent, never their contents.
+    pub(crate) folders: Vec<SentFolder>,
     /// The last command was sent (its text is not repeated here).
     pub(crate) command: bool,
     /// Its exit status, when it was sent.
@@ -196,12 +202,27 @@ pub(crate) struct Sent {
     pub(crate) can_attach: bool,
 }
 
+/// One folder the run was given, as `--json` shows it.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct SentFolder {
+    pub(crate) path: String,
+    pub(crate) source: &'static str,
+}
+
 impl Context {
     /// [`Sent`] for `question`.
     pub(crate) fn sent(&self, question: &str) -> Sent {
         let output = tail(self.output.trim_end(), OUTPUT_MAX, OUTPUT_LINES);
         Sent {
             folder: self.cwd.clone(),
+            folders: self
+                .granted
+                .iter()
+                .map(|g| SentFolder {
+                    path: g.folder.display().to_string(),
+                    source: g.source.name(),
+                })
+                .collect(),
             command: !self.command.is_empty(),
             exit_code: self.exit_code,
             output: if output.is_empty() {
@@ -358,10 +379,31 @@ pub(crate) fn read_line(ctx: &Context, mode: Mode, can_run: bool) -> String {
     if ctx.reads {
         what.push("the files in it Io chose to open (secrets blocked)".into());
     }
+    let named = ctx
+        .granted
+        .iter()
+        .filter(|g| ctx.also.contains(&g.folder))
+        .map(|g| {
+            let path: String = g
+                .folder
+                .display()
+                .to_string()
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect();
+            format!("{path} via {}", g.source.name())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let named = if named.is_empty() {
+        String::new()
+    } else {
+        format!(" ({named})")
+    };
     match ctx.also.len() {
         0 => {}
-        1 => what.push("the path of the folder you allowed and the files in it Io chose to open (secrets blocked)".into()),
-        _ => what.push("the paths of the folders you allowed and the files in them Io chose to open (secrets blocked)".into()),
+        1 => what.push(format!("the path of the folder you allowed{named} and the files in it Io chose to open (secrets blocked)")),
+        _ => what.push(format!("the paths of the folders you allowed{named} and the files in them Io chose to open (secrets blocked)")),
     }
     if !ctx.git.is_empty() {
         what.push("the git branch, last commits and change counts".into());
@@ -410,25 +452,35 @@ pub(crate) enum Blocked {
     Root,
     /// The home folder: everything the person has.
     Home,
+    /// A folder above the home folder or above (or inside) a secret place such as `~/.config`
+    /// or `~/Library` ([`crate::access::broad_or_secret_bearing`]): no yes opens it whole.
+    Broad,
     /// Not a folder this program can list: a yes cannot fix that.
     Unreadable,
 }
 
 /// What stops the run from opening files in `dir`, or none when it may: a folder that can be
-/// listed, and neither the filesystem root nor the home folder (too broad). Root and home are
-/// the two a person's yes can open ([`crate::access`]).
+/// listed and is not too broad ([`crate::access::broad_or_secret_bearing`], the one check:
+/// the root, the home folder, what is above it and what holds secret places). Root and home
+/// are the two a person's yes can open; a broad folder no yes opens.
 #[must_use]
 pub(crate) fn blocked(dir: &std::path::Path, home: Option<&std::path::Path>) -> Option<Blocked> {
-    let Ok(real) = dir.canonicalize() else {
+    let Some(real) = crate::access::canonical(dir) else {
         return Some(Blocked::Unreadable);
     };
     if !real.is_dir() || std::fs::read_dir(&real).is_err() {
         return Some(Blocked::Unreadable);
     }
-    if real.parent().is_none() {
-        return Some(Blocked::Root);
+    if !crate::access::broad_or_secret_bearing(&real, home) {
+        return None;
     }
-    is_home(&real, home).then_some(Blocked::Home)
+    Some(if real.parent().is_none() {
+        Blocked::Root
+    } else if is_home(&real, home) {
+        Blocked::Home
+    } else {
+        Blocked::Broad
+    })
 }
 
 /// Whether the run may open files in `dir` ([`blocked`] says why not).
@@ -442,7 +494,10 @@ pub(crate) fn can_read(dir: &std::path::Path, home: Option<&std::path::Path>) ->
 /// allows, so `? list this folder` can run `ls` (PRD 0197).
 #[must_use]
 pub(crate) fn is_home(dir: &std::path::Path, home: Option<&std::path::Path>) -> bool {
-    let (Ok(real), Some(h)) = (dir.canonicalize(), home.and_then(|h| h.canonicalize().ok())) else {
+    let (Some(real), Some(h)) = (
+        crate::access::canonical(dir),
+        home.and_then(crate::access::canonical),
+    ) else {
         return false;
     };
     real == h

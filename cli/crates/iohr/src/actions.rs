@@ -457,7 +457,7 @@ pub(crate) fn menu(
             }
             None
         }
-        ("allow", ..) => allow(next.allow, asked, user_dir),
+        ("allow", ..) => allow(next.allow, asked, user_dir, false),
         ("addfolder", ..) => add_folder(cwd, asked, user_dir),
         (step, ..) if step.starts_with("step") => step[4..]
             .parse::<usize>()
@@ -483,13 +483,24 @@ pub(crate) fn menu(
 }
 
 /// Allow: keeps the yes for `folder` (the same `trusted.toml` the terminal card writes) and
-/// returns the line that asks the question again; nothing when it could not be kept.
-fn allow(folder: Option<&Path>, asked: &str, user_dir: &Path) -> Option<String> {
+/// returns the line that asks the question again; nothing when it could not be kept. The yes
+/// is for that question's folder only (`standing` is false); Add folder keeps it for every ask.
+fn allow(folder: Option<&Path>, asked: &str, user_dir: &Path, standing: bool) -> Option<String> {
     let folder = folder?;
-    match trust::remember(user_dir, folder) {
+    let kept = if standing {
+        trust::add_standing(user_dir, folder)
+    } else {
+        trust::remember(user_dir, folder)
+    };
+    match kept {
         Ok(file) => Out::note(&format!(
-            "Io may read {} from now on, secrets stay blocked; take it back by removing it from {}",
+            "Io may read {} {}, secrets stay blocked; take it back by removing it from {}",
             plain(&folder.display().to_string()),
+            if standing {
+                "in every ask from now on"
+            } else {
+                "when you ask about it from now on"
+            },
             file.display()
         )),
         Err(why) => {
@@ -526,7 +537,7 @@ fn add_folder(cwd: &Path, asked: &str, user_dir: &Path) -> Option<String> {
             return None;
         }
     };
-    allow(Some(&real), asked, user_dir)
+    allow(Some(&real), asked, user_dir, true)
 }
 
 /// The folder `typed` names, as Io may read it, or why not: the same check
@@ -537,9 +548,7 @@ pub(crate) fn folder_to_add(
     home: Option<&Path>,
 ) -> Result<PathBuf, String> {
     let at = access::expand_home(Path::new(typed.trim()), home);
-    access::allowable_at(&at, cwd, home).ok_or_else(|| {
-        "not a folder Io may read (it must exist, be listable and not hold secrets)".to_owned()
-    })
+    access::allowable_at(&at, cwd, home, access::Source::Trust).map_err(|why| why.to_string())
 }
 
 /// Copies `text` and says how. It tries each way there is, because only some can be checked:
@@ -851,12 +860,12 @@ mod tests {
         let user = dir.path().join("cfg");
         assert!(!trust::is_trusted(&user, &folder));
         assert_eq!(
-            allow(Some(&folder), "explain\u{7} this directory", &user).as_deref(),
+            allow(Some(&folder), "explain\u{7} this directory", &user, false).as_deref(),
             Some("? explain this directory")
         );
         assert!(trust::is_trusted(&user, &folder));
-        assert_eq!(allow(Some(&folder), "  ", &user), None);
-        assert_eq!(allow(None, "q", &user), None);
+        assert_eq!(allow(Some(&folder), "  ", &user, false), None);
+        assert_eq!(allow(None, "q", &user, false), None);
     }
 
     #[test]
@@ -899,5 +908,35 @@ mod tests {
                 .contains("not a file in this folder")
         );
         assert!(open("http://x.example", &inside).is_err());
+    }
+
+    #[test]
+    fn add_folder_refuses_the_root_the_home_folder_and_what_holds_secrets_with_a_reason() {
+        let home = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".config/gh")).unwrap();
+        std::fs::create_dir(home.path().join(".ssh")).unwrap();
+        std::fs::create_dir(home.path().join("docs")).unwrap();
+        let add = |typed: &str| folder_to_add(typed, work.path(), Some(home.path()));
+        for typed in ["/", "~", "~/", "~/.config", "~/.ssh"] {
+            let why = add(typed).unwrap_err();
+            assert!(
+                why.contains("too broad") || why.contains("secret"),
+                "{typed}: {why}"
+            );
+        }
+        assert!(add("~/docs").is_ok());
+    }
+
+    #[test]
+    fn allow_keeps_a_yes_for_the_question_and_add_folder_one_for_every_ask() {
+        let user = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let folder = folder.path().canonicalize().unwrap();
+        let _ = allow(Some(&folder), "q", user.path(), false);
+        assert!(trust::is_trusted(user.path(), &folder));
+        assert_eq!(trust::standing(user.path()).len(), 0);
+        let _ = allow(Some(&folder), "q", user.path(), true);
+        assert_eq!(trust::standing(user.path()), [folder]);
     }
 }

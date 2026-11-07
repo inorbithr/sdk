@@ -2,6 +2,12 @@
 //! at a terminal Io asks once, on the same Io card as a command's ask, the way Claude Code
 //! asks whether to trust a folder. A yes for always is kept in `trusted.toml` beside the
 //! user's permission rules; a yes for this time keeps nothing. No terminal, no key or any failure is a no.
+//!
+//! The file has two lists, and they mean different things. `folders` holds the yes the person
+//! gave to one question (the card's Always, the menu's Allow): it is looked up for the folder
+//! that question needs and never grants anything else. `standing` holds the folders the person
+//! added on purpose with Add folder: those are granted to every ask. An old file without
+//! `standing` has none, so no earlier answer becomes a standing grant.
 
 use std::path::{Path, PathBuf};
 
@@ -12,8 +18,12 @@ pub(crate) const FILE: &str = "trusted.toml";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Trusted {
+    /// The yes kept for one question's folder.
     #[serde(default)]
     folders: Vec<String>,
+    /// The folders added with Add folder: granted to every ask.
+    #[serde(default)]
+    standing: Vec<String>,
 }
 
 fn load(user_dir: &Path) -> Trusted {
@@ -24,7 +34,7 @@ fn load(user_dir: &Path) -> Trusted {
 }
 
 fn canonical(folder: &Path) -> Option<String> {
-    folder.canonicalize().ok().map(|p| p.display().to_string())
+    crate::access::canonical(folder).map(|p| p.display().to_string())
 }
 
 /// Whether the person said yes for always to reading `folder`.
@@ -33,23 +43,41 @@ pub(crate) fn is_trusted(user_dir: &Path, folder: &Path) -> bool {
     canonical(folder).is_some_and(|f| load(user_dir).folders.contains(&f))
 }
 
-/// The folders the person said yes for always, as kept (canonical when they were written).
-/// A folder that is gone or a file that is broken gives none; callers check each again.
+/// The folders the person added with Add folder, as kept (canonical when they were written):
+/// granted to every ask. A folder that is gone or a file that is broken gives none; callers
+/// check each again. A file with no `standing` key gives none: the yes kept for one question
+/// ([`remember`]) is never listed here.
 #[must_use]
-pub(crate) fn folders(user_dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn standing(user_dir: &Path) -> Vec<PathBuf> {
     load(user_dir)
-        .folders
+        .standing
         .into_iter()
         .map(PathBuf::from)
         .collect()
 }
 
-/// Keeps `folder` as trusted. Written whole, so a broken file is replaced by a good one.
+/// Keeps the yes for one question's `folder` (the card's Always, the menu's Allow): found
+/// again by [`is_trusted`] when that folder is asked for, never granted otherwise. Written
+/// whole, so a broken file is replaced by a good one.
 pub(crate) fn remember(user_dir: &Path, folder: &Path) -> Result<PathBuf, String> {
+    keep(user_dir, folder, |t| &mut t.folders)
+}
+
+/// Keeps `folder` as one the person added on purpose (Add folder): granted to every ask from
+/// now on, each time checked again ([`crate::access::allowable_at`]).
+pub(crate) fn add_standing(user_dir: &Path, folder: &Path) -> Result<PathBuf, String> {
+    keep(user_dir, folder, |t| &mut t.standing)
+}
+
+fn keep(
+    user_dir: &Path,
+    folder: &Path,
+    list: fn(&mut Trusted) -> &mut Vec<String>,
+) -> Result<PathBuf, String> {
     let f = canonical(folder).ok_or("the folder cannot be found")?;
     let mut t = load(user_dir);
-    if !t.folders.contains(&f) {
-        t.folders.push(f);
+    if !list(&mut t).contains(&f) {
+        list(&mut t).push(f);
     }
     std::fs::create_dir_all(user_dir)
         .map_err(|e| format!("cannot create {}: {}", user_dir.display(), e.kind()))?;
@@ -178,20 +206,61 @@ mod tests {
     }
 
     #[test]
-    fn the_kept_folders_are_listed_in_the_order_they_were_kept() {
+    fn the_standing_folders_are_listed_in_the_order_they_were_added() {
         let user = tempfile::tempdir().unwrap();
         let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        assert_eq!(folders(user.path()).len(), 0);
-        remember(user.path(), a.path()).unwrap();
-        remember(user.path(), b.path()).unwrap();
-        remember(user.path(), a.path()).unwrap();
+        assert_eq!(standing(user.path()).len(), 0);
+        add_standing(user.path(), a.path()).unwrap();
+        add_standing(user.path(), b.path()).unwrap();
+        add_standing(user.path(), a.path()).unwrap();
         assert_eq!(
-            folders(user.path()),
+            standing(user.path()),
             [
                 a.path().canonicalize().unwrap(),
                 b.path().canonicalize().unwrap()
             ]
         );
+    }
+
+    #[test]
+    fn a_yes_for_one_question_is_never_a_standing_folder() {
+        let user = tempfile::tempdir().unwrap();
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        remember(user.path(), a.path()).unwrap();
+        assert!(is_trusted(user.path(), a.path()));
+        assert_eq!(standing(user.path()), Vec::<PathBuf>::new());
+        // Added on purpose: standing, and the other list is untouched.
+        add_standing(user.path(), b.path()).unwrap();
+        assert_eq!(standing(user.path()), [b.path().canonicalize().unwrap()]);
+        assert!(!is_trusted(user.path(), b.path()));
+        assert_eq!(load(user.path()).folders.len(), 1);
+    }
+
+    #[test]
+    fn a_file_from_before_standing_loads_with_none_and_keeps_its_folders() {
+        let user = tempfile::tempdir().unwrap();
+        let a = tempfile::tempdir().unwrap();
+        let path = a.path().canonicalize().unwrap();
+        std::fs::write(
+            user.path().join(FILE),
+            format!("folders = [{:?}]\n", path.display().to_string()),
+        )
+        .unwrap();
+        assert!(standing(user.path()).is_empty(), "no earlier yes stands");
+        assert!(is_trusted(user.path(), &path));
+        // An empty file and a missing one load as nothing either.
+        std::fs::write(user.path().join(FILE), "").unwrap();
+        assert_eq!(standing(user.path()).len(), 0);
+        assert_eq!(standing(&user.path().join("missing")).len(), 0);
+        // Writing one keeps the folders a file already had.
+        std::fs::write(
+            user.path().join(FILE),
+            format!("folders = [{:?}]\n", path.display().to_string()),
+        )
+        .unwrap();
+        add_standing(user.path(), a.path()).unwrap();
+        let t = load(user.path());
+        assert_eq!((t.folders.len(), t.standing.len()), (1, 1));
     }
 
     #[test]

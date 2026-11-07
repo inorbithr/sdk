@@ -946,6 +946,32 @@ fn the_menu_letters_print_one_prompt_line_or_nothing_and_copy_uses_tmux() {
     );
 }
 
+// Add folder refuses the home folder and the root where they are typed, with a reason, and
+// keeps nothing in `trusted.toml`; a project folder is kept as a standing folder.
+#[test]
+fn add_folder_refuses_home_and_root_and_keeps_a_project_folder_as_standing() {
+    let r = Rig::new();
+    let cmd = ["ask", "--menu", "--command=ls"];
+    let trusted = r.home.path().join("config").join("trusted.toml");
+    for typed in ["~", "/"] {
+        let keys = format!("d\u{1f}{typed}\u{1f}\r\u{1f}\u{1b}\u{1f}\u{1b}");
+        let Some((line, screen)) = press_in_menu(&r, &cmd, &keys, &[]) else {
+            return;
+        };
+        let plain_screen = strip_escapes(&screen);
+        assert!(plain_screen.contains("too broad"), "{typed}: {screen:?}");
+        assert_eq!(line, "", "{typed}: nothing is put on the prompt");
+        assert!(!trusted.exists(), "{typed}: nothing was kept");
+    }
+    let project = r.home.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let keys = "d\u{1f}~/project\u{1f}\r";
+    let (line, screen) = press_in_menu(&r, &cmd, keys, &[]).unwrap();
+    let kept = std::fs::read_to_string(&trusted).unwrap_or_default();
+    assert!(kept.contains("standing"), "{screen:?} {line:?} {kept:?}");
+    assert!(kept.contains("project"), "{kept:?}");
+}
+
 // PRD 0187.1: the menu is a bar of numbered rows in a box under the card. A digit picks a row
 // at once, so do its letter and Enter on the highlighted row; Esc leaves nothing on the screen
 // and nothing on stdout; with NO_COLOR it is plain numbered lines.
@@ -1736,7 +1762,7 @@ fn the_card_says_the_output_was_not_sent_and_json_carries_the_same_facts() {
     assert_eq!(
         v["context"],
         serde_json::json!({
-            "folder": "/work/api", "command": true, "exit_code": 101,
+            "folder": "/work/api", "folders": [], "command": true, "exit_code": 101,
             "output": "not_sent", "output_bytes": 0, "can_attach": true
         })
     );

@@ -123,7 +123,8 @@ fn folder_step(value: &str, cwd: &Path) -> Option<Step> {
     // The folder as the system names it (a symlink is followed): it must still be under `cwd`
     // and not a secret place, so a link named `docs` that points at `~/.ssh` is not offered.
     let inside = plain && !secret && {
-        let there = crate::access::allowable_at(&cwd.join(v), cwd, None);
+        let there =
+            crate::access::allowable_at(&cwd.join(v), cwd, None, crate::access::Source::Trust).ok();
         let here = cwd.canonicalize().ok();
         matches!((there, here), (Some(t), Some(h)) if t.starts_with(&h))
     };

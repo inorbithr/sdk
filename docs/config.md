@@ -537,7 +537,7 @@ and drawn as a card.
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
 | `mode` | The mode of every answer (PRD 0197): `manual` (rules first, then Io asks before each command), `plan` (read only: Io answers with a plan, changes nothing and runs nothing) or `auto` (a command no rule decides runs without asking; a deny rule, the secret list and a command `iohr` cannot read to check them still refuse it); `IOHR_ASK_MODE` and `--mode` win over it, and it beats `permissions` | `manual` at a terminal, `rules` without one | `iohr ask`, `iohr shell hook zsh` |
 | `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
-| `read` | More folders Io may read besides the working folder, a list such as `["~/notes", "/srv/docs"]` (a leading `~/` is your home folder); at most 8 in all. `IOHR_ASK_READ` (a path list, `:` apart on Unix and `;` on Windows) and `--read FOLDER` (also `--add-dir FOLDER`, repeatable) add to it; the three sources add up and a folder named twice counts once. Each folder goes through the same check as a yes at the card: it must exist, be listable and not be a secret place (such as `~/.ssh`), else `iohr ask` stops with a usage error and starts nothing; the secret-file deny rules stay on beside every added folder | none | `iohr ask --headless`, `--card` |
+| `read` | More folders Io may read besides the working folder, a list such as `["~/notes", "/srv/docs"]` (a leading `~/` is your home folder); at most 8 in all. `IOHR_ASK_READ` (a path list, `:` apart on Unix and `;` on Windows) and `--read FOLDER` (also `--add-dir FOLDER`, repeatable) add to it; the three sources add up and a folder named twice counts once. Each folder goes through the same check as a yes at the card: it must exist, be listable and not be a secret place (such as `~/.ssh`), else `iohr ask` stops with a usage error and starts nothing; the secret-file deny rules stay on beside every added folder. A folder that is too broad is refused too: the filesystem root, your home folder (only an explicit `--read ~` names it), every folder above your home folder and above `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube` or `~/Library/Keychains` (the check ignores case on macOS). `IOHR_ASK_READ` and `[ask] read` select the file-tool run the way `--read` does; `--interactive` streams without folder grants and says so on stderr. Each folder given is written to `permissions.log` (source `flag`, `env`, `config`, `trust` or `card`, and the path, never contents) and listed in `--json` `context.folders` | none | `iohr ask --headless`, `--card` |
 
 Flags: `--agent`, `--via`, `--model`, `--mode`, `--allow-edits`, `--permissions`, `--thinking`, `--read` (repeatable, alias `--add-dir`), `--dry-run`. In the streamed
 run a shell command is never allowed, with or without `--allow-edits`; the agent's default
@@ -692,9 +692,11 @@ Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Expl
 with only what the answer has: Run and Copy when it suggested one command, Open when it named
 an https link or a file in the folder, Undo when the run saved a permission rule that the project
 file still holds; Add folder is always there: it asks for a folder (a leading `~/` is home), checks it like a yes
-(it must exist, be listable and hold no secrets), keeps it in `trusted.toml` and puts the question on the prompt
-again. A folder kept there is read on every later ask in a folder Io may read, except your home folder and the
-filesystem root; take one back by removing it from `trusted.toml`. The key in `menu_key` opens the menu (`iohr ask
+(it must exist, be listable, hold no secrets and not be too broad: `/`, your home folder and every folder above it are
+refused with a message), keeps it under `standing` in `trusted.toml` and puts the question on the prompt again.
+Only Add folder writes `standing`; those folders are read on every later ask in a folder Io may read, each checked
+again and each written to `permissions.log`. Allow and Always on a card keep a yes under `folders` for the question
+that names that folder only. Take either back by removing it from `trusted.toml`. The key in `menu_key` opens the menu (`iohr ask
 --menu`, letters `r c f e o u d`, Esc leaves it; the hook passes the rules to `--undo`). Run puts the command on the prompt line and
 nothing else: Enter still runs it, and iohr never does. Copy sends it to the clipboard
 through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside

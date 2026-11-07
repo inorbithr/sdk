@@ -18,6 +18,9 @@ pub(crate) enum Why {
     Home,
     /// The folder is the filesystem root: too broad to read unasked.
     Root,
+    /// The folder holds or sits above secret places (`/Users`, `~/.config`, `~/Library`):
+    /// no yes opens it whole, so nothing is asked.
+    Broad,
     /// The folder cannot be listed: no yes would open it, so nothing is asked.
     Unreadable,
 }
@@ -28,6 +31,7 @@ impl Why {
             Self::Named => "named",
             Self::Home => "home",
             Self::Root => "root",
+            Self::Broad => "broad",
             Self::Unreadable => "unreadable",
         }
     }
@@ -40,7 +44,8 @@ pub(crate) struct Shown {
     pub(crate) why: &'static str,
     /// Whether a yes would help (false: the folder cannot be listed).
     pub(crate) askable: bool,
-    /// How to give the yes for one run; null when it would not help.
+    /// How to give the yes for one run; null when it would not help (and for the filesystem
+    /// root, which `--read` never opens).
     pub(crate) allow_with: Option<String>,
 }
 
@@ -60,17 +65,18 @@ impl Request {
     pub(crate) fn shown(&self) -> Shown {
         let folder = self.folder.display().to_string();
         Shown {
-            allow_with: self.askable().then(|| format!("--read {folder}")),
+            allow_with: (self.askable() && self.why != Why::Root)
+                .then(|| format!("--read {folder}")),
             why: self.why.name(),
             askable: self.askable(),
             folder,
         }
     }
 
-    /// Whether a yes would help: false for a folder that cannot be listed.
+    /// Whether a yes would help: false for a folder that cannot be listed or is too broad.
     #[must_use]
     pub(crate) fn askable(&self) -> bool {
-        self.why != Why::Unreadable
+        !matches!(self.why, Why::Unreadable | Why::Broad)
     }
 }
 
@@ -108,7 +114,7 @@ pub(crate) fn named_folders<'a>(
         } else {
             cwd.join(w)
         };
-        let real = allowable_at(&at, cwd, home)?;
+        let real = allowable_at(&at, cwd, home, Source::Card).ok()?;
         (Some(&real) != here.as_ref()).then_some(real)
     })
 }
@@ -126,21 +132,152 @@ pub(crate) fn expand_home(path: &Path, home: Option<&Path>) -> PathBuf {
     }
 }
 
-/// `folder` as the system names it, when Io may be allowed to read it: it exists, is a folder
-/// that can be listed and is not a secret place. A relative path is taken from `cwd`.
-#[must_use]
-pub(crate) fn allowable_at(folder: &Path, cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
-    let real = cwd.join(folder).canonicalize().ok()?;
-    let listable = real.is_dir() && std::fs::read_dir(&real).is_ok();
-    let secret = secrets::is_secret_path(&real.display().to_string(), cwd, home);
-    (listable && !secret).then_some(real)
+/// Where a yes for a folder came from; the audit line and `--json` name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Source {
+    /// `--read` (alias `--add-dir`): named by the person for this run.
+    Flag,
+    /// `IOHR_ASK_READ`.
+    Env,
+    /// `[ask] read`.
+    Config,
+    /// A yes kept in `trusted.toml`: a folder from Add folder, or an Allow or Always for
+    /// the question being asked.
+    Trust,
+    /// The card, asked at this question: a yes once or always, or a folder the question names.
+    Card,
 }
 
-/// [`allowable_at`] against the real home folder, as a yes/no.
+impl Source {
+    /// The word `permissions.log` and `--json` use.
+    #[must_use]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Flag => "flag",
+            Self::Env => "env",
+            Self::Config => "config",
+            Self::Trust => "trust",
+            Self::Card => "card",
+        }
+    }
+
+    /// Whether this way of asking may name the home folder itself. Only a person's own words
+    /// for this run may: the flag the Home card offers, and the card asked at the question.
+    /// The environment, the config and what is kept never open it.
+    fn names_home(self) -> bool {
+        matches!(self, Self::Flag | Self::Card)
+    }
+
+    /// Whether this way of asking may name the filesystem root: only the card, at the
+    /// question.
+    fn names_root(self) -> bool {
+        self == Self::Card
+    }
+}
+
+/// One folder a run was given, and where the yes came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Grant {
+    pub(crate) source: Source,
+    /// The folder as the system names it (canonical).
+    pub(crate) folder: PathBuf,
+}
+
+/// Why a folder may not be read, in words for the person who named it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    /// It is missing, is not a folder, or cannot be listed.
+    Unreadable,
+    /// It is a secret place, or inside one.
+    Secret,
+    /// It is the filesystem root, the home folder, or holds secret places below it.
+    Broad,
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Unreadable => "not a folder Io can read (it must exist and be listable)",
+            Self::Secret => "a secret place: Io never reads it",
+            Self::Broad => {
+                "too broad: it is the root, your home folder or holds secret folders such as \
+                 ~/.ssh or ~/.config; name a project folder instead"
+            }
+        })
+    }
+}
+
+/// `path` as the system names it (symlinks resolved), or none when it does not exist. The one
+/// place a folder is made canonical: the check below, the trust store and the card all use it.
 #[must_use]
-pub(crate) fn allowable(folder: &Path, cwd: &Path) -> bool {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    allowable_at(folder, cwd, home.as_deref()).is_some()
+pub(crate) fn canonical(path: &Path) -> Option<PathBuf> {
+    path.canonicalize().ok()
+}
+
+/// `p` lower-cased, for comparing places on a file system that ignores case (macOS, Windows):
+/// `~/.SSH` is `~/.ssh` there. On a file system that keeps case this over-refuses at worst.
+fn folded(p: &Path) -> PathBuf {
+    PathBuf::from(p.to_string_lossy().to_lowercase())
+}
+
+/// Whether `real` (canonical) is too broad or too close to secrets to hand to a run whole:
+/// the filesystem root, the home folder, every folder above the home folder (`/Users`,
+/// `/home`), every folder above one of [`secrets::SECRET_DIRS`] (`~/.config`, `~/Library`),
+/// and those folders themselves or anything inside them. A run handed `~/.config` could list
+/// `gcloud` and `gh` beside it, so the secret rules alone, which look at one path, are not
+/// enough. The one place this is decided: [`allowable_at`] and the working folder
+/// ([`crate::headless::blocked`]) both ask it.
+#[must_use]
+pub(crate) fn broad_or_secret_bearing(real: &Path, home: Option<&Path>) -> bool {
+    if real.parent().is_none() {
+        return true;
+    }
+    let Some(home) = home else { return false };
+    let home = canonical(home).unwrap_or_else(|| home.to_path_buf());
+    let at = folded(real);
+    // The home folder and everything above it.
+    if folded(&home).starts_with(&at) {
+        return true;
+    }
+    secrets::SECRET_DIRS.iter().any(|d| {
+        let secret = folded(&home.join(d));
+        secret.starts_with(&at) || at.starts_with(&secret)
+    })
+}
+
+/// `folder` as the system names it, when Io may be allowed to read it, or why not: it exists,
+/// is a folder that can be listed, is not a secret place and is not too broad
+/// ([`broad_or_secret_bearing`]). A relative path is taken from `cwd`. The one checker every
+/// way of granting a folder goes through (`--read`, `IOHR_ASK_READ`, `[ask] read`, Add folder,
+/// the kept folders and the card); `source` says whether the home folder or the root itself may
+/// be named ([`Source`]).
+///
+/// # Errors
+///
+/// The [`Refusal`] that says why not.
+pub(crate) fn allowable_at(
+    folder: &Path,
+    cwd: &Path,
+    home: Option<&Path>,
+    source: Source,
+) -> Result<PathBuf, Refusal> {
+    let real = canonical(&cwd.join(folder)).ok_or(Refusal::Unreadable)?;
+    if !real.is_dir() || std::fs::read_dir(&real).is_err() {
+        return Err(Refusal::Unreadable);
+    }
+    if secrets::is_secret_path(&real.display().to_string(), cwd, home) {
+        return Err(Refusal::Secret);
+    }
+    let home_real = home.and_then(canonical);
+    let exactly_home = home_real.as_deref() == Some(real.as_path());
+    let exactly_root = real.parent().is_none();
+    if (exactly_home && source.names_home()) || (exactly_root && source.names_root()) {
+        return Ok(real);
+    }
+    if broad_or_secret_bearing(&real, home) {
+        return Err(Refusal::Broad);
+    }
+    Ok(real)
 }
 
 /// What Io still needs a yes for: the folder the question names when the run cannot already
@@ -171,6 +308,7 @@ pub(crate) fn needed(
     let why = match blocked(cwd, home)? {
         Blocked::Root => Why::Root,
         Blocked::Home => Why::Home,
+        Blocked::Broad => Why::Broad,
         Blocked::Unreadable => Why::Unreadable,
     };
     if reads {
@@ -192,12 +330,25 @@ fn clean(text: &str) -> String {
 
 /// The one quiet line under the card for a folder Io did not read: what it needs and how to
 /// give it (the key in the menu when the hook is there, else the flag). A folder that cannot
-/// be listed says so, and offers nothing.
+/// be listed, or is too broad, says so and offers nothing; the filesystem root has no flag.
 #[must_use]
 pub(crate) fn note(req: &Request, key: Option<&str>) -> String {
     let folder = clean(&req.folder.display().to_string());
-    if !req.askable() {
-        return format!("Io cannot open {folder}: the system does not let it list that folder");
+    match req.why {
+        Why::Unreadable => {
+            return format!("Io cannot open {folder}: the system does not let it list that folder");
+        }
+        Why::Broad => {
+            return format!(
+                "Io will not read {folder}: it holds secret folders; ask from a project folder instead"
+            );
+        }
+        Why::Root if key.is_none() => {
+            return format!(
+                "Io needs your OK to read {folder} \u{b7} ask from a project folder instead"
+            );
+        }
+        _ => {}
     }
     match key {
         Some(k) => format!("Io needs your OK to read {folder} \u{b7} {k} then l to allow"),
@@ -380,6 +531,83 @@ mod tests {
         assert_eq!(
             note(&r, None),
             "Io needs your OK to read /data/x \u{b7} ask again with --read /data/x"
+        );
+    }
+
+    #[test]
+    fn broad_or_secret_bearing_refuses_root_home_and_every_folder_above_a_secret() {
+        let (_d, home) = tree();
+        let h = Some(home.as_path());
+        // The root, the home folder and everything above it.
+        assert!(broad_or_secret_bearing(Path::new("/"), h));
+        assert!(broad_or_secret_bearing(&home, h));
+        let above = home.parent().unwrap();
+        assert!(broad_or_secret_bearing(above, h), "{}", above.display());
+        // Folders that hold secret places below them, and the secret places themselves.
+        for dir in [
+            ".config",
+            "Library",
+            ".ssh",
+            ".aws",
+            ".gnupg",
+            ".kube",
+            "Library/Keychains",
+            ".ssh/keys",
+            ".config/gcloud",
+        ] {
+            assert!(broad_or_secret_bearing(&home.join(dir), h), "{dir}");
+        }
+        // A case variant is the same place on macOS and Windows.
+        assert!(broad_or_secret_bearing(&home.join(".SSH"), h));
+        assert!(broad_or_secret_bearing(&home.join("LIBRARY"), h));
+        // A project folder passes, and so does one that only looks like a secret one.
+        assert!(!broad_or_secret_bearing(&home.join("work"), h));
+        assert!(!broad_or_secret_bearing(&home.join("work/api"), h));
+        assert!(!broad_or_secret_bearing(&home.join(".sshfs-notes"), h));
+        // Without a home folder only the root is known to be broad.
+        assert!(broad_or_secret_bearing(Path::new("/"), None));
+        assert!(!broad_or_secret_bearing(&home.join("work"), None));
+    }
+
+    #[test]
+    fn every_way_of_granting_goes_through_the_same_check_and_only_a_person_names_home() {
+        let (_d, home) = tree();
+        let work = home.join("work");
+        let h = Some(home.as_path());
+        std::fs::create_dir_all(home.join(".config/gh")).unwrap();
+        std::fs::create_dir_all(home.join("Library/Keychains")).unwrap();
+        for source in [
+            Source::Flag,
+            Source::Env,
+            Source::Config,
+            Source::Trust,
+            Source::Card,
+        ] {
+            for dir in [".config", "Library", ".config/gh", "Library/Keychains"] {
+                assert!(
+                    allowable_at(&home.join(dir), &work, h, source).is_err(),
+                    "{source:?} {dir}"
+                );
+            }
+            assert_eq!(
+                allowable_at(&home.join("Downloads"), &work, h, source),
+                Ok(home.join("Downloads")),
+                "{source:?}"
+            );
+            assert_eq!(
+                allowable_at(Path::new("/"), &work, h, source).is_ok(),
+                source == Source::Card,
+                "{source:?} root"
+            );
+            assert_eq!(
+                allowable_at(&home, &work, h, source).is_ok(),
+                matches!(source, Source::Flag | Source::Card),
+                "{source:?} home"
+            );
+        }
+        assert_eq!(
+            allowable_at(&home.join("work/../.config"), &work, h, Source::Env),
+            Err(Refusal::Broad)
         );
     }
 }
