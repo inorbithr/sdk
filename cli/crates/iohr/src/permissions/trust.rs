@@ -85,6 +85,18 @@ fn shown(folder: &Path) -> String {
         .collect()
 }
 
+/// How the card names the folder it asks about: "your home folder", else the folder's own
+/// name (the card's other line holds the full path).
+#[must_use]
+pub(crate) fn place_of(folder: &Path, home: Option<&Path>) -> String {
+    if crate::headless::is_home(folder, home) {
+        return "your home folder".to_owned();
+    }
+    folder
+        .file_name()
+        .map_or_else(|| shown(folder), |n| shown(Path::new(n)))
+}
+
 /// Asks at the terminal whether Io may read files in `folder`, on the same Io card as a
 /// command's ask (one prompt, one design); a terminal too narrow or plain for the card gets
 /// one line with the same keys. Only call it at a terminal.
@@ -104,7 +116,10 @@ pub(crate) fn ask(folder: &Path) -> Answer {
                     thing: Some(shown(folder)),
                     more: 0,
                 },
-                folder: "your home folder".to_owned(),
+                folder: place_of(
+                    folder,
+                    std::env::var_os("HOME").map(PathBuf::from).as_deref(),
+                ),
                 can_always: true,
             };
             return match broker::draw_and_read_rows(&card, &ask_card::trust_choices(), cols, look) {
@@ -149,6 +164,15 @@ mod tests {
         assert!(is_trusted(user.path(), home.path()));
         assert!(!is_trusted(user.path(), other.path()));
         assert_eq!(load(user.path()).folders.len(), 1);
+    }
+
+    #[test]
+    fn the_card_names_the_folder_it_asks_about() {
+        let home = tempfile::tempdir().unwrap();
+        let sub = home.path().join("Downloads");
+        std::fs::create_dir(&sub).unwrap();
+        assert_eq!(place_of(home.path(), Some(home.path())), "your home folder");
+        assert_eq!(place_of(&sub, Some(home.path())), "Downloads");
     }
 
     #[test]
