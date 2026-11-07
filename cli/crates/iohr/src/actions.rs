@@ -16,7 +16,9 @@ use crate::permissions::{
     rule::Rule,
     rules_subject,
     store::{self, Files},
+    trust,
 };
+use crate::steps::Step;
 use crate::ui::{Choice, Ui};
 
 /// Separates the answer, the command and the link in the hook's record. A control character
@@ -73,6 +75,29 @@ impl MenuKey {
     }
 }
 
+/// What the answer offers beyond its command and link (PRD 0187, RFC 0203): the folder Io
+/// needs a yes to read, and the next steps the model suggested.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Next<'a> {
+    /// Allow: the folder Io asked to read and did not get a yes for.
+    pub(crate) allow: Option<&'a Path>,
+    /// Numbered steps (Read a folder, Search, Run through the permission card).
+    pub(crate) steps: &'a [Step],
+}
+
+/// The longest a step's name is drawn in the row under the card.
+const STEP_ROW_MAX: usize = 28;
+
+/// A step's name cut to [`STEP_ROW_MAX`] characters for the row.
+fn short(label: &str) -> String {
+    if label.chars().count() <= STEP_ROW_MAX {
+        label.to_owned()
+    } else {
+        let cut: String = label.chars().take(STEP_ROW_MAX - 3).collect();
+        format!("{cut}...")
+    }
+}
+
 /// The line under the card: the actions on offer and the key. Run and Copy need a command,
 /// Open a link, Undo a rule this answer's run saved; Follow up and Explain are always there.
 /// None when there is no key.
@@ -81,44 +106,58 @@ pub(crate) fn row(
     has_command: bool,
     has_link: bool,
     has_undo: bool,
+    next: &Next<'_>,
 ) -> Option<String> {
     let key = key.label()?;
-    let mut names = Vec::new();
+    let mut names: Vec<String> = Vec::new();
     if has_command {
-        names.extend(["Run", "Copy"]);
+        names.extend(["Run".to_owned(), "Copy".to_owned()]);
     }
-    names.extend(["Follow up", "Explain"]);
+    if next.allow.is_some() {
+        names.push("Allow".to_owned());
+    }
+    names.extend(next.steps.iter().map(|s| short(&s.label())));
+    names.extend(["Follow up".to_owned(), "Explain".to_owned()]);
     if has_link {
-        names.push("Open");
+        names.push("Open".to_owned());
     }
     if has_undo {
-        names.push("Undo");
+        names.push("Undo".to_owned());
     }
     Some(format!("{}   {key} to choose", names.join(" \u{b7} ")))
+}
+
+/// `text` without its control characters: it is typed on a prompt or drawn on a terminal.
+fn plain(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// Between the rules of the record's last field.
 pub(crate) const US: char = '\u{1f}';
 
-/// What the hook reads from one answer: the text, the command, the link and the permission
-/// rules this answer's run saved (what Undo takes back, joined by [`US`]), in that order,
-/// separated by [`RS`] (empty when there is none), with no trailing newline.
+/// What the hook reads from one answer: the text, the command, the link, the permission
+/// rules this answer's run saved (what Undo takes back, joined by [`US`]), the folder Io needs
+/// a yes for and the next steps (`kind:value`, joined by [`US`]), in that order, separated by
+/// [`RS`] (empty when there is none), with no trailing newline. A hook that reads only the
+/// first four still works.
 pub(crate) fn record(
     answer: &str,
     command: Option<&str>,
     link: Option<&str>,
     undo: &[String],
+    next: &Next<'_>,
 ) -> String {
     let answer: String = answer.chars().filter(|c| *c != RS).collect();
-    let undo: Vec<String> = undo
-        .iter()
-        .map(|r| r.chars().filter(|c| !c.is_control()).collect())
-        .collect();
+    let undo: Vec<String> = undo.iter().map(|r| plain(r)).collect();
+    let allow = next.allow.map(|f| plain(&f.display().to_string()));
+    let allow = allow.unwrap_or_default();
+    let steps: Vec<String> = next.steps.iter().map(Step::encode).collect();
     format!(
-        "{answer}{RS}{}{RS}{}{RS}{}",
+        "{answer}{RS}{}{RS}{}{RS}{}{RS}{allow}{RS}{}",
         command.unwrap_or_default(),
         link.unwrap_or_default(),
-        undo.join(&US.to_string())
+        undo.join(&US.to_string()),
+        steps.join(&US.to_string())
     )
 }
 
@@ -145,7 +184,13 @@ pub(crate) fn risk(command: &str) -> Option<&'static str> {
     }
 }
 
-fn choices(command: Option<&str>, link: bool, undo: bool, asks: usize) -> Vec<Choice> {
+fn choices(
+    command: Option<&str>,
+    link: bool,
+    undo: bool,
+    asks: usize,
+    next: &Next<'_>,
+) -> Vec<Choice> {
     let pick = |value: &str, label: &str, hint: &str, key: char| Choice {
         value: value.to_owned(),
         label: label.to_owned(),
@@ -161,6 +206,26 @@ fn choices(command: Option<&str>, link: bool, undo: bool, asks: usize) -> Vec<Ch
         };
         out.push(pick("run", "Run", &hint, 'r'));
         out.push(pick("copy", "Copy", "the command to the clipboard", 'c'));
+    }
+    if let Some(folder) = next.allow {
+        out.push(pick(
+            "allow",
+            "Allow",
+            &format!(
+                "let Io read {} from now on (secrets stay blocked), then ask again",
+                plain(&folder.display().to_string())
+            ),
+            'l',
+        ));
+    }
+    for (i, step) in next.steps.iter().enumerate() {
+        out.push(Choice {
+            value: format!("step{i}"),
+            label: step.label(),
+            hint: step.hint().to_owned(),
+            available: true,
+            key: None,
+        });
     }
     out.push(pick(
         "follow",
@@ -212,10 +277,10 @@ pub(crate) struct Takeback<'a> {
 ///
 /// No terminal to ask on.
 pub(crate) fn menu(
-    command: Option<&str>,
-    link: Option<&str>,
+    (command, link): (Option<&str>, Option<&str>),
     cwd: &Path,
     undo: &Takeback<'_>,
+    (next, asked, user_dir): (&Next<'_>, &str, &Path),
 ) -> Result<(), Error> {
     let command = command.and_then(card::insertable);
     let link = link.filter(|l| !l.is_empty() && !l.chars().any(char::is_control));
@@ -224,6 +289,7 @@ pub(crate) fn menu(
         link.is_some(),
         !undo.rules.is_empty(),
         crate::commands::asks::cached_count(),
+        next,
     );
     let first = all.first().map_or("", |c| c.value.as_str()).to_owned();
     let Some(picked) = Ui::select_bar("What next?", &all, &first)? else {
@@ -250,6 +316,12 @@ pub(crate) fn menu(
             }
             None
         }
+        ("allow", ..) => allow(next.allow, asked, user_dir),
+        (step, ..) if step.starts_with("step") => step[4..]
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| next.steps.get(i))
+            .map(Step::question),
         ("undo", ..) => {
             match store::take_back(undo.files, &undo.rules) {
                 Ok(_) => say(&format!(
@@ -266,6 +338,25 @@ pub(crate) fn menu(
         Out::raw(typed.as_bytes());
     }
     Ok(())
+}
+
+/// Allow: keeps the yes for `folder` (the same `trusted.toml` the terminal card writes) and
+/// returns the line that asks the question again; nothing when it could not be kept.
+fn allow(folder: Option<&Path>, asked: &str, user_dir: &Path) -> Option<String> {
+    let folder = folder?;
+    match trust::remember(user_dir, folder) {
+        Ok(file) => Out::note(&format!(
+            "Io may read {} from now on, secrets stay blocked; take it back by removing it from {}",
+            plain(&folder.display().to_string()),
+            file.display()
+        )),
+        Err(why) => {
+            Out::note(&format!("could not keep the permission: {why}"));
+            return None;
+        }
+    }
+    let q = plain(asked);
+    (!q.trim().is_empty()).then(|| format!("? {}", q.trim()))
 }
 
 /// Copies `text` and says how. It tries each way there is, because only some can be checked:
@@ -408,7 +499,7 @@ mod tests {
     #[test]
     fn asks_are_a_choice_only_when_some_wait() {
         let keys = |n| -> Vec<char> {
-            choices(None, false, false, n)
+            choices(None, false, false, n, &Next::default())
                 .iter()
                 .filter_map(|c| c.key)
                 .collect()
@@ -416,7 +507,7 @@ mod tests {
         assert_eq!(keys(0), ['f', 'e']);
         assert_eq!(keys(3), ['f', 'e', 'a']);
         assert!(
-            choices(None, false, false, 3)
+            choices(None, false, false, 3, &Next::default())
                 .last()
                 .unwrap()
                 .hint
@@ -427,37 +518,110 @@ mod tests {
     #[test]
     fn the_row_offers_what_the_answer_has() {
         assert_eq!(
-            row(MenuKey::Down, true, true, false).as_deref(),
+            row(MenuKey::Down, true, true, false, &Next::default()).as_deref(),
             Some(
                 "Run \u{b7} Copy \u{b7} Follow up \u{b7} Explain \u{b7} Open   \u{2193} to choose"
             )
         );
         assert_eq!(
-            row(MenuKey::Down, false, false, true).as_deref(),
+            row(MenuKey::Down, false, false, true, &Next::default()).as_deref(),
             Some("Follow up \u{b7} Explain \u{b7} Undo   \u{2193} to choose")
         );
         assert_eq!(
-            row(MenuKey::CtrlG, false, false, false).as_deref(),
+            row(MenuKey::CtrlG, false, false, false, &Next::default()).as_deref(),
             Some("Follow up \u{b7} Explain   ctrl-g to choose")
         );
-        assert_eq!(row(MenuKey::Off, true, true, true), None);
+        assert_eq!(row(MenuKey::Off, true, true, true, &Next::default()), None);
     }
 
     #[test]
-    fn a_record_has_four_fields_and_no_record_separator_in_the_answer() {
+    fn a_record_has_six_fields_and_no_record_separator_in_the_answer() {
         assert_eq!(
-            record("hi", Some("ls"), None, &[]),
-            "hi\u{1e}ls\u{1e}\u{1e}"
+            record("hi", Some("ls"), None, &[], &Next::default()),
+            "hi\u{1e}ls\u{1e}\u{1e}\u{1e}\u{1e}"
         );
         assert_eq!(
-            record("a\u{1e}b", None, Some("x.rs"), &[]),
-            "ab\u{1e}\u{1e}x.rs\u{1e}"
+            record("a\u{1e}b", None, Some("x.rs"), &[], &Next::default()),
+            "ab\u{1e}\u{1e}x.rs\u{1e}\u{1e}\u{1e}"
         );
         let rules = ["Bash(ls:*)".to_owned(), "Read(a\nb)".to_owned()];
         assert_eq!(
-            record("hi", None, None, &rules),
-            "hi\u{1e}\u{1e}\u{1e}Bash(ls:*)\u{1f}Read(ab)"
+            record("hi", None, None, &rules, &Next::default()),
+            "hi\u{1e}\u{1e}\u{1e}Bash(ls:*)\u{1f}Read(ab)\u{1e}\u{1e}"
         );
+    }
+
+    #[test]
+    fn the_row_and_the_bar_offer_allow_and_the_next_steps_as_actions() {
+        let steps = [Step::Read("api".into()), Step::Search("TODO".into())];
+        let folder = Path::new("/home/me");
+        let next = Next {
+            allow: Some(folder),
+            steps: &steps,
+        };
+        assert_eq!(
+            row(MenuKey::Down, false, false, false, &next).as_deref(),
+            Some(
+                "Allow \u{b7} Read api/ \u{b7} Search for TODO \u{b7} Follow up \u{b7} Explain   \u{2193} to choose"
+            )
+        );
+        let c = choices(None, false, false, 0, &next);
+        let values: Vec<&str> = c.iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(values, ["allow", "step0", "step1", "follow", "explain"]);
+        assert_eq!(c[0].key, Some('l'));
+        assert!(c[0].hint.contains("/home/me") && c[0].hint.contains("secrets stay blocked"));
+        assert_eq!(c[1].label, "Read api/");
+        assert_eq!(c[2].label, "Search for TODO");
+        // The bar numbers them; a step is never a bare shell line to copy.
+        assert!(c.iter().all(|c| !c.hint.contains("grep")));
+        // Nothing to allow and no step: the bar is as it was.
+        let none = choices(None, false, false, 0, &Next::default());
+        assert_eq!(none.len(), 2);
+    }
+
+    #[test]
+    fn a_long_step_is_cut_in_the_row_but_whole_in_the_bar() {
+        let long = "x".repeat(60);
+        let steps = [Step::Search(long.clone())];
+        let next = Next {
+            allow: None,
+            steps: &steps,
+        };
+        let r = row(MenuKey::Down, false, false, false, &next).unwrap();
+        assert!(r.contains("...") && !r.contains(&long), "{r}");
+        assert_eq!(
+            choices(None, false, false, 0, &next)[0].label,
+            format!("Search for {long}")
+        );
+    }
+
+    #[test]
+    fn the_record_carries_the_folder_and_the_steps_for_the_menu() {
+        let steps = [Step::Read("api".into()), Step::Run("cargo test".into())];
+        let next = Next {
+            allow: Some(Path::new("/home/me\u{7}")),
+            steps: &steps,
+        };
+        assert_eq!(
+            record("hi", None, None, &[], &next),
+            "hi\u{1e}\u{1e}\u{1e}\u{1e}/home/me\u{1e}read:api\u{1f}run:cargo test"
+        );
+    }
+
+    #[test]
+    fn allow_keeps_the_yes_and_asks_the_question_again_and_a_blank_question_gives_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("data");
+        std::fs::create_dir(&folder).unwrap();
+        let user = dir.path().join("cfg");
+        assert!(!trust::is_trusted(&user, &folder));
+        assert_eq!(
+            allow(Some(&folder), "explain\u{7} this directory", &user).as_deref(),
+            Some("? explain this directory")
+        );
+        assert!(trust::is_trusted(&user, &folder));
+        assert_eq!(allow(Some(&folder), "  ", &user), None);
+        assert_eq!(allow(None, "q", &user), None);
     }
 
     #[test]

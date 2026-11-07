@@ -24,7 +24,7 @@
 # refreshes it (at most once in 30 seconds), and the next prompt shows the new number. An
 # RPROMPT you set yourself is left alone; INORBIT_ASKS_PROMPT=0 turns the segment off.
 if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
-  typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_live
+  typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_access _iohr_ask_steps _iohr_ask_live
   typeset -gA _iohr_card_prev
   # The keys that open the menu, from `[ask] menu_key` (none when it is off).
   typeset -ga _iohr_card_keys=(__IOHR_MENU_KEYS__)
@@ -59,7 +59,7 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     fi
     local out
     zle -I
-    out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" --undo="$_iohr_ask_undo" </dev/tty 2>/dev/tty)
+    out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" --undo="$_iohr_ask_undo" ${_iohr_ask_access:+--access="$_iohr_ask_access"} ${_iohr_ask_steps:+--step="$_iohr_ask_steps"} --asked="$_iohr_ask_pq" </dev/tty 2>/dev/tty)
     if [[ -n $out ]]; then
       BUFFER=$out
       CURSOR=${#BUFFER}
@@ -114,7 +114,7 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     local rec rs=$'\x1e' rest tail
     # The card goes to the terminal on stderr. The record on stdout is the answer (kept for
     # `??`), the command it suggests, the link it names and the permission rules this run saved
-    # (what Undo takes back), separated by a 0x1e character.
+    # (what Undo takes back), separated by a 0x1e character, then the folder Io needs a yes for and the next steps.
     if rec=$("${a[@]}" -- "$q"); then
       rest=${rec#*$rs}
       _iohr_ask_pq=$q
@@ -122,10 +122,17 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
       _iohr_ask_cmd=${rest%%$rs*}
       tail=${rest#*$rs}
       _iohr_ask_link=${tail%%$rs*}
-      if [[ $tail == *$rs* ]]; then _iohr_ask_undo=${tail#*$rs}; else _iohr_ask_undo=; fi
+      # The later fields (undo, the folder Io needs a yes for, the next steps) may be missing
+      # from an older record: each is then empty.
+      local t2= t3=
+      [[ $tail == *$rs* ]] && t2=${tail#*$rs}
+      _iohr_ask_undo=${t2%%$rs*}
+      [[ $t2 == *$rs* ]] && t3=${t2#*$rs}
+      _iohr_ask_access=${t3%%$rs*}
+      if [[ $t3 == *$rs* ]]; then _iohr_ask_steps=${t3#*$rs}; else _iohr_ask_steps=; fi
       _iohr_ask_live=1
     else
-      _iohr_ask_pq= _iohr_ask_pa= _iohr_ask_cmd= _iohr_ask_link= _iohr_ask_undo= _iohr_ask_live=
+      _iohr_ask_pq= _iohr_ask_pa= _iohr_ask_cmd= _iohr_ask_link= _iohr_ask_undo= _iohr_ask_access= _iohr_ask_steps= _iohr_ask_live=
     fi
   }
 

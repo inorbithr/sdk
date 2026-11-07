@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use tokio::io::AsyncBufReadExt as _;
 
+use crate::access;
 use crate::actions::{self, MenuKey};
 use crate::ask::stream::{self, Look, Renderer};
 use crate::ask::{self, Agent, Via};
@@ -27,6 +28,7 @@ use crate::permissions::engine::Place;
 #[cfg(unix)]
 use crate::permissions::store::{self, Files};
 use crate::permissions::{Grant, Mode, Settled, Words, trust};
+use crate::steps::{self, Step};
 use crate::ui::Ui;
 use crate::{Env, prompt};
 
@@ -216,7 +218,28 @@ fn menu(g: &Global, args: &AskArgs) -> Result<(), Error> {
         rules: store::saved_project_allows(&files, &undo),
         files: &files,
     };
-    actions::menu(args.command.as_deref(), args.link.as_deref(), &cwd, &undo)
+    // Only a folder Io could be allowed to read, and only steps that decode, are offered.
+    let allow = args
+        .access
+        .as_deref()
+        .filter(|f| access::allowable(f, &cwd));
+    let steps: Vec<Step> = args
+        .step
+        .iter()
+        .filter_map(|s| Step::decode(s))
+        .take(steps::MAX)
+        .collect();
+    let next = actions::Next {
+        allow,
+        steps: &steps,
+    };
+    let dir = Ctx::load(g)?.dir;
+    actions::menu(
+        (args.command.as_deref(), args.link.as_deref()),
+        &cwd,
+        &undo,
+        (&next, args.asked.as_deref().unwrap_or_default(), &dir),
+    )
 }
 
 /// `--dry-run`: the exact command line, one object under `--json`; nothing is started.
@@ -405,6 +428,7 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
     let ctx = Context {
         files: headless::list_folder(Path::new(&cwd)),
         reads: headless::can_read(Path::new(&cwd), home.as_deref()),
+        also: None,
         git: askback::git_facts(Path::new(&cwd)),
         project: root
             .as_deref()
@@ -451,16 +475,18 @@ async fn headless(
     (g, env): (&Global, &Env),
 ) -> Result<(), Error> {
     let Chosen {
-        bin,
-        agent,
-        via,
-        model,
-        ..
+        bin, agent, model, ..
     } = *chosen;
     let (mut ctx, root) = context_of(h)?;
     let terminal = !out.json && prompt::interactive();
     let mode = chosen_mode(chosen, terminal)?;
-    trust_home(chosen, &mut ctx, mode, terminal);
+    let pending = grant_access(
+        chosen,
+        &mut ctx,
+        (mode, terminal),
+        question,
+        h.read.as_deref(),
+    )?;
     let message = headless::assemble(question, &ctx).map_err(Error::Usage)?;
     let fancy = Ui::detect(out.json).fancy();
     let stdout_tty = std::io::stdout().is_terminal();
@@ -493,30 +519,13 @@ async fn headless(
             }
         }
         let (text, duration_ms) = ran.map_err(Error::Failed)?;
-        let (text, questions) = askback::split(&text);
-        if out.json {
-            Out::print_json(&Answer {
-                command: card::command_of(&text),
-                text,
-                questions,
-                agent: agent.name(),
-                via: via.name(),
-                label,
-                model: model.to_owned(),
-                exit_code: 0,
-                duration_ms,
-                permissions: settled_of(session.as_ref(), 0)
-                    .iter()
-                    .map(Settled::json)
-                    .collect(),
-            });
-        } else {
-            Out::raw(format!("{text}\n").as_bytes());
-            // No terminal to ask on: the questions are plain lines, apart from the answer.
-            for line in askback::plain_lines(&questions) {
-                Out::note(&line);
-            }
-        }
+        print_answer(
+            out,
+            chosen,
+            (&ctx, &label, session.as_ref()),
+            (text, duration_ms),
+            pending.as_ref(),
+        );
         return Ok(());
     }
     // A person reads a card.
@@ -536,6 +545,7 @@ async fn headless(
             stdout_tty,
             session,
             mode,
+            pending,
         },
     )
     .await
@@ -555,6 +565,8 @@ struct Prepared {
     session: Option<Session>,
     /// The mode this run settled on.
     mode: Mode,
+    /// A folder Io needed a yes to read and did not get one for.
+    pending: Option<access::Request>,
 }
 
 /// The mode this run is in: the flags, then `[ask]`, then the terminal ([`Mode::choose`]).
@@ -576,7 +588,7 @@ fn permission_session(
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let shell_at_home =
         mode == Mode::Manual && headless::is_home(Path::new(&ctx.cwd), home.as_deref());
-    if !mode.runs_commands() || !(ctx.reads || shell_at_home) {
+    if !mode.runs_commands() || !(ctx.reads || ctx.also.is_some() || shell_at_home) {
         return Ok(None);
     }
     // No unix sockets, no live ask: off unix `iohr ask` stays read-only (see
@@ -618,34 +630,86 @@ fn streamed(
     Ok((!plan && edits, plan))
 }
 
-/// The home folder is too broad to read unasked (`headless::can_read`). At a terminal, where
-/// every command is asked anyway, Io asks once whether to trust it, the way Claude Code asks
-/// about a folder; a yes gives this run the file tools beside the asked commands (secrets stay
-/// blocked by `permissions::secrets`). A yes for always is kept in `trusted.toml` in the
-/// user's iohr folder. No terminal, `--json` or a mode that runs nothing for the answer's sake
-/// (`plan`, `deny`, `rules`): no question, no reads. `auto` asks it too: it is a question
-/// about the folder, not about a command.
-fn trust_home(chosen: &Chosen<'_>, ctx: &mut Context, mode: Mode, terminal: bool) {
-    if ctx.reads || !terminal || !matches!(mode, Mode::Manual | Mode::Auto) {
-        return;
-    }
+/// Ask, never "I can't" (PRD 0187, RFC 0203). The home folder, the root and a folder the
+/// question names outside the working one are too broad or too far to read unasked
+/// ([`access::needed`]). At a terminal, where every command is asked anyway, Io asks on the
+/// permission card whether it may read that folder; a yes for always is kept in `trusted.toml`
+/// in the user's iohr folder, a yes for this time keeps nothing. `--read <folder>` is a yes
+/// for this run (the way without a terminal). A yes gives the file tools beside the asked
+/// commands (secrets stay blocked by `permissions::secrets`); a no, no terminal, `--json` or a
+/// mode that runs nothing for the answer's sake (`plan`, `deny`, `rules`) leaves the request
+/// pending: the card says what Io needs and offers Allow, and the run answers from the names.
+///
+/// # Errors
+///
+/// `--read` names something that is not a folder Io may read.
+fn grant_access(
+    chosen: &Chosen<'_>,
+    ctx: &mut Context,
+    (mode, terminal): (Mode, bool),
+    question: &str,
+    yes: Option<&Path>,
+) -> Result<Option<access::Request>, Error> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let cwd = Path::new(&ctx.cwd);
-    if !headless::is_home(cwd, home.as_deref()) {
-        return;
+    let cwd = std::path::PathBuf::from(&ctx.cwd);
+    if let Some(folder) = yes {
+        let real = access::allowable_at(folder, &cwd, home.as_deref()).ok_or_else(|| {
+            Error::Usage(format!(
+                "--read {}: not a folder Io may read (it must exist, be listable and not hold secrets)",
+                folder.display()
+            ))
+        })?;
+        apply_grant(ctx, &real);
     }
-    ctx.reads = trust::is_trusted(chosen.dir, cwd)
-        || match trust::ask(cwd) {
-            trust::Answer::Always => {
-                if let Err(why) = trust::remember(chosen.dir, cwd) {
-                    let _ = console::Term::stderr()
-                        .write_line(&format!("Trusted for this time only: {why}"));
+    let Some(req) = access::needed(
+        question,
+        &cwd,
+        home.as_deref(),
+        (ctx.reads, ctx.also.as_deref()),
+    ) else {
+        return Ok(None);
+    };
+    if !req.askable() {
+        return Ok(Some(req));
+    }
+    let may_ask = terminal && matches!(mode, Mode::Manual | Mode::Auto);
+    let yes = trust::is_trusted(chosen.dir, &req.folder)
+        || (may_ask
+            && match trust::ask(&req.folder) {
+                trust::Answer::Always => {
+                    if let Err(why) = trust::remember(chosen.dir, &req.folder) {
+                        let _ = console::Term::stderr()
+                            .write_line(&format!("Trusted for this time only: {why}"));
+                    }
+                    true
                 }
-                true
-            }
-            trust::Answer::Once => true,
-            trust::Answer::No => false,
-        };
+                trust::Answer::Once => true,
+                trust::Answer::No => false,
+            });
+    if yes {
+        apply_grant(ctx, &req.folder);
+        return Ok(None);
+    }
+    Ok(Some(req))
+}
+
+/// Gives the run the file tools for `folder`: the working folder itself, or a folder beside it.
+fn apply_grant(ctx: &mut Context, folder: &Path) {
+    let here = Path::new(&ctx.cwd).canonicalize().ok();
+    if here.as_deref() == Some(folder) {
+        ctx.reads = true;
+    } else {
+        ctx.also = Some(folder.to_path_buf());
+    }
+}
+
+/// The model's answer split into what is shown, the questions it asked back and the next
+/// steps it suggested; neither block is ever left in the text.
+fn split_answer(raw: &str, cwd: &Path) -> (String, Vec<askback::Question>, Vec<Step>) {
+    let (text, questions) = askback::split(raw);
+    let command = card::command_of(&text);
+    let (text, steps) = steps::split(&text, cwd, command.as_deref());
+    (text, questions, steps)
 }
 
 /// Starts the broker. A broker that cannot start is an error, never a fall back to something
@@ -683,7 +747,7 @@ async fn run_at(
         model,
         started,
         folder.as_deref(),
-        ctx.reads,
+        (ctx.reads, ctx.also.as_deref()),
         (session, mode == Mode::Plan),
     )
     .await
@@ -692,7 +756,11 @@ async fn run_at(
 /// Where the run starts: the folder when it may read it or run commands there, else none
 /// (the temp folder).
 fn run_dir(ctx: &Context, session: Option<&Session>) -> Option<std::path::PathBuf> {
-    (ctx.reads || session.is_some()).then(|| std::path::PathBuf::from(&ctx.cwd))
+    if ctx.reads || session.is_some() {
+        return Some(std::path::PathBuf::from(&ctx.cwd));
+    }
+    // Only a folder the person allowed: the run starts there, where its tools may read.
+    ctx.also.clone()
 }
 
 /// The lines after an answer for what Io wanted and could not be allowed: with a rule to
@@ -785,6 +853,7 @@ fn closing_notes(
     session: Option<&Session>,
     waiting: Option<&asks::Waiting>,
     (h, menu_key, look, width): (&HeadlessArgs, MenuKey, CardLook, usize),
+    pending: Option<&access::Request>,
 ) {
     // A drawn card holds the permission results itself; a plain look has none to hold them.
     if !look.fancy {
@@ -795,6 +864,16 @@ fn closing_notes(
     for line in refused_lines(session) {
         Out::note(&line);
     }
+    // What Io needs a yes for: the menu's key when the hook binds it, else the flag.
+    if let Some(req) = pending {
+        let key = menu_key.label().filter(|_| h.hook && req.askable());
+        let line = access::note(req, key);
+        Out::note(&if look.fancy {
+            console::style(line).dim().to_string()
+        } else {
+            line
+        });
+    }
     if let Some(w) = waiting {
         Out::note(&waiting_line(w, h.hook, menu_key, look, width));
     }
@@ -802,10 +881,59 @@ fn closing_notes(
 
 /// The line the shell hook reads back: the answer's one command and link, and the rules the
 /// person saved in this run (what Undo takes back).
-fn record_hook(text: &str, cwd: &Path, undo: &[String]) {
+fn record_hook(text: &str, cwd: &Path, undo: &[String], next: &actions::Next<'_>) {
     let command = card::command_of(text);
     let link = card::link_of(text, cwd);
-    Out::raw(actions::record(text, command.as_deref(), link.as_deref(), undo).as_bytes());
+    Out::raw(actions::record(text, command.as_deref(), link.as_deref(), undo, next).as_bytes());
+}
+
+/// The answer of a run with no card: the JSON of `--json`, else the text once on stdout with
+/// the questions, what Io needs a yes for and the next steps as notes apart from it.
+fn print_answer(
+    out: Out,
+    chosen: &Chosen<'_>,
+    (ctx, label, session): (&Context, &str, Option<&Session>),
+    (raw, duration_ms): (String, u64),
+    pending: Option<&access::Request>,
+) {
+    let (text, questions, steps) = split_answer(&raw, Path::new(&ctx.cwd));
+    if out.json {
+        Out::print_json(&Answer {
+            command: card::command_of(&text),
+            text,
+            questions,
+            agent: chosen.agent.name(),
+            via: chosen.via.name(),
+            label: label.to_owned(),
+            model: chosen.model.to_owned(),
+            exit_code: 0,
+            duration_ms,
+            permissions: settled_of(session, 0).iter().map(Settled::json).collect(),
+            access: pending.map(access::Request::shown),
+            next: steps.iter().map(Step::shown).collect(),
+        });
+        return;
+    }
+    Out::raw(format!("{text}\n").as_bytes());
+    // No terminal to ask on: the questions are plain lines, apart from the answer.
+    for line in askback::plain_lines(&questions) {
+        Out::note(&line);
+    }
+    if let Some(req) = pending {
+        Out::note(&access::note(req, None));
+    }
+    for step in &steps {
+        Out::note(&format!("next: {}", step.label()));
+    }
+}
+
+/// What the action bar offers besides the command: Allow for the folder asked about (when a
+/// yes would help) and the next steps.
+fn next_for<'a>(pending: Option<&'a access::Request>, steps: &'a [Step]) -> actions::Next<'a> {
+    actions::Next {
+        allow: pending.filter(|r| r.askable()).map(|r| r.folder.as_path()),
+        steps,
+    }
 }
 
 /// The card: the model runs under a spinner while the asks waiting are counted, the answer is
@@ -838,25 +966,14 @@ async fn card_run(
         stdout_tty,
         session,
         mode,
+        pending,
     } = prepared;
     let look = CardLook::detect(fancy);
     let how = (session.as_ref(), mode);
     let run = run_at((bin, model), &message, started, &ctx, how);
-    // The asks waiting are looked up while the model thinks, so they add no time.
-    let (done, waiting) = if look.fancy {
-        let (done, waiting) =
-            tokio::join!(spin_while(run, agent, look, started), asks::waiting(g, env));
-        (done?, waiting)
-    } else {
-        (run.await, None)
-    };
+    let (done, waiting) = run_waiting(run, (agent, look, started), (g, env)).await?;
     let notice = format!("An AI model {} {}", ask::PROVIDER, ask::CHECK);
-    // Only a drawn card moves the footer on: a plain look has none (its label discloses).
-    let footer = if look.fancy {
-        hints::next(dir, hints, &notice, hints::now())
-    } else {
-        hints::Footer::Full
-    };
+    let footer = footer_for(look, (dir, hints), &notice);
     // The permission results of the run so far, drawn in the card; a second card (after the
     // model's question is answered) shows only what came after.
     let seen = settled_of(session.as_ref(), 0).len();
@@ -884,37 +1001,100 @@ async fn card_run(
     let cwd = Path::new(&ctx.cwd).to_path_buf();
     match &done {
         Ok((raw, duration_ms)) => {
-            let (mut text, questions) = askback::split(raw);
+            let (mut text, questions, mut steps) = split_answer(raw, &cwd);
             let took = Duration::from_millis(*duration_ms);
             let ctx_of = (cwd.as_path(), !undo.is_empty());
-            draw_answer(&shown, &text, took, (h, look, menu_key), ctx_of, width);
+            draw_answer(
+                &shown,
+                &text,
+                took,
+                (h, look, menu_key),
+                (ctx_of, &next_for(pending.as_ref(), &steps)),
+                width,
+            );
             // The model asked back: ask the person, keep the answer, and answer once more.
-            let can_ask = look.fancy
-                && prompt::interactive()
-                && (h.hook || h.card || !h.headless)
-                && !questions.is_empty();
+            let can_ask = may_ask_back(h, look, &questions);
             if let Some(root) = root.as_deref().filter(|_| can_ask)
-                && let Some((again, ms)) =
+                && let Some(again) =
                     ask_back(chosen, question, &mut ctx, (root, &questions), look, how).await?
             {
-                text = again;
+                text = again.0;
+                steps = again.1;
                 let how = (seen, h, look, menu_key);
-                let took = Duration::from_millis(ms);
-                draw_again(&shown, session.as_ref(), how, (&text, took), (&cwd, width));
+                let took = Duration::from_millis(again.2);
+                draw_again(
+                    &shown,
+                    session.as_ref(),
+                    how,
+                    (&text, took),
+                    (&cwd, width, &next_for(pending.as_ref(), &steps)),
+                );
             }
             closing_notes(
                 session.as_ref(),
                 waiting.as_ref(),
                 (h, menu_key, look, width),
+                pending.as_ref(),
             );
-            if h.hook {
-                record_hook(&text, &cwd, &saved_rules(session.as_ref()));
-            } else if !stdout_tty {
-                Out::raw(format!("{text}\n").as_bytes());
-            }
+            let undo = saved_rules(session.as_ref());
+            hand_over(
+                h,
+                stdout_tty,
+                (&text, &cwd),
+                (&undo, &next_for(pending.as_ref(), &steps)),
+            );
             Ok(())
         }
         Err(why) => Err(draw_failed(&shown, why, started, (width, look))),
+    }
+}
+
+/// The footer of the card. Only a drawn card moves it on: a plain look has none (its label
+/// discloses).
+fn footer_for(look: CardLook, (dir, hints): (&Path, hints::Mode), notice: &str) -> hints::Footer {
+    if look.fancy {
+        hints::next(dir, hints, notice, hints::now())
+    } else {
+        hints::Footer::Full
+    }
+}
+
+/// Whether the model's questions are put to the person: a drawn card at a terminal.
+fn may_ask_back(h: &HeadlessArgs, look: CardLook, questions: &[askback::Question]) -> bool {
+    look.fancy
+        && prompt::interactive()
+        && (h.hook || h.card || !h.headless)
+        && !questions.is_empty()
+}
+
+/// The run under a spinner when the card is drawn, with the asks waiting looked up while the
+/// model thinks (they add no time).
+async fn run_waiting(
+    run: impl std::future::Future<Output = Result<(String, u64), String>>,
+    (agent, look, started): (Agent, CardLook, Instant),
+    (g, env): (&Global, &Env),
+) -> Result<(Result<(String, u64), String>, Option<asks::Waiting>), Error> {
+    if look.fancy {
+        let (done, waiting) =
+            tokio::join!(spin_while(run, agent, look, started), asks::waiting(g, env));
+        Ok((done?, waiting))
+    } else {
+        Ok((run.await, None))
+    }
+}
+
+/// What goes to stdout after the card: the hook's record (for the shell's menu and `??`), else
+/// the answer once when stdout is not the terminal the card is on.
+fn hand_over(
+    h: &HeadlessArgs,
+    stdout_tty: bool,
+    (text, cwd): (&str, &Path),
+    (undo, next): (&[String], &actions::Next<'_>),
+) {
+    if h.hook {
+        record_hook(text, cwd, undo, next);
+    } else if !stdout_tty {
+        Out::raw(format!("{text}\n").as_bytes());
     }
 }
 
@@ -925,7 +1105,7 @@ fn draw_again(
     session: Option<&Session>,
     (seen, h, look, menu_key): (usize, &HeadlessArgs, CardLook, MenuKey),
     (text, took): (&str, Duration),
-    (cwd, width): (&Path, usize),
+    (cwd, width, next): (&Path, usize, &actions::Next<'_>),
 ) {
     let fresh = statuses(session, seen, h.hook);
     let again = Card {
@@ -933,7 +1113,14 @@ fn draw_again(
         ..shown.clone()
     };
     let undo = !saved_rules(session).is_empty();
-    draw_answer(&again, text, took, (h, look, menu_key), (cwd, undo), width);
+    draw_answer(
+        &again,
+        text,
+        took,
+        (h, look, menu_key),
+        ((cwd, undo), next),
+        width,
+    );
 }
 
 /// Puts the model's questions to the person, keeps what they answer (iohr writes it, the
@@ -947,7 +1134,7 @@ async fn ask_back(
     (root, questions): (&Path, &[askback::Question]),
     look: CardLook,
     how: (Option<&Session>, Mode),
-) -> Result<Option<(String, u64)>, Error> {
+) -> Result<Option<(String, Vec<Step>, u64)>, Error> {
     let Some(answers) = askback::ask_person(questions) else {
         return Ok(None);
     };
@@ -961,7 +1148,10 @@ async fn ask_back(
     let run = run_at((chosen.bin, chosen.model), &again, started, ctx, how);
     match spin_while(run, chosen.agent, look, started).await? {
         // The second answer asks nothing: a question in it is dropped.
-        Ok((raw, ms)) => Ok(Some((askback::split(&raw).0, ms))),
+        Ok((raw, ms)) => {
+            let (text, _, steps) = split_answer(&raw, Path::new(&ctx.cwd));
+            Ok(Some((text, steps, ms)))
+        }
         Err(why) => {
             Out::note(&format!("could not refresh the answer: {why}"));
             Ok(None)
@@ -976,14 +1166,14 @@ fn draw_answer(
     text: &str,
     took: Duration,
     (h, look, menu_key): (&HeadlessArgs, CardLook, MenuKey),
-    (cwd, undo): (&Path, bool),
+    ((cwd, undo), next): ((&Path, bool), &actions::Next<'_>),
     width: usize,
 ) {
     let command = card::command_of(text);
     let link = card::link_of(text, cwd);
     // The row promises a key that only the hook binds, so only the hook draws it.
     let row = (h.hook && look.fancy)
-        .then(|| actions::row(menu_key, command.is_some(), link.is_some(), undo))
+        .then(|| actions::row(menu_key, command.is_some(), link.is_some(), undo, next))
         .flatten();
     let card = Card {
         elapsed: Some(took),
@@ -1117,6 +1307,192 @@ mod tests {
         };
         let line = waiting_line(&w, false, MenuKey::Down, PLAIN, 80);
         assert_eq!(line, "3 asks waiting \u{b7} `iohr asks list` opens them");
+    }
+
+    // ---- ask instead of "I can't" (RFC 0203)
+
+    struct Tree {
+        _d: tempfile::TempDir,
+        /// The folder the question is asked in.
+        work: std::path::PathBuf,
+        /// A folder beside it that a question can name.
+        other: std::path::PathBuf,
+        /// The place `trusted.toml` lives.
+        user: std::path::PathBuf,
+    }
+
+    fn tree() -> Tree {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().canonicalize().unwrap();
+        let (work, other, user) = (root.join("work"), root.join("other"), root.join("cfg"));
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(work.join("a.txt"), "x").unwrap();
+        Tree {
+            _d: d,
+            work,
+            other,
+            user,
+        }
+    }
+
+    fn ctx_in(cwd: &Path, reads: bool) -> Context {
+        Context {
+            cwd: cwd.display().to_string(),
+            reads,
+            ..Context::default()
+        }
+    }
+
+    fn chosen<'a>(dir: &'a Path, bin: &'a Path) -> Chosen<'a> {
+        Chosen {
+            bin,
+            agent: Agent::Claude,
+            via: Via::Local,
+            model: "haiku",
+            hints: hints::Mode::default(),
+            menu_key: MenuKey::Down,
+            dir,
+            modes: (Words::default(), Words::default()),
+        }
+    }
+
+    #[test]
+    fn a_named_folder_outside_is_asked_for_and_nothing_is_read_before_the_yes() {
+        let t = tree();
+        let bin = Path::new("claude");
+        let mut ctx = ctx_in(&t.work, true);
+        let q = format!("what is in {}", t.other.display());
+        // No terminal, so Io cannot ask here: the request goes back, the run stays as it was.
+        let pending = grant_access(
+            &chosen(&t.user, bin),
+            &mut ctx,
+            (Mode::Manual, false),
+            &q,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(pending.folder, t.other);
+        assert!(!pending.is_cwd && pending.askable());
+        assert_eq!(ctx.also, None);
+        // Deny never asks, even at a terminal: no prompt is drawn and the request is kept.
+        let pending = grant_access(
+            &chosen(&t.user, bin),
+            &mut ctx,
+            (Mode::Deny, true),
+            &q,
+            None,
+        )
+        .unwrap();
+        assert!(pending.is_some());
+        assert_eq!(ctx.also, None);
+    }
+
+    #[test]
+    fn a_yes_on_record_gives_the_read_tools_for_that_folder() {
+        let t = tree();
+        let bin = Path::new("claude");
+        trust::remember(&t.user, &t.other).unwrap();
+        let mut ctx = ctx_in(&t.work, true);
+        let q = format!("what is in {}", t.other.display());
+        let pending = grant_access(
+            &chosen(&t.user, bin),
+            &mut ctx,
+            (Mode::Manual, false),
+            &q,
+            None,
+        )
+        .unwrap();
+        assert!(pending.is_none());
+        assert_eq!(ctx.also.as_deref(), Some(t.other.as_path()));
+        // The run then has tools for it, secrets still denied (see the headless tests).
+        let args = headless::args("haiku", (ctx.reads, ctx.also.as_deref()), None, false).unwrap();
+        assert!(args.contains(&format!("--add-dir={}", t.other.display())));
+        assert!(
+            args.iter()
+                .any(|a| a.starts_with("--disallowedTools=Read("))
+        );
+    }
+
+    #[test]
+    fn a_broad_folder_with_a_yes_for_it_reads_and_without_one_asks() {
+        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let Ok(home) = home.canonicalize() else {
+            return;
+        };
+        let t = tree();
+        let bin = Path::new("claude");
+        let mut ctx = ctx_in(&home, false);
+        let pending = grant_access(
+            &chosen(&t.user, bin),
+            &mut ctx,
+            (Mode::Manual, false),
+            "explain this directory",
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(pending.is_cwd);
+        assert!(!ctx.reads, "never answered with tools it was not given");
+        trust::remember(&t.user, &home).unwrap();
+        let mut ctx = ctx_in(&home, false);
+        let pending = grant_access(
+            &chosen(&t.user, bin),
+            &mut ctx,
+            (Mode::Manual, false),
+            "explain this directory",
+            None,
+        )
+        .unwrap();
+        assert!(pending.is_none());
+        assert!(ctx.reads);
+    }
+
+    #[test]
+    fn read_is_the_yes_for_one_run_and_refuses_what_is_not_a_readable_folder() {
+        let t = tree();
+        let bin = Path::new("claude");
+        let mut ctx = ctx_in(&t.work, true);
+        let q = format!("what is in {}", t.other.display());
+        let pending = grant_access(
+            &chosen(&t.user, bin),
+            &mut ctx,
+            (Mode::Manual, false),
+            &q,
+            Some(&t.other),
+        )
+        .unwrap();
+        assert!(pending.is_none());
+        assert_eq!(ctx.also.as_deref(), Some(t.other.as_path()));
+        assert!(!trust::is_trusted(&t.user, &t.other), "one run only");
+        for bad in [t.work.join("a.txt"), t.work.join("nope")] {
+            let mut ctx = ctx_in(&t.work, true);
+            let err = grant_access(
+                &chosen(&t.user, bin),
+                &mut ctx,
+                (Mode::Manual, false),
+                "q",
+                Some(&bad),
+            )
+            .unwrap_err();
+            assert!(matches!(err, Error::Usage(_)), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_answer_is_split_into_text_questions_and_steps_with_no_block_left() {
+        let t = tree();
+        std::fs::create_dir_all(t.work.join("api")).unwrap();
+        let raw = "A service.\n\n```next\nread api/\nrun ls\n```\n\n```sh\nls\n```";
+        let (text, questions, steps) = split_answer(raw, &t.work);
+        assert!(!text.contains("next"), "{text}");
+        assert_eq!(questions.len(), 0);
+        // The answer's own command is not repeated as a step.
+        assert_eq!(steps, vec![Step::Read("api".into())]);
+        assert_eq!(card::command_of(&text).as_deref(), Some("ls"));
     }
 
     #[test]
