@@ -111,6 +111,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
+        Command::Panel(args) => crate::panel::demo(g, &args),
         Command::Permissions(cmd) => permissions::run(g, cmd, out),
         Command::PermissionServer { .. } => Err(Error::Failed(
             "the permission server needs a unix system".to_owned(),

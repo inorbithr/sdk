@@ -33,6 +33,7 @@ mod hints;
 mod io_signin;
 mod lock;
 mod output;
+mod panel;
 mod paths;
 mod permissions;
 mod planner;

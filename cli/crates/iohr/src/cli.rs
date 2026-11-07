@@ -463,6 +463,9 @@ pub enum Command {
     /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
     #[command(subcommand)]
     Permissions(PermissionsCommand),
+    /// Draws the terminal panel's design on stub data (a design round, not the panel).
+    #[command(hide = true)]
+    Panel(PanelArgs),
     /// Serves the permission questions of one `iohr ask` run to Claude Code (not for you).
     #[command(name = "permission-server", hide = true)]
     PermissionServer {
@@ -1782,6 +1785,75 @@ pub struct SyncArgs {
     /// The project folder. Default: the nearest folder up from here that has `atlas/`.
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
+}
+
+/// `iohr panel`: the design of the terminal panel, drawn on stub data.
+#[derive(Debug, Args)]
+pub struct PanelArgs {
+    /// Draw the demo (the only thing `panel` does until the design is approved).
+    #[arg(long)]
+    pub demo: bool,
+    /// The layout: a framed rail, an accordion, or a band for terminals without margins.
+    #[arg(long, value_enum, default_value = "rail")]
+    pub variant: PanelVariant,
+    /// What the panel shows.
+    #[arg(long, value_enum, default_value = "menu")]
+    pub view: PanelView,
+    /// The state of auto mode in the demo.
+    #[arg(long, value_enum, default_value = "on")]
+    pub auto: PanelAuto,
+    /// The terminal's width in columns.
+    #[arg(long, default_value_t = 100)]
+    pub cols: u16,
+    /// The terminal's height in rows.
+    #[arg(long, default_value_t = 28)]
+    pub rows: u16,
+    /// The highlighted row, counted from 0.
+    #[arg(long, default_value_t = 0)]
+    pub selected: usize,
+    /// Print the lines only, one per row, with no cursor movement.
+    #[arg(long)]
+    pub lines: bool,
+    /// Also print the sequences that reserve (and, last, give back) the panel's room.
+    #[arg(long)]
+    pub setup: bool,
+}
+
+/// How the panel is laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelVariant {
+    /// A framed column at the top right; a submenu replaces the list in place.
+    Rail,
+    /// A ruled column; a submenu opens under its row.
+    Accordion,
+    /// Top rows across the terminal: for terminals that cannot reserve columns.
+    Band,
+}
+
+/// What the demo panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelView {
+    /// Closed: three quiet lines.
+    Rest,
+    /// The menu.
+    Menu,
+    /// Waiting approvals, with deny, question and details.
+    Approvals,
+    /// Subcommands that can be run.
+    Run,
+    /// The auto mode switch.
+    Auto,
+    /// Where the panel stands.
+    Status,
+}
+
+/// The auto mode the demo shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelAuto {
+    Off,
+    /// Asked, waiting for the phone.
+    Asking,
+    On,
 }
 
 #[derive(Debug, Subcommand)]
