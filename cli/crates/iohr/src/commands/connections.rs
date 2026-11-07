@@ -452,7 +452,7 @@ fn settings(
     let mut config = BTreeMap::new();
     for p in pairs {
         let Some((k, v)) = p.split_once('=') else {
-            return Err(Error::Usage(format!("--config takes KEY=VALUE, not {p}")));
+            return Err(Error::Usage("--config takes KEY=VALUE".to_owned()));
         };
         if secrets.iter().any(|f| str_of(f, "name") == k) {
             return Err(Error::Usage(format!(
