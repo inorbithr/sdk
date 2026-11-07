@@ -205,11 +205,18 @@ pub struct AskConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu_key: Option<String>,
     /// What happens when Io wants to run a command or open a file no rule decides (PRD
-    /// 0197): `prompt` (ask at the terminal; the default at one), `rules` (follow the rules
-    /// only; the default without a terminal) or `deny` (no commands offered).
-    /// `--permissions` wins over it.
+    /// 0197): `manual` (or `prompt`: ask at the terminal; the default at one), `plan`, `auto`
+    /// (the modes of `mode`), `rules` (follow the rules only; the default without a terminal)
+    /// or `deny` (no commands offered). `--permissions` wins over it, and `mode` beats it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<String>,
+    /// How Io works (PRD 0197): `manual` (ask before each command; the default at a terminal),
+    /// `plan` (read and propose a plan, change nothing) or `auto` (run commands no rule
+    /// decides without asking; deny rules and the secret list still win). `--mode` (or
+    /// `IOHR_ASK_MODE`) wins over it, and it beats `permissions`. The zsh hook starts its
+    /// shift+tab switch from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 impl AskConfig {
@@ -223,6 +230,7 @@ impl AskConfig {
             && self.thinking.is_none()
             && self.hints.is_none()
             && self.menu_key.is_none()
+            && self.mode.is_none()
             && self.permissions.is_none()
     }
 }

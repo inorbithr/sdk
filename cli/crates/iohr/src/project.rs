@@ -21,6 +21,7 @@ use crate::template::Runner;
 
 /// The template used when neither `--template` nor `[project] template` names one.
 pub mod folder;
+pub mod space;
 pub(crate) mod wizard;
 
 pub const DEFAULT_TEMPLATE: &str = "coordinated";
@@ -61,7 +62,8 @@ pub fn choose_template(flag: Option<&str>, configured: Option<&str>) -> String {
 pub struct Step {
     pub id: String,
     pub title: String,
-    /// `done`, `skipped`, `not-yet`, `failed` or `ask`.
+    /// `done`, `skipped`, `not-yet`, `queued`, `failed` or `ask`. `queued` is a step that
+    /// could not happen yet (no network, not signed in) and is kept to run later.
     pub state: String,
     pub said: String,
     /// The API or decision a `not-yet` step waits on.
@@ -226,6 +228,8 @@ pub fn ai_commit(
 /// Where a project's link to its InOrbit space lives (RFC 0103, "The link"): committed, so
 /// everyone working in the folder records to the same space.
 pub const SPACE_FILE: &str = ".inorbit/space";
+/// The project record every template writes at the folder's root.
+pub const MANIFEST_FILE: &str = "inorbit.toml";
 
 /// The text of [`SPACE_FILE`]: the space's `id` and `name` when init has them (the cloud step),
 /// else empty values and a line saying it is not linked yet and which command links it.
@@ -247,6 +251,13 @@ pub fn space_link(space: Option<(&str, &str)>) -> String {
 pub fn add_space_link(files: &mut Vec<(String, String)>, space: Option<(&str, &str)>) {
     if !files.iter().any(|(p, _)| p == SPACE_FILE) {
         files.push((SPACE_FILE.to_owned(), space_link(space)));
+    }
+    // A link to a space on a local stack stays on the machine (`space::link_file`).
+    if !files.iter().any(|(p, _)| p == space::GITIGNORE_FILE) {
+        files.push((
+            space::GITIGNORE_FILE.to_owned(),
+            space::GITIGNORE_TEXT.to_owned(),
+        ));
     }
 }
 
@@ -298,13 +309,6 @@ pub fn cloud_steps(name: &str) -> Vec<Step> {
             "",
         ),
         step(
-            "space",
-            "The project in InOrbit: a Decisions space of kind project",
-            "not-yet",
-            "decisions_create_space works for a person today; init does it once a project has a scope of its own",
-            "POST /v1/decisions/projects (RFC 0115), a project scope",
-        ),
-        step(
             "listing",
             "A private listing in the Marketplace",
             "not-yet",
@@ -328,17 +332,37 @@ pub fn cloud_steps(name: &str) -> Vec<Step> {
     ]
 }
 
-/// Writes the rendered files under `dir`, making it first; the paths written, in order. A path
-/// in `programs` gets the executable bit.
+/// What [`write_files`] did with each path of the template.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Written {
+    /// Made now: the file was not there.
+    made: Vec<String>,
+    /// Already there with exactly these bytes: not touched.
+    same: Vec<String>,
+    /// Already there with other bytes (the person's own, or from an earlier init): not touched.
+    kept: Vec<String>,
+}
+
+/// Writes the rendered files under `dir`, making it first. A path in `programs` gets the
+/// executable bit when it is made. A file that is already there is never written: the same
+/// bytes are `same`, any other bytes are `kept` (init run again in its folder leaves what a
+/// person changed), so nothing is written twice and nothing is overwritten.
 fn write_files(
     dir: &Path,
     files: &[(String, String)],
     programs: &[String],
-) -> Result<Vec<String>, String> {
+) -> Result<Written, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    let mut written = Vec::new();
+    let mut done = Written::default();
     for (rel, text) in files {
         let p = dir.join(rel);
+        if p.exists() {
+            match std::fs::read(&p) {
+                Ok(have) if have == text.as_bytes() => done.same.push(rel.clone()),
+                _ => done.kept.push(rel.clone()),
+            }
+            continue;
+        }
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
@@ -347,9 +371,9 @@ fn write_files(
         if programs.contains(rel) {
             make_executable(&p)?;
         }
-        written.push(rel.clone());
+        done.made.push(rel.clone());
     }
-    Ok(written)
+    Ok(done)
 }
 
 #[cfg(unix)]
@@ -368,15 +392,36 @@ fn make_executable(_: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// True when `dir` already holds the project these `files` make: its `inorbit.toml` names the
+/// same project and template as the rendered one. The sign that init is being run again in its
+/// own folder. A read, so a dry run asks it too.
+#[must_use]
+pub fn is_rerun(dir: &Path, files: &[(String, String)]) -> bool {
+    let key = |text: &str| -> Option<(String, String)> {
+        let t: toml::Table = text.parse().ok()?;
+        let get = |k: &str| t.get(k)?.as_str().map(str::to_owned);
+        Some((get("name")?, get("template")?))
+    };
+    let Some((_, rendered)) = files.iter().find(|(p, _)| p == MANIFEST_FILE) else {
+        return false;
+    };
+    let Some(have) = std::fs::read_to_string(dir.join(MANIFEST_FILE)).ok() else {
+        return false;
+    };
+    matches!((key(&have), key(rendered)), (Some(a), Some(b)) if a == b)
+}
+
 /// The folder must not exist or must hold nothing but dotfiles (an empty folder, or the one a
 /// person is standing in), and no file the template writes may already be there: nothing is
-/// overwritten. A read, so a dry run checks it too.
+/// overwritten. The one exception is a folder that already holds this very project
+/// ([`is_rerun`]): init run again there is allowed, and [`scaffold`] leaves every file that is
+/// already there alone. A read, so a dry run checks it too.
 ///
 /// # Errors
 ///
 /// A busy folder.
 pub fn check_target(dir: &Path, files: &[(String, String)]) -> Result<(), String> {
-    if !dir.exists() {
+    if !dir.exists() || is_rerun(dir, files) {
         return Ok(());
     }
     let busy = !folder::only_dotfiles(dir) || files.iter().any(|(p, _)| dir.join(p).exists());
@@ -414,8 +459,10 @@ pub fn check_manifest(files: &[(String, String)]) -> Result<(), String> {
     ))
 }
 
-/// The scaffold step: writes the files under `dir` (a real action: callers reach it only
-/// through the dry-run gate).
+/// The scaffold step: writes the files under `dir` that are not there yet (a real action:
+/// callers reach it only through the dry-run gate); the paths made, in order. Run again in the
+/// project's own folder it makes nothing that exists, and the step says how many files were
+/// the same and which were left as the person has them.
 ///
 /// # Errors
 ///
@@ -428,37 +475,58 @@ pub fn scaffold(
 ) -> Result<(Vec<String>, Step), String> {
     check_target(dir, files)?;
     check_manifest(files)?;
-    let written = write_files(dir, files, programs)?;
-    let s = step(
-        "scaffold",
-        "Scaffold from the template",
-        "done",
+    let done = write_files(dir, files, programs)?;
+    let said = if done.same.is_empty() && done.kept.is_empty() {
         format!(
             "{} files from `{template}` in {}",
             files.len(),
             dir.display()
-        ),
-        "",
-    );
-    Ok((written, s))
+        )
+    } else {
+        let shown: Vec<&str> = done.kept.iter().take(5).map(String::as_str).collect();
+        let more = done.kept.len().saturating_sub(shown.len());
+        format!(
+            "run again in {}: {} made, {} unchanged, {} left alone as they are{}{}",
+            dir.display(),
+            done.made.len(),
+            done.same.len(),
+            done.kept.len(),
+            if shown.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", shown.join(", "))
+            },
+            if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            }
+        )
+    };
+    let s = step("scaffold", "Scaffold from the template", "done", said, "");
+    Ok((done.made, s))
 }
 
 /// The git step: a repository with its first commit, or a skipped step when git did not
-/// answer.
+/// answer. `rerun` (init run again in its own folder, [`is_rerun`]) commits nothing: what is in
+/// the folder is the person's now, and a commit of it is theirs to make.
 #[must_use]
-pub fn git_step(dir: &Path, name: &str, template: &str) -> Step {
-    if first_commit(dir, name, template) {
+pub fn git_step(dir: &Path, name: &str, template: &str, rerun: bool) -> Step {
+    let title = "A git repository with its first commit";
+    if rerun {
         step(
             "git",
-            "A git repository with its first commit",
-            "done",
-            "main, one commit",
+            title,
+            "skipped",
+            "this folder was set up before: nothing was committed, your work is yours to commit",
             "",
         )
+    } else if first_commit(dir, name, template) {
+        step("git", title, "done", "main, one commit", "")
     } else {
         step(
             "git",
-            "A git repository with its first commit",
+            title,
             "skipped",
             "git did not answer; the folder works without it",
             "",
@@ -482,12 +550,21 @@ pub fn register_step(
     let state = state_root.join(name);
     private_dir(&state.join("state"))?;
     private_dir(&state.join("cache"))?;
+    let file = state.join("project.toml");
+    // Run again, the record keeps the day it was made and is not written twice.
+    let made = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("created_at")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| now.to_owned());
     let record = format!(
-        "# iohr's record of a project you build yourself. Nothing sensitive, ever.\nversion = 1\nname = {name:?}\npath = {:?}\ntemplate = {template:?}\ncreated_at = {now:?}\n",
+        "# iohr's record of a project you build yourself. Nothing sensitive, ever.\nversion = 1\nname = {name:?}\npath = {:?}\ntemplate = {template:?}\ncreated_at = {made:?}\n",
         dir.to_string_lossy()
     );
-    std::fs::write(state.join("project.toml"), record)
-        .map_err(|e| format!("cannot write the project record: {e}"))?;
+    if std::fs::read_to_string(&file).ok().as_deref() != Some(record.as_str()) {
+        std::fs::write(&file, record)
+            .map_err(|e| format!("cannot write the project record: {e}"))?;
+    }
     let s = step(
         "runtime",
         "Registered with the local runtime",
@@ -561,6 +638,12 @@ pub fn agent_prompt(
     let _ = write!(p, "\n\n{}", how_to_work(facts.bin));
     if !facts.docs_only {
         let _ = write!(p, "\n\n{LATEST_STABLE}");
+        // The latest stable is for what the agent picks, never for the language's minimum
+        // version in the manifest: the scaffold wrote the installed one, and the project has
+        // to build here.
+        if facts.toolchain.is_some() {
+            let _ = write!(p, " {TOOLCHAIN_MINIMUM}");
+        }
     }
     p
 }
@@ -602,6 +685,14 @@ pub const LATEST_STABLE: &str = "Use the latest stable, secure release of every 
      feature, tool and dependency you pick. Check it at its upstream repository (releases page \
      or tags) and its security advisories with WebFetch or WebSearch, and name the version and \
      where you read it.";
+
+/// The exception to [`LATEST_STABLE`] for the toolchain itself: the scaffold wrote the
+/// installed version as the language's minimum (`rust-version`, `go`, `engines`,
+/// `requires-python`), and a newer one would not build on this machine.
+pub const TOOLCHAIN_MINIMUM: &str = "The one exception is the language's own minimum version in \
+     the manifest (rust-version, the go directive, engines, requires-python): keep what the \
+     scaffold wrote, the installed toolchain above, never raise it to a newer release, which \
+     would not build here. A newer toolchain goes in your summary as a suggestion.";
 
 /// What `command` prints first, for the agent's prompt (`rustc 1.99.0 (b940084d7 2026-09-28)`),
 /// else nothing: a toolchain that will not run is told nothing rather than guessed. A version
@@ -947,6 +1038,12 @@ pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<
         match s.state.as_str() {
             "skipped" => out.push(format!("skipped: {} ({})", s.title.to_lowercase(), s.said)),
             "ask" => out.push(format!("asked: {} ({})", s.title.to_lowercase(), s.said)),
+            "queued" => out.push(format!(
+                "queued: {} ({}); {}",
+                s.title.to_lowercase(),
+                s.said,
+                s.needs
+            )),
             _ => {}
         }
     }
@@ -1098,8 +1195,16 @@ mod tests {
                 .iter()
                 .all(|s| s.state != "not-yet" || !s.needs.is_empty())
         );
+        // The same folder again is a rerun: it succeeds and writes nothing.
+        let (again, s) = scaffold(&dir, &files, &[], "demo").unwrap();
+        assert!(again.is_empty(), "{again:?}");
+        assert!(s.said.contains("0 made"), "{}", s.said);
+        // Someone else's folder is still refused.
+        let other = d.path().join("development/other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("keep.txt"), "x").unwrap();
         assert!(
-            scaffold(&dir, &files, &[], "demo")
+            scaffold(&other, &files, &[], "demo")
                 .unwrap_err()
                 .contains("not empty")
         );
@@ -1194,7 +1299,9 @@ mod tests {
         );
         assert!(p.starts_with("Module my_shop."));
         assert!(p.contains("- Installed toolchain: rustc 1.99.0 (b940084d7 2026-09-28)"));
-        assert!(p.ends_with(LATEST_STABLE) && p.contains("upstream repository"));
+        assert!(p.contains(LATEST_STABLE) && p.contains("upstream repository"));
+        // The installed toolchain stays the language minimum, after the latest-stable rule.
+        assert!(p.ends_with(TOOLCHAIN_MINIMUM));
         assert!(p.contains("- flavour: fancy") && p.contains("sell hats"));
         assert!(p.contains(&dated("2026-11-05")));
         assert!(p.contains(
