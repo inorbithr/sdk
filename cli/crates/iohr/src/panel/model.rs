@@ -5,9 +5,12 @@
 //! Data that has not arrived, or could not be read, is shown as such, never as a number.
 //!
 //! States: `Rest` (the pill; keys go to the shell) and the open views `Menu`, `Approvals`,
-//! `Auto`, `Run`, `Status`, `Help` (the panel swallows every key). The menu key toggles
+//! `Workloads`, `Workload` (one opened), `Auto`, `Run`, `Status`, `Help` (the panel swallows
+//! every key). The menu key toggles
 //! between `Rest` and `Menu`; `Esc` goes one level back (Approvals, Auto, Run, Status and Help
 //! to the menu, the menu to rest); a deny is two keys (`d`, then `y`), `n` or `Esc` cancels it.
+
+mod work;
 
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -15,6 +18,7 @@ use time::format_description::well_known::Rfc3339;
 use super::cells::{
     ACC, AMBER, BoxSpec, FAINT, GREEN, KEY, Line, MUTE, Span, TXT, bold, one_wide, sp,
 };
+use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
 use crate::commands::asks::PanelAsk;
 
@@ -33,6 +37,8 @@ pub(super) struct Ask {
     pub(super) title: String,
     pub(super) kind: String,
     pub(super) age: String,
+    /// The name the asking agent gives itself (to find the workload that waits on it).
+    pub(super) agent: String,
 }
 
 impl Ask {
@@ -43,6 +49,7 @@ impl Ask {
             title: one_wide(&a.title),
             kind: one_wide(&a.kind),
             age: age(&a.created_at, now),
+            agent: a.agent.clone(),
         }
     }
 }
@@ -67,6 +74,8 @@ pub(super) enum View {
     Rest,
     Menu,
     Approvals,
+    Workloads,
+    Workload,
     Run,
     Status,
     Auto,
@@ -80,6 +89,8 @@ pub(super) enum Key {
     Down,
     Enter,
     Esc,
+    Left,
+    Right,
     Char(char),
     /// The panel's key, Option+i.
     Menu,
@@ -98,9 +109,10 @@ pub(super) enum Effect {
 }
 
 /// The menu: label, key, view it opens.
-const MENU: [(&str, char, View); 6] = [
+const MENU: [(&str, char, View); 7] = [
     ("Auto mode", 'a', View::Auto),
     ("Approvals", 'p', View::Approvals),
+    ("Workloads", 'w', View::Workloads),
     ("Run", 'r', View::Run),
     ("Status", 's', View::Status),
     ("Help", '?', View::Help),
@@ -121,6 +133,14 @@ pub(super) struct Model {
     confirm: Option<String>,
     note: Option<String>,
     stub: bool,
+    /// What the sessions registry and the coordinator's picture gave.
+    pub(super) work: Source<Snapshot>,
+    /// The workload tree as rows, the asks folded in.
+    work_rows: Vec<Workload>,
+    work_sel: usize,
+    /// The workload shown in place (`View::Workload`), by id.
+    opened: Option<String>,
+    act_sel: usize,
 }
 
 impl Model {
@@ -134,6 +154,11 @@ impl Model {
             confirm: None,
             note: None,
             stub,
+            work: Source::Loading,
+            work_rows: Vec::new(),
+            work_sel: 0,
+            opened: None,
+            act_sel: 0,
         }
     }
 
@@ -151,6 +176,7 @@ impl Model {
             .and_then(|id| self.list().iter().position(|a| a.id == id))
             .unwrap_or(self.ask_sel)
             .min(len.saturating_sub(1));
+        self.rebuild_work();
         if self
             .confirm
             .as_ref()
@@ -202,6 +228,8 @@ impl Model {
             View::Rest => Effect::None,
             View::Menu => self.menu_key(key),
             View::Approvals => self.approvals_key(key),
+            View::Workloads => self.work_key(key),
+            View::Workload => self.work_open_key(key),
             View::Auto | View::Run | View::Status | View::Help => {
                 if key == Key::Esc {
                     self.view = View::Menu;
@@ -234,7 +262,7 @@ impl Model {
                     self.menu_sel = i;
                     self.choose(i)
                 }),
-            Key::Menu => Effect::None,
+            Key::Menu | Key::Left | Key::Right => Effect::None,
         }
     }
 
@@ -245,7 +273,7 @@ impl Model {
         }
         self.view = view;
         self.note = None;
-        if view == View::Approvals {
+        if matches!(view, View::Approvals | View::Workloads) {
             Effect::Refresh
         } else {
             Effect::None
@@ -295,6 +323,8 @@ impl Model {
         match self.view {
             View::Rest => 44,
             View::Approvals => 50,
+            View::Workloads => 60,
+            View::Workload => 72,
             _ => 42,
         }
     }
@@ -309,6 +339,8 @@ impl Model {
             View::Rest => (vec![], vec![], vec![self.pill()], None),
             View::Menu => self.menu(width),
             View::Approvals => self.approvals(width),
+            View::Workloads => self.workloads(width),
+            View::Workload => self.workload(width),
             View::Auto => self.auto(),
             View::Run => Self::coming("Run", "run a command with an agent from here"),
             View::Status => Self::coming("Status", "platform and agent status"),
@@ -370,6 +402,7 @@ impl Model {
         let rights = [
             mode,
             waiting,
+            self.work_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
             (String::new(), MUTE),
@@ -594,6 +627,7 @@ mod tests {
             title: title.into(),
             kind: "pull request".into(),
             age: "4m".into(),
+            agent: String::new(),
         }
     }
 
@@ -672,7 +706,7 @@ mod tests {
         let mut m = model(2);
         m.key(Key::Menu);
         m.key(Key::Up);
-        assert_eq!(m.menu_sel, 5, "wraps to Stop panel");
+        assert_eq!(m.menu_sel, 6, "wraps to Stop panel");
         m.key(Key::Down);
         assert_eq!(m.menu_sel, 0);
         let text = rows(&m);
@@ -760,12 +794,154 @@ mod tests {
         );
     }
 
+    /// A model with the design's workloads and one ask that names the "Fix sdk #448 reads" session.
+    fn work_model() -> Model {
+        let mut m = model(1);
+        m.set_work(Source::Ready(super::super::workloads::stub()));
+        let mut a = ask("apr_0", "Merge sdk #448 to main");
+        a.agent = "Fix sdk #448 reads".into();
+        m.set_asks(Source::Ready(vec![a]));
+        m
+    }
+
+    #[test]
+    fn the_menu_counts_what_is_running_and_the_list_is_the_workload_tree() {
+        let mut m = work_model();
+        m.key(Key::Menu);
+        let text = rows(&m);
+        assert!(
+            text[3].contains("Workloads") && text[3].contains("4 ›") && text[3].contains("4 ›  w"),
+            "{text:?}"
+        );
+        assert_eq!(m.key(Key::Char('w')), Effect::Refresh);
+        assert_eq!(m.view, View::Workloads);
+        let t = rows(&m);
+        assert!(t[0].contains("iohr › Workloads"), "{t:?}");
+        assert!(t[0].contains("4 running · 1 need you"), "{t:?}");
+        let by = |s: &str| {
+            t.iter()
+                .find(|r| r.contains(s))
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(by("Coordinator  this Mac").contains("needs you"), "{t:?}");
+        assert!(by("├ ◐ Fix sdk #448 reads  Sonnet").contains("needs you"));
+        assert!(by("├ ● Floating band builder").contains("14 min"));
+        assert!(by("└ ○ Atlas sync  job").contains("idle 18 min"));
+        assert!(by("Coordinator service  queue").contains("3 jobs"));
+        assert!(by("esc back").contains("↑↓ move  ⏎ open  m message  t terminal"));
+        assert_eq!(m.key(Key::Char('m')), Effect::None);
+        assert!(rows(&m).join("\n").contains("message: coming next"));
+        m.key(Key::Esc);
+        assert_eq!(m.view, View::Menu);
+    }
+
+    #[test]
+    fn opening_one_shows_its_fields_picks_actions_and_hands_approval_to_approvals() {
+        let mut m = work_model();
+        m.key(Key::Menu);
+        m.key(Key::Char('w'));
+        for _ in 0..3 {
+            m.key(Key::Down);
+        }
+        assert_eq!(m.key(Key::Enter), Effect::None);
+        assert_eq!(m.view, View::Workload);
+        assert_eq!(m.width(), 72);
+        let t = rows(&m);
+        let all = t.join("\n");
+        assert!(t[0].contains("Workloads › Fix sdk #448 reads"), "{all}");
+        assert!(t[0].contains("◐ needs you"), "{all}");
+        for want in [
+            "Why     clear the security hold on sdk #448",
+            "Latest  rewriting grant_access in ask.rs",
+            "Since   needs you  ·  Sonnet  ·  under Coordinator",
+            "Uses    412 MB  ·  38% CPU",
+            "Waits   Merge sdk #448 to main  ·  approve on your phone",
+            "PR      inorbithr/sdk #448  draft  ·  3 checks failing",
+            "m message  t terminal  l transcript  p pr  a approval  x stop",
+            "←→ pick   ⏎ do it   esc back to list",
+        ] {
+            assert!(all.contains(want), "missing {want:?} in\n{all}");
+        }
+        m.key(Key::Right);
+        assert_eq!(m.act_sel, 1);
+        m.key(Key::Left);
+        m.key(Key::Left);
+        assert_eq!(m.act_sel, 5, "wraps to stop");
+        assert_eq!(m.key(Key::Enter), Effect::None);
+        assert!(rows(&m).join("\n").contains("stop: coming next"));
+        assert_eq!(m.key(Key::Char('l')), Effect::None);
+        assert!(rows(&m).join("\n").contains("transcript: coming next"));
+        assert_eq!(m.key(Key::Char('a')), Effect::Refresh);
+        assert_eq!(m.view, View::Approvals, "approval is the Approvals view");
+        assert_eq!(m.ask_sel, 0);
+        m.key(Key::Esc);
+        m.key(Key::Char('w'));
+        m.key(Key::Enter);
+        m.key(Key::Esc);
+        assert_eq!(m.view, View::Workloads, "esc goes back to the list");
+    }
+
+    #[test]
+    fn what_a_source_does_not_give_is_not_available_and_a_workload_without_an_ask_has_no_approval()
+    {
+        let mut m = work_model();
+        m.key(Key::Menu);
+        m.key(Key::Char('w'));
+        m.key(Key::Down);
+        m.key(Key::Enter);
+        let all = rows(&m).join("\n");
+        assert!(all.contains("Uses    388 MB"), "{all}");
+        m.key(Key::Char('a'));
+        assert!(rows(&m).join("\n").contains("no ask is waiting on this"));
+        assert_eq!(m.view, View::Workload);
+        m.key(Key::Esc);
+        m.key(Key::Down);
+        m.key(Key::Down);
+        m.key(Key::Down);
+        m.key(Key::Enter);
+        assert!(rows(&m).join("\n").contains("Uses    not available"));
+        assert!(rows(&m).join("\n").contains("PR      not available"));
+    }
+
+    #[test]
+    fn workloads_loading_unavailable_and_gone_are_said_not_counted() {
+        let mut m = model(0);
+        m.key(Key::Menu);
+        assert!(rows(&m)[3].contains("… ›"));
+        m.key(Key::Char('w'));
+        assert!(rows(&m).join("\n").contains("Reading your workloads"));
+        m.set_work(Source::Unavailable("disk gone".into()));
+        let t = rows(&m).join("\n");
+        assert!(t.contains("Workloads unavailable.") && t.contains("disk gone"));
+        m.key(Key::Esc);
+        assert!(rows(&m)[3].contains("n/a ›"));
+        let mut snap = super::super::workloads::stub();
+        snap.sessions.clear();
+        m.set_work(Source::Ready(snap));
+        m.key(Key::Char('w'));
+        m.key(Key::Enter);
+        assert_eq!(m.view, View::Workload);
+        m.set_work(Source::Ready(super::super::workloads::Snapshot {
+            sessions: vec![],
+            queue: Err("signed out".into()),
+        }));
+        m.key(Key::Esc);
+        let t = rows(&m).join("\n");
+        assert!(
+            t.contains("unavailable") && t.contains("none running"),
+            "{t}"
+        );
+    }
+
     #[test]
     fn every_view_fits_its_width() {
         for view in [
             View::Rest,
             View::Menu,
             View::Approvals,
+            View::Workloads,
+            View::Workload,
             View::Run,
             View::Status,
             View::Auto,

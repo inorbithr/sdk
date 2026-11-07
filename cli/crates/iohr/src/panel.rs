@@ -23,6 +23,7 @@ mod input;
 mod model;
 mod proxy;
 mod screen;
+mod workloads;
 
 /// The panel's width in columns, frame included.
 pub(crate) const WIDTH: usize = 34;
@@ -65,9 +66,10 @@ const RUN: [(char, &str, &str); 5] = [
 ];
 
 /// The top-level rows: the key, the label, and the view each opens (`None` acts at once).
-const MENU: [(char, &str, Option<PanelView>); 6] = [
+const MENU: [(char, &str, Option<PanelView>); 7] = [
     ('a', "Auto mode", Some(PanelView::Auto)),
     ('p', "Approvals", Some(PanelView::Approvals)),
+    ('w', "Workloads", Some(PanelView::Workloads)),
     ('r', "Run", Some(PanelView::Run)),
     ('s', "Status", Some(PanelView::Status)),
     ('?', "Help", None),
@@ -133,6 +135,7 @@ fn menu_rows(m: &Model, open: Option<PanelView>) -> Vec<Row> {
         let right = match key {
             'a' => m.auto_value().0,
             'p' => format!("{} ▸", PENDING.len()),
+            'w' => format!("{} ▸", demo_running()),
             'r' | 's' => "▸".to_owned(),
             _ => String::new(),
         };
@@ -172,6 +175,52 @@ fn approvals_rows(m: &Model) -> Vec<Row> {
                 Tone::Dim,
             ));
         }
+    }
+    out
+}
+
+/// The demo's workload tree (the stub the floating panel shows), as plain rows.
+fn demo_tree() -> Vec<workloads::Workload> {
+    workloads::tree(
+        &workloads::stub(),
+        &[(
+            "stub-0".to_owned(),
+            "Merge sdk #443 to main".to_owned(),
+            "Fix sdk #448 reads".to_owned(),
+        )],
+    )
+}
+
+/// How many sessions and jobs of the demo tree are running.
+fn demo_running() -> usize {
+    demo_tree()
+        .iter()
+        .filter(|w| matches!(w.role, workloads::Role::Session | workloads::Role::Job))
+        .filter(|w| w.state.running())
+        .count()
+}
+
+fn workloads_rows() -> Vec<Row> {
+    let tree = demo_tree();
+    let mut out = vec![Row::Back(
+        "Workloads".to_owned(),
+        format!("{} running", demo_running()),
+    )];
+    for (i, w) in tree.iter().enumerate() {
+        let dot = match w.state {
+            workloads::State::Needs => "◐",
+            workloads::State::Idle => "○",
+            workloads::State::Working | workloads::State::Stuck => "●",
+        };
+        let tone = match w.state {
+            workloads::State::Needs => Tone::Amber,
+            workloads::State::Working => Tone::Green,
+            workloads::State::Idle | workloads::State::Stuck => Tone::Dim,
+        };
+        out.push(Row::Text(
+            format!("{}{dot} {}", workloads::glyph(&tree, i), w.label),
+            tone,
+        ));
     }
     out
 }
@@ -257,6 +306,7 @@ fn rows(view: PanelView, m: &Model, nested: bool) -> Vec<Row> {
         }
         PanelView::Menu => menu_rows(m, None),
         PanelView::Approvals => approvals_rows(m),
+        PanelView::Workloads => workloads_rows(),
         PanelView::Run => run_rows(m),
         PanelView::Auto => auto_rows(m),
         PanelView::Status => status_rows(m),
@@ -319,9 +369,11 @@ fn foot(view: PanelView) -> &'static str {
     match view {
         PanelView::Rest => "",
         PanelView::Menu => "↑↓ move   ⏎ open   esc close",
-        PanelView::Approvals | PanelView::Run | PanelView::Auto | PanelView::Status => {
-            "↑↓ move   ⏎ choose   esc back"
-        }
+        PanelView::Approvals
+        | PanelView::Workloads
+        | PanelView::Run
+        | PanelView::Auto
+        | PanelView::Status => "↑↓ move   ⏎ choose   esc back",
     }
 }
 
@@ -481,6 +533,7 @@ pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Err
         PanelView::Rest => model::View::Rest,
         PanelView::Menu => model::View::Menu,
         PanelView::Approvals => model::View::Approvals,
+        PanelView::Workloads => model::View::Workloads,
         PanelView::Run => model::View::Run,
         PanelView::Auto => model::View::Auto,
         PanelView::Status => model::View::Status,
@@ -549,10 +602,11 @@ mod tests {
         Model { auto, selected }
     }
 
-    const VIEWS: [PanelView; 6] = [
+    const VIEWS: [PanelView; 7] = [
         PanelView::Rest,
         PanelView::Menu,
         PanelView::Approvals,
+        PanelView::Workloads,
         PanelView::Run,
         PanelView::Auto,
         PanelView::Status,

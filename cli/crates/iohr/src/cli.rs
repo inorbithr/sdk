@@ -1859,6 +1859,8 @@ pub enum PanelView {
     Menu,
     /// Waiting approvals, with deny, question and details.
     Approvals,
+    /// The workload tree: sessions on this Mac and the coordinator's queue.
+    Workloads,
     /// Subcommands that can be run.
     Run,
     /// The auto mode switch.

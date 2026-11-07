@@ -194,3 +194,39 @@ fn the_menu_opens_with_option_i_and_closes_with_esc() {
     });
     assert_eq!(row(s.screen.screen(), ROWS - 1).trim_end(), "END");
 }
+
+/// Workloads opens from the menu with `w`, one row opens in place, and Esc walks back: list,
+/// menu, pill. The data under `--demo` is the labelled stub; nothing of the panel is left on
+/// screen and the command's own last line is intact.
+#[test]
+fn workloads_open_one_and_esc_back_leaves_nothing_behind() {
+    let mut s = Session::start("seq 1 40; printf END; sleep 5");
+    s.until("the panel at rest", |screen| {
+        row(screen, ROWS - 1).starts_with("END") && row(screen, 1).contains("⌥i menu")
+    });
+    let any = |screen: &vt100::Screen, text: &str| (0..ROWS).any(|r| row(screen, r).contains(text));
+    s.send(b"\x1bi");
+    s.until("the menu with Workloads", |screen| any(screen, "Workloads"));
+    s.send(b"w");
+    s.until("the Workloads list", |screen| {
+        any(screen, "Workloads") && any(screen, "Coordinator") && any(screen, "need you")
+    });
+    assert!(any(s.screen.screen(), "stub"), "the stub is labelled");
+    s.send(b"\r");
+    s.until("one workload opened", |screen| {
+        any(screen, "Why") && any(screen, "Latest") && any(screen, "Waits")
+    });
+    s.send(b"\x1b");
+    s.until("the list again", |screen| {
+        !any(screen, "Latest") && any(screen, "Coordinator")
+    });
+    s.send(b"\x1b");
+    s.until("the menu again", |screen| {
+        any(screen, "Stop panel") && !any(screen, "Coordinator service")
+    });
+    s.send(b"\x1b");
+    s.until("the pill again", |screen| {
+        row(screen, 1).contains("⌥i menu") && !any(screen, "Stop panel")
+    });
+    assert_eq!(row(s.screen.screen(), ROWS - 1).trim_end(), "END");
+}

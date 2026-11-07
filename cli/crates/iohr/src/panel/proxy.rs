@@ -35,9 +35,11 @@ use super::cells::{self, Rect};
 use super::input;
 use super::model::{Ask, Effect, Key, Model, Source, View};
 use super::screen::{Boundary, Screen};
+use super::workloads::{self, Snapshot};
 use crate::card::Look;
 use crate::cli::Global;
 use crate::commands::asks::{self, PanelAsk};
+use crate::commands::coordinator;
 use crate::commands::shell;
 use crate::context::Ctx;
 use crate::error::Error;
@@ -216,6 +218,8 @@ fn stub_asks() -> Vec<Ask> {
         title: (*title).to_owned(),
         kind: (*kind).to_owned(),
         age: (*age).to_owned(),
+        // The stub session of this name is the one that waits on the first ask.
+        agent: if i == 0 { "Fix sdk #448 reads" } else { "" }.to_owned(),
     })
     .collect()
 }
@@ -392,12 +396,16 @@ struct Session {
     env: Env,
     asks_fetch: Option<Fetch<Result<Vec<PanelAsk>, Error>>>,
     deny_fetch: Option<Fetch<(String, Result<(), Error>)>>,
+    workloads_fetch: Option<Fetch<Result<Snapshot, Error>>>,
 }
 
 impl Session {
     fn refresh(&mut self) {
         if !self.stub && self.asks_fetch.is_none() {
             self.asks_fetch = Some(read_asks(self.g.clone(), self.env.clone()));
+        }
+        if !self.stub && self.workloads_fetch.is_none() {
+            self.workloads_fetch = Some(read_workloads(self.g.clone(), self.env.clone()));
         }
     }
 
@@ -444,6 +452,11 @@ impl Session {
         write_terminal(&self.proxy.redraw());
     }
 
+    fn workloads_done(&mut self, result: Result<Snapshot, Error>) {
+        self.proxy.model.set_work(source_of(result));
+        write_terminal(&self.proxy.redraw());
+    }
+
     fn deny_done(&mut self, id: &str, result: Result<(), Error>) {
         match result {
             Ok(()) => self.proxy.model.denied(id),
@@ -467,6 +480,7 @@ fn initial_model(g: &Global, config: &Config) -> Model {
     model.view = config.initial;
     if config.stub {
         model.set_asks(Source::Ready(stub_asks()));
+        model.set_work(Source::Ready(workloads::stub()));
         model.mode = Source::Ready("auto".into());
     } else {
         model.mode = source_of(Ctx::load(g).and_then(|c| shell::start_mode(&c).map(str::to_owned)));
@@ -527,6 +541,7 @@ pub(super) async fn run(g: &Global, env: Env, config: Config) -> Result<(), Erro
         env,
         asks_fetch: None,
         deny_fetch: None,
+        workloads_fetch: None,
     };
     write_terminal(&session.proxy.redraw());
     session.refresh();
@@ -559,6 +574,7 @@ pub(super) async fn run(g: &Global, env: Env, config: Config) -> Result<(), Erro
             _ = winch.recv() => session.resized(),
             _ = tick.tick(), if !config.stub => session.refresh(),
             result = poll(&mut session.asks_fetch) => session.asks_done(result),
+            result = poll(&mut session.workloads_fetch) => session.workloads_done(result),
             (id, result) = poll(&mut session.deny_fetch) => session.deny_done(&id, result),
         }
     }
@@ -578,6 +594,30 @@ fn read_asks(g: Global, env: Env) -> Fetch<Result<Vec<PanelAsk>, Error>> {
             Ok(r) => r,
             Err(_) => Err(Error::Failed("the asks took too long".into())),
         }
+    })
+}
+
+/// The sessions on this Mac and the coordinator's queue, read together: the registry and `ps`
+/// run off the loop, the picture under the same limit as the asks. A queue that cannot be read
+/// says why in the snapshot; the sessions are local and still shown.
+fn read_workloads(g: Global, env: Env) -> Fetch<Result<Snapshot, Error>> {
+    Box::pin(async move {
+        let now = OffsetDateTime::now_utc();
+        let local = tokio::task::spawn_blocking(move || {
+            workloads::home_root().map_or_else(Vec::new, |root| {
+                workloads::sessions(&root, now, &workloads::pid_alive, &workloads::ps_uses)
+            })
+        });
+        let picture = tokio::time::timeout(FETCH_LIMIT, coordinator::picture(&g, &env));
+        let (local, picture) = tokio::join!(local, picture);
+        let sessions =
+            local.map_err(|e| Error::Failed(format!("the sessions read failed: {e}")))?;
+        let queue = match picture {
+            Ok(Ok(v)) => Ok(workloads::queue(&v, now)),
+            Ok(Err(e)) => Err(e.to_string().lines().next().unwrap_or("").to_owned()),
+            Err(_) => Err("the queue took too long".to_owned()),
+        };
+        Ok(Snapshot { sessions, queue })
     })
 }
 

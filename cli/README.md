@@ -899,13 +899,32 @@ is resized. Nothing is drawn under `NO_COLOR`, off a terminal, or on the alterna
 less); it comes back when the program ends. Colours are truecolor when `COLORTERM=truecolor`, else
 the nearest of the 256.
 
-The panel has three views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns).
-`⌥i` opens the menu (42 columns): `a` auto mode, `p` approvals, `r` run, `s` status, `?` help, `x`
-stop the panel; arrows and Enter move and open, Esc closes. In approvals (50 columns) the selected
+The panel has four views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns).
+`⌥i` opens the menu (42 columns): `a` auto mode, `p` approvals, `w` workloads, `r` run, `s` status,
+`?` help, `x` stop the panel; arrows and Enter move and open, Esc closes. In approvals (50 columns) the selected
 ask expands to its kind and "approve on your phone", and `d` denies it after a y/n confirmation
 through the same call as the asks command. Keys are taken only while the panel is open; every other
 byte goes to your shell untouched. If the asks cannot be read, the panel says "unavailable", never a
 number. Stub data appears only with `--demo` and is labelled "stub".
+
+Workloads (60 columns, `w`) is the Mac app's workload tree, flattened: a Coordinator root for this
+machine, its children with `├` and `└`, then one "Coordinator service" row for the queue. A dot
+shows the state: green working, amber needs you, grey idle, red stuck. The header counts
+`N running · M need you`; the count is of sessions and jobs, not of the root and service rows, and
+the menu shows the same number. The data is real and read every 20 seconds from the same places the
+Mac app reads: the sessions registry `~/.inorbit/agents/sessions/*.json` (a session is listed only
+while its process is alive; working means seen in the last 10 minutes, else idle; the model family
+and the latest assistant line come from the end of its transcript, memory and CPU from `ps`) and
+the coordinator picture (`GET /v1/coordinator/picture`: jobs and the queue). A session "needs you"
+when an open ask names it (its name, its id, or an id prefix of 6 or more characters), the Mac app's
+rule. If the coordinator cannot be reached the service row says "unavailable" and the sessions
+still show; the public picture tier is marked redacted. `↑↓` move, Enter opens a row in place (72
+columns: Why, Latest, Since, Uses, Waits, PR, then the actions), Esc goes back to the list. In an
+opened workload `a` goes to the approvals view on its ask (or says none is waiting). Message,
+terminal, transcript, PR and stop are shown as "coming next" and do nothing. Not available yet and
+shown as "not available": a session's PR and checks, worker nodes under a session, and the stuck
+and failed states of a session (only jobs can be stuck). Under `--demo` the list is the design's
+stub tree, labelled "stub" in the title.
 
 Not built yet, and shown as "coming next": the Run and Status views, auto-approve from the phone,
 and typing a question inside the panel. Approving is on your phone only. Only zsh is tried; bash and

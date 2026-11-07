@@ -41,6 +41,8 @@ pub(super) fn parse(bytes: &[u8]) -> Vec<Key> {
                     match (intro, last, params.as_str()) {
                         (_, Some('A'), "") | ('O', Some('A'), _) => keys.push(Key::Up),
                         (_, Some('B'), "") | ('O', Some('B'), _) => keys.push(Key::Down),
+                        (_, Some('C'), "") | ('O', Some('C'), _) => keys.push(Key::Right),
+                        (_, Some('D'), "") | ('O', Some('D'), _) => keys.push(Key::Left),
                         ('[', Some('u'), "105;3") => keys.push(Key::Menu),
                         _ => {}
                     }
@@ -78,6 +80,8 @@ mod tests {
         assert_eq!(parse(b"\x1b"), [Key::Esc]);
         assert_eq!(parse(b"\x1b[A\x1b[B"), [Key::Up, Key::Down]);
         assert_eq!(parse(b"\x1bOA\x1bOB"), [Key::Up, Key::Down]);
+        assert_eq!(parse(b"\x1b[C\x1b[D"), [Key::Right, Key::Left]);
+        assert_eq!(parse(b"\x1bOC\x1bOD"), [Key::Right, Key::Left]);
         assert_eq!(parse(b"\r"), [Key::Enter]);
         assert_eq!(
             parse(b"p?x"),

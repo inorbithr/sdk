@@ -309,6 +309,8 @@ pub(crate) struct PanelAsk {
     pub(crate) title: String,
     pub(crate) kind: String,
     pub(crate) created_at: String,
+    /// The name the asking agent gives itself: how a workload that waits on this ask is found.
+    pub(crate) agent: String,
 }
 
 /// The asks that are the person's turn (the same rule as the count: `pending` only), oldest
@@ -323,6 +325,7 @@ pub(crate) async fn pending_asks(g: &Global, env: &Env) -> Result<Vec<PanelAsk>,
             title: headline(str_of(a, "title"), 200),
             kind: str_of(a, "kind").to_owned(),
             created_at: str_of(a, "created_at").to_owned(),
+            agent: str_of(a, "agent").to_owned(),
         })
         .collect())
 }
