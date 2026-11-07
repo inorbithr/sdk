@@ -3366,6 +3366,221 @@ async fn coordinator_jobs_create_list_and_asks_list() {
     assert!(String::from_utf8_lossy(&o.stdout).contains("An ask"));
 }
 
+/// A Planner plan with one item, for the `coordinator plan` and `item` tests.
+async fn planner_mocks(server: &MockServer, status: &str) {
+    let item = serde_json::json!({
+        "item_id": "build", "kind": "task", "title": "Build", "status": status,
+        "version": 3, "holder": "", "position": 1
+    });
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1", "title": "My plan", "state": "open", "access": "private"},
+            "items": [item.clone()], "notes": []
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(item.clone()))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/claim"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"item": {"item_id": "build", "holder": "iohr:me", "held_until": "2026-11-07T14:00:00Z", "status": "proposed"}}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/release"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"item": {"item_id": "build", "holder": "", "status": "proposed"}}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/notes"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"note": {"id": "note_1", "item_id": "build"}})),
+        )
+        .mount(server)
+        .await;
+}
+
+/// The calls the Planner mocks saw, as `METHOD path` and the body's `body` or `status` field.
+async fn planner_calls(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|q| q.url.path().starts_with("/v1/coordinator/plans"))
+        .map(|q| {
+            let b: serde_json::Value = serde_json::from_slice(&q.body).unwrap_or_default();
+            let said = b["body"].as_str().or(b["status"].as_str()).unwrap_or("");
+            format!("{} {} {said}", q.method, q.url.path())
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_plan_create_list_show_and_item_commands() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans"))
+        .and(wiremock::matchers::body_partial_json(
+            serde_json::json!({"title": "My plan", "external_id": "project:my"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1", "title": "My plan"}, "created": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"plans": [{
+            "id": "plan_1", "title": "My plan", "state": "open", "item_count": 1,
+            "updated_at": "2026-11-07T10:00:00Z"
+        }]})))
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "plan",
+            "create",
+            "My plan",
+            "--external-id",
+            "project:my",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(out.contains("plan_1") && out.contains("false"), "{out}");
+    let o = r.with_token(&t, &["coordinator", "plan", "list"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("My plan"));
+    let o = r.with_token(&t, &["coordinator", "plan", "show", "plan_1"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("build"));
+    let o = r.with_token(
+        &t,
+        &["coordinator", "item", "claim", "plan_1", "build", "--holder", "me"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &["coordinator", "item", "note", "plan_1", "build", "halfway"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &["coordinator", "item", "done", "plan_1", "build", "--note", "shipped"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(
+        calls.iter().any(|c| c == "POST /v1/coordinator/plans/plan_1/items/build/notes halfway"),
+        "{calls:?}"
+    );
+    let done: Vec<&String> = calls.iter().filter(|c| c.ends_with("shipped") || c.ends_with(" done")).collect();
+    assert_eq!(done.len(), 2, "the note, then the status: {calls:?}");
+    // A bad slug is a usage error before any call.
+    let o = r.with_token(&t, &["coordinator", "item", "note", "plan_1", "a/b", "x"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    // Nobody can read the Planner without the coordinator scopes' sign-in: a 403 says so.
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_denied"))
+        .respond_with(ResponseTemplate::new(403).set_body_raw(
+            r#"{"code":"forbidden","error":"no","details":[]}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let o = r.with_token(&t, &["coordinator", "plan", "show", "plan_denied"]);
+    assert_ne!(code(&o), 0, "{}", text(&o));
+}
+
+/// `item run`: the command is a Planner step. Success is claim, building, note, done;
+/// failure is a `failed:` note, back to proposed, and the command's own exit code.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_run_is_a_planner_step_and_a_failure_goes_back_to_proposed() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    let o = r.with_token(
+        &t,
+        &["coordinator", "item", "run", "plan_1", "build", "--", "true"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(calls.iter().any(|c| c.contains("/claim")), "{calls:?}");
+    assert!(
+        calls.iter().any(|c| c.ends_with("building")),
+        "set building: {calls:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c.contains("/notes") && c.contains("done: ")),
+        "{calls:?}"
+    );
+    assert!(calls.last().unwrap().ends_with(" done"), "{calls:?}");
+
+    // A failing command: its exit code is ours, and the item goes back to proposed.
+    server.reset().await;
+    planner_mocks(&server, "proposed").await;
+    let o = r.with_token(
+        &t,
+        &["coordinator", "item", "run", "plan_1", "build", "--", "sh", "-c", "exit 7"],
+    );
+    assert_eq!(code(&o), 7, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(
+        calls.iter().any(|c| c.contains("/notes") && c.contains("failed: ")),
+        "{calls:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c.ends_with(" proposed")),
+        "back to proposed: {calls:?}"
+    );
+    assert!(calls.iter().any(|c| c.contains("/release")), "{calls:?}");
+    assert!(!calls.iter().any(|c| c.ends_with(" done")), "{calls:?}");
+    assert!(
+        !calls.iter().any(|c| c.contains("exit 7")),
+        "the arguments never reach a note: {calls:?}"
+    );
+
+    // An item that is already done is skipped: the command does not run.
+    server.reset().await;
+    planner_mocks(&server, "done").await;
+    let marker = dir.path().join("ran");
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator", "item", "run", "plan_1", "build", "--", "touch",
+            marker.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!marker.exists(), "a done step is not run again");
+}
+
 const IO_SECRET: &str = "IOSECRETMARKER";
 
 /// A mode 0600 secret file, and the mock sign-in service that mints `io_token` for it.

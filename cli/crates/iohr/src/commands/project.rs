@@ -1490,6 +1490,31 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     if let Some(r) = roles.as_ref().filter(|_| !out.json) {
         super::atlas::show_report(ui, r);
     }
+    // The Planner plan the project's builds go through (RFC 0211): made or found, and its id
+    // written into coordination.toml. Signed out, init goes on and says how to set it later.
+    let plan = flow
+        .act_async(
+            "plan",
+            "create or find the project's Planner plan and write its id into coordination.toml",
+            || {
+                super::project_plan::run(
+                    g,
+                    env,
+                    &dir,
+                    name,
+                    a.plan_id.as_deref(),
+                    a.no_plan,
+                )
+            },
+        )
+        .await
+        .flatten();
+    if let Some(st) = plan {
+        if st.state == "skipped" && !out.json {
+            ui.note("Planner", &st.said);
+        }
+        report.steps.push(st);
+    }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
     let mut agent_built = false;

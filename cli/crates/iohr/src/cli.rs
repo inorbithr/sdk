@@ -1800,7 +1800,7 @@ pub struct InitArgs {
     /// The template: an id (`iohr project template list` shows them), a folder
     /// (`./my-template`), or a git repository (`gh:owner/repo[//subdir][@ref]`,
     /// `git:URL[//subdir][@ref]`). Default: `[project] template` in iohr's config.toml,
-    /// else demo. A template that is coming says so and refuses. At a terminal, leaving
+    /// else coordinated. A template that is coming says so and refuses. At a terminal, leaving
     /// it out offers the templates as a menu.
     #[arg(long)]
     pub template: Option<String>,
@@ -1840,6 +1840,15 @@ pub struct InitArgs {
     /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
     #[arg(long, visible_alias = "plan")]
     pub dry_run: bool,
+    /// Use this existing Planner plan for the project instead of making one: its id is
+    /// written under `[plan]` in `coordination.toml` (checked when you are signed in).
+    /// Without it, a signed-in init makes the plan named after the project, or finds the
+    /// one it made before; signed out, the id stays empty and init says how to set it.
+    #[arg(long, value_name = "PLAN")]
+    pub plan_id: Option<String>,
+    /// Leave `[plan] id` in `coordination.toml` empty: no plan is made or looked up.
+    #[arg(long, conflicts_with = "plan_id")]
+    pub no_plan: bool,
     /// Answer the questions with their defaults: no menu, no confirmation.
     #[arg(short = 'y', long)]
     pub yes: bool,
@@ -1894,7 +1903,7 @@ pub enum TemplateCommand {
     /// List the templates `init` accepts.
     ///
     /// The templates `init` and `create` accept: name, live or coming, where each comes
-    /// from, which one is the default (`[project] template` in config.toml, else demo) and
+    /// from, which one is the default (`[project] template` in config.toml, else coordinated) and
     /// what it is. `--json` prints the same as a list.
     List,
     /// Show what a template asks, writes and runs.

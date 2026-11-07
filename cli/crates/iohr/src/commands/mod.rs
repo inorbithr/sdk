@@ -24,6 +24,7 @@ mod openapi;
 mod permissions;
 mod profile;
 mod project;
+mod project_plan;
 mod project_template;
 mod runner;
 mod sdk;

@@ -23,7 +23,7 @@ use crate::template::Runner;
 pub mod folder;
 pub(crate) mod wizard;
 
-pub const DEFAULT_TEMPLATE: &str = "demo";
+pub const DEFAULT_TEMPLATE: &str = "coordinated";
 
 /// The name rule: the folder, the Python module and the extension's name all come from it, so
 /// it is the extension name rule (lowercase, digits, dashes, 2 to 32, never `tbd`) and never a
@@ -1071,11 +1071,12 @@ mod tests {
     }
 
     #[test]
-    fn the_template_is_the_flag_then_the_config_then_demo() {
+    fn the_template_is_the_flag_then_the_config_then_coordinated() {
         assert_eq!(choose_template(Some("demo"), Some("coordinated")), "demo");
-        assert_eq!(choose_template(None, Some("coordinated")), "coordinated");
-        assert_eq!(choose_template(None, None), "demo");
-        assert_eq!(choose_template(Some(" "), Some(" ")), "demo");
+        assert_eq!(choose_template(None, Some("demo")), "demo");
+        assert_eq!(choose_template(None, None), "coordinated");
+        assert_eq!(choose_template(Some(" "), Some(" ")), "coordinated");
+        assert_eq!(DEFAULT_TEMPLATE, "coordinated");
     }
 
     #[test]

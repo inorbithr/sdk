@@ -104,6 +104,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr sdk examples --from [NAME=]FILE [--lang L]... [--out FILE]` | One short program per operation and language that calls it with the published runtime, as JSON keyed by operation id; what the API reference shows beside each operation |
 | `iohr profile account NAME ID\|SLUG` | Point a signed-in profile at one of its teams, the account `sdk generate` cuts to; a later `iohr login` keeps it |
 | `iohr coordinator jobs list \| create`, `asks list \| create` | The coordinator's jobs and queued asks (RFC 0120, RFC 0138): list jobs by state, file a job (`--brief -` reads standard input; `--ask` links a queued ask), list asks, queue an ask (`asks create --kind K --body -`; the kind is required so the planner can file it); `--account <id>` on `jobs list|create` and `asks list` acts on a team you belong to (default: your own account; needs the coordinator release that accepts `account_id`). `iohr coordinator brief JOB` prints the job's brief (task, acceptance, files, document excerpt, capped at the kind's token budget, RFC 0132) for a worker to start from; the size goes to stderr. Needs a person's `iohr login`, not an API key, or `--sign-in io` to file as Io (below) |
+| `iohr coordinator plan list \| show \| create`, `item add \| claim \| release \| note \| done \| fail \| run` | The Planner's plans, items, claims and notes (RFC 0166, RFC 0211). `plan create TITLE --external-id project:NAME` makes a plan or returns the one with that id (the output says `created`); `plan show PLAN` lists its items and latest notes. `item PLAN ITEM` commands write the item: `add` (title, kind, body; an existing item keeps what you do not set), `claim` (default holder `iohr:<profile>`, 3600 s; another holder's live claim is refused, `--force` takes it), `note` (text or `-` for standard input, up to 2000 characters), `done` (`--note`), and `fail REASON`, which notes the failure, sets the item back to `proposed` and releases it (the Planner has no failed status). `item run PLAN ITEM -- COMMAND` is a build step as a Planner item: it adds the item when missing, claims it, runs the command, then notes and marks it done, or notes the failure and puts it back; an item already `done` is skipped (a build resumes), and the command's exit code is this command's. The note names the program, never its arguments. `--account <id>` acts on a team. Needs a person's `iohr login` |
 | `iohr domains add \| verify \| confirm \| list \| rm` | Prove the account controls a domain with one DNS TXT record; `verify --wait` checks every 10 s for up to `--timeout` seconds (600) |
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
@@ -447,7 +448,8 @@ with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain `
 `not yet:` lines are printed as before, on stderr, and stdout stays data only.
 
 ```sh
-iohr project init demo
+iohr project init my-shop         # the coordinated template: a Planner plan comes with it
+iohr project init demo --template demo
 iohr project create my-shop --template coordinated --dir ~/work/my-shop --json
 iohr project template list        # name, status, origin, the default (*) and what it is
 iohr project template list --json
@@ -458,8 +460,8 @@ cd "$(iohr project template path my-sensor)"   # the folder of one of yours
 `iohr project template list` lists every template (`iohr project templates` is the same command,
 kept for older scripts); `macos-app` and `ui-panel` are `coming` and
 refuse until they exist. The template is `--template`, else `template` under `[project]` in
-`config.toml` (`[project]` / `template = "coordinated"`; you edit it, `iohr config` does not
-write it), else `demo` (a described project uses `blank`, whatever `[project]` says). A configured
+`config.toml` (`[project]` / `template = "demo"`; you edit it, `iohr config` does not
+write it), else `coordinated` (RFC 0211: the demo plus a `coordination.toml` and a Planner plan; `--template demo` is the plain one) (a described project uses `blank`, whatever `[project]` says). A configured
 template that is coming refuses too.
 
 ### Templates are data
