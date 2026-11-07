@@ -3519,6 +3519,18 @@ async fn coordinator_plan_create_list_show_and_item_commands() {
         .filter(|c| c.ends_with("shipped") || c.ends_with(" done"))
         .collect();
     assert_eq!(done.len(), 2, "the note, then the status: {calls:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_plan_refusals_are_usage_and_sign_in_errors() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
     // A bad slug is a usage error before any call.
     let o = r.with_token(&t, &["coordinator", "item", "note", "plan_1", "a/b", "x"]);
     assert_eq!(code(&o), 2, "{}", text(&o));
