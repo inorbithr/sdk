@@ -3372,6 +3372,545 @@ async fn coordinator_jobs_create_list_and_asks_list() {
     assert!(String::from_utf8_lossy(&o.stdout).contains("An ask"));
 }
 
+/// A Planner plan with one item, for the `coordinator plan` and `item` tests.
+async fn planner_mocks(server: &MockServer, status: &str) {
+    let item = serde_json::json!({
+        "item_id": "build", "kind": "task", "title": "Build", "status": status,
+        "version": 3, "holder": "", "position": 1
+    });
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1", "title": "My plan", "state": "open", "access": "private"},
+            "items": [item.clone()], "notes": []
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(item.clone()))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/claim"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"item": {"item_id": "build", "holder": "iohr:me", "held_until": "2026-11-07T14:00:00Z", "status": "proposed"}}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/release"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"item": {"item_id": "build", "holder": "", "status": "proposed"}}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/build/notes"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"note": {"id": "note_1", "item_id": "build"}})),
+        )
+        .mount(server)
+        .await;
+}
+
+/// The calls the Planner mocks saw, as `METHOD path` and the body's `body` or `status` field.
+async fn planner_calls(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|q| q.url.path().starts_with("/v1/coordinator/plans"))
+        .map(|q| {
+            let b: serde_json::Value = serde_json::from_slice(&q.body).unwrap_or_default();
+            let said = b["body"]
+                .as_str()
+                .or(b["item"]["status"].as_str())
+                .unwrap_or("");
+            format!("{} {} {said}", q.method, q.url.path())
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_plan_create_list_show_and_item_commands() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans"))
+        .and(wiremock::matchers::body_partial_json(
+            serde_json::json!({"title": "My plan", "external_id": "project:my"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1", "title": "My plan"}, "created": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"plans": [{
+                "id": "plan_1", "title": "My plan", "state": "open", "item_count": 1,
+                "updated_at": "2026-11-07T10:00:00Z"
+            }]})),
+        )
+        .mount(&server)
+        .await;
+
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "plan",
+            "create",
+            "My plan",
+            "--external-id",
+            "project:my",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(out.contains("plan_1") && out.contains("false"), "{out}");
+    let o = r.with_token(&t, &["coordinator", "plan", "list"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("My plan"));
+    let o = r.with_token(&t, &["coordinator", "plan", "show", "plan_1"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("build"));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "claim",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &["coordinator", "item", "note", "plan_1", "build", "halfway"],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "done",
+            "plan_1",
+            "build",
+            "--note",
+            "shipped",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "POST /v1/coordinator/plans/plan_1/items/build/notes halfway"),
+        "{calls:?}"
+    );
+    let done: Vec<&String> = calls
+        .iter()
+        .filter(|c| c.ends_with("shipped") || c.ends_with(" done"))
+        .collect();
+    assert_eq!(done.len(), 2, "the note, then the status: {calls:?}");
+}
+
+/// The JSON bodies the mocks received on `METHOD path`, oldest first.
+async fn planner_bodies(server: &MockServer, verb: &str, at: &str) -> Vec<serde_json::Value> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|q| q.method.as_str() == verb && q.url.path() == at)
+        .map(|q| serde_json::from_slice(&q.body).unwrap_or_default())
+        .collect()
+}
+
+/// `item add` keeps what it is not asked to change and locks on the version it read.
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_add_keeps_the_rest_and_locks_on_the_version() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    let item = "/v1/coordinator/plans/plan_1/items/build";
+    // add: the item exists (version 3), so its title changes under that version, its kind stays.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "add",
+            "plan_1",
+            "build",
+            "--title",
+            "Build it",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let put = planner_bodies(&server, "PUT", item).await;
+    assert_eq!(put.len(), 1, "{put:?}");
+    assert_eq!(put[0]["item"]["title"], "Build it", "{put:?}");
+    assert_eq!(put[0]["item"]["kind"], "task", "{put:?}");
+    assert_eq!(put[0]["expected_version"], 3, "{put:?}");
+
+    // add: a new item is written as proposed, version 0, with the kind given.
+    Mock::given(method("PUT"))
+        .and(path("/v1/coordinator/plans/plan_1/items/fresh"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "item": {"item_id": "fresh", "kind": "bug", "title": "Fresh", "status": "proposed", "version": 1}
+        })))
+        .mount(&server)
+        .await;
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "add",
+            "plan_1",
+            "fresh",
+            "--title",
+            "Fresh",
+            "--kind",
+            "bug",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let put = planner_bodies(&server, "PUT", "/v1/coordinator/plans/plan_1/items/fresh").await;
+    assert_eq!(put[0]["expected_version"], 0, "{put:?}");
+    assert_eq!(put[0]["item"]["status"], "proposed", "{put:?}");
+    assert_eq!(put[0]["item"]["kind"], "bug", "{put:?}");
+}
+
+/// `item fail` is a `failed:` note, back to proposed, then the release.
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_fail_notes_proposes_and_releases() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    // fail: the reason is a `failed:` note, the item goes back to proposed, the claim is released.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "fail",
+            "plan_1",
+            "build",
+            "--reason",
+            "the tests broke",
+            "--holder",
+            "me",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(text(&o).contains("failed"), "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    let at = |needle: &str| calls.iter().position(|c| c.contains(needle));
+    let note = at("/notes failed: the tests broke");
+    let back = calls.iter().rposition(|c| c.ends_with(" proposed"));
+    let rel = at("/release");
+    assert!(
+        note.is_some() && back.is_some() && rel.is_some(),
+        "{calls:?}"
+    );
+    assert!(
+        note < back && back < rel,
+        "note, proposed, release: {calls:?}"
+    );
+}
+
+/// `item release` and `claim` send `force` only when asked, and a live claim of another
+/// holder is refused with the API's words.
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_release_and_claim_send_force_only_when_asked() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    let item = "/v1/coordinator/plans/plan_1/items/build";
+    // release: the holder goes in, `force` only when asked.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "release",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "release",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+            "--force",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let rel = planner_bodies(&server, "POST", &format!("{item}/release")).await;
+    // The two release commands, in order.
+    let (plain, forced) = (&rel[rel.len() - 2], &rel[rel.len() - 1]);
+    assert_eq!(plain["holder"], "me", "{rel:?}");
+    assert!(plain.get("force").is_none(), "{rel:?}");
+    assert_eq!(forced["force"], true, "{rel:?}");
+
+    // claim: plain and --force differ by the force flag; the seconds and holder go through.
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "claim",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+            "--seconds",
+            "600",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "claim",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+            "--force",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let claims = planner_bodies(&server, "POST", &format!("{item}/claim")).await;
+    assert_eq!(claims.len(), 2, "{claims:?}");
+    assert_eq!(claims[0]["holder"], "me", "{claims:?}");
+    assert_eq!(claims[0]["seconds"], 600, "{claims:?}");
+    assert!(claims[0].get("force").is_none(), "{claims:?}");
+    assert_eq!(claims[1]["force"], true, "{claims:?}");
+
+    // claim: another holder's live claim is refused (409) and the words reach the person.
+    Mock::given(method("POST"))
+        .and(path("/v1/coordinator/plans/plan_1/items/taken/claim"))
+        .respond_with(ResponseTemplate::new(409).set_body_raw(
+            r#"{"code":"aborted","error":"item taken is held by someone else","details":[]}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let o = r.with_token(&t, &["coordinator", "item", "claim", "plan_1", "taken"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("held by someone else"), "{}", text(&o));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_plan_refusals_are_usage_and_sign_in_errors() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    // A bad slug is a usage error before any call.
+    let o = r.with_token(&t, &["coordinator", "item", "note", "plan_1", "a/b", "x"]);
+    assert_eq!(code(&o), 2, "{}", text(&o));
+    // Nobody can read the Planner without the coordinator scopes' sign-in: a 403 says so.
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_denied"))
+        .respond_with(ResponseTemplate::new(403).set_body_raw(
+            r#"{"code":"forbidden","error":"no","details":[]}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let o = r.with_token(&t, &["coordinator", "plan", "show", "plan_denied"]);
+    assert_eq!(code(&o), 4, "{}", text(&o));
+    assert!(text(&o).contains("coordinator"), "{}", text(&o));
+}
+
+/// `item run`: the command is a Planner step. Success is claim, building, note, done;
+/// failure is a `failed:` note, back to proposed, and the command's own exit code.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_run_is_a_planner_step_and_a_failure_goes_back_to_proposed() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    let t = token(&[]);
+    planner_mocks(&server, "proposed").await;
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "true",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(calls.iter().any(|c| c.contains("/claim")), "{calls:?}");
+    assert!(
+        calls.iter().any(|c| c.ends_with("building")),
+        "set building: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.contains("/notes") && c.contains("done: ")),
+        "{calls:?}"
+    );
+    assert!(calls.last().unwrap().ends_with(" done"), "{calls:?}");
+
+    // A failing command: its exit code is ours, and the item goes back to proposed.
+    server.reset().await;
+    planner_mocks(&server, "proposed").await;
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "sh",
+            "-c",
+            "exit 7",
+        ],
+    );
+    assert_eq!(code(&o), 7, "{}", text(&o));
+    let calls = planner_calls(&server).await;
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.contains("/notes") && c.contains("failed: ")),
+        "{calls:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c.ends_with(" proposed")),
+        "back to proposed: {calls:?}"
+    );
+    assert!(calls.iter().any(|c| c.contains("/release")), "{calls:?}");
+    assert!(!calls.iter().any(|c| c.ends_with(" done")), "{calls:?}");
+    assert!(
+        !calls.iter().any(|c| c.contains("exit 7")),
+        "the arguments never reach a note: {calls:?}"
+    );
+
+    // An item that is already done is skipped: the command does not run.
+    server.reset().await;
+    planner_mocks(&server, "done").await;
+    let marker = dir.path().join("ran");
+    let o = r.with_token(
+        &t,
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "touch",
+            marker.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(!marker.exists(), "a done step is not run again");
+}
+
+/// `item run` on an item another holder builds says how to take it over with a command that
+/// exists (`item claim --force`), not a `--force` the command does not have.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn coordinator_item_run_on_a_held_item_names_the_claim_command() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    Mock::given(method("GET"))
+        .and(path("/v1/coordinator/plans/plan_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "plan": {"id": "plan_1"},
+            "items": [{"item_id": "build", "status": "building", "holder": "someone-else",
+                       "held_until": "2999-01-01T00:00:00Z"}],
+            "notes": []
+        })))
+        .mount(&server)
+        .await;
+    let o = r.with_token(
+        &token(&[]),
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "true",
+        ],
+    );
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(
+        text(&o).contains("held by someone-else")
+            && text(&o).contains("iohr coordinator item claim plan_1 build --force"),
+        "{}",
+        text(&o)
+    );
+}
+
 const IO_SECRET: &str = "IOSECRETMARKER";
 
 /// A mode 0600 secret file, and the mock sign-in service that mints `io_token` for it.
