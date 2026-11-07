@@ -968,6 +968,91 @@ async fn search_and_show_read_the_catalogue() {
     assert_eq!(code(&o), 2, "{}", text(&o));
 }
 
+/// A catalogue listing of InOrbit's, released (`latest` given) or coming.
+fn first_party(name: &str, latest: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "publisher": "inorbit", "name": name, "kind": "program", "description": "d",
+        "visibility": "public", "coming": latest.is_none(), "publisher_name": "InOrbit",
+        "first_party": true, "latest": latest.map(|v| serde_json::json!({"version": v}))
+    })
+}
+
+async fn list_catalogue(b: &Box_, listings: &[serde_json::Value]) {
+    Mock::given(method("GET"))
+        .and(path("/v1/extensions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "extensions": listings, "next_page_token": ""
+        })))
+        .mount(&b.server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn show_with_no_name_lists_the_catalogue_the_way_search_does() {
+    let b = Box_::new().await;
+    list_catalogue(
+        &b,
+        &[
+            first_party("agent", Some("0.2.0")),
+            first_party("crawler", None),
+        ],
+    )
+    .await;
+    let shown = b.run_api(&["ext", "show"]);
+    assert_eq!(code(&shown), 0, "{}", text(&shown));
+    let out = String::from_utf8_lossy(&shown.stdout);
+    assert!(out.starts_with("NAME"), "{out}");
+    assert!(
+        out.contains("inorbit/agent") && out.contains("0.2.0"),
+        "{out}"
+    );
+    let crawler = out
+        .lines()
+        .find(|l| l.contains("inorbit/crawler"))
+        .unwrap_or_default();
+    assert!(crawler.contains("coming"), "{out}");
+    // The one listing: the bytes `ext search` prints.
+    let searched = b.run_api(&["ext", "search"]);
+    assert_eq!(shown.stdout, searched.stdout, "{}", text(&searched));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn init_without_a_terminal_hints_the_extension_and_installs_nothing() {
+    let b = Box_::new().await;
+    list_catalogue(
+        &b,
+        &[
+            first_party("agent", Some("0.2.0")),
+            first_party("crawler", None),
+        ],
+    )
+    .await;
+    let dir = b.dir.path().join("work/made");
+    let o = b
+        .cmd(&[
+            "project",
+            "init",
+            "made",
+            "--template",
+            "coordinated",
+            "--yes",
+            "--no-smoke",
+            "--dir",
+            dir.to_str().unwrap(),
+        ])
+        .env("HOME", b.dir.path())
+        .env("IOHR_BASE_URL", b.server.uri())
+        .env("IOHR_TOKEN", token(&["extensions:read"]))
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("ext install inorbit/agent"), "{}", text(&o));
+    assert!(!err.contains("ext install inorbit/crawler"), "{}", text(&o));
+    nothing_installed(&b);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_catalogue_install_never_replaces_another_signers_extension() {
     let b = Box_::new().await;

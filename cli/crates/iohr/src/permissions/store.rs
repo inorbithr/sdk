@@ -259,6 +259,8 @@ pub(crate) enum Outcome {
     AllowedByRule,
     /// The person said yes once.
     AllowedOnce,
+    /// `auto` mode: no rule decided it and nobody was asked.
+    AllowedAuto,
     /// The person said always: a rule was written.
     AllowedAlways,
     /// A rule or the secret list refused it.
@@ -275,6 +277,7 @@ impl Outcome {
         match self {
             Self::AllowedByRule => "allowed by rule",
             Self::AllowedOnce => "allowed once",
+            Self::AllowedAuto => "allowed, auto mode",
             Self::AllowedAlways => "allowed always",
             Self::DeniedByRule => "denied by rule",
             Self::DeniedByPerson => "denied by person",

@@ -21,7 +21,7 @@ use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
 use crate::toolchain::{self, Lang, State};
-use crate::ui::{Choice, Nav, Ui, cancel};
+use crate::ui::{Choice, Mark, Nav, Ui, cancel};
 
 /// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
 fn state_root() -> Result<PathBuf, Error> {
@@ -129,7 +129,11 @@ impl Flow {
     fn gate(&mut self, id: &str, what: &str) -> bool {
         if self.dry {
             self.would.push((id.to_owned(), what.to_owned()));
-            self.ui.info(&format!("would: {what}"));
+            // Drawn, the plan is one numbered box at the end of the dry run; plain, each
+            // action is a `would:` line as it is planned.
+            if !self.ui.fancy() {
+                self.ui.info(&format!("would: {what}"));
+            }
             false
         } else {
             true
@@ -1398,7 +1402,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 args: ask::argv(
                     *ag,
                     model.as_deref(),
-                    true,
+                    (true, false),
                     &allow,
                     Some(max_turns),
                     &prompt,
@@ -1480,6 +1484,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         None => {}
     }
     // The built-in roles (security and the language's engineer): imported when signed in.
+    let roles_sp = (!dry && ui.fancy()).then(|| ui.step("Importing the built-in roles"));
     let roles = flow
         .act_async(
             "roles",
@@ -1487,8 +1492,15 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             || super::atlas::import_for(g, env, &dir, false, false),
         )
         .await;
-    if let Some(r) = roles.as_ref().filter(|_| !out.json) {
-        super::atlas::show_report(ui, r);
+    match (roles.as_ref().filter(|_| !out.json), roles_sp) {
+        // Drawn: one line that says how it went, the role names in it.
+        (Some(r), Some(sp)) if !r.outcomes.is_empty() || r.message.is_some() => {
+            let (mark, said) = super::atlas::roles_result(r);
+            sp.end(mark, &said);
+        }
+        (Some(r), None) => super::atlas::show_report(ui, r),
+        (_, Some(sp)) => sp.clear(),
+        (None, None) => {}
     }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
@@ -1497,10 +1509,15 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     for s in &steps {
         match s.name {
             StepName::Git => {
+                let sp = (!dry).then(|| ui.step("Making a git repository"));
                 let r = flow.act("git", "make a git repository with one commit", || {
                     project::git_step(&dir, name, &tpl.meta.id)
                 });
                 if let Some(st) = r {
+                    if let Some(sp) = sp {
+                        let (mark, said) = step_line(&st);
+                        sp.end(mark, &said);
+                    }
                     report.steps.push(st);
                 }
             }
@@ -1509,15 +1526,25 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                     "register the project: state and cache under {}",
                     state.display()
                 );
+                let sp = (!dry).then(|| ui.step("Registering the project"));
                 let r = flow.act("register", &what, || {
                     project::register_step(&dir, &state_root, name, &tpl.meta.id, &created_at)
                 });
                 match r {
                     Some(Ok((_, st))) => {
+                        if let Some(sp) = sp {
+                            let (mark, said) = step_line(&st);
+                            sp.end(mark, &said);
+                        }
                         report.steps.push(st);
                         report.steps.extend(project::cloud_steps(name));
                     }
-                    Some(Err(e)) => return Err(Error::Failed(e)),
+                    Some(Err(e)) => {
+                        if let Some(sp) = sp {
+                            sp.fail(&format!("Could not register the project: {e}"));
+                        }
+                        return Err(Error::Failed(e));
+                    }
                     None => {}
                 }
             }
@@ -1586,6 +1613,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 model: r.model.clone(),
                                 rows: true,
                                 made: Some("AI-built"),
+                                summary: true,
                             },
                             ui,
                             waiting: "Your agent is building it",
@@ -1606,6 +1634,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                             Out::raw(format!("{line}\n").as_bytes());
                         }
                         if ended.code == 0 {
+                            ui.done(&format!("{} built it in {secs} s", r.agent.name()));
                             agent_built = true;
                             report.steps.push(project::step(
                                 "agent",
@@ -1660,6 +1689,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 why.clone(),
                                 "",
                             ));
+                            ui.failed(&format!("{} did not finish: {why}", r.agent.name()));
                             agent_failed = Some(why);
                         }
                     }
@@ -1688,6 +1718,24 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 ui.info(&st.said);
             }
         }
+        report.steps.push(st);
+    }
+    // Extensions that fit the project: one more step, offered at a terminal, a hint
+    // line otherwise.
+    if let Some(st) = super::init_extensions::offer(
+        g,
+        env,
+        ui,
+        out,
+        dry,
+        interactive,
+        &super::init_extensions::Signals {
+            template: &tpl.meta.id,
+            describe: describe.as_deref(),
+        },
+    )
+    .await
+    {
         report.steps.push(st);
     }
     if dry {
@@ -1819,6 +1867,14 @@ fn dry_report(
         }));
         return;
     }
+    flow.ui.plan(
+        "What init will do",
+        &flow
+            .would
+            .iter()
+            .map(|(_, w)| w.clone())
+            .collect::<Vec<_>>(),
+    );
     flow.ui.note(
         &format!("{} files, none written", files.len()),
         &plan_lines(files.iter().map(|(p, t)| (p.as_str(), t.len()))).join("\n"),
@@ -1875,6 +1931,19 @@ async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
         }
     }
     signed_in
+}
+
+/// How a finished report step reads on the terminal: its mark and one line. Only `done` is a
+/// check; a step that was skipped or waits on a decision says so in its line.
+pub(super) fn step_line(st: &project::Step) -> (Mark, String) {
+    let mark = Mark::of(&st.state);
+    let said = match st.state.as_str() {
+        "done" => format!("{}: {}", st.title, st.said),
+        "skipped" => format!("{} skipped: {}", st.title, st.said),
+        "failed" => format!("{} failed: {}", st.title, st.said),
+        _ => format!("{} waits: {}", st.title, st.said),
+    };
+    (mark, said)
 }
 
 /// The drawn ending: what is left to do in one line (`--verbose` lists it), and an outro

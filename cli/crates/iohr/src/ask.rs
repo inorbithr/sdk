@@ -161,7 +161,7 @@ pub(crate) const SECRET_READS: &[&str] = crate::permissions::secrets::READ_RULES
 /// Claude (flags checked against `claude --help`): `-p` prints and exits, `--output-format
 /// stream-json` needs `--verbose`, `--include-partial-messages` streams pieces as they
 /// arrive, `--no-session-persistence` keeps nothing on disk, `--permission-mode acceptEdits`
-/// lets it edit, `--max-turns` bounds the run. An editing run takes `allow`, the commands it may
+/// lets it edit (`--permission-mode plan` in plan mode, which only reads), `--max-turns` bounds the run. An editing run takes `allow`, the commands it may
 /// run (each a prefix, `cargo test`, scoped as `Bash(cargo test:*)`), and always `Read`, `Glob`,
 /// `Grep`, `Write`, `Edit`, `WebSearch` and `WebFetch` (a documents project needs no shell to
 /// fetch a site: `WebFetch` does it); any other command is refused because nobody can be asked in print mode, and
@@ -174,7 +174,7 @@ pub(crate) const SECRET_READS: &[&str] = crate::permissions::secrets::READ_RULES
 pub(crate) fn argv(
     agent: Agent,
     model: Option<&str>,
-    allow_edits: bool,
+    (allow_edits, plan): (bool, bool),
     allow: &[String],
     max_turns: Option<u32>,
     question: &str,
@@ -198,6 +198,14 @@ pub(crate) fn argv(
         a.extend(["--model".to_owned(), m.to_owned()]);
     }
     match (agent, allow_edits) {
+        // Plan mode (`plan`, which beats `allow_edits`): Claude's own plan mode, so it reads and
+        // proposes and changes nothing, with the shell and the secret files denied outright.
+        (Agent::Claude, _) if plan => {
+            a.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
+            a.push("--disallowedTools".to_owned());
+            a.extend(SECRET_READS.iter().map(|r| (*r).to_owned()));
+            a.push("Bash".to_owned());
+        }
         (Agent::Claude, true) => {
             a.extend(["--permission-mode".to_owned(), "acceptEdits".to_owned()]);
             let mut denied: Vec<String> = SECRET_READS.iter().map(|r| (*r).to_owned()).collect();
@@ -224,9 +232,10 @@ pub(crate) fn argv(
             a.extend(denied);
         }
         (Agent::Claude, false) => {}
+        // Codex has no plan mode (checked against its CLI reference): plan is its read-only sandbox.
         (Agent::Codex, edits) => a.extend([
             "--sandbox".to_owned(),
-            if edits {
+            if edits && !plan {
                 "workspace-write"
             } else {
                 "read-only"
@@ -360,11 +369,18 @@ mod tests {
 
     #[test]
     fn the_argv_has_no_session_and_no_edits_unless_asked() {
-        let a = argv(Agent::Claude, Some("haiku"), false, &[], None, "q");
+        let a = argv(Agent::Claude, Some("haiku"), (false, false), &[], None, "q");
         assert!(a.contains(&"--no-session-persistence".to_owned()));
         assert!(!a.contains(&"--permission-mode".to_owned()));
         assert_eq!(a[a.len() - 2..], ["--", "q"]);
-        let e = argv(Agent::Claude, Some("haiku"), true, &[], Some(7), "q");
+        let e = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (true, false),
+            &[],
+            Some(7),
+            "q",
+        );
         assert!(
             e.windows(2)
                 .any(|w| w == ["--permission-mode", "acceptEdits"])
@@ -385,19 +401,61 @@ mod tests {
             !a.contains(&"--max-turns".to_owned()) && !a.contains(&"--disallowedTools".to_owned())
         );
         assert!(
-            !argv(Agent::Codex, None, false, &[], Some(7), "q").contains(&"--max-turns".to_owned())
+            !argv(Agent::Codex, None, (false, false), &[], Some(7), "q")
+                .contains(&"--max-turns".to_owned())
         );
         assert!(
-            argv(Agent::Codex, None, false, &[], Some(7), "q")
+            argv(Agent::Codex, None, (false, false), &[], Some(7), "q")
                 .windows(2)
                 .any(|w| w == ["--sandbox", "read-only"])
         );
     }
 
     #[test]
+    fn plan_reads_and_changes_nothing_and_beats_allow_edits() {
+        for edits in [false, true] {
+            let c = argv(
+                Agent::Claude,
+                Some("haiku"),
+                (edits, true),
+                &[],
+                Some(7),
+                "q",
+            );
+            assert!(
+                c.windows(2).any(|w| w == ["--permission-mode", "plan"]),
+                "{c:?}"
+            );
+            assert!(!c.contains(&"acceptEdits".to_owned()), "{c:?}");
+            let denied = &c[c.iter().position(|x| x == "--disallowedTools").unwrap() + 1..];
+            assert!(denied.contains(&"Bash".to_owned()));
+            assert!(
+                SECRET_READS
+                    .iter()
+                    .all(|r| denied.contains(&(*r).to_owned()))
+            );
+            assert!(!c.contains(&"--allowedTools".to_owned()));
+            assert_eq!(c[c.len() - 2..], ["--", "q"]);
+            // Codex has no plan mode: plan is its read-only sandbox, even with edits asked.
+            let x = argv(Agent::Codex, None, (edits, true), &[], None, "q");
+            assert!(
+                x.windows(2).any(|w| w == ["--sandbox", "read-only"]),
+                "{x:?}"
+            );
+        }
+    }
+
+    #[test]
     fn scoped_commands_and_the_web_are_allowed_and_the_rest_of_the_shell_is_not() {
         let allow = ["cargo build".to_owned(), "cargo test".to_owned()];
-        let e = argv(Agent::Claude, Some("haiku"), true, &allow, Some(7), "q");
+        let e = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (true, false),
+            &allow,
+            Some(7),
+            "q",
+        );
         let at = e.iter().position(|x| x == "--allowedTools").unwrap();
         assert_eq!(
             e[at + 1..at + 10],
@@ -430,7 +488,14 @@ mod tests {
         assert!(e.windows(2).any(|w| w == ["--setting-sources", ""]));
         assert_eq!(e[e.len() - 2..], ["--", "q"]);
         // Reading runs allow nothing.
-        let r = argv(Agent::Claude, Some("haiku"), false, &allow, None, "q");
+        let r = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (false, false),
+            &allow,
+            None,
+            "q",
+        );
         assert!(!r.contains(&"--allowedTools".to_owned()));
     }
 

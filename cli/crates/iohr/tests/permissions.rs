@@ -418,6 +418,90 @@ fn deny_mode_offers_no_bash_and_the_environment_and_config_choose_it() {
     assert_eq!(o.status.code(), Some(2), "{}", text(&o));
 }
 
+// ------------------------------------------------------------ modes (PRD 0197)
+
+#[test]
+fn auto_runs_what_no_rule_decides_and_a_deny_rule_a_secret_and_an_unreadable_line_still_win() {
+    let r = rig!();
+    assert!(
+        r.iohr(&["permissions", "deny", "Bash(echo no)"], &[])
+            .status
+            .success()
+    );
+    let read_env = json!({"tool_name": "Read", "input": {"file_path": ".env"}});
+    r.calls(&json!([
+        bash("echo hi"),
+        bash("echo no"),
+        bash("echo $(id)"),
+        bash("echo a > made.txt"),
+        read_env
+    ]));
+    // No terminal and no rule for `echo hi`: auto runs it, nobody is asked.
+    let o = r.iohr(&["--json", "ask", "--headless", "--mode", "auto", "q"], &[]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(answer(&o), "allow:hi; deny:; deny:; deny:; deny:");
+    assert!(!r.work().join("made.txt").exists());
+    // The run is offered the shell behind the prompt tool, as in `rules`, and says it is auto.
+    let args = r.saw("claude.args");
+    assert!(
+        args.contains("Bash") && args.contains("mcp__iohrperm__approve"),
+        "{args}"
+    );
+    assert!(!args.contains("--permission-mode"), "{args}");
+    // The audit names the mode of the allowed call and the reason of each refusal.
+    let log = std::fs::read_to_string(r.work().join(".inorbit/permissions.log")).unwrap();
+    assert!(log.contains("auto mode"), "{log}");
+    assert!(log.contains("cannot be checked"), "{log}");
+    // The environment and the older word say the same.
+    for (args, env) in [
+        (
+            vec!["ask", "--headless", "q"],
+            vec![("IOHR_ASK_MODE", "auto")],
+        ),
+        (
+            vec!["ask", "--headless", "--permissions", "auto", "q"],
+            vec![],
+        ),
+    ] {
+        r.calls(&json!([bash("echo again")]));
+        let o = r.iohr(&[&["--json"][..], &args[..]].concat(), &env);
+        assert_eq!(answer(&o), "allow:again", "{}", text(&o));
+    }
+}
+
+#[test]
+fn plan_runs_no_shell_asks_claude_for_a_plan_and_holds_without_a_terminal() {
+    let r = rig!();
+    r.calls(&json!([bash("touch made.txt")]));
+    // The fake needs the prompt tool, so it may exit; only what it was started with counts.
+    let _ = r.iohr(&["ask", "--headless", "--mode", "plan", "q"], &[]);
+    let a = r.saw("claude.args");
+    let lines: Vec<&str> = a.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| *l == "--permission-mode")
+        .unwrap();
+    assert_eq!(lines[at + 1], "plan", "{a}");
+    assert!(!a.contains("--mcp-config") && !a.contains("Bash"), "{a}");
+    assert!(!r.work().join("made.txt").exists());
+    // `[ask] mode` says it too, and `--allow-edits` does not widen it.
+    std::fs::create_dir_all(r.home.path().join("config")).unwrap();
+    std::fs::write(
+        r.home.path().join("config/config.toml"),
+        "[ask]\nmode = \"plan\"\n",
+    )
+    .unwrap();
+    let _ = r.iohr(&["ask", "--headless", "--allow-edits", "q"], &[]);
+    let a = r.saw("claude.args");
+    assert!(
+        a.contains("plan") && !a.contains("acceptEdits") && !a.contains("Bash"),
+        "{a}"
+    );
+    // A word that is no mode is a usage error.
+    let o = r.iohr(&["ask", "--headless", "--mode", "yolo", "q"], &[]);
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+}
+
 // ------------------------------------------------------------ the terminal
 
 #[test]
