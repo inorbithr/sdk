@@ -4,6 +4,18 @@ Pre-release (0.x): commands and output can still change between versions. This p
 describes `main`; a change merged after the latest pre-release ships with the next one
 ([CHANGELOG.md](CHANGELOG.md), [releases](https://github.com/inorbithr/sdk/releases?q=iohr)).
 
+Guides for each part, with captures of real output, are on the developer site:
+[what iohr can do](https://developers.inorbit.hr/docs/tools/iohr/),
+[projects](https://developers.inorbit.hr/docs/tools/projects/) (`iohr project init`, the
+atlas, memory, `iohr sync`), [the `?` prompt](https://developers.inorbit.hr/docs/tools/ask/),
+[extensions](https://developers.inorbit.hr/docs/tools/extensions/) and
+[iohr and iohr-preview](https://developers.inorbit.hr/docs/tools/preview/). This README is
+the reference they link back to.
+
+`iohr-preview` is the next build of this program under another name: it carries changes that
+are checked but not yet in a release (today the `?` mode switch, the extension offer in
+`iohr project init` and `iohr ext show` with no name). It is not published as a package.
+
 ```sh
 brew trust inorbithr/tap                                          # once per machine: Homebrew refuses untrusted taps
 brew install inorbithr/tap/iohr                                   # macOS, Linux
