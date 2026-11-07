@@ -104,6 +104,7 @@ fn json_is_the_documented_shape_and_never_the_question() {
     assert_eq!(
         keys,
         [
+            "access",
             "agent",
             "answer",
             "command",
@@ -112,12 +113,15 @@ fn json_is_the_documented_shape_and_never_the_question() {
             "exit_code",
             "label",
             "model",
+            "next",
             "permissions",
             "questions",
             "via"
         ]
     );
     assert_eq!(v["questions"], serde_json::json!([]));
+    assert_eq!(v["access"], serde_json::Value::Null);
+    assert_eq!(v["next"], serde_json::json!([]));
     assert_eq!(v["answer"], "It is Rayleigh scattering.");
     assert_eq!(v["agent"], "claude");
     assert_eq!(v["via"], "local");
@@ -453,9 +457,10 @@ fn the_answer_is_printed_once_with_a_model_from_the_environment() {
 }
 
 // Off a terminal (a pipe, or NO_COLOR) the hook's card is plain: no escape, no row under it,
-// and the record on stdout is the answer, the command and the link, in that order.
+// and the record on stdout is the answer, the command, the link, the undo, the folder asked
+// about and the next steps, in that order.
 #[test]
-fn the_hook_record_is_four_fields_and_the_plain_card_has_no_row() {
+fn the_hook_record_is_six_fields_and_the_plain_card_has_no_row() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
     std::fs::write(r.work().join("notes.md"), "x").unwrap();
@@ -477,7 +482,7 @@ fn the_hook_record_is_four_fields_and_the_plain_card_has_no_row() {
         assert!(out.status.success(), "{}", text(&out));
         let stdout = String::from_utf8(out.stdout.clone()).unwrap();
         let f: Vec<&str> = stdout.split('\u{1e}').collect();
-        assert_eq!(f.len(), 4, "{stdout:?}");
+        assert_eq!(f.len(), 6, "{stdout:?}");
         assert!(
             f[0].contains("run:") && f[0].contains("git status"),
             "{f:?}"
@@ -486,6 +491,8 @@ fn the_hook_record_is_four_fields_and_the_plain_card_has_no_row() {
         assert_eq!(f[2], "notes.md");
         // Nobody was asked, so no rule was saved and Undo has nothing to take back.
         assert_eq!(f[3], "");
+        // A readable folder asks for nothing and the answer named no next step.
+        assert_eq!((f[4], f[5]), ("", ""));
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
             !err.contains('\u{1b}') && !err.contains("to choose"),
@@ -1423,6 +1430,187 @@ fn the_menu_offers_asks_only_when_some_wait_and_puts_the_list_on_the_prompt() {
     assert!(screen.contains("2 waiting"), "{screen:?}");
 }
 
+// ------------------------------------------------ ask instead of "I can't" (RFC 0203)
+
+/// The arguments the fake agent got, one per line.
+fn sent_args(r: &Rig) -> Vec<String> {
+    r.saw("claude.args").lines().map(str::to_owned).collect()
+}
+
+fn ask_json(r: &Rig, cwd: &std::path::Path, extra: &[&str], answer: &str) -> serde_json::Value {
+    let mut a = vec![
+        "--json",
+        "ask",
+        "--headless",
+        "--cwd",
+        cwd.to_str().unwrap(),
+    ];
+    a.extend_from_slice(extra);
+    a.push("explain this directory");
+    let out = r.run(&a, &answer_json(answer), "0");
+    assert!(out.status.success(), "{}", text(&out));
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+// The bug: asked in the home folder, the run got no tools and the answer told the owner to run
+// grep themselves. Now Io asks to read the folder: the request is data (no terminal here), the
+// run is not given tools it was not allowed, and `--read` is the yes for one run.
+#[test]
+fn a_folder_too_broad_to_read_is_asked_for_and_a_yes_gives_the_read_tools() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    std::fs::write(home.join("README.md"), "hello").unwrap();
+
+    let v = ask_json(&r, &home, &[], "It looks like a home folder.");
+    assert_eq!(v["access"]["folder"], home.display().to_string());
+    assert_eq!(v["access"]["why"], "home");
+    assert_eq!(v["access"]["askable"], true);
+    assert_eq!(
+        v["access"]["allow_with"],
+        format!("--read {}", home.display())
+    );
+    let args = sent_args(&r);
+    let at = args.iter().position(|a| a == "--tools").unwrap();
+    assert_eq!(args[at + 1], "", "no tools without the yes: {args:?}");
+
+    let v = ask_json(
+        &r,
+        &home,
+        &["--read", home.to_str().unwrap()],
+        "It has a README.",
+    );
+    assert!(v["access"].is_null(), "{v}");
+    let args = sent_args(&r);
+    let at = args.iter().position(|a| a == "--tools").unwrap();
+    // The read tools (the permission card adds Bash in the default mode).
+    assert!(args[at + 1].starts_with("Read,Grep,Glob"), "{args:?}");
+    // Secrets stay denied under a yes.
+    assert!(
+        args.iter()
+            .any(|a| a.starts_with("--disallowedTools=Read(")),
+        "{args:?}"
+    );
+}
+
+#[test]
+fn a_folder_the_question_names_outside_the_work_folder_is_asked_for_too() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    std::fs::create_dir_all(home.join("Downloads")).unwrap();
+    let other = home.join("Downloads");
+    let work = home.join("work");
+    let q = format!("what is in {}", other.display());
+    let out = r.run(
+        &[
+            "--json",
+            "ask",
+            "--headless",
+            "--cwd",
+            work.to_str().unwrap(),
+            &q,
+        ],
+        &answer_json("Some files."),
+        "0",
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["access"]["why"], "named", "{v}");
+    assert_eq!(v["access"]["folder"], other.display().to_string());
+    assert!(!sent_args(&r).iter().any(|a| a.starts_with("--add-dir")));
+    // The yes adds that one folder, in the `=` form (the flag is variadic).
+    let out = r.run(
+        &[
+            "--json",
+            "ask",
+            "--headless",
+            "--cwd",
+            work.to_str().unwrap(),
+            "--read",
+            other.to_str().unwrap(),
+            &q,
+        ],
+        &answer_json("Some files."),
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(sent_args(&r).contains(&format!("--add-dir={}", other.display())));
+    // A folder that does not exist, or a secret place, is a usage error, never a yes.
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    for bad in ["nope", ".ssh"] {
+        let out = r.run(
+            &[
+                "--json",
+                "ask",
+                "--headless",
+                "--cwd",
+                home.to_str().unwrap(),
+                "--read",
+                bad,
+                "q",
+            ],
+            OK_JSON,
+            "0",
+        );
+        assert!(!out.status.success(), "{bad}");
+    }
+}
+
+// The answer's next steps are actions in the bar, never a shell line to copy: in the JSON, and
+// as the sixth field of the hook's record, and the block is not shown in the answer.
+#[test]
+fn next_steps_come_as_actions_and_the_block_is_not_shown() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    std::fs::create_dir_all(r.work().join("api")).unwrap();
+    let answer = "A service.\n\n```next\nread api/\nsearch TODO\nread ../\n```\n";
+    let v = ask_json(&r, &r.work(), &[], answer);
+    assert_eq!(
+        v["next"],
+        serde_json::json!([
+            {"kind": "read", "value": "api"},
+            {"kind": "search", "value": "TODO"}
+        ])
+    );
+    assert_eq!(v["answer"], "A service.");
+
+    let out = r.run(
+        &[
+            "ask",
+            "--headless",
+            "--hook",
+            "--cwd",
+            r.work().to_str().unwrap(),
+            "q",
+        ],
+        &answer_json(answer),
+        "0",
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let f: Vec<&str> = stdout.split('\u{1e}').collect();
+    assert_eq!(f.len(), 6, "{stdout:?}");
+    assert_eq!(f[5], "read:api\u{1f}search:TODO");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("```next"));
+}
+
+// The system prompt: with no access Io says what it would read and offers it as an action; it
+// never tells the person to run grep, ls, cat or find.
+#[test]
+fn the_prompt_offers_the_reading_and_never_tells_the_person_to_run_grep() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    ask_json(&r, &home, &[], "x");
+    let sent = format!("{}{}", r.saw("claude.args"), r.saw("claude.stdin"));
+    assert!(
+        sent.contains("Io offers the reading as an action"),
+        "{sent}"
+    );
+    assert!(sent.contains("```next"));
+    assert!(sent.contains("never tell the person to run grep, ls, cat or find"));
+    assert!(!sent.contains("run grep -rn"));
+}
+
 // ---------------------------------------------------------------- what the question can see
 // RFC 0203, PRD 0187.1: the card says what was sent, and the output of the last command is
 // sent only when the person attached it (a file, a re-run they said yes to, or a paste).
@@ -1772,7 +1960,7 @@ esac
         lines[1].contains("--menu")
             && lines[1].contains("--failed-command false")
             && lines[1].contains("--failed-exit 1")
-            && lines[1].contains("--asked why did that fail")
+            && lines[1].contains("--asked=why did that fail")
             && lines[1].contains("--output-to "),
         "{calls}"
     );

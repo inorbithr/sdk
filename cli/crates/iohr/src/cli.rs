@@ -1479,8 +1479,20 @@ pub struct AskArgs {
         value_delimiter = '\u{1f}'
     )]
     pub undo: Vec<String>,
-    /// With `--menu`: the question that was asked, so Attach output can put it back on the
-    /// prompt to ask again with the output.
+    /// With `--menu`: the folder Io needs your OK to read (Allow keeps the yes for it).
+    #[arg(long, value_name = "FOLDER", requires = "menu")]
+    pub access: Option<std::path::PathBuf>,
+    /// With `--menu`: the next steps the answer offered as `kind:value` (`read:api`,
+    /// `search:TODO`, `run:cargo test`), separated by the unit separator (U+001F).
+    #[arg(
+        long,
+        value_name = "STEPS",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub step: Vec<String>,
+    /// With `--menu`: the question that was asked, so Allow and Attach output can put it back on
+    /// the prompt to ask again.
     #[arg(long, value_name = "QUESTION", requires = "menu")]
     pub asked: Option<String>,
     /// With `--menu`: the last command, when it failed. With `--failed-exit` and `--asked`
@@ -1867,6 +1879,11 @@ pub struct HeadlessArgs {
         conflicts_with = "interactive"
     )]
     pub prior_answer: Option<String>,
+    /// A folder you allow Io to read for this question, besides the one it is asked in: the
+    /// answer to the card's "needs your OK to read" note, for a run with no terminal to ask on
+    /// (a script, `--json`, the app). Secrets stay blocked.
+    #[arg(long, value_name = "FOLDER", conflicts_with = "interactive")]
+    pub read: Option<std::path::PathBuf>,
 }
 
 impl HeadlessArgs {
@@ -1878,6 +1895,7 @@ impl HeadlessArgs {
             || self.exit_code.is_some()
             || self.output_file.is_some()
             || self.prior_question.is_some()
+            || self.read.is_some()
     }
 }
 
