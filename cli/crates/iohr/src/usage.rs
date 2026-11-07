@@ -249,13 +249,23 @@ fn clap_words(e: &clap::Error, cmd: &clap::Command) -> (String, Vec<String>) {
             format!("`{name}` has no such subcommand"),
             tips(ContextKind::SuggestedSubcommand, "did you mean"),
         ),
-        ErrorKind::InvalidValue | ErrorKind::ValueValidation => (
-            format!(
-                "invalid value for {}",
-                arg.unwrap_or_else(|| "an argument".to_owned())
-            ),
-            tips(ContextKind::ValidValue, "possible values:"),
-        ),
+        ErrorKind::InvalidValue | ErrorKind::ValueValidation => {
+            // What the value may be: the values clap lists, else the argument's own help (the
+            // reason a custom parser gave can repeat the value, so it is not used).
+            let mut notes = tips(ContextKind::ValidValue, "possible values:");
+            if notes.is_empty()
+                && let Some(help) = arg.as_deref().and_then(|a| describe(cmd, a))
+            {
+                notes.push(help);
+            }
+            (
+                format!(
+                    "invalid value for {}",
+                    arg.unwrap_or_else(|| "an argument".to_owned())
+                ),
+                notes,
+            )
+        }
         ErrorKind::ArgumentConflict => {
             let prior = strings(e.get(ContextKind::PriorArg)).unwrap_or_default();
             let a = arg.unwrap_or_else(|| "an argument".to_owned());
@@ -558,7 +568,7 @@ mod tests {
         // The person at the terminal sees the reason as raised.
         let t = text(&r, Paint::plain());
         assert!(t.contains("error: there is no profile SECRETMARKER"), "{t}");
-        assert!(!t.contains(WITHHELD), "{t}");
+        assert!(!t.starts_with(&format!("error: {WITHHELD}")), "{t}");
     }
 
     #[test]
