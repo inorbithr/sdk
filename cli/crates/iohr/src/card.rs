@@ -52,7 +52,7 @@ impl Look {
     pub(crate) fn violet(self) -> Style {
         self.style((167, 139, 250), 141)
     }
-    fn green(self) -> Style {
+    pub(crate) fn green(self) -> Style {
         self.style((74, 222, 128), 114)
     }
     pub(crate) fn cyan(self) -> Style {
@@ -61,7 +61,7 @@ impl Look {
     pub(crate) fn dim(self) -> Style {
         self.style((139, 144, 163), 246)
     }
-    fn amber(self) -> Style {
+    pub(crate) fn amber(self) -> Style {
         self.style((251, 191, 36), 214)
     }
     fn badge(self) -> Style {
@@ -311,6 +311,8 @@ enum Block {
     Command(String),
     /// Code that is not a command, kept as written.
     Code(Vec<String>),
+    /// A table: the header row first, each row its cells (the divider row is dropped).
+    Table(Vec<Vec<String>>),
 }
 
 /// Shell fences: what is in them is a command to show, not code to read. The same list as the
@@ -462,6 +464,15 @@ fn item(line: &str) -> Option<(String, String)> {
     None
 }
 
+/// `---`, `***` or `___`: a rule between sections, which a terminal does not need drawn.
+fn is_rule(line: &str) -> bool {
+    let mut c = line.chars();
+    match c.next() {
+        Some(f @ ('-' | '*' | '_')) => line.len() >= 3 && line.chars().all(|x| x == f),
+        _ => false,
+    }
+}
+
 fn blocks(text: &str) -> Vec<Block> {
     let mut out = Vec::new();
     let mut cur: Option<Block> = None;
@@ -490,22 +501,58 @@ fn blocks(text: &str) -> Vec<Block> {
             Seg::Line(raw) => raw,
         };
         let line = raw.trim();
+        // A quote is read as the prose it quotes.
+        let line = if line.starts_with('>') {
+            line.trim_start_matches('>').trim()
+        } else {
+            line
+        };
         if line.is_empty() {
             flush(&mut cur, &mut out);
         } else if line.starts_with('#') {
             flush(&mut cur, &mut out);
             out.push(Block::Head(line.trim_start_matches('#').trim().to_owned()));
+        } else if is_rule(line) {
+            flush(&mut cur, &mut out);
+        } else if line.starts_with('|') {
+            if !matches!(cur, Some(Block::Table(_))) {
+                flush(&mut cur, &mut out);
+                cur = Some(Block::Table(Vec::new()));
+            }
+            if let Some(Block::Table(rows)) = cur.as_mut() {
+                let cells: Vec<String> = line
+                    .trim_matches('|')
+                    .split('|')
+                    .map(|c| c.trim().to_owned())
+                    .collect();
+                let divider = cells
+                    .iter()
+                    .all(|c| !c.is_empty() && c.chars().all(|ch| matches!(ch, '-' | ':' | ' ')));
+                if !divider {
+                    rows.push(cells);
+                }
+            }
         } else if let Some((mark, rest)) = item(line) {
             flush(&mut cur, &mut out);
-            cur = Some(Block::Item(mark, rest));
+            // A nested item is indented under its parent and marked with a hollow bullet.
+            let indent = raw
+                .chars()
+                .take_while(|c| matches!(c, ' ' | '\t'))
+                .map(|c| if c == '\t' { 4 } else { 1 })
+                .sum::<usize>();
+            let depth = (indent / 2).min(3);
+            let mark = if depth > 0 && mark == "\u{2022}" {
+                "\u{25e6}".to_owned()
+            } else {
+                mark
+            };
+            cur = Some(Block::Item(format!("{}{mark}", "  ".repeat(depth)), rest));
+        } else if let Some(Block::Para(p) | Block::Item(_, p)) = cur.as_mut() {
+            p.push(' ');
+            p.push_str(line);
         } else {
-            match cur.as_mut() {
-                Some(Block::Para(p) | Block::Item(_, p)) => {
-                    p.push(' ');
-                    p.push_str(line);
-                }
-                _ => cur = Some(Block::Para(line.to_owned())),
-            }
+            flush(&mut cur, &mut out);
+            cur = Some(Block::Para(line.to_owned()));
         }
     }
     flush(&mut cur, &mut out);
@@ -520,6 +567,7 @@ enum Kind {
     Code,
     Dim,
     Amber,
+    Head,
 }
 
 /// Inline `code` and **bold**, the marks dropped; everything else is text.
@@ -561,6 +609,7 @@ fn paint(kind: Kind, s: &str, look: Look) -> String {
         Kind::Code => look.cyan().apply_to(s).to_string(),
         Kind::Dim => look.dim().apply_to(s).to_string(),
         Kind::Amber => look.amber().apply_to(s).to_string(),
+        Kind::Head => look.violet().bold().apply_to(s).to_string(),
     }
 }
 
@@ -669,8 +718,10 @@ fn wrap(spans: &[(Kind, String)], width: usize, look: Look, base: Kind) -> Vec<S
         .collect()
 }
 
-/// The answer's lines (without the rail), a blank line between blocks.
-fn body(text: &str, width: usize, look: Look) -> Vec<String> {
+/// The answer's lines (without the rail), a blank line between blocks: headings, **bold**,
+/// `code`, nested lists, tables and shell fences drawn for a terminal, wrapped to `width`, and
+/// plain text (no escape codes) when `look` is not fancy.
+pub(crate) fn body(text: &str, width: usize, look: Look) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut last: Option<&Block> = None;
     let all = blocks(text);
@@ -687,7 +738,7 @@ fn body(text: &str, width: usize, look: Look) -> Vec<String> {
         }
         match b {
             Block::Para(p) => out.extend(wrap(&spans(p), width, look, Kind::Text)),
-            Block::Head(h) => out.extend(wrap(&spans(h), width, look, Kind::Bold)),
+            Block::Head(h) => out.extend(wrap(&spans(h), width, look, Kind::Head)),
             Block::Item(mark, t) => {
                 let lead = measure_text_width(mark) + 1;
                 let lines = wrap(&spans(t), width.saturating_sub(lead), look, Kind::Text);
@@ -712,11 +763,72 @@ fn body(text: &str, width: usize, look: Look) -> Vec<String> {
                     out.push(format!("  {}", look.dim().apply_to(l)));
                 }
             }
+            Block::Table(rows) => out.extend(table(rows, width, look)),
         }
         last = Some(b);
     }
     if out.is_empty() {
         out.push(look.dim().apply_to("(the agent gave no text)").to_string());
+    }
+    out
+}
+
+/// A cell's text with its marks (`**`, backticks) dropped.
+fn cell_text(cell: &str) -> String {
+    spans(cell).into_iter().map(|(_, t)| t).collect()
+}
+
+/// A table as aligned columns, the header in bold. Too wide for `width`, each row is a line:
+/// its first cell in bold, then the others.
+fn table(rows: &[Vec<String>], width: usize, look: Look) -> Vec<String> {
+    let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..cols)
+        .map(|c| {
+            rows.iter()
+                .filter_map(|r| r.get(c))
+                .map(|t| measure_text_width(&cell_text(t)))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let total: usize = widths.iter().sum::<usize>() + 2 * cols.saturating_sub(1);
+    let mut out = Vec::new();
+    if total <= width {
+        for (i, row) in rows.iter().enumerate() {
+            let mut line = String::new();
+            for (c, w) in widths.iter().enumerate() {
+                let text = row.get(c).map_or("", String::as_str);
+                let base = if i == 0 { Kind::Bold } else { Kind::Text };
+                let painted: String = spans(text)
+                    .into_iter()
+                    .map(|(k, t)| paint(if k == Kind::Text { base } else { k }, &t, look))
+                    .collect();
+                line.push_str(&painted);
+                if c + 1 < cols {
+                    let pad = w.saturating_sub(measure_text_width(&cell_text(text))) + 2;
+                    line.push_str(&" ".repeat(pad));
+                }
+            }
+            out.push(line);
+        }
+        return out;
+    }
+    for row in rows.iter().skip(1) {
+        let mut parts = row.iter();
+        let first = parts.next().map_or_else(String::new, |f| {
+            if f.contains('`') || f.contains("**") {
+                f.clone()
+            } else {
+                format!("**{f}**")
+            }
+        });
+        let rest: Vec<&str> = parts.map(String::as_str).collect();
+        let text = if rest.is_empty() {
+            first
+        } else {
+            format!("{first} \u{2014} {}", rest.join("; "))
+        };
+        out.extend(wrap(&spans(&text), width, look, Kind::Text));
     }
     out
 }
@@ -1088,5 +1200,48 @@ mod tests {
         for l in with.lines() {
             assert!(measure_text_width(l) <= 80, "{l}");
         }
+    }
+
+    const SUMMARY: &str = "## What I built\n\nA **watcher** that logs a line every `5s`, with a long line that has to wrap at the width.\n\n- `src/app.py` the loop\n  - nested detail\n- a test\n\n| file | what |\n| --- | --- |\n| `a.py` | the loop |\n\n---\n\n```sh\npython3 src/app.py\n```";
+
+    #[test]
+    fn a_summary_is_drawn_without_its_markdown_marks() {
+        let lines = body(SUMMARY, 50, FANCY);
+        let text = strip(&lines.join("\n"));
+        for mark in ["##", "**", "`", "| ---", "---"] {
+            assert!(!text.contains(mark), "{mark} left in\n{text}");
+        }
+        assert_eq!(strip(&lines[0]), "What I built");
+        assert!(
+            lines[0].contains("\u{1b}[38;5;141m\u{1b}[1m"),
+            "{:?}",
+            lines[0]
+        );
+        assert!(text.contains("\u{2022} src/app.py the loop"), "{text}");
+        assert!(text.contains("  \u{25e6} nested detail"), "{text}");
+        assert!(text.contains("\u{276f} python3 src/app.py"), "{text}");
+        assert!(lines.iter().all(|l| measure_text_width(l) <= 50), "{text}");
+    }
+
+    #[test]
+    fn a_table_is_aligned_with_a_bold_header_and_falls_back_when_too_wide() {
+        let t =
+            "| file | what it does |\n|---|---|\n| `a.py` | the loop |\n| `long_name.py` | tests |";
+        let wide = body(t, 60, FANCY);
+        assert_eq!(strip(&wide[0]), "file          what it does");
+        assert_eq!(strip(&wide[1]), "a.py          the loop");
+        assert_eq!(strip(&wide[2]), "long_name.py  tests");
+        let narrow = body(t, 20, FANCY);
+        let text = strip(&narrow.join("\n"));
+        assert!(text.contains("a.py \u{2014} the loop"), "{text}");
+        assert!(narrow.iter().all(|l| measure_text_width(l) <= 20), "{text}");
+    }
+
+    #[test]
+    fn a_plain_look_draws_the_same_lines_with_no_escape_codes() {
+        let plain = body(SUMMARY, 50, PLAIN);
+        assert!(plain.iter().all(|l| !l.contains('\u{1b}')), "{plain:?}");
+        let fancy: Vec<String> = body(SUMMARY, 50, FANCY).iter().map(|l| strip(l)).collect();
+        assert_eq!(plain, fancy);
     }
 }

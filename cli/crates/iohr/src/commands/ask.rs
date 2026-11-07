@@ -292,6 +292,10 @@ pub(crate) async fn stream(run: Run<'_>) -> Result<Ended, Error> {
         )));
     };
     let spinner = (!json).then(|| ui.step(waiting));
+    // The live view draws the closing words on stderr, so it is for a person: with stdout
+    // piped, the agent's words go there as they always did.
+    let mut look = look;
+    look.summary &= std::io::IsTerminal::is_terminal(&std::io::stdout());
     let mut render = Renderer::new(std::io::stdout(), std::io::stderr(), look, spinner);
     let mut lines = tokio::io::BufReader::new(stdout).lines();
     // No limit is a year away, far inside what the timer takes.
