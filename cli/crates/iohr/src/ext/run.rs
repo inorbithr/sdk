@@ -89,10 +89,7 @@ pub(crate) async fn run(
         .installed(name)
         .map_err(|e| Error::Failed(e.to_string()))?
     else {
-        return Err(Error::Usage(format!(
-            "`{name}` is not an iohr command or an installed extension. `iohr --help` lists the \
-             commands; `iohr ext install {name}` installs an extension by that name."
-        )));
+        return Err(Error::Usage(crate::usage::NOT_A_COMMAND.to_owned()));
     };
     let program = check_program(&record, &dir).map_err(|e| Error::Failed(e.to_string()))?;
     check_confirmed(&entry, &record).map_err(|e| Error::Failed(e.to_string()))?;

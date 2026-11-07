@@ -1129,10 +1129,7 @@ pub(crate) async fn external(g: &Global, env: &Env, argv: Vec<OsString>) -> Resu
         .and_then(|n| n.into_string().ok())
         .unwrap_or_default();
     if check_name(&name).is_err() {
-        return Err(Error::Usage(format!(
-            "`{}` is not an iohr command; `iohr --help` lists them",
-            crate::ext::manifest::printable(&name)
-        )));
+        return Err(Error::Usage(crate::usage::NOT_A_COMMAND.to_owned()));
     }
     let rest: Vec<OsString> = argv.collect();
     let code = crate::ext::run::run(g, env, &store(g)?, &name, &rest).await?;

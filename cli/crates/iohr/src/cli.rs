@@ -228,6 +228,24 @@ pub fn command(json: bool) -> clap::Command {
     }
     let styles = cmd.get_styles().clone();
     let (head, lit) = (styles.get_header(), styles.get_literal());
+    // The examples every command ends its help with: the same table the usage errors read.
+    let paint = |style: &clap::builder::styling::Style, text: &str| {
+        format!("{}{text}{}", style.render(), style.render_reset())
+    };
+    for (path, list) in crate::examples::ALL {
+        if path.is_empty() {
+            continue;
+        }
+        let text = crate::examples::block(
+            list,
+            &crate::examples::Style {
+                head: &|t| paint(head, t),
+                command: &|t| paint(lit, t),
+                note: &str::to_owned,
+            },
+        );
+        cmd = with_after_help(cmd, path, &text);
+    }
     let listed: Vec<(String, String)> = cmd
         .get_subcommands()
         .filter(|c| !c.is_hide_set())
@@ -268,6 +286,14 @@ pub fn command(json: bool) -> clap::Command {
         cmd = cmd.mut_subcommand(n, |c| c.hide(true));
     }
     cmd.help_template(template)
+}
+
+/// `text` as the `after_help` of the command at `path` (a subcommand's, however deep).
+fn with_after_help(cmd: clap::Command, path: &[&str], text: &str) -> clap::Command {
+    match path.split_first() {
+        None => cmd.after_help(text.to_owned()),
+        Some((first, rest)) => cmd.mut_subcommand(first, |c| with_after_help(c, rest, text)),
+    }
 }
 
 #[derive(Debug, Subcommand)]

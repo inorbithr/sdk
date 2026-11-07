@@ -1243,7 +1243,15 @@ mod run {
         let b = Box_::new().await;
         let o = b.run(&["agent", "status"]);
         assert_eq!(code(&o), 2, "{}", text(&o));
-        assert!(text(&o).contains("iohr ext install agent"), "{}", text(&o));
+        assert!(
+            text(&o).contains("not an iohr command or an installed extension")
+                && text(&o).contains("iohr ext install PUBLISHER/NAME"),
+            "{}",
+            text(&o)
+        );
+        // The word typed is not repeated (the examples say "AI agent"; the command was `agent`).
+        assert!(!text(&o).contains("`agent`"), "{}", text(&o));
+        assert!(!text(&o).contains("iohr agent"), "{}", text(&o));
     }
 }
 

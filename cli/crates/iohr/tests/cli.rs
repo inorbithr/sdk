@@ -1530,7 +1530,13 @@ fn a_language_iohr_does_not_know_is_a_usage_error_and_writes_nothing() {
         .output()
         .unwrap();
     assert_eq!(code(&o), 2, "{}", text(&o));
-    assert!(text(&o).contains("cobol"), "{}", text(&o));
+    assert!(
+        text(&o).contains("invalid value for --lang <LANG>"),
+        "{}",
+        text(&o)
+    );
+    // The word typed is not repeated, in the report or in the AI line.
+    assert!(!text(&o).contains("cobol"), "{}", text(&o));
     assert!(
         !out_dir.exists(),
         "nothing is written for a language iohr does not know"
