@@ -108,7 +108,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
-| `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
+| `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show` with no name lists the same catalogue, listings not yet released marked coming; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
 | `iohr ext install [--lock FILE] [--no-service] \| service \| list \| upgrade \| remove \| verify \| sync` | Extensions: install (`NAME` from the registry, or `PUBLISHER/NAME` through the catalogue), verify and pin them; one that declares privileges for its system service asks first unless `--yes`; one with a system service of its own (`inorbit/capture`) offers to set it up with sudo after installing (it lists the interfaces it detects and suggests one; `--interface` repeatable, or `--all-interfaces`), and `iohr ext service NAME` does it later; `iohr <name> ...` runs one |
 | `iohr ext init \| dev \| lint` | Build an extension locally (PRD 0084): `init PUBLISHER/NAME --lang rust\|python\|shell [--dir DIR]` scaffolds a folder (manifest with every field, entry point on the token channel, self-test, README, signing release workflow; a name holding `tbd` is refused); `dev [PATH] [--test]` runs it, or its tests, with the token channel for exactly the manifest's scopes, its secrets, `STATE` and `CACHE` under `~/.inorbit/ext-dev/NAME/` and its output timestamped, never touching installed extensions; `lint [PATH] [--preview] [--json]` checks `extension.toml` and says what it may do in plain words. Offline, except the token channel's sign-in |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
@@ -317,6 +317,7 @@ pins and runs. The first is the InOrbit agent:
 
 ```sh
 iohr ext search agent                    # the catalogue: what you may install
+iohr ext show                            # no name: the whole catalogue, coming ones marked
 iohr ext show inorbit/agent              # publisher, signer, scopes, privileges, versions
 iohr ext install inorbit/agent           # or inorbit/agent@0.1.0, or just: agent
 iohr agent status                        # runs the installed program
@@ -329,6 +330,12 @@ once (an admin or owner of the account is needed; anyone else is refused with th
 reason). A key or token profile hands out its own token when it holds the scopes, and is
 refused when it does not. Minting is bounded at 30 s, then the program gets a `503` that
 says why (ADR 0012, point 6).
+
+`iohr project init` looks at the template and the `--describe` text, finds the catalogue
+listings that fit (a rule table in `commands/init_extensions.rs`) and, at a terminal, asks
+whether to install each one (default no) through the same path as `iohr ext install`. With
+`--yes`, `--json` or no terminal it prints one `iohr ext install ...` line and installs
+nothing. A listing marked coming is never offered for install.
 
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A

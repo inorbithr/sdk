@@ -67,6 +67,11 @@ fn list_of(v: &Value, k: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Whether a listing is announced but not released: it has no version to install.
+pub(crate) fn is_coming(x: &Value) -> bool {
+    flag(x, "coming")
+}
+
 fn flag(v: &Value, k: &str) -> bool {
     v.get(k).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -144,6 +149,15 @@ async fn versions(s: &Session, publisher: &str, name: &str) -> Result<Vec<Value>
     .map_err(scoped)
 }
 
+/// Every listing this account may see, from the API (the client `ext search` uses), for
+/// callers that match listings themselves, such as `init`'s offer of fitting extensions.
+pub(crate) async fn listings(g: &Global, env: &Env) -> Result<Vec<Value>, Error> {
+    let s = session(g, env).await?;
+    pages(&s.api, "/v1/extensions", &[], "extensions", MAX_SEARCH)
+        .await
+        .map_err(scoped)
+}
+
 /// `iohr ext search`.
 pub(crate) async fn search(
     g: &Global,
@@ -211,7 +225,7 @@ pub(crate) async fn search(
 }
 
 fn search_row(x: &Value) -> Vec<String> {
-    let latest = if flag(x, "coming") {
+    let latest = if is_coming(x) {
         "coming".to_owned()
     } else {
         x.get("latest")
