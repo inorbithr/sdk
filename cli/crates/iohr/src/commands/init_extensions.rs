@@ -170,7 +170,7 @@ pub(crate) fn respond(
     for o in offers {
         match (o.state, mode) {
             (State::Coming, _) => say(&format!(
-                "{} is coming, not released yet: it {}.",
+                "{} is not released yet, so there is nothing to install. Once it is, it {}.",
                 o.id, o.why
             )),
             (State::Installable, Mode::Ask) => {
@@ -190,12 +190,15 @@ pub(crate) fn respond(
 /// How the offer ended, as init's report step (`done`, `skipped` or `failed`), which init
 /// draws as a check, a warning or a cross like its other steps. `lines` is what the offer
 /// said; `installed` and `failed` are what `ext install` did. `drawn` is whether the step
-/// line itself carries `lines` (else they were printed as notes already).
+/// line itself carries `lines` (else they were printed as notes already). `installable` is
+/// whether any offer could be installed at all: when none could (all still coming), the
+/// step says there was nothing to install, not that something was skipped.
 pub(crate) fn summary(
     lines: &[String],
     installed: &[String],
     failed: &[String],
     drawn: bool,
+    installable: bool,
 ) -> crate::project::Step {
     let said = |base: String| {
         if drawn && !lines.is_empty() {
@@ -216,7 +219,12 @@ pub(crate) fn summary(
         let base = format!("installed {}", installed.join(", "));
         crate::project::step("extensions", "Extensions", "done", said(base), "")
     } else {
-        let base = "none installed".to_owned();
+        let base = if installable {
+            "none installed"
+        } else {
+            "nothing released to install"
+        }
+        .to_owned();
         let base = if drawn || lines.is_empty() {
             base
         } else {
@@ -300,8 +308,12 @@ pub(crate) async fn offer(
             )),
         }
     }
-    let st = summary(&lines, &installed, &failed, drawn);
-    if drawn {
+    let installable = offers.iter().any(|o| o.state == State::Installable);
+    let st = summary(&lines, &installed, &failed, drawn, installable);
+    if drawn && !installable && failed.is_empty() {
+        // Only listings still coming: a fact, not a skipped step, so no warning mark.
+        ui.info(&lines.join(" "));
+    } else if drawn {
         let (mark, said) = super::project::step_line(&st);
         match mark {
             Mark::Ok => ui.done(&said),
@@ -394,7 +406,7 @@ mod tests {
             if m != Mode::Skip {
                 assert!(
                     said.iter()
-                        .any(|l| l.starts_with("inorbit/crawler is coming")
+                        .any(|l| l.starts_with("inorbit/crawler is not released yet")
                             && !l.contains("ext install")),
                     "{m:?}: {said:?}"
                 );
@@ -444,26 +456,44 @@ mod tests {
 
     #[test]
     fn the_offer_ends_as_one_report_step_with_the_mark_of_what_happened() {
-        let said = vec!["inorbit/crawler is coming, not released yet: it reads.".to_owned()];
-        let ok = summary(&said, &["inorbit/agent".into()], &[], true);
+        let said =
+            vec!["inorbit/crawler is not released yet, so there is nothing to install.".to_owned()];
+        let ok = summary(&said, &["inorbit/agent".into()], &[], true, true);
         assert_eq!((ok.id.as_str(), ok.state.as_str()), ("extensions", "done"));
         assert!(
             ok.said.starts_with("installed inorbit/agent"),
             "{}",
             ok.said
         );
-        let skipped = summary(&said, &[], &[], true);
+        let skipped = summary(&said, &[], &[], true, true);
         assert_eq!(skipped.state, "skipped");
-        assert!(skipped.said.contains("coming"), "{}", skipped.said);
+        assert!(
+            skipped.said.starts_with("none installed"),
+            "{}",
+            skipped.said
+        );
+        // Only listings still coming: nothing was skipped, there was nothing to install.
+        let none_yet = summary(&said, &[], &[], true, false);
+        assert!(
+            none_yet.said.starts_with("nothing released to install"),
+            "{}",
+            none_yet.said
+        );
+        assert!(
+            !none_yet.said.contains("none installed"),
+            "{}",
+            none_yet.said
+        );
         let bad = summary(
             &[],
             &[],
             &["could not install inorbit/agent: no".into()],
             false,
+            true,
         );
         assert_eq!(bad.state, "failed");
         // Printed as notes already: the step does not say the lines twice.
-        let noted = summary(&said, &[], &[], false);
-        assert!(!noted.said.contains("coming"), "{}", noted.said);
+        let noted = summary(&said, &[], &[], false, true);
+        assert!(!noted.said.contains("not released"), "{}", noted.said);
     }
 }
