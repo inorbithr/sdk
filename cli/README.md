@@ -138,6 +138,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr asks count [--cache] [--json] [--account A]` | How many asks wait for you: "3 asks", nothing for none; only asks whose turn is yours (`pending`) count, one you already answered with a note (`question`) is the agent's turn and is left out (`iohr asks list` still shows it), `{"count": N}` with `--json`; `--cache` keeps just the number in `~/.inorbit/term/asks-count` and does nothing while that file is under 30 seconds old (the shell hook's prompt segment uses it). It reads the sign-in through a quiet credential store: no Keychain dialog (macOS interaction is switched off) and no wait past 1.5 s; when the store would ask, `--cache` keeps the last number and prints nothing, without `--cache` it exits 1 saying so |
 | `iohr permissions list\|allow RULE\|deny RULE\|remove RULE\|check TOOL INPUT [--project\|--user] [--json]` | The rules for what Io may run or open when you ask it something (Claude Code's rule grammar) in `.inorbit/permissions.toml` and the user file in the iohr config folder; `allow` refuses rules that could open a secret file and a blanket `Bash(*)` (exit 2); `check` prints `allow`, `deny` or `ask` and the rule; every ask decision is logged to `.inorbit/permissions.log` (no output, no contents); see `docs/config.md`, section 4.5 |
 | `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu; Shift+Tab on a `?` line cycles manual, plan and auto): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
+| `iohr panel [--demo] [-- COMMAND...]` | Runs your shell (or COMMAND) with a floating panel at the top right of the terminal, drawn over the output and taking no rows (see "The floating panel"); `--demo` fills it with labelled stub asks; with `--demo --variant rail\|accordion\|band` it prints the older static design drawings instead |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--env production|local`
@@ -888,6 +889,31 @@ Claude Code only: it signs in with your own `claude` login, never an API key, an
 stores neither question nor answer. Only zsh is built; `iohr shell hook bash` and `fish`
 exit 1 with "not built yet", and so do `--via io` and `--headless` with `--agent codex`. An answer is an AI
 answer: check it before you rely on it.
+
+## The floating panel
+
+`iohr panel` runs your shell inside a small terminal proxy and paints a panel over the top right
+corner after every chunk of output, with save and restore of the cursor. It takes no rows: the shell
+keeps its full height, what you half-typed stays where it is, and the panel moves when the window
+is resized. Nothing is drawn under `NO_COLOR`, off a terminal, or on the alternate screen (vim,
+less); it comes back when the program ends. Colours are truecolor when `COLORTERM=truecolor`, else
+the nearest of the 256.
+
+The panel has three views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns).
+`⌥i` opens the menu (42 columns): `a` auto mode, `p` approvals, `r` run, `s` status, `?` help, `x`
+stop the panel; arrows and Enter move and open, Esc closes. In approvals (50 columns) the selected
+ask expands to its kind and "approve on your phone", and `d` denies it after a y/n confirmation
+through the same call as the asks command. Keys are taken only while the panel is open; every other
+byte goes to your shell untouched. If the asks cannot be read, the panel says "unavailable", never a
+number. Stub data appears only with `--demo` and is labelled "stub".
+
+Not built yet, and shown as "coming next": the Run and Status views, auto-approve from the phone,
+and typing a question inside the panel. Approving is on your phone only. Only zsh is tried; bash and
+fish are untested. `⌥i` needs the terminal to send Option as Esc or Meta (iTerm2: Profiles, Keys,
+"Esc+"; Terminal.app: "Use Option as Meta key"). The panel saves and restores the cursor with DECSC
+and DECRC, which can overwrite a program's own saved cursor. The shell runs with `IOHR_PANEL=1`,
+and a nested `iohr panel` then runs the command plainly; `IOHR_PANEL_LEADER` is internal (the proxy
+re-executes itself to become the shell's session leader).
 
 ## Runner
 

@@ -135,6 +135,7 @@ pub const RESERVED: &[&str] = &[
     "memory",
     "openapi",
     "packages",
+    "panel",
     "permission-server",
     "permissions",
     "profile",

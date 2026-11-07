@@ -12,10 +12,17 @@ use std::fmt::Write as _;
 
 use console::{Style, measure_text_width, truncate_str};
 
+use crate::Env;
 use crate::card::Look;
 use crate::cli::{Global, PanelArgs, PanelAuto, PanelVariant, PanelView};
 use crate::error::Error;
 use crate::output::Out;
+
+mod cells;
+mod input;
+mod model;
+mod proxy;
+mod screen;
 
 /// The panel's width in columns, frame included.
 pub(crate) const WIDTH: usize = 34;
@@ -334,6 +341,8 @@ fn lines(
     let body = rows(view, m, nested);
     let mut out = Vec::new();
     match variant {
+        // The floating band is drawn live by the proxy, not as a static design.
+        PanelVariant::Float => {}
         PanelVariant::Rail => {
             let tag = format!(" {STUB} ");
             let title = format!(
@@ -434,6 +443,7 @@ fn reserve(variant: PanelVariant, cols: usize, rows: usize, height: usize) -> St
             format!("\x1b[?69h\x1b[1;{}s", cols.saturating_sub(WIDTH + 1))
         }
         PanelVariant::Band => format!("\x1b[{};{rows}r", height + 1),
+        PanelVariant::Float => String::new(),
     }
 }
 
@@ -447,6 +457,7 @@ fn draw(variant: PanelVariant, rows: &[String], cols: usize) -> String {
     let col = match variant {
         PanelVariant::Rail | PanelVariant::Accordion => cols.saturating_sub(WIDTH) + 1,
         PanelVariant::Band => 1,
+        PanelVariant::Float => return String::new(),
     };
     let mut out = String::from("\x1b7");
     for (i, row) in rows.iter().enumerate() {
@@ -456,13 +467,38 @@ fn draw(variant: PanelVariant, rows: &[String], cols: usize) -> String {
     out
 }
 
-/// `iohr panel --demo`: draws the design on stub data.
-pub(crate) fn demo(g: &Global, args: &PanelArgs) -> Result<(), Error> {
-    if !args.demo {
-        return Err(Error::Usage(
-            "the panel is a design for now: run `iohr panel --demo`".to_owned(),
-        ));
+/// `iohr panel`: the floating band over a shell (or the command after `--`); `--demo` runs it
+/// on stub asks (`--variant float`) or draws one of the static designs.
+pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
+    if std::env::var_os(proxy::LEADER).is_some() {
+        return proxy::session_leader(&args.command);
     }
+    if args.demo && args.variant != PanelVariant::Float {
+        demo(g, &args);
+        return Ok(());
+    }
+    let initial = args.view.map_or(model::View::Rest, |v| match v {
+        PanelView::Rest => model::View::Rest,
+        PanelView::Menu => model::View::Menu,
+        PanelView::Approvals => model::View::Approvals,
+        PanelView::Run => model::View::Run,
+        PanelView::Auto => model::View::Auto,
+        PanelView::Status => model::View::Status,
+    });
+    proxy::run(
+        g,
+        env,
+        proxy::Config {
+            stub: args.demo,
+            initial,
+            command: args.command,
+        },
+    )
+    .await
+}
+
+/// The static designs, drawn once on stub data (`--demo`).
+fn demo(g: &Global, args: &PanelArgs) {
     let fancy = crate::ui::fancy_for(
         true,
         g.json,
@@ -481,7 +517,8 @@ pub(crate) fn demo(g: &Global, args: &PanelArgs) -> Result<(), Error> {
         selected: args.selected,
     };
     let (cols, term_rows) = (usize::from(args.cols), usize::from(args.rows));
-    let rows = lines(args.variant, args.view, &m, look, cols);
+    let view = args.view.unwrap_or(PanelView::Menu);
+    let rows = lines(args.variant, view, &m, look, cols);
     let mut text = String::new();
     if args.lines {
         for row in &rows {
@@ -497,7 +534,6 @@ pub(crate) fn demo(g: &Global, args: &PanelArgs) -> Result<(), Error> {
         }
     }
     Out::raw(text.as_bytes());
-    Ok(())
 }
 
 #[cfg(test)]

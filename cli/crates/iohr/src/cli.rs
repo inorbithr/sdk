@@ -1799,18 +1799,23 @@ pub struct SyncArgs {
     pub dir: Option<PathBuf>,
 }
 
-/// `iohr panel`: the design of the terminal panel, drawn on stub data.
+/// `iohr panel`: runs your shell (or the command after `--`) with the floating panel over its
+/// top right corner. `--demo` draws a design on stub data instead.
 #[derive(Debug, Args)]
 pub struct PanelArgs {
-    /// Draw the demo (the only thing `panel` does until the design is approved).
+    /// Stub data: draw a static design (see `--variant`), or with `--variant float` run the
+    /// floating panel on stub asks.
     #[arg(long)]
     pub demo: bool,
+    /// The command to run under the panel (after `--`); your shell by default.
+    #[arg(last = true)]
+    pub command: Vec<String>,
     /// The layout: a framed rail, an accordion, or a band for terminals without margins.
     #[arg(long, value_enum, default_value = "rail")]
     pub variant: PanelVariant,
-    /// What the panel shows.
-    #[arg(long, value_enum, default_value = "menu")]
-    pub view: PanelView,
+    /// What the panel shows (default: the resting pill; a static demo's default is the menu).
+    #[arg(long, value_enum)]
+    pub view: Option<PanelView>,
     /// The state of auto mode in the demo.
     #[arg(long, value_enum, default_value = "on")]
     pub auto: PanelAuto,
@@ -1840,6 +1845,9 @@ pub enum PanelVariant {
     Accordion,
     /// Top rows across the terminal: for terminals that cannot reserve columns.
     Band,
+    /// The floating band: a small box at the top right over the shell, painted last, taking no
+    /// room. The panel `iohr panel` runs; with `--demo` on stub asks.
+    Float,
 }
 
 /// What the demo panel shows.
