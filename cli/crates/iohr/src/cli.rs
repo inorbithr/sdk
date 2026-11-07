@@ -2685,7 +2685,12 @@ pub enum AsksCommand {
         #[arg(long)]
         account: Option<String>,
     },
-    /// Approve on your phone: it holds the key, this waits for you to use it.
+    /// Approve: on a Mac with an enrolled key, after Touch ID; on your phone for a merge, a
+    /// roll, a migration or an auto-approve rule, and on every other machine.
+    ///
+    /// A Mac signs the same decision proof the phone does, with a key in its Secure Enclave
+    /// (`iohr asks key enroll`). The terminal prints what is approved and Touch ID shows the
+    /// same title. Anything that is hard to take back is refused here and waits for the phone.
     Approve {
         /// The ask's id (apr_...).
         id: String,
@@ -2696,6 +2701,34 @@ pub enum AsksCommand {
         #[arg(long)]
         account: Option<String>,
     },
+    /// The key this Mac approves with: enrol it, look at it, remove it.
+    Key {
+        #[command(subcommand)]
+        command: AsksKeyCommand,
+    },
+}
+
+/// `iohr asks key`: the Secure Enclave key a Mac approves asks with (RFC 0113).
+#[derive(Debug, Subcommand)]
+pub enum AsksKeyCommand {
+    /// Make this Mac's key (in the Secure Enclave, behind Touch ID) and enrol it.
+    ///
+    /// With `--proof` from an enrolled phone key the service activates the key at once;
+    /// without it the key waits 24 hours (your first key is active at once). Only a Mac
+    /// can do this.
+    Enroll {
+        /// A name for the key (1 to 100 characters); default: this Mac's name.
+        #[arg(long)]
+        label: Option<String>,
+        /// A JSON file with the phone's countersignature of this key:
+        /// `{"key_id", "signed_at", "nonce", "signature"}`.
+        #[arg(long, value_name = "FILE")]
+        proof: Option<std::path::PathBuf>,
+    },
+    /// Show this Mac's key and what the service knows of it.
+    Show,
+    /// Revoke this Mac's key at the service and delete it from this Mac.
+    Remove,
 }
 
 #[derive(Debug, Subcommand)]

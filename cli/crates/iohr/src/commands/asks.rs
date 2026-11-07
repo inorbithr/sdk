@@ -21,6 +21,7 @@ use crate::Env;
 use crate::cli::{AsksCommand, Global};
 use crate::context::{Session, account, quiet_session, session};
 use crate::error::Error;
+use crate::mac_sign;
 use crate::output::{Out, table_text};
 use crate::prompt;
 use crate::runner::approvals::{is_approval_id, note_text};
@@ -28,6 +29,8 @@ use crate::runner::service::{HttpService, ServiceError};
 use crate::ui::{Choice, Paint, Ui};
 
 use super::{day, headline, str_of};
+
+mod key;
 
 /// The statuses the service keeps (`approvals.proto`), besides the two groups below.
 const STATUSES: &[&str] = &[
@@ -88,7 +91,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AsksCommand, out: Out) -> Re
         }
         AsksCommand::Decide { id, account } => {
             let s = session(g, env).await?;
-            decide(&s, &id, account, out).await
+            decide(g, &s, &id, account, out).await
         }
         AsksCommand::Deny { id, note, account } => {
             let s = session(g, env).await?;
@@ -105,8 +108,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AsksCommand, out: Out) -> Re
         }
         AsksCommand::Approve { id, once, account } => {
             let s = session(g, env).await?;
-            approve(&s, &id, once, account, out).await
+            approve(g, &s, &id, once, account, out).await
         }
+        AsksCommand::Key { command } => key::run(g, env, command, out).await,
     }
 }
 
@@ -708,6 +712,7 @@ fn done(out: Out, a: &Value, said: &str) {
 
 /// The menu: approve (on the phone), deny or question, for one open ask.
 async fn decide(
+    g: &Global,
     s: &Session,
     id: &str,
     account_flag: Option<String>,
@@ -738,7 +743,7 @@ async fn decide(
         choice("question", "Ask a question", "the ask stays open", 'w'),
     ];
     match Ui::select_keyed("What do you want to do?", &choices, "approve")?.as_deref() {
-        Some("approve") => approve(s, id, false, account_flag, out).await,
+        Some("approve") => approve(g, s, id, false, account_flag, out).await,
         Some("deny") => {
             let note = Ui::detect(false).input("Why? (optional, Enter to skip)", "", |_| Ok(()))?;
             deny(s, id, &note_text(&note), account_flag, out).await
@@ -765,6 +770,7 @@ fn choice(value: &str, label: &str, hint: &str, key: char) -> Choice {
 }
 
 async fn approve(
+    g: &Global,
     s: &Session,
     id: &str,
     once: bool,
@@ -778,8 +784,26 @@ async fn approve(
         done(out, &a, &format!("Already {status}:"));
         return Ok(());
     }
+    // A Mac with an enrolled key signs the asks its tier allows; the rest is the phone's.
+    let why = match key::attempt(g, &svc, &a).await? {
+        key::Attempt::Signed(approved) => {
+            done(out, &approved, "Approved");
+            return Ok(());
+        }
+        key::Attempt::Phone(why) => why,
+    };
     Out::note("Approve on your phone");
-    Out::note("Approving needs your phone's key. Open InOrbit there; this ask is under Needs you.");
+    match why {
+        Some(why) => Out::note(&format!(
+            "{why}: it needs your phone's key. Open InOrbit there; this ask is under Needs you."
+        )),
+        None => {
+            Out::note("Approving needs your phone's key. Open InOrbit there; this ask is under Needs you.");
+            if mac_sign::can_sign_here() {
+                Out::note("To approve the smaller asks from this Mac, run `iohr asks key enroll`.");
+            }
+        }
+    }
     let means = headline(str_of(&a, "approve_means"), 160);
     if !means.is_empty() {
         Out::note(&format!("Approving means: {means}"));

@@ -1103,7 +1103,7 @@ fn pin_note(id: &str, profile: Option<&ProfileName>) {
     ));
 }
 
-fn host_name() -> String {
+pub(super) fn host_name() -> String {
     std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .ok()
