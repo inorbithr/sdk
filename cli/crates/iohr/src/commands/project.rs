@@ -1794,7 +1794,11 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             place.shown, place.shown
         )));
     }
-    if let Some(st) = report.steps.iter().find(|s| s.id == "plan" && s.state == "failed") {
+    if let Some(st) = report
+        .steps
+        .iter()
+        .find(|s| s.id == "plan" && s.state == "failed")
+    {
         return Err(Error::Failed(format!(
             "{}. The project is kept in {}",
             st.said, place.shown

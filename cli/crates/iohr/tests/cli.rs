@@ -3419,7 +3419,10 @@ async fn planner_calls(server: &MockServer) -> Vec<String> {
         .filter(|q| q.url.path().starts_with("/v1/coordinator/plans"))
         .map(|q| {
             let b: serde_json::Value = serde_json::from_slice(&q.body).unwrap_or_default();
-            let said = b["body"].as_str().or(b["status"].as_str()).unwrap_or("");
+            let said = b["body"]
+                .as_str()
+                .or(b["item"]["status"].as_str())
+                .unwrap_or("");
             format!("{} {} {said}", q.method, q.url.path())
         })
         .collect()
