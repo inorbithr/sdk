@@ -11,6 +11,7 @@ mod config;
 mod connections;
 mod connectors;
 mod coordinator;
+mod coordinator_plan;
 mod decisions;
 mod domains;
 mod ext;

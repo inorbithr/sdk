@@ -2335,6 +2335,12 @@ pub enum CoordinatorCommand {
     /// The coordinator's queued asks.
     #[command(subcommand)]
     Asks(CoordinatorAsksCommand),
+    /// The Planner's plans: create one, list yours, show one with its items.
+    #[command(subcommand)]
+    Plan(CoordinatorPlanCommand),
+    /// One item of a plan: add, claim, note, finish, or run a command as the step.
+    #[command(subcommand)]
+    Item(CoordinatorItemCommand),
     /// Print a job's brief.
     ///
     /// A job's brief, the one text a worker starts from: the task, its acceptance, the
@@ -2544,6 +2550,152 @@ pub enum CoordinatorAsksCommand {
         /// The id in the system it came from; the same id returns the same ask.
         #[arg(long)]
         external_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorPlanCommand {
+    /// List the plans you may see.
+    List {
+        /// active, paused or archived (default: all).
+        #[arg(long)]
+        state: Option<String>,
+        /// At most this many.
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=200))]
+        limit: u32,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Show a plan with its items and their latest notes.
+    Show {
+        /// The plan id (`plan_...`).
+        plan: String,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// Create a plan you own, or find the one with the same external id.
+    Create {
+        /// The plan's title, 1 to 200 characters.
+        title: String,
+        /// The id in the system it comes from; the same id returns the same plan.
+        #[arg(long)]
+        external_id: Option<String>,
+        /// Who sees it: owner (the default) or account (every member).
+        #[arg(long, value_parser = ["owner", "account"])]
+        access: Option<String>,
+        /// Act on this account: a team you belong to (default: your own).
+        #[arg(long)]
+        account: Option<String>,
+    },
+}
+
+/// The plan and item every `coordinator item` command names.
+#[derive(Debug, Args)]
+pub struct PlanItemRef {
+    /// The plan id (`plan_...`).
+    pub plan: String,
+    /// The item's slug in the plan: 1 to 80 of A-Z, a-z, 0-9, `_`, `.` and `-`.
+    pub item: String,
+    /// Act on this account: a team you belong to (default: your own).
+    #[arg(long)]
+    pub account: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CoordinatorItemCommand {
+    /// Add an item to a plan (or change its title, kind and text), as proposed.
+    Add {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// What the item is called, 1 to 200 characters.
+        #[arg(long)]
+        title: String,
+        /// What kind of item: feature, bug, docs, ... (default: task).
+        #[arg(long)]
+        kind: Option<String>,
+        /// A longer description, or `-` to read it from standard input.
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Claim an item before work on it starts: a lease held by one holder.
+    Claim {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// Who builds it, 1 to 120 characters (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+        /// How long the lease lasts, 1 to 86400 (default 3600).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=86_400))]
+        seconds: Option<u32>,
+        /// Take it over from another holder's live claim.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Give a claim up.
+    Release {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// The holder (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+        /// Release another holder's live claim.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Write a note on an item.
+    Note {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// The note, 1 to 2000 characters, or `-` to read it from standard input.
+        text: String,
+    },
+    /// Finish an item: an optional closing note, then status done (this clears the claim).
+    Done {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// A closing note.
+        #[arg(long)]
+        note: Option<String>,
+        /// Who is writing (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+    },
+    /// Fail an item: a `failed:` note, status back to proposed and the claim released.
+    ///
+    /// The Planner has no failed status, and dropped is final, so a failed step goes back
+    /// to proposed with the reason in its notes, ready to be claimed again.
+    Fail {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// Why it failed.
+        #[arg(long)]
+        reason: String,
+        /// Who is writing (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+    },
+    /// Run a command as a Planner step: claim, building, the command, then done or failed.
+    ///
+    /// Adds the item when the plan lacks it, skips one that is already done, refuses one
+    /// another holder is building, and ends with a note and the status the command's exit
+    /// earned. The command's exit code is this command's (1 when it could not start).
+    Run {
+        #[command(flatten)]
+        at: PlanItemRef,
+        /// The title when the item has to be added (default: the item's slug).
+        #[arg(long)]
+        title: Option<String>,
+        /// The kind when the item has to be added (default: task).
+        #[arg(long)]
+        kind: Option<String>,
+        /// Who builds it (default: iohr and your profile).
+        #[arg(long)]
+        holder: Option<String>,
+        /// The command and its arguments, after `--`.
+        #[arg(last = true, required = true, num_args = 1..)]
+        command: Vec<String>,
     },
 }
 
