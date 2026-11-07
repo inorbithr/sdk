@@ -74,6 +74,39 @@ const EMPTY: &str = "(empty: nothing at the top level, or every name is hidden)"
 /// The listing of a folder that could not be read.
 const UNREADABLE: &str = "(could not be read)";
 
+/// Where the output that goes with the last command came from. Said in the card's footer and
+/// in `--json`, so what was sent is never a guess.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputHow {
+    /// A file the caller gave (`--output-file`).
+    #[default]
+    Attached,
+    /// The command was run again, after the person said yes, and its output captured.
+    Captured,
+    /// The person pasted it.
+    Pasted,
+}
+
+impl OutputHow {
+    /// The word `--json` carries.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Attached => "attached",
+            Self::Captured => "captured",
+            Self::Pasted => "pasted",
+        }
+    }
+
+    /// How the card's footer says it.
+    fn said(self) -> &'static str {
+        match self {
+            Self::Attached => "the end of its output, from a file you gave, secrets redacted",
+            Self::Captured => "the end of its output, from a re-run you allowed, secrets redacted",
+            Self::Pasted => "the end of its output, as you pasted it, secrets redacted",
+        }
+    }
+}
+
 /// What the question is asked against.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Context {
@@ -89,6 +122,8 @@ pub(crate) struct Context {
     pub(crate) command: String,
     pub(crate) exit_code: Option<i32>,
     pub(crate) output: String,
+    /// Where `output` came from; meaningful only when it is not empty.
+    pub(crate) output_how: OutputHow,
     /// The question and answer this one follows up (`?? ...` in the shell).
     pub(crate) prior: Option<(String, String)>,
     /// The text of `<git>`, from [`crate::askback::git_facts`]; empty when not collected.
@@ -128,6 +163,52 @@ pub(crate) struct Answer {
     /// The next steps the answer offered ([`crate::steps`]); empty when none. `answer` never
     /// holds the block.
     pub(crate) next: Vec<crate::steps::Shown>,
+    /// What of the shell's context went to the model: the card's footer as data.
+    pub(crate) context: Sent,
+}
+
+/// What `--json` says was sent besides the question (never the text of any of it): the
+/// same facts as the card's `Read:` footer.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct Sent {
+    /// The folder's path was sent.
+    pub(crate) folder: String,
+    /// The last command was sent (its text is not repeated here).
+    pub(crate) command: bool,
+    /// Its exit status, when it was sent.
+    pub(crate) exit_code: Option<i32>,
+    /// `not_sent`, or how the output came: `attached`, `captured` or `pasted`.
+    pub(crate) output: &'static str,
+    /// The bytes of output sent, after the cut and the redaction.
+    pub(crate) output_bytes: usize,
+    /// The command failed and the question asks why: a person is offered a re-run with the
+    /// output captured, or a paste (`iohr ask --menu`); nothing is attached without them.
+    pub(crate) can_attach: bool,
+}
+
+impl Context {
+    /// [`Sent`] for `question`.
+    pub(crate) fn sent(&self, question: &str) -> Sent {
+        let output = tail(self.output.trim_end(), OUTPUT_MAX, OUTPUT_LINES);
+        Sent {
+            folder: self.cwd.clone(),
+            command: !self.command.is_empty(),
+            exit_code: self.exit_code,
+            output: if output.is_empty() {
+                "not_sent"
+            } else {
+                self.output_how.name()
+            },
+            output_bytes: output.len(),
+            can_attach: crate::attach::offer(
+                question,
+                &self.command,
+                self.exit_code,
+                !self.output.is_empty(),
+            )
+            .is_some(),
+        }
+    }
 }
 
 /// The longest tail of `s` within `max` bytes and `lines` lines, cut on a line start where
@@ -260,40 +341,45 @@ pub(crate) fn list_folder(dir: &std::path::Path) -> String {
 /// print goes to the provider too.
 #[must_use]
 pub(crate) fn read_line(ctx: &Context, mode: Mode, can_run: bool) -> String {
-    let mut what = vec!["your question", "the folder's path"];
+    let mut what: Vec<String> = vec!["your question".into(), "the folder's path".into()];
     if !ctx.files.is_empty() {
-        what.push("its top-level file names");
+        what.push("its top-level file names".into());
     }
     if ctx.reads {
-        what.push("the files in it Io chose to open (secrets blocked)");
+        what.push("the files in it Io chose to open (secrets blocked)".into());
     }
     if ctx.also.is_some() {
-        what.push("the path of the folder you allowed and the files in it Io chose to open (secrets blocked)");
+        what.push("the path of the folder you allowed and the files in it Io chose to open (secrets blocked)".into());
     }
     if !ctx.git.is_empty() {
-        what.push("the git branch, last commits and change counts");
+        what.push("the git branch, last commits and change counts".into());
     }
     if !ctx.project.is_empty() {
-        what.push("the project's notes");
+        what.push("the project's notes".into());
     }
     if !ctx.command.is_empty() {
-        what.push("the last command");
+        what.push("the last command".into());
     }
     if ctx.exit_code.is_some() {
-        what.push("its exit status");
+        what.push("its exit status".into());
     }
     if !ctx.output.is_empty() {
-        what.push("the end of its output");
+        what.push(ctx.output_how.said().into());
+    } else if !ctx.command.is_empty() {
+        // A shell cannot see what the command printed: say that it was not sent.
+        if let Some(last) = what.last_mut() {
+            *last = format!("{last} (output not sent)");
+        }
     }
     if can_run && mode == Mode::Auto {
-        what.push("the output of any command your rules do not forbid");
+        what.push("the output of any command your rules do not forbid".into());
         return format!(
             "Read: {}; auto mode: a command your rules do not forbid runs without asking.",
             what.join(", ")
         );
     }
     if can_run {
-        what.push("the output of any command you or your rules allow");
+        what.push("the output of any command you or your rules allow".into());
         return format!(
             "Read: {}; a command runs only when you or your rules allow it.",
             what.join(", ")
@@ -1130,5 +1216,45 @@ mod tests {
             read(r#"{"result":"  "}"#, true),
             Reading::Failed(_)
         ));
+    }
+
+    #[test]
+    fn the_footer_and_the_data_say_what_of_the_last_command_was_sent() {
+        let failed = |output: &str, how: OutputHow| Context {
+            cwd: "/w".into(),
+            command: "make".into(),
+            exit_code: Some(2),
+            output: output.into(),
+            output_how: how,
+            ..Context::default()
+        };
+        // No output: the footer says so, and the data says what an attach could add.
+        let none = failed("", OutputHow::Attached);
+        assert!(
+            read_line(&none, Mode::Manual, false).contains("its exit status (output not sent)")
+        );
+        let sent = none.sent("why did that fail");
+        assert_eq!(
+            (sent.output, sent.output_bytes, sent.can_attach),
+            ("not_sent", 0, true)
+        );
+        assert!(!none.sent("list the files").can_attach);
+        // Output: where it came from, in the footer and in the data.
+        for (how, footer) in [
+            (OutputHow::Attached, "from a file you gave"),
+            (OutputHow::Captured, "from a re-run you allowed"),
+            (OutputHow::Pasted, "as you pasted it"),
+        ] {
+            let ctx = failed("boom\n", how);
+            let line = read_line(&ctx, Mode::Manual, false);
+            assert!(
+                line.contains(footer) && line.contains("secrets redacted"),
+                "{line}"
+            );
+            assert!(!line.contains("output not sent"), "{line}");
+            let sent = ctx.sent("why did that fail");
+            assert_eq!((sent.output, sent.output_bytes), (how.name(), 4));
+            assert!(!sent.can_attach, "already attached");
+        }
     }
 }

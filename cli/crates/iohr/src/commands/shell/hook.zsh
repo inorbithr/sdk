@@ -6,10 +6,14 @@
 # keeps it out of its history. `?? ...` follows up the last answer. The answer is AI text
 # under your own subscription and says so; nothing in it is ever run. INORBIT_ASK=0 turns
 # this off for a shell. The folder and the last command (with its exit status) are sent as
-# context; a plain shell cannot see that command's output. Under an answer, the Down arrow
+# context; a plain shell cannot see that command's output, so it is not sent, and the card
+# says so. After a failed command, a question such as "why did that fail" offers, in the
+# menu below, Re-run with output (shows the command and asks first; it runs once, stopped
+# after 10 seconds) and Paste output; what you attach is sent with the next ask, with
+# secrets redacted, and the card lists it. Under an answer, the Down arrow
 # on an empty line (`[ask] menu_key`) opens a menu: Run puts the answer's command on the
 # prompt line for you to read and run with Enter, Copy, Follow up, Explain, Open. Nothing
-# in the menu runs a command.
+# in the menu runs a command without that yes.
 #
 # The mode of the answers (PRD 0197): manual (ask before each command), plan (read only, a plan
 # and no command) or auto (run what your rules do not forbid, without asking). Shift+Tab on a
@@ -25,6 +29,9 @@
 # RPROMPT you set yourself is left alone; INORBIT_ASKS_PROMPT=0 turns the segment off.
 if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_access _iohr_ask_steps _iohr_ask_live
+  # The command that failed under the last ask, its exit status, and the output attached to it
+  # from the menu (a private file and how it came: captured or pasted).
+  typeset -g _iohr_ask_failcmd _iohr_ask_failrc _iohr_ask_outfile _iohr_ask_outkind
   typeset -gA _iohr_card_prev
   # The keys that open the menu, from `[ask] menu_key` (none when it is off).
   typeset -ga _iohr_card_keys=(__IOHR_MENU_KEYS__)
@@ -57,9 +64,30 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
       zle ${_iohr_card_prev[$KEYMAP]:-down-line-or-history}
       return
     fi
-    local out
+    local out rs=$'\x1e' to=
+    local -a extra
     zle -I
-    out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" --undo="$_iohr_ask_undo" ${_iohr_ask_access:+--access="$_iohr_ask_access"} ${_iohr_ask_steps:+--step="$_iohr_ask_steps"} --asked="$_iohr_ask_pq" </dev/tty 2>/dev/tty)
+    # The folder Io needs a yes for and the next steps ride along: Allow and the steps need them.
+    [[ -n $_iohr_ask_access ]] && extra+=(--access="$_iohr_ask_access")
+    [[ -n $_iohr_ask_steps ]] && extra+=(--step="$_iohr_ask_steps")
+    extra+=(--asked="$_iohr_ask_pq")
+    # A private file for the output the menu may attach (removed when nothing comes of it).
+    if [[ -n $_iohr_ask_failcmd ]]; then
+      to=$(umask 077; command mktemp "${TMPDIR:-/tmp}/iohr-ask-output.XXXXXX" 2>/dev/null) &&
+        extra+=(--failed-command "$_iohr_ask_failcmd" --failed-exit "$_iohr_ask_failrc" --output-to "$to")
+    fi
+    out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" --undo="$_iohr_ask_undo" "${extra[@]}" </dev/tty 2>/dev/tty)
+    # Attached output came back as `? question` 0x1e kind; the file is read by the next ask.
+    if [[ -n $to ]]; then
+      if [[ $out == *$rs* && -s $to ]]; then
+        [[ -n $_iohr_ask_outfile ]] && command rm -f -- "$_iohr_ask_outfile"
+        _iohr_ask_outfile=$to _iohr_ask_outkind=${out#*$rs}
+        out=${out%%$rs*}
+      else
+        command rm -f -- "$to"
+        out=${out%%$rs*}
+      fi
+    fi
     if [[ -n $out ]]; then
       BUFFER=$out
       CURSOR=${#BUFFER}
@@ -110,12 +138,24 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     local -a a=(command __IOHR_BIN__ ask --headless --hook --cwd "$PWD")
     [[ -n $_iohr_ask_mode ]] && a+=(--mode "$_iohr_ask_mode")
     [[ -n $last ]] && a+=(--last-command "${last[1,1024]}" --exit-code "$rc")
+    # Output attached from the menu goes with this ask only, and only for the command it was
+    # attached to; the private file is removed once it is read.
+    local outfile=$_iohr_ask_outfile outkind=$_iohr_ask_outkind
+    _iohr_ask_outfile= _iohr_ask_outkind=
+    if [[ -n $outfile && ${last[1,1024]} == $_iohr_ask_failcmd && -n $outkind ]]; then
+      a+=(--output-file "$outfile" --output-kind "$outkind")
+    fi
+    _iohr_ask_failcmd= _iohr_ask_failrc=
+    [[ -n $last ]] && { _iohr_ask_failcmd=${last[1,1024]}; _iohr_ask_failrc=$rc; }
     (( follow )) && [[ -n $_iohr_ask_pq ]] && a+=(--prior-question "$_iohr_ask_pq" --prior-answer "$_iohr_ask_pa")
     local rec rs=$'\x1e' rest tail
     # The card goes to the terminal on stderr. The record on stdout is the answer (kept for
     # `??`), the command it suggests, the link it names and the permission rules this run saved
-    # (what Undo takes back), separated by a 0x1e character, then the folder Io needs a yes for and the next steps.
-    if rec=$("${a[@]}" -- "$q"); then
+    # (what Undo takes back), separated by a 0x1e character, then the folder Io needs a yes for and
+    # the next steps.
+    rec=$("${a[@]}" -- "$q"); local ok=$?
+    [[ -n $outfile ]] && command rm -f -- "$outfile"
+    if (( ok == 0 )); then
       rest=${rec#*$rs}
       _iohr_ask_pq=$q
       _iohr_ask_pa=${rec%%$rs*}

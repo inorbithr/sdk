@@ -8,9 +8,11 @@ use std::process::{Command, Stdio};
 
 use base64::Engine as _;
 
+use crate::attach;
 use crate::browser;
 use crate::card;
 use crate::error::Error;
+use crate::headless::OutputHow;
 use crate::output::Out;
 use crate::permissions::{
     rule::Rule,
@@ -98,16 +100,22 @@ fn short(label: &str) -> String {
     }
 }
 
+/// What an answer has beyond a command, for the row and the menu.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Extras {
+    /// A file or `https://` link the answer named (Open).
+    pub(crate) link: bool,
+    /// A permission rule this answer's run saved (Undo).
+    pub(crate) undo: bool,
+    /// The last command failed and the question asks why: its output can be attached.
+    pub(crate) attach: bool,
+}
+
 /// The line under the card: the actions on offer and the key. Run and Copy need a command,
-/// Open a link, Undo a rule this answer's run saved; Follow up and Explain are always there.
-/// None when there is no key.
-pub(crate) fn row(
-    key: MenuKey,
-    has_command: bool,
-    has_link: bool,
-    has_undo: bool,
-    next: &Next<'_>,
-) -> Option<String> {
+/// Open a link, Undo a rule this answer's run saved, Attach output a failed command that the
+/// question asks about, Allow a folder Io asked to read and the next steps it suggested; Follow
+/// up and Explain are always there. None when there is no key.
+pub(crate) fn row(key: MenuKey, has_command: bool, has: Extras, next: &Next<'_>) -> Option<String> {
     let key = key.label()?;
     let mut names: Vec<String> = Vec::new();
     if has_command {
@@ -117,11 +125,14 @@ pub(crate) fn row(
         names.push("Allow".to_owned());
     }
     names.extend(next.steps.iter().map(|s| short(&s.label())));
+    if has.attach {
+        names.push("Attach output".to_owned());
+    }
     names.extend(["Follow up".to_owned(), "Explain".to_owned()]);
-    if has_link {
+    if has.link {
         names.push("Open".to_owned());
     }
-    if has_undo {
+    if has.undo {
         names.push("Undo".to_owned());
     }
     Some(format!("{}   {key} to choose", names.join(" \u{b7} ")))
@@ -184,13 +195,7 @@ pub(crate) fn risk(command: &str) -> Option<&'static str> {
     }
 }
 
-fn choices(
-    command: Option<&str>,
-    link: bool,
-    undo: bool,
-    asks: usize,
-    next: &Next<'_>,
-) -> Vec<Choice> {
+fn choices(command: Option<&str>, has: Extras, asks: usize, next: &Next<'_>) -> Vec<Choice> {
     let pick = |value: &str, label: &str, hint: &str, key: char| Choice {
         value: value.to_owned(),
         label: label.to_owned(),
@@ -227,6 +232,20 @@ fn choices(
             key: None,
         });
     }
+    if has.attach {
+        out.push(pick(
+            "rerun",
+            "Re-run with output",
+            "run the command again with its output captured; asks first",
+            'w',
+        ));
+        out.push(pick(
+            "paste",
+            "Paste output",
+            "paste what it printed; secrets are redacted before anything is sent",
+            'p',
+        ));
+    }
     out.push(pick(
         "follow",
         "Follow up",
@@ -234,7 +253,7 @@ fn choices(
         'f',
     ));
     out.push(pick("explain", "Explain", "ask what it means", 'e'));
-    if link {
+    if has.link {
         out.push(pick(
             "open",
             "Open",
@@ -242,7 +261,7 @@ fn choices(
             'o',
         ));
     }
-    if undo {
+    if has.undo {
         out.push(pick(
             "undo",
             "Undo",
@@ -268,6 +287,116 @@ pub(crate) struct Takeback<'a> {
     pub(crate) rules: Vec<Rule>,
 }
 
+/// What Attach output works on: the failed command, the question to ask again and the private
+/// file the output is written to (made by the hook, read by the next ask).
+pub(crate) struct Attach<'a> {
+    pub(crate) failed: &'a attach::Failed,
+    pub(crate) asked: &'a str,
+    pub(crate) to: &'a Path,
+}
+
+/// After Attach output the line is the question to ask again, then [`RS`] and how the output
+/// came (`captured` or `pasted`), so the hook sends it with `--output-kind`.
+fn asked_again(a: &Attach<'_>, how: OutputHow) -> String {
+    let asked: String = a.asked.chars().filter(|c| !c.is_control()).collect();
+    format!("? {asked}{RS}{}", how.name())
+}
+
+/// Writes the scrubbed output to the file; the line to put on the prompt, or nothing.
+fn keep(a: &Attach<'_>, text: &str, how: OutputHow) -> Option<String> {
+    let text = attach::scrub(text);
+    if text.trim().is_empty() {
+        Out::note("there was no output to send");
+        return None;
+    }
+    match std::fs::write(a.to, &text) {
+        Ok(()) => {
+            Out::note(&format!(
+                "{} lines of output kept, secrets redacted; Enter asks again with them",
+                text.lines().count()
+            ));
+            Some(asked_again(a, how))
+        }
+        Err(e) => {
+            Out::note(&format!("could not keep the output: {}", e.kind()));
+            None
+        }
+    }
+}
+
+/// Re-run with output: shows the exact command, asks, and only after a yes runs it once in the
+/// folder, for at most [`attach::RERUN_LIMIT`], keeping the end of what it printed.
+fn rerun(a: &Attach<'_>, cwd: &Path) -> Option<String> {
+    let Some(command) = card::insertable(&a.failed.command) else {
+        Out::note("cannot re-run it: the command has control characters");
+        return None;
+    };
+    Out::note(&format!(
+        "It would run again in {}: {command}",
+        cwd.display()
+    ));
+    let hint = match risk(command) {
+        Some(why) => format!("it {why}; it runs again, read it first"),
+        None => format!(
+            "runs once, stopped after {} s; the end of its output is sent, secrets redacted",
+            attach::RERUN_LIMIT.as_secs()
+        ),
+    };
+    let choice = |value: &str, label: &str, hint: &str, key: char| Choice {
+        value: value.to_owned(),
+        label: label.to_owned(),
+        hint: hint.to_owned(),
+        available: true,
+        key: Some(key),
+    };
+    let rows = [
+        choice("no", "No", "leave it as it is", 'n'),
+        choice("yes", "Yes, run it again", &hint, 'y'),
+    ];
+    // Esc, a cancel or no terminal are all a no: nothing is run.
+    if !matches!(
+        Ui::select_bar("Run it again to capture its output?", &rows, "no"),
+        Ok(Some(v)) if v == "yes"
+    ) {
+        return None;
+    }
+    match attach::rerun(command, cwd, attach::RERUN_LIMIT) {
+        Ok(got) => {
+            if got.timed_out {
+                Out::note(&format!(
+                    "stopped after {} s; kept the end of what it printed",
+                    attach::RERUN_LIMIT.as_secs()
+                ));
+            } else if got.exit_code != Some(a.failed.exit_code) {
+                let now = got
+                    .exit_code
+                    .map_or("no status".to_owned(), |c| c.to_string());
+                Out::note(&format!(
+                    "it exited {now} this time (it exited {} before)",
+                    a.failed.exit_code
+                ));
+            }
+            keep(a, &got.text, OutputHow::Captured)
+        }
+        Err(why) => {
+            Out::note(&why);
+            None
+        }
+    }
+}
+
+/// Paste output: reads what the person pastes, to Ctrl-D, from the terminal.
+fn paste(a: &Attach<'_>) -> Option<String> {
+    Out::note("Paste the output, then Ctrl-D on an empty line (Ctrl-C leaves).");
+    match attach::paste(std::io::stdin().lock()) {
+        Ok(text) => keep(a, &text, OutputHow::Pasted),
+        Err(why) => {
+            Out::note(&why);
+            None
+        }
+    }
+}
+
 /// The menu for `iohr ask --menu`: draws on stderr, reads the terminal, and prints on stdout
 /// the one line for the prompt (Run: the command; Follow up, Explain: a `??` question to
 /// finish), or nothing (Copy, Open, a cancel). The caller is a shell widget that only ever
@@ -280,17 +409,17 @@ pub(crate) fn menu(
     (command, link): (Option<&str>, Option<&str>),
     cwd: &Path,
     undo: &Takeback<'_>,
+    attach: Option<&Attach<'_>>,
     (next, asked, user_dir): (&Next<'_>, &str, &Path),
 ) -> Result<(), Error> {
     let command = command.and_then(card::insertable);
     let link = link.filter(|l| !l.is_empty() && !l.chars().any(char::is_control));
-    let all = choices(
-        command,
-        link.is_some(),
-        !undo.rules.is_empty(),
-        crate::commands::asks::cached_count(),
-        next,
-    );
+    let has = Extras {
+        link: link.is_some(),
+        undo: !undo.rules.is_empty(),
+        attach: attach.is_some(),
+    };
+    let all = choices(command, has, crate::commands::asks::cached_count(), next);
     let first = all.first().map_or("", |c| c.value.as_str()).to_owned();
     let Some(picked) = Ui::select_bar("What next?", &all, &first)? else {
         return Ok(());
@@ -308,6 +437,8 @@ pub(crate) fn menu(
         ("explain", Some(c), _) => Some(format!("?? explain this command: {c}")),
         ("explain", None, _) => Some("?? explain that in more detail".to_owned()),
         ("asks", ..) => Some("iohr asks list".to_owned()),
+        ("rerun", ..) => attach.and_then(|a| rerun(a, cwd)),
+        ("paste", ..) => attach.and_then(paste),
         ("follow", ..) => Some("?? ".to_owned()),
         ("open", _, Some(l)) => {
             match open(l, cwd) {
@@ -499,7 +630,7 @@ mod tests {
     #[test]
     fn asks_are_a_choice_only_when_some_wait() {
         let keys = |n| -> Vec<char> {
-            choices(None, false, false, n, &Next::default())
+            choices(None, Extras::default(), n, &Next::default())
                 .iter()
                 .filter_map(|c| c.key)
                 .collect()
@@ -507,7 +638,7 @@ mod tests {
         assert_eq!(keys(0), ['f', 'e']);
         assert_eq!(keys(3), ['f', 'e', 'a']);
         assert!(
-            choices(None, false, false, 3, &Next::default())
+            choices(None, Extras::default(), 3, &Next::default())
                 .last()
                 .unwrap()
                 .hint
@@ -518,20 +649,50 @@ mod tests {
     #[test]
     fn the_row_offers_what_the_answer_has() {
         assert_eq!(
-            row(MenuKey::Down, true, true, false, &Next::default()).as_deref(),
+            row(
+                MenuKey::Down,
+                true,
+                Extras {
+                    link: true,
+                    ..Extras::default()
+                },
+                &Next::default()
+            )
+            .as_deref(),
             Some(
                 "Run \u{b7} Copy \u{b7} Follow up \u{b7} Explain \u{b7} Open   \u{2193} to choose"
             )
         );
         assert_eq!(
-            row(MenuKey::Down, false, false, true, &Next::default()).as_deref(),
+            row(
+                MenuKey::Down,
+                false,
+                Extras {
+                    undo: true,
+                    ..Extras::default()
+                },
+                &Next::default()
+            )
+            .as_deref(),
             Some("Follow up \u{b7} Explain \u{b7} Undo   \u{2193} to choose")
         );
         assert_eq!(
-            row(MenuKey::CtrlG, false, false, false, &Next::default()).as_deref(),
+            row(MenuKey::CtrlG, false, Extras::default(), &Next::default()).as_deref(),
             Some("Follow up \u{b7} Explain   ctrl-g to choose")
         );
-        assert_eq!(row(MenuKey::Off, true, true, true, &Next::default()), None);
+        assert_eq!(
+            row(
+                MenuKey::Off,
+                true,
+                Extras {
+                    link: true,
+                    undo: true,
+                    attach: true
+                },
+                &Next::default()
+            ),
+            None
+        );
     }
 
     #[test]
@@ -560,12 +721,12 @@ mod tests {
             steps: &steps,
         };
         assert_eq!(
-            row(MenuKey::Down, false, false, false, &next).as_deref(),
+            row(MenuKey::Down, false, Extras::default(), &next).as_deref(),
             Some(
                 "Allow \u{b7} Read api/ \u{b7} Search for TODO \u{b7} Follow up \u{b7} Explain   \u{2193} to choose"
             )
         );
-        let c = choices(None, false, false, 0, &next);
+        let c = choices(None, Extras::default(), 0, &next);
         let values: Vec<&str> = c.iter().map(|c| c.value.as_str()).collect();
         assert_eq!(values, ["allow", "step0", "step1", "follow", "explain"]);
         assert_eq!(c[0].key, Some('l'));
@@ -575,7 +736,7 @@ mod tests {
         // The bar numbers them; a step is never a bare shell line to copy.
         assert!(c.iter().all(|c| !c.hint.contains("grep")));
         // Nothing to allow and no step: the bar is as it was.
-        let none = choices(None, false, false, 0, &Next::default());
+        let none = choices(None, Extras::default(), 0, &Next::default());
         assert_eq!(none.len(), 2);
     }
 
@@ -587,10 +748,10 @@ mod tests {
             allow: None,
             steps: &steps,
         };
-        let r = row(MenuKey::Down, false, false, false, &next).unwrap();
+        let r = row(MenuKey::Down, false, Extras::default(), &next).unwrap();
         assert!(r.contains("...") && !r.contains(&long), "{r}");
         assert_eq!(
-            choices(None, false, false, 0, &next)[0].label,
+            choices(None, Extras::default(), 0, &next)[0].label,
             format!("Search for {long}")
         );
     }

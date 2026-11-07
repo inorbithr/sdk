@@ -108,6 +108,7 @@ fn json_is_the_documented_shape_and_never_the_question() {
             "agent",
             "answer",
             "command",
+            "context",
             "duration_ms",
             "exit_code",
             "label",
@@ -1608,4 +1609,419 @@ fn the_prompt_offers_the_reading_and_never_tells_the_person_to_run_grep() {
     assert!(sent.contains("```next"));
     assert!(sent.contains("never tell the person to run grep, ls, cat or find"));
     assert!(!sent.contains("run grep -rn"));
+}
+
+// ---------------------------------------------------------------- what the question can see
+// RFC 0203, PRD 0187.1: the card says what was sent, and the output of the last command is
+// sent only when the person attached it (a file, a re-run they said yes to, or a paste).
+
+const FAILED: [&str; 7] = [
+    "ask",
+    "--cwd",
+    "/work/api",
+    "--last-command",
+    "cargo test",
+    "--exit-code",
+    "101",
+];
+
+fn with<'a>(base: &[&'a str], more: &[&'a str]) -> Vec<&'a str> {
+    base.iter().chain(more).copied().collect()
+}
+
+#[test]
+fn the_card_says_the_output_was_not_sent_and_json_carries_the_same_facts() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let json = |args: &[&str]| -> serde_json::Value {
+        let mut a = vec!["--json"];
+        a.extend_from_slice(args);
+        let out = r.run(&a, OK_JSON, "0");
+        assert!(out.status.success(), "{}", text(&out));
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    // A failed command and no output: the footer and the data both say it was not sent.
+    let v = json(&with(&FAILED, &["--headless", "--", "why did that fail"]));
+    let label = v["label"].as_str().unwrap();
+    assert!(
+        label.contains("its exit status (output not sent)"),
+        "{label}"
+    );
+    assert_eq!(
+        v["context"],
+        serde_json::json!({
+            "folder": "/work/api", "command": true, "exit_code": 101,
+            "output": "not_sent", "output_bytes": 0, "can_attach": true
+        })
+    );
+    // A question that does not ask why is not offered the attach.
+    let v = json(&with(&FAILED, &["--headless", "--", "list the files"]));
+    assert_eq!(v["context"]["can_attach"], false);
+    // No command at all: nothing to say about output.
+    let v = json(&["ask", "--headless", "--cwd", "/work/api", "--", "hello"]);
+    assert_eq!(v["context"]["command"], false);
+    assert_eq!(v["context"]["exit_code"], serde_json::Value::Null);
+    assert!(!v["label"].as_str().unwrap().contains("output not sent"));
+    // With output from a file, secrets are redacted and the footer says where it came from.
+    let f = r.home.path().join("out.txt");
+    std::fs::write(
+        &f,
+        "error: failed\npassword=hunter2\nAuthorization: Bearer abc.def.ghi\nAPI_KEY=sk-live-0123456789\n",
+    )
+    .unwrap();
+    let file = f.to_str().unwrap();
+    let v = json(&with(
+        &FAILED,
+        &[
+            "--output-file",
+            file,
+            "--headless",
+            "--",
+            "why did that fail",
+        ],
+    ));
+    assert_eq!(v["context"]["output"], "attached");
+    assert_eq!(v["context"]["can_attach"], false);
+    assert!(v["context"]["output_bytes"].as_u64().unwrap() > 0);
+    let label = v["label"].as_str().unwrap();
+    assert!(
+        label.contains("from a file you gave, secrets redacted") && !label.contains("not sent"),
+        "{label}"
+    );
+    let sent = r.saw("claude.stdin");
+    assert!(sent.contains("error: failed"), "{sent}");
+    for leaked in ["hunter2", "abc.def.ghi", "sk-live-0123456789"] {
+        assert!(!sent.contains(leaked), "{leaked} reached the model: {sent}");
+    }
+    // The kinds a re-run and a paste carry say so in the footer and in the data.
+    for (kind, said) in [
+        ("captured", "from a re-run you allowed"),
+        ("pasted", "as you pasted it"),
+    ] {
+        let v = json(&with(
+            &FAILED,
+            &[
+                "--output-file",
+                file,
+                "--output-kind",
+                kind,
+                "--headless",
+                "--",
+                "why",
+            ],
+        ));
+        assert_eq!(v["context"]["output"], kind);
+        assert!(v["label"].as_str().unwrap().contains(said));
+    }
+    // The kind belongs to a file.
+    let out = r.run(
+        &with(&FAILED, &["--output-kind", "pasted", "--", "q"]),
+        OK_JSON,
+        "0",
+    );
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+}
+
+#[test]
+fn off_a_terminal_the_plain_card_says_how_to_attach_the_output_and_never_draws_a_row() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    for env in [&[][..], &[("NO_COLOR", "1")][..], &[("TERM", "dumb")][..]] {
+        let out = r.run_env(
+            &with(&FAILED, &["--headless", "--", "why did that fail"]),
+            OK_JSON,
+            "0",
+            env,
+        );
+        assert!(out.status.success(), "{}", text(&out));
+        let t = text(&out);
+        assert!(t.contains("Its output was not sent."), "{t}");
+        assert!(t.contains("--output-file FILE"), "{t}");
+        assert!(!t.contains('\u{1b}'), "plain has no escape codes: {t:?}");
+        assert!(!t.contains("Re-run with output"), "{t}");
+    }
+    // A question that does not ask why says nothing of it; nor does one that has the output.
+    let out = r.run(
+        &with(&FAILED, &["--headless", "--", "list the files"]),
+        OK_JSON,
+        "0",
+    );
+    assert!(!text(&out).contains("Its output was not sent."));
+}
+
+#[test]
+fn the_menu_offers_the_output_only_for_a_failed_command_and_a_why_question() {
+    let r = Rig::new();
+    let to = r.home.path().join("attached");
+    let to_s = to.to_str().unwrap();
+    let base = |asked: &'static str, exit: &'static str| {
+        vec![
+            "ask",
+            "--menu",
+            "--command=git status",
+            "--asked",
+            asked,
+            "--failed-command",
+            "false",
+            "--failed-exit",
+            exit,
+            "--output-to",
+        ]
+    };
+    let mut a = base("why did that fail", "1");
+    a.push(to_s);
+    let Some((_, screen)) = press_in_menu(&r, &a, "\u{1b}", &[]) else {
+        return;
+    };
+    assert!(
+        screen.contains("Re-run with output") && screen.contains("Paste output"),
+        "{screen:?}"
+    );
+    // A succeeded command, or a question that does not ask why: neither is offered.
+    for (asked, exit) in [("why did that fail", "0"), ("list the files", "1")] {
+        let mut a = base(asked, exit);
+        a.push(to_s);
+        let (line, screen) = press_in_menu(&r, &a, "w", &[]).unwrap();
+        assert_eq!(line, "");
+        assert!(!screen.contains("Re-run with output"), "{screen:?}");
+    }
+    assert!(!to.exists() || std::fs::read_to_string(&to).unwrap().is_empty());
+}
+
+#[test]
+fn a_rerun_asks_first_runs_once_and_keeps_only_the_scrubbed_end_of_its_output() {
+    let r = Rig::new();
+    let to = r.home.path().join("attached");
+    let to_s = to.to_str().unwrap();
+    let ran = r.home.path().join("ran");
+    let command = format!(
+        "echo run >> {ran}; echo boom-out; echo password=hunter2 >&2; exit 3",
+        ran = ran.display()
+    );
+    let failed = format!("--failed-command={command}");
+    let a = [
+        "ask",
+        "--menu",
+        "--asked",
+        "why did that fail",
+        &failed,
+        "--failed-exit",
+        "3",
+        "--output-to",
+        to_s,
+    ];
+    let Some((line, screen)) = press_in_menu(&r, &a, "w\u{1f}n", &[]) else {
+        return;
+    };
+    // The command is shown whole, and nothing ran on a no.
+    assert!(screen.contains("It would run again"), "{screen:?}");
+    assert!(screen.contains("boom-out"), "{screen:?}");
+    assert_eq!(line, "", "{screen:?}");
+    assert!(!ran.exists(), "a no runs nothing");
+    // Esc on the question is a no too.
+    let (line, _) = press_in_menu(&r, &a, "w\u{1f}\u{1b}", &[]).unwrap();
+    assert_eq!(line, "");
+    assert!(!ran.exists(), "Esc runs nothing");
+    // A yes runs it once; the line is the question again, the kind follows a 0x1e.
+    let (line, screen) = press_in_menu(&r, &a, "w\u{1f}y", &[]).unwrap();
+    assert_eq!(line, "? why did that fail\u{1e}captured", "{screen:?}");
+    assert_eq!(std::fs::read_to_string(&ran).unwrap().lines().count(), 1);
+    let kept = std::fs::read_to_string(&to).unwrap();
+    assert!(kept.contains("boom-out"), "{kept}");
+    assert!(
+        !kept.contains("hunter2"),
+        "secrets never reach the file: {kept}"
+    );
+    assert!(screen.contains("lines of output kept"), "{screen:?}");
+}
+
+#[test]
+fn a_rerun_is_bounded_in_time_and_in_size() {
+    let r = Rig::new();
+    let to = r.home.path().join("attached");
+    let a = [
+        "ask",
+        "--menu",
+        "--asked",
+        "why did that fail",
+        "--failed-command=yes line-of-noise",
+        "--failed-exit",
+        "1",
+        "--output-to",
+        to.to_str().unwrap(),
+    ];
+    // The re-run is stopped after 10 s; resizes are harmless steps that give it the time.
+    let waits = "\u{1f}WINCH:x".repeat(24);
+    let Some((line, screen)) = press_in_menu(&r, &a, &format!("w\u{1f}y{waits}"), &[]) else {
+        return;
+    };
+    assert_eq!(line, "? why did that fail\u{1e}captured", "{screen:?}");
+    assert!(screen.contains("stopped after"), "{screen:?}");
+    assert!(std::fs::metadata(&to).unwrap().len() <= 16 * 1024);
+}
+
+#[test]
+fn a_paste_is_kept_scrubbed_and_nothing_is_run() {
+    let r = Rig::new();
+    let to = r.home.path().join("attached");
+    let ran = r.home.path().join("ran");
+    let failed = format!("--failed-command=touch {}", ran.display());
+    let a = [
+        "ask",
+        "--menu",
+        "--asked",
+        "why did that fail",
+        &failed,
+        "--failed-exit",
+        "1",
+        "--output-to",
+        to.to_str().unwrap(),
+    ];
+    let Some((line, screen)) = press_in_menu(
+        &r,
+        &a,
+        "p\u{1f}real error: no such file\ntoken=abc123\n\u{1f}\u{4}",
+        &[],
+    ) else {
+        return;
+    };
+    assert_eq!(line, "? why did that fail\u{1e}pasted", "{screen:?}");
+    let kept = std::fs::read_to_string(&to).unwrap();
+    assert!(kept.contains("real error: no such file"), "{kept}");
+    assert!(!kept.contains("abc123"), "{kept}");
+    assert!(!ran.exists(), "a paste runs nothing");
+}
+
+// The hook end to end on a real pty: a failed command, a why question, the menu's re-run, and
+// the next ask carries the output file and its kind; the file is removed after it is read; and
+// the output never goes with another command or another ask.
+#[test]
+fn the_hook_carries_attached_output_to_the_next_ask_only() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.path().join("calls.log");
+    let seen = dir.path().join("seen.txt");
+    let fake = bin.join("iohr");
+    // --menu: logs its arguments, writes the file it was given and prints the question and
+    // the kind. Otherwise (an ask): logs its arguments and what the output file held.
+    std::fs::write(
+        &fake,
+        format!(
+            r#"#!/bin/sh
+echo "$*" >> {log}
+case "$*" in
+*--menu*)
+  while [ $# -gt 0 ]; do [ "$1" = --output-to ] && to=$2; shift; done
+  printf 'captured: the real error
+' > "$to"
+  printf '? why did that failcaptured';;
+*)
+  while [ $# -gt 0 ]; do [ "$1" = --output-file ] && cat "$2" >> {seen}; shift; done
+  printf 'the answerecho hinotes.md';;
+esac
+"#,
+            log = log.display(),
+            seen = seen.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let down = "RAW:\u{1b}[B";
+    drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {}", file.display()),
+            "false".to_owned(),
+            "? why did that fail".to_owned(),
+            down.to_owned(),
+            // The line is the question again; Enter asks it with the output.
+            "RAW:\r".to_owned(),
+            // Another ask: no output goes with it.
+            "? and again, why did that fail".to_owned(),
+        ],
+    );
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    // The asks segment's own refresh (`asks count`) is not one of the calls under test.
+    let lines: Vec<&str> = calls.lines().filter(|l| !l.starts_with("asks ")).collect();
+    assert_eq!(lines.len(), 4, "{calls}");
+    assert!(
+        !lines[0].contains("--output-file"),
+        "the first ask has none: {calls}"
+    );
+    assert!(
+        lines[1].contains("--menu")
+            && lines[1].contains("--failed-command false")
+            && lines[1].contains("--failed-exit 1")
+            && lines[1].contains("--asked=why did that fail")
+            && lines[1].contains("--output-to "),
+        "{calls}"
+    );
+    assert!(
+        lines[2].contains("--output-file ") && lines[2].contains("--output-kind captured"),
+        "{calls}"
+    );
+    assert!(!lines[3].contains("--output-file"), "{calls}");
+    assert_eq!(
+        std::fs::read_to_string(&seen).unwrap(),
+        "captured: the real error\n"
+    );
+    // The private file is gone once the ask has read it.
+    let to = lines[2]
+        .split("--output-file ")
+        .nth(1)
+        .and_then(|r| r.split(' ').next())
+        .unwrap();
+    assert!(!std::path::Path::new(to).exists(), "{to} was left behind");
+}
+
+#[test]
+fn the_hook_sends_no_output_for_another_command_and_drops_a_menu_that_attached_nothing() {
+    if Command::new("zsh").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'a\\036\\036'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let stale = dir.path().join("stale");
+    std::fs::write(&stale, "old output").unwrap();
+    let o = Command::new("zsh")
+        .args([
+            "-f",
+            "-i",
+            "-c",
+            &format!(
+                "source {f}; print -s 'cargo build'; _iohr_ask_failcmd='cargo test'; \
+                 _iohr_ask_outfile={stale}; _iohr_ask_outkind=captured; \
+                 _iohr_ask_q='? why did that fail'; _iohr_ask_precmd",
+                f = file.display(),
+                stale = stale.display()
+            ),
+        ])
+        .current_dir(dir.path())
+        .env_clear()
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("ARGS:"), "{err}");
+    assert!(!err.contains("--output-file"), "another command: {err}");
+    assert!(!stale.exists(), "the file is removed either way");
 }

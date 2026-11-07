@@ -21,6 +21,7 @@ mod actions;
 mod args;
 mod ask;
 mod askback;
+mod attach;
 mod browser;
 mod card;
 mod commands;
