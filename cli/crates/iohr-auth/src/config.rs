@@ -133,7 +133,7 @@ impl ExtConfig {
 }
 
 /// The `[project]` table: defaults for `iohr project init`. A `--template` flag wins over it;
-/// the built-in default (`demo`) applies when it is unset. Checked where it is used.
+/// the built-in default (`coordinated`) applies when it is unset. Checked where it is used.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ProjectConfig {

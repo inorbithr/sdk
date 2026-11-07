@@ -15,6 +15,7 @@ use crate::cli::{
 use crate::context::{Ctx, Session, io_session, session};
 use crate::error::Error;
 use crate::output::Out;
+use crate::planner::scoped;
 
 use super::{day, str_of};
 
@@ -75,6 +76,8 @@ pub(crate) async fn run(
             account,
         }) => list_asks(&s, state, source, limit, account, out).await,
         CoordinatorCommand::Brief { job } => brief(&s, &job, out).await,
+        CoordinatorCommand::Plan(cmd) => super::coordinator_plan::plan(&s, cmd, out).await,
+        CoordinatorCommand::Item(cmd) => super::coordinator_plan::item(&s, cmd, out).await,
         CoordinatorCommand::Asks(CoordinatorAsksCommand::Create {
             kind,
             body,
@@ -98,17 +101,6 @@ pub(crate) async fn run(
             })?;
             create_ask(&s, &req, out).await
         }
-    }
-}
-
-fn scoped(e: inorbithr::Error) -> Error {
-    if matches!(e.status(), Some(401 | 403)) {
-        Error::with_hint(
-            e,
-            "The coordinator serves signed-in people: run `iohr login`; an API key cannot use it.",
-        )
-    } else {
-        e.into()
     }
 }
 
