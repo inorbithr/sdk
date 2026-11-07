@@ -31,7 +31,7 @@ mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
-mod shell;
+pub(crate) mod shell;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -111,6 +111,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
+        Command::Panel(args) => crate::panel::run(g, env, args).await,
         Command::Permissions(cmd) => permissions::run(g, cmd, out),
         Command::PermissionServer { .. } => Err(Error::Failed(
             "the permission server needs a unix system".to_owned(),

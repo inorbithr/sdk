@@ -288,10 +288,54 @@ async fn fetch_waiting(
     env: &Env,
     account_flag: Option<String>,
 ) -> Result<Waiting, Error> {
+    Ok(Waiting::of(&fetch_open(g, env, account_flag).await?))
+}
+
+/// The open asks, read through the quiet store (see [`fetch_waiting`]).
+async fn fetch_open(
+    g: &Global,
+    env: &Env,
+    account_flag: Option<String>,
+) -> Result<Vec<Value>, Error> {
     let s = quiet_session(g, env).await?;
     let svc = service(&s, None, account_flag)?;
-    let rows = svc.list_approvals("open", "").await.map_err(scoped)?;
-    Ok(Waiting::of(&rows))
+    svc.list_approvals("open", "").await.map_err(scoped)
+}
+
+/// An ask waiting for the person, as the terminal panel lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PanelAsk {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) created_at: String,
+}
+
+/// The asks that are the person's turn (the same rule as the count: `pending` only), oldest
+/// first as the service returns them. The terminal panel's list.
+pub(crate) async fn pending_asks(g: &Global, env: &Env) -> Result<Vec<PanelAsk>, Error> {
+    let rows = fetch_open(g, env, None).await?;
+    Ok(rows
+        .iter()
+        .filter(|a| str_of(a, "status") == "pending")
+        .map(|a| PanelAsk {
+            id: str_of(a, "approval_id").to_owned(),
+            title: headline(str_of(a, "title"), 200),
+            kind: str_of(a, "kind").to_owned(),
+            created_at: str_of(a, "created_at").to_owned(),
+        })
+        .collect())
+}
+
+/// Denies one ask, quietly (no output): what `asks deny` does, for the terminal panel, which
+/// confirms with the person first. Approving is never done here: it needs the phone's key.
+pub(crate) async fn deny_quiet(g: &Global, env: &Env, id: &str) -> Result<(), Error> {
+    let s = quiet_session(g, env).await?;
+    let svc = service(&s, Some(id), None)?;
+    svc.decide_approval(id, "deny", "denied from the terminal panel")
+        .await
+        .map_err(scoped)?;
+    Ok(())
 }
 
 fn service<'a>(

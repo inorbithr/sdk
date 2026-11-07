@@ -1,0 +1,592 @@
+//! The pty proxy: the shell runs in a pseudo-terminal this process owns, and the panel is
+//! painted over the top right corner after each chunk of the shell's output (ADR 0225).
+//!
+//! The panel floats: it takes no rows (no scroll region), the shell keeps the full height, and
+//! it is on the normal screen, not the alternate one. Around every chunk the proxy puts back
+//! what the panel covered (from a vt100 model of the child's screen, so nothing of the panel
+//! reaches the scrollback), writes the chunk, and draws the panel again, all inside one
+//! synchronized update. It paints only between escape sequences ([`Boundary`]) and never on
+//! the alternate screen, where a full screen program owns every cell.
+//!
+//! Known limit: painting saves and restores the cursor with DECSC/DECRC, the one slot a
+//! program may also use for its own saved cursor; a program that saved its cursor and has
+//! the panel painted before it restores loses it.
+//!
+//! The child is started by running this binary again (`iohr panel -- CMD` with `IOHR_PANEL_LEADER` set)
+//! on the pty's slave: it makes itself the session leader, takes the pty as its controlling
+//! terminal and replaces itself with the command, so no unsafe code is needed.
+
+use std::fs::File;
+use std::future::Future;
+use std::io::{IsTerminal as _, Write as _};
+use std::os::fd::{AsFd as _, OwnedFd};
+use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+use std::pin::Pin;
+use std::process::Stdio;
+use std::time::Duration;
+
+use rustix::fs::{Mode, OFlags};
+use rustix::termios::{OptionalActions, Termios, Winsize};
+use time::OffsetDateTime;
+use tokio::sync::mpsc;
+use tokio::time::Instant;
+
+use super::cells::{self, Rect};
+use super::input;
+use super::model::{Ask, Effect, Key, Model, Source, View};
+use super::screen::{Boundary, Screen};
+use crate::card::Look;
+use crate::cli::Global;
+use crate::commands::asks::{self, PanelAsk};
+use crate::commands::shell;
+use crate::context::Ctx;
+use crate::error::Error;
+use crate::{Env, ui};
+
+/// How often the asks are read again while the panel runs.
+const REFRESH: Duration = Duration::from_secs(20);
+/// How long one read of the asks may take.
+const FETCH_LIMIT: Duration = Duration::from_secs(8);
+/// How long the shell's last output is drained after it exits.
+const DRAIN: Duration = Duration::from_millis(150);
+
+const SAVE: &[u8] = b"\x1b7";
+const RESTORE: &[u8] = b"\x1b8";
+const SYNC_ON: &[u8] = b"\x1b[?2026h";
+const SYNC_OFF: &[u8] = b"\x1b[?2026l";
+
+/// What to run and what to show.
+pub(super) struct Config {
+    /// Stub data (the demo): labelled so in the title.
+    pub(super) stub: bool,
+    /// The view the panel starts in.
+    pub(super) initial: View,
+    /// The command; empty means the person's shell.
+    pub(super) command: Vec<String>,
+}
+
+fn command_or_shell(command: &[String]) -> Vec<String> {
+    if command.is_empty() {
+        vec![std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned())]
+    } else {
+        command.to_vec()
+    }
+}
+
+fn io_err(what: &str, e: impl std::fmt::Display) -> Error {
+    Error::Failed(format!("{what}: {e}"))
+}
+
+/// Set (to anything) in the helper's environment: this run is the shell side of the pty.
+pub(super) const LEADER: &str = "IOHR_PANEL_LEADER";
+/// Set in the shell's environment: it runs under the panel, so a nested `iohr panel` runs plainly.
+const INSIDE: &str = "IOHR_PANEL";
+
+/// The shell side of the pty: become the session leader, take the pty (standard input) as the
+/// controlling terminal, and become the command. Only returns on failure.
+pub(super) fn session_leader(command: &[String]) -> Result<(), Error> {
+    let command = command_or_shell(command);
+    rustix::process::setsid().map_err(|e| io_err("cannot start a session", e))?;
+    rustix::process::ioctl_tiocsctty(rustix::stdio::stdin())
+        .map_err(|e| io_err("cannot take the terminal", e))?;
+    let e = std::process::Command::new(&command[0])
+        .args(&command[1..])
+        .env_remove(LEADER)
+        .env(INSIDE, "1")
+        .exec();
+    Err(io_err(&format!("cannot run {}", command[0]), e))
+}
+
+/// Runs the command on this terminal as it is: no panel (not a terminal, plain output, or
+/// already inside the panel).
+fn run_plain(command: &[String]) -> Result<(), Error> {
+    let command = command_or_shell(command);
+    let status = std::process::Command::new(&command[0])
+        .args(&command[1..])
+        .status()
+        .map_err(|e| io_err(&format!("cannot run {}", command[0]), e))?;
+    exit_result(status)
+}
+
+fn exit_result(status: std::process::ExitStatus) -> Result<(), Error> {
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(c) => Err(Error::Child(u8::try_from(c).unwrap_or(1))),
+        None => Err(Error::Child(128u8.saturating_add(
+            u8::try_from(status.signal().unwrap_or(0)).unwrap_or(0),
+        ))),
+    }
+}
+
+/// The terminal put back as it was, when the proxy ends however it ends.
+struct RawMode {
+    saved: Termios,
+}
+
+impl RawMode {
+    fn enter() -> Result<Self, Error> {
+        let fd = rustix::stdio::stdin();
+        let saved = rustix::termios::tcgetattr(fd).map_err(|e| io_err("not a terminal", e))?;
+        let mut raw = saved.clone();
+        raw.make_raw();
+        rustix::termios::tcsetattr(fd, OptionalActions::Drain, &raw)
+            .map_err(|e| io_err("cannot set the terminal", e))?;
+        Ok(Self { saved })
+    }
+}
+
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        let _ =
+            rustix::termios::tcsetattr(rustix::stdio::stdin(), OptionalActions::Drain, &self.saved);
+    }
+}
+
+fn host_size() -> (usize, usize) {
+    match rustix::termios::tcgetwinsize(std::io::stdout().as_fd()) {
+        Ok(w) if w.ws_row > 0 && w.ws_col > 0 => (usize::from(w.ws_row), usize::from(w.ws_col)),
+        _ => (24, 80),
+    }
+}
+
+fn winsize(rows: usize, cols: usize) -> Winsize {
+    Winsize {
+        ws_row: u16::try_from(rows).unwrap_or(u16::MAX),
+        ws_col: u16::try_from(cols).unwrap_or(u16::MAX),
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    }
+}
+
+/// A pseudo-terminal: the master this process holds and the slave the shell gets.
+struct Pty {
+    master: OwnedFd,
+    slave: OwnedFd,
+}
+
+fn open_pty(rows: usize, cols: usize) -> Result<Pty, Error> {
+    let fail = |e: rustix::io::Errno| io_err("cannot open a pseudo-terminal", e);
+    let master =
+        rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
+            .map_err(fail)?;
+    // The shell must not inherit the master (macOS has no O_CLOEXEC for it).
+    rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC).map_err(fail)?;
+    rustix::pty::grantpt(&master).map_err(fail)?;
+    rustix::pty::unlockpt(&master).map_err(fail)?;
+    let name = rustix::pty::ptsname(&master, Vec::new()).map_err(fail)?;
+    let path = std::ffi::OsStr::new(
+        name.to_str()
+            .map_err(|e| io_err("cannot open a pseudo-terminal", e))?,
+    )
+    .to_owned();
+    let slave = rustix::fs::open(
+        &path,
+        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(fail)?;
+    rustix::termios::tcsetwinsize(&master, winsize(rows, cols)).map_err(fail)?;
+    Ok(Pty { master, slave })
+}
+
+type Fetch<T> = Pin<Box<dyn Future<Output = T>>>;
+
+async fn poll<T>(slot: &mut Option<Fetch<T>>) -> T {
+    match slot.as_mut() {
+        Some(f) => {
+            let out = f.await;
+            *slot = None;
+            out
+        }
+        None => std::future::pending().await,
+    }
+}
+
+/// The stub asks the demo shows: labelled stub in the title.
+fn stub_asks() -> Vec<Ask> {
+    [
+        ("Merge sdk #443 to main", "pull request", "4m"),
+        ("Roll runner to 0.7.21", "roll", "11m"),
+        ("Apply migration 20261106", "migration", "1h"),
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, (title, kind, age))| Ask {
+        id: format!("stub-{i}"),
+        title: (*title).to_owned(),
+        kind: (*kind).to_owned(),
+        age: (*age).to_owned(),
+    })
+    .collect()
+}
+
+/// The proxy's state: the model, the child's screen, and what is painted on the terminal.
+struct Proxy {
+    model: Model,
+    screen: Screen,
+    boundary: Boundary,
+    look: Look,
+    rows: usize,
+    cols: usize,
+    /// The rectangle (box and shadow) painted on the terminal now.
+    on_screen: Option<Rect>,
+    /// The panel changed while painting was not allowed: paint at the next chance.
+    dirty: bool,
+    /// The panel was stopped from the menu: the shell goes on without it.
+    stopped: bool,
+}
+
+impl Proxy {
+    fn can_paint(&self) -> bool {
+        self.boundary.clean() && !self.screen.alt()
+    }
+
+    /// Puts back what the panel covers.
+    fn lift(&mut self) -> Vec<u8> {
+        let Some(rect) = self.on_screen else {
+            return Vec::new();
+        };
+        if !self.can_paint() {
+            return Vec::new();
+        }
+        self.on_screen = None;
+        let mut out = SAVE.to_vec();
+        out.extend(self.screen.restore(rect));
+        out.extend_from_slice(RESTORE);
+        out
+    }
+
+    /// Draws the panel as the model has it now, removing it from where it was if that moved.
+    fn sync(&mut self) -> Vec<u8> {
+        if !self.can_paint() {
+            self.dirty = true;
+            return Vec::new();
+        }
+        self.dirty = false;
+        if self.stopped {
+            return self.lift();
+        }
+        let width = self.model.width().min(self.cols.saturating_sub(2));
+        let placed = cells::place(&self.model.spec(width), self.cols);
+        let new_rect = placed
+            .as_ref()
+            .map(|f| f.rect.with_shadow(self.rows, self.cols));
+        let mut out = SAVE.to_vec();
+        if let Some(old) = self.on_screen
+            && Some(old) != new_rect
+        {
+            out.extend(self.screen.restore(old));
+        }
+        if let Some(f) = &placed {
+            let screen = &self.screen;
+            let segments = cells::segments(f, self.rows, self.cols, &|r, c| screen.char_at(r, c));
+            out.extend(cells::paint(self.look, &segments));
+        }
+        out.extend_from_slice(RESTORE);
+        self.on_screen = new_rect;
+        out
+    }
+
+    /// One chunk of the shell's output, as the bytes for the terminal: the panel lifted, the
+    /// chunk, the panel drawn again, in one synchronized update.
+    fn child_output(&mut self, chunk: &[u8]) -> Vec<u8> {
+        let mut out = SYNC_ON.to_vec();
+        out.extend(self.lift());
+        out.extend_from_slice(chunk);
+        self.boundary.feed(chunk);
+        self.screen.feed(chunk);
+        out.extend(self.sync());
+        out.extend_from_slice(SYNC_OFF);
+        out
+    }
+
+    /// A change of the panel with no output from the shell.
+    fn redraw(&mut self) -> Vec<u8> {
+        let mut out = SYNC_ON.to_vec();
+        out.extend(self.sync());
+        out.extend_from_slice(SYNC_OFF);
+        out
+    }
+
+    fn resize(&mut self, rows: usize, cols: usize) -> Vec<u8> {
+        self.rows = rows;
+        self.cols = cols;
+        self.screen.resize(rows, cols);
+        // The terminal reflowed what it had: whatever it holds of the panel is the shell's to
+        // redraw; the next paint is a fresh one.
+        self.on_screen = None;
+        self.redraw()
+    }
+}
+
+fn write_terminal(bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(bytes);
+    let _ = out.flush();
+}
+
+fn reader<R: std::io::Read + Send + 'static>(mut from: R) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel(64);
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; 16 * 1024];
+        loop {
+            match from.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.blocking_send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    rx
+}
+
+fn source_of<T>(r: Result<T, Error>) -> Source<T> {
+    match r {
+        Ok(v) => Source::Ready(v),
+        Err(e) => Source::Unavailable(e.to_string().lines().next().unwrap_or("").to_owned()),
+    }
+}
+
+/// The shell started on a pty: its master side (for keys in, output out) and its handle.
+struct Shell {
+    master: File,
+    child: std::process::Child,
+}
+
+fn launch(command: &[String], rows: usize, cols: usize) -> Result<Shell, Error> {
+    let pty = open_pty(rows, cols)?;
+    let exe = std::env::current_exe().map_err(|e| io_err("cannot find iohr", e))?;
+    let stdio = |fd: &OwnedFd| -> Result<Stdio, Error> {
+        Ok(Stdio::from(
+            fd.try_clone()
+                .map_err(|e| io_err("cannot share the pty", e))?,
+        ))
+    };
+    let child = std::process::Command::new(exe)
+        .args(["panel", "--"])
+        .args(command)
+        .env(LEADER, "1")
+        .stdin(stdio(&pty.slave)?)
+        .stdout(stdio(&pty.slave)?)
+        .stderr(stdio(&pty.slave)?)
+        .spawn()
+        .map_err(|e| io_err(&format!("cannot run {}", command[0]), e))?;
+    Ok(Shell {
+        master: File::from(pty.master),
+        child,
+    })
+}
+
+/// What the loop holds besides the proxy: the shell's input and the reads in flight.
+struct Session {
+    proxy: Proxy,
+    master: File,
+    stub: bool,
+    g: Global,
+    env: Env,
+    asks_fetch: Option<Fetch<Result<Vec<PanelAsk>, Error>>>,
+    deny_fetch: Option<Fetch<(String, Result<(), Error>)>>,
+}
+
+impl Session {
+    fn refresh(&mut self) {
+        if !self.stub && self.asks_fetch.is_none() {
+            self.asks_fetch = Some(read_asks(self.g.clone(), self.env.clone()));
+        }
+    }
+
+    fn apply(&mut self, effect: Effect) {
+        match effect {
+            Effect::None => {}
+            Effect::Refresh => self.refresh(),
+            Effect::Deny(id) => {
+                if self.stub {
+                    self.proxy.model.denied(&id);
+                } else if self.deny_fetch.is_none() {
+                    self.deny_fetch = Some(deny(self.g.clone(), self.env.clone(), id));
+                }
+            }
+            Effect::Stop => self.proxy.stopped = true,
+        }
+    }
+
+    /// Keys from the person: the panel's while it is open (or for its own key), else the shell's.
+    fn user_input(&mut self, bytes: &[u8]) {
+        let panel_keys = !self.proxy.stopped && !self.proxy.screen.alt();
+        let effects: Vec<Effect> = if panel_keys && self.proxy.model.open() {
+            input::parse(bytes)
+                .into_iter()
+                .map(|k| self.proxy.model.key(k))
+                .collect()
+        } else if panel_keys && input::is_menu_key(bytes) {
+            vec![self.proxy.model.key(Key::Menu)]
+        } else {
+            let _ = self.master.write_all(bytes);
+            return;
+        };
+        for effect in effects {
+            self.apply(effect);
+        }
+        write_terminal(&self.proxy.redraw());
+    }
+
+    fn asks_done(&mut self, result: Result<Vec<PanelAsk>, Error>) {
+        let now = OffsetDateTime::now_utc();
+        self.proxy.model.set_asks(source_of(
+            result.map(|rows| rows.iter().map(|a| Ask::from(a, now)).collect::<Vec<_>>()),
+        ));
+        write_terminal(&self.proxy.redraw());
+    }
+
+    fn deny_done(&mut self, id: &str, result: Result<(), Error>) {
+        match result {
+            Ok(()) => self.proxy.model.denied(id),
+            Err(e) => self
+                .proxy
+                .model
+                .deny_failed(e.to_string().lines().next().unwrap_or("")),
+        }
+        write_terminal(&self.proxy.redraw());
+    }
+
+    fn resized(&mut self) {
+        let (rows, cols) = host_size();
+        let _ = rustix::termios::tcsetwinsize(&self.master, winsize(rows, cols));
+        write_terminal(&self.proxy.resize(rows, cols));
+    }
+}
+
+fn initial_model(g: &Global, config: &Config) -> Model {
+    let mut model = Model::new(config.stub);
+    model.view = config.initial;
+    if config.stub {
+        model.set_asks(Source::Ready(stub_asks()));
+        model.mode = Source::Ready("auto".into());
+    } else {
+        model.mode = source_of(Ctx::load(g).and_then(|c| shell::start_mode(&c).map(str::to_owned)));
+    }
+    model
+}
+
+/// Runs `config.command` under the panel until it exits; its exit code is ours.
+pub(super) async fn run(g: &Global, env: Env, config: Config) -> Result<(), Error> {
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let fancy = interactive
+        && ui::fancy_for(
+            true,
+            g.json,
+            std::env::var("NO_COLOR").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+        );
+    if !fancy || std::env::var_os(INSIDE).is_some() {
+        return run_plain(&config.command);
+    }
+    let command = command_or_shell(&config.command);
+    let (rows, cols) = host_size();
+    let Shell { master, mut child } = launch(&command, rows, cols)?;
+
+    let _raw = RawMode::enter()?;
+    let mut from_child = reader(
+        master
+            .try_clone()
+            .map_err(|e| io_err("cannot share the pty", e))?,
+    );
+    let mut from_user = reader(std::io::stdin());
+    let (exit_tx, mut exit_rx) = mpsc::channel::<Result<(), Error>>(1);
+    std::thread::spawn(move || {
+        let r = child
+            .wait()
+            .map_err(|e| io_err("cannot wait for the shell", e))
+            .and_then(exit_result);
+        let _ = exit_tx.blocking_send(r);
+    });
+    let mut winch = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())
+        .map_err(|e| io_err("cannot watch the window size", e))?;
+
+    let mut session = Session {
+        proxy: Proxy {
+            model: initial_model(g, &config),
+            screen: Screen::new(rows, cols),
+            boundary: Boundary::new(),
+            look: Look::detect(true),
+            rows,
+            cols,
+            on_screen: None,
+            dirty: false,
+            stopped: false,
+        },
+        master,
+        stub: config.stub,
+        g: g.clone(),
+        env,
+        asks_fetch: None,
+        deny_fetch: None,
+    };
+    write_terminal(&session.proxy.redraw());
+    session.refresh();
+
+    let mut tick = tokio::time::interval(REFRESH);
+    let mut exit: Option<Result<(), Error>> = None;
+    let mut exit_at: Option<Instant> = None;
+    let mut user_open = true;
+
+    loop {
+        tokio::select! {
+            chunk = from_child.recv() => match chunk {
+                Some(bytes) => write_terminal(&session.proxy.child_output(&bytes)),
+                None => break,
+            },
+            bytes = from_user.recv(), if user_open => match bytes {
+                Some(bytes) => session.user_input(&bytes),
+                None => user_open = false,
+            },
+            result = exit_rx.recv(), if exit.is_none() => {
+                exit = Some(result.unwrap_or(Ok(())));
+                exit_at = Some(Instant::now() + DRAIN);
+            },
+            () = async {
+                match exit_at {
+                    Some(t) => tokio::time::sleep_until(t).await,
+                    None => std::future::pending().await,
+                }
+            } => break,
+            _ = winch.recv() => session.resized(),
+            _ = tick.tick(), if !config.stub => session.refresh(),
+            result = poll(&mut session.asks_fetch) => session.asks_done(result),
+            (id, result) = poll(&mut session.deny_fetch) => session.deny_done(&id, result),
+        }
+    }
+
+    // Leave the screen as the shell had it, without the panel.
+    session.proxy.stopped = true;
+    write_terminal(&session.proxy.redraw());
+    match exit {
+        Some(r) => r,
+        None => exit_rx.recv().await.unwrap_or(Ok(())),
+    }
+}
+
+fn read_asks(g: Global, env: Env) -> Fetch<Result<Vec<PanelAsk>, Error>> {
+    Box::pin(async move {
+        match tokio::time::timeout(FETCH_LIMIT, asks::pending_asks(&g, &env)).await {
+            Ok(r) => r,
+            Err(_) => Err(Error::Failed("the asks took too long".into())),
+        }
+    })
+}
+
+fn deny(g: Global, env: Env, id: String) -> Fetch<(String, Result<(), Error>)> {
+    Box::pin(async move {
+        let r = match tokio::time::timeout(FETCH_LIMIT, asks::deny_quiet(&g, &env, &id)).await {
+            Ok(r) => r,
+            Err(_) => Err(Error::Failed("the deny took too long".into())),
+        };
+        (id, r)
+    })
+}
