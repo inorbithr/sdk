@@ -33,12 +33,17 @@ pub(crate) const READ_RULES: &[&str] = &[
     "Read(**/.gnupg/**)",
     "Read(**/.kube/**)",
     "Read(**/.docker/config.json)",
+    "Read(**/.git-credentials)",
+    "Read(**/.zsh_history)",
+    "Read(**/.bash_history)",
+    "Read(**/Library/Keychains/**)",
     "Read(**/*secret*)",
     "Read(**/*credential*)",
     "Read(**/*.tfstate)",
     "Read(~/.ssh/**)",
     "Read(~/.aws/**)",
     "Read(~/.config/gh/**)",
+    "Read(~/Library/Keychains/**)",
     "Read(~/.inorbit/**)",
 ];
 
@@ -82,4 +87,38 @@ pub(crate) fn secret_word<'a>(
         let w = w.rsplit_once('=').map_or(w.as_str(), |(_, v)| v);
         (!w.is_empty() && !w.starts_with('-') && is_secret_path(w, cwd, home)).then_some(w)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keychains_git_credentials_and_shell_history_are_secret_wherever_they_are() {
+        let home = Path::new("/Users/me");
+        let cwd = Path::new("/Users/me/work");
+        for p in [
+            "~/Library/Keychains/login.keychain-db",
+            "~/Library/Keychains",
+            "/Users/me/Library/Keychains/login.keychain-db",
+            "~/.git-credentials",
+            "../.git-credentials",
+            "~/.zsh_history",
+            "~/.bash_history",
+            "/Users/other/.zsh_history",
+        ] {
+            assert!(is_secret_path(p, cwd, Some(home)), "{p}");
+        }
+        assert!(!is_secret_path(
+            "~/Library/Preferences/x.plist",
+            cwd,
+            Some(home)
+        ));
+        assert!(!is_secret_path("~/Downloads/notes.txt", cwd, Some(home)));
+        // The broker's allow-rule check refuses a rule that names one.
+        assert!(pattern_hits_secret("~/.zsh_history", cwd, Some(home)));
+        assert!(pattern_hits_secret("**/.git-credentials", cwd, Some(home)));
+        // Every list entry is passed to Claude as a `Read(...)` deny.
+        assert!(READ_RULES.contains(&"Read(~/Library/Keychains/**)"));
+    }
 }

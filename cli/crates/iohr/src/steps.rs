@@ -119,9 +119,15 @@ fn folder_step(value: &str, cwd: &Path) -> Option<Step> {
         && !v.starts_with('~')
         && !v.split('/').any(|p| p == ".." || p.is_empty())
         && !v.chars().any(char::is_control);
-    let there = plain && cwd.join(v).is_dir();
     let secret = secrets::is_secret_path(v, cwd, None);
-    (there && !secret).then(|| Step::Read(v.to_owned()))
+    // The folder as the system names it (a symlink is followed): it must still be under `cwd`
+    // and not a secret place, so a link named `docs` that points at `~/.ssh` is not offered.
+    let inside = plain && !secret && {
+        let there = crate::access::allowable_at(&cwd.join(v), cwd, None);
+        let here = cwd.canonicalize().ok();
+        matches!((there, here), (Some(t), Some(h)) if t.starts_with(&h))
+    };
+    inside.then(|| Step::Read(v.to_owned()))
 }
 
 /// One line of the block as a step; none when it is not one of the three, or its value does
@@ -222,6 +228,36 @@ mod tests {
         let d = dir();
         std::fs::create_dir_all(d.path().join(".ssh")).unwrap();
         let text = "x\n```next\nread ../\nread /etc/\nread ~/\nread a.txt\nread nothing/\nread .ssh/\nread api/src\n```";
+        let (_, steps) = split(text, d.path(), None);
+        assert_eq!(steps, vec![Step::Read("api/src".into())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_secret_place_or_outside_the_folder_is_not_offered() {
+        let d = dir();
+        // A fake home with a `.ssh` in it, linked from inside the working folder.
+        let other = tempfile::tempdir().unwrap();
+        let ssh = other.path().join(".ssh");
+        std::fs::create_dir_all(&ssh).unwrap();
+        std::os::unix::fs::symlink(&ssh, d.path().join("keys")).unwrap();
+        // A plain folder outside, linked in: not under the working folder either.
+        let out = other.path().join("outside");
+        std::fs::create_dir_all(&out).unwrap();
+        std::os::unix::fs::symlink(&out, d.path().join("elsewhere")).unwrap();
+        // A link to a folder inside stays fine.
+        std::os::unix::fs::symlink(d.path().join("api"), d.path().join("svc")).unwrap();
+        let text = "x\n```next\nread keys/\nread elsewhere/\nread svc/\n```";
+        let (_, steps) = split(text, d.path(), None);
+        assert_eq!(steps, vec![Step::Read("svc".into())]);
+        // The same through the folder the question names: the real path is judged.
+        assert!(crate::access::named_folder("explain keys/", d.path(), None).is_none());
+    }
+
+    #[test]
+    fn dot_dot_and_absolute_paths_in_a_step_are_dropped_wherever_they_sit() {
+        let d = dir();
+        let text = "x\n```next\nread api/../..\nread api//src\nread ./../x\nread /\nread //etc\nread ~root\nread `api/src`\n```";
         let (_, steps) = split(text, d.path(), None);
         assert_eq!(steps, vec![Step::Read("api/src".into())]);
     }
