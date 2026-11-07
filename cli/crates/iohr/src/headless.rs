@@ -112,6 +112,10 @@ pub(crate) struct Answer {
     /// What the model asked back, at most two, validated ([`crate::askback::split`]); empty
     /// when it asked nothing. `answer` never holds the questions block.
     pub(crate) questions: Vec<crate::askback::Question>,
+    /// What the person answered when Io asked to run something ([`crate::permissions::Settled`]
+    /// as data: `grant` once, always or no, the `subject`, the saved `rules` and `file`);
+    /// empty when nobody was asked, which is always so with `--json` (it never asks).
+    pub(crate) permissions: Vec<serde_json::Value>,
 }
 
 /// The longest tail of `s` within `max` bytes and `lines` lines, cut on a line start where

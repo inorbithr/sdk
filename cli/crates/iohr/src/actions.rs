@@ -12,6 +12,11 @@ use crate::browser;
 use crate::card;
 use crate::error::Error;
 use crate::output::Out;
+use crate::permissions::{
+    rule::Rule,
+    rules_subject,
+    store::{self, Files},
+};
 use crate::ui::{Choice, Ui};
 
 /// Separates the answer, the command and the link in the hook's record. A control character
@@ -69,8 +74,14 @@ impl MenuKey {
 }
 
 /// The line under the card: the actions on offer and the key. Run and Copy need a command,
-/// Open a link; Follow up and Explain are always there. None when there is no key.
-pub(crate) fn row(key: MenuKey, has_command: bool, has_link: bool) -> Option<String> {
+/// Open a link, Undo a rule this answer's run saved; Follow up and Explain are always there.
+/// None when there is no key.
+pub(crate) fn row(
+    key: MenuKey,
+    has_command: bool,
+    has_link: bool,
+    has_undo: bool,
+) -> Option<String> {
     let key = key.label()?;
     let mut names = Vec::new();
     if has_command {
@@ -80,17 +91,34 @@ pub(crate) fn row(key: MenuKey, has_command: bool, has_link: bool) -> Option<Str
     if has_link {
         names.push("Open");
     }
+    if has_undo {
+        names.push("Undo");
+    }
     Some(format!("{}   {key} to choose", names.join(" \u{b7} ")))
 }
 
-/// What the hook reads from one answer: the text, the command and the link, in that order,
+/// Between the rules of the record's last field.
+pub(crate) const US: char = '\u{1f}';
+
+/// What the hook reads from one answer: the text, the command, the link and the permission
+/// rules this answer's run saved (what Undo takes back, joined by [`US`]), in that order,
 /// separated by [`RS`] (empty when there is none), with no trailing newline.
-pub(crate) fn record(answer: &str, command: Option<&str>, link: Option<&str>) -> String {
+pub(crate) fn record(
+    answer: &str,
+    command: Option<&str>,
+    link: Option<&str>,
+    undo: &[String],
+) -> String {
     let answer: String = answer.chars().filter(|c| *c != RS).collect();
+    let undo: Vec<String> = undo
+        .iter()
+        .map(|r| r.chars().filter(|c| !c.is_control()).collect())
+        .collect();
     format!(
-        "{answer}{RS}{}{RS}{}",
+        "{answer}{RS}{}{RS}{}{RS}{}",
         command.unwrap_or_default(),
-        link.unwrap_or_default()
+        link.unwrap_or_default(),
+        undo.join(&US.to_string())
     )
 }
 
@@ -117,7 +145,7 @@ pub(crate) fn risk(command: &str) -> Option<&'static str> {
     }
 }
 
-fn choices(command: Option<&str>, link: bool, asks: usize) -> Vec<Choice> {
+fn choices(command: Option<&str>, link: bool, undo: bool, asks: usize) -> Vec<Choice> {
     let pick = |value: &str, label: &str, hint: &str, key: char| Choice {
         value: value.to_owned(),
         label: label.to_owned(),
@@ -149,6 +177,14 @@ fn choices(command: Option<&str>, link: bool, asks: usize) -> Vec<Choice> {
             'o',
         ));
     }
+    if undo {
+        out.push(pick(
+            "undo",
+            "Undo",
+            "take back the permission just saved for this project",
+            'u',
+        ));
+    }
     if asks > 0 {
         out.push(pick(
             "asks",
@@ -160,6 +196,13 @@ fn choices(command: Option<&str>, link: bool, asks: usize) -> Vec<Choice> {
     out
 }
 
+/// What Undo takes back: the rules the answer's run saved that the project file still holds,
+/// and the files they sit in.
+pub(crate) struct Takeback<'a> {
+    pub(crate) files: &'a Files,
+    pub(crate) rules: Vec<Rule>,
+}
+
 /// The menu for `iohr ask --menu`: draws on stderr, reads the terminal, and prints on stdout
 /// the one line for the prompt (Run: the command; Follow up, Explain: a `??` question to
 /// finish), or nothing (Copy, Open, a cancel). The caller is a shell widget that only ever
@@ -168,12 +211,18 @@ fn choices(command: Option<&str>, link: bool, asks: usize) -> Vec<Choice> {
 /// # Errors
 ///
 /// No terminal to ask on.
-pub(crate) fn menu(command: Option<&str>, link: Option<&str>, cwd: &Path) -> Result<(), Error> {
+pub(crate) fn menu(
+    command: Option<&str>,
+    link: Option<&str>,
+    cwd: &Path,
+    undo: &Takeback<'_>,
+) -> Result<(), Error> {
     let command = command.and_then(card::insertable);
     let link = link.filter(|l| !l.is_empty() && !l.chars().any(char::is_control));
     let all = choices(
         command,
         link.is_some(),
+        !undo.rules.is_empty(),
         crate::commands::asks::cached_count(),
     );
     let first = all.first().map_or("", |c| c.value.as_str()).to_owned();
@@ -198,6 +247,16 @@ pub(crate) fn menu(command: Option<&str>, link: Option<&str>, cwd: &Path) -> Res
             match open(l, cwd) {
                 Ok(how) => say(&how),
                 Err(why) => say(&why),
+            }
+            None
+        }
+        ("undo", ..) => {
+            match store::take_back(undo.files, &undo.rules) {
+                Ok(_) => say(&format!(
+                    "{} is no longer allowed in this project",
+                    rules_subject(&undo.rules)
+                )),
+                Err(why) => say(&format!("could not take the permission back: {why}")),
             }
             None
         }
@@ -349,7 +408,7 @@ mod tests {
     #[test]
     fn asks_are_a_choice_only_when_some_wait() {
         let keys = |n| -> Vec<char> {
-            choices(None, false, n)
+            choices(None, false, false, n)
                 .iter()
                 .filter_map(|c| c.key)
                 .collect()
@@ -357,7 +416,7 @@ mod tests {
         assert_eq!(keys(0), ['f', 'e']);
         assert_eq!(keys(3), ['f', 'e', 'a']);
         assert!(
-            choices(None, false, 3)
+            choices(None, false, false, 3)
                 .last()
                 .unwrap()
                 .hint
@@ -368,22 +427,37 @@ mod tests {
     #[test]
     fn the_row_offers_what_the_answer_has() {
         assert_eq!(
-            row(MenuKey::Down, true, true).as_deref(),
+            row(MenuKey::Down, true, true, false).as_deref(),
             Some(
                 "Run \u{b7} Copy \u{b7} Follow up \u{b7} Explain \u{b7} Open   \u{2193} to choose"
             )
         );
         assert_eq!(
-            row(MenuKey::CtrlG, false, false).as_deref(),
+            row(MenuKey::Down, false, false, true).as_deref(),
+            Some("Follow up \u{b7} Explain \u{b7} Undo   \u{2193} to choose")
+        );
+        assert_eq!(
+            row(MenuKey::CtrlG, false, false, false).as_deref(),
             Some("Follow up \u{b7} Explain   ctrl-g to choose")
         );
-        assert_eq!(row(MenuKey::Off, true, true), None);
+        assert_eq!(row(MenuKey::Off, true, true, true), None);
     }
 
     #[test]
-    fn a_record_has_three_fields_and_no_record_separator_in_the_answer() {
-        assert_eq!(record("hi", Some("ls"), None), "hi\u{1e}ls\u{1e}");
-        assert_eq!(record("a\u{1e}b", None, Some("x.rs")), "ab\u{1e}\u{1e}x.rs");
+    fn a_record_has_four_fields_and_no_record_separator_in_the_answer() {
+        assert_eq!(
+            record("hi", Some("ls"), None, &[]),
+            "hi\u{1e}ls\u{1e}\u{1e}"
+        );
+        assert_eq!(
+            record("a\u{1e}b", None, Some("x.rs"), &[]),
+            "ab\u{1e}\u{1e}x.rs\u{1e}"
+        );
+        let rules = ["Bash(ls:*)".to_owned(), "Read(a\nb)".to_owned()];
+        assert_eq!(
+            record("hi", None, None, &rules),
+            "hi\u{1e}\u{1e}\u{1e}Bash(ls:*)\u{1f}Read(ab)"
+        );
     }
 
     #[test]

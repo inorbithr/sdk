@@ -26,11 +26,11 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
-use super::Mode;
 use super::ask_card;
 use super::engine::{self, Place, SECRET_RULE, Verdict};
 use super::rule::Rule;
 use super::store::{self, Files, Kind, Outcome, Scope};
+use super::{Grant, Mode, Settled, rules_subject};
 
 /// The MCP server's name and its one tool, as Claude Code names them.
 pub(crate) const SERVER: &str = "iohrperm";
@@ -69,6 +69,8 @@ pub(crate) struct Denied {
 struct Shared {
     opts: Opts,
     denied: Mutex<Vec<Denied>>,
+    /// What the person answered, in order, for the answer card ([`Session::settled`]).
+    settled: Mutex<Vec<Settled>>,
     /// Milliseconds spent waiting for the person, so the run's time limit leaves them out.
     waited_ms: AtomicU64,
     pending: AtomicUsize,
@@ -127,6 +129,7 @@ impl Session {
         let shared = Arc::new(Shared {
             opts,
             denied: Mutex::new(Vec::new()),
+            settled: Mutex::new(Vec::new()),
             waited_ms: AtomicU64::new(0),
             pending: AtomicUsize::new(0),
             one_at_a_time: tokio::sync::Mutex::new(()),
@@ -168,6 +171,16 @@ impl Session {
             .denied
             .lock()
             .map(|d| d.clone())
+            .unwrap_or_default()
+    }
+
+    /// What the person answered at the terminal so far: the answer card shows each as a
+    /// status row, and the hook's Undo action takes a saved rule back.
+    pub(crate) fn settled(&self) -> Vec<Settled> {
+        self.shared
+            .settled
+            .lock()
+            .map(|s| s.clone())
             .unwrap_or_default()
     }
 
@@ -373,7 +386,9 @@ async fn ask(sh: &Arc<Shared>, tool: &str, input: Value) -> Value {
     .unwrap_or(Choice::No);
     let waited = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
     sh.waited_ms.fetch_add(waited, Ordering::Relaxed);
-    let reply = settle(sh, tool, &input, &what, suggestion.as_deref(), key);
+    let reply = settle(sh, tool, &input, suggestion.as_deref(), key);
+    // The question's line is not left behind; the answer card carries the result.
+    crate::card::spin_clear();
     crate::card::pause_spin(false);
     sh.pending.fetch_sub(1, Ordering::Relaxed);
     reply
@@ -381,7 +396,7 @@ async fn ask(sh: &Arc<Shared>, tool: &str, input: Value) -> Value {
 
 /// Draws the Io card over the spinner's line, reads the answer with the action bar's keys
 /// (arrows and Enter, `1`-`9`, `y`, `a`, `n`; Esc, `q` and Ctrl-C are no), and erases the card,
-/// so the one result line of [`settle`] is all that stays. A terminal that cannot be read is a
+/// so nothing of the ask stays; its result is shown by the answer card. A terminal that cannot be read is a
 /// no.
 fn draw_and_read(card: &ask_card::Ask, cols: usize, look: crate::card::Look) -> Choice {
     draw_and_read_rows(card, &ask_card::choices(card.can_always), cols, look)
@@ -426,13 +441,13 @@ fn read_choice(can_always: bool) -> Choice {
     }
 }
 
-/// Acts on the answer: the one result line, the rule written for "always", the audit, and
-/// the reply for Claude Code.
+/// Acts on the answer: the rule written for "always", the audit, the result kept for the
+/// answer card ([`Session::settled`]; the model is still running, so nothing is drawn now),
+/// and the reply for Claude Code.
 fn settle(
     sh: &Shared,
     tool: &str,
     input: &Value,
-    what: &str,
     suggestion: Option<&[Rule]>,
     key: Choice,
 ) -> Value {
@@ -446,10 +461,16 @@ fn settle(
                 .join(" ")
         },
     );
-    match key {
+    let mut done = Settled {
+        grant: Grant::Once,
+        subject: call_subject(tool, input),
+        rules: Vec::new(),
+        file: String::new(),
+        not_saved: None,
+    };
+    let reply = match key {
         Choice::Once => {
             audit(&o.files, tool, input, &named, Outcome::AllowedOnce);
-            crate::card::say_done(&format!("Allowed once: {what}"));
             json!({"behavior": "allow", "updatedInput": input})
         }
         Choice::Always => {
@@ -466,28 +487,56 @@ fn settle(
                 None => {
                     audit(&o.files, tool, input, &named, Outcome::AllowedAlways);
                     let file = o.files.path(Scope::Project);
-                    let shown = file
+                    done.grant = Grant::Always;
+                    done.subject = rules_subject(saved);
+                    done.rules = saved.iter().map(ToString::to_string).collect();
+                    done.file = file
                         .strip_prefix(&o.place.cwd)
                         .unwrap_or(&file)
                         .display()
                         .to_string();
-                    crate::card::say_done(&format!(
-                        "Allowed always: {named}, saved to {shown}. Undo: {} permissions remove '{named}'",
-                        o.bin
-                    ));
                 }
                 Some(why) => {
                     audit(&o.files, tool, input, &named, Outcome::AllowedOnce);
-                    crate::card::say_done(&format!("Allowed once: {what} (not saved: {why})"));
+                    done.not_saved = Some(why);
                 }
             }
             json!({"behavior": "allow", "updatedInput": input})
         }
         Choice::No => {
             audit(&o.files, tool, input, &named, Outcome::DeniedByPerson);
-            crate::card::say_done(&format!("Not allowed: {what}"));
+            done.grant = Grant::No;
             refuse("The person denied this at the terminal. Carry on without it.")
         }
+    };
+    if let Ok(mut all) = sh.settled.lock() {
+        all.push(done);
+    }
+    reply
+}
+
+/// How much of a command the status row names.
+const SUBJECT_MAX: usize = 40;
+
+/// What one call is, in a few words, for the status row of a single allow or refusal: the
+/// command for `Bash`, the tool and its target for the rest. Control characters are spaces
+/// and a long one is cut.
+fn call_subject(tool: &str, input: &Value) -> String {
+    let w = wanted_parts(tool, input);
+    let text = match (tool, w.thing) {
+        ("Bash", Some(t)) => t,
+        (_, Some(t)) => format!("{} {t}", w.verb),
+        (_, None) => tool
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect(),
+    };
+    let text = text.trim();
+    if text.chars().count() > SUBJECT_MAX {
+        let cut: String = text.chars().take(SUBJECT_MAX).collect();
+        format!("{}...", cut.trim_end())
+    } else {
+        text.to_owned()
     }
 }
 
