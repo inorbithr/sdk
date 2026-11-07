@@ -13,7 +13,8 @@
 # secrets redacted, and the card lists it. Under an answer, the Down arrow
 # on an empty line (`[ask] menu_key`) opens a menu: Run puts the answer's command on the
 # prompt line for you to read and run with Enter, Copy, Follow up, Explain, Open. Nothing
-# in the menu runs a command without that yes.
+# in the menu runs a command without that yes. An empty Enter keeps the card, so the key still
+# works; running a command ends it.
 #
 # The mode of the answers (PRD 0197): manual (ask before each command), plan (read only, a plan
 # and no command) or auto (run what your rules do not forbid, without asking). Shift+Tab on a
@@ -46,7 +47,9 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   # The widget: a question line is kept, the shell is handed an empty line, and the answer
   # is printed by the precmd below, before the next prompt (a widget cannot print safely).
   _iohr_ask_accept() {
-    _iohr_ask_live=  # any new line ends the card's menu
+    # A command ends the card's menu; an empty Enter (or spaces) keeps it, so the Down key
+    # still opens the menu on the prompt that comes back.
+    [[ $BUFFER == *[![:space:]]* ]] && _iohr_ask_live=
     if [[ ${INORBIT_ASK-} != 0 && $BUFFER != *$'\n'* && $BUFFER =~ $_iohr_ask_re ]]; then
       _iohr_ask_q=$BUFFER
       PREDISPLAY=$BUFFER  # the typed line stays on screen while the shell gets an empty one
@@ -202,19 +205,21 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   # First, so the exit status it reads is the last command's.
   add-zsh-hook precmd _iohr_ask_precmd
   precmd_functions=(_iohr_ask_precmd ${precmd_functions:#_iohr_ask_precmd})
-  # Wired once: sourcing this again (a second `source ~/.zshrc`, or a plugin such as
-  # zsh-autosuggestions that re-wraps widgets) would copy our own widget into
-  # _iohr_ask_prev_accept, and accept-line would call itself until FUNCNEST. The functions
-  # above are safe to redefine; only the wiring is guarded, by the widget that holds the
-  # previous accept-line (a shell variable can be reset, the widget table is the truth).
+  # Sourcing this again (a second `source ~/.zshrc`, an upgrade in a running shell, or a plugin
+  # such as zsh-autosuggestions that re-wraps widgets) must not copy our own widget into
+  # _iohr_ask_prev_accept, or accept-line would call itself until FUNCNEST. So the functions
+  # above are redefined every time (a widget runs the function of its name), the accept-line
+  # wiring is guarded by the widget that holds the previous accept-line (a shell variable can
+  # be reset, the widget table is the truth), and the keys are bound again every time: only
+  # the key's previous widget is kept from the first time, never one of ours.
   if (( ! ${+widgets[_iohr_ask_prev_accept]} )); then
     # Chain to whatever accept-line was before (the shell's own, or the user's widget).
     zle -A accept-line _iohr_ask_prev_accept
     zle -N accept-line _iohr_ask_accept
   fi
-  # The menu key, once per keymap and key: the widget that held it is kept so the key keeps
-  # its meaning anywhere else (the same guard against wrapping ourselves).
-  if (( ${#_iohr_card_keys} && ! ${+widgets[_iohr_card_action]} )); then
+  # The menu key, in each keymap: the widget that held it is kept so the key keeps its
+  # meaning anywhere else.
+  if (( ${#_iohr_card_keys} )); then
     zle -N _iohr_card_action
     local _iohr_km _iohr_seq _iohr_cur
     for _iohr_km in emacs viins; do
@@ -230,17 +235,17 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     done
     unset _iohr_km _iohr_seq _iohr_cur
   fi
-  # The mode key (Shift+Tab, `^[[Z`), once per keymap, with the same guard.
-  if (( ! ${+widgets[_iohr_ask_cycle]} )); then
-    zle -N _iohr_ask_cycle
-    local _iohr_km _iohr_cur
-    for _iohr_km in emacs viins; do
+  # The mode key (Shift+Tab, `^[[Z`), in each keymap, the same way.
+  zle -N _iohr_ask_cycle
+  local _iohr_km _iohr_cur
+  for _iohr_km in emacs viins; do
+    if [[ -z ${_iohr_mode_prev[$_iohr_km]-} ]]; then
       _iohr_cur=$(bindkey -M $_iohr_km -- '^[[Z' 2>/dev/null)
       _iohr_cur=${_iohr_cur##* }
       [[ -n $_iohr_cur && $_iohr_cur != undefined-key && $_iohr_cur != _iohr_ask_cycle ]] &&
         _iohr_mode_prev[$_iohr_km]=$_iohr_cur
-      bindkey -M $_iohr_km -- '^[[Z' _iohr_ask_cycle
-    done
-    unset _iohr_km _iohr_cur
-  fi
+    fi
+    bindkey -M $_iohr_km -- '^[[Z' _iohr_ask_cycle
+  done
+  unset _iohr_km _iohr_cur
 fi
