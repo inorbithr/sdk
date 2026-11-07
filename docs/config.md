@@ -506,7 +506,7 @@ The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 | Key | Values | Default | Read by |
 |---|---|---|---|
-| `template` | a name from `iohr project template list` that is live | `demo` | `iohr project init`, `create` and the default `template list` marks |
+| `template` | a name from `iohr project template list` that is live | `coordinated` | `iohr project init`, `create` and the default `template list` marks |
 
 ### 4.5 The ask table
 
