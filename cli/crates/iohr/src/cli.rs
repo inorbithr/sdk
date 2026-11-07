@@ -1788,6 +1788,20 @@ impl HeadlessArgs {
     }
 }
 
+/// Which Planner plan `iohr project init` uses (RFC 0211).
+#[derive(Debug, Args)]
+pub struct InitPlanArgs {
+    /// Use this existing Planner plan for the project instead of making one: its id is
+    /// written under `[plan]` in `coordination.toml` (checked when you are signed in).
+    /// Without it, a signed-in init makes the plan named after the project, or finds the
+    /// one it made before; signed out, the id stays empty and init says how to set it.
+    #[arg(long = "plan-id", value_name = "PLAN")]
+    pub plan_id: Option<String>,
+    /// Leave `[plan] id` in `coordination.toml` empty: no plan is made or looked up.
+    #[arg(long = "no-plan", conflicts_with = "plan_id")]
+    pub no_plan: bool,
+}
+
 /// The flags of `project init`: one struct, boxed in [`ProjectCommand::Init`] because the
 /// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
 /// `PathBuf` is wider).
@@ -1840,15 +1854,8 @@ pub struct InitArgs {
     /// `would: ...`; with `--json` the plan is data. `--plan` is the same.
     #[arg(long, visible_alias = "plan")]
     pub dry_run: bool,
-    /// Use this existing Planner plan for the project instead of making one: its id is
-    /// written under `[plan]` in `coordination.toml` (checked when you are signed in).
-    /// Without it, a signed-in init makes the plan named after the project, or finds the
-    /// one it made before; signed out, the id stays empty and init says how to set it.
-    #[arg(long, value_name = "PLAN")]
-    pub plan_id: Option<String>,
-    /// Leave `[plan] id` in `coordination.toml` empty: no plan is made or looked up.
-    #[arg(long, conflicts_with = "plan_id")]
-    pub no_plan: bool,
+    #[command(flatten)]
+    pub plan: InitPlanArgs,
     /// Answer the questions with their defaults: no menu, no confirmation.
     #[arg(short = 'y', long)]
     pub yes: bool,

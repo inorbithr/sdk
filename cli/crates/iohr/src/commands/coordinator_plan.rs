@@ -85,38 +85,7 @@ pub(super) async fn item(s: &Session, cmd: CoordinatorItemCommand, out: Out) -> 
             title,
             kind,
             body,
-        } => {
-            let body = body.as_deref().map(read_text).transpose()?;
-            let p = Plans::new(&s.api, at.account.as_deref());
-            let holder = default_holder(&s.label);
-            // Writing an item replaces it, so one that exists keeps what is not asked for.
-            let got = p.get(&at.plan).await?;
-            let (mut fields, version) = match find_item(&got, &at.item) {
-                Some(i) => (
-                    item_fields(i),
-                    i.get("version").and_then(Value::as_i64).unwrap_or(0),
-                ),
-                None => {
-                    let mut m = Map::new();
-                    m.insert("status".into(), json!("proposed"));
-                    (m, 0)
-                }
-            };
-            fields.insert("title".into(), json!(title));
-            if let Some(k) = kind {
-                fields.insert("kind".into(), json!(k));
-            } else if !fields.contains_key("kind") {
-                fields.insert("kind".into(), json!("task"));
-            }
-            if let Some(b) = body {
-                fields.insert("body".into(), json!(b));
-            }
-            let v = p
-                .upsert(&at.plan, &at.item, fields, version, &holder)
-                .await?;
-            print_item(&v, out);
-            Ok(())
-        }
+        } => add(s, &at, &title, kind, body, out).await,
         CoordinatorItemCommand::Claim {
             at,
             holder,
@@ -195,6 +164,45 @@ pub(super) async fn item(s: &Session, cmd: CoordinatorItemCommand, out: Out) -> 
             command,
         } => run(s, at, title, kind, holder, command, out).await,
     }
+}
+
+/// `item add`: writing an item replaces it, so one that exists keeps what is not asked for.
+async fn add(
+    s: &Session,
+    at: &PlanItemRef,
+    title: &str,
+    kind: Option<String>,
+    body: Option<String>,
+    out: Out,
+) -> Result<(), Error> {
+    let body = body.as_deref().map(read_text).transpose()?;
+    let p = Plans::new(&s.api, at.account.as_deref());
+    let holder = default_holder(&s.label);
+    let got = p.get(&at.plan).await?;
+    let (mut fields, version) = if let Some(i) = find_item(&got, &at.item) {
+        (
+            item_fields(i),
+            i.get("version").and_then(Value::as_i64).unwrap_or(0),
+        )
+    } else {
+        let mut m = Map::new();
+        m.insert("status".into(), json!("proposed"));
+        (m, 0)
+    };
+    fields.insert("title".into(), json!(title));
+    if let Some(k) = kind {
+        fields.insert("kind".into(), json!(k));
+    } else if !fields.contains_key("kind") {
+        fields.insert("kind".into(), json!("task"));
+    }
+    if let Some(b) = body {
+        fields.insert("body".into(), json!(b));
+    }
+    let v = p
+        .upsert(&at.plan, &at.item, fields, version, &holder)
+        .await?;
+    print_item(&v, out);
+    Ok(())
 }
 
 /// `item run`: the command is the step's work; its exit code is this command's.

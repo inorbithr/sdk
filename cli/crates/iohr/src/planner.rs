@@ -342,35 +342,32 @@ impl<'a> Plans<'a> {
         Fut: Future<Output = Result<String, Error>>,
     {
         let got = self.get(step.plan).await?;
-        match find_item(&got, step.item) {
-            Some(item) => {
-                match item.get("status").and_then(Value::as_str).unwrap_or("") {
-                    "done" => return Ok(Outcome::Skipped),
-                    "dropped" => {
-                        return Err(Error::Failed(format!(
-                            "item {} was dropped; add it again under another slug",
-                            step.item
-                        )));
-                    }
-                    _ => {}
-                }
-                let held = item.get("holder").and_then(Value::as_str).unwrap_or("");
-                if !held.is_empty() && held != step.holder {
-                    let until = item.get("held_until").and_then(Value::as_str).unwrap_or("");
+        if let Some(item) = find_item(&got, step.item) {
+            match item.get("status").and_then(Value::as_str).unwrap_or("") {
+                "done" => return Ok(Outcome::Skipped),
+                "dropped" => {
                     return Err(Error::Failed(format!(
-                        "item {} is held by {held} until {until}; wait, or claim it with --force",
+                        "item {} was dropped; add it again under another slug",
                         step.item
                     )));
                 }
+                _ => {}
             }
-            None => {
-                let mut fields = Map::new();
-                fields.insert("title".into(), json!(step.title));
-                fields.insert("kind".into(), json!(step.kind));
-                fields.insert("status".into(), json!("proposed"));
-                self.upsert(step.plan, step.item, fields, 0, step.holder)
-                    .await?;
+            let held = item.get("holder").and_then(Value::as_str).unwrap_or("");
+            if !held.is_empty() && held != step.holder {
+                let until = item.get("held_until").and_then(Value::as_str).unwrap_or("");
+                return Err(Error::Failed(format!(
+                    "item {} is held by {held} until {until}; wait, or claim it with --force",
+                    step.item
+                )));
             }
+        } else {
+            let mut fields = Map::new();
+            fields.insert("title".into(), json!(step.title));
+            fields.insert("kind".into(), json!(step.kind));
+            fields.insert("status".into(), json!("proposed"));
+            self.upsert(step.plan, step.item, fields, 0, step.holder)
+                .await?;
         }
         self.claim(
             step.plan,
@@ -476,7 +473,7 @@ mod tests {
         }
     }
 
-    fn plan_with(items: Value) -> Value {
+    fn plan_with(items: &Value) -> Value {
         json!({"plan": {"id": PLAN, "title": "p", "version": 3}, "items": items, "notes": []})
     }
 
@@ -543,7 +540,7 @@ mod tests {
     #[tokio::test]
     async fn a_step_claims_notes_and_finishes_in_that_order() {
         let server = MockServer::start().await;
-        mount(&server, &plan_with(json!([item("proposed", "")]))).await;
+        mount(&server, &plan_with(&json!([item("proposed", "")]))).await;
         let a = api(&server);
         let out = Plans::new(&a, None)
             .run_step(&step(), || async { Ok("built".to_owned()) })
@@ -578,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn a_step_adds_the_item_the_plan_lacks() {
         let server = MockServer::start().await;
-        mount(&server, &plan_with(json!([]))).await;
+        mount(&server, &plan_with(&json!([]))).await;
         let a = api(&server);
         // The status writes after the claim read the plan again, which the mock still
         // answers without the item: the step stops there, after the add and the claim.
@@ -603,7 +600,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_step_goes_back_to_proposed_with_a_note_and_no_claim() {
         let server = MockServer::start().await;
-        mount(&server, &plan_with(json!([item("proposed", "")]))).await;
+        mount(&server, &plan_with(&json!([item("proposed", "")]))).await;
         let a = api(&server);
         let e = Plans::new(&a, None)
             .run_step(&step(), || async {
@@ -634,7 +631,7 @@ mod tests {
     #[tokio::test]
     async fn a_done_item_is_skipped_and_nothing_runs() {
         let server = MockServer::start().await;
-        mount(&server, &plan_with(json!([item("done", "")]))).await;
+        mount(&server, &plan_with(&json!([item("done", "")]))).await;
         let a = api(&server);
         let out = Plans::new(&a, None)
             .run_step(&step(), || async {
@@ -651,7 +648,7 @@ mod tests {
         let server = MockServer::start().await;
         mount(
             &server,
-            &plan_with(json!([item("building", "someone-else")])),
+            &plan_with(&json!([item("building", "someone-else")])),
         )
         .await;
         let a = api(&server);
@@ -665,7 +662,7 @@ mod tests {
         assert_eq!(shape(&calls(&server).await), ["GET "]);
 
         let dropped = MockServer::start().await;
-        mount(&dropped, &plan_with(json!([item("dropped", "")]))).await;
+        mount(&dropped, &plan_with(&json!([item("dropped", "")]))).await;
         let a = api(&dropped);
         let e = Plans::new(&a, None)
             .run_step(&step(), || async {
@@ -679,7 +676,7 @@ mod tests {
     #[tokio::test]
     async fn the_account_rides_on_every_call() {
         let server = MockServer::start().await;
-        mount(&server, &plan_with(json!([item("done", "")]))).await;
+        mount(&server, &plan_with(&json!([item("done", "")]))).await;
         let a = api(&server);
         Plans::new(&a, Some("acc_team"))
             .run_step(&step(), || async { Ok(String::new()) })

@@ -94,16 +94,16 @@ async fn settle(
     title: &str,
 ) -> Step {
     let fail = |said: String| step("plan", title, "failed", said, "");
-    if let Some(id) = chosen {
-        if let Err(e) = plan_segment(id) {
-            return fail(e.to_string());
-        }
+    if let Some(id) = chosen
+        && let Err(e) = plan_segment(id)
+    {
+        return fail(e.to_string());
     }
     // A plan already named in the file stays: init may run again on a folder it made.
-    if chosen.is_none() {
-        if let Some(id) = plan_id_in(text) {
-            return step("plan", title, "done", format!("already set: {id}"), "");
-        }
+    if chosen.is_none()
+        && let Some(id) = plan_id_in(text)
+    {
+        return step("plan", title, "done", format!("already set: {id}"), "");
     }
     let (id, said) = match (chosen, api) {
         (Some(id), Some(api)) => match Plans::new(api, None).get(id).await {

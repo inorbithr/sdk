@@ -3447,10 +3447,12 @@ async fn coordinator_plan_create_list_show_and_item_commands() {
         .await;
     Mock::given(method("GET"))
         .and(path("/v1/coordinator/plans"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"plans": [{
-            "id": "plan_1", "title": "My plan", "state": "open", "item_count": 1,
-            "updated_at": "2026-11-07T10:00:00Z"
-        }]})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"plans": [{
+                "id": "plan_1", "title": "My plan", "state": "open", "item_count": 1,
+                "updated_at": "2026-11-07T10:00:00Z"
+            }]})),
+        )
         .mount(&server)
         .await;
 
@@ -3476,7 +3478,15 @@ async fn coordinator_plan_create_list_show_and_item_commands() {
     assert!(String::from_utf8_lossy(&o.stdout).contains("build"));
     let o = r.with_token(
         &t,
-        &["coordinator", "item", "claim", "plan_1", "build", "--holder", "me"],
+        &[
+            "coordinator",
+            "item",
+            "claim",
+            "plan_1",
+            "build",
+            "--holder",
+            "me",
+        ],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
     let o = r.with_token(
@@ -3486,15 +3496,28 @@ async fn coordinator_plan_create_list_show_and_item_commands() {
     assert_eq!(code(&o), 0, "{}", text(&o));
     let o = r.with_token(
         &t,
-        &["coordinator", "item", "done", "plan_1", "build", "--note", "shipped"],
+        &[
+            "coordinator",
+            "item",
+            "done",
+            "plan_1",
+            "build",
+            "--note",
+            "shipped",
+        ],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
     let calls = planner_calls(&server).await;
     assert!(
-        calls.iter().any(|c| c == "POST /v1/coordinator/plans/plan_1/items/build/notes halfway"),
+        calls
+            .iter()
+            .any(|c| c == "POST /v1/coordinator/plans/plan_1/items/build/notes halfway"),
         "{calls:?}"
     );
-    let done: Vec<&String> = calls.iter().filter(|c| c.ends_with("shipped") || c.ends_with(" done")).collect();
+    let done: Vec<&String> = calls
+        .iter()
+        .filter(|c| c.ends_with("shipped") || c.ends_with(" done"))
+        .collect();
     assert_eq!(done.len(), 2, "the note, then the status: {calls:?}");
     // A bad slug is a usage error before any call.
     let o = r.with_token(&t, &["coordinator", "item", "note", "plan_1", "a/b", "x"]);
@@ -3527,7 +3550,15 @@ async fn coordinator_item_run_is_a_planner_step_and_a_failure_goes_back_to_propo
     planner_mocks(&server, "proposed").await;
     let o = r.with_token(
         &t,
-        &["coordinator", "item", "run", "plan_1", "build", "--", "true"],
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "true",
+        ],
     );
     assert_eq!(code(&o), 0, "{}", text(&o));
     let calls = planner_calls(&server).await;
@@ -3537,7 +3568,9 @@ async fn coordinator_item_run_is_a_planner_step_and_a_failure_goes_back_to_propo
         "set building: {calls:?}"
     );
     assert!(
-        calls.iter().any(|c| c.contains("/notes") && c.contains("done: ")),
+        calls
+            .iter()
+            .any(|c| c.contains("/notes") && c.contains("done: ")),
         "{calls:?}"
     );
     assert!(calls.last().unwrap().ends_with(" done"), "{calls:?}");
@@ -3547,12 +3580,24 @@ async fn coordinator_item_run_is_a_planner_step_and_a_failure_goes_back_to_propo
     planner_mocks(&server, "proposed").await;
     let o = r.with_token(
         &t,
-        &["coordinator", "item", "run", "plan_1", "build", "--", "sh", "-c", "exit 7"],
+        &[
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "sh",
+            "-c",
+            "exit 7",
+        ],
     );
     assert_eq!(code(&o), 7, "{}", text(&o));
     let calls = planner_calls(&server).await;
     assert!(
-        calls.iter().any(|c| c.contains("/notes") && c.contains("failed: ")),
+        calls
+            .iter()
+            .any(|c| c.contains("/notes") && c.contains("failed: ")),
         "{calls:?}"
     );
     assert!(
@@ -3573,7 +3618,13 @@ async fn coordinator_item_run_is_a_planner_step_and_a_failure_goes_back_to_propo
     let o = r.with_token(
         &t,
         &[
-            "coordinator", "item", "run", "plan_1", "build", "--", "touch",
+            "coordinator",
+            "item",
+            "run",
+            "plan_1",
+            "build",
+            "--",
+            "touch",
             marker.to_str().unwrap(),
         ],
     );
