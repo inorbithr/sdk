@@ -105,6 +105,27 @@ pub struct Global {
     pub data_dir: Option<PathBuf>,
 }
 
+/// The global flags that take a value, as they are typed (`--profile`, `-p`), read from the
+/// definition above so a new one is never forgotten. Code that walks a raw command line
+/// uses it to tell a flag's value from the command (`iohr --profile session session`).
+#[must_use]
+pub fn global_value_flags() -> Vec<OsString> {
+    let command = Global::augment_args(clap::Command::new("iohr"));
+    let mut flags = Vec::new();
+    for arg in command.get_arguments() {
+        if !arg.get_action().takes_values() {
+            continue;
+        }
+        if let Some(long) = arg.get_long() {
+            flags.push(OsString::from(format!("--{long}")));
+        }
+        if let Some(short) = arg.get_short() {
+            flags.push(OsString::from(format!("-{short}")));
+        }
+    }
+    flags
+}
+
 /// Who signs in when it is not a person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SignIn {
@@ -210,6 +231,8 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "permissions",
             "shell",
             "runner",
+            "session",
+            "stop",
             "coordinator",
             "memory",
         ],
@@ -476,6 +499,26 @@ pub enum Command {
     /// installed `claude`, on your own subscription.
     #[command(subcommand)]
     Runner(RunnerCommand),
+    /// Open this project's session: one process hosts its Roles while iohr is open.
+    ///
+    /// Joins this project's session host (RFC 0213), starting it when none runs: one
+    /// `iohr runner run --session DIR` process per project that hosts its Roles and works from
+    /// a durable queue (a `DuckDB` file in iohr's data directory, so nothing is lost when it
+    /// stops or the machine restarts). The command stays open as the session and prints
+    /// nothing on stdout; Ctrl-C, SIGTERM or the terminal closing leaves it. The host stops
+    /// when the last session has left, or on `iohr stop`.
+    ///
+    /// Slice S1 of RFC 0213: no tasks are accepted from the server yet, and a task a Role
+    /// claims fails with "not built". The host, its Roles, the durable queue and the session
+    /// link work; `iohr ask --work` and the real handler come next.
+    Session(SessionArgs),
+    /// Stop this project's session host.
+    ///
+    /// Tells the project's session host to stop. Each Role finishes the task it holds, then
+    /// the host ends; `--wait` (15 seconds by default) waits until it has, and says
+    /// `stopping` when it has not yet. A task cut short by a crash instead is taken again by
+    /// the next host as soon as it starts.
+    Stop(StopArgs),
     /// Install the InOrbit Trails browser extension.
     ///
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
@@ -661,6 +704,11 @@ pub enum RunnerCommand {
         /// verified path and restarts itself.
         #[arg(long)]
         no_auto_upgrade: bool,
+        /// Run as a project's session host (RFC 0213): the runner hosts the project's
+        /// Roles beside its turns, never upgrades itself, and stops when the last session
+        /// has left, on `iohr stop`, on SIGTERM or on Ctrl-C. `iohr session` starts it.
+        #[arg(long, value_name = "DIR")]
+        session: Option<PathBuf>,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -1781,6 +1829,23 @@ pub enum MemoryCommand {
         #[arg(long)]
         pull: bool,
     },
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SessionArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct StopArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// Seconds to wait for the host to end (0 to 600).
+    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=600))]
+    pub wait: u64,
 }
 
 #[derive(Debug, Clone, Args)]

@@ -693,6 +693,27 @@ async fn verbose_output_never_shows_the_token() {
         "{args:?} leaked the token"
     );
     assert!(!all.contains("request id"), "{args:?} made a call");
+    // `iohr stop` (RFC 0213) talks to a local socket only: it makes no API call, and with no
+    // host running it says so and exits 0. `iohr session` never returns while it is open:
+    // `session_starts_one_host_that_beats_and_stop_ends_it` (tests/runner.rs) runs it with
+    // `--verbose` and checks no credential reaches its output or the host's log.
+    let data = dir.path().join("session-data");
+    let args = [
+        "stop",
+        project_dir,
+        "--data-dir",
+        data.to_str().unwrap(),
+        "--verbose",
+    ];
+    let o = r.with_token(&t, &args);
+    assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+    let all = text(&o);
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER"),
+        "{args:?} leaked the token"
+    );
+    assert!(all.contains("no session host runs"), "{args:?}: {all}");
+    assert!(!all.contains("request id"), "{args:?} made a call");
     // `ext verify ARTIFACT` (RFC 0143) is offline too: an artifact with a bundle that
     // does not match fails (exit 1) and prints no token and no request line.
     let artifact = dir.path().join("artifact.bin");
