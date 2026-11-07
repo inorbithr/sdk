@@ -1,6 +1,6 @@
 //! What closes a `?` card: the full disclosure now and then, one short hint the rest of
-//! the time (PRD 0187). The header's "AI answer" label is on every card; only the footer
-//! varies, and the state it needs is one small file in the config directory.
+//! the time (PRD 0187). The header (Io, with the agent and the model at the right) is on every card; only
+//! the footer varies, and the state it needs is one small file in the config directory.
 //!
 //! The decision is pure ([`decide`], with the clock passed in); [`load`] and [`store`] are the
 //! file. Nothing here reads a question or an answer.

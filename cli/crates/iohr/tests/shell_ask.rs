@@ -903,9 +903,9 @@ sys.stdout.write(screen.decode(errors="replace"))
     Some((line, String::from_utf8_lossy(&o.stdout).into_owned()))
 }
 
-// The menu's letters: Run and Explain print the one line for the prompt and nothing else;
-// Copy and Esc print nothing; Copy goes through tmux when inside it. Nothing here runs the
-// command: the only place a command could run is the shell, and it only gets a line.
+// The menu's letters: Run prints the command and the `run` marker, Explain the one line for the
+// prompt, nothing else; Copy and Esc print nothing; Copy goes through tmux when inside it.
+// `iohr` never runs the command: the shell hook does, and it only gets a line.
 #[test]
 fn the_menu_letters_print_one_prompt_line_or_nothing_and_copy_uses_tmux() {
     let r = Rig::new();
@@ -921,7 +921,7 @@ fn the_menu_letters_print_one_prompt_line_or_nothing_and_copy_uses_tmux() {
     let Some((line, screen)) = press_in_menu(&r, &cmd, "r", &[]) else {
         return;
     };
-    assert_eq!(line, "git status", "{screen:?}");
+    assert_eq!(line, "git status\u{1e}run", "{screen:?}");
     assert!(screen.contains("What next?"), "{screen:?}");
     let (line, _) = press_in_menu(&r, &cmd, "e", &[]).unwrap();
     assert_eq!(line, "?? explain this command: git status");
@@ -1000,7 +1000,7 @@ fn the_action_bar_picks_by_number_letter_or_arrows_and_esc_leaves_nothing() {
     let Some((line, screen)) = press_in_menu(&r, &cmd, "1", &[]) else {
         return;
     };
-    assert_eq!(line, "git status", "1 is Run: {screen:?}");
+    assert_eq!(line, "git status\u{1e}run", "1 is Run: {screen:?}");
     let plain_screen = strip_escapes(&screen);
     for want in [
         "\u{256d}\u{2500} What next?",
@@ -1038,6 +1038,73 @@ fn the_action_bar_picks_by_number_letter_or_arrows_and_esc_leaves_nothing() {
             "{key:?}: drew {drawn}, erased {erased}: {screen:?}"
         );
     }
+}
+
+// Run goes through the permission rules before the hook executes it: a plain command goes at
+// once, a risky one asks first (a yes sends it, a no or Esc sends nothing), a command a rule
+// denies is never sent, and nothing is sent while the rule file cannot be read.
+#[test]
+fn run_asks_for_a_risky_command_and_never_sends_a_denied_one() {
+    let r = Rig::new();
+    let work = r.work().display().to_string();
+    let plain = ["ask", "--menu", "--cwd", &work, "--command=git status"];
+    let Some((line, _)) = press_in_menu(&r, &plain, "r", &[]) else {
+        return;
+    };
+    assert_eq!(line, "git status\u{1e}run", "a plain command runs at once");
+
+    let risky = ["ask", "--menu", "--cwd", &work, "--command=rm -rf build"];
+    let (line, screen) = press_in_menu(&r, &risky, "r\u{1f}y", &[]).unwrap();
+    assert_eq!(line, "rm -rf build\u{1e}run", "a yes sends it: {screen:?}");
+    let plain_screen = strip_escapes(&screen);
+    assert!(
+        plain_screen.contains("Run it?") && plain_screen.contains("deletes files"),
+        "it asked first and said why: {screen:?}"
+    );
+    for no in ["r\u{1f}n", "r\u{1f}\u{1b}"] {
+        let (line, screen) = press_in_menu(&r, &risky, no, &[]).unwrap();
+        assert_eq!(line, "", "{no:?} sends nothing: {screen:?}");
+    }
+
+    let rules = r.work().join(".inorbit/permissions.toml");
+    std::fs::create_dir_all(rules.parent().unwrap()).unwrap();
+    std::fs::write(&rules, "deny = [\"Bash(git:*)\"]\n").unwrap();
+    let (line, screen) = press_in_menu(&r, &plain, "r", &[]).unwrap();
+    assert_eq!(line, "", "a denied command is never sent: {screen:?}");
+    assert!(
+        strip_escapes(&screen).contains("does not allow it"),
+        "{screen:?}"
+    );
+    std::fs::write(&rules, "deny = [\"Bash(\"]\n").unwrap();
+    let (line, screen) = press_in_menu(&r, &plain, "r", &[]).unwrap();
+    assert_eq!(line, "", "{screen:?}");
+    assert!(
+        strip_escapes(&screen).contains("cannot be read"),
+        "{screen:?}"
+    );
+}
+
+// A command that still holds a placeholder is Copy only: the bar has no Run and its key sends
+// nothing; Copy is still there.
+#[test]
+fn a_command_with_a_placeholder_has_no_run() {
+    let r = Rig::new();
+    let work = r.work().display().to_string();
+    let cmd = [
+        "ask",
+        "--menu",
+        "--cwd",
+        &work,
+        "--command=cd path/to/your/repo && git log --oneline -5",
+    ];
+    let Some((line, screen)) = press_in_menu(&r, &cmd, "r", &[("NO_COLOR", "1")]) else {
+        return;
+    };
+    assert_eq!(line, "", "no Run to choose: {screen:?}");
+    assert!(
+        screen.contains("[1] Copy") && !screen.contains("Run"),
+        "{screen:?}"
+    );
 }
 
 #[test]
@@ -1120,6 +1187,124 @@ fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
         "the line was not run: {on_line:?}"
     );
     assert!(out[7].contains("RAN-2"), "Enter runs it: {:?}", out[7]);
+}
+
+// A chosen question is asked at once, with no second Enter: the menu prints a whole `?` or `??`
+// line (a step, Explain, Allow), the widget hands it to accept-line (our own widget, so the shell
+// never sees it) and the ask runs. Follow up prints a bare `?? ` for the person to finish: it
+// stays on the line, and nothing is asked until Enter.
+#[test]
+fn a_chosen_question_is_asked_at_once_and_a_bare_follow_up_waits_for_the_person() {
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
+    let log = dir.path().join("asks.log");
+    let mode = dir.path().join("menu.mode");
+    z.fake(format!(
+        "#!/bin/sh\ncase \"$*\" in\n*--menu*) cat {mode};;\n*) printf '%s\\n' \"$*\" >> {log}; printf 'the answer\\036\\036\\036\\036\\036step';;\nesac\n",
+        mode = mode.display(),
+        log = log.display()
+    ));
+    // The log also holds the background `asks count --cache` refresh: only the questions count.
+    let questions = |f: &std::path::Path| {
+        std::fs::read_to_string(f)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.starts_with("ask --headless"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let down = "RAW:\u{1b}[B";
+    // First menu: a step. Second menu: Follow up.
+    std::fs::write(&mode, "?? explain what is in api/").unwrap();
+    let out = drive_zsh(
+        file,
+        bin,
+        &[
+            format!("source {}", file.display()),
+            "? a question".to_owned(),
+            down.to_owned(),
+        ],
+    );
+    let asked = questions(&log);
+    assert_eq!(
+        asked.lines().count(),
+        2,
+        "the chosen question ran once: {asked:?}\n{out:?}"
+    );
+    assert!(
+        asked
+            .lines()
+            .last()
+            .unwrap()
+            .ends_with("-- explain what is in api/"),
+        "{asked}"
+    );
+    assert!(!out[2].contains("FUNCNEST"), "{:?}", out[2]);
+
+    // Follow up: a bare `?? ` stays on the line.
+    std::fs::remove_file(&log).unwrap();
+    std::fs::write(&mode, "?? ").unwrap();
+    let out = drive_zsh(
+        file,
+        bin,
+        &[
+            format!("source {}", file.display()),
+            "? a question".to_owned(),
+            down.to_owned(),
+            // The bare `?? ` is on the line, not asked; clear it so the driver's `exit` is not
+            // taken for its question.
+            "RAW:\u{15}".to_owned(),
+        ],
+    );
+    assert!(out[2].contains("?? "), "{out:?}");
+    let asked = questions(&log);
+    assert_eq!(
+        asked.lines().count(),
+        1,
+        "only the first question: {asked:?}\n{out:?}"
+    );
+}
+
+// Choosing Run executes the command at once, with no second Enter: the menu prints the command
+// and the `run` marker, and the widget hands the command to accept-line like a typed line. A
+// bare command with no marker (an old `iohr`) still only lands on the line.
+#[test]
+fn a_chosen_run_is_executed_at_once_through_accept_line() {
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
+    let log = dir.path().join("menu.log");
+    z.fake(format!(
+        "#!/bin/sh\ncase \"$*\" in\n*--menu*) echo \"$*\" >> {log}; printf 'echo RAN-$((1+1))\\036run';;\n*) printf 'the answer\\036echo RAN-$((1+1))\\036notes.md';;\nesac\n",
+        log = log.display()
+    ));
+    let out = drive_zsh(
+        file,
+        bin,
+        &[
+            format!("source {}", file.display()),
+            "? a question".to_owned(),
+            // The answer is up and the line is empty: Down opens the menu, and Run is chosen.
+            "RAW:\u{1b}[B".to_owned(),
+        ],
+    );
+    let asked = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(asked.lines().count(), 1, "one menu only: {asked:?}");
+    assert!(
+        out[2].contains("RAN-2"),
+        "Run executed with no Enter: {:?}",
+        out[2]
+    );
+    assert!(
+        !out[2].contains('\u{1e}'),
+        "the marker is never typed: {:?}",
+        out[2]
+    );
 }
 
 // Shift+Tab on a `?` line goes on from manual (where every shell starts) to plan, auto and round

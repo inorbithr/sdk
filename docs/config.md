@@ -661,7 +661,7 @@ The menu stays open until a letter picks an action, or Esc, `q` or Ctrl-C closes
 resize, a stray signal or an arrow key's tail bytes (an application-mode Down sends `ESC O B`)
 do not close it or pick an action. Only a real terminal error closes it, with one line on stderr.
 
-The card's header says "AI answer" on every card. Its footer is the full disclosure (what was
+The card's header is `Io`, with the agent, the model, the mode and the time on the right, so the AI is named on every card; a failed answer also says "no answer". Its footer is the full disclosure (what was
 read, that nothing was run, that an AI model under your own subscription got the folder, and
 to check the answer) on the first card ever, whenever that text changes, and about once a
 day; every other card closes with one short hint, taken in turn from "`??` follows up" and
