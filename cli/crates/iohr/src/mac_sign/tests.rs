@@ -53,12 +53,22 @@ fn ask(kind: &str, title: &str) -> serde_json::Value {
 
 #[test]
 fn the_message_is_core_s_decision_vector() {
-    // The vector in core `approval_messages` tests: trimmed note hashed, id and nonce trimmed.
-    let m = decision_message("apr_1", "ab", "approve", " ok ", 9, " n ", " key_1 ");
+    // The layout of core's `approval_messages` test vector: trimmed note hashed, nonce and
+    // key id trimmed. The nonce is made for this run, as the production path makes it.
+    let nonce = fresh_nonce().expect("nonce");
+    let m = decision_message(
+        "apr_1",
+        "ab",
+        "approve",
+        " ok ",
+        9,
+        &format!(" {nonce} "),
+        " key_1 ",
+    );
     assert_eq!(
         m,
         format!(
-            "iohr-approval-decision-v1\napr_1\nab\napprove\n{}\n9\nn\nkey_1",
+            "iohr-approval-decision-v1\napr_1\nab\napprove\n{}\n9\n{nonce}\nkey_1",
             crate::runner::signing::h("ok")
         )
     );
@@ -73,25 +83,26 @@ fn a_signed_decision_verifies_against_the_public_key_over_that_message() {
         decision: "approve",
         note: "",
     };
+    let nonce = fresh_nonce().expect("nonce");
     let proof = sign_decision(
         &signer,
         "apk_1",
         &d,
         "approve \"Plan\" (c0ffee)",
         1_800_000_000,
-        "bm9uY2U",
+        &nonce,
     )
     .expect("signs");
     assert_eq!(proof["key_id"], "apk_1");
     assert_eq!(proof["signed_at"], 1_800_000_000);
-    assert_eq!(proof["nonce"], "bm9uY2U");
+    assert_eq!(proof["nonce"], nonce.as_str());
     let message = decision_message(
         d.approval_id,
         "c0ffee",
         "approve",
         "",
         1_800_000_000,
-        "bm9uY2U",
+        &nonce,
         "apk_1",
     );
     let public = B64URL
@@ -115,7 +126,7 @@ fn a_signed_decision_verifies_against_the_public_key_over_that_message() {
         "approve",
         "",
         1_800_000_001,
-        "bm9uY2U",
+        &nonce,
         "apk_1",
     );
     let public = B64URL
@@ -138,7 +149,8 @@ fn a_refused_touch_id_makes_no_proof() {
         decision: "approve",
         note: "",
     };
-    let e = sign_decision(&signer, "apk_1", &d, "r", 1, "n").expect_err("refused");
+    let nonce = fresh_nonce().expect("nonce");
+    let e = sign_decision(&signer, "apk_1", &d, "r", 1, &nonce).expect_err("refused");
     assert!(e.contains("refused"), "{e}");
 }
 
@@ -197,16 +209,17 @@ fn the_enrol_request_names_the_mac_and_carries_the_phone_s_countersignature() {
         alone,
         json!({"public_key": key, "platform": "macos", "label": "Nevio's MacBook", "device_id": "host-1"})
     );
+    let nonce = fresh_nonce().expect("nonce");
     let p = Proof {
         key_id: "apk_phone".to_owned(),
         signed_at: 1_800_000_000,
-        nonce: "bm9uY2U".to_owned(),
+        nonce: nonce.clone(),
         signature: "c2ln".to_owned(),
     };
     let with = enroll_body(&key, "Nevio's MacBook", "host-1", Some(&p));
     assert_eq!(
         with["countersign"],
-        json!({"key_id": "apk_phone", "signed_at": 1_800_000_000, "nonce": "bm9uY2U", "signature": "c2ln"})
+        json!({"key_id": "apk_phone", "signed_at": 1_800_000_000, "nonce": nonce, "signature": "c2ln"})
     );
     assert_eq!(with["platform"], "macos");
 }
