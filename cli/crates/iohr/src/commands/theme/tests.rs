@@ -261,7 +261,7 @@ fn an_unknown_theme_writes_nothing() {
         install(&cat(), d.path(), &args("dracula"), out()),
         Err(Error::Usage(_))
     ));
-    assert!(files(d.path()).is_empty());
+    assert_eq!(files(d.path()), Vec::<String>::new());
 }
 
 #[test]

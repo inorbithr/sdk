@@ -8,6 +8,8 @@
 //! Colours are written in `NSColorSpace` 2 (device RGB): the values reach the screen as
 //! sRGB, so `#ff9e1b` is `#ff9e1b`. The calibrated space (1) would shift them.
 
+use std::fmt::Write as _;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
@@ -197,18 +199,16 @@ pub(super) fn profile(cat: &Catalogue, theme: &Theme, face: &Face) -> String {
         put(key, color(name));
     }
     out.push_str(&data("Font", &font_archive(face, cat.font.size)));
-    out.push_str(&format!(
-        "\t<key>CursorBlink</key>\n\t<{}/>\n",
-        cat.cursor.blink
-    ));
-    out.push_str(&format!(
+    let _ = write!(out, "\t<key>CursorBlink</key>\n\t<{}/>\n", cat.cursor.blink);
+    let _ = write!(
+        out,
         "\t<key>CursorType</key>\n\t<integer>{}</integer>\n",
         cursor_type(&cat.cursor.style)
-    ));
+    );
     out.push_str("\t<key>FontAntialias</key>\n\t<true/>\n");
     out.push_str("\t<key>ProfileCurrentVersion</key>\n\t<real>2.09</real>\n");
     out.push_str("\t<key>name</key>\n");
-    out.push_str(&format!("\t<string>{}</string>\n", profile_name(theme)));
+    let _ = writeln!(out, "\t<string>{}</string>", profile_name(theme));
     out.push_str("\t<key>type</key>\n\t<string>Window Settings</string>\n");
     out.push_str("</dict>\n</plist>\n");
     out

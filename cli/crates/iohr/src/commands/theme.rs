@@ -317,14 +317,17 @@ pub(crate) fn run(cmd: ThemeCommand, out: Out) -> Result<(), Error> {
     let cat = Catalogue::load()?;
     let dir = term_dir()?;
     match cmd {
-        ThemeCommand::List => list(&cat, &dir, out),
+        ThemeCommand::List => {
+            list(&cat, &dir, out);
+            Ok(())
+        }
         ThemeCommand::Show { name } => show(&cat, &dir, &name, out),
         ThemeCommand::Install(args) => install(&cat, &dir, &args, out),
         ThemeCommand::Off => off(&dir, out),
     }
 }
 
-fn list(cat: &Catalogue, dir: &Path, out: Out) -> Result<(), Error> {
+fn list(cat: &Catalogue, dir: &Path, out: Out) {
     let state = read_state(dir);
     let active = state.theme.as_deref();
     if out.json {
@@ -342,7 +345,7 @@ fn list(cat: &Catalogue, dir: &Path, out: Out) -> Result<(), Error> {
             })
             .collect();
         Out::print_json(&json!({ "themes": rows, "prompt": state.prompt }));
-        return Ok(());
+        return;
     }
     let p = Paint::stdout(false);
     let rows: Vec<Vec<String>> = cat

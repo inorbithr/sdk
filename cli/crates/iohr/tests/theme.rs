@@ -98,7 +98,7 @@ fn list_show_install_and_off_work_and_say_what_they_write() {
     assert!(!shown.contains('\u{1b}'), "{shown:?}");
 
     // Nothing written yet; install writes exactly the profile and the state.
-    assert!(files(&rig.term()).is_empty());
+    assert_eq!(files(&rig.term()), Vec::<String>::new());
     let o = rig.run(&["theme", "install", "nord", "--json"]);
     assert!(o.status.success(), "{o:?}");
     assert_eq!(files(&rig.term()), ["theme.json", "themes/nord.terminal"]);
