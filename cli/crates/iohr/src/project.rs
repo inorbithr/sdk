@@ -1011,7 +1011,8 @@ fn smoke_heartbeat(
     }
 }
 
-/// The report, one line per step: done first, then asks and skips, then what waits on what.
+/// The report, one line per step: done first, then skips, then what waits on what. A step that
+/// is the editor's own ask (`ask`) has no line: the ending already says Code asks first.
 #[must_use]
 pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<String> {
     let mut out = vec![format!("{} is at {}", r.id, r.dir.display())];
@@ -1037,7 +1038,6 @@ pub fn lines(r: &Report, smoke: Option<&Smoke>, signed_in: Option<&str>) -> Vec<
     for s in &r.steps {
         match s.state.as_str() {
             "skipped" => out.push(format!("skipped: {} ({})", s.title.to_lowercase(), s.said)),
-            "ask" => out.push(format!("asked: {} ({})", s.title.to_lowercase(), s.said)),
             "queued" => out.push(format!(
                 "queued: {} ({}); {}",
                 s.title.to_lowercase(),
@@ -1207,6 +1207,26 @@ mod tests {
             scaffold(&other, &files, &[], "demo")
                 .unwrap_err()
                 .contains("not empty")
+        );
+    }
+
+    #[test]
+    fn the_editors_own_ask_is_a_step_but_never_a_line() {
+        let mut steps = cloud_steps("demo");
+        assert!(steps.iter().any(|s| s.state == "ask"));
+        steps.retain(|s| s.state == "ask");
+        let r = Report {
+            name: "demo".into(),
+            id: "demo".into(),
+            dir: PathBuf::from("/x/demo"),
+            state: PathBuf::from("/x/state"),
+            files: Vec::new(),
+            steps,
+        };
+        let said = lines(&r, None, Some("me")).join("\n");
+        assert!(
+            !said.contains("asked") && !said.contains("editor"),
+            "{said}"
         );
     }
 
