@@ -998,7 +998,7 @@ mod tests {
             follows: None,
             read: "Read: your question, the folder's path; nothing was run.",
             notice: "An AI model under your own subscription. Check it before you rely on it.",
-            label: "Io · AI answer -- Io running on Claude Code (local).",
+            label: "Io -- Io running on Claude Code (local).",
             full: true,
             hint: Some("`??` follows up."),
             row: None,
@@ -1042,7 +1042,7 @@ mod tests {
         let out = strip(&render(&card(text), 60, FANCY));
         let lines: Vec<&str> = out.lines().collect();
         assert!(lines[0].starts_with("╭─ ◆ Io ─"), "{out}");
-        assert!(!lines[0].contains("AI answer"), "{out}");
+        assert!(!out.contains("AI answer"), "{out}");
         assert!(
             lines[0].ends_with("Claude Code (local) · haiku · 1.8s"),
             "{out}"
@@ -1124,7 +1124,7 @@ mod tests {
         let out = render(&card("Hi. What are you working on?"), 60, PLAIN);
         assert_eq!(
             out,
-            "Io · AI answer -- Io running on Claude Code (local). Read: your question, the folder's path; nothing was run.\nHi. What are you working on?\n"
+            "Io -- Io running on Claude Code (local). Read: your question, the folder's path; nothing was run.\nHi. What are you working on?\n"
         );
         let mut c = card("");
         c.body = Body::Failed("`claude` is not signed in");
