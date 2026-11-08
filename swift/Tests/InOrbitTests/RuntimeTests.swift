@@ -106,7 +106,7 @@ final class RuntimeTests: XCTestCase {
         let client = try Client<Public>(options)
         let op = Codegen.Operation(name: "me", method: .get, path: "/v1/me", template: "/v1/me", scopes: [])
         do {
-            _ = try await client.call(op, options: CallOptions())
+            _ = try await client.core.call(op, options: CallOptions())
             XCTFail("an answer past 16 MiB was accepted")
         } catch let e as TooLargeError {
             XCTAssertTrue(e.message.contains("16 MiB"), e.message)

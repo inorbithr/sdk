@@ -41,7 +41,8 @@ public struct HTTPRequest: Sendable {
 extension HTTPRequest: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var description: String {
         let names = headers.keys.sorted().map { $0 == "authorization" ? "\($0): \(Secret.marker)" : $0 }
-        return "HTTPRequest(\(method.rawValue) \(url), headers: [\(names.joined(separator: ", "))], body: \(body?.count ?? 0) bytes)"
+        let shown = names.joined(separator: ", ")
+        return "HTTPRequest(\(method.rawValue) \(url), headers: [\(shown)], body: \(body?.count ?? 0) bytes)"
     }
 
     public var debugDescription: String { description }
