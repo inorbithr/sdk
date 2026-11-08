@@ -4,7 +4,7 @@
 //! ([`crate::session::link`]) and the host does the rest.
 
 #[cfg(unix)]
-pub(crate) use unix::{enter, open, start_host, stop};
+pub(crate) use unix::{data_dir, enter, open, start_host, stop};
 
 #[cfg(not(unix))]
 pub(crate) use other::{enter, open, start_host, stop};
@@ -29,6 +29,7 @@ mod unix {
     use crate::session::lifecycle::Paths;
     use crate::session::link::{self, Stopped};
     use crate::session::queue::Task;
+    use crate::session::turn::{self, Globals};
 
     /// How long `iohr session` waits for a host it started to answer: the host signs in and
     /// checks its runner before it listens.
@@ -49,11 +50,15 @@ mod unix {
     /// The host's files for `project`: below `--data-dir` (`IOHR_DATA_DIR`), else the
     /// platform's data directory, the one extensions use.
     fn paths_for(g: &Global, project: &Path) -> Result<Paths, Error> {
-        let data = match &g.data_dir {
-            Some(d) => d.clone(),
-            None => Store::data_root().map_err(|e| Error::Failed(e.to_string()))?,
-        };
-        Ok(Paths::for_project(&data, project))
+        Ok(Paths::for_project(&data_dir(g)?, project))
+    }
+
+    /// The iohr data folder the hosts keep their files below.
+    pub(crate) fn data_dir(g: &Global) -> Result<PathBuf, Error> {
+        match &g.data_dir {
+            Some(d) => Ok(d.clone()),
+            None => Store::data_root().map_err(|e| Error::Failed(e.to_string())),
+        }
     }
 
     /// The Roles a project hosts: the packs it holds, else what its language selects.
@@ -89,14 +94,23 @@ mod unix {
         }
     }
 
-    /// What a Role does with a task in this slice: nothing yet. The turn itself (`claude -p`
-    /// through the runner's turn function) is the next slice, so a task fails with that said
-    /// plainly instead of looking done.
-    fn no_turn_yet(task: &Task, role: &str) -> Result<String, String> {
-        Err(format!(
-            "Role {role} cannot run task {} yet: its turn handler is not built (RFC 0213, next slice)",
-            task.id
-        ))
+    /// The flags a Role's turn carries from this host: its profile, environment and data
+    /// folder, so a turn runs where the host does.
+    fn globals_of(g: &Global) -> Globals {
+        let mut v: Vec<OsString> = Vec::new();
+        if let Some(p) = &g.profile {
+            v.push("--profile".into());
+            v.push(p.as_str().into());
+        }
+        if let Some(e) = &g.env {
+            v.push("--env".into());
+            v.push(e.into());
+        }
+        if let Some(d) = &g.data_dir {
+            v.push("--data-dir".into());
+            v.push(d.into());
+        }
+        Globals(v)
     }
 
     /// Starts the host for `project` on a thread of this process. `on_end` runs when it ends
@@ -110,15 +124,26 @@ mod unix {
         let project = project_dir(Some(project))?;
         let paths = paths_for(g, &project)?;
         let roles = host_roles(&project);
+        let globals = globals_of(g);
+        let exe = std::env::current_exe()
+            .map_err(|e| Error::Failed(format!("cannot find this program: {e}")))?;
         let stop = Arc::new(AtomicBool::new(false));
         let (told, heard) = mpsc::channel::<Result<(), String>>();
         let thread = {
             let (stop, told) = (stop.clone(), told.clone());
             std::thread::spawn(move || {
+                // A Role's turn is `iohr ask --role` as a child of this host (RFC 0213, S2).
+                let turn = |task: &Task, role: &str| {
+                    let result = turn::run(&exe, &globals, task, role, &stop);
+                    if let Ok(reply) = &result {
+                        turn::keep_notes(&project, task, role, reply);
+                    }
+                    result
+                };
                 let result = host::serve(
                     &paths,
                     &roles,
-                    &no_turn_yet,
+                    &turn,
                     &stop,
                     Options::default(),
                     |recovered| {
@@ -318,7 +343,7 @@ mod unix {
             }));
         }
         Out::note(&format!(
-            "session open: host {} runs {} Role(s) ({}); S1: no tasks are accepted yet, and a claimed task fails \"not built\"; Ctrl-C leaves, the host stops when the last session has left",
+            "session open: host {} runs {} Role(s) ({}); a `?` here is answered by every Role too, one card each; Ctrl-C leaves, the host stops when the last session has left",
             joined.host_pid,
             roles.len(),
             roles.join(", ")
