@@ -428,7 +428,7 @@ const STOPWORDS: &[(&str, &[&str])] = &[
     (
         "de",
         &[
-            "der", "die", "und", "das", "ist", "nicht", "mit", "für", "ein", "eine", "wir", "sie",
+            "der", "die", "und", "das", "nicht", "mit", "für", "eine", "wir", "dass", "auch",
         ],
     ),
     (
@@ -668,9 +668,9 @@ mod tests {
 
     #[test]
     fn the_language_is_guessed_when_the_page_does_not_say() {
-        let de = "<body><p>Wir bauen Roboter für die Lagerhaltung und das ist nicht einfach, \
-                  aber wir sind sicher, dass die Kunden mit der Lösung ein Ziel erreichen und \
-                  sie nutzen das System für eine lange Zeit mit uns und mit der Welt.</p></body>";
+        let de = "<body><p>Wir bauen Roboter für die Lagerhaltung und das war nicht einfach, \
+                  aber wir sind sicher, dass die Kunden mit der Lösung das Ziel erreichen und \
+                  nutzen das System für eine lange Zeit mit uns und mit der Welt.</p></body>";
         let p = clean(de, &Url::parse("https://a.example/").unwrap());
         assert_eq!(p.lang, "de");
         let none = clean(
