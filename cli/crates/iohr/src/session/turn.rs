@@ -250,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_returns_the_childs_answer_and_runs_unrouted_in_the_folder() {
+    fn a_turn_returns_the_child_answer_and_runs_unrouted_in_the_folder() {
         let dir = tempfile::tempdir().unwrap();
         let exe = script(
             dir.path(),
