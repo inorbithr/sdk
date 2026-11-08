@@ -1139,8 +1139,10 @@ pub(crate) mod tests {
             let text = std::fs::read_to_string(dir.join(script)).unwrap();
             let value = |key: &str| {
                 text.lines()
-                    .find_map(|l| l.trim().strip_prefix(key))
-                    .map(|v| v.trim_matches(['"', '\''].as_slice()).to_owned())
+                    .find_map(|l| {
+                        let v = l.trim().strip_prefix(key)?;
+                        Some(v.trim_matches(['"', '\''].as_slice()).to_owned())
+                    })
                     .unwrap_or_else(|| panic!("{script} sets no {key}"))
             };
             assert_eq!(value(identity), IOHR_RELEASE_IDENTITY, "{script}");
