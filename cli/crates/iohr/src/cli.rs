@@ -479,7 +479,7 @@ pub enum Command {
     /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
     #[command(subcommand)]
     Shell(ShellCommand),
-    /// The InOrbit app's terminal look for Terminal.app and zsh: themes, profile, prompt.
+    /// The app's terminal look for Terminal.app and zsh
     ///
     /// `iohr theme list` shows the themes (the app's own, generated from it); `iohr theme
     /// install NAME` writes the Terminal.app profile under ~/.inorbit/term and remembers the

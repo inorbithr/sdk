@@ -149,6 +149,7 @@ pub const RESERVED: &[&str] = &[
     "shell",
     "stop",
     "sync",
+    "theme",
     "token",
     "tunnel",
     "upgrade",

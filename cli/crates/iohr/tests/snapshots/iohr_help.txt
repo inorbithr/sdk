@@ -37,6 +37,7 @@ Agents:
   asks         Read and answer the asks waiting for you: list, show, deny, question
   permissions  Rules for what Io may run or open when you ask it something
   shell        Shell integration: `? question` at your prompt asks your AI agent
+  theme        The app's terminal look for Terminal.app and zsh
   runner       Run coordinator turns on this machine
   session      Open this project's session: one process hosts its Roles while iohr is open
   stop         Stop this project's session host
