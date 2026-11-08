@@ -114,6 +114,7 @@ impl Workload {
     }
 
     /// The time cell: "needs you", "idle 18 min", "4 min ago", or what the source said.
+    #[cfg(any(unix, test))]
     pub(super) fn right(&self) -> String {
         if let Some(r) = &self.right {
             return r.clone();
@@ -128,6 +129,7 @@ impl Workload {
     }
 
     /// The `Since` line: the time cell, what it runs on, and where it sits.
+    #[cfg(unix)]
     pub(super) fn since(&self) -> String {
         let mut parts = vec![self.right()];
         if !self.sub.is_empty() {
@@ -141,6 +143,7 @@ impl Workload {
 }
 
 /// "just now", "14 min", "3 h".
+#[cfg(any(unix, test))]
 fn span(m: u64) -> String {
     match m {
         0 => "just now".to_owned(),
