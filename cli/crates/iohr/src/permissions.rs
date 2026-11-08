@@ -83,6 +83,8 @@ use rule::Rule;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Grant {
     /// Allowed this time; nothing saved.
+    // Only the unix broker builds it (off unix `iohr ask` has no live ask); every `match` still names it.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Once,
     /// Allowed, and a rule saved in the project file.
     Always,

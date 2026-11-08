@@ -631,14 +631,11 @@ pub(crate) fn end_from_inside() -> bool {
     proxy::end_from_inside()
 }
 
-#[cfg(not(unix))]
-pub(crate) fn end_from_inside() -> bool {
-    false
-}
-
 /// Off unix there is no pseudo-terminal to proxy: the live panel is not built, and the static
-/// designs (`--demo --variant rail|accordion|band`) still draw.
+/// designs (`--demo --variant rail|accordion|band`) still draw. `async` only to match the unix
+/// `live` the caller awaits.
 #[cfg(not(unix))]
+#[allow(clippy::unused_async)]
 async fn live(_g: &Global, _env: Env, _args: PanelArgs) -> Result<(), Error> {
     Err(Error::Failed(
         "the floating panel needs a unix terminal; `--demo --variant rail|accordion|band` draws the static designs".into(),
