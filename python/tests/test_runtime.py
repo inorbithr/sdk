@@ -89,7 +89,8 @@ def test_an_operation_never_prints_its_values() -> None:
         params=[("key_id", "param-1")],
     )
     for out in (repr(op), str(op), f"{op!r}"):
-        assert "value-1" not in out and "body-1" not in out and "param-1" not in out, out
+        for value in ("value-1", "body-1", "param-1"):
+            assert value not in out, out
         assert "keys.create" in out
 
 
@@ -111,7 +112,8 @@ def test_secrets_never_serialise() -> None:
         {}, {"token": "tok-1", "key_secret": "s3cr3t"}, Credential("code", "token"), None
     )
     for out in (repr(res), str(res), f"{res}"):
-        assert "tok-1" not in out and "s3cr3t" not in out, out
+        assert "tok-1" not in out, out
+        assert "s3cr3t" not in out, out
         assert "token" in out, out
 
 

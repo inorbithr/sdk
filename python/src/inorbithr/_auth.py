@@ -64,9 +64,13 @@ class Token:
         cls, source: type[Any], handler: GetCoreSchemaHandler
     ) -> core_schema.CoreSchema:
         """Pydantic's JSON form: the marker in place of the token."""
-        schema = handler(source)
-        schema["serialization"] = core_schema.plain_serializer_function_ser_schema(cls._json)
-        return schema
+        return cast(
+            "core_schema.CoreSchema",
+            {
+                **handler(source),
+                "serialization": core_schema.plain_serializer_function_ser_schema(cls._json),
+            },
+        )
 
     def _json(self) -> dict[str, object]:
         return {"access": _REDACTED, "expires_at": self.expires_at}
