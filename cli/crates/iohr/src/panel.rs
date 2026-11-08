@@ -611,6 +611,7 @@ pub(crate) fn bare_enters(_: &Global) -> bool {
 /// top right corner of the screen (ADR 0225), and a fresh terminal prints this note in those very
 /// rows, so the box would paint over the cause it is there to give. A terminal first scrolls the
 /// corner away: the note starts below the box and its shadow. Off a terminal it is the plain note.
+#[cfg(unix)]
 pub(crate) fn note_below_the_box(line: &str) {
     use std::io::{IsTerminal as _, Write as _};
     let mut err = std::io::stderr().lock();
@@ -622,6 +623,7 @@ pub(crate) fn note_below_the_box(line: &str) {
 
 /// The rows the idle box and its shadow cover from the top of the screen: three for the box,
 /// one for the shadow under it.
+#[cfg(unix)]
 const CORNER_ROWS: usize = 4;
 
 /// The key the static designs name: the live panel's own choice for this terminal.
