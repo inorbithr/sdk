@@ -39,6 +39,7 @@ use inorbithr::Method;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
+use super::host_action::v1::HOST_ACTION_V1;
 use super::host_action::{self, ArgvRunner, HOST_ACTION};
 use super::private;
 use super::service::{HttpService, ServiceError};
@@ -334,14 +335,15 @@ pub(crate) fn check_action(
     runner_id: &str,
     effect: &str,
 ) -> Result<(), String> {
-    if schema_id != HOST_ACTION {
-        return Err(format!("schema_id: only {HOST_ACTION}"));
-    }
+    let validate = match schema_id {
+        HOST_ACTION => host_action::validate,
+        HOST_ACTION_V1 => host_action::v1::validate_v1,
+        _ => return Err(format!("schema_id: only {HOST_ACTION} or {HOST_ACTION_V1}")),
+    };
     if has_float(action) {
         return Err("action: integers and strings only".to_owned());
     }
-    host_action::validate(action)
-        .map_err(|at| format!("action: not a {HOST_ACTION} document (at {at})"))?;
+    validate(action).map_err(|at| format!("action: not a {schema_id} document (at {at})"))?;
     if payload_digest(action) != script_sha256 {
         return Err("script_sha256: not the SHA-256 of the action's canonical JSON".to_owned());
     }

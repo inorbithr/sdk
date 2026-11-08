@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use super::layer;
 use super::lock::{Entry, FILE, Lock};
-use super::manifest::{CONFIG_MEDIA_TYPE, LAYER_MEDIA_TYPE, MAX_MANIFEST, Manifest};
+use super::manifest::{
+    CONFIG_MEDIA_TYPE, CONFIG_MEDIA_TYPE_V2, LAYER_MEDIA_TYPE, MAX_MANIFEST, Manifest,
+};
 use super::oci::{Descriptor, Digest, INDEX, ImageManifest, Index, MANIFEST, Platform, Registry};
 use super::trust::{self, Policy, Verified};
 
@@ -161,6 +163,11 @@ pub async fn fetch(
     let verified = trust::verify(policy, &bundles)?;
 
     let manifest = Manifest::parse(&registry.blob(&repo, config, MAX_MANIFEST).await?)?;
+    if config.media_type == CONFIG_MEDIA_TYPE && !manifest.host_actions.is_empty() {
+        return Err(ExtError::Manifest(super::manifest::ManifestError(
+            "the manifest declares host actions, which only a v2 config carries".to_owned(),
+        )));
+    }
     if manifest.name != name {
         return Err(ExtError::Manifest(super::manifest::ManifestError(format!(
             "the artifact says it is {}, not {name}",
@@ -192,7 +199,7 @@ fn shape(image: &ImageManifest) -> Result<(&Descriptor, &Descriptor), ExtError> 
     if image.media_type.as_deref().is_some_and(|m| m != MANIFEST) {
         return Err(bad("the platform manifest is not an OCI image manifest"));
     }
-    if image.config.media_type != CONFIG_MEDIA_TYPE {
+    if ![CONFIG_MEDIA_TYPE, CONFIG_MEDIA_TYPE_V2].contains(&image.config.media_type.as_str()) {
         return Err(bad(
             "the artifact is not an iohr extension (its config media type)",
         ));

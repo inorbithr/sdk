@@ -79,12 +79,31 @@ impl Artifact {
         if !privileges.is_empty() {
             config["privileges"] = serde_json::json!(privileges);
         }
+        Self::from_config(
+            &config,
+            "application/vnd.inorbit.iohr.extension.config.v1+json",
+            program,
+        )
+    }
+
+    /// An artifact whose manifest declares `host_actions`, under the config media type
+    /// `config_type`.
+    fn acting(name: &str, host_actions: &serde_json::Value, config_type: &str) -> Self {
+        let config = serde_json::json!({
+            "name": name, "version": "1.0.0", "entrypoint": "bin/prog",
+            "scopes": [], "description": "a test extension",
+            "host_actions": host_actions,
+        });
+        Self::from_config(&config, config_type, b"prog")
+    }
+
+    fn from_config(config: &serde_json::Value, config_type: &str, program: &[u8]) -> Self {
         let config = config.to_string().into_bytes();
         let layer = tar_gz(&[("README", b'0', b"hi"), ("bin/prog", b'0', program)]);
         let manifest = serde_json::json!({
             "schemaVersion": 2,
             "mediaType": "application/vnd.oci.image.manifest.v1+json",
-            "config": {"mediaType": "application/vnd.inorbit.iohr.extension.config.v1+json",
+            "config": {"mediaType": config_type,
                        "digest": Digest::of(&config).as_str(), "size": config.len()},
             "layers": [{"mediaType": "application/vnd.inorbit.iohr.extension.layer.v1.tar+gzip",
                         "digest": Digest::of(&layer).as_str(), "size": layer.len()}]
@@ -590,6 +609,80 @@ async fn an_unsigned_or_stranger_signed_artifact_is_refused() {
             .all(|n| n.to_string_lossy() == "iohr-ext.lock"),
         "{leftovers:?}"
     );
+}
+
+fn restart_action() -> serde_json::Value {
+    serde_json::json!([{
+        "id": "agent.restart-worker",
+        "params": {"worker": {"type": "dns-label"}},
+        "os": ["linux", "macos", "windows"],
+        "effect": "Restarts worker {worker}.",
+        "timeout_secs": 60,
+    }])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn host_actions_install_only_from_a_v2_config_and_are_shown() {
+    let b = Box_::new().await;
+    let key = KeyPair::generate_ecdsa_p256().unwrap();
+    b.trust(&key);
+    let v1 = Artifact::acting(
+        "agent",
+        &restart_action(),
+        "application/vnd.inorbit.iohr.extension.config.v1+json",
+    );
+    publish(&b.server, "agent", "1.0.0", &v1, Some(&key)).await;
+    let o = b.run(&["ext", "install", "agent@1.0.0"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("only a v2 config"), "{}", text(&o));
+    nothing_installed(&b);
+
+    let v2 = Artifact::acting(
+        "worker",
+        &serde_json::json!([{
+            "id": "worker.restart",
+            "params": {"name": {"type": "dns-label"}},
+            "os": ["linux", "macos", "windows"],
+            "effect": "Restarts {name}.",
+            "timeout_secs": 60,
+        }]),
+        "application/vnd.inorbit.iohr.extension.config.v2+json",
+    );
+    publish(&b.server, "worker", "1.0.0", &v2, Some(&key)).await;
+    let o = b.run(&["ext", "install", "worker@1.0.0"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert!(
+        text(&o).contains("host actions  worker.restart (Restarts {name}.)"),
+        "{}",
+        text(&o)
+    );
+    let o = b.run(&["ext", "list", "--json"]);
+    assert_eq!(code(&o), 0, "{}", text(&o));
+    assert_eq!(
+        stdout_json(&o)[0]["host_actions"][0]["id"],
+        "worker.restart",
+        "{}",
+        text(&o)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_action_outside_the_rules_is_refused_at_install() {
+    let b = Box_::new().await;
+    let key = KeyPair::generate_ecdsa_p256().unwrap();
+    b.trust(&key);
+    let mut bad = restart_action();
+    bad[0]["params"]["worker"] = serde_json::json!({"type": "path"});
+    let a = Artifact::acting(
+        "agent",
+        &bad,
+        "application/vnd.inorbit.iohr.extension.config.v2+json",
+    );
+    publish(&b.server, "agent", "1.0.0", &a, Some(&key)).await;
+    let o = b.run(&["ext", "install", "agent@1.0.0"]);
+    assert_eq!(code(&o), 1, "{}", text(&o));
+    assert!(text(&o).contains("not valid"), "{}", text(&o));
+    nothing_installed(&b);
 }
 
 #[tokio::test(flavor = "multi_thread")]

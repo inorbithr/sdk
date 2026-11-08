@@ -1,0 +1,7 @@
+{
+  "provider": "builtin",
+  "action": "example.flush",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {},
+  "effect": "Flushes the example cache."
+}

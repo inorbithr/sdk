@@ -687,11 +687,12 @@ fn report(f: &Fetched, entry: &Entry, out: Out) {
             "name": m.name, "version": m.version, "digest": entry.digest,
             "signer": f.verified.signer.to_string(), "provenance": f.verified.provenance,
             "scopes": m.scopes, "privileges": m.privileges,
+            "host_actions": m.host_actions,
         }));
         return;
     }
     Out::note(&format!(
-        "Installed {} {} ({}).\n  signed by   {}\n  built from  {}\n  may ask for {}\n  privileges  {}\nRun it as `iohr {} ...`.",
+        "Installed {} {} ({}).\n  signed by   {}\n  built from  {}\n  may ask for {}\n  privileges  {}\n{}Run it as `iohr {} ...`.",
         m.name,
         m.version,
         entry.digest,
@@ -713,8 +714,22 @@ fn report(f: &Fetched, entry: &Entry, out: Out) {
                 m.privileges.join(", ")
             )
         },
+        host_action_line(&m.host_actions),
         m.name
     ));
+}
+
+/// `  host actions  <id> (<effect>), ...` and a line break, or nothing when it declares
+/// none: what the runner may be asked to run with this extension, once approved.
+fn host_action_line(actions: &[crate::ext::host_actions::HostAction]) -> String {
+    if actions.is_empty() {
+        return String::new();
+    }
+    let each: Vec<String> = actions
+        .iter()
+        .map(|a| format!("{} ({})", a.id, a.effect))
+        .collect();
+    format!("  host actions  {}\n", each.join(", "))
 }
 
 fn list(store: &Store, out: Out) -> Result<(), Error> {
@@ -729,6 +744,7 @@ fn list(store: &Store, out: Out) -> Result<(), Error> {
             "name": entry.name, "version": entry.version, "digest": entry.digest,
             "signer": record.signer, "provenance": record.provenance,
             "scopes": record.manifest.scopes, "privileges": record.manifest.privileges,
+            "host_actions": record.manifest.host_actions,
             "registry": record.registry,
             "installed_at": record.installed_at,
         }));

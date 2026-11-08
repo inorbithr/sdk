@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 /// The config media type of an extension artifact.
 pub const CONFIG_MEDIA_TYPE: &str = "application/vnd.inorbit.iohr.extension.config.v1+json";
+/// The config media type of an artifact whose manifest declares `host_actions`; a v1
+/// config never carries them.
+pub const CONFIG_MEDIA_TYPE_V2: &str = "application/vnd.inorbit.iohr.extension.config.v2+json";
 /// The media type of the one layer, a gzipped tar that holds the program.
 pub const LAYER_MEDIA_TYPE: &str = "application/vnd.inorbit.iohr.extension.layer.v1.tar+gzip";
 
@@ -211,6 +214,9 @@ pub struct Manifest {
     /// The screen it serves on a loopback address, for a host to show (RFC 0143).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel: Option<Panel>,
+    /// The actions it offers a runner's host, each approved before it runs (config v2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_actions: Vec<super::host_actions::HostAction>,
 }
 
 /// `[panel]`: a program extension that serves its screen over HTTP on a loopback address
@@ -550,7 +556,18 @@ impl Manifest {
                 "an artifact's config keeps scopes and privileges at its top level".into(),
             ));
         }
+        super::host_actions::check_all(&self.host_actions, &self.name)?;
         self.check_runtime()
+    }
+
+    /// The config media type its artifact carries: v2 when it declares host actions.
+    #[must_use]
+    pub fn config_media_type(&self) -> &'static str {
+        if self.host_actions.is_empty() {
+            CONFIG_MEDIA_TYPE
+        } else {
+            CONFIG_MEDIA_TYPE_V2
+        }
     }
 
     /// The rules of the fields a runtime reads (PRD 0084).
@@ -1068,6 +1085,9 @@ pub struct SourceManifest {
     /// See [`Manifest::panel`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel: Option<Panel>,
+    /// See [`Manifest::host_actions`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_actions: Vec<super::host_actions::HostAction>,
     /// How `iohr ext dev` runs it while it is being built.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dev: Option<Dev>,
@@ -1172,6 +1192,7 @@ impl SourceManifest {
             targets: self.targets.clone(),
             upgrade: self.upgrade.clone(),
             panel: self.panel.clone(),
+            host_actions: self.host_actions.clone(),
         };
         m.check()?;
         Ok(m)

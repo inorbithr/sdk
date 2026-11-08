@@ -82,6 +82,7 @@ mod disk_prune;
 mod install_checks;
 mod labs_reattribute;
 mod runner_scale;
+pub(crate) mod v1;
 
 /// The schema a run's `schema_id` names.
 pub(crate) const HOST_ACTION: &str = "runner/host-action/v0";
@@ -100,6 +101,27 @@ pub(crate) const INSTALL_CHECKS: &str = "agent.install-checks";
 pub(crate) const DISK_PRUNE: &str = "disk.prune";
 pub(crate) const RUNNER_SCALE: &str = "helm.runner-scale";
 pub(crate) const REATTRIBUTE_DOCUMENT: &str = "labs.reattribute-document";
+
+/// Whether `id` is one of the runner's own actions: no extension may declare it.
+pub(crate) fn is_builtin(id: &str) -> bool {
+    matches!(
+        id,
+        DELETE_FAILED_PODS
+            | ROLLOUT_RESTART
+            | USER_RESTART
+            | PRUNE_IMAGES
+            | CANCEL_RUN
+            | UPGRADE
+            | PREVIEW_TAKE
+            | ROLL_TASK
+            | SWEEP_TARGETS
+            | RELEASE_RERUN
+            | INSTALL_CHECKS
+            | DISK_PRUNE
+            | RUNNER_SCALE
+            | REATTRIBUTE_DOCUMENT
+    )
+}
 /// Core's task the action runs.
 pub(crate) const LABS_REATTRIBUTE: &str = "labs:reattribute";
 
@@ -141,7 +163,7 @@ const MAX_RUN_ID: u64 = 9_007_199_254_740_991;
 const REPO_OWNER: &str = "inorbithr/";
 
 /// `^[a-z0-9]+(-[a-z0-9]+)*$`: one word of an action id.
-fn is_word(s: &str) -> bool {
+pub(crate) fn is_word(s: &str) -> bool {
     !s.is_empty()
         && s.split('-').all(|part| {
             !part.is_empty()
@@ -251,7 +273,7 @@ fn is_sweep_mode(s: &str) -> bool {
 }
 
 /// The effect sentence: 1 to 200 characters, no control character.
-fn is_effect(s: &str) -> bool {
+pub(crate) fn is_effect(s: &str) -> bool {
     let n = s.chars().count();
     (1..=200).contains(&n)
         && !s

@@ -3,6 +3,7 @@
 //! channel and never its refresh token (ADR 0012, platform RFC 0028).
 
 pub(crate) mod dev;
+pub mod host_actions;
 pub mod init;
 pub mod install;
 pub mod layer;
