@@ -678,7 +678,8 @@ fn on_a_colour_terminal_the_ask_is_an_io_card_that_starts_on_no() {
         "{screen}"
     );
     assert!(!screen.contains("Allowed always"), "{screen}");
-    let card_at = screen.find("AI answer").unwrap_or_default();
+    // The answer card is the last Io header on the screen (the permission ask came before it).
+    let card_at = screen.rfind("\u{25c6} Io").unwrap_or_default();
     assert!(
         screen
             .find("allowed in this project from now on")

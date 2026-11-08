@@ -244,7 +244,7 @@ fn plain_prints_only_the_answer_and_the_ai_label_is_one_line_on_stderr() {
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
     assert_eq!(err.lines().count(), 1, "{err}");
     assert!(
-        err.contains("Io · AI answer -- Io running on Claude Code (local)"),
+        err.contains("Io -- Io running on Claude Code (local)"),
         "{err}"
     );
     assert!(err.contains("your own subscription"), "{err}");

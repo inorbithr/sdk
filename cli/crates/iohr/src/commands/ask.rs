@@ -333,7 +333,7 @@ fn menu(g: &Global, args: &AskArgs) -> Result<(), Error> {
         .step
         .iter()
         .filter_map(|s| Step::decode(s))
-        .take(steps::MAX)
+        .take(steps::OFFERED)
         .collect();
     let next = actions::Next {
         allow,
@@ -1508,7 +1508,12 @@ fn draw_answer(
                 undo,
                 attach,
             };
-            actions::row(menu_key, command.is_some(), has, next)
+            actions::row(
+                menu_key,
+                actions::Offer::of(command.as_deref(), cwd),
+                has,
+                next,
+            )
         })
         .flatten();
     let card = Card {

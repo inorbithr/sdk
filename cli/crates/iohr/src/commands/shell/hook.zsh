@@ -13,8 +13,10 @@
 # secrets redacted, and the card lists it. Under an answer, the Down arrow
 # on an empty line (`[ask] menu_key`) opens a menu: Run puts the answer's command on the
 # prompt line for you to read and run with Enter, Copy, Follow up, Explain, Open. Nothing
-# in the menu runs a command without that yes. An empty Enter keeps the card, so the key still
-# works; running a command ends it.
+# in the menu runs a command without that yes. A question the menu picks (a next step,
+# Explain, Allow) is asked at once, with no second Enter; Follow up leaves `?? ` on the line
+# for you to finish. An empty Enter keeps the card, so the key still works; running a command
+# ends it.
 #
 # The mode of the answers (PRD 0197): manual (ask before each command), plan (read only, a plan
 # and no command) or auto (run what your rules do not forbid, without asking). Shift+Tab on a
@@ -60,8 +62,9 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
 
   # The menu under the answer. It is only ever a key on an empty line after an answer; with
   # text on the line, or no answer, the key does what it did before. The menu draws on the
-  # terminal and prints at most one line, which goes to the buffer: `iohr` never runs it, the
-  # line is only run when you press Enter (it is set in BUFFER and nowhere else).
+  # terminal and prints at most one line; `iohr` never runs it. Run's command (after the menu's
+  # yes when it is risky) and a whole `?` or `??` question are handed to accept-line at once;
+  # anything else (a bare `?? `, to finish) stays in the buffer.
   _iohr_card_action() {
     if [[ -z $_iohr_ask_live || -n $BUFFER ]]; then
       zle ${_iohr_card_prev[$KEYMAP]:-down-line-or-history}
@@ -80,8 +83,20 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
         extra+=(--failed-command "$_iohr_ask_failcmd" --failed-exit "$_iohr_ask_failrc" --output-to "$to")
     fi
     out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" --undo="$_iohr_ask_undo" "${extra[@]}" </dev/tty 2>/dev/tty)
-    # Attached output came back as `? question` 0x1e kind; the file is read by the next ask.
-    if [[ -n $to ]]; then
+    # Run came back as `command` 0x1e run: the command is the person's choice (the menu asked
+    # first when it must), so it goes through accept-line like a line they typed.
+    if [[ $out == *${rs}run ]]; then
+      out=${out%${rs}run}
+      [[ -n $to ]] && command rm -f -- "$to"
+      if [[ -n $out && $out != *$'\n'* ]]; then
+        BUFFER=$out
+        CURSOR=${#BUFFER}
+        zle accept-line
+        return
+      fi
+      out=
+    elif [[ -n $to ]]; then
+      # Attached output came back as `? question` 0x1e kind; the file is read by the next ask.
       if [[ $out == *$rs* && -s $to ]]; then
         [[ -n $_iohr_ask_outfile ]] && command rm -f -- "$_iohr_ask_outfile"
         _iohr_ask_outfile=$to _iohr_ask_outkind=${out#*$rs}
@@ -94,6 +109,15 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     if [[ -n $out ]]; then
       BUFFER=$out
       CURSOR=${#BUFFER}
+      # A chosen `?` or `??` question (a step, Explain, Allow, an attached output) is asked at
+      # once: the line is the one this hook already takes for a question, and no shell ever
+      # sees it. `zle accept-line` is our own widget (it empties the buffer and chains to the
+      # shell's), so this cannot loop. Anything else stays in the buffer for you to finish or
+      # run with Enter: a bare `?? ` (Follow up), `iohr asks list`.
+      if [[ ${INORBIT_ASK-} != 0 && $BUFFER != *$'\n'* && $BUFFER =~ $_iohr_ask_re ]]; then
+        zle accept-line
+        return
+      fi
     fi
     zle reset-prompt
   }

@@ -512,7 +512,8 @@ pub(crate) struct Look {
     /// A run nobody watches live (`iohr project init`): without the drawn look, still print one
     /// plain row per tool and the footer, on stderr, so a log shows what the agent did.
     pub(crate) rows: bool,
-    /// What the footer says the AI made: `AI answer` when unset.
+    /// What the footer says the AI made (`AI-built` for a project); nothing when unset, the Io
+    /// name in the card header is the notice.
     pub(crate) made: Option<&'static str>,
     /// The live view of a run a person waits on (`iohr project init`), only with `fancy`: a
     /// spinner on the tool that runs now, a check mark row for each tool that finished, and the
@@ -814,7 +815,9 @@ impl<O: Write, E: Write> Renderer<O, E> {
             if let Some(t) = d.thinking_tokens.filter(|t| *t > 0) {
                 parts.push(format!("{t} thinking tokens"));
             }
-            parts.push(self.look.made.unwrap_or("AI answer").to_owned());
+            if let Some(made) = self.look.made {
+                parts.push(made.to_owned());
+            }
             let _ = writeln!(
                 self.err,
                 "{}",
@@ -1416,7 +1419,6 @@ mod tests {
             "\u{23fa} Read README.md",
             "\u{2502} a thought",
             "haiku",
-            "AI answer",
             "1.2s",
             "3 turns",
             "$0.0123",
@@ -1426,6 +1428,10 @@ mod tests {
                 "{want} in {err:?}"
             );
         }
+        assert!(
+            !console::strip_ansi_codes(&err).contains("AI answer"),
+            "the Io name is the notice: {err:?}"
+        );
     }
 
     #[test]
