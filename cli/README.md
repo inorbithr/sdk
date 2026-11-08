@@ -28,7 +28,8 @@ and what would run). It follows how iohr was installed: a Homebrew copy runs
 `brew upgrade inorbithr/tap/iohr` (and tells you to run `brew trust inorbithr/tap` when
 Homebrew refuses the tap); a copy from `install.sh` is downloaded, checked against the
 release's `SHA256SUMS` and its GitHub build attestation (checked inside iohr, so the GitHub
-CLI is not needed, and a release without one is refused), and replaced in place; an APT or
+CLI is not needed; a release without one, or signed by anything but this repository's
+release workflow on `main`, is refused), and replaced in place; an APT or
 other copy is told what to run. The Homebrew tap can lag a release until its formula pull
 request is merged.
 
@@ -39,7 +40,8 @@ stable one ([releasing](../docs/releasing.md)). The
 installers ([install.sh](install/install.sh), [install.ps1](install/install.ps1)) are short
 enough to read first: each downloads the archive for your machine from the GitHub release,
 refuses it unless its SHA-256 matches the release's `SHA256SUMS` (and, with the GitHub CLI
-signed in, unless its build attestation checks), and copies one binary into your user
+signed in, unless its build attestation names this repository's release workflow on
+`main`; without it, they say that only the checksum was checked), and copies one binary into your user
 directory. Every release also has archives, `.deb` and `.msi` files with provenance and
 SBOMs ([verifying releases](../docs/security/verifying-releases.md)). From source:
 

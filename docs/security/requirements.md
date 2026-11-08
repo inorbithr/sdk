@@ -210,12 +210,20 @@ checked against its SHA-256 digest and declared size. An artifact is installed o
 with a signature and SLSA provenance from InOrbit's release workflow (Sigstore keyless:
 Fulcio certificate chain, SCT, Rekor entry, identity
 `https://github.com/inorbithr/<repo>/.github/workflows/release.yml@refs/tags/*`, issuer
-`https://token.actions.githubusercontent.com`, provenance naming the same repository),
-or with a signature by a public key in `ext.trusted_keys`. Every installed program is
-re-hashed before it runs. No option skips a check.
+`https://token.actions.githubusercontent.com`, Fulcio's build signer, source repository
+and source ref claims agreeing with that identity, signature and provenance under one
+identity, the provenance agreeing with the certificate, and the repository the one the
+extension is named after), or with a signature by a public key in `ext.trusted_keys`.
+The `iohr` release archives (`iohr upgrade`, the runner, the installers) are accepted
+only from exactly `https://github.com/inorbithr/sdk/.github/workflows/release.yml@refs/heads/main`
+with the source ref `refs/heads/main`. Every installed program is re-hashed before it
+runs. No option skips a check.
 - Why: the registry and any mirror in between are not trusted; the release workflow is.
 - Verify: unit tests against a real Sigstore bundle (accepted for its own signer,
-  refused for another identity, a tampered signature or another digest); integration
+  refused for another identity, a tampered signature or another digest), unit tests for
+  certificate claims and provenance that disagree with the identity, another branch or
+  tag of the `iohr` release workflow, and a repository not named after the extension, and
+  a test that holds the installers to the release identity; integration
   tests for a tampered blob, an unsigned artifact, a stranger's key and a program
   changed on disk.
 - Refs: SSDF PS.2, PW.4; CRA I.2(a), I.2(f); SLSA Build L3 (consumer side).
