@@ -12,7 +12,9 @@ use crate::Env;
 use crate::cli::{
     CoordinatorAsksCommand, CoordinatorCommand, CoordinatorJobsCommand, Global, SignIn,
 };
-use crate::context::{Ctx, Session, io_session, quiet_session, session};
+#[cfg(unix)]
+use crate::context::quiet_session;
+use crate::context::{Ctx, Session, io_session, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::planner::scoped;
@@ -193,6 +195,7 @@ fn items(v: &Value, key: &str) -> Result<Vec<Value>, Error> {
 
 /// The coordinator's picture (`GET /v1/coordinator/picture`, the snapshot the Mac app reads),
 /// quietly: no prompt and no output, for the terminal panel's Workloads.
+#[cfg(unix)]
 pub(crate) async fn picture(g: &Global, env: &Env) -> Result<Value, Error> {
     let s = quiet_session(g, env).await?;
     s.api

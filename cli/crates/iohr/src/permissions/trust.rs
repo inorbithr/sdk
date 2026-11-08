@@ -126,6 +126,7 @@ fn shown(folder: &Path) -> String {
 
 /// How the card names the folder it asks about: "your home folder", else the folder's own
 /// name (the card's other line holds the full path).
+#[cfg(any(unix, test))]
 #[must_use]
 pub(crate) fn place_of(folder: &Path, home: Option<&Path>) -> String {
     if crate::headless::is_home(folder, home) {
