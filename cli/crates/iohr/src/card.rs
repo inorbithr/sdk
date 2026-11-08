@@ -22,6 +22,12 @@ const RAIL: &str = "│  ";
 /// The braille spinner, one frame per tick.
 const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// The spinner's frame for a tick: the one frame set the card, the terminal panel and its chat
+/// box all draw.
+pub(crate) fn spinner(frame: usize) -> &'static str {
+    FRAMES[frame % FRAMES.len()]
+}
+
 /// A colour as red, green, blue.
 pub(crate) type Rgb = (u8, u8, u8);
 
@@ -950,7 +956,7 @@ pub(crate) fn say(line: &str) {
 
 /// One spinner frame on stderr, over the line before it.
 pub(crate) fn spin(frame: usize, elapsed: Duration, agent: &str, look: Look) {
-    let f = FRAMES[frame % FRAMES.len()];
+    let f = spinner(frame);
     let mut err = std::io::stderr().lock();
     if PAUSED.load(std::sync::atomic::Ordering::SeqCst) {
         return;

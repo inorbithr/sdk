@@ -28,6 +28,8 @@ mod workloads;
 #[cfg(unix)]
 mod cells;
 #[cfg(unix)]
+mod chat;
+#[cfg(unix)]
 mod input;
 #[cfg(unix)]
 mod model;
