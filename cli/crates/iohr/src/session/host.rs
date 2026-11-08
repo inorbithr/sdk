@@ -49,6 +49,27 @@ pub(crate) struct Options {
     pub(crate) pace: Pace,
     /// A host nobody joined within this long ends (its starter died).
     pub(crate) first_join: Duration,
+    /// The process that started this host (its parent then). A host nobody has joined ends
+    /// as soon as that process is gone, not [`Self::first_join`] later: a shell killed
+    /// between starting the host and joining it leaves nobody to join.
+    pub(crate) starter: Option<i32>,
+}
+
+impl Options {
+    /// The options of a host started by the process that is its parent now.
+    pub(crate) fn started_by_parent() -> Self {
+        Self {
+            starter: rustix::process::getppid().map(rustix::process::Pid::as_raw_pid),
+            ..Self::default()
+        }
+    }
+
+    /// Whether the starter is gone: this process was handed to another parent.
+    fn starter_gone(&self) -> bool {
+        self.starter.is_some_and(|starter| {
+            rustix::process::getppid().map(rustix::process::Pid::as_raw_pid) != Some(starter)
+        })
+    }
 }
 
 impl Default for Options {
@@ -56,6 +77,7 @@ impl Default for Options {
         Self {
             pace: Pace::default(),
             first_join: Duration::from_secs(30),
+            starter: None,
         }
     }
 }
@@ -119,7 +141,7 @@ where
     let result = std::thread::scope(|scope| {
         let (listening, shared) = (&listener, &net);
         let acceptor = scope.spawn(move || {
-            accept(listening, &accept_queue, shared, options.first_join);
+            accept(listening, &accept_queue, shared, options);
         });
         let out = pool::run(&queue, roles, handler, stop, options.pace);
         // The Roles are done (whatever ended them): now the acceptor and every connection end.
@@ -161,7 +183,7 @@ impl Drop for Held<'_> {
     }
 }
 
-fn accept(listener: &UnixListener, queue: &Queue, net: &Net<'_>, first_join: Duration) {
+fn accept(listener: &UnixListener, queue: &Queue, net: &Net<'_>, options: Options) {
     let started = Instant::now();
     std::thread::scope(|scope| {
         while !net.down.load(Ordering::Relaxed) {
@@ -180,7 +202,9 @@ fn accept(listener: &UnixListener, queue: &Queue, net: &Net<'_>, first_join: Dur
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if !net.joined.load(Ordering::Relaxed) && started.elapsed() > first_join {
+                    if !net.joined.load(Ordering::Relaxed)
+                        && (started.elapsed() > options.first_join || options.starter_gone())
+                    {
                         net.stop.store(true, Ordering::SeqCst);
                     }
                     std::thread::sleep(Duration::from_millis(10));
@@ -332,6 +356,7 @@ mod tests {
                 poll: Duration::from_millis(5),
             },
             first_join,
+            starter: None,
         }
     }
 
@@ -356,11 +381,11 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let paths = Paths::in_dir(dir.path().join("h"));
             paths.create().unwrap();
-            Self::start_with(dir, paths, first_join, busy)
+            Self::start_with(dir, paths, first_join, busy, None)
         }
 
         fn start_in(dir: tempfile::TempDir, paths: Paths, first_join: Duration) -> Self {
-            Self::start_with(dir, paths, first_join, Duration::ZERO)
+            Self::start_with(dir, paths, first_join, Duration::ZERO, None)
         }
 
         fn start_with(
@@ -368,6 +393,7 @@ mod tests {
             paths: Paths,
             first_join: Duration,
             busy: Duration,
+            starter: Option<i32>,
         ) -> Self {
             let stop = std::sync::Arc::new(AtomicBool::new(false));
             let ran = std::sync::Arc::new(Mutex::new(Vec::new()));
@@ -389,7 +415,10 @@ mod tests {
                         &roles(),
                         &handler,
                         &stop,
-                        options(first_join),
+                        Options {
+                            starter,
+                            ..options(first_join)
+                        },
                         |_| {
                             let _ = ready_tx.send(());
                         },
@@ -620,6 +649,30 @@ mod tests {
         assert!(matches!(again, Err(HostError::AlreadyRunning)));
         // The first one is untouched.
         assert_eq!(link::running(&host.paths), Some(std::process::id()));
+    }
+
+    /// A host whose starter is gone ends at once when nobody joined, not after `first_join`.
+    #[test]
+    fn a_host_whose_starter_is_gone_and_nobody_joined_ends_at_once() {
+        // A pid that is not this process's parent: the starter is gone from the host's view.
+        let gone = Options {
+            starter: Some(i32::MAX),
+            ..options(LONG)
+        };
+        assert!(gone.starter_gone());
+        assert!(
+            !Options::started_by_parent().starter_gone(),
+            "the parent is still the parent"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path().join("h"));
+        paths.create().unwrap();
+        let host = Running::start_with(dir, paths, LONG, Duration::ZERO, gone.starter);
+        assert!(
+            host.ended(Duration::from_secs(5)).is_some(),
+            "the host outlived its starter with nobody joined"
+        );
+        assert!(!host.paths.sock.exists());
     }
 
     #[test]
