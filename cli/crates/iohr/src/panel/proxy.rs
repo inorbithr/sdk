@@ -663,6 +663,7 @@ impl Session {
                 }
             }
             Effect::Stop => self.proxy.stopped = true,
+            Effect::ChatToggle => self.proxy.chat.toggle(),
             Effect::Question { id, text } => {
                 if self.stub {
                     self.proxy.model.acted(Ok("stub: nothing was sent".into()));
