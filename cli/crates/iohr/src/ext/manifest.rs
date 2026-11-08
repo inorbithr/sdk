@@ -122,6 +122,7 @@ pub const RESERVED: &[&str] = &[
     "config",
     "connections",
     "connectors",
+    "context",
     "coordinator",
     "decisions",
     "domains",
