@@ -109,6 +109,9 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr openapi pull` | The OpenAPI document this credential sees, to `openapi.json` |
 | `iohr memory remember TEXT [--why W] [--ref PATH]... [--preference] [--pin] [--scope S] \| recall QUERY \| list \| forget ID \| check [--strict] \| drift [--remote] [--strict] \| sync [--dry-run] [--pull]` | Memory kept as files, local first: one Markdown file per memory in `.inorbit/memory/` (the project, committed), `~/.inorbit/memory/notes/` (you) or, with `[memory] sync = true`, your InOrbit account. No sign-in and no network except `sync`, `drift --remote` and `--scope account`. `check` finds dangling refs, a missing why, stale and never-confirmed, duplicate and uncovered topics; `drift` compares with the code (git) and the service; `sync` never overwrites |
 | `iohr atlas roles list \| import [--dry-run]` | The built-in roles in `atlas/roles/` and whether each is in your InOrbit account; `import` sends them (`--dry-run` prints the body and sends nothing) |
+| `iohr atlas search QUERY [--site S] [--limit N]` | The best chunks of the text of the sites you crawled, each with its page, heading path and offsets (local; `--json` for data) |
+| `iohr atlas facts [--site S] [--predicate P] [--grep TEXT]` | The facts of the site model, each with the chunk it came from |
+| `iohr atlas index [--pages] [--site S]` | The crawled sites with pages, chunks, words, entities, facts and links; `--pages` lists the pages |
 | `iohr sdk generate --lang rust\|typescript\|python\|go\|java\|csharp\|swift --for P... --out DIR` | A surface cut to what the profiles may call, into your repository, with `iohr.lock` beside the directory; `--from NAME=FILE` works offline, `--package` names the surface's package or namespace (Go, Java, C#), `--runtime` the runtime's name in your project, `--force` replaces a non-empty directory |
 | `iohr sdk config [--profile NAME] [--for TYPE]` | The configuration an SDK client built with `load` would use here: each setting with its source, the credential chain, the pipeline, what was ignored; secrets redacted; offline (below) |
 | `iohr sdk check [--lock FILE] [--files]` | Fetch every profile's document again and exit 1 with what moved when the cut changed; for CI, `IOHR_TOKEN_<PROFILE>` stands in for a profile |
@@ -539,6 +542,29 @@ was sent to InOrbit. Run iohr sync when you want it there." Without the `agent` 
 init says so in one line and offers to install it at a terminal. A crawl that fails does not
 fail init: it is a failed step with the extension's own error. The crawl day is the evidence
 time; the crawler records no per-page fetch time.
+
+#### The site knowledge base (PRD 0192)
+
+After the crawl, init reads the text of each HTML page it found, once, in a second pass that
+is separate from the crawl and does not change its rate: one request at a time, one a second,
+no redirect followed, 2 MB a page, within the same `--crawl-minutes`, and only pages the
+crawler read with a 200 answer. The HTML is kept in `.inorbit/crawl/<host>/pages/` (a copy
+under a week old is not asked for again, so a second init over the same site makes no request
+for it). The text is cleaned (main text, title, headings, links, language; blocks that repeat
+across the site are left out), cut along its headings into chunks of about 180 words with a
+word count and a stable id (`ch_...`) and its URL and character offsets, and indexed in one
+DuckDB file, `.inorbit/crawl/kb.duckdb`. Search is lexical (BM25 over a term table, heading and
+title words weigh more); there is no embedding model on this machine, and the crawl box and `--json` say
+`embeddings: stub` rather than pass a lexical score for a vector one.
+
+The site model, `.inorbit/crawl/<host>/model.jsonl`, holds entities (organizations, products,
+people, places, events, technologies, emails, phones, prices, profiles; from the page's own
+JSON-LD first, then patterns), sections with an extractive summary, and facts in the same shape
+as the page facts (`kind`, `site`, `url`, `crawled`) plus the chunk each came from. The crawl
+box adds the counts. `iohr atlas search|facts|index` read it, and `?` and `??` add the best five
+chunks for the question to what the model is given, as `<sources>` with each page URL and
+chunk id, so an answer about the site can name where it came from. All of it stays on this
+machine, gitignored, until you run `iohr sync`. A build that fails does not fail the crawl.
 
 ```sh
 iohr project init my-shop         # the coordinated template: a Planner plan comes with it

@@ -59,7 +59,7 @@ impl Plan {
     /// What a dry run says it would do.
     pub(crate) fn would(&self) -> String {
         format!(
-            "read {} on this machine with iohr-agent (up to {} pages or {} minutes; {}) into {DIR}/{}/, then write atlas facts and one memory entry; nothing is sent to InOrbit",
+            "read {} on this machine with iohr-agent (up to {} pages or {} minutes; {}) into {DIR}/{}/, read the text of each page once more (one request a second), then write atlas facts, a local knowledge base and one memory entry; nothing is sent to InOrbit",
             self.url.as_str(),
             self.pages,
             self.minutes,
@@ -87,7 +87,7 @@ pub(crate) fn consent(p: &Plan) -> String {
         " A link to another name in its domain is asked about, once per name, before it is followed; with no terminal none is followed (--crawl-subdomains follows them)."
     };
     format!(
-        "This reads the public pages of {scope} on this machine, with iohr-agent: at most one request a second, robots.txt followed, up to {} pages or {} minutes.{more} What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
+        "This reads the public pages of {scope} on this machine, with iohr-agent: at most one request a second, robots.txt followed, up to {} pages or {} minutes.{more} It then reads the text of each page it found once more, at the same pace, for a local search index. What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
         p.pages, p.minutes, p.name
     )
 }
@@ -877,7 +877,11 @@ pub(crate) async fn run(
         Err(e) => return failed(e),
     };
     let n = crawl.counts();
-    let text = summary(&p.name, &n, kept.facts, kept.memories);
+    let mut text = summary(&p.name, &n, kept.facts, kept.memories);
+    let model = read_text(ui, out, root, p, &crawl, &crawled).await;
+    if let Some(m) = &model {
+        text = m.within(&p.name, &text);
+    }
     if !out.json {
         ui.note("Crawl", &text);
     }
@@ -886,11 +890,68 @@ pub(crate) async fn run(
         "Crawl",
         "done",
         format!(
-            "read {} pages of {} on this machine; {} facts in {}, 1 memory entry; nothing was sent to InOrbit",
-            n.read, p.name, kept.facts, kept.study
+            "read {} pages of {} on this machine; {} facts in {}, 1 memory entry{}; nothing was sent to InOrbit",
+            n.read,
+            p.name,
+            kept.facts,
+            kept.study,
+            model.as_ref().map_or_else(String::new, |m| format!(
+                "; knowledge base: {} chunks, {} words, {} entities",
+                m.chunks, m.tokens, m.entities
+            )),
         ),
         "",
     )
+}
+
+/// The local knowledge base of the crawl (PRD 0192): the text of each page, cut into chunks,
+/// indexed, with the site model. It never fails the crawl: what went wrong is said, and the
+/// crawl's own record stands.
+async fn read_text(
+    ui: Ui,
+    out: Out,
+    root: &Path,
+    p: &Plan,
+    crawl: &Crawl,
+    crawled: &str,
+) -> Option<crate::kb::Report> {
+    let input: Vec<crate::kb::PageIn> = crawl
+        .pages
+        .iter()
+        .filter(|x| x.status == 200 && x.error.is_none())
+        .filter(|x| x.content_type.is_empty() || x.content_type.to_lowercase().contains("html"))
+        .map(|x| crate::kb::PageIn {
+            url: x.url.clone(),
+            title: x.title.clone(),
+            depth: x.depth,
+        })
+        .collect();
+    let sp = (!out.json && !input.is_empty())
+        .then(|| ui.step(&format!("Reading the text of {} pages", input.len())));
+    let opts = crate::kb::Opts {
+        deadline: Duration::from_secs(u64::from(p.minutes) * 60),
+        pace: crate::kb::fetch::PACE,
+        crawled: crawled.to_owned(),
+    };
+    let none = |_: usize, _: usize| {};
+    let built = crate::kb::build(root, &p.name, &input, &opts, &none).await;
+    match (built, sp) {
+        (Ok(r), sp) => {
+            if let Some(sp) = sp {
+                sp.clear();
+            }
+            Some(r)
+        }
+        (Err(e), sp) => {
+            let line = format!("The knowledge base was not built: {e}");
+            match sp {
+                Some(sp) => sp.fail(&line),
+                None if !out.json => ui.warn(&line),
+                None => {}
+            }
+            None
+        }
+    }
 }
 
 /// A host as a folder name: safe characters only.
