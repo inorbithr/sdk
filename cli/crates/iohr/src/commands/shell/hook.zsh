@@ -175,6 +175,9 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     fi
     zle ${_iohr_qm_prev[$KEYMAP]:-self-insert}
   }
+  # What the panel types instead of `?` when the box is folded (or too small to show): the
+  # question mark goes into the line, with no second report to the box.
+  _iohr_chat_qm_inline() { LBUFFER+='?'; }
 
   # The box's question, as the panel hands it over: the answer mode on the first line and the
   # `?` or `??` line on the second, in the private file; one Enter, no second one. A line on
@@ -346,6 +349,7 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
   # the same way. Both do nothing outside a panel with a box.
   zle -N _iohr_chat_qm
   zle -N _iohr_chat_send
+  zle -N _iohr_chat_qm_inline
   local _iohr_km _iohr_cur
   for _iohr_km in emacs viins; do
     if [[ -z ${_iohr_qm_prev[$_iohr_km]-} ]]; then
@@ -356,6 +360,7 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     fi
     bindkey -M $_iohr_km -- '?' _iohr_chat_qm
     bindkey -M $_iohr_km -- '^[[27771~' _iohr_chat_send
+    bindkey -M $_iohr_km -- '^[[27772~' _iohr_chat_qm_inline
   done
   unset _iohr_km _iohr_cur
 fi

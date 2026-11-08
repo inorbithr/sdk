@@ -26,6 +26,9 @@ pub(super) const MIN_ROWS: usize = 16;
 /// The key the proxy writes into the shell to deliver a question: one no keyboard sends, bound
 /// by the hook to the widget that reads the question from the private file.
 pub(super) const DELIVER: &[u8] = b"\x1b[27771~";
+/// What the proxy types into the shell instead of `?` when the box is not there to take it
+/// (folded, or the terminal too small): the shell puts a plain `?` on its line.
+pub(super) const INLINE_QM: &[u8] = b"\x1b[27772~";
 /// What the shell's reports start with.
 const PREFIX: &[u8] = b"\x1b]7771;chat;";
 /// The longest report body that is believed; a longer one is not ours.
@@ -280,6 +283,21 @@ impl Chat {
     /// Something on the box moves (the spinner, the clock, a delivery being waited on).
     pub(super) fn animating(&self) -> bool {
         self.available() && (self.run.is_some() || self.delivered.is_some())
+    }
+
+    /// A delivered question that showed no sign of starting within [`DELIVER_LIMIT`] (the key
+    /// was lost, or the shell was busy after all): the box takes questions again. Whether it
+    /// did.
+    pub(super) fn expire(&mut self, now: Instant) -> bool {
+        match self.delivered {
+            Some(at) if now.saturating_duration_since(at) >= DELIVER_LIMIT => {
+                self.delivered = None;
+                self.at_prompt = true;
+                self.sent = false;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn toggle(&mut self) {

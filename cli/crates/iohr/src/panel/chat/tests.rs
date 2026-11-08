@@ -287,6 +287,20 @@ fn a_delivered_question_that_never_starts_can_be_given_up() {
 }
 
 #[test]
+fn a_question_nobody_started_is_given_up_after_the_limit() {
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    chat.message(Msg::Focus, now());
+    let t = now();
+    typed(&mut chat, "hi\r");
+    assert!(!chat.expire(t), "not yet");
+    assert!(!chat.at_prompt);
+    assert!(chat.expire(t + DELIVER_LIMIT + Duration::from_millis(1)));
+    assert!(chat.at_prompt && chat.delivered.is_none());
+    assert!(!chat.expire(t + DELIVER_LIMIT * 2), "only once");
+}
+
+#[test]
 fn the_rest_box_is_four_rows_with_the_hint_row() {
     let mut chat = Chat::new(true, false);
     idle(&mut chat);
