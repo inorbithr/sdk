@@ -38,6 +38,10 @@ fn home(name: &str) -> PathBuf {
     let dir = PathBuf::from(format!("/tmp/iohr-live-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    // A bare `iohr` runs the person's own zsh, which with no rc file at all starts its
+    // new-user menu (Linux does; macOS ships one) and draws it over the panel. A one-line
+    // `.zshrc` keeps that away; `zsh -f` shells ignore it.
+    std::fs::write(dir.join(".zshrc"), "PS1='$ '\n").unwrap();
     dir
 }
 
