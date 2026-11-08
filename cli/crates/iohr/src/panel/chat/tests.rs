@@ -258,12 +258,12 @@ fn the_box_shows_only_once_the_shell_hook_has_reported() {
 }
 
 #[test]
-fn focus_while_hidden_brings_the_box_back_with_the_keys() {
+fn a_folded_box_does_not_take_the_question_mark() {
     let mut chat = Chat::new(true, true);
     idle(&mut chat);
     assert!(chat.folded());
     chat.message(Msg::Focus, now());
-    assert!(chat.open() && chat.focus);
+    assert!(chat.folded() && !chat.focus);
 }
 
 #[test]

@@ -328,10 +328,11 @@ impl Chat {
     pub(super) fn message(&mut self, msg: Msg, now: Instant) {
         match msg {
             Msg::Focus => {
-                if !self.enabled {
+                // A folded box leaves `?` to the line (the proxy types it back), so a person
+                // who hid the box still asks inline as before.
+                if !self.open() {
                     return;
                 }
-                self.hidden = false;
                 self.at_prompt = true;
                 if self.focus {
                     self.deeper = true;
