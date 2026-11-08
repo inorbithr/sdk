@@ -1363,6 +1363,20 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     );
     let programs = template::programs(tpl, &vals);
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
+    // The folder's context file for `?` and `??`: written once, never over a person's own.
+    if !a.no_io_md && !crate::iomd::has_file(&dir) {
+        let line = |v: &[String]| (!v.is_empty()).then(|| v.join(" "));
+        let (build, test) = runner
+            .as_ref()
+            .map_or((None, None), |r| (line(&r.build), line(&r.test)));
+        crate::iomd::add_starter(
+            &mut files,
+            name,
+            describe.as_deref(),
+            (build.as_deref(), test.as_deref()),
+            &me,
+        );
+    }
     // Reads only, so a dry run finds the same problems a real one would.
     project::check_target(&dir, &files).map_err(Error::Failed)?;
     // Init run again in the folder it made: files already there are left alone, nothing is
