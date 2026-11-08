@@ -992,6 +992,20 @@ never sent to your shell. At rest it asks for none, so the shell keeps normal dr
 click on the pill opens the menu and every other click goes through to the program) or `off` (no
 mouse at all).
 
+The chat box (RFC 0212, zsh only) is a framed box of four rows at the bottom of the terminal, kept
+clear of your shell's output by a scroll region. `?` at an empty prompt focuses it and `??` asks
+deeper; one Enter sends either (the question goes to your shell as if you had typed it, so it is in
+your history). While Io answers, the status row shows a spinner, what it is doing ("reading 3
+files"), a moving bar with the count and the time (the number of steps is not known, so it is not a
+percentage), and a `■ Stop esc` button; Esc or a click on it stops the answer, and Ctrl-C still
+does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, Esc
+clears the line, and a click on the mode chip changes the mode. `Ctrl-]` (or `^G` then `c`, or a
+click on `hide`) folds the box to a corner chip and brings it back; the chip is a click away, and
+`[panel] chat = "hidden"` or `"off"` (or `IOHR_PANEL_CHAT`) sets the start. `Ctrl-]` is zsh's
+find-character key and is rebound only inside the panel. A full-screen program has the whole
+screen: the box steps aside and comes back after it. While the box shows, the panel takes the
+mouse for its buttons, so select text with Option or Shift held.
+
 Bare `iohr` inside the panel prints one line, that the panel is on and which key
 opens the menu, and exits 0; after `iohr stop` it brings the panel back first. `iohr stop` inside the panel stops the session host and closes
 the panel with it; with no host running it says the panel is closed. If something cannot be read, the
