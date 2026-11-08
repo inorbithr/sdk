@@ -116,25 +116,34 @@ fn validate(json: &str) -> Vec<Question> {
         .collect()
 }
 
-/// Splits the model's answer into what is shown and the questions it asked: the last fenced
-/// ```` ```questions ```` block is removed from the text (even when it is broken or never
-/// closed: raw JSON is never shown) and validated. The text keeps everything else, trimmed.
-pub(crate) fn split(text: &str) -> (String, Vec<Question>) {
+/// Takes the last fenced block tagged `tag` out of `text`: the text without it (even when
+/// the block is never closed: raw block text is never shown), trimmed, and the block's lines.
+/// None when there is no such block.
+pub(crate) fn take_block(text: &str, tag: &str) -> (String, Option<String>) {
+    let fence = format!("```{tag}");
     let lines: Vec<&str> = text.lines().collect();
-    let opens = |l: &&str| l.trim().to_ascii_lowercase().starts_with("```questions");
+    let opens = |l: &&str| l.trim().to_ascii_lowercase().starts_with(&fence);
     let Some(open) = lines.iter().rposition(opens) else {
-        return (text.trim().to_owned(), Vec::new());
+        return (text.trim().to_owned(), None);
     };
     let close = lines[open + 1..]
         .iter()
         .position(|l| l.trim() == "```")
         .map(|i| open + 1 + i);
-    let json = lines[open + 1..close.unwrap_or(lines.len())].join("\n");
+    let body = lines[open + 1..close.unwrap_or(lines.len())].join("\n");
     let mut kept: Vec<&str> = lines[..open].to_vec();
     if let Some(c) = close {
         kept.extend(&lines[c + 1..]);
     }
-    (kept.join("\n").trim().to_owned(), validate(&json))
+    (kept.join("\n").trim().to_owned(), Some(body))
+}
+
+/// Splits the model's answer into what is shown and the questions it asked: the last fenced
+/// ```` ```questions ```` block is removed from the text (even when it is broken or never
+/// closed: raw JSON is never shown) and validated. The text keeps everything else, trimmed.
+pub(crate) fn split(text: &str) -> (String, Vec<Question>) {
+    let (kept, json) = take_block(text, "questions");
+    (kept, json.map(|j| validate(&j)).unwrap_or_default())
 }
 
 // ---- git facts ----

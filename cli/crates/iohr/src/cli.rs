@@ -105,6 +105,27 @@ pub struct Global {
     pub data_dir: Option<PathBuf>,
 }
 
+/// The global flags that take a value, as they are typed (`--profile`, `-p`), read from the
+/// definition above so a new one is never forgotten. Code that walks a raw command line
+/// uses it to tell a flag's value from the command (`iohr --profile session session`).
+#[must_use]
+pub fn global_value_flags() -> Vec<OsString> {
+    let command = Global::augment_args(clap::Command::new("iohr"));
+    let mut flags = Vec::new();
+    for arg in command.get_arguments() {
+        if !arg.get_action().takes_values() {
+            continue;
+        }
+        if let Some(long) = arg.get_long() {
+            flags.push(OsString::from(format!("--{long}")));
+        }
+        if let Some(short) = arg.get_short() {
+            flags.push(OsString::from(format!("-{short}")));
+        }
+    }
+    flags
+}
+
 /// Who signs in when it is not a person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SignIn {
@@ -210,6 +231,8 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "permissions",
             "shell",
             "runner",
+            "session",
+            "stop",
             "coordinator",
             "memory",
         ],
@@ -476,6 +499,26 @@ pub enum Command {
     /// installed `claude`, on your own subscription.
     #[command(subcommand)]
     Runner(RunnerCommand),
+    /// Open this project's session: one process hosts its Roles while iohr is open.
+    ///
+    /// Joins this project's session host (RFC 0213), starting it when none runs: one
+    /// `iohr runner run --session DIR` process per project that hosts its Roles and works from
+    /// a durable queue (a `DuckDB` file in iohr's data directory, so nothing is lost when it
+    /// stops or the machine restarts). The command stays open as the session and prints
+    /// nothing on stdout; Ctrl-C, SIGTERM or the terminal closing leaves it. The host stops
+    /// when the last session has left, or on `iohr stop`.
+    ///
+    /// Slice S1 of RFC 0213: no tasks are accepted from the server yet, and a task a Role
+    /// claims fails with "not built". The host, its Roles, the durable queue and the session
+    /// link work; `iohr ask --work` and the real handler come next.
+    Session(SessionArgs),
+    /// Stop this project's session host.
+    ///
+    /// Tells the project's session host to stop. Each Role finishes the task it holds, then
+    /// the host ends; `--wait` (15 seconds by default) waits until it has, and says
+    /// `stopping` when it has not yet. A task cut short by a crash instead is taken again by
+    /// the next host as soon as it starts.
+    Stop(StopArgs),
     /// Install the InOrbit Trails browser extension.
     ///
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
@@ -661,6 +704,11 @@ pub enum RunnerCommand {
         /// verified path and restarts itself.
         #[arg(long)]
         no_auto_upgrade: bool,
+        /// Run as a project's session host (RFC 0213): the runner hosts the project's
+        /// Roles beside its turns, never upgrades itself, and stops when the last session
+        /// has left, on `iohr stop`, on SIGTERM or on Ctrl-C. `iohr session` starts it.
+        #[arg(long, value_name = "DIR")]
+        session: Option<PathBuf>,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -1479,8 +1527,20 @@ pub struct AskArgs {
         value_delimiter = '\u{1f}'
     )]
     pub undo: Vec<String>,
-    /// With `--menu`: the question that was asked, so Attach output can put it back on the
-    /// prompt to ask again with the output.
+    /// With `--menu`: the folder Io needs your OK to read (Allow keeps the yes for it).
+    #[arg(long, value_name = "FOLDER", requires = "menu")]
+    pub access: Option<std::path::PathBuf>,
+    /// With `--menu`: the next steps the answer offered as `kind:value` (`read:api`,
+    /// `search:TODO`, `run:cargo test`), separated by the unit separator (U+001F).
+    #[arg(
+        long,
+        value_name = "STEPS",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub step: Vec<String>,
+    /// With `--menu`: the question that was asked, so Allow and Attach output can put it back on
+    /// the prompt to ask again.
     #[arg(long, value_name = "QUESTION", requires = "menu")]
     pub asked: Option<String>,
     /// With `--menu`: the last command, when it failed. With `--failed-exit` and `--asked`
@@ -1772,6 +1832,23 @@ pub enum MemoryCommand {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct SessionArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct StopArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// Seconds to wait for the host to end (0 to 600).
+    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=600))]
+    pub wait: u64,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct SyncArgs {
     /// Say what would be created or saved and send nothing.
     #[arg(long)]
@@ -1867,6 +1944,18 @@ pub struct HeadlessArgs {
         conflicts_with = "interactive"
     )]
     pub prior_answer: Option<String>,
+    /// A folder you allow Io to read for this question, besides the one it is asked in: the
+    /// answer to the card's "needs your OK to read" note, for a run with no terminal to ask on
+    /// (a script, `--json`, the app). Repeat it for more folders; `--add-dir` is the same flag,
+    /// as in Claude Code. `IOHR_ASK_READ` (a path list) and `[ask] read` add to these. Secrets
+    /// stay blocked.
+    #[arg(
+        long,
+        visible_alias = "add-dir",
+        value_name = "FOLDER",
+        conflicts_with = "interactive"
+    )]
+    pub read: Vec<std::path::PathBuf>,
 }
 
 impl HeadlessArgs {
@@ -1878,6 +1967,7 @@ impl HeadlessArgs {
             || self.exit_code.is_some()
             || self.output_file.is_some()
             || self.prior_question.is_some()
+            || !self.read.is_empty()
     }
 }
 
@@ -2915,6 +3005,39 @@ mod grammar_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn read_repeats_and_add_dir_is_the_same_flag() {
+        use clap::Parser as _;
+        let cli = super::Cli::try_parse_from([
+            "iohr",
+            "ask",
+            "--read",
+            "/a",
+            "--add-dir",
+            "/b",
+            "--add-dir=/c",
+            "what is in them",
+        ])
+        .unwrap();
+        let super::Command::Ask(a) = cli.command else {
+            panic!("not ask")
+        };
+        let got: Vec<_> = a
+            .headless
+            .read
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        assert_eq!(got, ["/a", "/b", "/c"]);
+        assert!(a.headless.has_context());
+        // Not given: no folders and no context of its own.
+        let cli = super::Cli::try_parse_from(["iohr", "ask", "hi"]).unwrap();
+        let super::Command::Ask(a) = cli.command else {
+            panic!("not ask")
+        };
+        assert_eq!(a.headless.read.len(), 0);
     }
 
     #[test]

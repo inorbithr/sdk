@@ -29,7 +29,7 @@
 # refreshes it (at most once in 30 seconds), and the next prompt shows the new number. An
 # RPROMPT you set yourself is left alone; INORBIT_ASKS_PROMPT=0 turns the segment off.
 if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
-  typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_live
+  typeset -g _iohr_ask_q _iohr_ask_pq _iohr_ask_pa _iohr_ask_cmd _iohr_ask_link _iohr_ask_undo _iohr_ask_access _iohr_ask_steps _iohr_ask_live
   # The command that failed under the last ask, its exit status, and the output attached to it
   # from the menu (a private file and how it came: captured or pasted).
   typeset -g _iohr_ask_failcmd _iohr_ask_failrc _iohr_ask_outfile _iohr_ask_outkind
@@ -70,10 +70,14 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     local out rs=$'\x1e' to=
     local -a extra
     zle -I
+    # The folder Io needs a yes for and the next steps ride along: Allow and the steps need them.
+    [[ -n $_iohr_ask_access ]] && extra+=(--access="$_iohr_ask_access")
+    [[ -n $_iohr_ask_steps ]] && extra+=(--step="$_iohr_ask_steps")
+    extra+=(--asked="$_iohr_ask_pq")
     # A private file for the output the menu may attach (removed when nothing comes of it).
     if [[ -n $_iohr_ask_failcmd ]]; then
       to=$(umask 077; command mktemp "${TMPDIR:-/tmp}/iohr-ask-output.XXXXXX" 2>/dev/null) &&
-        extra=(--asked "$_iohr_ask_pq" --failed-command "$_iohr_ask_failcmd" --failed-exit "$_iohr_ask_failrc" --output-to "$to")
+        extra+=(--failed-command "$_iohr_ask_failcmd" --failed-exit "$_iohr_ask_failrc" --output-to "$to")
     fi
     out=$(command __IOHR_BIN__ ask --menu --cwd "$PWD" --command="$_iohr_ask_cmd" --link="$_iohr_ask_link" --undo="$_iohr_ask_undo" "${extra[@]}" </dev/tty 2>/dev/tty)
     # Attached output came back as `? question` 0x1e kind; the file is read by the next ask.
@@ -150,7 +154,8 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     local rec rs=$'\x1e' rest tail
     # The card goes to the terminal on stderr. The record on stdout is the answer (kept for
     # `??`), the command it suggests, the link it names and the permission rules this run saved
-    # (what Undo takes back), separated by a 0x1e character.
+    # (what Undo takes back), separated by a 0x1e character, then the folder Io needs a yes for and
+    # the next steps.
     rec=$("${a[@]}" -- "$q"); local ok=$?
     [[ -n $outfile ]] && command rm -f -- "$outfile"
     if (( ok == 0 )); then
@@ -160,10 +165,17 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
       _iohr_ask_cmd=${rest%%$rs*}
       tail=${rest#*$rs}
       _iohr_ask_link=${tail%%$rs*}
-      if [[ $tail == *$rs* ]]; then _iohr_ask_undo=${tail#*$rs}; else _iohr_ask_undo=; fi
+      # The later fields (undo, the folder Io needs a yes for, the next steps) may be missing
+      # from an older record: each is then empty.
+      local t2= t3=
+      [[ $tail == *$rs* ]] && t2=${tail#*$rs}
+      _iohr_ask_undo=${t2%%$rs*}
+      [[ $t2 == *$rs* ]] && t3=${t2#*$rs}
+      _iohr_ask_access=${t3%%$rs*}
+      if [[ $t3 == *$rs* ]]; then _iohr_ask_steps=${t3#*$rs}; else _iohr_ask_steps=; fi
       _iohr_ask_live=1
     else
-      _iohr_ask_pq= _iohr_ask_pa= _iohr_ask_cmd= _iohr_ask_link= _iohr_ask_undo= _iohr_ask_live=
+      _iohr_ask_pq= _iohr_ask_pa= _iohr_ask_cmd= _iohr_ask_link= _iohr_ask_undo= _iohr_ask_access= _iohr_ask_steps= _iohr_ask_live=
     fi
   }
 

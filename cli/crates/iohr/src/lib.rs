@@ -16,6 +16,7 @@ pub mod project;
 pub mod roles;
 pub mod template;
 
+mod access;
 mod actions;
 mod args;
 mod ask;
@@ -38,6 +39,9 @@ mod permissions;
 mod planner;
 mod prompt;
 mod runner;
+#[cfg(unix)]
+mod session;
+mod steps;
 mod toolchain;
 mod ui;
 mod usage;

@@ -435,7 +435,7 @@ pub(crate) fn draw_and_read_rows(
     let _ = write!(err, "\r\x1b[2K");
     let _ = err.flush();
     drop(err);
-    let picked = crate::ui::Ui::select_card("Io asks", rows, ask_card::INITIAL, |at| {
+    let picked = crate::ui::Ui::select_drawn("Io asks", rows, ask_card::INITIAL, true, |at| {
         ask_card::lines_with(card, rows, at, cols, look)
     });
     // Esc, `q` and Ctrl-C leave with nothing picked, and a terminal that cannot be read

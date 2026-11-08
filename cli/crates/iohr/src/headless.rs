@@ -60,7 +60,9 @@ You cannot run anything and must never say you did. \
 <files> lists the names at the top of the folder. \
 When the question is about the folder's contents and you have the Read, Grep and Glob tools, read the few files that answer it (start with README, manifests such as Cargo.toml or package.json, and docs), stay inside the folder, and name the files your answer comes from. \
 Secret files (.env, keys, credentials) are blocked: never try to open them and never repeat a secret you see. \
-If you have no tools, you only know the names in <files>: say so if asked about contents. \
+If you have no tools, or the folder is too broad to read, you only know the names in <files>: answer what those names show, then say in one line what you would read (a path) and that Io can offer to read it. \
+Never say you cannot read or open something, and never tell the person to run grep, ls, cat or find themselves: Io offers the reading as an action. \
+When a next step would help, add before the final ```sh block a fenced ```next block of at most 3 lines, each one of `read <subfolder>/` (a folder shown in <files>), `search <text>` or `run <command>`; no other words. \
 If <files> says the folder is empty, it shows nothing at its top level (hidden names are left out): say that plainly instead of saying you cannot see the folder; if it says the folder could not be read, say that. \
 <git> holds facts iohr collected with git itself (the branch, the last commits, the change counts): use them for anything about the history or the state of the work, and never say you cannot run git or see the history while they are there. \
 <project> holds what the project's own notes say (its purpose and saved notes): treat that as known. \
@@ -117,6 +119,13 @@ pub(crate) struct Context {
     pub(crate) files: String,
     /// The run may open files inside the folder ([`can_read`]).
     pub(crate) reads: bool,
+    /// The folders besides the working one the person allowed Io to read (named in the
+    /// question, `--read`, `IOHR_ASK_READ`, `[ask] read`, the trust store or the card's Add
+    /// folder), canonical and without repeats: the file tools may open files inside them too.
+    pub(crate) also: Vec<std::path::PathBuf>,
+    /// Every folder the run was given and where the yes came from, in the order given: the
+    /// audit line, `--json` and the label name them. Only [`crate::commands::ask`] adds to it.
+    pub(crate) granted: Vec<crate::access::Grant>,
     pub(crate) command: String,
     pub(crate) exit_code: Option<i32>,
     pub(crate) output: String,
@@ -157,6 +166,12 @@ pub(crate) struct Answer {
     /// as data: `grant` once, always or no, the `subject`, the saved `rules` and `file`);
     /// empty when nobody was asked, which is always so with `--json` (it never asks).
     pub(crate) permissions: Vec<serde_json::Value>,
+    /// The folder Io needs a yes for before it can read what the question is about, or null:
+    /// run again with `--read <folder>` to give it ([`crate::access`]).
+    pub(crate) access: Option<crate::access::Shown>,
+    /// The next steps the answer offered ([`crate::steps`]); empty when none. `answer` never
+    /// holds the block.
+    pub(crate) next: Vec<crate::steps::Shown>,
     /// The Role the run worked in (`--role`): its name, where it came from and its model,
     /// never its text. Absent without `--role`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -171,6 +186,9 @@ pub(crate) struct Answer {
 pub(crate) struct Sent {
     /// The folder's path was sent.
     pub(crate) folder: String,
+    /// The folders besides it the run may read, each with where the yes came from (`flag`,
+    /// `env`, `config`, `trust` or `card`); their paths were sent, never their contents.
+    pub(crate) folders: Vec<SentFolder>,
     /// The last command was sent (its text is not repeated here).
     pub(crate) command: bool,
     /// Its exit status, when it was sent.
@@ -184,12 +202,27 @@ pub(crate) struct Sent {
     pub(crate) can_attach: bool,
 }
 
+/// One folder the run was given, as `--json` shows it.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct SentFolder {
+    pub(crate) path: String,
+    pub(crate) source: &'static str,
+}
+
 impl Context {
     /// [`Sent`] for `question`.
     pub(crate) fn sent(&self, question: &str) -> Sent {
         let output = tail(self.output.trim_end(), OUTPUT_MAX, OUTPUT_LINES);
         Sent {
             folder: self.cwd.clone(),
+            folders: self
+                .granted
+                .iter()
+                .map(|g| SentFolder {
+                    path: g.folder.display().to_string(),
+                    source: g.source.name(),
+                })
+                .collect(),
             command: !self.command.is_empty(),
             exit_code: self.exit_code,
             output: if output.is_empty() {
@@ -346,6 +379,32 @@ pub(crate) fn read_line(ctx: &Context, mode: Mode, can_run: bool) -> String {
     if ctx.reads {
         what.push("the files in it Io chose to open (secrets blocked)".into());
     }
+    let named = ctx
+        .granted
+        .iter()
+        .filter(|g| ctx.also.contains(&g.folder))
+        .map(|g| {
+            let path: String = g
+                .folder
+                .display()
+                .to_string()
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect();
+            format!("{path} via {}", g.source.name())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let named = if named.is_empty() {
+        String::new()
+    } else {
+        format!(" ({named})")
+    };
+    match ctx.also.len() {
+        0 => {}
+        1 => what.push(format!("the path of the folder you allowed{named} and the files in it Io chose to open (secrets blocked)")),
+        _ => what.push(format!("the paths of the folders you allowed{named} and the files in them Io chose to open (secrets blocked)")),
+    }
     if !ctx.git.is_empty() {
         what.push("the git branch, last commits and change counts".into());
     }
@@ -386,17 +445,48 @@ pub(crate) fn read_line(ctx: &Context, mode: Mode, can_run: bool) -> String {
     format!("Read: {}; nothing was run.", what.join(", "))
 }
 
-/// Whether the run may open files in `dir`: a folder that can be listed, and neither the
-/// filesystem root nor the home folder (too broad: everything the person has).
+/// Why the run may not open files in a folder, when it may not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Blocked {
+    /// The filesystem root: everything on the machine.
+    Root,
+    /// The home folder: everything the person has.
+    Home,
+    /// A folder above the home folder or above (or inside) a secret place such as `~/.config`
+    /// or `~/Library` ([`crate::access::broad_or_secret_bearing`]): no yes opens it whole.
+    Broad,
+    /// Not a folder this program can list: a yes cannot fix that.
+    Unreadable,
+}
+
+/// What stops the run from opening files in `dir`, or none when it may: a folder that can be
+/// listed and is not too broad ([`crate::access::broad_or_secret_bearing`], the one check:
+/// the root, the home folder, what is above it and what holds secret places). Root and home
+/// are the two a person's yes can open; a broad folder no yes opens.
+#[must_use]
+pub(crate) fn blocked(dir: &std::path::Path, home: Option<&std::path::Path>) -> Option<Blocked> {
+    let Some(real) = crate::access::canonical(dir) else {
+        return Some(Blocked::Unreadable);
+    };
+    if !real.is_dir() || std::fs::read_dir(&real).is_err() {
+        return Some(Blocked::Unreadable);
+    }
+    if !crate::access::broad_or_secret_bearing(&real, home) {
+        return None;
+    }
+    Some(if real.parent().is_none() {
+        Blocked::Root
+    } else if is_home(&real, home) {
+        Blocked::Home
+    } else {
+        Blocked::Broad
+    })
+}
+
+/// Whether the run may open files in `dir` ([`blocked`] says why not).
 #[must_use]
 pub(crate) fn can_read(dir: &std::path::Path, home: Option<&std::path::Path>) -> bool {
-    let Ok(real) = dir.canonicalize() else {
-        return false;
-    };
-    if real.parent().is_none() || !real.is_dir() || std::fs::read_dir(&real).is_err() {
-        return false;
-    }
-    !is_home(&real, home)
+    blocked(dir, home).is_none()
 }
 
 /// Whether `dir` is the home folder. There the run never gets the file tools (too broad), but
@@ -404,7 +494,10 @@ pub(crate) fn can_read(dir: &std::path::Path, home: Option<&std::path::Path>) ->
 /// allows, so `? list this folder` can run `ls` (PRD 0197).
 #[must_use]
 pub(crate) fn is_home(dir: &std::path::Path, home: Option<&std::path::Path>) -> bool {
-    let (Ok(real), Some(h)) = (dir.canonicalize(), home.and_then(|h| h.canonicalize().ok())) else {
+    let (Some(real), Some(h)) = (
+        crate::access::canonical(dir),
+        home.and_then(crate::access::canonical),
+    ) else {
         return false;
     };
     real == h
@@ -428,6 +521,21 @@ pub(crate) fn assemble(question: &str, ctx: &Context) -> Result<String, String> 
             let _ = writeln!(m, "<role>\n{}\n</role>", head(ctx.role.trim(), ROLE_MAX));
         }
         let _ = writeln!(m, "<cwd>{}</cwd>", head(ctx.cwd.trim(), CWD_MAX));
+        for also in &ctx.also {
+            let path = also.display().to_string();
+            let _ = writeln!(m, "<allowed>{}</allowed>", head(&path, CWD_MAX));
+        }
+        if !ctx.also.is_empty() {
+            let _ = writeln!(
+                m,
+                "The person allowed you to read the {} in <allowed>; open files there with your read tools.",
+                if ctx.also.len() == 1 {
+                    "folder"
+                } else {
+                    "folders"
+                }
+            );
+        }
         if !ctx.files.trim().is_empty() {
             let _ = writeln!(m, "<files>\n{}\n</files>", ctx.files.trim_end());
         }
@@ -543,7 +651,7 @@ what you would check first, and what could go wrong; the person switches to anot
 /// either, and its brief asks for a plan.
 pub(crate) fn args(
     model: &str,
-    reads: bool,
+    (reads, also): (bool, &[std::path::PathBuf]),
     session: Option<&Session>,
     plan: bool,
 ) -> Result<Vec<String>, String> {
@@ -576,13 +684,20 @@ pub(crate) fn args(
     if plan {
         v.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
     }
-    if reads || session.is_some() {
-        let tools = match (reads, session.is_some()) {
+    let files = reads || !also.is_empty();
+    if files || session.is_some() {
+        let tools = match (files, session.is_some()) {
             (true, true) => format!("{READ_TOOLS},Bash"),
             (true, false) => READ_TOOLS.to_owned(),
             (false, _) => "Bash".to_owned(),
         };
         v.extend(["--restricted".to_owned(), "--tools".to_owned(), tools]);
+        // The run starts in the working folder when that one is readable, else in the first
+        // folder the person allowed ([`added`]); every other one is added by name (`=`: the
+        // list form would swallow the next argument).
+        for extra in added(reads, also) {
+            v.push(format!("--add-dir={}", extra.display()));
+        }
         if let Some(s) = session {
             v.extend(s.args());
         }
@@ -595,6 +710,17 @@ pub(crate) fn args(
     }
     assert_honest(&v).map_err(|e| e.to_string())?;
     Ok(v)
+}
+
+/// The allowed folders `--add-dir` names: all of them when the run starts in the working
+/// folder, all but the first when it is too broad to read and the run starts in that one
+/// (`commands::ask::scope_dir`).
+fn added(reads: bool, also: &[std::path::PathBuf]) -> &[std::path::PathBuf] {
+    if reads {
+        also
+    } else {
+        also.get(1..).unwrap_or_default()
+    }
 }
 
 /// What a finished run said, without ever quoting the model's or the user's text in a
@@ -660,7 +786,7 @@ pub(crate) async fn run(
     model: &str,
     started: Instant,
     folder: Option<&std::path::Path>,
-    reads: bool,
+    reads: (bool, &[std::path::PathBuf]),
     (session, plan): (Option<&Session>, bool),
 ) -> Result<(String, u64), String> {
     let args = args(model, reads, session, plan)?;
@@ -759,7 +885,7 @@ mod tests {
 
     #[test]
     fn the_args_are_bounded_and_never_hold_a_forbidden_flag() {
-        let a = args("haiku", false, None, false).unwrap();
+        let a = args("haiku", (false, &[]), None, false).unwrap();
         for f in FORBIDDEN {
             assert!(
                 !a.iter().any(|x| x == f || x.starts_with(&format!("{f}="))),
@@ -769,7 +895,7 @@ mod tests {
         let at = |flag: &str| a.iter().position(|x| x == flag).unwrap();
         assert_eq!(a[at("--model") + 1], "haiku");
         assert_eq!(
-            args("opus", false, None, false).unwrap()[at("--model") + 1],
+            args("opus", (false, &[]), None, false).unwrap()[at("--model") + 1],
             "opus"
         );
         assert_eq!(a[at("--max-turns") + 1], MAX_TURNS.to_string());
@@ -882,7 +1008,7 @@ mod tests {
     #[test]
     fn plan_is_claudes_plan_mode_with_a_plan_brief_and_no_shell() {
         let at = |a: &[String], flag: &str| a.iter().position(|x| x == flag);
-        let a = args("haiku", true, None, true).unwrap();
+        let a = args("haiku", (true, &[]), None, true).unwrap();
         let i = at(&a, "--permission-mode").expect("plan mode flag");
         assert_eq!(a[i + 1], "plan");
         assert_eq!(a[at(&a, "--tools").unwrap() + 1], "Read,Grep,Glob");
@@ -896,7 +1022,7 @@ mod tests {
         // The other modes pass no permission mode at all.
         assert!(
             at(
-                &args("haiku", true, None, false).unwrap(),
+                &args("haiku", (true, &[]), None, false).unwrap(),
                 "--permission-mode"
             )
             .is_none()
@@ -1033,7 +1159,7 @@ mod tests {
 
     #[test]
     fn a_readable_folder_gets_only_the_read_tools_restricted_with_secrets_denied() {
-        let a = args("haiku", true, None, false).unwrap();
+        let a = args("haiku", (true, &[]), None, false).unwrap();
         for f in FORBIDDEN {
             assert!(
                 !a.iter().any(|x| x == f || x.starts_with(&format!("{f}="))),
@@ -1096,8 +1222,101 @@ mod tests {
     }
 
     #[test]
+    fn the_prompt_offers_the_reading_and_never_tells_the_person_to_run_a_search() {
+        for b in [
+            brief(20),
+            brief_with_bash(20),
+            brief_auto(20),
+            brief_plan(20),
+        ] {
+            // With no access Io says what it would read and offers it as an action.
+            assert!(b.contains("say in one line what you would read"), "{b}");
+            assert!(b.contains("Io offers the reading as an action"));
+            // The next steps come as a block the card turns into actions.
+            assert!(b.contains("```next") && b.contains("`read <subfolder>/`"));
+            // It never sends the person off to run the search themselves.
+            assert!(b.contains("never tell the person to run grep, ls, cat or find themselves"));
+            assert!(b.contains("Never say you cannot read or open something"));
+        }
+    }
+
+    #[test]
+    fn a_folder_the_person_allowed_gets_the_read_tools_by_name_and_secrets_stay_denied() {
+        // Blind: the tools are the empty set, never the read tools.
+        let blind = args("haiku", (false, &[]), None, false).unwrap();
+        let at = blind.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(blind[at + 1], "");
+        let there = std::path::Path::new("/data/x");
+        // Allowed beside a readable working folder: `--add-dir=` (the flag is variadic).
+        let both = args("haiku", (true, &[there.to_path_buf()]), None, false).unwrap();
+        assert!(both.contains(&"--add-dir=/data/x".to_owned()));
+        let at = both.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(both[at + 1], READ_TOOLS);
+        assert!(
+            both.iter()
+                .any(|a| a.starts_with("--disallowedTools=Read("))
+        );
+        // Allowed while the working folder is too broad: the tools, run from the allowed one.
+        let only = args("haiku", (false, &[there.to_path_buf()]), None, false).unwrap();
+        let at = only.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(only[at + 1], READ_TOOLS);
+        assert!(!only.iter().any(|a| a.starts_with("--add-dir")));
+    }
+
+    #[test]
+    fn every_allowed_folder_is_added_by_name_and_secrets_stay_denied_for_all_of_them() {
+        let two = [
+            std::path::PathBuf::from("/data/x"),
+            std::path::PathBuf::from("/data/y"),
+        ];
+        // Beside a readable working folder: one `--add-dir=` each.
+        let both = args("haiku", (true, &two), None, false).unwrap();
+        assert!(both.contains(&"--add-dir=/data/x".to_owned()));
+        assert!(both.contains(&"--add-dir=/data/y".to_owned()));
+        // The working folder too broad: the run starts in the first, the rest are added.
+        let broad = args("haiku", (false, &two), None, false).unwrap();
+        assert!(!broad.contains(&"--add-dir=/data/x".to_owned()));
+        assert!(broad.contains(&"--add-dir=/data/y".to_owned()));
+        for a in [&both, &broad] {
+            let at = a.iter().position(|x| x == "--tools").unwrap();
+            assert_eq!(a[at + 1], READ_TOOLS);
+            for rule in SECRETS {
+                assert!(a.contains(&format!("--disallowedTools={rule}")), "{rule}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_message_names_every_allowed_folder() {
+        let ctx = Context {
+            cwd: "/work".into(),
+            also: vec!["/data/x".into(), "/data/y".into()],
+            ..Context::default()
+        };
+        let m = assemble("compare them", &ctx).unwrap();
+        assert!(m.contains("<allowed>/data/x</allowed>"), "{m}");
+        assert!(m.contains("<allowed>/data/y</allowed>"), "{m}");
+        assert!(m.contains("the folders in <allowed>"), "{m}");
+        assert!(read_line(&ctx, Mode::Manual, false).contains("the folders you allowed"));
+    }
+
+    #[test]
+    fn the_message_names_the_allowed_folder_and_the_read_line_says_so() {
+        let ctx = Context {
+            cwd: "/work".into(),
+            also: vec!["/data/x".into()],
+            ..Context::default()
+        };
+        let m = assemble("what is in /data/x", &ctx).unwrap();
+        assert!(m.contains("<allowed>/data/x</allowed>"), "{m}");
+        assert!(read_line(&ctx, Mode::Manual, false).contains("the folder you allowed"));
+        let none = assemble("q", &Context::default()).unwrap();
+        assert!(!none.contains("<allowed>"));
+    }
+
+    #[test]
     fn the_prompt_is_not_an_argument() {
-        let a = args("haiku", false, None, false).unwrap();
+        let a = args("haiku", (false, &[]), None, false).unwrap();
         assert!(a.iter().all(|x| !x.contains("Question:")));
     }
 

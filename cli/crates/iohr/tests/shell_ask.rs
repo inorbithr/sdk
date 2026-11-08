@@ -104,6 +104,7 @@ fn json_is_the_documented_shape_and_never_the_question() {
     assert_eq!(
         keys,
         [
+            "access",
             "agent",
             "answer",
             "command",
@@ -112,12 +113,15 @@ fn json_is_the_documented_shape_and_never_the_question() {
             "exit_code",
             "label",
             "model",
+            "next",
             "permissions",
             "questions",
             "via"
         ]
     );
     assert_eq!(v["questions"], serde_json::json!([]));
+    assert_eq!(v["access"], serde_json::Value::Null);
+    assert_eq!(v["next"], serde_json::json!([]));
     assert_eq!(v["answer"], "It is Rayleigh scattering.");
     assert_eq!(v["agent"], "claude");
     assert_eq!(v["via"], "local");
@@ -453,9 +457,10 @@ fn the_answer_is_printed_once_with_a_model_from_the_environment() {
 }
 
 // Off a terminal (a pipe, or NO_COLOR) the hook's card is plain: no escape, no row under it,
-// and the record on stdout is the answer, the command and the link, in that order.
+// and the record on stdout is the answer, the command, the link, the undo, the folder asked
+// about and the next steps, in that order.
 #[test]
-fn the_hook_record_is_four_fields_and_the_plain_card_has_no_row() {
+fn the_hook_record_is_six_fields_and_the_plain_card_has_no_row() {
     let r = Rig::new();
     r.fake("claude", FAKE_CLAUDE);
     std::fs::write(r.work().join("notes.md"), "x").unwrap();
@@ -477,7 +482,7 @@ fn the_hook_record_is_four_fields_and_the_plain_card_has_no_row() {
         assert!(out.status.success(), "{}", text(&out));
         let stdout = String::from_utf8(out.stdout.clone()).unwrap();
         let f: Vec<&str> = stdout.split('\u{1e}').collect();
-        assert_eq!(f.len(), 4, "{stdout:?}");
+        assert_eq!(f.len(), 6, "{stdout:?}");
         assert!(
             f[0].contains("run:") && f[0].contains("git status"),
             "{f:?}"
@@ -486,6 +491,8 @@ fn the_hook_record_is_four_fields_and_the_plain_card_has_no_row() {
         assert_eq!(f[2], "notes.md");
         // Nobody was asked, so no rule was saved and Undo has nothing to take back.
         assert_eq!(f[3], "");
+        // A readable folder asks for nothing and the answer named no next step.
+        assert_eq!((f[4], f[5]), ("", ""));
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
             !err.contains('\u{1b}') && !err.contains("to choose"),
@@ -632,21 +639,12 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     if Command::new("zsh").arg("--version").output().is_err() {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let n = Command::new("zsh").arg("-n").arg(&file).output().unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
+    let n = Command::new("zsh").arg("-n").arg(file).output().unwrap();
     assert!(n.status.success(), "{}", String::from_utf8_lossy(&n.stderr));
     // The precmd, with a fake `iohr` that prints its arguments.
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        "#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'the answer\\036ls -la\\036README.md'\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    z.fake("#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'the answer\\036ls -la\\036README.md'\n");
     let zsh = |script: &str| {
         Command::new("zsh")
             .args(["-f", "-i", "-c", script])
@@ -693,6 +691,37 @@ fn the_zsh_hook_is_valid_zsh_and_runs_the_ask_with_its_context() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(out.starts_with("\u{1b}]7727;ask;6;"), "{out:?}");
     assert!(!String::from_utf8_lossy(&o.stderr).contains("ARGS:"));
+}
+
+/// Whether `program` runs here (a test that needs it returns when it does not).
+fn have(program: &str) -> bool {
+    Command::new(program).arg("--version").output().is_ok()
+}
+
+/// A folder with the hook file and a `bin` for a fake `iohr`, for the tests that source the
+/// zsh hook.
+struct Zsh {
+    dir: tempfile::TempDir,
+    file: PathBuf,
+    bin: PathBuf,
+}
+
+impl Zsh {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hook.zsh");
+        std::fs::write(&file, hook("zsh").stdout).unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        Self { dir, file, bin }
+    }
+
+    /// The `iohr` the hook finds on its PATH: `script` is the whole program.
+    fn fake(&self, script: impl AsRef<[u8]>) {
+        let fake = self.bin.join("iohr");
+        std::fs::write(&fake, script).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 /// Drives a real interactive zsh on a pty (python3's `pty`; the test is skipped where zsh
@@ -757,29 +786,19 @@ sys.stdout.write("\x00".join(shown))
 
 #[test]
 fn evaluating_the_hook_twice_keeps_enter_working_and_wires_accept_line_once() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        "#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer >&2\necho the answer\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let z = Zsh::new();
+    let (file, bin) = (&z.file, &z.bin);
+    z.fake("#!/bin/sh\necho \"ASKED: $*\" >&2\necho the answer >&2\necho the answer\n");
     let f = file.display();
     // A second `source ~/.zshrc`, then once more with a shell variable of the old guard
     // unset (state a plugin may reset): the wiring must not copy our own widget into the one
     // accept-line calls, or Enter loops until FUNCNEST.
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {f}"),
             format!("source {f}"),
@@ -927,6 +946,32 @@ fn the_menu_letters_print_one_prompt_line_or_nothing_and_copy_uses_tmux() {
     );
 }
 
+// Add folder refuses the home folder and the root where they are typed, with a reason, and
+// keeps nothing in `trusted.toml`; a project folder is kept as a standing folder.
+#[test]
+fn add_folder_refuses_home_and_root_and_keeps_a_project_folder_as_standing() {
+    let r = Rig::new();
+    let cmd = ["ask", "--menu", "--command=ls"];
+    let trusted = r.home.path().join("config").join("trusted.toml");
+    for typed in ["~", "/"] {
+        let keys = format!("d\u{1f}{typed}\u{1f}\r\u{1f}\u{1b}\u{1f}\u{1b}");
+        let Some((line, screen)) = press_in_menu(&r, &cmd, &keys, &[]) else {
+            return;
+        };
+        let plain_screen = strip_escapes(&screen);
+        assert!(plain_screen.contains("too broad"), "{typed}: {screen:?}");
+        assert_eq!(line, "", "{typed}: nothing is put on the prompt");
+        assert!(!trusted.exists(), "{typed}: nothing was kept");
+    }
+    let project = r.home.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let keys = "d\u{1f}~/project\u{1f}\r";
+    let (line, screen) = press_in_menu(&r, &cmd, keys, &[]).unwrap();
+    let kept = std::fs::read_to_string(&trusted).unwrap_or_default();
+    assert!(kept.contains("standing"), "{screen:?} {line:?} {kept:?}");
+    assert!(kept.contains("project"), "{kept:?}");
+}
+
 // PRD 0187.1: the menu is a bar of numbered rows in a box under the card. A digit picks a row
 // at once, so do its letter and Enter on the highlighted row; Esc leaves nothing on the screen
 // and nothing on stdout; with NO_COLOR it is plain numbered lines.
@@ -1030,30 +1075,22 @@ fn with_no_color_the_action_bar_is_plain_numbered_lines() {
 // with no answer yet, the key does what it did.
 #[test]
 fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
     let log = dir.path().join("menu.log");
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
+    z.fake(
         format!(
             "#!/bin/sh\ncase \"$*\" in\n*--menu*) echo \"$*\" >> {log}; printf '%s' 'echo RAN-$((1+1))';;\n*) printf 'the answer\\036echo RAN-$((1+1))\\036notes.md';;\nesac\n",
             log = log.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let down = "RAW:\u{1b}[B";
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             // No answer yet: Down is the shell's own, the menu is not asked.
@@ -1188,30 +1225,20 @@ fn evaluating_the_hook_again_rebinds_the_menu_key_without_wrapping_twice() {
 // question after it carries `--mode`. On another line the key is the shell's own.
 #[test]
 fn shift_tab_on_a_question_line_cycles_the_mode_and_every_ask_carries_it() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
     let log = dir.path().join("asks.log");
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        format!(
-            "#!/bin/sh\necho \"$*\" >> {log}\nprintf 'the answer\\036ls\\036notes.md'\n",
-            log = log.display()
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    z.fake(format!(
+        "#!/bin/sh\necho \"$*\" >> {log}\nprintf 'the answer\\036ls\\036notes.md'\n",
+        log = log.display()
+    ));
     let tab = "RAW:\u{1b}[Z";
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             // Not a question line: Shift+Tab leaves the mode alone.
@@ -1277,29 +1304,21 @@ fn the_menu_holds_through_resizes_signals_and_application_cursor_keys() {
 // a resize reach the shell's group while it is open, and the menu still waits for the letter.
 #[test]
 fn the_menu_under_zsh_holds_through_signals_and_a_resize() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (file, bin) = (&z.file, &z.bin);
     // The answer is fake; the menu is the real binary.
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
+    z.fake(
         format!(
             "#!/bin/sh\ncase \"$*\" in\n*--menu*) exec {real} \"$@\";;\n*) printf 'the answer\\036git status\\036notes.md';;\nesac\n",
             real = env!("CARGO_BIN_EXE_iohr")
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let out = drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             "? a question".to_owned(),
@@ -1521,6 +1540,287 @@ fn the_menu_offers_asks_only_when_some_wait_and_puts_the_list_on_the_prompt() {
     assert!(screen.contains("2 waiting"), "{screen:?}");
 }
 
+// ------------------------------------------------ ask instead of "I can't" (RFC 0203)
+
+/// The arguments the fake agent got, one per line.
+fn sent_args(r: &Rig) -> Vec<String> {
+    r.saw("claude.args").lines().map(str::to_owned).collect()
+}
+
+fn ask_json(r: &Rig, cwd: &std::path::Path, extra: &[&str], answer: &str) -> serde_json::Value {
+    let mut a = vec![
+        "--json",
+        "ask",
+        "--headless",
+        "--cwd",
+        cwd.to_str().unwrap(),
+    ];
+    a.extend_from_slice(extra);
+    a.push("explain this directory");
+    let out = r.run(&a, &answer_json(answer), "0");
+    assert!(out.status.success(), "{}", text(&out));
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+// The bug: asked in the home folder, the run got no tools and the answer told the owner to run
+// grep themselves. Now Io asks to read the folder: the request is data (no terminal here), the
+// run is not given tools it was not allowed, and `--read` is the yes for one run.
+#[test]
+fn a_folder_too_broad_to_read_is_asked_for_and_a_yes_gives_the_read_tools() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    std::fs::write(home.join("README.md"), "hello").unwrap();
+
+    let v = ask_json(&r, &home, &[], "It looks like a home folder.");
+    assert_eq!(v["access"]["folder"], home.display().to_string());
+    assert_eq!(v["access"]["why"], "home");
+    assert_eq!(v["access"]["askable"], true);
+    assert_eq!(
+        v["access"]["allow_with"],
+        format!("--read {}", home.display())
+    );
+    let args = sent_args(&r);
+    let at = args.iter().position(|a| a == "--tools").unwrap();
+    assert_eq!(args[at + 1], "", "no tools without the yes: {args:?}");
+
+    let v = ask_json(
+        &r,
+        &home,
+        &["--read", home.to_str().unwrap()],
+        "It has a README.",
+    );
+    assert!(v["access"].is_null(), "{v}");
+    let args = sent_args(&r);
+    let at = args.iter().position(|a| a == "--tools").unwrap();
+    // The read tools (the permission card adds Bash in the default mode).
+    assert!(args[at + 1].starts_with("Read,Grep,Glob"), "{args:?}");
+    // Secrets stay denied under a yes.
+    assert!(
+        args.iter()
+            .any(|a| a.starts_with("--disallowedTools=Read(")),
+        "{args:?}"
+    );
+}
+
+#[test]
+fn a_folder_the_question_names_outside_the_work_folder_is_asked_for_too() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    std::fs::create_dir_all(home.join("Downloads")).unwrap();
+    let other = home.join("Downloads");
+    let work = home.join("work");
+    let q = format!("what is in {}", other.display());
+    let out = r.run(
+        &[
+            "--json",
+            "ask",
+            "--headless",
+            "--cwd",
+            work.to_str().unwrap(),
+            &q,
+        ],
+        &answer_json("Some files."),
+        "0",
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["access"]["why"], "named", "{v}");
+    assert_eq!(v["access"]["folder"], other.display().to_string());
+    assert!(!sent_args(&r).iter().any(|a| a.starts_with("--add-dir")));
+    // The yes adds that one folder, in the `=` form (the flag is variadic).
+    let out = r.run(
+        &[
+            "--json",
+            "ask",
+            "--headless",
+            "--cwd",
+            work.to_str().unwrap(),
+            "--read",
+            other.to_str().unwrap(),
+            &q,
+        ],
+        &answer_json("Some files."),
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(sent_args(&r).contains(&format!("--add-dir={}", other.display())));
+    // A folder that does not exist, or a secret place, is a usage error, never a yes.
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    for bad in ["nope", ".ssh"] {
+        let out = r.run(
+            &[
+                "--json",
+                "ask",
+                "--headless",
+                "--cwd",
+                home.to_str().unwrap(),
+                "--read",
+                bad,
+                "q",
+            ],
+            OK_JSON,
+            "0",
+        );
+        assert!(!out.status.success(), "{bad}");
+    }
+}
+
+// More folders to read, from every source (RFC 0203): `--read` and its alias `--add-dir` repeat,
+// `IOHR_ASK_READ` is a path list and `[ask] read` a config list. Each folder is one `--add-dir=`
+// to the agent, and a secret place from any source is a usage error.
+#[test]
+fn folders_to_read_come_from_flags_the_env_and_the_config_and_secrets_stay_refused() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    let work = home.join("work");
+    let dirs: Vec<_> = ["one", "two", "three", "four"]
+        .iter()
+        .map(|n| {
+            let d = home.join(n);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        })
+        .collect();
+    let added = |r: &Rig| -> Vec<String> {
+        sent_args(r)
+            .into_iter()
+            .filter(|a| a.starts_with("--add-dir="))
+            .collect()
+    };
+    let want = |ds: &[&std::path::PathBuf]| -> Vec<String> {
+        ds.iter()
+            .map(|d| format!("--add-dir={}", d.display()))
+            .collect()
+    };
+    let cwd = work.to_str().unwrap();
+    let ask = |r: &Rig, extra: &[&str], env: &[(&str, &str)]| {
+        let mut a = vec!["--json", "ask", "--headless", "--cwd", cwd];
+        a.extend_from_slice(extra);
+        a.push("what is in these");
+        r.run_env(&a, &answer_json("Files."), "0", env)
+    };
+
+    // Flags: `--read` and `--add-dir` repeat and mix.
+    let out = ask(
+        &r,
+        &[
+            "--read",
+            dirs[0].to_str().unwrap(),
+            "--add-dir",
+            dirs[1].to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[0], &dirs[1]]));
+
+    // Env: a path list.
+    let list = std::env::join_paths([&dirs[2], &dirs[3]]).unwrap();
+    let out = ask(&r, &[], &[("IOHR_ASK_READ", list.to_str().unwrap())]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[2], &dirs[3]]));
+
+    // Config: `[ask] read`, a `~/` is the home folder.
+    std::fs::create_dir_all(home.join("config")).unwrap();
+    std::fs::write(
+        home.join("config").join("config.toml"),
+        "[ask]\nread = [\"~/one\", \"~/two\"]\n",
+    )
+    .unwrap();
+    let out = ask(&r, &[], &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[0], &dirs[1]]));
+
+    // All three add up, none twice.
+    let out = ask(
+        &r,
+        &["--read", dirs[0].to_str().unwrap()],
+        &[("IOHR_ASK_READ", dirs[2].to_str().unwrap())],
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(added(&r), want(&[&dirs[0], &dirs[2], &dirs[1]]));
+    assert!(
+        sent_args(&r)
+            .iter()
+            .any(|a| a.starts_with("--disallowedTools=Read(")),
+        "secrets stay denied beside every added folder"
+    );
+
+    // A secret place from any source is refused and the agent is not started with it.
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    std::fs::write(r.out().join("claude.args"), "").unwrap();
+    let secret = home.join(".ssh");
+    let out = ask(&r, &["--add-dir", secret.to_str().unwrap()], &[]);
+    assert!(!out.status.success(), "flag: {}", text(&out));
+    let out = ask(&r, &[], &[("IOHR_ASK_READ", secret.to_str().unwrap())]);
+    assert!(!out.status.success(), "env: {}", text(&out));
+    std::fs::write(
+        home.join("config").join("config.toml"),
+        "[ask]\nread = [\"~/.ssh\"]\n",
+    )
+    .unwrap();
+    let out = ask(&r, &[], &[]);
+    assert!(!out.status.success(), "config: {}", text(&out));
+    assert!(sent_args(&r).is_empty(), "the agent never started");
+}
+
+// The answer's next steps are actions in the bar, never a shell line to copy: in the JSON, and
+// as the sixth field of the hook's record, and the block is not shown in the answer.
+#[test]
+fn next_steps_come_as_actions_and_the_block_is_not_shown() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    std::fs::create_dir_all(r.work().join("api")).unwrap();
+    let answer = "A service.\n\n```next\nread api/\nsearch TODO\nread ../\n```\n";
+    let v = ask_json(&r, &r.work(), &[], answer);
+    assert_eq!(
+        v["next"],
+        serde_json::json!([
+            {"kind": "read", "value": "api"},
+            {"kind": "search", "value": "TODO"}
+        ])
+    );
+    assert_eq!(v["answer"], "A service.");
+
+    let out = r.run(
+        &[
+            "ask",
+            "--headless",
+            "--hook",
+            "--cwd",
+            r.work().to_str().unwrap(),
+            "q",
+        ],
+        &answer_json(answer),
+        "0",
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let f: Vec<&str> = stdout.split('\u{1e}').collect();
+    assert_eq!(f.len(), 6, "{stdout:?}");
+    assert_eq!(f[5], "read:api\u{1f}search:TODO");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("```next"));
+}
+
+// The system prompt: with no access Io says what it would read and offers it as an action; it
+// never tells the person to run grep, ls, cat or find.
+#[test]
+fn the_prompt_offers_the_reading_and_never_tells_the_person_to_run_grep() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let home = r.home.path().canonicalize().unwrap();
+    ask_json(&r, &home, &[], "x");
+    let sent = format!("{}{}", r.saw("claude.args"), r.saw("claude.stdin"));
+    assert!(
+        sent.contains("Io offers the reading as an action"),
+        "{sent}"
+    );
+    assert!(sent.contains("```next"));
+    assert!(sent.contains("never tell the person to run grep, ls, cat or find"));
+    assert!(!sent.contains("run grep -rn"));
+}
+
 // ---------------------------------------------------------------- what the question can see
 // RFC 0203, PRD 0187.1: the card says what was sent, and the output of the last command is
 // sent only when the person attached it (a file, a re-run they said yes to, or a paste).
@@ -1560,7 +1860,7 @@ fn the_card_says_the_output_was_not_sent_and_json_carries_the_same_facts() {
     assert_eq!(
         v["context"],
         serde_json::json!({
-            "folder": "/work/api", "command": true, "exit_code": 101,
+            "folder": "/work/api", "folders": [], "command": true, "exit_code": 101,
             "output": "not_sent", "output_bytes": 0, "can_attach": true
         })
     );
@@ -1807,24 +2107,16 @@ fn a_paste_is_kept_scrubbed_and_nothing_is_run() {
 // the output never goes with another command or another ask.
 #[test]
 fn the_hook_carries_attached_output_to_the_next_ask_only() {
-    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
     if !have("zsh") || !have("python3") {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
     let log = dir.path().join("calls.log");
     let seen = dir.path().join("seen.txt");
-    let fake = bin.join("iohr");
-    // --menu: logs its arguments, writes the file it was given and prints the question and
     // the kind. Otherwise (an ask): logs its arguments and what the output file held.
-    std::fs::write(
-        &fake,
-        format!(
-            r#"#!/bin/sh
+    z.fake(format!(
+        r#"#!/bin/sh
 echo "$*" >> {log}
 case "$*" in
 *--menu*)
@@ -1837,16 +2129,13 @@ case "$*" in
   printf 'the answerecho hinotes.md';;
 esac
 "#,
-            log = log.display(),
-            seen = seen.display()
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        log = log.display(),
+        seen = seen.display()
+    ));
     let down = "RAW:\u{1b}[B";
     drive_zsh(
-        &file,
-        &bin,
+        file,
+        bin,
         &[
             format!("source {}", file.display()),
             "false".to_owned(),
@@ -1870,7 +2159,7 @@ esac
         lines[1].contains("--menu")
             && lines[1].contains("--failed-command false")
             && lines[1].contains("--failed-exit 1")
-            && lines[1].contains("--asked why did that fail")
+            && lines[1].contains("--asked=why did that fail")
             && lines[1].contains("--output-to "),
         "{calls}"
     );
@@ -1897,18 +2186,9 @@ fn the_hook_sends_no_output_for_another_command_and_drops_a_menu_that_attached_n
     if Command::new("zsh").arg("--version").output().is_err() {
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hook.zsh");
-    std::fs::write(&file, hook("zsh").stdout).unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let fake = bin.join("iohr");
-    std::fs::write(
-        &fake,
-        "#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'a\\036\\036'\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let z = Zsh::new();
+    let (dir, file, bin) = (&z.dir, &z.file, &z.bin);
+    z.fake("#!/bin/sh\necho \"ARGS: $*\" >&2\nprintf 'a\\036\\036'\n");
     let stale = dir.path().join("stale");
     std::fs::write(&stale, "old output").unwrap();
     let o = Command::new("zsh")
