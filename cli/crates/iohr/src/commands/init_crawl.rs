@@ -1356,7 +1356,7 @@ mod tests {
         assert_eq!(asked, ["shop.acme.example"]);
         assert_eq!(passes.len(), 2);
         assert_eq!(crawl.pages.len(), 3);
-        assert!(crawl.not_followed.is_empty());
+        assert_eq!(crawl.not_followed, Vec::<String>::new());
     }
 
     #[tokio::test]
