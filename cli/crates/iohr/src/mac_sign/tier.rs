@@ -33,14 +33,23 @@ const WORDS: &[(&str, &str)] = &[
     ("autoapprov", "an auto-approve rule"),
 ];
 
+/// Why an ask of this `kind` alone goes to the phone, or `None` when its kind may be signed on
+/// a Mac (the ask's words and payload can still send it there: [`classify`]). A kind that is not
+/// named in [`MAC_KINDS`] goes to the phone, so a new kind, an empty one and a different
+/// spelling all fail closed. The panel asks this too, so there is one list.
+pub(crate) fn by_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "pull_request" => Some("a merge"),
+        "roll" => Some("a roll"),
+        k if !MAC_KINDS.contains(&k) => Some("a kind this Mac does not sign"),
+        _ => None,
+    }
+}
+
 /// Where an ask goes.
 pub(crate) fn classify(ask: &Value) -> Tier {
-    let kind = text(ask, "kind");
-    match kind {
-        "pull_request" => return Tier::Phone("a merge"),
-        "roll" => return Tier::Phone("a roll"),
-        k if !MAC_KINDS.contains(&k) => return Tier::Phone("a kind this Mac does not sign"),
-        _ => {}
+    if let Some(why) = by_kind(text(ask, "kind")) {
+        return Tier::Phone(why);
     }
     let payload = ask.get("payload").unwrap_or(&Value::Null);
     if payload
@@ -169,6 +178,18 @@ mod tests {
                 Tier::Mac,
                 "{kind}"
             );
+        }
+    }
+
+    #[test]
+    fn the_kind_alone_is_what_the_panel_asks() {
+        assert_eq!(by_kind("pull_request"), Some("a merge"));
+        assert_eq!(by_kind("roll"), Some("a roll"));
+        for kind in ["migration", "auto_approve", "Decision", ""] {
+            assert!(by_kind(kind).is_some(), "{kind}");
+        }
+        for kind in ["review", "document", "decision", "run"] {
+            assert_eq!(by_kind(kind), None, "{kind}");
         }
     }
 }

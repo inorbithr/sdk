@@ -1,14 +1,11 @@
 //! Approving an ask from the panel.
 //!
-//! Approving needs the proof of a device key (RFC 0113, ADR 0142, ADR 0215), and the keys live
-//! on the phone, so today every approve from the panel hands over to the phone, whatever the
-//! kind. Merge, roll, migration and auto-approve asks stay on the phone even when a signer
-//! exists (the owner's rule): [`phone_only`] is the list.
-//!
-//! Where a signer plugs in: the Touch ID signing of `feat/mac-touchid-sign` (a `DeviceSigner`
-//! and a fail-closed risk tier) is not in this tree. When it lands, [`attempt`] asks it for the
-//! kinds that are not [`phone_only`] and returns [`Outcome::Signed`]; the panel already shows
-//! whatever [`Outcome`] says and sends nothing itself.
+//! Approving needs the proof of a device key (RFC 0113, ADR 0142, ADR 0215). The panel is a
+//! raw-mode screen and never asks Touch ID itself: every approve from it hands over, to the
+//! phone, or for an ask a Mac may sign to `iohr asks approve <id>` in a shell (`mac_sign`, the
+//! Secure Enclave key behind Touch ID). Which asks a Mac may sign is the one list in
+//! [`crate::mac_sign::tier`]; a merge, a roll, a migration and an auto-approve rule are never
+//! signed on a Mac ([`phone_only`] reads that list, there is no second copy).
 
 /// What an approve key did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,13 +14,10 @@ pub(super) enum Outcome {
     Phone(String),
 }
 
-/// The ask kinds that are never approved from a terminal, whatever signer there is.
+/// The ask kinds that are never approved from a terminal, whatever signer there is: every kind
+/// a Mac may not sign (fail closed, so an empty or new kind is on the list).
 pub(super) fn phone_only(kind: &str) -> bool {
-    let k = kind.to_ascii_lowercase().replace([' ', '-'], "_");
-    matches!(
-        k.as_str(),
-        "pull_request" | "merge" | "roll" | "migration" | "auto_approve"
-    )
+    crate::mac_sign::tier::by_kind(kind).is_some()
 }
 
 /// The approve key on an ask of `kind`.
@@ -31,7 +25,7 @@ pub(super) fn attempt(kind: &str) -> Outcome {
     let why = if phone_only(kind) {
         "approve on your phone: this kind is never signed here"
     } else {
-        "approve on your phone: its key signs it"
+        "approve on your phone, or iohr asks approve"
     };
     Outcome::Phone(why.into())
 }
@@ -41,7 +35,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn merge_roll_migration_and_auto_approve_are_phone_only_and_nothing_is_signed_here_yet() {
+    fn merge_roll_migration_and_auto_approve_are_phone_only_and_the_panel_signs_nothing() {
         for k in [
             "pull request",
             "pull_request",
@@ -56,7 +50,7 @@ mod tests {
         assert!(!phone_only("decision"));
         assert_eq!(
             attempt("decision"),
-            Outcome::Phone("approve on your phone: its key signs it".into())
+            Outcome::Phone("approve on your phone, or iohr asks approve".into())
         );
     }
 }
