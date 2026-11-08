@@ -980,7 +980,10 @@ token or a key in a repository secret. [recipes.md](recipes.md) shows both.
   caller who needs others supplies an HTTP client.
 - Answers may be compressed: the SDK sends `Accept-Encoding: gzip` where the runtime
   decodes it, and the 16 MiB cap applies to the **decoded** body, so a small compressed
-  body cannot inflate past the cap. Request bodies are not compressed.
+  body cannot inflate past the cap. The cap is applied while the body is read: past it
+  the SDK stops reading, closes the connection and raises `TooLargeError`, so an
+  oversized answer, chunked or compressed, is never held whole. Request bodies are not
+  compressed.
 - Redirects are never followed. A `3xx` is returned as an `ApiError`, and the
   `Authorization` header is never sent to another origin. A caller-supplied client gets
   its redirect policy overridden where the language allows (Go copies the client today);
