@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use iohr_auth::RunnerConfig;
 
+use super::provider::AuthPolicy;
+
 use crate::commands::upgrade::{SignWith, sign};
 
 /// The most turns one runner holds at once; the service clamps to the same.
@@ -130,6 +132,22 @@ pub(crate) struct Effective {
     pub(crate) user_units: Option<Setting<Vec<String>>>,
     /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
     pub(crate) core_checkout: Option<Setting<String>>,
+    /// Which sign-in Claude turns may run on (`claude_auth`; default `api_only`).
+    pub(crate) claude_auth: Setting<AuthPolicy>,
+    /// Which sign-in Codex turns may run on (`codex_auth`; default `any`).
+    pub(crate) codex_auth: Setting<AuthPolicy>,
+}
+
+impl Effective {
+    /// The local policy for a provider: its key, or the strictest for one the runner
+    /// has no key for.
+    pub(crate) fn auth_policy(&self, provider: &str) -> AuthPolicy {
+        match provider {
+            "claude" => self.claude_auth.value,
+            "codex" => self.codex_auth.value,
+            other => AuthPolicy::default_for(other),
+        }
+    }
 }
 
 /// The first of the flag, the profile's table and the file's table that sets a value.
@@ -246,6 +264,8 @@ pub(crate) fn resolve(
             c.source
         ));
     }
+    let claude_auth = auth_policy_of("claude", profile, file, |c| c.claude_auth.clone())?;
+    let codex_auth = auth_policy_of("codex", profile, file, |c| c.codex_auth.clone())?;
     Ok(Effective {
         capacity,
         kinds,
@@ -260,7 +280,35 @@ pub(crate) fn resolve(
         upgrade_sign,
         user_units,
         core_checkout,
+        claude_auth,
+        codex_auth,
     })
+}
+
+/// `<provider>_auth`: the profile's table, then `[runner]`, then the provider's default.
+/// Never a flag and never the server: only this machine's config turns a looser
+/// sign-in on.
+fn auth_policy_of(
+    provider: &str,
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+    get: impl Fn(&RunnerConfig) -> Option<String>,
+) -> Result<Setting<AuthPolicy>, String> {
+    match pick(None, profile, file, get) {
+        Some(m) => Ok(Setting {
+            value: AuthPolicy::parse(&m.value).ok_or_else(|| {
+                format!(
+                    "runner {provider}_auth {:?} ({}) is not any or api_only",
+                    m.value, m.source
+                )
+            })?,
+            source: m.source,
+        }),
+        None => Ok(Setting {
+            value: AuthPolicy::default_for(provider),
+            source: Source::Default,
+        }),
+    }
 }
 
 /// `upgrade_sign_identity`: `IOHR_SIGN_IDENTITY`, then the profile's table, then
@@ -760,6 +808,28 @@ mod tests {
         work.user_units = Some(vec!["sshd".into()]);
         let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
         assert!(err.contains("user_units") && err.contains("work"), "{err}");
+    }
+
+    #[test]
+    fn claude_is_api_only_and_codex_any_by_default_and_a_bad_value_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.claude_auth.value, AuthPolicy::ApiOnly);
+        assert_eq!(none.claude_auth.source, Source::Default);
+        assert_eq!(none.codex_auth.value, AuthPolicy::Any);
+        assert_eq!(none.auth_policy("gemini"), AuthPolicy::ApiOnly);
+        let mut file = RunnerConfig::default();
+        file.claude_auth = Some("any".into());
+        file.codex_auth = Some("api_only".into());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            (e.claude_auth.value, e.claude_auth.source.clone()),
+            (AuthPolicy::Any, Source::File)
+        );
+        assert_eq!(e.auth_policy("codex"), AuthPolicy::ApiOnly);
+        let mut work = RunnerConfig::default();
+        work.claude_auth = Some("subscription".into());
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(err.contains("claude_auth") && err.contains("work"), "{err}");
     }
 
     #[test]

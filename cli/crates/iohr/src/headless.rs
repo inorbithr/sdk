@@ -20,7 +20,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::permissions::Mode;
 use crate::permissions::broker::Session;
-use crate::runner::claude::assert_honest;
+use crate::runner::claude;
 use crate::runner::env::scrub;
 
 /// Turns the run may take: a few file reads and the answer.
@@ -656,7 +656,6 @@ pub(crate) fn args(
     session: Option<&Session>,
     plan: bool,
 ) -> Result<Vec<String>, String> {
-    let turns = MAX_TURNS.to_string();
     let lines = crate::card::stderr_lines();
     let brief = match session {
         _ if plan => brief_plan(lines),
@@ -664,53 +663,40 @@ pub(crate) fn args(
         Some(_) => brief_with_bash(lines),
         None => brief(lines),
     };
-    let mut v: Vec<String> = [
-        "-p",
-        "--model",
-        model,
-        "--output-format",
-        "json",
-        "--max-turns",
-        &turns,
-        "--no-session-persistence",
-        "--setting-sources",
-        "",
-        "--strict-mcp-config",
-        "--system-prompt",
-        &brief,
-    ]
-    .iter()
-    .map(|s| (*s).to_owned())
-    .collect();
-    if plan {
-        v.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
-    }
+    let mut call = claude::Call {
+        model: Some(model),
+        max_turns: Some(MAX_TURNS),
+        setting_sources: Some(""),
+        strict_mcp: true,
+        keep: claude::Keep::Nothing,
+        prompt: claude::Prompt::Replace(&brief),
+        permission_mode: plan.then_some("plan"),
+        ..claude::Call::default()
+    };
     let files = reads || !also.is_empty();
     if files || session.is_some() {
-        let tools = match (files, session.is_some()) {
+        call.restricted = true;
+        call.tools = Some(match (files, session.is_some()) {
             (true, true) => format!("{READ_TOOLS},Bash"),
             (true, false) => READ_TOOLS.to_owned(),
             (false, _) => "Bash".to_owned(),
-        };
-        v.extend(["--restricted".to_owned(), "--tools".to_owned(), tools]);
+        });
         // The run starts in the working folder when that one is readable, else in the first
-        // folder the person allowed ([`added`]); every other one is added by name (`=`: the
-        // list form would swallow the next argument).
-        for extra in added(reads, also) {
-            v.push(format!("--add-dir={}", extra.display()));
-        }
+        // folder the person allowed ([`added`]); every other one is added by name.
+        call.add_dirs = added(reads, also)
+            .iter()
+            .map(|d| d.display().to_string())
+            .collect();
         if let Some(s) = session {
-            v.extend(s.args());
+            call.extra = s.args();
         }
-        // One flag per rule: the list form would swallow the next argument.
-        for rule in SECRETS {
-            v.push(format!("--disallowedTools={rule}"));
-        }
+        call.disallowed = SECRETS.iter().map(|r| (*r).to_owned()).collect();
     } else {
-        v.extend(["--tools", ""].map(str::to_owned));
+        call.tools = Some(String::new());
     }
-    assert_honest(&v).map_err(|e| e.to_string())?;
-    Ok(v)
+    claude::build(&call, &claude::Auth::OwnSignIn)
+        .map(|b| b.args)
+        .map_err(|e| e.to_string())
 }
 
 /// The allowed folders `--add-dir` names: all of them when the run starts in the working

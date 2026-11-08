@@ -1221,6 +1221,10 @@ fn assert_two_commits_the_second_ai_built(d: &Path) {
 
 #[cfg(unix)]
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one run checked from its arguments to its smoke test"
+)]
 fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test() {
     if !on_path("python3") {
         return;
@@ -1275,7 +1279,10 @@ fn describe_runs_the_agent_in_print_mode_in_the_background_then_the_smoke_test()
             .any(|a| a.starts_with("Bash(") && a.contains("curl")),
         "{args:?}"
     );
-    assert!(args.contains(&"Read(./.env)".to_owned()), "{args:?}");
+    assert!(
+        args.contains(&"--disallowedTools=Read(./.env)".to_owned()),
+        "{args:?}"
+    );
     assert!(
         has("--max-turns", "150") && has("--model", "sonnet"),
         "{args:?}"

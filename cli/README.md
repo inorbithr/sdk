@@ -127,7 +127,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
-| `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--session DIR] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
+| `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--session DIR] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| api-key set [--stdin \| --file PATH] [--account A] \| api-key remove [--account A] \| personal-use [--accept \| --withdraw] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on the Anthropic API key `api-key set` stored (or, for personal use only, your own Claude plan; below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `api-key set` stores the key in the credential store from a prompt, `--stdin` or `--file`, never an argument, and `api-key remove` deletes it; `personal-use` shows the personal-use notice and `--accept` or `--withdraw` records your answer on this machine, without signing in; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
 | `iohr session [DIR] [--json]` | Open a session on a project (platform RFC 0213): starts the project's one session host if none runs (this same `iohr` as `runner run --session DIR`, a process of its own that hosts the project's Roles and the runner's turn loop), joins it, and stays open until Ctrl-C or SIGTERM. The host stops when the last session has left (a shell that is killed counts as left), on `iohr stop`, or on SIGTERM; a host nobody joins within 30 s ends by itself. With `--json` it prints `{project, host_pid, roles}`; notes go to stderr. Needs a registered runner (`iohr runner register`). Every `?`/`??` ask asked in the project's folder is answered by its Roles too (see Session mode). Unix only |
 | `iohr stop [DIR] [--wait S] [--json]` | Stop the project's session host and wait up to `--wait` seconds (0 to 600, default 15) for it to end; an answer a Role is still writing is cut short and goes back to the queue for the next host. Prints `stopped` only when the host's lock is free, `stopping` while a Role still holds a task; says on stderr that no host runs when none does, and exits 0 either way; `--json` prints `{project, state, host_pid}` with `state` one of `not running`, `stopped`, `stopping`. Makes no API call; Unix only |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
@@ -1026,7 +1026,7 @@ leader).
 ## Runner
 
 ```sh
-claude                                  # once: /login with your subscription
+iohr runner api-key set                 # once: your Anthropic API key, no echo
 iohr runner register                    # this machine, by its host name
 iohr runner run                         # until Ctrl-C
 iohr runner status
@@ -1075,11 +1075,20 @@ also passes `--setting-sources project,local` and `--strict-mcp-config`, so your
 user-level hooks, plugins, skills and MCP servers are not loaded into a turn (your
 sign-in is). On `claude` 2.1.307 one short turn went from 33,220 to 15,054 context tokens.
 
-It runs on your subscription and nothing else:
+It runs on an Anthropic API key, the path for organisations and teams. Your own Claude
+plan is for personal use only: it is off unless the runner table says
+`claude_auth = "any"` and you accepted the notice `iohr runner personal-use` shows, and
+then the runner takes one turn at a time, only work you assigned yourself
+(`docs/config.md` section 4.3). `claude` sends its requests to Anthropic directly;
+InOrbit does not proxy them.
 
 - Before every turn it asks the binary (`claude auth status`) and refuses unless it says
-  `claude.ai` and `firstParty`. It never reads Claude Code's own credential files and
-  never signs in for you.
+  `api_key` (or, where allowed, `claude.ai`) and `firstParty`. It never reads Claude
+  Code's own credential files and never signs in for you.
+- The stored key reaches only the `claude` process the runner starts, as
+  `ANTHROPIC_API_KEY` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` beside it; it is never
+  an argument, never printed, never logged and never sent to InOrbit. A key or token
+  given as an argument to `iohr` is refused before anything runs.
 - The child gets an allowlist of your environment, nothing else: `PATH`, `HOME`, `USER`,
   `LOGNAME`, `SHELL`, `TERM`, `TMPDIR`, `TZ`, `LANG`, `LC_*`, `CLAUDE_CONFIG_DIR` and the
   XDG directories (and the Windows equivalents), so `claude` finds its own sign-in.
@@ -1091,7 +1100,8 @@ It runs on your subscription and nothing else:
 - It never passes `--bare`, `--settings` or an endpoint, and never edits the binary or
   its requests. Both the arguments and the environment are table-tested, and a `--bare`
   or an `ANTHROPIC_BASE_URL` in their output fails the build.
-- A turn is refused when its user is not the person the runner is registered to.
+- A turn is refused when its user is not the person the runner is registered to, and on
+  your own Claude plan when someone else assigned it.
 - `gh` and git are signed out in the child: `GH_CONFIG_DIR` points at a directory that
   does not exist, git's credential helpers are cleared (`GIT_CONFIG_COUNT`) and its
   prompts are off (`GIT_TERMINAL_PROMPT=0`). The check a job runs gets the same.
