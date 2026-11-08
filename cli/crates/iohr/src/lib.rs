@@ -49,6 +49,13 @@ mod usage;
 
 pub use args::refuse_secrets_in_args;
 pub use commands::run;
+
+/// Whether bare `iohr` enters the session here (a terminal, colour allowed, no `--json`, not
+/// inside a panel) instead of printing the usage report.
+#[must_use]
+pub fn bare_enters(g: &cli::Global) -> bool {
+    panel::bare_enters(g)
+}
 pub use error::Error;
 pub use usage::{report_clap as report_usage_clap, report_message as report_usage_message};
 

@@ -21,6 +21,8 @@ use sha2::{Digest as _, Sha256};
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+mod pty;
+
 const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"seat@example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example","subscriptionType":"max","loginExpiresAt":"2026-11-05T10:00:00Z","configDirectory":"/home/a/.claude","projectsDirectory":"/home/a/.claude/projects"}"#;
 /// The same seat after a token refresh, on another host, with the email in another case.
 const SUB_REFRESHED: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Seat@Example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example Renamed","subscriptionType":"pro","loginExpiresAt":"2026-11-06T22:00:00Z","configDirectory":"/Users/b/.config/claude","projectsDirectory":"/srv/projects"}"#;
@@ -2086,4 +2088,91 @@ async fn sigterm_ends_a_host_run_by_hand() {
         .unwrap();
     assert!(status.success(), "SIGTERM is a clean stop: {status}");
     assert!(session_socket(&dir.path().join("data")).is_none());
+}
+
+/// Bare `iohr` on a terminal is the session: the shell with the panel over it, in the host this
+/// folder's session joined (started here, since none ran). `iohr stop` ends the host, which
+/// closes the panel and leaves the shell; the shell then ends with its own exit status.
+#[tokio::test]
+async fn bare_iohr_on_a_terminal_enters_the_session_and_stop_closes_the_panel() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap().to_owned();
+    let mut c = session_cmd(&server, dir.path(), &[]);
+    c.current_dir(&project)
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("SHELL", "/bin/sh")
+        .env("PS1", "shell> ");
+    let mut s = pty::Session::spawn(c);
+    s.until("the panel over the shell", |screen| {
+        pty::any(screen, "⌥i menu") && pty::any(screen, "shell>")
+    });
+    let screen = s.screen.screen().contents();
+    assert!(
+        !screen.contains("Usage:"),
+        "bare iohr printed help:\n{screen}"
+    );
+    // The host is a process of its own that this shell joined: it beats, and has a socket.
+    assert!(
+        beats_at_least(&server, 1).await >= 1,
+        "the host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    assert!(session_socket(&dir.path().join("data")).is_some());
+    // `iohr stop` from another process ends the host; the panel closes, the shell stays.
+    let stopped = tokio::task::spawn_blocking({
+        let (server_uri, dir_path) = (server.uri(), dir.path().to_path_buf());
+        move || {
+            let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
+            c.args(["stop", &p, "--wait", "0"])
+                .env_clear()
+                .env("IOHR_BASE_URL", server_uri)
+                .env("IOHR_CONFIG_DIR", dir_path.join("config"))
+                .env("IOHR_PROFILE", "p")
+                .env("HOME", &dir_path)
+                .env("IOHR_DATA_DIR", dir_path.join("data"))
+                .env("PATH", "/usr/bin:/bin");
+            c.output().unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(stopped.status.code(), Some(0), "{}", text(&stopped));
+    // The host ends once its Roles are idle; its closing connection is what closes the panel.
+    wait_until("the host gone", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    s.until("the panel gone", |screen| !pty::any(screen, "⌥i menu"));
+    assert!(
+        s.child.try_wait().unwrap().is_none(),
+        "the shell must stay open when the host stops"
+    );
+    s.send(b"exit\n");
+    let status = s.exited().expect("the shell ends after exit");
+    assert!(status.success(), "{status}");
+    // Leaving says why the panel went: the note is written where the shell ended, not over it.
+    s.until("the host's stop said", |screen| {
+        pty::any(screen, "the session host stopped")
+    });
+}
+
+/// Under `NO_COLOR` a terminal is not the session either: the usage report, exit 2.
+#[tokio::test]
+async fn bare_iohr_on_a_terminal_under_no_color_prints_the_usage_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    let mut c = iohr(&server, dir.path(), &[]);
+    c.env("TERM", "xterm-256color").env("NO_COLOR", "1");
+    let mut s = pty::Session::spawn(c);
+    let status = s.exited().expect("it prints and ends");
+    assert_eq!(status.code(), Some(2), "{}", s.screen.screen().contents());
+    assert!(
+        s.screen.screen().contents().contains("Usage: iohr"),
+        "{}",
+        s.screen.screen().contents()
+    );
 }

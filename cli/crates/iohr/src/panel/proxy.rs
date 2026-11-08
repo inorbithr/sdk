@@ -32,14 +32,14 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::cells::{self, Rect};
-use super::input;
 use super::model::{Ask, Effect, Key, Model, Source, View};
 use super::screen::{Boundary, Screen};
+use super::workloads::{self, Snapshot};
+use super::{act, input};
 use crate::card::Look;
 use crate::cli::Global;
-use crate::commands::asks::{self, PanelAsk};
-use crate::commands::shell;
-use crate::context::Ctx;
+use crate::commands::asks::{self, PanelAsk, PanelAuto};
+use crate::commands::coordinator;
 use crate::error::Error;
 use crate::{Env, ui};
 
@@ -63,6 +63,9 @@ pub(super) struct Config {
     pub(super) initial: View,
     /// The command; empty means the person's shell.
     pub(super) command: Vec<String>,
+    /// Answers when the session host this shell joined has stopped (`iohr stop`): the panel
+    /// closes and the shell goes on. `None` when there is no host.
+    pub(super) host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 
 fn command_or_shell(command: &[String]) -> Vec<String> {
@@ -216,6 +219,8 @@ fn stub_asks() -> Vec<Ask> {
         title: (*title).to_owned(),
         kind: (*kind).to_owned(),
         age: (*age).to_owned(),
+        // The stub session of this name is the one that waits on the first ask.
+        agent: if i == 0 { "Fix sdk #448 reads" } else { "" }.to_owned(),
     })
     .collect()
 }
@@ -392,6 +397,15 @@ struct Session {
     env: Env,
     asks_fetch: Option<Fetch<Result<Vec<PanelAsk>, Error>>>,
     deny_fetch: Option<Fetch<(String, Result<(), Error>)>>,
+    workloads_fetch: Option<Fetch<Result<Snapshot, Error>>>,
+    auto_fetch: Option<Fetch<Result<PanelAuto, Error>>>,
+    /// One action at a time: a question, a message, a stop, auto mode on or off.
+    act_fetch: Option<Fetch<Result<String, String>>>,
+    /// One page read at a time: an ask's details, a transcript.
+    read_fetch: Option<Fetch<Result<Vec<String>, String>>>,
+    host_gone: Option<Fetch<()>>,
+    /// The host stopped while the panel was open.
+    host_stopped: bool,
 }
 
 impl Session {
@@ -399,6 +413,40 @@ impl Session {
         if !self.stub && self.asks_fetch.is_none() {
             self.asks_fetch = Some(read_asks(self.g.clone(), self.env.clone()));
         }
+        if !self.stub && self.workloads_fetch.is_none() {
+            self.workloads_fetch = Some(read_workloads(self.g.clone(), self.env.clone()));
+        }
+        if !self.stub && self.auto_fetch.is_none() {
+            self.auto_fetch = Some(read_auto(self.g.clone(), self.env.clone()));
+        }
+    }
+
+    /// Starts an action, unless one is still running.
+    fn act(&mut self, f: Fetch<Result<String, String>>) {
+        if self.act_fetch.is_some() {
+            self.proxy
+                .model
+                .acted(Err("still working on the last action".into()));
+        } else {
+            self.act_fetch = Some(f);
+        }
+    }
+
+    /// Runs a local action (the registry, a process, a file) off the loop.
+    fn local(
+        &mut self,
+        f: impl FnOnce(&std::path::Path) -> Result<String, String> + Send + 'static,
+    ) {
+        let fut: Fetch<Result<String, String>> = Box::pin(async move {
+            let run = move || match workloads::home_root() {
+                Some(root) => f(&root),
+                None => Err("cannot find your home folder".into()),
+            };
+            tokio::task::spawn_blocking(run)
+                .await
+                .unwrap_or_else(|e| Err(format!("the action failed: {e}")))
+        });
+        self.act(fut);
     }
 
     fn apply(&mut self, effect: Effect) {
@@ -413,6 +461,122 @@ impl Session {
                 }
             }
             Effect::Stop => self.proxy.stopped = true,
+            Effect::Question { id, text } => {
+                if self.stub {
+                    self.proxy.model.acted(Ok("stub: nothing was sent".into()));
+                } else {
+                    let (g, env) = (self.g.clone(), self.env.clone());
+                    self.act(limited(async move {
+                        asks::question_quiet(&g, &env, &id, &text)
+                            .await
+                            .map(|()| "question sent".to_owned())
+                    }));
+                }
+            }
+            Effect::Detail(id) => {
+                if self.stub {
+                    self.proxy.model.reader_done(Ok(stub_detail(&id)));
+                } else if self.read_fetch.is_none() {
+                    let (g, env) = (self.g.clone(), self.env.clone());
+                    self.read_fetch = Some(read_limited(async move {
+                        asks::detail_quiet(&g, &env, &id).await.map(|d| {
+                            let mut lines: Vec<String> =
+                                d.pairs.iter().map(|(k, v)| format!("{k}  {v}")).collect();
+                            if !d.open {
+                                lines.push("this ask is no longer waiting".into());
+                            }
+                            lines
+                        })
+                    }));
+                }
+            }
+            Effect::AutoOn => {
+                if self.stub {
+                    self.proxy.model.acted(Ok("stub: nothing was asked".into()));
+                } else {
+                    let (g, env) = (self.g.clone(), self.env.clone());
+                    self.act(limited(async move {
+                        asks::auto_request(&g, &env)
+                            .await
+                            .map(|_| "asked your phone: approve there to turn it on".to_owned())
+                    }));
+                }
+            }
+            Effect::AutoOff => {
+                if self.stub {
+                    self.proxy
+                        .model
+                        .acted(Ok("stub: nothing was changed".into()));
+                } else {
+                    let (g, env) = (self.g.clone(), self.env.clone());
+                    self.act(limited(async move {
+                        asks::auto_revoke(&g, &env)
+                            .await
+                            .map(|()| "auto mode is off".to_owned())
+                    }));
+                }
+            }
+            other => self.apply_work(other),
+        }
+    }
+
+    /// The Workloads actions: they act on this machine's sessions, not on the account.
+    fn apply_work(&mut self, effect: Effect) {
+        match effect {
+            Effect::Message { id, text } => {
+                if self.stub {
+                    self.proxy.model.acted(Ok("stub: nothing was sent".into()));
+                } else {
+                    self.local(move |root| {
+                        act::message(root, &id, &text, OffsetDateTime::now_utc())
+                    });
+                }
+            }
+            Effect::Terminal(id) => {
+                if self.stub {
+                    self.proxy
+                        .model
+                        .acted(Ok("stub: no terminal to show".into()));
+                } else {
+                    self.local(move |root| act::terminal(root, &id));
+                }
+            }
+            Effect::Transcript(id) => {
+                if self.stub {
+                    self.proxy.model.reader_done(Ok(vec![
+                        "stub: a session's transcript is read from its file".into(),
+                    ]));
+                } else if self.read_fetch.is_none() {
+                    self.read_fetch = Some(Box::pin(async move {
+                        let run = move || match workloads::home_root() {
+                            Some(root) => act::transcript(&root, &id),
+                            None => Err("cannot find your home folder".into()),
+                        };
+                        tokio::task::spawn_blocking(run)
+                            .await
+                            .unwrap_or_else(|e| Err(format!("the read failed: {e}")))
+                    }));
+                }
+            }
+            Effect::Pr { id, pr } => {
+                if self.stub {
+                    self.proxy
+                        .model
+                        .acted(Ok("stub: no pull request to open".into()));
+                } else {
+                    self.local(move |root| act::pr(root, &id, pr.as_deref()));
+                }
+            }
+            Effect::StopWork(id) => {
+                if self.stub {
+                    self.proxy
+                        .model
+                        .acted(Ok("stub: nothing was stopped".into()));
+                } else {
+                    self.local(move |root| act::stop(root, &id));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -444,6 +608,11 @@ impl Session {
         write_terminal(&self.proxy.redraw());
     }
 
+    fn workloads_done(&mut self, result: Result<Snapshot, Error>) {
+        self.proxy.model.set_work(source_of(result));
+        write_terminal(&self.proxy.redraw());
+    }
+
     fn deny_done(&mut self, id: &str, result: Result<(), Error>) {
         match result {
             Ok(()) => self.proxy.model.denied(id),
@@ -455,6 +624,31 @@ impl Session {
         write_terminal(&self.proxy.redraw());
     }
 
+    fn auto_done(&mut self, result: Result<PanelAuto, Error>) {
+        self.proxy.model.set_auto(source_of(result));
+        write_terminal(&self.proxy.redraw());
+    }
+
+    /// An action ended: say what it did, and read everything again (a question or a stop
+    /// changes the lists, auto mode changes the pill).
+    fn act_done(&mut self, result: Result<String, String>) {
+        self.proxy.model.acted(result);
+        self.refresh();
+        write_terminal(&self.proxy.redraw());
+    }
+
+    fn read_done(&mut self, result: Result<Vec<String>, String>) {
+        self.proxy.model.reader_done(result);
+        write_terminal(&self.proxy.redraw());
+    }
+
+    /// The session host stopped (`iohr stop`): the panel closes, the shell goes on.
+    fn host_ended(&mut self) {
+        self.host_stopped = true;
+        self.proxy.stopped = true;
+        write_terminal(&self.proxy.redraw());
+    }
+
     fn resized(&mut self) {
         let (rows, cols) = host_size();
         let _ = rustix::termios::tcsetwinsize(&self.master, winsize(rows, cols));
@@ -462,30 +656,46 @@ impl Session {
     }
 }
 
-fn initial_model(g: &Global, config: &Config) -> Model {
+fn initial_model(config: &Config) -> Model {
     let mut model = Model::new(config.stub);
     model.view = config.initial;
     if config.stub {
         model.set_asks(Source::Ready(stub_asks()));
-        model.mode = Source::Ready("auto".into());
-    } else {
-        model.mode = source_of(Ctx::load(g).and_then(|c| shell::start_mode(&c).map(str::to_owned)));
+        model.set_work(Source::Ready(workloads::stub()));
+        model.set_auto(Source::Ready(PanelAuto {
+            active: true,
+            expires_at: "2099-01-01T18:00:00Z".into(),
+            approved: 3,
+            never_kinds: vec!["pull_request".into(), "roll".into(), "migration".into()],
+        }));
     }
     model
 }
 
 /// Runs `config.command` under the panel until it exits; its exit code is ours.
-pub(super) async fn run(g: &Global, env: Env, config: Config) -> Result<(), Error> {
+/// Whether the panel can be drawn here: a terminal on both ends, colour allowed, no `--json`.
+/// Bare `iohr` uses the same test to decide between entering the session and the usage report.
+pub(super) fn fancy(g: &Global) -> bool {
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    let fancy = interactive
+    interactive
         && ui::fancy_for(
             true,
             g.json,
             std::env::var("NO_COLOR").ok().as_deref(),
             std::env::var("TERM").ok().as_deref(),
-        );
-    if !fancy || std::env::var_os(INSIDE).is_some() {
-        return run_plain(&config.command);
+        )
+}
+
+/// Whether this process already runs inside a panel.
+pub(super) fn inside() -> bool {
+    std::env::var_os(INSIDE).is_some()
+}
+
+/// Runs the shell (or the command) under the panel. `Ok(true)` means the session host stopped
+/// while the panel was open.
+pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool, Error> {
+    if !fancy(g) || inside() {
+        return run_plain(&config.command).map(|()| false);
     }
     let command = command_or_shell(&config.command);
     let (rows, cols) = host_size();
@@ -511,7 +721,7 @@ pub(super) async fn run(g: &Global, env: Env, config: Config) -> Result<(), Erro
 
     let mut session = Session {
         proxy: Proxy {
-            model: initial_model(g, &config),
+            model: initial_model(&config),
             screen: Screen::new(rows, cols),
             boundary: Boundary::new(),
             look: Look::detect(true),
@@ -527,6 +737,12 @@ pub(super) async fn run(g: &Global, env: Env, config: Config) -> Result<(), Erro
         env,
         asks_fetch: None,
         deny_fetch: None,
+        workloads_fetch: None,
+        auto_fetch: None,
+        act_fetch: None,
+        read_fetch: None,
+        host_gone: config.host_gone.take().map(host_closed),
+        host_stopped: false,
     };
     write_terminal(&session.proxy.redraw());
     session.refresh();
@@ -559,17 +775,73 @@ pub(super) async fn run(g: &Global, env: Env, config: Config) -> Result<(), Erro
             _ = winch.recv() => session.resized(),
             _ = tick.tick(), if !config.stub => session.refresh(),
             result = poll(&mut session.asks_fetch) => session.asks_done(result),
+            result = poll(&mut session.workloads_fetch) => session.workloads_done(result),
             (id, result) = poll(&mut session.deny_fetch) => session.deny_done(&id, result),
+            result = poll(&mut session.auto_fetch) => session.auto_done(result),
+            result = poll(&mut session.act_fetch) => session.act_done(result),
+            result = poll(&mut session.read_fetch) => session.read_done(result),
+            () = poll(&mut session.host_gone) => session.host_ended(),
         }
     }
 
     // Leave the screen as the shell had it, without the panel.
     session.proxy.stopped = true;
     write_terminal(&session.proxy.redraw());
+    let host_stopped = session.host_stopped;
     match exit {
         Some(r) => r,
         None => exit_rx.recv().await.unwrap_or(Ok(())),
     }
+    .map(|()| host_stopped)
+}
+
+/// Resolves when the host closes; a dropped sender is not a stop, so that never resolves.
+fn host_closed(rx: tokio::sync::oneshot::Receiver<()>) -> Fetch<()> {
+    Box::pin(async move {
+        if rx.await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    })
+}
+
+/// An action under the same limit as every other read.
+fn limited(
+    f: impl Future<Output = Result<String, Error>> + 'static,
+) -> Fetch<Result<String, String>> {
+    Box::pin(async move {
+        match tokio::time::timeout(FETCH_LIMIT, f).await {
+            Ok(r) => r.map_err(|e| e.to_string().lines().next().unwrap_or("").to_owned()),
+            Err(_) => Err("it took too long".to_owned()),
+        }
+    })
+}
+
+fn read_limited(
+    f: impl Future<Output = Result<Vec<String>, Error>> + 'static,
+) -> Fetch<Result<Vec<String>, String>> {
+    Box::pin(async move {
+        match tokio::time::timeout(FETCH_LIMIT, f).await {
+            Ok(r) => r.map_err(|e| e.to_string().lines().next().unwrap_or("").to_owned()),
+            Err(_) => Err("it took too long".to_owned()),
+        }
+    })
+}
+
+fn read_auto(g: Global, env: Env) -> Fetch<Result<PanelAuto, Error>> {
+    Box::pin(async move {
+        match tokio::time::timeout(FETCH_LIMIT, asks::auto_state(&g, &env)).await {
+            Ok(r) => r,
+            Err(_) => Err(Error::Failed("the auto mode took too long".into())),
+        }
+    })
+}
+
+/// What the demo shows for an ask's details: labelled stub.
+fn stub_detail(id: &str) -> Vec<String> {
+    vec![
+        format!("id  {id}"),
+        "stub: the real details come from the approvals service".into(),
+    ]
 }
 
 fn read_asks(g: Global, env: Env) -> Fetch<Result<Vec<PanelAsk>, Error>> {
@@ -578,6 +850,30 @@ fn read_asks(g: Global, env: Env) -> Fetch<Result<Vec<PanelAsk>, Error>> {
             Ok(r) => r,
             Err(_) => Err(Error::Failed("the asks took too long".into())),
         }
+    })
+}
+
+/// The sessions on this Mac and the coordinator's queue, read together: the registry and `ps`
+/// run off the loop, the picture under the same limit as the asks. A queue that cannot be read
+/// says why in the snapshot; the sessions are local and still shown.
+fn read_workloads(g: Global, env: Env) -> Fetch<Result<Snapshot, Error>> {
+    Box::pin(async move {
+        let now = OffsetDateTime::now_utc();
+        let local = tokio::task::spawn_blocking(move || {
+            workloads::home_root().map_or_else(Vec::new, |root| {
+                workloads::sessions(&root, now, &workloads::pid_alive, &workloads::ps_uses)
+            })
+        });
+        let picture = tokio::time::timeout(FETCH_LIMIT, coordinator::picture(&g, &env));
+        let (local, picture) = tokio::join!(local, picture);
+        let sessions =
+            local.map_err(|e| Error::Failed(format!("the sessions read failed: {e}")))?;
+        let queue = match picture {
+            Ok(Ok(v)) => Ok(workloads::queue(&v, now)),
+            Ok(Err(e)) => Err(e.to_string().lines().next().unwrap_or("").to_owned()),
+            Err(_) => Err("the queue took too long".to_owned()),
+        };
+        Ok(Snapshot { sessions, queue })
     })
 }
 

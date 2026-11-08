@@ -9,123 +9,34 @@
 )]
 #![cfg(unix)]
 
-use std::fs::File;
-use std::io::{Read as _, Write as _};
-use std::os::fd::OwnedFd;
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
-use rustix::fs::{Mode, OFlags};
-use rustix::termios::Winsize;
+mod pty;
 
-const ROWS: u16 = 24;
-const COLS: u16 = 80;
+use pty::{COLS, ROWS, Session as Pty, row};
 
-/// The binary under a pty of `ROWS` x `COLS`: the master end and the process.
-struct Session {
-    master: File,
-    child: Child,
-    output: mpsc::Receiver<Vec<u8>>,
-    screen: vt100::Parser,
-}
+/// The binary under a pty running `command` in the demo panel.
+struct Session;
 
 impl Session {
-    fn start(command: &str) -> Self {
-        let master =
-            rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
-                .unwrap();
-        rustix::pty::grantpt(&master).unwrap();
-        rustix::pty::unlockpt(&master).unwrap();
-        let name = rustix::pty::ptsname(&master, Vec::new()).unwrap();
-        let slave: OwnedFd = rustix::fs::open(
-            name.to_str().unwrap(),
-            OFlags::RDWR | OFlags::NOCTTY,
-            Mode::empty(),
-        )
-        .unwrap();
-        rustix::termios::tcsetwinsize(
-            &master,
-            Winsize {
-                ws_row: ROWS,
-                ws_col: COLS,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            },
-        )
-        .unwrap();
-        let home = tempfile_dir();
-        let stdio = || Stdio::from(slave.try_clone().unwrap());
-        let child = Command::new(env!("CARGO_BIN_EXE_iohr"))
-            .args([
-                "panel",
-                "--demo",
-                "--variant",
-                "float",
-                "--",
-                "sh",
-                "-c",
-                command,
-            ])
-            .env_clear()
-            .env("HOME", &home)
-            .env("PATH", "/usr/bin:/bin")
-            .env("TERM", "xterm-256color")
-            .env("COLORTERM", "truecolor")
-            .stdin(stdio())
-            .stdout(stdio())
-            .stderr(stdio())
-            .spawn()
-            .unwrap();
-        drop(slave);
-        let mut read = File::from(master.try_clone().unwrap());
-        let (tx, output) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 8192];
-            while let Ok(n) = read.read(&mut buf) {
-                if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
-                    break;
-                }
-            }
-        });
-        Self {
-            master: File::from(master),
-            child,
-            output,
-            screen: vt100::Parser::new(ROWS, COLS, 0),
-        }
-    }
-
-    /// Reads the terminal until `done` holds for what is on screen, or panics after ten seconds.
-    fn until(&mut self, what: &str, done: impl Fn(&vt100::Screen) -> bool) {
-        let end = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < end {
-            if let Ok(bytes) = self.output.recv_timeout(Duration::from_millis(100)) {
-                self.screen.process(&bytes);
-            }
-            // A frame is whole once the synchronized update closes; keep reading what is queued.
-            while let Ok(bytes) = self.output.try_recv() {
-                self.screen.process(&bytes);
-            }
-            if done(self.screen.screen()) {
-                return;
-            }
-        }
-        panic!(
-            "timed out waiting for {what}; the screen is:\n{}",
-            self.screen.screen().contents()
-        );
-    }
-
-    fn send(&mut self, bytes: &[u8]) {
-        self.master.write_all(bytes).unwrap();
-    }
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+    fn start(command: &str) -> Pty {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
+        c.args([
+            "panel",
+            "--demo",
+            "--variant",
+            "float",
+            "--",
+            "sh",
+            "-c",
+            command,
+        ])
+        .env_clear()
+        .env("HOME", tempfile_dir())
+        .env("PATH", "/usr/bin:/bin")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor");
+        Pty::spawn(c)
     }
 }
 
@@ -133,10 +44,6 @@ fn tempfile_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("iohr-panel-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
-}
-
-fn row(screen: &vt100::Screen, r: u16) -> String {
-    screen.rows(0, COLS).nth(usize::from(r)).unwrap_or_default()
 }
 
 /// 200 lines of output scroll the screen: the panel stays on row 0 at the right, the command's
@@ -191,6 +98,82 @@ fn the_menu_opens_with_option_i_and_closes_with_esc() {
     s.until("the pill again", |screen| {
         row(screen, 1).contains("⌥i menu")
             && !(0..ROWS).any(|r| row(screen, r).contains("Stop panel"))
+    });
+    assert_eq!(row(s.screen.screen(), ROWS - 1).trim_end(), "END");
+}
+
+/// Workloads opens from the menu with `w`, one row opens in place, and Esc walks back: list,
+/// menu, pill. The data under `--demo` is the labelled stub; nothing of the panel is left on
+/// screen and the command's own last line is intact.
+#[test]
+fn workloads_open_one_and_esc_back_leaves_nothing_behind() {
+    let mut s = Session::start("seq 1 40; printf END; sleep 5");
+    s.until("the panel at rest", |screen| {
+        row(screen, ROWS - 1).starts_with("END") && row(screen, 1).contains("⌥i menu")
+    });
+    let any = |screen: &vt100::Screen, text: &str| (0..ROWS).any(|r| row(screen, r).contains(text));
+    s.send(b"\x1bi");
+    s.until("the menu with Workloads", |screen| any(screen, "Workloads"));
+    s.send(b"w");
+    s.until("the Workloads list", |screen| {
+        any(screen, "Workloads") && any(screen, "Coordinator") && any(screen, "need you")
+    });
+    assert!(any(s.screen.screen(), "stub"), "the stub is labelled");
+    s.send(b"\r");
+    s.until("one workload opened", |screen| {
+        any(screen, "Why") && any(screen, "Latest") && any(screen, "Waits")
+    });
+    s.send(b"\x1b");
+    s.until("the list again", |screen| {
+        !any(screen, "Latest") && any(screen, "Coordinator")
+    });
+    s.send(b"\x1b");
+    s.until("the menu again", |screen| {
+        any(screen, "Stop panel") && !any(screen, "Coordinator service")
+    });
+    s.send(b"\x1b");
+    s.until("the pill again", |screen| {
+        row(screen, 1).contains("⌥i menu") && !any(screen, "Stop panel")
+    });
+    assert_eq!(row(s.screen.screen(), ROWS - 1).trim_end(), "END");
+}
+
+/// The Auto mode entry shows the policy (the stub's, labelled), and Approvals hand an approve
+/// to the phone; on the stub nothing is sent or changed and the panel says so.
+#[test]
+fn auto_mode_and_approvals_act_on_the_stub_and_say_so() {
+    let mut s = Session::start("seq 1 40; printf END; sleep 5");
+    s.until("the panel at rest", |screen| {
+        row(screen, ROWS - 1).starts_with("END") && row(screen, 1).contains("⌥i menu")
+    });
+    let any = |screen: &vt100::Screen, text: &str| (0..ROWS).any(|r| row(screen, r).contains(text));
+    s.send(b"\x1bi");
+    s.until("the menu", |screen| any(screen, "Auto mode"));
+    s.send(b"a");
+    s.until("the policy", |screen| {
+        any(screen, "On until") && any(screen, "decided by it so far")
+    });
+    s.send(b"\r");
+    s.until("the stub's answer", |screen| {
+        any(screen, "stub: nothing was changed")
+    });
+    s.send(b"\x1b");
+    s.until("the menu again", |screen| any(screen, "Stop panel"));
+    s.send(b"p");
+    s.until("the approvals", |screen| any(screen, "a approve"));
+    s.send(b"a");
+    s.until("the phone note", |screen| {
+        any(screen, "approve on your phone")
+    });
+    s.send(b"q");
+    s.until("the question line", |screen| any(screen, "ask ›"));
+    s.send(b"why\r");
+    s.until("the stub's answer", |screen| {
+        any(screen, "stub: nothing was sent")
+    });
+    s.send(b"o");
+    s.until("the details", |screen| {
+        any(screen, "the real details come from")
     });
     assert_eq!(row(s.screen.screen(), ROWS - 1).trim_end(), "END");
 }

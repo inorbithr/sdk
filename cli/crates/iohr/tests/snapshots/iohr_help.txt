@@ -3,7 +3,7 @@ The InOrbit command line.
 Sign in, keep several accounts as profiles, and call the API. A token is never an argument: pipe it
 to `iohr login --with-token`, or set `IOHR_TOKEN`.
 
-Usage: iohr [OPTIONS] <COMMAND>
+Usage: iohr [OPTIONS] [COMMAND]
 
 Sign-in:
   login        Sign in and add a profile

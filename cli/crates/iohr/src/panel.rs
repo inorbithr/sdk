@@ -1,5 +1,6 @@
-//! The terminal panel's design, drawn on stub data (design round: nothing here talks to the
-//! platform and nothing is wired to a shell).
+//! The terminal panel's static design drawings (`--demo --variant rail|accordion|band`), on
+//! stub data: nothing here talks to the platform and nothing is wired to a shell. The live
+//! panel is in [`proxy`]; the stub tree these drawings show is the one in [`workloads`].
 //!
 //! The panel is a vertical menu at the top right of the terminal, in the one palette of
 //! [`crate::card::Look`] (violet frame, cyan key chips, dim hints, a reversed selected row).
@@ -18,10 +19,21 @@ use crate::cli::{Global, PanelArgs, PanelAuto, PanelVariant, PanelView};
 use crate::error::Error;
 use crate::output::Out;
 
+#[cfg(unix)]
+mod act;
+#[cfg(unix)]
+mod approve;
+mod workloads;
+// The live panel is a pty proxy (rustix, unix terminals); off unix only the static designs run.
+#[cfg(unix)]
 mod cells;
+#[cfg(unix)]
 mod input;
+#[cfg(unix)]
 mod model;
+#[cfg(unix)]
 mod proxy;
+#[cfg(unix)]
 mod screen;
 
 /// The panel's width in columns, frame included.
@@ -65,9 +77,10 @@ const RUN: [(char, &str, &str); 5] = [
 ];
 
 /// The top-level rows: the key, the label, and the view each opens (`None` acts at once).
-const MENU: [(char, &str, Option<PanelView>); 6] = [
+const MENU: [(char, &str, Option<PanelView>); 7] = [
     ('a', "Auto mode", Some(PanelView::Auto)),
     ('p', "Approvals", Some(PanelView::Approvals)),
+    ('w', "Workloads", Some(PanelView::Workloads)),
     ('r', "Run", Some(PanelView::Run)),
     ('s', "Status", Some(PanelView::Status)),
     ('?', "Help", None),
@@ -133,6 +146,7 @@ fn menu_rows(m: &Model, open: Option<PanelView>) -> Vec<Row> {
         let right = match key {
             'a' => m.auto_value().0,
             'p' => format!("{} ▸", PENDING.len()),
+            'w' => format!("{} ▸", demo_running()),
             'r' | 's' => "▸".to_owned(),
             _ => String::new(),
         };
@@ -172,6 +186,52 @@ fn approvals_rows(m: &Model) -> Vec<Row> {
                 Tone::Dim,
             ));
         }
+    }
+    out
+}
+
+/// The demo's workload tree (the stub the floating panel shows), as plain rows.
+fn demo_tree() -> Vec<workloads::Workload> {
+    workloads::tree(
+        &workloads::stub(),
+        &[(
+            "stub-0".to_owned(),
+            "Merge sdk #443 to main".to_owned(),
+            "Fix sdk #448 reads".to_owned(),
+        )],
+    )
+}
+
+/// How many sessions and jobs of the demo tree are running.
+fn demo_running() -> usize {
+    demo_tree()
+        .iter()
+        .filter(|w| matches!(w.role, workloads::Role::Session | workloads::Role::Job))
+        .filter(|w| w.state.running())
+        .count()
+}
+
+fn workloads_rows() -> Vec<Row> {
+    let tree = demo_tree();
+    let mut out = vec![Row::Back(
+        "Workloads".to_owned(),
+        format!("{} running", demo_running()),
+    )];
+    for (i, w) in tree.iter().enumerate() {
+        let dot = match w.state {
+            workloads::State::Needs => "◐",
+            workloads::State::Idle => "○",
+            workloads::State::Working | workloads::State::Stuck => "●",
+        };
+        let tone = match w.state {
+            workloads::State::Needs => Tone::Amber,
+            workloads::State::Working => Tone::Green,
+            workloads::State::Idle | workloads::State::Stuck => Tone::Dim,
+        };
+        out.push(Row::Text(
+            format!("{}{dot} {}", workloads::glyph(&tree, i), w.label),
+            tone,
+        ));
     }
     out
 }
@@ -257,6 +317,7 @@ fn rows(view: PanelView, m: &Model, nested: bool) -> Vec<Row> {
         }
         PanelView::Menu => menu_rows(m, None),
         PanelView::Approvals => approvals_rows(m),
+        PanelView::Workloads => workloads_rows(),
         PanelView::Run => run_rows(m),
         PanelView::Auto => auto_rows(m),
         PanelView::Status => status_rows(m),
@@ -319,9 +380,11 @@ fn foot(view: PanelView) -> &'static str {
     match view {
         PanelView::Rest => "",
         PanelView::Menu => "↑↓ move   ⏎ open   esc close",
-        PanelView::Approvals | PanelView::Run | PanelView::Auto | PanelView::Status => {
-            "↑↓ move   ⏎ choose   esc back"
-        }
+        PanelView::Approvals
+        | PanelView::Workloads
+        | PanelView::Run
+        | PanelView::Auto
+        | PanelView::Status => "↑↓ move   ⏎ choose   esc back",
     }
 }
 
@@ -470,6 +533,7 @@ fn draw(variant: PanelVariant, rows: &[String], cols: usize) -> String {
 /// `iohr panel`: the floating band over a shell (or the command after `--`); `--demo` runs it
 /// on stub asks (`--variant float`) or draws one of the static designs.
 pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
+    #[cfg(unix)]
     if std::env::var_os(proxy::LEADER).is_some() {
         return proxy::session_leader(&args.command);
     }
@@ -477,10 +541,17 @@ pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Err
         demo(g, &args);
         return Ok(());
     }
+    live(g, env, args).await
+}
+
+/// The floating panel over a shell, on a pseudo-terminal.
+#[cfg(unix)]
+async fn live(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
     let initial = args.view.map_or(model::View::Rest, |v| match v {
         PanelView::Rest => model::View::Rest,
         PanelView::Menu => model::View::Menu,
         PanelView::Approvals => model::View::Approvals,
+        PanelView::Workloads => model::View::Workloads,
         PanelView::Run => model::View::Run,
         PanelView::Auto => model::View::Auto,
         PanelView::Status => model::View::Status,
@@ -492,9 +563,53 @@ pub(crate) async fn run(g: &Global, env: Env, args: PanelArgs) -> Result<(), Err
             stub: args.demo,
             initial,
             command: args.command,
+            host_gone: None,
         },
     )
     .await
+    .map(|_| ())
+}
+
+/// Bare `iohr`: the person's shell under the panel, in the session the caller joined. Answers
+/// `true` when the session host stopped while the shell was open (`iohr stop`).
+#[cfg(unix)]
+pub(crate) async fn session_shell(
+    g: &Global,
+    env: Env,
+    host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> Result<bool, Error> {
+    proxy::run(
+        g,
+        env,
+        proxy::Config {
+            stub: false,
+            initial: model::View::Rest,
+            command: Vec::new(),
+            host_gone,
+        },
+    )
+    .await
+}
+
+/// Whether bare `iohr` enters the session: a terminal, colour allowed, no `--json`, and not
+/// already inside a panel. Anything else keeps the usage report.
+#[cfg(unix)]
+pub(crate) fn bare_enters(g: &Global) -> bool {
+    proxy::fancy(g) && !proxy::inside()
+}
+
+#[cfg(not(unix))]
+pub(crate) fn bare_enters(_: &Global) -> bool {
+    false
+}
+
+/// Off unix there is no pseudo-terminal to proxy: the live panel is not built, and the static
+/// designs (`--demo --variant rail|accordion|band`) still draw.
+#[cfg(not(unix))]
+async fn live(_g: &Global, _env: Env, _args: PanelArgs) -> Result<(), Error> {
+    Err(Error::Failed(
+        "the floating panel needs a unix terminal; `--demo --variant rail|accordion|band` draws the static designs".into(),
+    ))
 }
 
 /// The static designs, drawn once on stub data (`--demo`).
@@ -549,10 +664,11 @@ mod tests {
         Model { auto, selected }
     }
 
-    const VIEWS: [PanelView; 6] = [
+    const VIEWS: [PanelView; 7] = [
         PanelView::Rest,
         PanelView::Menu,
         PanelView::Approvals,
+        PanelView::Workloads,
         PanelView::Run,
         PanelView::Auto,
         PanelView::Status,

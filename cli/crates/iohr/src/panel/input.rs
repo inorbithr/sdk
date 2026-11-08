@@ -12,7 +12,7 @@ pub(super) fn is_menu_key(bytes: &[u8]) -> bool {
     MENU_KEYS.contains(&bytes)
 }
 
-/// The keys in one read while the panel is open. A lone Esc is Esc; arrows are
+/// The keys in one read while the panel is open. A lone Esc is Esc; Backspace is DEL or BS; arrows are
 /// `ESC [ A` or `ESC O A`; Enter is a carriage return or a newline; every other
 /// sequence is skipped; text is one `Char` per character.
 pub(super) fn parse(bytes: &[u8]) -> Vec<Key> {
@@ -41,6 +41,8 @@ pub(super) fn parse(bytes: &[u8]) -> Vec<Key> {
                     match (intro, last, params.as_str()) {
                         (_, Some('A'), "") | ('O', Some('A'), _) => keys.push(Key::Up),
                         (_, Some('B'), "") | ('O', Some('B'), _) => keys.push(Key::Down),
+                        (_, Some('C'), "") | ('O', Some('C'), _) => keys.push(Key::Right),
+                        (_, Some('D'), "") | ('O', Some('D'), _) => keys.push(Key::Left),
                         ('[', Some('u'), "105;3") => keys.push(Key::Menu),
                         _ => {}
                     }
@@ -52,6 +54,7 @@ pub(super) fn parse(bytes: &[u8]) -> Vec<Key> {
             },
             '\u{2c6}' => keys.push(Key::Menu),
             '\r' | '\n' => keys.push(Key::Enter),
+            '\x7f' | '\x08' => keys.push(Key::Backspace),
             c if c.is_control() => {}
             c => keys.push(Key::Char(c)),
         }
@@ -78,6 +81,8 @@ mod tests {
         assert_eq!(parse(b"\x1b"), [Key::Esc]);
         assert_eq!(parse(b"\x1b[A\x1b[B"), [Key::Up, Key::Down]);
         assert_eq!(parse(b"\x1bOA\x1bOB"), [Key::Up, Key::Down]);
+        assert_eq!(parse(b"\x1b[C\x1b[D"), [Key::Right, Key::Left]);
+        assert_eq!(parse(b"\x1bOC\x1bOD"), [Key::Right, Key::Left]);
         assert_eq!(parse(b"\r"), [Key::Enter]);
         assert_eq!(
             parse(b"p?x"),
@@ -97,5 +102,9 @@ mod tests {
             "Alt-x is not the panel's"
         );
         assert_eq!(parse(b"\x03a"), [Key::Char('a')], "controls are dropped");
+        assert_eq!(
+            parse(b"a\x7f\x08"),
+            [Key::Char('a'), Key::Backspace, Key::Backspace]
+        );
     }
 }

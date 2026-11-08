@@ -21,6 +21,7 @@ pub(super) const FAINT: Rgb = (0x56, 0x5a, 0x70);
 pub(super) const KEY: Rgb = palette::CYAN;
 pub(super) const GREEN: Rgb = palette::GREEN;
 pub(super) const AMBER: Rgb = palette::AMBER;
+pub(super) const RED: Rgb = (0xf8, 0x71, 0x71);
 pub(super) const ACC: Rgb = palette::VIOLET;
 const SHADOW_FG: Rgb = (0x3a, 0x3d, 0x52);
 const SHADOW_BG: Rgb = (0x10, 0x11, 0x19);
