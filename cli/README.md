@@ -1271,7 +1271,7 @@ Every 20 seconds (up to 5 minutes after errors) the runner lists the account's a
 `run` asks and takes those pinned to its own runner id. Before anything runs it checks,
 in the order the platform checks them, that the ask is approved and pinned, that the
 payload hashes to what was approved, that a person decided it, that the action fits the
-`runner/host-action/v0` schema, that it names this runner and its key, that it has not
+`runner/host-action/v0` or `runner/host-action/v1` schema, that it names this runner and its key, that it has not
 expired, and that a pinned device key signed the decision. An ask whose decision this
 machine has already carried out (the record is `runner/approvals/<account>/seen`, owner-only, one line per
 decision, a malformed line is an error) is refused as a replay. A refused ask is reported `failed` with the reason and runs nothing.
@@ -1284,7 +1284,23 @@ The catalogue has one action, `k8s.delete-failed-pods`: `kubectl delete pods
 namespace. It runs `kubectl` from an absolute `PATH` entry with an argument vector (never
 a shell), the scrubbed environment above (no `KUBECONFIG`: the configured cluster is used), and a 2-minute limit. A
 namespace must be a DNS label, and `kube-system`, `kube-public` and `kube-node-lease` are
-refused. Any other action is reported `failed` as unknown.
+refused. Any other action is reported `failed` as unknown, unless an installed extension
+declares it.
+
+A `runner/host-action/v1` ask names its `provider`: `"builtin"` (or no provider, a v0
+ask) for the actions above, or an extension with the version and manifest digest the
+person approved. For an extension's action the runner verifies the installed copy again
+(the program's hash, the kept bundles and the signer, as `iohr ext verify` does), then
+checks that it is the approved version and digest, that it declares the action for this
+system, that the parameters are exactly the declared ones, each of its type, and that the
+`effect` is the declared one with those parameters filled in. Any mismatch is reported
+`failed` and runs nothing. It then starts the extension's entrypoint as `<entrypoint>
+host-action <id>`, with the parameters as one JSON object on standard input, no shell, the
+scrubbed environment above without `IOHR_TOKEN*` or `KUBECONFIG`, and the declared time
+limit. `iohr ext install` and `iohr ext lint` show the host actions an extension declares;
+see [docs/extensions/developing.md](../docs/extensions/developing.md). If the extension
+store or trust settings cannot be read when the runner starts, it prints `extension host
+actions: off` with the reason, and every extension action is refused as not installed.
 
 ## Where things are kept
 
