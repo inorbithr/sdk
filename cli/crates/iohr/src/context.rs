@@ -25,12 +25,18 @@ pub(crate) struct Ctx {
     pub(crate) config: Config,
 }
 
+/// The config directory: `--config-dir`/`IOHR_CONFIG_DIR`, else the platform's. The one place
+/// that decides it (profiles, the user-level `IO.md`).
+pub(crate) fn config_dir(global: &Global) -> Result<PathBuf, Error> {
+    match &global.config_dir {
+        Some(d) => Ok(d.clone()),
+        None => Ok(Config::default_dir()?),
+    }
+}
+
 impl Ctx {
     pub(crate) fn load(global: &Global) -> Result<Self, Error> {
-        let dir = match &global.config_dir {
-            Some(d) => d.clone(),
-            None => Config::default_dir()?,
-        };
+        let dir = config_dir(global)?;
         let config = Config::load(&dir)?;
         Ok(Self { dir, config })
     }
