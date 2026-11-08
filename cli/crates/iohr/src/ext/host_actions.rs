@@ -53,7 +53,7 @@ pub struct HostAction {
 /// What a parameter may hold. Each type is closed: nothing a shell or a path reads
 /// specially fits in one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "kebab-case", try_from = "RawParam")]
 #[non_exhaustive]
 pub enum ParamType {
     /// Lower-case letters and digits, words joined by `-`, at most 64 characters.
@@ -78,6 +78,47 @@ pub enum ParamType {
         /// The values it may hold.
         values: Vec<String>,
     },
+}
+
+/// A parameter type as written. Serde lets a tagged unit variant carry unknown fields, so
+/// the declaration reads through this closed form and each type takes only its own.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawParam {
+    #[serde(rename = "type")]
+    kind: String,
+    min: Option<u64>,
+    max: Option<u64>,
+    values: Option<Vec<String>>,
+}
+
+impl TryFrom<RawParam> for ParamType {
+    type Error = String;
+
+    fn try_from(r: RawParam) -> Result<Self, String> {
+        let bare = |t: Self| {
+            if r.min.is_none() && r.max.is_none() && r.values.is_none() {
+                Ok(t)
+            } else {
+                Err(format!("a `{}` parameter takes no other field", r.kind))
+            }
+        };
+        match (r.kind.as_str(), r.min, r.max, &r.values) {
+            ("word", ..) => bare(Self::Word),
+            ("dns-label", ..) => bare(Self::DnsLabel),
+            ("rev", ..) => bare(Self::Rev),
+            ("repo", ..) => bare(Self::Repo),
+            ("integer", Some(min), Some(max), None) => Ok(Self::Integer { min, max }),
+            ("integer", ..) => Err("an `integer` parameter takes `min` and `max`".to_owned()),
+            ("enum", None, None, Some(values)) => Ok(Self::Enum {
+                values: values.clone(),
+            }),
+            ("enum", ..) => Err("an `enum` parameter takes `values`".to_owned()),
+            _ => Err(
+                "a parameter type is word, dns-label, rev, repo, integer or enum".to_owned(),
+            ),
+        }
+    }
 }
 
 impl ParamType {
@@ -389,7 +430,16 @@ mod tests {
             assert!(ty.holds(&good) && !ty.holds(&bad), "{ty:?}");
         }
         assert!(serde_json::from_value::<ParamType>(json!({"type": "path"})).is_err());
-        assert!(serde_json::from_value::<ParamType>(json!({"type": "word", "x": 1})).is_err());
+        for bad in [
+            json!({"type": "word", "x": 1}),
+            json!({"type": "word", "min": 1}),
+            json!({"type": "integer", "min": 1}),
+            json!({"type": "enum", "values": ["a"], "max": 2}),
+        ] {
+            assert!(serde_json::from_value::<ParamType>(bad.clone()).is_err(), "{bad}");
+        }
+        let int = json!({"type": "integer", "min": 1, "max": 9});
+        assert_eq!(serde_json::to_value(t(int.clone())).unwrap(), int);
     }
 
     #[test]
