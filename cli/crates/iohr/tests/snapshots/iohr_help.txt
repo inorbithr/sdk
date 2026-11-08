@@ -45,6 +45,7 @@ Agents:
   memory       Keep what a project knows as files, check it, and sync it when you choose
 
 Operate:
+  ui           Serve and open the InOrbit web UI on this machine
   tunnel       Open a loopback pipe to an environment's edge
   browser      Install the InOrbit Trails browser extension
   upgrade      Update iohr to the newest release

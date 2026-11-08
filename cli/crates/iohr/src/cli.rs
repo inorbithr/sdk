@@ -242,7 +242,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Operate",
-        &["tunnel", "browser", "upgrade", "completion", "help"],
+        &["ui", "tunnel", "browser", "upgrade", "completion", "help"],
     ),
 ];
 
@@ -549,6 +549,14 @@ pub enum Command {
     /// `ssh -N -L` until Ctrl-C; binds 127.0.0.1 only and goes through Envoy, never to a
     /// service directly. The environment is `--env` (production by default).
     Tunnel(Tunnel),
+    /// Serve and open the InOrbit web UI on this machine.
+    ///
+    /// The web UI (`sdk/ui`) with the desktop app's window: frame, header, sidebar, menus
+    /// and right pane, and the panels of installed extensions. Bare `iohr ui` serves the
+    /// built UI on a loopback address and opens it; `iohr ui serve` serves without
+    /// opening. It listens on 127.0.0.1 only (`[::1]` when that is unavailable) and
+    /// answers only requests addressed to that host and port.
+    Ui(UiArgs),
     /// Print a shell completion script.
     Completion {
         /// The shell.
@@ -2728,6 +2736,38 @@ pub struct BrowserInstall {
     /// Print the page's address instead of opening it (for a browser on another machine).
     #[arg(long)]
     pub print: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct UiArgs {
+    /// What to do; none serves the built UI and opens it.
+    #[command(subcommand)]
+    pub command: Option<UiCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum UiCommand {
+    /// Serve the built UI on a loopback address until Ctrl-C.
+    ///
+    /// Serves a built `ui/dist` (the nearest one above this folder, or `--dir`) on
+    /// 127.0.0.1. GET and HEAD only; a request for another host, a path outside the folder
+    /// or a method other than those is refused. Unknown page paths get `index.html`, so
+    /// the app's own routes load.
+    Serve(UiServe),
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UiServe {
+    /// The port to listen on (default: one the system picks).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// The built UI folder, holding `index.html` (default: the nearest `ui/dist` above
+    /// this folder).
+    #[arg(long, env = "IOHR_UI_DIR")]
+    pub dir: Option<PathBuf>,
+    /// Open the UI in the default browser once it listens.
+    #[arg(long)]
+    pub open: bool,
 }
 
 #[derive(Debug, Subcommand)]

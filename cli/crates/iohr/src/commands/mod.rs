@@ -39,6 +39,7 @@ pub(crate) mod shell;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
+mod web_ui;
 mod whoami;
 
 use clap::CommandFactory as _;
@@ -50,6 +51,21 @@ use crate::cli::{
 };
 use crate::error::Error;
 use crate::output::Out;
+
+/// Commands that never call the API, so a placeholder address is no bar: a tunnel reaches
+/// an environment over ssh, the UI serves files on loopback, and the permission commands
+/// stay on this machine.
+fn calls_no_api(command: Option<&Command>) -> bool {
+    matches!(
+        command,
+        Some(
+            Command::Tunnel(_)
+                | Command::Ui(_)
+                | Command::Permissions(_)
+                | Command::PermissionServer { .. }
+        )
+    )
+}
 
 /// Runs the parsed command.
 ///
@@ -68,11 +84,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         return crate::permissions::server::run(socket)
             .map_err(|e| Error::Failed(format!("permission server: {}", e.kind())));
     }
-    // A tunnel reaches an environment over ssh and calls no API, so a placeholder address is no bar.
-    if !matches!(
-        cli.command,
-        Some(Command::Tunnel(_) | Command::Permissions(_) | Command::PermissionServer { .. })
-    ) {
+    if !calls_no_api(cli.command.as_ref()) {
         g.check_environment()?;
     }
     if g.sign_in.is_some()
@@ -149,6 +161,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
             Ok(())
         }
         Command::Tunnel(args) => tunnel::run(g, &args, out),
+        Command::Ui(args) => web_ui::run(args, out).await,
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();
