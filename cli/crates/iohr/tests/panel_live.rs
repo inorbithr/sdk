@@ -221,3 +221,35 @@ fn a_session_host_that_stops_at_once_says_why_not_just_its_exit_status() {
         "only the exit status, no cause:\n{screen}"
     );
 }
+
+#[test]
+fn a_rerun_after_stop_that_cannot_start_a_host_says_why_again() {
+    let home = home("rerun-nohost");
+    // Signed out, the host cannot start: the panel opens without one, with the note.
+    let mut s = iohr(&home, &[]);
+    s.until("the first note", |sc| any(sc, "no session host:"));
+    s.until("the box", |sc| any(sc, "◆ iohr"));
+    // The person's own zsh is the shell here (its prompt is theirs): give it a moment to be
+    // ready for what is typed next.
+    settle(&mut s, 800);
+    let notes = |s: &Pty| {
+        s.screen
+            .screen()
+            .contents()
+            .matches("no session host:")
+            .count()
+    };
+    assert_eq!(notes(&s), 1, "{}", s.screen.screen().contents());
+
+    type_line(&mut s, &format!("{BIN} stop"));
+    s.until("the panel closed by stop", |sc| {
+        any(sc, "the panel is closed")
+    });
+    // The re-run brings the panel back, and the panel tries the host again from its own
+    // process: the same note, written into the shell's output.
+    type_line(&mut s, BIN);
+    s.until("the panel back", |sc| any(sc, "the panel is on"));
+    s.until("the note again", |sc| {
+        sc.contents().matches("no session host:").count() == 2
+    });
+}

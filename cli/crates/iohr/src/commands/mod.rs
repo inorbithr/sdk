@@ -33,7 +33,7 @@ mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
-mod session;
+pub(crate) mod session;
 pub(crate) mod shell;
 mod token;
 mod tunnel;
