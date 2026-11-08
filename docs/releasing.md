@@ -73,7 +73,7 @@ Conventional Commits that touched it; nobody sets one by hand (no `release-as`, 
 | Channel | How a release reaches it | Credential |
 |---|---|---|
 | GitHub release | `iohr` job: archives, `.deb`, `.msi`, SBOMs, `SHA256SUMS`, attestations | `GITHUB_TOKEN`, environment `release-cli` |
-| APT (`https://packages.inorbit.hr/apt`) | `iohr-apt`: reprepro, signed by the repository subkey, uploaded to R2, then installed in Debian | `APT_SIGNING_*`, `R2_*` (repository secrets) |
+| APT (`https://packages.inorbit.hr/apt`) | `iohr-apt`: reprepro, signed by the repository subkey, uploaded to R2, then installed in Debian | `APT_SIGNING_*`, `R2_*` (environment `release-cli`) |
 | Installers (`https://packages.inorbit.hr/install.sh`, `.ps1`) | uploaded by `iohr-apt`; `iohr-install` runs them against the release | as above |
 | Homebrew (`inorbithr/homebrew-tap`) | `iohr-tap`: a formula PR the tap's CI installs and tests; a maintainer merges it | release GitHub App, token limited to the tap |
 | Client policy (`clients_versions`, the update headers) | `iohr-policy`: a pull request to `inorbithr/core` that moves `[clients.policy.cli] latest` to the release; a maintainer merges it and core rolls. `minimum`, grace and `enforce` stay an admin's call in the console | release GitHub App, token limited to core |
@@ -90,6 +90,25 @@ is `GH_TOKEN` or `gh auth token`, with write access to the tap); a maintainer st
 the pull request. It cannot create the files: the archives carry GitHub build attestations,
 which only the workflow's identity can make. Brew users also need `brew trust
 inorbithr/tap` once; `iohr upgrade` prints that when Homebrew refuses.
+
+## Environments
+
+Every `release.yml` job that writes (attests, attaches, publishes) or reads a release
+secret runs in an environment deployable from `main` only, and its secrets are stored in
+that environment, not in the repository. Build jobs hold read permissions only.
+
+| Job | Environment | Required reviewer | Secrets |
+|---|---|---|---|
+| `release-please` | `release-please` | none: it runs on every push to `main`, so a reviewer would hold every push | `RELEASE_APP_PRIVATE_KEY` |
+| `go` | `release-go` | yes | none (OIDC) |
+| `rust` | `release-crates` | yes | none (OIDC) |
+| `ts` | `release-npm` | yes | none (OIDC) |
+| `py`, `py-existing` | `release-pypi` | yes | none (OIDC) |
+| `iohr` | `release-cli` | yes | none |
+| `iohr-tap`, `iohr-policy` | `release-cli` | yes (one approval for the three channel jobs) | `RELEASE_APP_PRIVATE_KEY` |
+| `iohr-apt` | `release-cli` | as above | `APT_SIGNING_KEY`, `APT_SIGNING_KEY_ID`, `APT_SIGNING_PASSPHRASE`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT` |
+
+`RELEASE_APP_ID` is a variable, not a secret, and stays at the repository.
 
 ## One-time setup (before the first release)
 
@@ -144,13 +163,9 @@ back.
   workflows' actions. It groups updates into one pull request per ecosystem for patch
   and minor and one for majors, weekly on Mondays (actions daily), never younger than the
   7-day cooldown (ADR 0005). Security updates come at once.
-- **Auto-merge** (`.github/workflows/dependabot-automerge.yml`): a Dependabot pull
-  request whose updates are all patch, or minor at 1.0 or later, gets `gh pr merge --auto
-  --squash`, so it lands once `ci-ok` passes. Majors and 0.x minors (breaking under
-  SemVer) wait for a maintainer, who adapts the code on the branch. The job runs only for
-  pull requests Dependabot opened, with a token limited to that merge. A merge made by
-  that token starts no workflows, so release-please picks it up on the next push to
-  `main`.
+- **No auto-merge**: every Dependabot pull request, patch and minor included, is merged
+  by a maintainer once `ci-ok` passes, as every other pull request is. Majors and 0.x
+  minors (breaking under SemVer) also need the code adapted on the branch.
 - **Toolchains and tools in `mise.toml`** are outside Dependabot: `mise outdated --bump`
   lists them, and a `chore(deps)` pull request moves them, with the CI matrix's newest
   cells (`ci.yml`) and the release build image (`cli/release/dist.sh`) in step.
