@@ -67,7 +67,9 @@ pub fn normalize(s: &str) -> String {
     words.join(" ")
 }
 
-fn words(s: &str) -> Vec<String> {
+/// Every word of `s`, lower case, stop words included.
+#[must_use]
+pub fn words(s: &str) -> Vec<String> {
     let lower = s.to_lowercase();
     WORD.as_ref().map_or_else(Vec::new, |r| {
         r.find_iter(&lower)
