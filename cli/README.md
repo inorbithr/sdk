@@ -1121,6 +1121,17 @@ the ask goes the way it always did. The socket's `roles` and `results <ask>` req
 this. Nothing yet re-attaches to an ask's answers after the wait ended, and finished tasks are
 not pruned. No launchd or systemd unit starts a session host at login.
 
+Each Role keeps two things in the project between its turns (RFC 0213 S2). When a Role's turn
+ends the host writes its handoff note, `.inorbit/handoff/<role>.md`: what it was asked and what
+it answered (cut to 800 and 2000 characters, replaced by each turn, written through a temporary
+file and a rename). Its memory area is `.inorbit/memory/<role>/`, the same memory files as
+`iohr memory` (the project's own store skips the sub-folder, so a Role's lessons are not the
+project's). Every `iohr ask --role <Role>` turn, routed or not, is told the note and the newest
+eight memories of the area (about 2000 characters, pinned first) after the Role's text. A Role
+name that is not lower-case letters, digits, `-` and `_` (at most 64) keeps and reads nothing.
+Both are plain files in the project folder; nothing is sent anywhere. Nothing writes the memory
+area yet: a person adds a memory file there by hand, in the format of `.inorbit/memory/`.
+
 ### Staying current
 
 `run` looks for a newer `iohr` release about hourly, and when there is one it takes no new
