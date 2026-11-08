@@ -21,6 +21,8 @@ use sha2::{Digest as _, Sha256};
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+mod pty;
+
 const SUB: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"seat@example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example","subscriptionType":"max","loginExpiresAt":"2026-11-05T10:00:00Z","configDirectory":"/home/a/.claude","projectsDirectory":"/home/a/.claude/projects"}"#;
 /// The same seat after a token refresh, on another host, with the email in another case.
 const SUB_REFRESHED: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Seat@Example.com","orgId":"00000000-0000-4000-8000-00000000000a","orgName":"Example Renamed","subscriptionType":"pro","loginExpiresAt":"2026-11-06T22:00:00Z","configDirectory":"/Users/b/.config/claude","projectsDirectory":"/srv/projects"}"#;
@@ -1907,5 +1909,271 @@ async fn sign_in_io_calls_the_coordinator_with_a_minted_token_and_guards_the_sec
     assert_eq!(
         last.headers.get("authorization").unwrap().to_str().unwrap(),
         format!("Bearer {}", token())
+    );
+}
+
+// ---- the session host (RFC 0213)
+
+/// The one socket a host made below `data`, if it is there.
+fn session_socket(data: &Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(data.join("session"))
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.path().join("sock"))
+        .find(|p| p.exists())
+}
+
+/// What the shell and the host wrote, for a failure message.
+fn session_diag(dir: &Path) -> String {
+    let host = std::fs::read_dir(dir.join("data/session"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .find_map(|e| std::fs::read_to_string(e.path().join("host.log")).ok())
+        .unwrap_or_default();
+    let shell = std::fs::read_to_string(dir.join("session.err")).unwrap_or_default();
+    format!("shell: {shell}\nhost: {host}")
+}
+
+fn session_cmd(server: &MockServer, dir: &Path, args: &[&str]) -> Command {
+    let mut c = iohr(server, dir, args);
+    // `iohr session` names no runner: the host's name is this machine's, as at `register`.
+    c.env("IOHR_DATA_DIR", dir.join("data"))
+        .env("HOSTNAME", "mac");
+    c
+}
+
+async fn wait_until(what: &str, mut ok: impl FnMut() -> bool) {
+    for _ in 0..200 {
+        if ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("gave up waiting for {what}");
+}
+
+#[tokio::test]
+async fn session_starts_one_host_that_beats_and_stop_ends_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let out = dir.path().join("session.out");
+    let mut shell = session_cmd(&server, dir.path(), &["session", p, "--verbose"])
+        .stdout(std::fs::File::create(&out).unwrap())
+        .stderr(std::fs::File::create(dir.path().join("session.err")).unwrap())
+        .spawn()
+        .unwrap();
+    // The host is a process of its own, and it is the runner: it keeps the lease alive.
+    assert!(
+        beats_at_least(&server, 1).await >= 1,
+        "the host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    wait_until("the session note", || {
+        std::fs::read_to_string(dir.path().join("session.err"))
+            .is_ok_and(|t| t.contains("session open: host"))
+    })
+    .await;
+    let note = std::fs::read_to_string(dir.path().join("session.err")).unwrap();
+    let host: u32 = note
+        .split("session open: host ")
+        .nth(1)
+        .and_then(|r| r.split(' ').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap();
+    assert_ne!(host, shell.id(), "the host is not the shell");
+    assert!(session_socket(&dir.path().join("data")).is_some());
+    // A second shell joins the same host: no second process.
+    let second = run(&mut session_cmd(
+        &server,
+        dir.path(),
+        &["stop", p, "--wait", "0"],
+    ));
+    assert_eq!(second.status.code(), Some(0), "{}", text(&second));
+    // `stop` told it; the host finishes and ends, and the shell sees it go.
+    let status = tokio::task::spawn_blocking(move || shell.wait().unwrap())
+        .await
+        .unwrap();
+    assert!(status.success(), "{status}");
+    wait_until("the socket to go", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    let again = run(&mut session_cmd(&server, dir.path(), &["stop", p]));
+    assert_eq!(again.status.code(), Some(0));
+    assert!(
+        text(&again).contains("no session host runs"),
+        "{}",
+        text(&again)
+    );
+    // Neither the shell's nor the host's output holds a credential.
+    let log = std::fs::read_dir(dir.path().join("data/session"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .find_map(|e| std::fs::read_to_string(e.path().join("host.log")).ok())
+        .unwrap_or_default();
+    let all = format!(
+        "{}{note}{log}",
+        std::fs::read_to_string(&out).unwrap_or_default()
+    );
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER") && !all.contains("SECRETKEY"),
+        "{all}"
+    );
+}
+
+#[tokio::test]
+async fn a_killed_shell_takes_the_host_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let mut shell = session_cmd(&server, dir.path(), &["session", p])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_until("the host's socket", || {
+        session_socket(&dir.path().join("data")).is_some()
+    })
+    .await;
+    assert!(beats_at_least(&server, 1).await >= 1);
+    // SIGKILL: the shell cannot say goodbye; the kernel closes its end of the pipe.
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+    wait_until("the host to end", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    let o = run(&mut session_cmd(&server, dir.path(), &["stop", p]));
+    assert!(text(&o).contains("no session host runs"), "{}", text(&o));
+}
+
+#[tokio::test]
+async fn sigterm_ends_a_host_run_by_hand() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let mut host = session_cmd(
+        &server,
+        dir.path(),
+        &[
+            "runner",
+            "run",
+            "--name",
+            "mac",
+            "--interval",
+            "1",
+            "--session",
+            p,
+        ],
+    )
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_until("the host's socket", || {
+        session_socket(&dir.path().join("data")).is_some()
+    })
+    .await;
+    signal(host.id(), "-TERM");
+    let status = tokio::task::spawn_blocking(move || host.wait().unwrap())
+        .await
+        .unwrap();
+    assert!(status.success(), "SIGTERM is a clean stop: {status}");
+    assert!(session_socket(&dir.path().join("data")).is_none());
+}
+
+/// Bare `iohr` on a terminal is the session: the shell with the panel over it, in the host this
+/// folder's session joined (started here, since none ran). `iohr stop` ends the host, which
+/// closes the panel and leaves the shell; the shell then ends with its own exit status.
+#[tokio::test]
+async fn bare_iohr_on_a_terminal_enters_the_session_and_stop_closes_the_panel() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = registered_and_idle(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap().to_owned();
+    let mut c = session_cmd(&server, dir.path(), &[]);
+    c.current_dir(&project)
+        .env_remove("TERM_PROGRAM")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("SHELL", "/bin/sh")
+        .env("PS1", "shell> ");
+    let mut s = pty::Session::spawn(c);
+    s.until("the panel over the shell", |screen| {
+        pty::any(screen, "⌥i menu") && pty::any(screen, "shell>")
+    });
+    let screen = s.screen.screen().contents();
+    assert!(
+        !screen.contains("Usage:"),
+        "bare iohr printed help:\n{screen}"
+    );
+    // The host is a process of its own that this shell joined: it beats, and has a socket.
+    assert!(
+        beats_at_least(&server, 1).await >= 1,
+        "the host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    assert!(session_socket(&dir.path().join("data")).is_some());
+    // `iohr stop` from another process ends the host; the panel closes, the shell stays.
+    let stopped = tokio::task::spawn_blocking({
+        let (server_uri, dir_path) = (server.uri(), dir.path().to_path_buf());
+        move || {
+            let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
+            c.args(["stop", &p, "--wait", "0"])
+                .env_clear()
+                .env("IOHR_BASE_URL", server_uri)
+                .env("IOHR_CONFIG_DIR", dir_path.join("config"))
+                .env("IOHR_PROFILE", "p")
+                .env("HOME", &dir_path)
+                .env("IOHR_DATA_DIR", dir_path.join("data"))
+                .env("PATH", "/usr/bin:/bin");
+            c.output().unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(stopped.status.code(), Some(0), "{}", text(&stopped));
+    // The host ends once its Roles are idle; its closing connection is what closes the panel.
+    wait_until("the host gone", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    s.until("the panel gone", |screen| !pty::any(screen, "⌥i menu"));
+    assert!(
+        s.child.try_wait().unwrap().is_none(),
+        "the shell must stay open when the host stops"
+    );
+    s.send(b"exit\n");
+    let status = s.exited().expect("the shell ends after exit");
+    assert!(status.success(), "{status}");
+    // Leaving says why the panel went: the note is written where the shell ended, not over it.
+    s.until("the host's stop said", |screen| {
+        pty::any(screen, "the session host stopped")
+    });
+}
+
+/// Under `NO_COLOR` a terminal is not the session either: the usage report, exit 2.
+#[tokio::test]
+async fn bare_iohr_on_a_terminal_under_no_color_prints_the_usage_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    let mut c = iohr(&server, dir.path(), &[]);
+    c.env("TERM", "xterm-256color").env("NO_COLOR", "1");
+    let mut s = pty::Session::spawn(c);
+    let status = s.exited().expect("it prints and ends");
+    assert_eq!(status.code(), Some(2), "{}", s.screen.screen().contents());
+    assert!(
+        s.screen.screen().contents().contains("Usage: iohr"),
+        "{}",
+        s.screen.screen().contents()
     );
 }

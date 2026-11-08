@@ -77,6 +77,7 @@ async fn with_token(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
 async fn person(g: &Global, args: &Login, out: Out) -> Result<(), Error> {
     let mut ctx = Ctx::load(g)?;
     let (name, storage) = target(&ctx, g, args)?;
+    check_store(&ctx, &name, storage).await?;
     // An account the person chose for this profile, before this sign-in replaces it.
     let chosen_before = ctx
         .config
@@ -285,6 +286,18 @@ async fn settle_account(
 }
 
 /// The profile to write and where its secret goes.
+/// Writes and removes a throwaway entry before the sign-in starts, so a store that
+/// cannot keep a secret (a Linux host with no unlocked Secret Service) fails here, with
+/// the `--insecure-storage` hint, instead of after the person approved the code.
+async fn check_store(ctx: &Ctx, name: &ProfileName, storage: Storage) -> Result<(), Error> {
+    let probe = EntryKey::new(name.clone(), "iohr-store-check")?;
+    blocking(ctx.store(storage)?, move |s| {
+        s.set(&probe, &Redacted::new("check".to_owned()))?;
+        s.delete(&probe).map(drop)
+    })
+    .await
+}
+
 fn target(ctx: &Ctx, g: &Global, args: &Login) -> Result<(ProfileName, Storage), Error> {
     let name = match (&g.profile, &ctx.config.default) {
         (Some(n), _) | (None, Some(n)) => n.clone(),

@@ -15,16 +15,18 @@ use crate::handoff::{self, Stop};
 use crate::output::Out;
 use std::fmt::Write as _;
 
+use super::project_space::{self, Outcome};
 use super::project_template;
 use crate::project::folder::{self, Kind as Place, Proposal, Where};
 use crate::project::wizard::{self, Draft, Stage, Walk, Went};
 use crate::project::{self, Report, Smoke, check_name, choose_template, lines};
+use crate::roles::runtime;
 use crate::template::{self, Answer, Answers, Kind, LANGUAGE, Question, Spec, StepName, Template};
 use crate::toolchain::{self, Lang, State};
-use crate::ui::{Choice, Nav, Ui, cancel};
+use crate::ui::{Choice, Mark, Nav, Ui, cancel};
 
 /// The project's own state: `~/.inorbit/projects/<name>/`, never inside the repository.
-fn state_root() -> Result<PathBuf, Error> {
+pub(super) fn state_root() -> Result<PathBuf, Error> {
     etcetera::home_dir()
         .map(|h| h.join(".inorbit").join("projects"))
         .map_err(|e| Error::Failed(format!("no home folder: {e}")))
@@ -55,6 +57,7 @@ const DESCRIBE_TEMPLATE: &str = "blank";
 pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) -> Result<(), Error> {
     match cmd {
         ProjectCommand::Init(a) => init(g, env, *a, out).await,
+        ProjectCommand::Sync(a) => project_space::sync_command(g, env, a, out).await,
         // The old name of `template list`: the same handler, so the output is identical.
         ProjectCommand::Templates => template_command(g, TemplateCommand::List, out),
         ProjectCommand::Template { cmd } => template_command(g, cmd, out),
@@ -129,7 +132,11 @@ impl Flow {
     fn gate(&mut self, id: &str, what: &str) -> bool {
         if self.dry {
             self.would.push((id.to_owned(), what.to_owned()));
-            self.ui.info(&format!("would: {what}"));
+            // Drawn, the plan is one numbered box at the end of the dry run; plain, each
+            // action is a `would:` line as it is planned.
+            if !self.ui.fancy() {
+                self.ui.info(&format!("would: {what}"));
+            }
             false
         } else {
             true
@@ -522,6 +529,8 @@ struct AgentRun {
     /// The arguments of the print-mode run ([`ask::argv`]), the prompt last.
     args: Vec<String>,
     model: Option<String>,
+    /// The Role it builds in (`--role`), as `--json` names it.
+    role: Option<serde_json::Value>,
     max_turns: u32,
     timeout: Duration,
     thinking: Thinking,
@@ -702,6 +711,25 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         });
     }
 
+    // The Role, before anything is made: a name that is nowhere ends the run here (a dry run
+    // asks nobody, so it looks in the project and the built-in catalogue only).
+    let role = match a.role.as_deref() {
+        Some(name) => Some(
+            runtime::resolve(
+                g,
+                env,
+                runtime::Lookup {
+                    name,
+                    job: None,
+                    root: crate::memory::find_root(&std::env::current_dir().unwrap_or_default())
+                        .as_deref(),
+                    online: !dry,
+                },
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let here = Where::here(cfg.project.root.clone());
     let cx = Exec {
         g,
@@ -720,6 +748,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
             .or(cfg.project.agent_timeout)
             .unwrap_or(AGENT_SECONDS),
         ask_thinking: cfg.ask.thinking.clone(),
+        role,
         out,
     };
     let mut wiz = Wizard {
@@ -735,18 +764,39 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         given: None,
         at: Walk::new(),
     };
+    // The team and who reads the project's space: flags answer, else a question at a terminal
+    // (once, after the wizard's own steps, and only when the person is in more than one account).
+    let mut space: Option<project::space::Ask> = None;
     loop {
         wiz.run_to_the_end()?;
+        if space.is_none() {
+            space = Some(
+                project_space::ask(
+                    g,
+                    env,
+                    ui,
+                    a.space.team.as_deref(),
+                    a.space.visibility.as_deref(),
+                    interactive && !dry && !a.space.no_sync,
+                )
+                .await?,
+            );
+        }
+        let resolved = |wiz: &Wizard<'_>| -> Result<Resolved, Error> {
+            let mut r = wiz.resolved()?;
+            r.space = space.clone().unwrap_or_default();
+            Ok(r)
+        };
         // Without a terminal, with `--yes` and in a dry run there is no review: the dry run is
         // the plan, and the flags are the answers.
         if !interactive || dry {
-            return execute(&cx, &wiz.resolved()?, false).await;
+            return execute(&cx, &resolved(&wiz)?, false).await;
         }
-        let r = wiz.resolved()?;
+        let r = resolved(&wiz)?;
         let planned = execute(&cx, &r, true).await;
         wiz.draft.agent_ok = r.agent_ok.get();
         match review(ui, &wiz, planned.err())? {
-            Review::Create => return execute(&cx, &wiz.resolved()?, false).await,
+            Review::Create => return execute(&cx, &resolved(&wiz)?, false).await,
             Review::Change(stage) => wiz.at.jump(stage),
         }
     }
@@ -816,6 +866,7 @@ impl Wizard<'_> {
             describe: self.draft.describe.clone(),
             place: self.draft.folder.clone().ok_or_else(|| missing("folder"))?,
             here: self.here.clone(),
+            space: project::space::Ask::default(),
             agent_ok: std::cell::Cell::new(self.draft.agent_ok),
         })
     }
@@ -1183,6 +1234,8 @@ struct Exec<'a> {
     agent_turns: u32,
     agent_timeout: u64,
     ask_thinking: Option<String>,
+    /// The Role the agent builds in (`--role`, RFC 0211), found before the plan starts.
+    role: Option<runtime::Applied>,
     out: Out,
 }
 
@@ -1194,6 +1247,8 @@ struct Resolved {
     describe: Option<String>,
     place: Proposal,
     here: Where,
+    /// The team and who reads the project's space (asked once, after the wizard's steps).
+    space: project::space::Ask,
     /// Whether the agent step was confirmed (asked once, however often the plan is built).
     agent_ok: std::cell::Cell<Option<bool>>,
 }
@@ -1225,6 +1280,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         describe,
         place,
         here,
+        space: space_ask,
         ..
     } = r;
     let dir = place.dir.clone();
@@ -1309,6 +1365,9 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     let runner = lang.as_deref().and_then(|l| tpl.runner(l, &vals));
     // Reads only, so a dry run finds the same problems a real one would.
     project::check_target(&dir, &files).map_err(Error::Failed)?;
+    // Init run again in the folder it made: files already there are left alone, nothing is
+    // committed over them.
+    let rerun = project::is_rerun(&dir, &files);
     project::check_manifest(&files).map_err(Error::Failed)?;
     if !a.no_smoke
         && let Some(v) = lang.as_deref().and_then(|l| tpl.variant(l))
@@ -1391,8 +1450,12 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             // init's own bounds: nothing the agent is told or says is stored here.
             let model = ask::choose_model(
                 *ag,
-                cx.agent_model.as_deref(),
-                (*ag == Agent::Claude).then_some(AGENT_MODEL),
+                ask::ModelChoice {
+                    flag: cx.agent_model.as_deref(),
+                    role: cx.role.as_ref().and_then(|r| r.model.as_deref()),
+                    default: Some(AGENT_MODEL),
+                    ..ask::ModelChoice::default()
+                },
             )
             .map_err(Error::Usage)?;
             let max_turns = cx.agent_turns;
@@ -1402,13 +1465,18 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 args: ask::argv(
                     *ag,
                     model.as_deref(),
-                    true,
+                    (true, false),
                     &allow,
                     Some(max_turns),
+                    cx.role
+                        .as_ref()
+                        .map(runtime::Applied::system_text)
+                        .as_deref(),
                     &prompt,
                 ),
                 prompt,
                 model,
+                role: cx.role.as_ref().map(runtime::Applied::json),
                 max_turns,
                 timeout: Duration::from_secs(cx.agent_timeout),
                 thinking: ask::choose_thinking(None, cx.ask_thinking.as_deref())
@@ -1445,6 +1513,45 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         })
         .await
         .flatten();
+    // The project's space in InOrbit: made or found under the chosen team before anything is
+    // written, so the first commit holds the link. Never a reason for init to fail: what
+    // waiting cures is queued (`iohr project sync` does it later); only a `--team` the person
+    // is not in is refused here.
+    let env_name = g.environment_name().to_owned();
+    let synced: Option<Outcome> = if a.space.no_sync {
+        None
+    } else {
+        let asked = flow
+            .act_async(
+                "space",
+                "make or find the project's space in InOrbit under the chosen team, and link this folder to it",
+                || async {
+                    if signed_in.is_none() {
+                        Ok(Outcome::Queued("you are not signed in".to_owned()))
+                    } else {
+                        project_space::sync(g, env, name, space_ask).await
+                    }
+                },
+            )
+            .await;
+        asked.transpose()?
+    };
+    if let Some(Outcome::Linked(l)) = &synced {
+        if env_name == project::space::PRODUCTION {
+            for (p, text) in &mut files {
+                if p == project::SPACE_FILE {
+                    *text = project::space::link_text(&env_name, &l.id, &l.name, &l.account);
+                } else if p == "inorbit.toml" {
+                    *text = project::space::fill_manifest(text, &l.id);
+                }
+            }
+        } else {
+            files.push((
+                project::space::link_file(&env_name),
+                project::space::link_text(&env_name, &l.id, &l.name, &l.account),
+            ));
+        }
+    }
     let mut report = Report {
         name: name.clone(),
         id: format!("{publisher}/{name}"),
@@ -1474,6 +1581,26 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             report.files = written;
             report.steps.push(st);
+            report
+                .steps
+                .push(project_space::step(synced.as_ref(), &env_name));
+            match &synced {
+                Some(Outcome::Queued(why)) => {
+                    let q = project::space::Queued {
+                        name: name.clone(),
+                        dir: dir.clone(),
+                        env: env_name.clone(),
+                        ask: space_ask.clone(),
+                        queued_at: created_at.clone(),
+                        why: why.clone(),
+                    };
+                    if let Err(e) = project::space::queue(&state, &q) {
+                        warnings.push(e);
+                    }
+                }
+                Some(Outcome::Linked(_)) => project::space::dequeue(&state, &env_name),
+                _ => {}
+            }
         }
         Some(Err(e)) => {
             if let Some(sp) = sp {
@@ -1483,17 +1610,46 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         None => {}
     }
-    // The built-in roles (security and the language's engineer): imported when signed in.
-    let roles = flow
-        .act_async(
-            "roles",
-            "import the built-in roles into your InOrbit account (they stay in the project when you are signed out)",
-            || super::atlas::import_for(g, env, &dir, false, false),
-        )
-        .await;
-    if let Some(r) = roles.as_ref().filter(|_| !out.json) {
-        super::atlas::show_report(ui, r);
-    }
+    // The built-in roles (security and the language's engineer) go to the account only as part
+    // of the account step above: a local-only init (`--no-sync`) or one without a sign-in
+    // leaves them in the folder, says so, and makes no call. `iohr sync` imports them later.
+    let roles_skip = if a.space.no_sync {
+        Some("init is local only (--no-sync)")
+    } else if !dry && signed_in.is_none() {
+        Some("you are not signed in")
+    } else {
+        None
+    };
+    let roles = if let Some(why) = roles_skip {
+        let said = format!(
+            "the built-in roles stay in atlas/roles/, nothing was sent to your account ({why}); `iohr sync` imports them"
+        );
+        ui.info(&format!("Roles: {said}"));
+        report
+            .steps
+            .push(project::step("roles", "Roles", "skipped", said, ""));
+        None
+    } else {
+        let roles_sp = (!dry && ui.fancy()).then(|| ui.step("Importing the built-in roles"));
+        let roles = flow
+            .act_async(
+                "roles",
+                "import the built-in roles into your InOrbit account (they stay in the project when you are signed out)",
+                || super::atlas::import_for(g, env, &dir, false, false),
+            )
+            .await;
+        match (roles.as_ref().filter(|_| !out.json), roles_sp) {
+            // Drawn: one line that says how it went, the role names in it.
+            (Some(r), Some(sp)) if !r.outcomes.is_empty() || r.message.is_some() => {
+                let (mark, said) = super::atlas::roles_result(r);
+                sp.end(mark, &said);
+            }
+            (Some(r), None) => super::atlas::show_report(ui, r),
+            (_, Some(sp)) => sp.clear(),
+            (None, None) => {}
+        }
+        roles
+    };
     // The Planner plan the project's builds go through (RFC 0211): made or found, and its id
     // written into coordination.toml. Signed out, init goes on and says how to set it later.
     let plan = flow
@@ -1526,10 +1682,15 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     for s in &steps {
         match s.name {
             StepName::Git => {
+                let sp = (!dry).then(|| ui.step("Making a git repository"));
                 let r = flow.act("git", "make a git repository with one commit", || {
-                    project::git_step(&dir, name, &tpl.meta.id)
+                    project::git_step(&dir, name, &tpl.meta.id, rerun)
                 });
                 if let Some(st) = r {
+                    if let Some(sp) = sp {
+                        let (mark, said) = step_line(&st);
+                        sp.end(mark, &said);
+                    }
                     report.steps.push(st);
                 }
             }
@@ -1538,15 +1699,25 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                     "register the project: state and cache under {}",
                     state.display()
                 );
+                let sp = (!dry).then(|| ui.step("Registering the project"));
                 let r = flow.act("register", &what, || {
                     project::register_step(&dir, &state_root, name, &tpl.meta.id, &created_at)
                 });
                 match r {
                     Some(Ok((_, st))) => {
+                        if let Some(sp) = sp {
+                            let (mark, said) = step_line(&st);
+                            sp.end(mark, &said);
+                        }
                         report.steps.push(st);
                         report.steps.extend(project::cloud_steps(name));
                     }
-                    Some(Err(e)) => return Err(Error::Failed(e)),
+                    Some(Err(e)) => {
+                        if let Some(sp) = sp {
+                            sp.fail(&format!("Could not register the project: {e}"));
+                        }
+                        return Err(Error::Failed(e));
+                    }
                     None => {}
                 }
             }
@@ -1615,6 +1786,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 model: r.model.clone(),
                                 rows: true,
                                 made: Some("AI-built"),
+                                summary: true,
                             },
                             ui,
                             waiting: "Your agent is building it",
@@ -1631,10 +1803,12 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 "timed_out": ended.timed_out,
                                 "max_turns": r.max_turns,
                                 "timeout_seconds": r.timeout.as_secs(),
+                                "role": r.role,
                             });
                             Out::raw(format!("{line}\n").as_bytes());
                         }
                         if ended.code == 0 {
+                            ui.done(&format!("{} built it in {secs} s", r.agent.name()));
                             agent_built = true;
                             report.steps.push(project::step(
                                 "agent",
@@ -1689,6 +1863,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                                 why.clone(),
                                 "",
                             ));
+                            ui.failed(&format!("{} did not finish: {why}", r.agent.name()));
                             agent_failed = Some(why);
                         }
                     }
@@ -1717,6 +1892,24 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                 ui.info(&st.said);
             }
         }
+        report.steps.push(st);
+    }
+    // Extensions that fit the project: one more step, offered at a terminal, a hint
+    // line otherwise.
+    if let Some(st) = super::init_extensions::offer(
+        g,
+        env,
+        ui,
+        out,
+        dry,
+        interactive,
+        &super::init_extensions::Signals {
+            template: &tpl.meta.id,
+            describe: describe.as_deref(),
+        },
+    )
+    .await
+    {
         report.steps.push(st);
     }
     if dry {
@@ -1748,6 +1941,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             "answered": answers.keys().collect::<Vec<_>>(),
             "files": report.files, "signed_in": signed_in, "steps": report.steps, "smoke": smoke,
             "roles": roles,
+            "role": cx.role.as_ref().map(runtime::Applied::json),
             "lines": lines(&report, smoke.as_ref(), signed_in.as_deref()),
         });
         if ran {
@@ -1852,12 +2046,21 @@ fn dry_report(
                 "cwd": report.dir,
                 "prompt": r.prompt,
                 "model": r.model,
+                "role": r.role,
                 "max_turns": r.max_turns,
                 "timeout_seconds": r.timeout.as_secs(),
             })),
         }));
         return;
     }
+    flow.ui.plan(
+        "What init will do",
+        &flow
+            .would
+            .iter()
+            .map(|(_, w)| w.clone())
+            .collect::<Vec<_>>(),
+    );
     flow.ui.note(
         &format!("{} files, none written", files.len()),
         &plan_lines(files.iter().map(|(p, t)| (p.as_str(), t.len()))).join("\n"),
@@ -1916,8 +2119,21 @@ async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
     signed_in
 }
 
-/// The drawn ending: what is left to do in one line (`--verbose` lists it), and an outro
-/// with the next commands. Nothing here claims a step that did not happen.
+/// How a finished report step reads on the terminal: its mark and one line. Only `done` is a
+/// check; a step that was skipped or waits on a decision says so in its line.
+pub(super) fn step_line(st: &project::Step) -> (Mark, String) {
+    let mark = Mark::of(&st.state);
+    let said = match st.state.as_str() {
+        "done" => format!("{}: {}", st.title, st.said),
+        "skipped" => format!("{} skipped: {}", st.title, st.said),
+        "failed" => format!("{} failed: {}", st.title, st.said),
+        _ => format!("{} waits: {}", st.title, st.said),
+    };
+    (mark, said)
+}
+
+/// The drawn ending: the next commands, and under `--verbose` what init did not do. Nothing
+/// here claims a step that did not happen.
 fn finish(
     ui: Ui,
     verbose: bool,
@@ -1927,21 +2143,8 @@ fn finish(
     smoke: Option<&Smoke>,
     signed_in: Option<&str>,
 ) {
-    let later: Vec<String> = lines(r, smoke, signed_in)
-        .into_iter()
-        .filter(|l| l.starts_with("not yet:"))
-        .collect();
-    let asked: Vec<String> = lines(r, smoke, signed_in)
-        .into_iter()
-        .filter(|l| l.starts_with("asked:"))
-        .collect();
-    for a in &asked {
-        ui.info(a);
-    }
-    if verbose {
-        ui.note("Comes later", &later.join("\n"));
-    } else if !later.is_empty() {
-        ui.info(&later_line(later.len()));
+    if verbose && let Some(body) = not_built_yet(&lines(r, smoke, signed_in)) {
+        ui.note("Not built yet (RFC 0127.1, RFC 0127.2)", &body);
     }
     let next = next_lines(is_extension(r), runs_in_ext_dev(lang));
     let width = next.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
@@ -1954,15 +2157,21 @@ fn finish(
     ui.outro("Done.");
 }
 
-/// The one line that replaces the list of what waits on an API that does not exist yet.
-fn later_line(n: usize) -> String {
-    let things = if n == 1 { "thing comes" } else { "things come" };
-    format!("{n} {things} later (RFC 0127.x): run with --verbose to list them")
+/// What init does not do, listed only under `--verbose`: the steps that wait on an API that
+/// does not exist yet (`not yet:`) and the editor's own ask (`asked:`), which Desktop makes,
+/// not init. The default output says nothing about them; the outro already says Code asks first.
+fn not_built_yet(lines: &[String]) -> Option<String> {
+    let picked: Vec<&str> = lines
+        .iter()
+        .map(String::as_str)
+        .filter(|l| l.starts_with("not yet:") || l.starts_with("asked:"))
+        .collect();
+    (!picked.is_empty()).then(|| picked.join("\n"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Lang, lang_of_variant, language_choices, later_line, publisher_of};
+    use super::{Lang, lang_of_variant, language_choices, not_built_yet, publisher_of};
     use crate::template::{self, Spec};
     use std::path::Path;
 
@@ -2003,12 +2212,25 @@ mod tests {
     }
 
     #[test]
-    fn the_later_line_counts_and_points_at_verbose() {
+    fn only_steps_init_did_not_do_are_listed_and_only_when_there_are_some() {
+        let lines: Vec<String> = [
+            "done: wrote inorbit.toml",
+            "asked: the editor may open it",
+            "not yet: a Keychain slot for the project's own token",
+            "not yet: its own monitors",
+        ]
+        .map(String::from)
+        .to_vec();
         assert_eq!(
-            later_line(5),
-            "5 things come later (RFC 0127.x): run with --verbose to list them"
+            not_built_yet(&lines).as_deref(),
+            Some(
+                "asked: the editor may open it\nnot yet: a Keychain slot for the project's own token\nnot yet: its own monitors"
+            )
         );
-        assert!(later_line(1).starts_with("1 thing comes later"));
+        assert_eq!(
+            not_built_yet(&["done: wrote inorbit.toml".to_owned()]),
+            None
+        );
     }
 
     #[test]

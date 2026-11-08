@@ -51,6 +51,9 @@ pub struct Config {
     /// `iohr memory` settings (`[memory]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "MemoryConfig::is_empty")]
     pub memory: MemoryConfig,
+    /// `iohr` panel settings (`[panel]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "PanelConfig::is_empty")]
+    pub panel: PanelConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -205,11 +208,25 @@ pub struct AskConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu_key: Option<String>,
     /// What happens when Io wants to run a command or open a file no rule decides (PRD
-    /// 0197): `prompt` (ask at the terminal; the default at one), `rules` (follow the rules
-    /// only; the default without a terminal) or `deny` (no commands offered).
-    /// `--permissions` wins over it.
+    /// 0197): `manual` (or `prompt`: ask at the terminal; the default at one), `plan`, `auto`
+    /// (the modes of `mode`), `rules` (follow the rules only; the default without a terminal)
+    /// or `deny` (no commands offered). `--permissions` wins over it, and `mode` beats it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<String>,
+    /// How Io works (PRD 0197): `manual` (ask before each command; the default at a terminal),
+    /// `plan` (read and propose a plan, change nothing) or `auto` (run commands no rule
+    /// decides without asking; deny rules and the secret list still win). `--mode` (or
+    /// `IOHR_ASK_MODE`) wins over it, and it beats `permissions`. The zsh hook starts its
+    /// shift+tab switch from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Folders `iohr ask` may always read besides the one it is asked in, the way Claude Code's
+    /// `--add-dir` adds them: a leading `~/` is your home folder. Each must exist, be listable
+    /// and hold no secrets, or the question is refused; secret files inside stay blocked.
+    /// `--read` (alias `--add-dir`) and `IOHR_ASK_READ` (an OS path list) add to it, never
+    /// replace it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<Vec<String>>,
 }
 
 impl AskConfig {
@@ -223,7 +240,9 @@ impl AskConfig {
             && self.thinking.is_none()
             && self.hints.is_none()
             && self.menu_key.is_none()
+            && self.mode.is_none()
             && self.permissions.is_none()
+            && self.read.is_none()
     }
 }
 
@@ -282,6 +301,27 @@ impl MemoryConfig {
     #[must_use]
     pub fn sync_on(&self) -> bool {
         self.sync == Some(true)
+    }
+}
+
+/// The `[panel]` table: the floating panel bare `iohr` puts over the top right corner of the
+/// terminal (`docs/config.md` section 4.8).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PanelConfig {
+    /// When the panel reads the mouse: `menu` (only while the menu is open, so the terminal
+    /// keeps selecting text with a drag; the default), `always` (a click on the pill opens
+    /// the menu; the terminal selects text with Option or Shift held) or `off` (keys only).
+    /// `IOHR_PANEL_MOUSE` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mouse: Option<String>,
+}
+
+impl PanelConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.mouse.is_none()
     }
 }
 
@@ -841,6 +881,24 @@ mod tests {
         assert!(text.contains("account = \"acc_1\""));
         assert!(!text.contains("token =") && !text.contains("secret"));
         assert_eq!(Config::load(dir.path()).unwrap(), c);
+    }
+
+    #[test]
+    fn the_ask_read_folders_are_read_and_a_table_with_only_them_is_not_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[ask]\nread = [\"~/notes\", \"/srv/docs\"]\n",
+        )
+        .unwrap();
+        let c = Config::load(dir.path()).unwrap();
+        assert_eq!(
+            c.ask.read.as_deref(),
+            Some(&["~/notes".to_owned(), "/srv/docs".to_owned()][..])
+        );
+        assert!(!c.ask.is_empty());
+        assert!(Config::default().ask.read.is_none());
+        assert!(Config::default().ask.is_empty());
     }
 
     #[test]

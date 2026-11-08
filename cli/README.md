@@ -4,6 +4,18 @@ Pre-release (0.x): commands and output can still change between versions. This p
 describes `main`; a change merged after the latest pre-release ships with the next one
 ([CHANGELOG.md](CHANGELOG.md), [releases](https://github.com/inorbithr/sdk/releases?q=iohr)).
 
+Guides for each part, with captures of real output, are on the developer site:
+[what iohr can do](https://developers.inorbit.hr/docs/tools/iohr/),
+[projects](https://developers.inorbit.hr/docs/tools/projects/) (`iohr project init`, the
+atlas, memory, `iohr sync`), [the `?` prompt](https://developers.inorbit.hr/docs/tools/ask/),
+[extensions](https://developers.inorbit.hr/docs/tools/extensions/) and
+[iohr and iohr-preview](https://developers.inorbit.hr/docs/tools/preview/). This README is
+the reference they link back to.
+
+`iohr-preview` is the next build of this program under another name: it carries changes that
+are checked but not yet in a release (today the `?` mode switch, the extension offer in
+`iohr project init` and `iohr ext show` with no name). It is not published as a package.
+
 ```sh
 brew trust inorbithr/tap                                          # once per machine: Homebrew refuses untrusted taps
 brew install inorbithr/tap/iohr                                   # macOS, Linux
@@ -109,22 +121,27 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr connectors list [--category C] \| show ID` | The catalogue of apps a connection can be made from: sign-in modes and their fields, settings, actions, the hosts each may call, AI models labelled |
 | `iohr connections list \| show \| add \| test \| history \| pause \| resume \| rename \| delete \| reconnect` | The account's connections (RFC 0044): connect an app with a key (asked for without echo) or by signing in at the provider in a browser; `delete` asks first unless `--yes` |
 | `iohr connections grant \| grants \| revoke-grant` | Grant a product, an API key or an agent named actions of a connection until an expiry, list and revoke grants |
-| `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
+| `iohr ext search \| show` | The extensions catalogue (RFC 0073): `search [QUERY] [--kind K] [--all \| --page-size N]` lists name, kind, publisher, latest version and visibility; `show` with no name lists the same catalogue, listings not yet released marked coming; `show PUBLISHER/NAME` the description, publisher, signer, scopes, privileges in plain words, evidence, versions and the install line. API host only, `extensions:read` |
 | `iohr ext install [--lock FILE] [--no-service] \| service \| list \| upgrade \| remove \| verify \| sync` | Extensions: install (`NAME` from the registry, or `PUBLISHER/NAME` through the catalogue), verify and pin them; one that declares privileges for its system service asks first unless `--yes`; one with a system service of its own (`inorbit/capture`) offers to set it up with sudo after installing (it lists the interfaces it detects and suggests one; `--interface` repeatable, or `--all-interfaces`), and `iohr ext service NAME` does it later; `iohr <name> ...` runs one |
 | `iohr ext init \| dev \| lint` | Build an extension locally (PRD 0084): `init PUBLISHER/NAME --lang rust\|python\|shell [--dir DIR]` scaffolds a folder (manifest with every field, entry point on the token channel, self-test, README, signing release workflow; a name holding `tbd` is refused); `dev [PATH] [--test]` runs it, or its tests, with the token channel for exactly the manifest's scopes, its secrets, `STATE` and `CACHE` under `~/.inorbit/ext-dev/NAME/` and its output timestamped, never touching installed extensions; `lint [PATH] [--preview] [--json]` checks `extension.toml` and says what it may do in plain words. Offline, except the token channel's sign-in |
 | `iohr config set \| get \| unset` | `ext.registry` (a mirror) and `ext.trusted_keys` (keys a mirror re-signs with) |
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
-| `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
+| `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--session DIR] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
+| `iohr session [DIR] [--json]` | Open a session on a project (platform RFC 0213): starts the project's one session host if none runs (this same `iohr` as `runner run --session DIR`, a process of its own that hosts the project's Roles and the runner's turn loop), joins it, and stays open until Ctrl-C or SIGTERM. The host stops when the last session has left (a shell that is killed counts as left), on `iohr stop`, or on SIGTERM; a host nobody joins within 30 s ends by itself. With `--json` it prints `{project, host_pid, roles}`; notes go to stderr. Needs a registered runner (`iohr runner register`). S1: no tasks are accepted yet, a claimed task fails "not built". Unix only |
+| `iohr stop [DIR] [--wait S] [--json]` | Stop the project's session host and wait up to `--wait` seconds (0 to 600, default 15) for it to end; each Role finishes the task it holds first. Prints `stopped` only when the host's lock is free, `stopping` while a Role still holds a task; says on stderr that no host runs when none does, and exits 0 either way; `--json` prints `{project, state, host_pid}` with `state` one of `not running`, `stopped`, `stopping`. Makes no API call; Unix only |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
 | `iohr ext packages` | Every package you have in one table: published by your account, private ones shared with it, ones in progress on this machine, and what is installed (`iohr packages` still works, hidden from the help) |
-| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--allow-edits] [--permissions prompt\|rules\|deny] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F] [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, read-only file tools, no write access, a scrubbed environment, the question on stdin; a Bash tool only through your permission rules, and at a terminal Io asks with a small Io card (numbered bar, arrows or 1-9, `y` once, `a` always in this project, `n` no, starting on No; one plain line under `NO_COLOR` or without a terminal) before it runs a command the rules do not cover, with `--permissions rules` or `deny` or `IOHR_ASK_PERMISSIONS` or `[ask] permissions` choosing the mode), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, questions, agent, via, label, model, exit_code, duration_ms}` (`command` is the one command the answer suggested, or null; `questions` are the at most two questions the model asked back, each `{about, ask, choices}`, or `[]`). Inside a project the prompt carries iohr's own git facts (branch, last 5 commits, change counts) and the project's notes; at a terminal the card asks the questions, keeps the answer in `.inorbit/memory/` and `inorbit.toml` and refreshes the answer once, and a dim line says when asks are waiting `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
-| `iohr ask --menu --command C [--link L]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open, and Asks when some wait) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
+| `iohr ask [--headless \| --card \| --interactive] [--agent A] [--model M] [--role NAME [--job ID]] [--mode manual\|plan\|auto] [--allow-edits] [--permissions prompt\|rules\|deny] [--thinking show\|collapse] [--dry-run] [--cwd DIR] [--last-command C] [--exit-code N] [--output-file F [--output-kind attached\|captured\|pasted]] [--read FOLDER]... [--prior-question Q --prior-answer A] QUESTION...` | Ask your own AI agent (Claude Code or Codex, local, your subscription) a question about this folder. By default it streams one print-mode run to the terminal: what it thinks (dim), each tool it uses (one row each), the answer as it arrives, a footer with time, turns and cost; with no terminal, `NO_COLOR` or `TERM=dumb` only the answer is printed, `--json` passes the agent's own events through as JSON lines, and nothing is changed unless `--allow-edits` (files only). `--headless`, `--card` or a context flag selects the other path, the one the `?` prompt uses (Claude Code only): one capped `claude -p` run (model `haiku`, 4 turns, 90 s, no session saved, read-only file tools, no write access, a scrubbed environment, the question on stdin; a Bash tool only through your permission rules, and at a terminal Io asks with a small Io card (numbered bar, arrows or 1-9, `y` once, `a` always in this project, `n` no, starting on No; one plain line under `NO_COLOR` or without a terminal) before it runs a command the rules do not cover, with `--mode manual\|plan\|auto` (or `IOHR_ASK_MODE` or `[ask] mode`) choosing how: manual asks before each command, plan is read only and answers with a plan, auto runs what your rules do not forbid without asking, deny rules and secrets still winning; `--permissions rules` or `deny` or `IOHR_ASK_PERMISSIONS` or `[ask] permissions` still work), the answer printed after one AI label line on stderr, or, with `--card` at a terminal, drawn as a card on stderr (plain on a pipe, under `NO_COLOR` or `--json`); with `--json` it prints `{answer, command, questions, agent, via, label, model, exit_code, duration_ms, permissions, context}` (`context` is what of the shell's context was sent, as data: `{folder, command, exit_code, output, output_bytes, can_attach}`; `output` is `not_sent`, `attached`, `captured` or `pasted`, never the text itself) (`command` is the one command the answer suggested, or null; `questions` are the at most two questions the model asked back, each `{about, ask, choices}`, or `[]`). Inside a project the prompt carries iohr's own git facts (branch, last 5 commits, change counts) and the project's notes; at a terminal the card asks the questions, keeps the answer in `.inorbit/memory/` and `inorbit.toml` and refreshes the answer once, and a dim line says when asks are waiting `--read FOLDER` (alias `--add-dir`, repeatable), `IOHR_ASK_READ` (a path list) and `[ask] read` name more folders the run may read, each checked like a yes (it must exist, hold no secrets and not be broad: the root, your home folder and every folder above it are refused, bar an explicit `--read ~`; the secret deny rules stay on), each written to `permissions.log` by source and path and listed in `--json` `context.folders`; `--interactive` forces the streamed run even with those flags; `--via io` says "not built yet" |
+
+| `iohr ask --menu --command C [--link L] [--undo RULES] [--asked Q --access FOLDER --step KIND:VALUE --failed-command C --failed-exit N --output-to FILE]` | The action menu under a `?` card (Run, Copy, Follow up, Explain, Open, Undo for a permission the run saved, Add folder to keep one more folder for Io to read, Allow for a folder Io asked to read (kept in `trusted.toml`, then the question is put on the prompt again), the answer's next steps as numbered entries, Asks when some wait, and, after a failed command with a "why did that fail" question, Re-run with output and Paste output: the re-run shows the exact command and asks first, runs once for at most 10 s with the end of its output kept, and the paste reads to Ctrl-D; either writes the redacted output to FILE and prints the question again with `captured` or `pasted` after a 0x1e character) on the terminal, letter keys; prints only the one line for the prompt, asks no model and runs nothing |
 | `iohr asks count [--cache] [--json] [--account A]` | How many asks wait for you: "3 asks", nothing for none; only asks whose turn is yours (`pending`) count, one you already answered with a note (`question`) is the agent's turn and is left out (`iohr asks list` still shows it), `{"count": N}` with `--json`; `--cache` keeps just the number in `~/.inorbit/term/asks-count` and does nothing while that file is under 30 seconds old (the shell hook's prompt segment uses it). It reads the sign-in through a quiet credential store: no Keychain dialog (macOS interaction is switched off) and no wait past 1.5 s; when the store would ask, `--cache` keeps the last number and prints nothing, without `--cache` it exits 1 saying so |
 | `iohr permissions list\|allow RULE\|deny RULE\|remove RULE\|check TOOL INPUT [--project\|--user] [--json]` | The rules for what Io may run or open when you ask it something (Claude Code's rule grammar) in `.inorbit/permissions.toml` and the user file in the iohr config folder; `allow` refuses rules that could open a secret file and a blanket `Bash(*)` (exit 2); `check` prints `allow`, `deny` or `ask` and the rule; every ask decision is logged to `.inorbit/permissions.log` (no output, no contents); see `docs/config.md`, section 4.5 |
-| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
+| `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu; Shift+Tab on a `?` line cycles manual, plan and auto): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
+| `iohr` (no subcommand) | On a terminal: enters the session. It joins this folder's session host (starting it if none runs, as `iohr session` does) and gives your shell with the floating panel over it; if the host cannot start it says so on stderr and the panel still runs without one. Under `NO_COLOR`, with `--json`, or off a terminal it prints the usage report and exits 2, as before; `iohr --help` and `iohr help` print the help. `iohr stop` ends the host, which closes the panel and leaves your shell open. Unix only |
+| `iohr panel [--demo] [-- COMMAND...]` | Runs your shell (or COMMAND) with a floating panel at the top right of the terminal, drawn over the output and taking no rows (see "The floating panel"); `--demo` fills it with labelled stub asks; with `--demo --variant rail\|accordion\|band` it prints the older static design drawings instead |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
 Every command takes `--profile` (or `IOHR_PROFILE`), `--json`, `--verbose`, `--env production|local`
@@ -335,6 +352,7 @@ pins and runs. The first is the InOrbit agent:
 
 ```sh
 iohr ext search agent                    # the catalogue: what you may install
+iohr ext show                            # no name: the whole catalogue, coming ones marked
 iohr ext show inorbit/agent              # publisher, signer, scopes, privileges, versions
 iohr ext install inorbit/agent           # or inorbit/agent@0.1.0, or just: agent
 iohr agent status                        # runs the installed program
@@ -347,6 +365,12 @@ once (an admin or owner of the account is needed; anyone else is refused with th
 reason). A key or token profile hands out its own token when it holds the scopes, and is
 refused when it does not. Minting is bounded at 30 s, then the program gets a `503` that
 says why (ADR 0012, point 6).
+
+`iohr project init` looks at the template and the `--describe` text, finds the catalogue
+listings that fit (a rule table in `commands/init_extensions.rs`) and, at a terminal, asks
+whether to install each one (default no) through the same path as `iohr ext install`. With
+`--yes`, `--json` or no terminal it prints one `iohr ext install ...` line and installs
+nothing. A listing marked coming is never offered for install.
 
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A
@@ -446,7 +470,7 @@ check an extension by hand: [verifying extensions](../docs/security/verifying-ex
 
 ## A project of your own
 
-`iohr project init NAME` (also `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
+`iohr project init NAME` (also `iohr init NAME` and `iohr project create NAME`, the same command) sets up a project you build yourself (PRD 0088) with one command,
 and tells you what you now have. The local half is real: `~/development/NAME` from a template
 (by default `coordinated`: a private macOS service that heartbeats and serves a tiny panel, with the
 manifest of `iohr ext init`, plus a `coordination.toml` that names the project's Planner plan and an
@@ -455,6 +479,14 @@ without the `coordination.toml`), a git repository with one commit, the project'
 `~/.inorbit/projects/NAME/` (never in the repository), a Keychain slot reserved by name, and a
 smoke test that runs the project once and reads its heartbeat back, with no token channel, so
 its token ask is refused: the proof the channel is its only credential.
+
+Run it again in the folder it made and it succeeds: a file that is already there is left
+alone (reported as unchanged, or as left alone when you changed it), nothing is written
+twice and nothing of yours is committed for you. A folder that is not that project is
+still refused. The built-in roles go to your account only with the account step, so
+`--no-sync`, or no sign-in, leaves them in `atlas/roles/` with a plain line saying so
+(`iohr sync` imports them later). The template's `rust-version` is the toolchain you have
+installed, and an agent started with `--describe` is told to keep it as the minimum.
 
 At a terminal, `init` is guided: it asks for the name when it is missing (the folder's name is
 the default), offers the templates as a menu (templates that are coming are listed dimmed and
@@ -625,13 +657,14 @@ Every template writes two committed files, neither holding a secret:
   keys are grouped as the project (`name`, `id`, `kind`: `project`, `macos-service`,
   `macos-app` or `ui-panel`), where it came from (`template`, `template_version`,
   `created_at`) and the InOrbit links (`space_id`, `listing`, `memory_namespace`, each empty
-  until the step that fills it exists). It was `inorbit-project.toml`; nothing in the CLI reads
+  until the step that fills it exists; `iohr init` fills `space_id`). It was `inorbit-project.toml`; nothing in the CLI reads
   the record, so there is no fallback for the old name.
 - `.inorbit/space` is the link to an InOrbit space (platform RFC 0103, "The link"): `id` and
   `name` as `key = "value"` lines. `init` writes it from the shared scaffold step for every
   template. Until the space exists it holds empty values and a comment naming the plugin
-  command `/inorbit:link <space>`; the CLI has no link command of its own. `.inorbit/` is never
-  ignored, and `git init` commits it.
+  command `/inorbit:link <space>`; `iohr init` and `iohr project sync` fill it. `.inorbit/` is
+  committed, except `.inorbit/space.*` (the local environment's link), which its own
+  `.gitignore` keeps out.
 
 ### The atlas, and `iohr sync`
 
@@ -695,6 +728,35 @@ source. Every prompt that asks a model to research or write facts (`project init
 the agent step) ends with the system clock's date: "Today is YYYY-MM-DD. Use the newest edition or
 version published as of today; name it with its publication date; if you are unsure a newer one
 exists, say so."
+
+### Use a Role in a run: `--role`
+
+`iohr ask --role NAME` and `iohr init --role NAME` (the same as `iohr project init`) run the agent
+in a Role (RFC 0211). The Role is looked up in this order: the project's `atlas/roles/NAME.md`,
+then your account (`GET /v1/coordinator/personalities/NAME`, signed in), then the built-in
+catalogue in the binary, so `--role rust-engineer` works offline. A dry run never asks the
+account. A name that is nowhere ends the run before anything starts (exit 2).
+
+What the Role changes:
+
+- **Its text.** Claude Code gets the Role's core (the "Core" section of the pack, or the
+  account's compiled core, at most 8000 characters, cut with a note when longer) through
+  `--append-system-prompt`; the streamed `?` run puts it first in the prompt in a `<role>` block.
+  Codex has no system-prompt flag, so the text leads the question. The Role guides how the agent
+  works; it never widens the run's permissions, edits or limits.
+- **Its model.** The order is the `--model` flag, then `[ask] model` in the config, then the
+  Role's own model, then the default (`haiku` for `ask`, the project agent's default for `init`).
+  Codex ignores the Role's model. A Role model that is not a plain model name is ignored, not
+  an error.
+- **Its brief for a job.** `iohr ask --role NAME --job JOB_ID` (signed in) asks the account for
+  the Role's brief for that job (`POST /v1/coordinator/personalities/NAME/brief`, the job id
+  in the body, never the URL) and uses it in place of the Role's own text. When the brief is
+  not available the run goes on with the Role's text and says so in one line (the status only).
+
+With `--json` the Role is named: `ask --dry-run` has `role` beside `args`, the `iohr_summary`
+line and the headless answer carry it, and `init`'s agent step and report carry it, each as
+`{name, source: project|account|catalogue, brief: role|job, model, job}`. The Role's text is
+never in that object.
 
 ### Memory
 
@@ -760,7 +822,40 @@ printed instead, still labelled AI. Every step reads `would: ...`, and it ends w
 `dry run: nothing was changed`. With `--json` the plan is data: `files` (path and bytes),
 `steps`, and `agent` (command and prompt). Every action goes through one gate that checks it.
 
-The steps that need InOrbit (the project as a Decisions space, its private listing, its own
+### The project in InOrbit: `iohr init` and `iohr project sync`
+
+`iohr init NAME` is `iohr project init NAME`. Signed in, it makes the project's space in
+InOrbit before it writes anything, so the first commit holds the link: a Decisions space of
+kind `project` (RFC 0127.1), named like the folder. The team and who can read it:
+
+```sh
+iohr init my-shop --team acme --visibility managers   # under the team acme; owners and admins read it
+iohr init my-shop --visibility team                   # everyone in the account (the default)
+iohr --env local init my-shop                         # the local environment, a link of its own
+iohr project sync                                     # make or find the space later, from the folder
+iohr init my-shop --no-sync                           # make nothing in InOrbit
+```
+
+At a terminal, a missing `--team` or `--visibility` is asked as a menu (a personal account
+is "personal"; a team you are not in is refused before anything is made). The sync is
+idempotent: the space is found by account and name, so a second run, or a teammate's clone,
+never makes a second one; a clone whose sign-in cannot open the linked space is told to ask a
+team owner or admin. The link is `.inorbit/space` for production (committed, and `space_id` in
+`inorbit.toml` is filled) and `.inorbit/space.local` for `--env local`, kept out of git by
+`.inorbit/.gitignore`. The project then shows under Projects in the app and the console, and
+the team opens it from the link.
+
+Init never fails for the sync. Not signed in, offline, or a server that is down or refuses the
+call (401, 403, 408, 425, 429, 5xx) is a `queued` step with the answers kept in
+`~/.inorbit/projects/NAME/space-sync.<env>.toml`; `iohr project sync` completes it and clears
+it. Any other refusal is a failed step with the reason. `--dry-run` says `would:` and calls
+nothing.
+
+Still `not yet` (the platform has no API for them): a space's members, per-project scopes and
+tokens, and the project summary (`POST /v1/decisions/projects`), so the chosen visibility is
+the space's access floor (the whole account or its managers), not a member list.
+
+The other steps that need InOrbit (its private listing, its own
 scopes and tokens, a memory namespace, monitors and notifications) are reported as `not yet`,
 each with the API it waits on; nothing is skipped in silence, and a step that needs your or an
 admin's say becomes an ask. Every step is re-runnable, and nothing is overwritten. Then
@@ -781,19 +876,108 @@ on Claude Code (local), an AI model, under your own subscription; ...` and a lin
 what was read. `?? and the second one` asks a follow-up with the last question and answer as
 context. A line such as `?.txt` or `? ` alone runs as it always did. An accept-line widget you
 already have is kept and called for every other line. `INORBIT_ASK=0` turns it off for the
-session. Inside the InOrbit app (`INORBIT_TERM`) the hook asks the app to draw the answer
+session. Shift+Tab on a `?` line switches the mode of the answers between manual (asks before each
+command), plan (read only, a plan and nothing run) and auto (runs what your rules do not forbid);
+it says which under the prompt and every question carries it (`--mode`; `[ask] mode` and
+`IOHR_ASK_MODE` set where it starts). Inside the InOrbit app (`INORBIT_TERM`) the hook asks the app to draw the answer
 (an OSC `7727;ask` escape) instead of printing it.
 
 What goes to your provider: the question, the folder's path, the names at the top of that folder
 (at most 60 names and 2 KiB; dotfiles left out except `.inorbit`, `.github`, `.gitignore` and
 `.claude`; names the folder's own `.gitignore` hides left out; never file contents), the last
-command and its exit status, and, when a caller passes `--output-file`, the last 8 KiB (200 lines) of that file;
-the whole message is capped at 16 KiB. A plain zsh hook cannot read a command's output, so
-it sends no output; a program that has it can call `iohr ask --output-file`. Io runs on
+command and its exit status, and, when output is attached (`--output-file`, or the menu's re-run or paste), the last 8 KiB (200 lines) of it with secrets redacted (passwords, tokens, bearer values, URLs, hosts, IP addresses);
+the whole message is capped at 16 KiB. The card's `Read:` line says exactly this, including "output not sent" when none went. A plain zsh hook cannot read a command's output, so
+it sends none; after a failed command and a question such as "why did that fail", the menu (Down on an empty line) offers Re-run with output (asked first, never automatic, 10 s and 16 KiB at most) and Paste output, and what you attach goes with the next ask only. Off a terminal the card says the output was not sent and how to attach it (`--output-file FILE`). Io runs on
 Claude Code only: it signs in with your own `claude` login, never an API key, and `iohr`
 stores neither question nor answer. Only zsh is built; `iohr shell hook bash` and `fish`
 exit 1 with "not built yet", and so do `--via io` and `--headless` with `--agent codex`. An answer is an AI
 answer: check it before you rely on it.
+
+## The floating panel
+
+`iohr panel` runs your shell inside a small terminal proxy and paints a panel over the top right
+corner after every chunk of output, with save and restore of the cursor. It takes no rows: the shell
+keeps its full height, what you half-typed stays where it is, and the panel moves when the window
+is resized. Nothing is drawn under `NO_COLOR`, off a terminal, or on the alternate screen (vim,
+less); it comes back when the program ends. Colours are truecolor when `COLORTERM=truecolor`, else
+the nearest of the 256.
+
+Bare `iohr` on a terminal runs this same panel inside the project's session (see `iohr session`);
+`iohr panel` runs it on its own, without a host.
+
+The panel has these views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns or
+as wide as its text needs). The pill names the key that works in your terminal: `⌥i` where Option
+is Meta, and `^G` (Ctrl-G) in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, which type
+a dead key `ˆ` for Option+i by default (found through `TERM_PROGRAM`). Ctrl-G is a letter, so it
+is the same on every keyboard layout; it has no meaning for the terminal driver, and its only
+shell binding is "abort" in readline and zsh. Both keys always work. The key opens the menu
+(42 columns): `a` auto mode, `p` approvals, `w` workloads, `r` run, `s` status,
+`?` help, `x` stop the panel; arrows and Enter move and open, Esc closes. Keys are taken only while
+the panel is open; every other byte goes to your shell untouched.
+
+The mouse works on the menu and the views while they are open: a click on a row selects it and
+opens it, as Enter does; a click outside closes the view; the wheel moves the selection. The
+panel asks the terminal for mouse reports (SGR, `?1000h` with `?1006h`, never drag tracking) only
+while a view is open, and turns them off when it closes, when the program on the screen enters
+the alternate screen, and when the panel ends (or stops, or the process panics). Reports are
+never sent to your shell. At rest it asks for none, so the shell keeps normal drag-to-select. The
+`[panel] mouse` setting (or `IOHR_PANEL_MOUSE`) changes that: `menu` (the default), `always` (a
+click on the pill opens the menu and every other click goes through to the program) or `off` (no
+mouse at all).
+
+Bare `iohr` inside the panel prints one line, that you are already in the iohr session and which
+key opens the menu, and exits 0. `iohr stop` inside the panel stops the session host and closes
+the panel with it; with no host running it says the panel is closed. If something cannot be read, the
+panel says "unavailable", never a number. Stub data appears only with `--demo` and is labelled "stub".
+
+Auto mode (`a`, 56 columns) is the real auto mode: the account's auto-approve policy (ADR 0142),
+the one the Mac app and the phone show. The view reads it (`GET /v1/approvals/auto-approve`): on
+until a time, how many asks it decided, and the kinds it never decides. Enter turns it off
+(`DELETE`, the same call as the Mac app). Turning it on files an ask for 8 hours that goes to your
+phone (`POST`); only the phone sets the policy, so the panel says "asked your phone" and shows the
+new state at the next read. A second Enter before the phone answers asks once more.
+
+Approvals (50 columns, `p`) are full approvals through the CLI's own approvals client: `↑↓` pick an
+ask, `o` or Enter opens its details (a reader, `↑↓` scroll, Esc back), `q` types a question that is
+sent to the asker, `d` denies after a y/n confirmation, and `a` approves. Approving needs the
+device-key proof (RFC 0113), so from the CLI it is phone-only: `a` says "approve on your phone".
+Merge, roll, migration and auto-approve always stay on the phone. Touch ID signing (PR 450,
+`feat/mac-touchid-sign`) plugs in at `panel::approve::attempt`.
+
+Workloads (60 columns, `w`) is the Mac app's workload tree, flattened: a Coordinator root for this
+machine, its children with `├` and `└`, then one "Coordinator service" row for the queue. A dot
+shows the state: green working, amber needs you, grey idle, red stuck. The header counts
+`N running · M need you`; the count is of sessions and jobs, not of the root and service rows, and
+the menu shows the same number. The data is real and read every 20 seconds from the same places the
+Mac app reads: the sessions registry `~/.inorbit/agents/sessions/*.json` (a session is listed only
+while its process is alive; working means seen in the last 10 minutes, else idle; the model family
+and the latest assistant line come from the end of its transcript, memory and CPU from `ps`) and
+the coordinator picture (`GET /v1/coordinator/picture`: jobs and the queue). A session "needs you"
+when an open ask names it (its name, its id, or an id prefix of 6 or more characters), the Mac app's
+rule. If the coordinator cannot be reached the service row says "unavailable" and the sessions
+still show; the public picture tier is marked redacted. `m` messages the highlighted session and
+`t` opens its terminal from the list; `↑↓` move, Enter opens a row in place (72 columns: Why,
+Latest, Since, Uses, Waits, PR, then the actions), Esc goes back. In an opened workload the
+actions are `m` message (typed in the panel; one JSON line `{at, from, to, text}` appended to the
+session's `~/.inorbit/agents/inbox/<id>.jsonl` and to `~/.inorbit/agents/log.jsonl`, what
+`iohr-agents send` writes), `t` terminal (brings the Terminal.app or iTerm2 window with that tty
+forward through `osascript`; macOS only, and it says so elsewhere), `l` transcript (the end of its
+transcript in a scrolling reader), `p` PR (opens the pull request in the browser: a job's own, else the one `gh pr view`
+finds for the session's branch; says so when there is none), `a` its approval, and `x` stop (a y/n confirmation, then SIGINT, a second after 600 ms, never
+SIGKILL, as the Mac app stops a terminal). Not available yet and shown as "not available": a
+session's checks, worker nodes under a session, and the stuck and failed states of a session (only
+jobs can be stuck). Under `--demo` the list is the design's stub tree, labelled "stub" in the
+title, and every action says "stub: nothing was ..." and does nothing.
+
+Not built yet, and shown as "coming next": the Run and Status views. Only zsh is tried; bash and
+fish are untested (the pty test uses `/bin/sh`). `⌥i` needs the terminal to send Option as Esc or
+Meta (iTerm2: Profiles, Keys, "Esc+"; Terminal.app: "Use Option as Meta key"); without that setting
+use `^G`. If `[ask] menu_key = "ctrl-g"` is set, the panel leaves Ctrl-G to the `?` menu and shows
+`⌥i`. The panel saves and
+restores the cursor with DECSC and DECRC, which can overwrite a program's own saved cursor. The
+shell runs with `IOHR_PANEL=1`, and a nested `iohr panel` runs plainly and a bare `iohr` says it is already in the session;
+`IOHR_PANEL_LEADER` is internal (the proxy re-executes itself to become the shell's session
+leader).
 
 ## Runner
 
@@ -885,6 +1069,47 @@ Your own `gh` sign-in is used instead only when the platform says its App is not
 installed for the account, or the platform is older than the call; the log says which.
 Any other refusal (the App lacks a permission, the lease was not confirmed) leaves the
 lease unaccepted, so another runner can take it.
+
+### Session mode
+
+`iohr session` is the way into a project's Roles (platform RFC 0213). Opening it starts
+one host process for the project: `iohr runner run --session DIR`, which is the same runner
+(heartbeats, the 90 s server-side lease, turns on your `claude -p`, no self-upgrade while it
+hosts) plus the project's Roles at work on one local queue. The host stops when the last
+session has left, when a shell that was killed has left, on `iohr stop`, and on SIGTERM
+(exit 0). It keeps no more than one host per project: a lock the kernel frees when the
+process dies, so a crash leaves nothing to clean up.
+
+The queue is a DuckDB file, `queue.duckdb`, in `session/<project hash>/` below the data
+directory (`IOHR_DATA_DIR`, else the platform's own), beside the host's socket and log
+(`host.log`, the host's own output). The host is the only process that opens it; shells talk
+to the host over its socket. The folder must be yours and mode 0700 (the host refuses one that
+is not, or that is a link) and the socket is mode 0600; a socket path over 103 bytes is refused
+with a message naming the fix, and a host holds at most 64 connections (more are answered
+`error busy`). The queue holds `roles`, `tasks` and an append-only `task_events`. A task is
+`queued`, `claimed`, `running`, then `done` or `failed`; a Role takes the next task in one
+statement, with a lease of 90 s that its heartbeat renews. A statement that meets another
+Role's edit of the same row is tried again, not failed.
+
+Leases are timed on a monotonic clock of the host process, never the wall clock, so a laptop
+that sleeps or a clock that is set back cannot make a live Role's task look abandoned. While a
+host runs, a task is taken from its Role only when that Role's thread has ended and its lease
+has run out; a check every few seconds does that and also fails a task that was tried 3 times.
+A host that starts holds the lock alone, so every claim left in the file is an orphan: each
+goes back to `queued` with the attempt counted, and after 3 attempts becomes `failed` with the
+reason. A task is meant to be worked once at a time; a host killed in the middle of one runs
+it again on the next start (at least once), so a handler must be safe to repeat.
+
+`iohr stop` makes the host drain: each Role finishes the task it holds and takes no more, and
+until the last is done the host still answers `status` with `stopping` and still holds its
+lock. `--wait` polls that lock, so "stopped" is said only when the host has really ended, and
+"stopping" when the wait ran out first.
+
+This is slice S1 of RFC 0213: no tasks are accepted yet, and a claimed task fails "not built".
+Nothing in the command line puts a task in the queue (the socket takes `enqueue`, the `?`
+prompt does not send there yet), and a Role that claims a task fails it with a reason saying
+its turn handler is not built. No launchd or systemd unit
+starts a session host at login.
 
 ### Staying current
 
@@ -1045,6 +1270,8 @@ Each runtime dependency, and why (SR-20):
 | zeroize | Secrets are wiped from memory when dropped |
 | rpassword | `iohr connections add` and `reconnect`: a secret field typed on the terminal without echo (Unix and Windows consoles); with rtoolbox, two small crates and no new transitive dependency |
 | etcetera | The platform's config directory |
+| duckdb (bundled, Unix only) | The session host's durable task queue (RFC 0213): tasks and Roles survive a restart of the host or the machine, and Roles take work at the same time on connections of one process. Bundled so no system library is needed; it builds DuckDB from C++ source (bigger binary, longer first build) |
+| rustix (`process`, `fs`; Unix only) | The current user's id (`process`) and the session host's one-per-project lock, `flock` (`fs`): safe calls, no `unsafe` code |
 | base64, sha2 | Reading a token's claims to name its account; the PKCE S256 challenge |
 | getrandom | Request ids and retry jitter |
 | typify, schemars, syn, quote, prettyplease | `iohr sdk generate`: the models of a generated surface as Rust types, formatted (schemars reads the schemas, syn and quote add each model's constructor and setters, prettyplease prints them) |

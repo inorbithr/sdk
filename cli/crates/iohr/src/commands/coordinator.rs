@@ -12,7 +12,7 @@ use crate::Env;
 use crate::cli::{
     CoordinatorAsksCommand, CoordinatorCommand, CoordinatorJobsCommand, Global, SignIn,
 };
-use crate::context::{Ctx, Session, io_session, session};
+use crate::context::{Ctx, Session, io_session, quiet_session, session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::planner::scoped;
@@ -189,6 +189,16 @@ fn items(v: &Value, key: &str) -> Result<Vec<Value>, Error> {
             "the API answered with no `{key}` list"
         ))),
     }
+}
+
+/// The coordinator's picture (`GET /v1/coordinator/picture`, the snapshot the Mac app reads),
+/// quietly: no prompt and no output, for the terminal panel's Workloads.
+pub(crate) async fn picture(g: &Global, env: &Env) -> Result<Value, Error> {
+    let s = quiet_session(g, env).await?;
+    s.api
+        .get("/v1/coordinator/picture", &[])
+        .await
+        .map_err(scoped)
 }
 
 async fn list_jobs(
@@ -389,7 +399,7 @@ async fn list_asks(
 }
 
 /// A job id, safe as one path segment.
-fn job_segment(v: &str) -> Result<&str, Error> {
+pub(crate) fn job_segment(v: &str) -> Result<&str, Error> {
     if !v.is_empty()
         && v.len() <= 128
         && v.bytes()
@@ -407,6 +417,12 @@ fn job_segment(v: &str) -> Result<&str, Error> {
 /// other than newlines and tabs, ending in one newline.
 fn brief_text(v: &Value) -> Result<String, Error> {
     let text = v.get("text").and_then(Value::as_str).unwrap_or_default();
+    clean_text(text).ok_or_else(|| Error::Usage("the API answered without a brief".into()))
+}
+
+/// `text` without control characters other than newlines and tabs, ending in one newline;
+/// `None` when nothing is left of it. Shared with the Roles' brief (`roles::runtime`).
+pub(crate) fn clean_text(text: &str) -> Option<String> {
     let mut clean: String = text
         .chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
@@ -414,10 +430,10 @@ fn brief_text(v: &Value) -> Result<String, Error> {
     let end = clean.trim_end().len();
     clean.truncate(end);
     if clean.trim().is_empty() {
-        return Err(Error::Usage("the API answered without a brief".into()));
+        return None;
     }
     clean.push('\n');
-    Ok(clean)
+    Some(clean)
 }
 
 /// The size line for the person, on stderr: estimate, budget, what was cut.

@@ -103,33 +103,58 @@ fn pick<'a>(flag: Option<&'a str>, configured: Option<&'a str>, default: &'a str
         .unwrap_or(default)
 }
 
-/// The model: the flag (or `IOHR_ASK_MODEL`), else `[ask] model`, else for Claude `haiku` (the
-/// small, fast tier). The one reading of the setting, for the card and the streamed answer alike. Codex
-/// has no default here: with none named it uses its own configured model.
+/// Where a run's model can come from, in the order it is looked for (RFC 0211).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ModelChoice<'a> {
+    /// The flag (or its environment variable).
+    pub(crate) flag: Option<&'a str>,
+    /// The setting in the config file.
+    pub(crate) configured: Option<&'a str>,
+    /// The model of the Role the run works in (`--role`); Claude only, its names are Claude's.
+    pub(crate) role: Option<&'a str>,
+    /// What a Claude run uses when nothing above names one; `None` is [`DEFAULT_MODEL`].
+    pub(crate) default: Option<&'a str>,
+}
+
+/// A model name as a command line can carry it: no space, and not starting with `-` (it would
+/// read as a flag).
 ///
 /// # Errors
-/// A value that is empty after trimming, has a space, or starts with `-` (it would read as a flag).
-pub(crate) fn choose_model(
-    agent: Agent,
-    flag: Option<&str>,
-    configured: Option<&str>,
-) -> Result<Option<String>, String> {
-    let named = [flag, configured]
-        .into_iter()
-        .flatten()
-        .map(str::trim)
-        .find(|v| !v.is_empty());
-    let model = match (named, agent) {
-        (Some(m), _) => m,
-        (None, Agent::Claude) => DEFAULT_MODEL,
-        (None, Agent::Codex) => return Ok(None),
-    };
-    if model.starts_with('-') || model.contains(char::is_whitespace) {
+/// A name that has a space or starts with `-`.
+pub(crate) fn model_name(model: &str) -> Result<&str, String> {
+    let model = model.trim();
+    if model.is_empty() || model.starts_with('-') || model.contains(char::is_whitespace) {
         return Err(format!(
             "`model` is `{model}`; give a model name such as haiku"
         ));
     }
-    Ok(Some(model.to_owned()))
+    Ok(model)
+}
+
+/// The model: the flag (or `IOHR_ASK_MODEL`), else `[ask] model`, else the Role's model, else for
+/// Claude `default` (`haiku`, the small, fast tier, unless the caller has its own). The one
+/// reading of the setting, for the card and the streamed answer alike. Codex has no default
+/// here and takes no Role's model: with none named it uses its own configured model.
+///
+/// # Errors
+/// A value that is empty after trimming, has a space, or starts with `-` (it would read as a flag).
+pub(crate) fn choose_model(agent: Agent, c: ModelChoice<'_>) -> Result<Option<String>, String> {
+    let named = |list: &[Option<&str>]| {
+        list.iter()
+            .flatten()
+            .map(|v| v.trim())
+            .find(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    let model = match agent {
+        Agent::Claude => named(&[c.flag, c.configured, c.role, c.default])
+            .unwrap_or_else(|| DEFAULT_MODEL.to_owned()),
+        Agent::Codex => match named(&[c.flag, c.configured]) {
+            Some(m) => m,
+            None => return Ok(None),
+        },
+    };
+    model_name(&model).map(|m| Some(m.to_owned()))
 }
 
 /// How the thinking is drawn: the flag, else `[ask] thinking`, else `show`.
@@ -161,7 +186,7 @@ pub(crate) const SECRET_READS: &[&str] = crate::permissions::secrets::READ_RULES
 /// Claude (flags checked against `claude --help`): `-p` prints and exits, `--output-format
 /// stream-json` needs `--verbose`, `--include-partial-messages` streams pieces as they
 /// arrive, `--no-session-persistence` keeps nothing on disk, `--permission-mode acceptEdits`
-/// lets it edit, `--max-turns` bounds the run. An editing run takes `allow`, the commands it may
+/// lets it edit (`--permission-mode plan` in plan mode, which only reads), `--max-turns` bounds the run. An editing run takes `allow`, the commands it may
 /// run (each a prefix, `cargo test`, scoped as `Bash(cargo test:*)`), and always `Read`, `Glob`,
 /// `Grep`, `Write`, `Edit`, `WebSearch` and `WebFetch` (a documents project needs no shell to
 /// fetch a site: `WebFetch` does it); any other command is refused because nobody can be asked in print mode, and
@@ -174,9 +199,10 @@ pub(crate) const SECRET_READS: &[&str] = crate::permissions::secrets::READ_RULES
 pub(crate) fn argv(
     agent: Agent,
     model: Option<&str>,
-    allow_edits: bool,
+    (allow_edits, plan): (bool, bool),
     allow: &[String],
     max_turns: Option<u32>,
+    role: Option<&str>,
     question: &str,
 ) -> Vec<String> {
     let mut a: Vec<String> = match agent {
@@ -198,6 +224,14 @@ pub(crate) fn argv(
         a.extend(["--model".to_owned(), m.to_owned()]);
     }
     match (agent, allow_edits) {
+        // Plan mode (`plan`, which beats `allow_edits`): Claude's own plan mode, so it reads and
+        // proposes and changes nothing, with the shell and the secret files denied outright.
+        (Agent::Claude, _) if plan => {
+            a.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
+            a.push("--disallowedTools".to_owned());
+            a.extend(SECRET_READS.iter().map(|r| (*r).to_owned()));
+            a.push("Bash".to_owned());
+        }
         (Agent::Claude, true) => {
             a.extend(["--permission-mode".to_owned(), "acceptEdits".to_owned()]);
             let mut denied: Vec<String> = SECRET_READS.iter().map(|r| (*r).to_owned()).collect();
@@ -224,9 +258,10 @@ pub(crate) fn argv(
             a.extend(denied);
         }
         (Agent::Claude, false) => {}
+        // Codex has no plan mode (checked against its CLI reference): plan is its read-only sandbox.
         (Agent::Codex, edits) => a.extend([
             "--sandbox".to_owned(),
-            if edits {
+            if edits && !plan {
                 "workspace-write"
             } else {
                 "read-only"
@@ -238,7 +273,18 @@ pub(crate) fn argv(
     if let (Agent::Claude, Some(n)) = (agent, max_turns) {
         a.extend(["--max-turns".to_owned(), n.to_string()]);
     }
-    a.extend(["--".to_owned(), question.to_owned()]);
+    // A Role's text (RFC 0211): Claude Code takes it as more system prompt
+    // (`--append-system-prompt`, <https://code.claude.com/docs/en/cli-reference>), so the
+    // question stays the person's own words; Codex has no such flag, so the text leads the prompt.
+    let question = match (agent, role) {
+        (Agent::Claude, Some(r)) => {
+            a.extend(["--append-system-prompt".to_owned(), r.to_owned()]);
+            question.to_owned()
+        }
+        (Agent::Codex, Some(r)) => format!("{r}\n\n{question}"),
+        (_, None) => question.to_owned(),
+    };
+    a.extend(["--".to_owned(), question]);
     a
 }
 
@@ -343,7 +389,16 @@ mod tests {
 
     #[test]
     fn the_model_defaults_to_haiku_for_claude_and_to_nothing_for_codex() {
-        let m = |a, f, c| choose_model(a, f, c);
+        let m = |a, f, c| {
+            choose_model(
+                a,
+                ModelChoice {
+                    flag: f,
+                    configured: c,
+                    ..ModelChoice::default()
+                },
+            )
+        };
         assert_eq!(m(Agent::Claude, None, None), Ok(Some("haiku".into())));
         assert_eq!(
             m(Agent::Claude, None, Some("sonnet")),
@@ -359,12 +414,85 @@ mod tests {
     }
 
     #[test]
+    fn the_model_order_is_flag_then_config_then_the_role_then_the_default() {
+        let all = ModelChoice {
+            flag: Some("flag"),
+            configured: Some("config"),
+            role: Some("role"),
+            default: Some("default"),
+        };
+        let pick = |c: ModelChoice<'_>| choose_model(Agent::Claude, c).unwrap().unwrap();
+        assert_eq!(pick(all), "flag");
+        assert_eq!(pick(ModelChoice { flag: None, ..all }), "config");
+        assert_eq!(
+            pick(ModelChoice {
+                flag: Some(" "),
+                configured: None,
+                ..all
+            }),
+            "role"
+        );
+        assert_eq!(
+            pick(ModelChoice {
+                flag: None,
+                configured: None,
+                role: None,
+                ..all
+            }),
+            "default"
+        );
+        assert_eq!(
+            pick(ModelChoice {
+                default: None,
+                ..ModelChoice::default()
+            }),
+            "haiku"
+        );
+    }
+
+    #[test]
+    fn a_roles_model_is_never_used_for_codex_and_a_bad_one_is_refused_for_claude() {
+        let c = ModelChoice {
+            role: Some("sonnet"),
+            default: Some("sonnet"),
+            ..ModelChoice::default()
+        };
+        assert_eq!(choose_model(Agent::Codex, c), Ok(None));
+        let named = ModelChoice {
+            flag: Some("gpt-x"),
+            ..c
+        };
+        assert_eq!(choose_model(Agent::Codex, named), Ok(Some("gpt-x".into())));
+        let bad = ModelChoice {
+            role: Some("--evil"),
+            ..ModelChoice::default()
+        };
+        assert!(choose_model(Agent::Claude, bad).is_err());
+    }
+
+    #[test]
     fn the_argv_has_no_session_and_no_edits_unless_asked() {
-        let a = argv(Agent::Claude, Some("haiku"), false, &[], None, "q");
+        let a = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (false, false),
+            &[],
+            None,
+            None,
+            "q",
+        );
         assert!(a.contains(&"--no-session-persistence".to_owned()));
         assert!(!a.contains(&"--permission-mode".to_owned()));
         assert_eq!(a[a.len() - 2..], ["--", "q"]);
-        let e = argv(Agent::Claude, Some("haiku"), true, &[], Some(7), "q");
+        let e = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (true, false),
+            &[],
+            Some(7),
+            None,
+            "q",
+        );
         assert!(
             e.windows(2)
                 .any(|w| w == ["--permission-mode", "acceptEdits"])
@@ -385,19 +513,63 @@ mod tests {
             !a.contains(&"--max-turns".to_owned()) && !a.contains(&"--disallowedTools".to_owned())
         );
         assert!(
-            !argv(Agent::Codex, None, false, &[], Some(7), "q").contains(&"--max-turns".to_owned())
+            !argv(Agent::Codex, None, (false, false), &[], Some(7), None, "q")
+                .contains(&"--max-turns".to_owned())
         );
         assert!(
-            argv(Agent::Codex, None, false, &[], Some(7), "q")
+            argv(Agent::Codex, None, (false, false), &[], Some(7), None, "q")
                 .windows(2)
                 .any(|w| w == ["--sandbox", "read-only"])
         );
     }
 
     #[test]
+    fn plan_reads_and_changes_nothing_and_beats_allow_edits() {
+        for edits in [false, true] {
+            let c = argv(
+                Agent::Claude,
+                Some("haiku"),
+                (edits, true),
+                &[],
+                Some(7),
+                None,
+                "q",
+            );
+            assert!(
+                c.windows(2).any(|w| w == ["--permission-mode", "plan"]),
+                "{c:?}"
+            );
+            assert!(!c.contains(&"acceptEdits".to_owned()), "{c:?}");
+            let denied = &c[c.iter().position(|x| x == "--disallowedTools").unwrap() + 1..];
+            assert!(denied.contains(&"Bash".to_owned()));
+            assert!(
+                SECRET_READS
+                    .iter()
+                    .all(|r| denied.contains(&(*r).to_owned()))
+            );
+            assert!(!c.contains(&"--allowedTools".to_owned()));
+            assert_eq!(c[c.len() - 2..], ["--", "q"]);
+            // Codex has no plan mode: plan is its read-only sandbox, even with edits asked.
+            let x = argv(Agent::Codex, None, (edits, true), &[], None, None, "q");
+            assert!(
+                x.windows(2).any(|w| w == ["--sandbox", "read-only"]),
+                "{x:?}"
+            );
+        }
+    }
+
+    #[test]
     fn scoped_commands_and_the_web_are_allowed_and_the_rest_of_the_shell_is_not() {
         let allow = ["cargo build".to_owned(), "cargo test".to_owned()];
-        let e = argv(Agent::Claude, Some("haiku"), true, &allow, Some(7), "q");
+        let e = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (true, false),
+            &allow,
+            Some(7),
+            None,
+            "q",
+        );
         let at = e.iter().position(|x| x == "--allowedTools").unwrap();
         assert_eq!(
             e[at + 1..at + 10],
@@ -430,8 +602,46 @@ mod tests {
         assert!(e.windows(2).any(|w| w == ["--setting-sources", ""]));
         assert_eq!(e[e.len() - 2..], ["--", "q"]);
         // Reading runs allow nothing.
-        let r = argv(Agent::Claude, Some("haiku"), false, &allow, None, "q");
+        let r = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (false, false),
+            &allow,
+            None,
+            None,
+            "q",
+        );
         assert!(!r.contains(&"--allowedTools".to_owned()));
+    }
+
+    #[test]
+    fn a_role_is_appended_to_claudes_system_prompt_and_leads_codexs_prompt() {
+        let a = argv(
+            Agent::Claude,
+            Some("haiku"),
+            (false, false),
+            &[],
+            None,
+            Some("Role text"),
+            "q",
+        );
+        let at = a
+            .iter()
+            .position(|x| x == "--append-system-prompt")
+            .unwrap();
+        assert_eq!(a[at + 1], "Role text");
+        assert_eq!(a[a.len() - 2..], ["--", "q"]);
+        let c = argv(
+            Agent::Codex,
+            None,
+            (false, false),
+            &[],
+            None,
+            Some("Role text"),
+            "q",
+        );
+        assert!(!c.contains(&"--append-system-prompt".to_owned()));
+        assert_eq!(c[c.len() - 1], "Role text\n\nq");
     }
 
     #[test]

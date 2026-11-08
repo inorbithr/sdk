@@ -223,6 +223,52 @@ pub(crate) struct Ui {
     fancy: bool,
 }
 
+/// The marks a finished step wears: a green check, a yellow bang, a red cross. cliclack's own
+/// diamonds and squares say nothing a person can read at a glance (the owner's ask: "success if
+/// it's success"). The theme sets only the log symbols: prompts keep theirs.
+struct Marks;
+
+/// A step that worked.
+const CHECK: &str = "\u{2713}";
+/// A step that did not fully happen: said plainly, with the fix.
+const BANG: &str = "!";
+/// A step that failed.
+const CROSS: &str = "\u{2717}";
+
+impl cliclack::Theme for Marks {
+    fn active_symbol(&self) -> String {
+        console::style(CHECK).green().bold().to_string()
+    }
+    fn warning_symbol(&self) -> String {
+        console::style(BANG).yellow().bold().to_string()
+    }
+    fn error_symbol(&self) -> String {
+        console::style(CROSS).red().bold().to_string()
+    }
+}
+
+/// How a step ended, from the state a report gives it (`done`, `skipped`, `ask`, `not-yet`,
+/// `failed`): a step that only did less than asked is a warning, never a success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mark {
+    Ok,
+    Warn,
+    Fail,
+}
+
+impl Mark {
+    /// The mark of a report step's `state`. A state this does not know is a warning: nothing
+    /// unknown is drawn as a success.
+    #[must_use]
+    pub(crate) fn of(state: &str) -> Self {
+        match state {
+            "done" => Self::Ok,
+            "failed" => Self::Fail,
+            _ => Self::Warn,
+        }
+    }
+}
+
 /// A running step: a spinner on a terminal. Plain, it is silent: the command's own plain
 /// report (the stable lines scripts read) says how each step went.
 pub(crate) struct Step {
@@ -395,6 +441,25 @@ fn wrapped(text: &str, width: usize) -> String {
             row.push_str(word);
         }
         out.push(row);
+    }
+    out.join("\n")
+}
+
+/// A numbered list for a box: `1. text`, a long item wrapped under its own text, every line at
+/// most `width` columns.
+fn numbered(items: &[String], width: usize) -> String {
+    let lead = items.len().to_string().len() + 2;
+    let mut out: Vec<String> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let n = format!("{}.", i + 1);
+        let text = wrapped(item, width.saturating_sub(lead).max(10));
+        for (j, line) in text.lines().enumerate() {
+            if j == 0 {
+                out.push(format!("{n:<lead$}{line}"));
+            } else {
+                out.push(format!("{}{line}", " ".repeat(lead)));
+            }
+        }
     }
     out.join("\n")
 }
@@ -576,14 +641,17 @@ impl Ui {
     /// The look for this run: drawn only when [`fancy_for`] says so.
     #[must_use]
     pub(crate) fn detect(json: bool) -> Self {
-        Self {
-            fancy: fancy_for(
-                prompt::interactive(),
-                json,
-                std::env::var("NO_COLOR").ok().as_deref(),
-                std::env::var("TERM").ok().as_deref(),
-            ),
+        let fancy = fancy_for(
+            prompt::interactive(),
+            json,
+            std::env::var("NO_COLOR").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+        );
+        if fancy {
+            static MARKS: std::sync::Once = std::sync::Once::new();
+            MARKS.call_once(|| cliclack::set_theme(Marks));
         }
+        Self { fancy }
     }
 
     /// Whether the drawn look and its questions are on.
@@ -626,6 +694,29 @@ impl Ui {
             let _ = cliclack::log::info(wrapped(line, log_width()));
         } else {
             plain(line);
+        }
+    }
+
+    /// What a run will do, as one numbered box under `title`. Drawn only: plain, each action
+    /// said so already as it was planned (`would: ...`), the lines scripts read.
+    pub(crate) fn plan(self, title: &str, items: &[String]) {
+        if self.fancy && !items.is_empty() {
+            let _ = cliclack::note(title, numbered(items, log_width().saturating_sub(4)));
+        }
+    }
+
+    /// A line that says something worked, with a check mark. Drawn only: plain, the command's
+    /// own report says it.
+    pub(crate) fn done(self, line: &str) {
+        if self.fancy {
+            let _ = cliclack::log::success(wrapped(line, log_width()));
+        }
+    }
+
+    /// A line that says something failed, with a cross. Drawn only, like [`Ui::done`].
+    pub(crate) fn failed(self, line: &str) {
+        if self.fancy {
+            let _ = cliclack::log::error(wrapped(line, log_width()));
         }
     }
 
@@ -773,27 +864,16 @@ impl Ui {
         })
     }
 
-    /// The bar as the foot of a card of the caller's own (the permission ask): `rows(at)` is
-    /// the whole screen with row `at` highlighted, always the same number of lines, drawn
-    /// with the bar's keys (arrows, `1`-`9`, a row's letter, Enter, Esc, `q`, Ctrl-C). Returns
-    /// the value of the row picked, or `None` for a cancel; the card is erased either way.
+    /// The loop of every menu: `rows(at)` is the screen with entry `at` highlighted, always
+    /// the same number of lines, so erasing it leaves nothing behind. Drawn with the bar's keys
+    /// (arrows, `1`-`9` when `numbered`, a row's letter, Enter, Esc, `q`, Ctrl-C); returns the
+    /// value of the row picked, or `None` for a cancel. The bar under a card of the caller's own
+    /// (the permission ask) calls it with its rows.
     ///
     /// # Errors
     ///
     /// No terminal on stderr, or the terminal cannot be read.
-    #[cfg(unix)]
-    pub(crate) fn select_card(
-        prompt: &str,
-        choices: &[Choice],
-        initial: &str,
-        rows: impl Fn(usize) -> Vec<String>,
-    ) -> Result<Option<String>, Error> {
-        Self::select_drawn(prompt, choices, initial, true, rows)
-    }
-
-    /// The loop of both menus: `rows(at)` is the screen with entry `at` highlighted, always
-    /// the same number of lines, so erasing it leaves nothing behind.
-    fn select_drawn(
+    pub(crate) fn select_drawn(
         prompt: &str,
         choices: &[Choice],
         initial: &str,
@@ -839,10 +919,6 @@ impl Ui {
     /// # Errors
     ///
     /// No terminal, or the person cancelled.
-    #[allow(
-        dead_code,
-        reason = "the plain form of input_step: other commands (and the card-actions work) ask with it"
-    )]
     pub(crate) fn input(
         self,
         prompt: &str,
@@ -1032,13 +1108,29 @@ impl Step {
         }
     }
 
-    /// The step worked. The spinner is cleared and the result is a log line of its own: the
-    /// spinner's own finish pads its line to the terminal width and relies on the terminal to
-    /// wrap, which drew a stray rail mark and a second, wrapped line.
+    /// Says what the running step is doing now, on its spinner.
+    pub(crate) fn say(&self, what: &str) {
+        if let Some(b) = &self.bar {
+            b.set_message(what);
+        }
+    }
+
+    /// The step worked, with a check mark. The spinner is cleared and the result is a log line
+    /// of its own: the spinner's own finish pads its line to the terminal width and relies on
+    /// the terminal to wrap, which drew a stray rail mark and a second, wrapped line.
     pub(crate) fn ok(self, said: &str) {
         if let Some(b) = self.bar {
             b.clear();
-            let _ = cliclack::log::step(wrapped(said, log_width()));
+            let _ = cliclack::log::success(wrapped(said, log_width()));
+        }
+    }
+
+    /// The step ended as `mark` says, with `said`.
+    pub(crate) fn end(self, mark: Mark, said: &str) {
+        match mark {
+            Mark::Ok => self.ok(said),
+            Mark::Warn => self.warn(said),
+            Mark::Fail => self.fail(said),
         }
     }
 
@@ -1067,7 +1159,39 @@ mod tests {
     use super::wrapped;
     use console::Key;
 
-    use super::{Choice, Look, Paint, bar_lines, fancy_for, menu_rows, run_keyed};
+    use super::{Choice, Look, Marks, Paint, bar_lines, fancy_for, menu_rows, run_keyed};
+    use cliclack::Theme;
+
+    #[test]
+    fn a_numbered_plan_wraps_under_its_own_text() {
+        let items = vec![
+            "check your sign-in".to_owned(),
+            "write 81 files into ./bg and then some more words to wrap".to_owned(),
+        ];
+        let out = super::numbered(&items, 30);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "1. check your sign-in");
+        assert!(lines[1].starts_with("2. write 81 files"), "{out}");
+        assert!(lines[2].starts_with("   "), "{out}");
+        assert!(lines.iter().all(|l| l.chars().count() <= 30), "{out}");
+    }
+
+    #[test]
+    fn a_report_state_is_a_success_only_when_it_is_done() {
+        use super::Mark;
+        assert_eq!(Mark::of("done"), Mark::Ok);
+        for warned in ["skipped", "ask", "not-yet", "something-new"] {
+            assert_eq!(Mark::of(warned), Mark::Warn, "{warned}");
+        }
+        assert_eq!(Mark::of("failed"), Mark::Fail);
+    }
+
+    #[test]
+    fn a_finished_step_wears_a_check_a_bang_or_a_cross() {
+        assert_eq!(strip(&Marks.active_symbol()), "\u{2713}");
+        assert_eq!(strip(&Marks.warning_symbol()), "!");
+        assert_eq!(strip(&Marks.error_symbol()), "\u{2717}");
+    }
 
     fn strip(s: &str) -> String {
         console::strip_ansi_codes(s).into_owned()

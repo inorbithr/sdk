@@ -368,9 +368,11 @@ agent = "claude"
 model = "haiku"
 allow_edits = false
 permissions = "prompt"
+mode = "manual"
 thinking = "show"
 hints = "sometimes"
 menu_key = "down"
+read = []                           # more folders Io may read (below)
 
 [sync]                              # iohr sync (section 4.6)
 background = false
@@ -378,6 +380,9 @@ background = false
 [memory]                            # iohr memory (section 4.7)
 scope = "project"
 sync = false
+
+[panel]                             # the floating panel (section 4.8)
+mouse = "menu"
 ```
 
 Rules:
@@ -533,13 +538,39 @@ and drawn as a card.
 | `permissions` | What the `?` card may run: `prompt` (the person's rules decide, then Io asks in the terminal), `rules` (the rules only; the rest is refused and listed after the answer) or `deny` (no commands at all, the earlier behaviour); `IOHR_ASK_PERMISSIONS` and `--permissions` win over it | `prompt` at a terminal, `rules` without one (and under `--json`) | `iohr ask --headless`, `--card` |
 | `thinking` | `show` or `collapse` (a one-line `▸ thinking` marker) | `show` | `iohr ask` |
 | `hints` | `sometimes`, `always` or `never` (the footer of the `?` card, below) | `sometimes` | `iohr ask` |
+| `mode` | The mode of every answer (PRD 0197): `manual` (rules first, then Io asks before each command), `plan` (read only: Io answers with a plan, changes nothing and runs nothing) or `auto` (a command no rule decides runs without asking; a deny rule, the secret list and a command `iohr` cannot read to check them still refuse it); `IOHR_ASK_MODE` and `--mode` win over it, and it beats `permissions` | `manual` at a terminal, `rules` without one | `iohr ask`, `iohr shell hook zsh` |
 | `menu_key` | The key that opens the action menu under a `?` card, on an empty line: `down` (the Down arrow), `ctrl-g`, `alt-enter` or `off`; read when `iohr shell hook zsh` prints the hook, so open a new shell after a change | `down` | `iohr shell hook zsh` |
+| `read` | More folders Io may read besides the working folder, a list such as `["~/notes", "/srv/docs"]` (a leading `~/` is your home folder); at most 8 in all. `IOHR_ASK_READ` (a path list, `:` apart on Unix and `;` on Windows) and `--read FOLDER` (also `--add-dir FOLDER`, repeatable) add to it; the three sources add up and a folder named twice counts once. Each folder goes through the same check as a yes at the card: it must exist, be listable and not be a secret place (such as `~/.ssh`), else `iohr ask` stops with a usage error and starts nothing; the secret-file deny rules stay on beside every added folder. A folder that is too broad is refused too: the filesystem root, your home folder (only an explicit `--read ~` names it), every folder above your home folder and above `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube` or `~/Library/Keychains` (the check ignores case on macOS). `IOHR_ASK_READ` and `[ask] read` select the file-tool run the way `--read` does; `--interactive` streams without folder grants and says so on stderr. Each folder given is written to `permissions.log` (source `flag`, `env`, `config`, `trust` or `card`, and the path, never contents) and listed in `--json` `context.folders` | none | `iohr ask --headless`, `--card` |
 
-Flags: `--agent`, `--via`, `--model`, `--allow-edits`, `--permissions`, `--thinking`, `--dry-run`. In the streamed
+Flags: `--agent`, `--via`, `--model`, `--mode`, `--allow-edits`, `--permissions`, `--thinking`, `--read` (repeatable, alias `--add-dir`), `--dry-run`. In the streamed
 run a shell command is never allowed, with or without `--allow-edits`; the agent's default
 permissions stay in force. The headless run (the `?` card) can run a command only through the
 permission rules below. `--dry-run` prints the exact command line and starts nothing (with
 `--json` it is one object with `dry_run`, `via`, `agent`, `found`, `program` and `args`).
+
+#### Modes: manual, plan, auto
+
+`--mode manual|plan|auto` (or `IOHR_ASK_MODE`, or `[ask] mode`) picks how Io treats a call no rule
+decides. The flag and the environment beat the file; inside one layer `mode` beats the older
+`permissions`. `--permissions` takes the same three words (and still `prompt` for manual, `rules`
+and `deny`), and `--allow-edits` keeps its meaning, so nothing that worked stops working.
+
+| Mode | On the `?` card (headless) | In the streamed run | Codex |
+|---|---|---|---|
+| `manual` | Rules first, then Io asks before each command at a terminal (without one it is `rules`). The default. | The agent's own permissions | default sandbox |
+| `plan` | Read-only tools, `--permission-mode plan` and a brief that asks for a plan: no shell, no broker, no edits, also beside `--allow-edits` | `--permission-mode plan`, the shell and the secret reads closed | `--sandbox read-only` (Codex has no plan mode) |
+| `auto` | A command no rule decides runs without asking. A deny rule and the secret list still win and are never weakened; a command that cannot be read to check them (a `$(...)`, a backtick, a redirect) is refused, and the audit log says `allowed, auto mode` or `command cannot be checked` | The same as `--allow-edits` (files only): the streamed run has no broker, so a shell command stays refused | as `--allow-edits` |
+
+The card says the mode in its header (`manual mode`, `plan mode`, `auto mode`) and under `plan` or
+`auto` the line that says what was read says what was and was not run. `--dry-run` prints the
+streamed command line only: the broker's flags are added when a card run starts.
+
+In a shell with the hook (`iohr shell hook zsh`), Shift+Tab on a line that starts with `?` (or a
+bare `?`) goes to the next mode, manual to plan to auto and back to manual, and says which under
+the prompt; on any other line the key does what it did before. The shell starts in the mode
+`IOHR_ASK_MODE` or `[ask] mode` name (`manual` when they say nothing) and keeps the one you
+chose until it ends; every question carries it as `--mode`. Read when the hook is printed, so
+open a new shell after a change to the config.
 
 #### Asking before Io runs a command
 
@@ -568,8 +599,16 @@ The arrows and Enter pick the highlighted row, `1`-`9` pick a row, `y` runs it o
 and saves the narrowest rule (`Bash(ls:*)`, never `Bash(*)`) to `.inorbit/permissions.toml`
 (the second row is there only when such a rule can be saved), `n`, `q`, Esc, Ctrl-C or no
 answer refuses it. The bar starts on No, so a stray Enter never allows anything. Once you have
-answered, the card is erased and one result line stays (`Allowed once`, `Allowed always` or
-`Not allowed`). A long command is wrapped to three lines and the card says how many characters
+answered, the question is erased and its result goes inside the answer card it led to, as one
+quiet row above the footer in plain words (`✓ ls allowed in this project from now on`,
+`✓ ls allowed this time`, `✗ rm not allowed`); after an always, the rule and the file it went
+to sit dimmed under it (`Bash(ls:*) · .inorbit/permissions.toml`). An always is also an Undo in
+the card's action row (below): it takes the rule back through the code `iohr permissions remove`
+uses, and says so under the card. With no action row (no colour, no hook) the result is a plain
+line on stderr instead, and for an always it ends with the command that undoes it
+(`iohr permissions remove 'Bash(ls:*)'`). `--json` carries the results in `permissions`, an array
+(empty when nobody was asked, which is always so under `--json`) of `{grant, subject, rules,
+file, saved, not_saved}`, with `grant` one of `once`, `always` or `no`. A long command is wrapped to three lines and the card says how many characters
 it left out. With `NO_COLOR`, `TERM=dumb`, a terminal under 40 columns, or no terminal, the ask
 is one plain line, as it was:
 
@@ -652,14 +691,23 @@ Today the key is read and nothing else: `iohr` has no background process to hang
 on, so with `background = true` `iohr sync` says so and still runs only when you run it. The
 background loop is the next slice (RFC 0205).
 
-Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open",
+Under a card the zsh hook draws one more line, "Run · Copy · Follow up · Explain · Open · Undo · Add folder",
 with only what the answer has: Run and Copy when it suggested one command, Open when it named
-an https link or a file in the folder. The key in `menu_key` opens the menu (`iohr ask
---menu`, letters `r c f e o`, Esc leaves it). Run puts the command on the prompt line and
+an https link or a file in the folder, Undo when the run saved a permission rule that the project
+file still holds; Add folder is always there: it asks for a folder (a leading `~/` is home), checks it like a yes
+(it must exist, be listable, hold no secrets and not be too broad: `/`, your home folder and every folder above it are
+refused with a message), keeps it under `standing` in `trusted.toml` and puts the question on the prompt again.
+Only Add folder writes `standing`; those folders are read on every later ask in a folder Io may read, each checked
+again and each written to `permissions.log`. Allow and Always on a card keep a yes under `folders` for the question
+that names that folder only. Take either back by removing it from `trusted.toml`. The key in `menu_key` opens the menu (`iohr ask
+--menu`, letters `r c f e o u d`, Esc leaves it; the hook passes the rules to `--undo`). Run puts the command on the prompt line and
 nothing else: Enter still runs it, and iohr never does. Copy sends it to the clipboard
 through OSC 52 (which no terminal confirms, so it says "sent"), `tmux load-buffer -w` inside
 tmux, and `pbcopy` or `wl-copy` where they exist. Open uses the system opener and refuses an
-executable, a file that runs when opened, and a path outside the folder. The suggested
+executable, a file that runs when opened, and a path outside the folder. Undo removes the rule
+and says `ls is no longer allowed in this project` under the card (it is drawn by then, so it is
+not redrawn). The hook's record has four fields (answer, command, link, the saved rules) cut
+by a 0x1e character. The suggested
 command is the last single-line fence of the answer in a shell language; `iohr --json ask`
 carries it as `command` (null when there is none). A pipe or `NO_COLOR` gets no row.
 
@@ -680,6 +728,19 @@ chooses where it keeps them and whether it may use your InOrbit account. `iohr` 
 Outside a project the `project` default falls back to `user` with a note on stderr. With
 `sync = false`, `iohr memory sync` and `iohr memory drift --remote` still run when you type them:
 running the command is the explicit choice.
+
+### 4.8 The panel table
+
+The floating panel (`iohr`, `iohr panel`) has one setting.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `mouse` | `menu`: the panel takes mouse reports only while a view is open (a click on a row opens it, a click outside closes it, the wheel moves the selection) and the shell keeps normal drag-to-select the rest of the time; `always`: also at rest, where a click on the pill opens the menu and every other click goes through to the program; `off`: no mouse reports at all | `menu` | `iohr`, `iohr panel`; `IOHR_PANEL_MOUSE` overrides it |
+
+The key that opens the menu is not a setting: the pill shows the one that works in your terminal
+(`^G` in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, whose default makes Option+i a
+dead key; `⌥i` elsewhere), and both always work, unless `[ask] menu_key = "ctrl-g"` takes Ctrl-G
+for the `?` menu.
 
 ## 5. Credentials
 

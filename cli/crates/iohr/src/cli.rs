@@ -30,8 +30,10 @@ use crate::environments::{self, Environment, Environments};
 pub struct Cli {
     #[command(flatten)]
     pub global: Global,
+    /// None is bare `iohr`: on a terminal it enters the session (the shell with the panel);
+    /// anywhere else the binary prints the usage report.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 /// Flags every command takes.
@@ -105,6 +107,27 @@ pub struct Global {
     pub data_dir: Option<PathBuf>,
 }
 
+/// The global flags that take a value, as they are typed (`--profile`, `-p`), read from the
+/// definition above so a new one is never forgotten. Code that walks a raw command line
+/// uses it to tell a flag's value from the command (`iohr --profile session session`).
+#[must_use]
+pub fn global_value_flags() -> Vec<OsString> {
+    let command = Global::augment_args(clap::Command::new("iohr"));
+    let mut flags = Vec::new();
+    for arg in command.get_arguments() {
+        if !arg.get_action().takes_values() {
+            continue;
+        }
+        if let Some(long) = arg.get_long() {
+            flags.push(OsString::from(format!("--{long}")));
+        }
+        if let Some(short) = arg.get_short() {
+            flags.push(OsString::from(format!("-{short}")));
+        }
+    }
+    flags
+}
+
 /// Who signs in when it is not a person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SignIn {
@@ -118,6 +141,14 @@ impl Global {
     #[must_use]
     pub fn via_role(&self) -> Option<&String> {
         self.via_role.as_ref().or(self.via_personality.as_ref())
+    }
+
+    /// The name of the environment this run targets: `--env`, `IOHR_ENV`, else the default.
+    #[must_use]
+    pub fn environment_name(&self) -> &str {
+        self.env
+            .as_deref()
+            .unwrap_or_else(|| Environments::builtin().default_name())
     }
 
     /// The environment this run targets: `--env`, `IOHR_ENV`, else the default.
@@ -182,6 +213,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     (
         "Build",
         &[
+            "init",
             "project",
             "atlas",
             "sync",
@@ -201,6 +233,8 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "permissions",
             "shell",
             "runner",
+            "session",
+            "stop",
             "coordinator",
             "memory",
         ],
@@ -408,6 +442,11 @@ pub enum Command {
     /// from sign-in to a smoke test, and reports what you now have.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Create a project: the same as `iohr project init`.
+    ///
+    /// Sets up a project of your own and creates it in InOrbit under your team, for the
+    /// environment `--env` names, linked in `.inorbit/space`. See `iohr project init --help`.
+    Init(Box<InitArgs>),
     /// Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder.
     ///
     /// The atlas: plain files in the project's `atlas/` folder (PRDs, RFCs, ADRs and studies as
@@ -432,7 +471,7 @@ pub enum Command {
     /// JSON lines. Nothing is changed unless you pass `--allow-edits` (files only); shell
     /// commands are never allowed. iohr never stores the question or the answer. Defaults
     /// come from `[ask]` in config.toml; the flags win for one call.
-    Ask(AskArgs),
+    Ask(Box<AskArgs>),
     /// Shell integration: `? question` at your prompt asks your AI agent.
     ///
     /// `iohr shell hook zsh` prints what makes `? question` at your prompt ask your own AI
@@ -449,6 +488,12 @@ pub enum Command {
     /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
     #[command(subcommand)]
     Permissions(PermissionsCommand),
+    /// Runs your shell with the floating InOrbit panel over it (menu, approvals, workloads).
+    ///
+    /// `--demo` fills the panel with labelled stub data; `--demo --variant rail|accordion|band`
+    /// prints the older static design drawings instead.
+    #[command(hide = true)]
+    Panel(PanelArgs),
     /// Serves the permission questions of one `iohr ask` run to Claude Code (not for you).
     #[command(name = "permission-server", hide = true)]
     PermissionServer {
@@ -462,6 +507,26 @@ pub enum Command {
     /// installed `claude`, on your own subscription.
     #[command(subcommand)]
     Runner(RunnerCommand),
+    /// Open this project's session: one process hosts its Roles while iohr is open.
+    ///
+    /// Joins this project's session host (RFC 0213), starting it when none runs: one
+    /// `iohr runner run --session DIR` process per project that hosts its Roles and works from
+    /// a durable queue (a `DuckDB` file in iohr's data directory, so nothing is lost when it
+    /// stops or the machine restarts). The command stays open as the session and prints
+    /// nothing on stdout; Ctrl-C, SIGTERM or the terminal closing leaves it. The host stops
+    /// when the last session has left, or on `iohr stop`.
+    ///
+    /// Slice S1 of RFC 0213: no tasks are accepted from the server yet, and a task a Role
+    /// claims fails with "not built". The host, its Roles, the durable queue and the session
+    /// link work; `iohr ask --work` and the real handler come next.
+    Session(SessionArgs),
+    /// Stop this project's session host.
+    ///
+    /// Tells the project's session host to stop. Each Role finishes the task it holds, then
+    /// the host ends; `--wait` (15 seconds by default) waits until it has, and says
+    /// `stopping` when it has not yet. A task cut short by a crash instead is taken again by
+    /// the next host as soon as it starts.
+    Stop(StopArgs),
     /// Install the InOrbit Trails browser extension.
     ///
     /// InOrbit Trails, the browser extension: open the page that adds it to your browser.
@@ -647,6 +712,11 @@ pub enum RunnerCommand {
         /// verified path and restarts itself.
         #[arg(long)]
         no_auto_upgrade: bool,
+        /// Run as a project's session host (RFC 0213): the runner hosts the project's
+        /// Roles beside its turns, never upgrades itself, and stops when the last session
+        /// has left, on `iohr stop`, on SIGTERM or on Ctrl-C. `iohr session` starts it.
+        #[arg(long, value_name = "DIR")]
+        session: Option<PathBuf>,
         #[command(flatten)]
         account: AccountArg,
     },
@@ -1280,13 +1350,15 @@ pub enum ExtCommand {
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=200))]
         page_size: Option<u32>,
     },
-    /// Show one extension in the catalogue.
+    /// Show one extension in the catalogue, or list them all.
     ///
     /// One extension in the catalogue: what it does, its publisher, signer, scopes,
     /// privileges in plain words, evidence, versions and the line that installs it.
+    /// With no name, the catalogue itself, the list `ext search` prints (a listing not
+    /// released yet reads "coming").
     Show {
-        /// PUBLISHER/NAME, such as inorbit/agent.
-        extension: String,
+        /// PUBLISHER/NAME, such as inorbit/agent (default: list the catalogue).
+        extension: Option<String>,
     },
     /// Verify and install an extension.
     ///
@@ -1443,8 +1515,8 @@ pub struct AskArgs {
     pub question: Vec<String>,
     #[command(flatten)]
     pub headless: HeadlessArgs,
-    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain
-    /// or Open with a letter or the arrows. It asks no model, runs nothing, and prints the one
+    /// Open the menu under a `?` card, for the shell hook: pick Run, Copy, Follow up, Explain,
+    /// Open or Undo with a letter or the arrows. It asks no model, runs nothing, and prints the one
     /// line to put on the prompt (or nothing) on stdout.
     #[arg(long, conflicts_with_all = ["interactive", "headless", "card", "hook"])]
     pub menu: bool,
@@ -1454,6 +1526,42 @@ pub struct AskArgs {
     /// With `--menu`: the file (relative to `--cwd`) or `https://` link the answer named.
     #[arg(long, value_name = "LINK", requires = "menu")]
     pub link: Option<String>,
+    /// With `--menu`: the permission rules this answer's run saved, separated by the unit
+    /// separator (U+001F). Undo takes back the ones the project file still holds.
+    #[arg(
+        long,
+        value_name = "RULES",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub undo: Vec<String>,
+    /// With `--menu`: the folder Io needs your OK to read (Allow keeps the yes for it).
+    #[arg(long, value_name = "FOLDER", requires = "menu")]
+    pub access: Option<std::path::PathBuf>,
+    /// With `--menu`: the next steps the answer offered as `kind:value` (`read:api`,
+    /// `search:TODO`, `run:cargo test`), separated by the unit separator (U+001F).
+    #[arg(
+        long,
+        value_name = "STEPS",
+        requires = "menu",
+        value_delimiter = '\u{1f}'
+    )]
+    pub step: Vec<String>,
+    /// With `--menu`: the question that was asked, so Allow and Attach output can put it back on
+    /// the prompt to ask again.
+    #[arg(long, value_name = "QUESTION", requires = "menu")]
+    pub asked: Option<String>,
+    /// With `--menu`: the last command, when it failed. With `--failed-exit` and `--asked`
+    /// (a failure question) the menu offers to re-run it with its output captured, or to
+    /// paste the output.
+    #[arg(long, value_name = "COMMAND", requires = "menu")]
+    pub failed_command: Option<String>,
+    /// With `--menu`: the exit status of `--failed-command`.
+    #[arg(long, value_name = "N", allow_hyphen_values = true, requires = "menu")]
+    pub failed_exit: Option<i32>,
+    /// With `--menu`: the file (private, made by the hook) the attached output is written to.
+    #[arg(long, value_name = "FILE", requires = "menu")]
+    pub output_to: Option<std::path::PathBuf>,
     /// Where the answer comes from: `local`, your own agent (default; `[ask] via`).
     #[arg(long, value_name = "WHERE")]
     pub via: Option<String>,
@@ -1465,14 +1573,30 @@ pub struct AskArgs {
     /// only when you name one.
     #[arg(long, value_name = "MODEL", env = "IOHR_ASK_MODEL")]
     pub model: Option<String>,
+    /// Work in a Role: its text joins the prompt and its model is used when you name none
+    /// (project `atlas/roles/`, then your account, then the built-in catalogue).
+    #[arg(long, value_name = "NAME")]
+    pub role: Option<String>,
+    /// With `--role`: the job whose brief the Role compiles (its core, then matching recall).
+    #[arg(long, value_name = "ID", requires = "role")]
+    pub job: Option<String>,
+    /// How Io works: `manual` asks before each command (default at a terminal), `plan` reads
+    /// and proposes a plan and changes nothing (Claude's plan mode; Codex's read-only
+    /// sandbox), `auto` runs commands no rule decides without asking (a deny rule and the
+    /// secret list still win). In the shell hook shift+tab on a `?` line switches between
+    /// them. Beats `--permissions`. `[ask] mode`, `IOHR_ASK_MODE`.
+    #[arg(long, value_name = "MODE", env = "IOHR_ASK_MODE")]
+    pub mode: Option<String>,
     /// Let the agent edit files in this folder (Claude `--permission-mode acceptEdits`, Codex
     /// `--sandbox workspace-write`). Without it nothing is changed: print mode refuses edits
-    /// rather than ask. Shell commands are never allowed by iohr. `[ask] allow_edits`.
+    /// rather than ask. Shell commands are never allowed by iohr. It is the plain run's `--mode
+    /// auto` (`--mode plan` wins over it). `[ask] allow_edits`.
     #[arg(long)]
     pub allow_edits: bool,
-    /// What happens when Io wants to run a command or open a file no rule decides: `prompt`
-    /// asks you at the terminal (default at a terminal), `rules` only follows your rules and
-    /// says no to the rest (default without one), `deny` offers no commands at all. Rules:
+    /// What happens when Io wants to run a command or open a file no rule decides: `manual`
+    /// (or `prompt`) asks you at the terminal (default at a terminal), `plan` and `auto` are
+    /// the modes of `--mode`, `rules` only follows your rules and says no to the rest (default
+    /// without a terminal), `deny` offers no commands at all. `--mode` wins over it. Rules:
     /// `iohr permissions`. `[ask] permissions`.
     #[arg(long, value_name = "HOW", env = "IOHR_ASK_PERMISSIONS")]
     pub permissions: Option<String>,
@@ -1716,6 +1840,23 @@ pub enum MemoryCommand {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct SessionArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct StopArgs {
+    /// The project folder (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// Seconds to wait for the host to end (0 to 600).
+    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(0..=600))]
+    pub wait: u64,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct SyncArgs {
     /// Say what would be created or saved and send nothing.
     #[arg(long)]
@@ -1726,6 +1867,87 @@ pub struct SyncArgs {
     /// The project folder. Default: the nearest folder up from here that has `atlas/`.
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
+}
+
+/// `iohr panel`: runs your shell (or the command after `--`) with the floating panel over its
+/// top right corner. `--demo` runs it on labelled stub data (with an older `--variant`, it
+/// draws that static design instead). Bare `iohr` on a terminal runs the same panel inside the
+/// project's session; `iohr stop` closes it.
+#[derive(Debug, Args)]
+pub struct PanelArgs {
+    /// Stub data: draw a static design (see `--variant`), or with `--variant float` run the
+    /// floating panel on stub asks.
+    #[arg(long)]
+    pub demo: bool,
+    /// The command to run under the panel (after `--`); your shell by default.
+    #[arg(last = true)]
+    pub command: Vec<String>,
+    /// The layout: a framed rail, an accordion, or a band for terminals without margins.
+    #[arg(long, value_enum, default_value = "rail")]
+    pub variant: PanelVariant,
+    /// What the panel shows (default: the resting pill; a static demo's default is the menu).
+    #[arg(long, value_enum)]
+    pub view: Option<PanelView>,
+    /// The state of auto mode in the demo.
+    #[arg(long, value_enum, default_value = "on")]
+    pub auto: PanelAuto,
+    /// The terminal's width in columns.
+    #[arg(long, default_value_t = 100)]
+    pub cols: u16,
+    /// The terminal's height in rows.
+    #[arg(long, default_value_t = 28)]
+    pub rows: u16,
+    /// The highlighted row, counted from 0.
+    #[arg(long, default_value_t = 0)]
+    pub selected: usize,
+    /// Print the lines only, one per row, with no cursor movement.
+    #[arg(long)]
+    pub lines: bool,
+    /// Also print the sequences that reserve (and, last, give back) the panel's room.
+    #[arg(long)]
+    pub setup: bool,
+}
+
+/// How the panel is laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelVariant {
+    /// A framed column at the top right; a submenu replaces the list in place.
+    Rail,
+    /// A ruled column; a submenu opens under its row.
+    Accordion,
+    /// Top rows across the terminal: for terminals that cannot reserve columns.
+    Band,
+    /// The floating band: a small box at the top right over the shell, painted last, taking no
+    /// room. The panel `iohr panel` runs; with `--demo` on stub asks.
+    Float,
+}
+
+/// What the demo panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelView {
+    /// Closed: three quiet lines.
+    Rest,
+    /// The menu.
+    Menu,
+    /// Waiting approvals, with deny, question and details.
+    Approvals,
+    /// The workload tree: sessions on this Mac and the coordinator's queue.
+    Workloads,
+    /// Subcommands that can be run.
+    Run,
+    /// The auto mode switch.
+    Auto,
+    /// Where the panel stands.
+    Status,
+}
+
+/// The auto mode the demo shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelAuto {
+    Off,
+    /// Asked, waiting for the phone.
+    Asking,
+    On,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1781,9 +2003,20 @@ pub struct HeadlessArgs {
         conflicts_with = "interactive"
     )]
     pub exit_code: Option<i32>,
-    /// A file with that command's output; only its last 200 lines or 8 KiB are used.
+    /// A file with that command's output; only its last 200 lines or 8 KiB are used, and
+    /// secrets in it are redacted first. Without it the card says the output was not sent.
     #[arg(long, value_name = "FILE", conflicts_with = "interactive")]
     pub output_file: Option<std::path::PathBuf>,
+    /// Where `--output-file` came from, for the card's footer and `--json`: `attached` (a
+    /// file you gave, the default), `captured` (a re-run you allowed) or `pasted`.
+    #[arg(
+        long,
+        value_name = "HOW",
+        value_parser = ["attached", "captured", "pasted"],
+        requires = "output_file",
+        conflicts_with = "interactive"
+    )]
+    pub output_kind: Option<String>,
     /// An earlier question this one follows up (with `--prior-answer`).
     #[arg(
         long,
@@ -1800,6 +2033,18 @@ pub struct HeadlessArgs {
         conflicts_with = "interactive"
     )]
     pub prior_answer: Option<String>,
+    /// A folder you allow Io to read for this question, besides the one it is asked in: the
+    /// answer to the card's "needs your OK to read" note, for a run with no terminal to ask on
+    /// (a script, `--json`, the app). Repeat it for more folders; `--add-dir` is the same flag,
+    /// as in Claude Code. `IOHR_ASK_READ` (a path list) and `[ask] read` add to these. Secrets
+    /// stay blocked.
+    #[arg(
+        long,
+        visible_alias = "add-dir",
+        value_name = "FOLDER",
+        conflicts_with = "interactive"
+    )]
+    pub read: Vec<std::path::PathBuf>,
 }
 
 impl HeadlessArgs {
@@ -1811,6 +2056,7 @@ impl HeadlessArgs {
             || self.exit_code.is_some()
             || self.output_file.is_some()
             || self.prior_question.is_some()
+            || !self.read.is_empty()
     }
 }
 
@@ -1874,6 +2120,11 @@ pub struct InitArgs {
     /// the small fast tier `iohr ask` uses). With Codex it is passed on only when named.
     #[arg(long, value_name = "MODEL", env = "IOHR_INIT_AGENT_MODEL")]
     pub agent_model: Option<String>,
+    /// Build in a Role: its text joins the agent's prompt and its model is used when you
+    /// name none (the new project's `atlas/roles/`, then your account, then the built-in
+    /// catalogue).
+    #[arg(long, value_name = "NAME")]
+    pub role: Option<String>,
     /// Run the whole flow (menu, questions, defaults, `when` skips) and change nothing:
     /// no files, no git, no registration, no smoke test, no sign-in, no network, and the
     /// agent is not started (its command and prompt are printed). Every step shows as
@@ -1888,7 +2139,8 @@ pub struct InitArgs {
     /// The folder to write, relative to where you are. Default: ./NAME; at a terminal a
     /// menu proposes the folder you are in, `[project] root` in config.toml, a sibling
     /// when you are inside a git repository, or a path of your own. It must not exist
-    /// or be empty.
+    /// or be empty, or be the folder this project was made in: run again there, init
+    /// leaves every file that is already there alone and commits nothing.
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
     /// The language, for a template that offers several (the same as `--set
@@ -1903,6 +2155,46 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// Where the project lives in InOrbit: team, who reads it, or none.
+    #[command(flatten)]
+    pub space: InitSpaceArgs,
+}
+
+/// The flags of `project init` that say where the project lives in InOrbit.
+#[derive(Debug, Args)]
+pub struct InitSpaceArgs {
+    /// The team the project lives under in InOrbit: an account's id or slug
+    /// (`iohr accounts list` shows yours). Default: the account you are signed in on; at a
+    /// terminal, with more than one account, init asks. The environment is the global
+    /// `--env` (`production` by default, or `local`).
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` (everyone in it; only you in your own
+    /// account, the default) or `managers` (its owners and admins). At a terminal, init asks.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Keep the project on this machine: do not create it in InOrbit or queue that.
+    #[arg(long)]
+    pub no_sync: bool,
+}
+
+/// The flags of `project sync`.
+#[derive(Debug, Args)]
+pub struct ProjectSyncArgs {
+    /// The project folder. Default: the folder you are in.
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// The team the project lives under: an account's id or slug. Default: what init
+    /// queued, else the account you are signed in on.
+    #[arg(long, value_name = "ACCOUNT")]
+    pub team: Option<String>,
+    /// Who can see the project in that account: `team` or `managers`. Default: what init
+    /// queued, else `team`.
+    #[arg(long, value_name = "WHO", value_parser = clap::builder::PossibleValuesParser::new(crate::project::space::Readers::NAMES))]
+    pub visibility: Option<String>,
+    /// Say what would be made or linked and change nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1912,10 +2204,19 @@ pub enum ProjectCommand {
     /// Set up a project of your own: sign-in checked, the folder scaffolded from a
     /// template with its manifest, a git repository with one commit, its own state under
     /// ~/.inorbit/projects/NAME/, a Keychain slot by name, a smoke test that runs it once,
-    /// and a report. Idempotent: a step already done is done again without harm, and a
-    /// step that waits on an API says so instead of pretending. `create` is the same command.
+    /// and a report. Idempotent: run again in the folder it made, it leaves every file that
+    /// is already there as it is and says which, and a step that waits on an API says so
+    /// instead of pretending. `iohr init` and `create` are the same command.
     #[command(visible_alias = "create")]
     Init(Box<InitArgs>),
+    /// Create the project in InOrbit, or link to it, from its folder.
+    ///
+    /// The part of `init` that makes the project in InOrbit: a Decisions space of kind
+    /// project under your team, for the environment `--env` names. Idempotent: it finds the
+    /// space by the project's name and links to it, so a repeat, a retry after init could not
+    /// reach InOrbit, and a teammate who cloned the project all end at the same space. The
+    /// link is written to `.inorbit/space` (production, committed) or `.inorbit/space.local`.
+    Sync(ProjectSyncArgs),
     /// The same as `template list`, kept so older scripts work.
     #[command(hide = true)]
     Templates,
@@ -2793,6 +3094,39 @@ mod grammar_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn read_repeats_and_add_dir_is_the_same_flag() {
+        use clap::Parser as _;
+        let cli = super::Cli::try_parse_from([
+            "iohr",
+            "ask",
+            "--read",
+            "/a",
+            "--add-dir",
+            "/b",
+            "--add-dir=/c",
+            "what is in them",
+        ])
+        .unwrap();
+        let Some(super::Command::Ask(a)) = cli.command else {
+            panic!("not ask")
+        };
+        let got: Vec<_> = a
+            .headless
+            .read
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        assert_eq!(got, ["/a", "/b", "/c"]);
+        assert!(a.headless.has_context());
+        // Not given: no folders and no context of its own.
+        let cli = super::Cli::try_parse_from(["iohr", "ask", "hi"]).unwrap();
+        let Some(super::Command::Ask(a)) = cli.command else {
+            panic!("not ask")
+        };
+        assert_eq!(a.headless.read.len(), 0);
     }
 
     #[test]

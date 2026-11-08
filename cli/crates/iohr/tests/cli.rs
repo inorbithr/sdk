@@ -693,6 +693,27 @@ async fn verbose_output_never_shows_the_token() {
         "{args:?} leaked the token"
     );
     assert!(!all.contains("request id"), "{args:?} made a call");
+    // `iohr stop` (RFC 0213) talks to a local socket only: it makes no API call, and with no
+    // host running it says so and exits 0. `iohr session` never returns while it is open:
+    // `session_starts_one_host_that_beats_and_stop_ends_it` (tests/runner.rs) runs it with
+    // `--verbose` and checks no credential reaches its output or the host's log.
+    let data = dir.path().join("session-data");
+    let args = [
+        "stop",
+        project_dir,
+        "--data-dir",
+        data.to_str().unwrap(),
+        "--verbose",
+    ];
+    let o = r.with_token(&t, &args);
+    assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
+    let all = text(&o);
+    assert!(
+        !all.contains("TOKENSIGNATUREMARKER"),
+        "{args:?} leaked the token"
+    );
+    assert!(all.contains("no session host runs"), "{args:?}: {all}");
+    assert!(!all.contains("request id"), "{args:?} made a call");
     // `ext verify ARTIFACT` (RFC 0143) is offline too: an artifact with a bundle that
     // does not match fails (exit 1) and prints no token and no request line.
     let artifact = dir.path().join("artifact.bin");
@@ -1053,6 +1074,29 @@ fn profile_of(dir: &Path) -> toml::Table {
         .as_table()
         .unwrap()
         .clone()
+}
+
+/// A store that cannot keep the secret fails the sign-in before a code is shown, so a
+/// person never approves a sign-in that is then lost.
+#[tokio::test(flavor = "multi_thread")]
+async fn login_checks_the_store_before_it_shows_a_code() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let r = Run {
+        server: &server,
+        config: dir.path(),
+    };
+    mount_person_server(&server, me_with_teams("")).await;
+    // A file where the secrets directory goes: nothing can be written there.
+    std::fs::write(dir.path().join("secrets"), "").unwrap();
+    let login = login_as_me(&r, &server.uri(), &[]);
+    assert_ne!(code(&login), 0, "{}", text(&login));
+    assert!(!text(&login).contains("ABCD2345"), "{}", text(&login));
+    let asked = server.received_requests().await.unwrap_or_default();
+    assert!(
+        !asked.iter().any(|q| q.url.path() == "/oauth2/device/auth"),
+        "the device flow started"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

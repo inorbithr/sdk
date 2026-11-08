@@ -10,13 +10,14 @@ mod call;
 mod config;
 mod connections;
 mod connectors;
-mod coordinator;
+pub(crate) mod coordinator;
 mod coordinator_plan;
 mod decisions;
 mod domains;
 mod ext;
 mod ext_catalogue;
 mod ext_packages;
+mod init_extensions;
 mod lab;
 mod login;
 mod memory;
@@ -25,11 +26,13 @@ mod permissions;
 mod profile;
 mod project;
 mod project_plan;
+mod project_space;
 mod project_template;
 mod runner;
 mod sdk;
 mod sdk_add;
-mod shell;
+mod session;
+pub(crate) mod shell;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -40,7 +43,7 @@ use clap::CommandFactory as _;
 use crate::Env;
 use crate::cli::{
     AccountsCommand, AuthCommand, BrowserCommand, Cli, Command, ExtCommand, LabCommand,
-    OpenapiCommand, SdkCommand,
+    OpenapiCommand, ProjectCommand, SdkCommand,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -58,18 +61,23 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     // The permission server speaks MCP on stdout for one `iohr ask` run: it calls no API and
     // must print nothing else.
     #[cfg(unix)]
-    if let Command::PermissionServer { socket } = &cli.command {
+    if let Some(Command::PermissionServer { socket }) = &cli.command {
         return crate::permissions::server::run(socket)
             .map_err(|e| Error::Failed(format!("permission server: {}", e.kind())));
     }
     // A tunnel reaches an environment over ssh and calls no API, so a placeholder address is no bar.
     if !matches!(
         cli.command,
-        Command::Tunnel(_) | Command::Permissions(_) | Command::PermissionServer { .. }
+        Some(Command::Tunnel(_) | Command::Permissions(_) | Command::PermissionServer { .. })
     ) {
         g.check_environment()?;
     }
-    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_) | Command::Coordinator(_)) {
+    if g.sign_in.is_some()
+        && !matches!(
+            cli.command,
+            Some(Command::Runner(_) | Command::Coordinator(_))
+        )
+    {
         return Err(Error::Usage(
             "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` and `iohr coordinator` only".into(),
         ));
@@ -81,7 +89,15 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
             "--via-role, --via-session and --via-job need --sign-in io".into(),
         ));
     }
-    match cli.command {
+    // Bare `iohr` (the binary has already sent a non-terminal to the usage report).
+    let Some(command) = cli.command else {
+        return if crate::panel::bare_enters(g) {
+            session::enter(g, env).await
+        } else {
+            Err(Error::Usage(String::new()))
+        };
+    };
+    match command {
         Command::Login(args) => login::login(g, &env, &args, out).await,
         Command::Logout => login::logout(g, out).await,
         Command::Profile(cmd) => profile::run(g, &env, cmd, out).await,
@@ -106,20 +122,24 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
-        Command::Ask(args) => ask::run(g, &env, args, out).await,
+        Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
+        Command::Panel(args) => crate::panel::run(g, env, args).await,
         Command::Permissions(cmd) => permissions::run(g, cmd, out),
         Command::PermissionServer { .. } => Err(Error::Failed(
             "the permission server needs a unix system".to_owned(),
         )),
         Command::Project(cmd) => project::run(g, &env, cmd, out).await,
+        Command::Init(args) => project::run(g, &env, ProjectCommand::Init(args), out).await,
         Command::Atlas(cmd) => atlas::run(g, &env, cmd, out).await,
         Command::Sync(args) => atlas::sync(g, &env, &args, out).await,
         Command::Config(cmd) => config::run(g, cmd, out),
         Command::Lab(LabCommand::Check(args)) => lab::check(&args, out),
         Command::Decisions(cmd) => decisions::run(g, &env, cmd, out).await,
         Command::Runner(cmd) => Box::pin(runner::run(g, &env, cmd, out)).await,
+        Command::Session(args) => session::open(g, &args, out).await,
+        Command::Stop(args) => session::stop(g, &args, out).await,
         Command::Browser(BrowserCommand::Install(args)) => {
             browser_ext::install(g, &args, out);
             Ok(())

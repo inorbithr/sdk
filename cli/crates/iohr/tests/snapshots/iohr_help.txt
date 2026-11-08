@@ -3,7 +3,7 @@ The InOrbit command line.
 Sign in, keep several accounts as profiles, and call the API. A token is never an argument: pipe it
 to `iohr login --with-token`, or set `IOHR_TOKEN`.
 
-Usage: iohr [OPTIONS] <COMMAND>
+Usage: iohr [OPTIONS] [COMMAND]
 
 Sign-in:
   login        Sign in and add a profile
@@ -21,6 +21,7 @@ Account:
   config       Settings besides profiles: where extensions come from, which keys may sign them
 
 Build:
+  init         Create a project: the same as `iohr project init`
   project      Create projects and manage project templates
   atlas        Keep the project's PRDs, RFCs, ADRs and studies in its atlas/ folder
   sync         Send the project's atlas documents to its Decisions space
@@ -37,6 +38,8 @@ Agents:
   permissions  Rules for what Io may run or open when you ask it something
   shell        Shell integration: `? question` at your prompt asks your AI agent
   runner       Run coordinator turns on this machine
+  session      Open this project's session: one process hosts its Roles while iohr is open
+  stop         Stop this project's session host
   coordinator  List and file the coordinator's jobs and asks
   memory       Keep what a project knows as files, check it, and sync it when you choose
 
