@@ -380,6 +380,9 @@ background = false
 [memory]                            # iohr memory (section 4.7)
 scope = "project"
 sync = false
+
+[panel]                             # the floating panel (section 4.8)
+mouse = "menu"
 ```
 
 Rules:
@@ -725,6 +728,19 @@ chooses where it keeps them and whether it may use your InOrbit account. `iohr` 
 Outside a project the `project` default falls back to `user` with a note on stderr. With
 `sync = false`, `iohr memory sync` and `iohr memory drift --remote` still run when you type them:
 running the command is the explicit choice.
+
+### 4.8 The panel table
+
+The floating panel (`iohr`, `iohr panel`) has one setting.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `mouse` | `menu`: the panel takes mouse reports only while a view is open (a click on a row opens it, a click outside closes it, the wheel moves the selection) and the shell keeps normal drag-to-select the rest of the time; `always`: also at rest, where a click on the pill opens the menu and every other click goes through to the program; `off`: no mouse reports at all | `menu` | `iohr`, `iohr panel`; `IOHR_PANEL_MOUSE` overrides it |
+
+The key that opens the menu is not a setting: the pill shows the one that works in your terminal
+(`^G` in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, whose default makes Option+i a
+dead key; `⌥i` elsewhere), and both always work, unless `[ask] menu_key = "ctrl-g"` takes Ctrl-G
+for the `?` menu.
 
 ## 5. Credentials
 

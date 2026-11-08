@@ -52,7 +52,7 @@ fn key_words(key: MenuKey) -> String {
 /// when it is one of the three of the switch; empty otherwise (a `deny` or `rules` choice stays
 /// the config's, and the first Shift+Tab goes to the first mode of the ring). A bad word is an
 /// error here as it is in `iohr ask`.
-fn start_mode(ctx: &Ctx) -> Result<&'static str, Error> {
+pub(crate) fn start_mode(ctx: &Ctx) -> Result<&'static str, Error> {
     let env = |k: &str| std::env::var(k).ok();
     let (mode, perms) = (env("IOHR_ASK_MODE"), env("IOHR_ASK_PERMISSIONS"));
     let flag = Words {

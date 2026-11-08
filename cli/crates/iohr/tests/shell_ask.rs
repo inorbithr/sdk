@@ -1122,6 +1122,104 @@ fn the_menu_key_fills_the_prompt_line_and_nothing_runs_until_enter() {
     assert!(out[7].contains("RAN-2"), "Enter runs it: {:?}", out[7]);
 }
 
+/// A fake `iohr` for the pty tests below: an ask answers with a command, `--menu` is logged.
+fn fake_menu_iohr(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.join("menu.log");
+    let fake = bin.join("iohr");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in\n*--menu*) echo \"$*\" >> {log}; printf '%s' 'echo RAN-$((1+1))';;\n*) printf 'the answer\\036echo RAN-$((1+1))\\036notes.md';;\nesac\n",
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (bin, log)
+}
+
+// The card stays live across an empty Enter: an answer, then Enter on the empty prompt, then
+// Down still opens the menu (the owner's "it works sometimes"). A command that is run, or a
+// line of spaces, behaves as it should: spaces keep the card, a command ends it.
+#[test]
+fn the_menu_still_opens_after_an_empty_enter_and_ends_with_a_command() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let (bin, log) = fake_menu_iohr(dir.path());
+    let down = "RAW:\u{1b}[B";
+    let out = drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {}", file.display()),
+            "? a question".to_owned(),
+            "RAW:\r".to_owned(), // Enter on the empty prompt
+            down.to_owned(),
+            "RAW:\u{15}".to_owned(), // ctrl-u clears the line the menu filled
+            "RAW:   \r".to_owned(),  // Enter on spaces only
+            down.to_owned(),
+            "RAW:\u{15}".to_owned(),
+            "echo PLAIN-$((1+1))".to_owned(), // a command ends the card
+            down.to_owned(),
+        ],
+    );
+    let asked = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(
+        asked.lines().count(),
+        2,
+        "the menu opens after an empty Enter and after spaces, not after a command: {asked:?}\n{out:?}"
+    );
+    assert!(out[8].contains("PLAIN-2"), "{out:?}");
+}
+
+// Sourcing the hook again (a re-sourced ~/.zshrc after an upgrade) leaves accept-line wrapped
+// once, rebinds the menu key when something took it, and keeps the key it replaced.
+#[test]
+fn evaluating_the_hook_again_rebinds_the_menu_key_without_wrapping_twice() {
+    let have = |c: &str| Command::new(c).arg("--version").output().is_ok();
+    if !have("zsh") || !have("python3") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("hook.zsh");
+    std::fs::write(&file, hook("zsh").stdout).unwrap();
+    let (bin, log) = fake_menu_iohr(dir.path());
+    let down = "RAW:\u{1b}[B";
+    let f = file.display();
+    let out = drive_zsh(
+        &file,
+        &bin,
+        &[
+            format!("source {f}"),
+            format!("source {f}"),
+            // Something else takes Down (an older hook's shell, a history plugin).
+            "bindkey '^[[B' down-line-or-history".to_owned(),
+            format!("source {f}"),
+            "print -r -- \"W[${widgets[accept-line]}][${widgets[_iohr_ask_prev_accept]}][${_iohr_card_prev[emacs]}]\"".to_owned(),
+            "? a question".to_owned(),
+            down.to_owned(),
+        ],
+    );
+    assert!(
+        out[4].contains("W[user:_iohr_ask_accept][builtin][down-line-or-history]"),
+        "accept-line is wrapped once and the first previous key is kept: {:?}",
+        out[4]
+    );
+    let asked = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(
+        asked.lines().count(),
+        1,
+        "Down opens the menu: {asked:?}\n{out:?}"
+    );
+}
+
 // Shift+Tab on a `?` line goes on from manual (where every shell starts) to plan, auto and round
 // again, says which, and every
 // question after it carries `--mode`. On another line the key is the shell's own.

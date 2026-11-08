@@ -158,6 +158,58 @@ impl HttpService<'_> {
         Ok(())
     }
 
+    /// The account's auto-approve policy and the server's rules (`GetAutoApprovePolicy`): the
+    /// answer as the service gives it, `policy` unset when the account never had one.
+    pub(crate) async fn auto_approve_policy(&self) -> Result<Value, ServiceError> {
+        let v: Value = self
+            .api
+            .get(
+                "/v1/approvals/auto-approve",
+                &[("account_id", self.account.as_str())],
+            )
+            .await?;
+        Ok(v)
+    }
+
+    /// Asks for an auto-approve policy until `until` (RFC 3339, whole seconds, within 24 hours)
+    /// over every kind the never list allows (`RequestAutoApprove`). It creates an
+    /// `auto_approve` ask for the phone; the policy is set only when the phone's device key
+    /// approves it (ADR 0142), never from here. Answers the ask.
+    pub(crate) async fn request_auto_approve(
+        &self,
+        until: &str,
+        device: &str,
+    ) -> Result<Value, ServiceError> {
+        let body = json!({
+            "account_id": self.account,
+            "scope": {},
+            "until": until,
+            "device": device,
+        });
+        let v: Value = self
+            .api
+            .send_body(Method::Post, "/v1/approvals/auto-approve", &body)
+            .await?
+            .json()?;
+        Ok(v.get("approval").cloned().unwrap_or(Value::Null))
+    }
+
+    /// Turns the auto-approve policy off at once (`RevokeAutoApprovePolicy`): no proof, always
+    /// safe, and idempotent. Answers the policy as it is now.
+    pub(crate) async fn revoke_auto_approve(&self, note: &str) -> Result<Value, ServiceError> {
+        let raw = self
+            .api
+            .send(
+                Method::Delete,
+                "/v1/approvals/auto-approve",
+                &[("account_id", self.account.as_str()), ("note", note)],
+                None,
+            )
+            .await?;
+        let v: Value = raw.json()?;
+        Ok(v.get("policy").cloned().unwrap_or(Value::Null))
+    }
+
     /// Every `approval.changed` event of the account, as they happen.
     pub(crate) async fn approval_changes(&self) -> Result<EventStream<Value>, ServiceError> {
         let op = Operation::new(Method::Get, "/v1/events/events")

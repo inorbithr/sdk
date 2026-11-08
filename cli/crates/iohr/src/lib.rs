@@ -35,6 +35,7 @@ mod io_signin;
 mod lock;
 mod mac_sign;
 mod output;
+mod panel;
 mod paths;
 mod permissions;
 mod planner;
@@ -49,6 +50,23 @@ mod usage;
 
 pub use args::refuse_secrets_in_args;
 pub use commands::run;
+
+/// Whether bare `iohr` enters the session here (a terminal, colour allowed, no `--json`, not
+/// inside a panel) instead of printing the usage report.
+#[must_use]
+pub fn bare_enters(g: &cli::Global) -> bool {
+    panel::bare_enters(g)
+}
+
+/// Bare `iohr` inside a running panel: says in one line that the session is already here and
+/// which key opens the menu, and returns true (the caller exits 0). False anywhere else.
+#[must_use]
+pub fn bare_inside(g: &cli::Global) -> bool {
+    panel::bare_inside_message(g).is_some_and(|line| {
+        output::Out::note(&line);
+        true
+    })
+}
 pub use error::Error;
 pub use usage::{report_clap as report_usage_clap, report_message as report_usage_message};
 
