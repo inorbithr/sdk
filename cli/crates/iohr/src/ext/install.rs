@@ -507,5 +507,5 @@ fn write_file(path: &Path, bytes: &[u8], program: bool) -> Result<(), ExtError> 
         .map_err(|e| io("create", path, &e))?;
     f.write_all(bytes)
         .and_then(|()| f.sync_all())
-.map_err(|e| io("write", path, &e))
+        .map_err(|e| io("write", path, &e))
 }

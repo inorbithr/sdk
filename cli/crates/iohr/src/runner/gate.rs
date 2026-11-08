@@ -889,7 +889,8 @@ pub(crate) mod tests {
         assert_eq!(o.code, 0, "{}", o.stderr_tail);
         let env = std::fs::read_to_string(&seen).unwrap();
         assert!(
-            env.lines().any(|l| l == format!("GH_CONFIG_DIR={}", env::NO_GH_CONFIG)),
+            env.lines()
+                .any(|l| l == format!("GH_CONFIG_DIR={}", env::NO_GH_CONFIG)),
             "{env}"
         );
         assert!(env.lines().any(|l| l == "GIT_CONFIG_VALUE_0="), "{env}");

@@ -1185,10 +1185,7 @@ async fn a_token_service_on_another_origin_is_asked_without_the_credential() {
         )
         .mount(&elsewhere)
         .await;
-    let challenge = format!(
-        r#"Bearer realm="{}/token",service="test""#,
-        elsewhere.uri()
-    );
+    let challenge = format!(r#"Bearer realm="{}/token",service="test""#, elsewhere.uri());
     Mock::given(method("GET"))
         .and(|r: &Request| {
             r.url.path().starts_with("/v2/")
@@ -1212,7 +1209,9 @@ async fn a_token_service_on_another_origin_is_asked_without_the_credential() {
     let asked = elsewhere.received_requests().await.unwrap();
     assert!(!asked.is_empty(), "the token service was never asked");
     assert!(
-        asked.iter().all(|r| !r.headers.contains_key("authorization")),
+        asked
+            .iter()
+            .all(|r| !r.headers.contains_key("authorization")),
         "the credential went to another origin"
     );
 }
@@ -1368,7 +1367,9 @@ mod run {
         assert_eq!(code(&o), 0, "{}", text(&o));
 
         let mut path = vec![other_bin.clone()];
-        path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        path.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
         let out = b
             .cmd(&["probe"])
             .env("PATH", std::env::join_paths(path).unwrap())
@@ -1390,7 +1391,9 @@ mod run {
         assert!(!env.contains("TOKENSIGNATUREMARKER"), "{env}");
         assert!(!env.contains(other_bin.to_str().unwrap()), "{env}");
         assert_eq!(
-            std::fs::read_to_string(work.join("iohr.txt")).unwrap().trim(),
+            std::fs::read_to_string(work.join("iohr.txt"))
+                .unwrap()
+                .trim(),
             "absent"
         );
     }

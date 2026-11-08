@@ -1081,8 +1081,14 @@ mod tests {
         .unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), right);
         assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "kept");
-        let name = seen.borrow()[0].file_name().unwrap().to_string_lossy().into_owned();
-        assert!(name.starts_with(".iohr.upgrade.") && name.ends_with(".tmp"), "{name}");
+        let staged = seen.borrow()[0].clone();
+        let name = staged.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(".iohr.upgrade."), "{name}");
+        assert_eq!(
+            staged.extension(),
+            Some(std::ffi::OsStr::new("tmp")),
+            "{name}"
+        );
     }
 
     /// The signing step sees the written, executable program before the version check,

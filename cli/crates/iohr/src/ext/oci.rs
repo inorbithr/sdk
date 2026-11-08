@@ -858,8 +858,17 @@ mod tests {
             assert!(!credential_goes_to(&ghcr, &u(other)), "{other}");
         }
         let local = u("http://127.0.0.1:5000/");
-        assert!(credential_goes_to(&local, &u("http://127.0.0.1:5000/token")));
-        assert!(!credential_goes_to(&local, &u("http://127.0.0.1:5001/token")));
-        assert!(!credential_goes_to(&local, &u("http://localhost:5000/token")));
+        assert!(credential_goes_to(
+            &local,
+            &u("http://127.0.0.1:5000/token")
+        ));
+        assert!(!credential_goes_to(
+            &local,
+            &u("http://127.0.0.1:5001/token")
+        ));
+        assert!(!credential_goes_to(
+            &local,
+            &u("http://localhost:5000/token")
+        ));
     }
 }

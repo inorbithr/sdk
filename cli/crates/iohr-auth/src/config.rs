@@ -840,8 +840,7 @@ pub fn temp_path(dir: &Path, name: &str) -> PathBuf {
     let mut r = [0u8; 8];
     // A failed draw still leaves a name `create_new_private` refuses if it is taken.
     let _ = getrandom::fill(&mut r);
-    let hex: String = r.iter().map(|b| format!("{b:02x}")).collect();
-    dir.join(format!(".{name}.{hex}.tmp"))
+    dir.join(format!(".{name}.{:016x}.tmp", u64::from_le_bytes(r)))
 }
 
 /// Creates the file `path` for writing, refusing one that is already there (a link
@@ -1246,8 +1245,14 @@ mirror_note = "kept"
         super::write_private(&dir, "token", b"two").unwrap();
         let p = dir.join("token");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "two");
-        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
-        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
         assert_eq!(names, ["token"], "a temporary file was left behind");
     }
 
@@ -1261,6 +1266,9 @@ mirror_note = "kept"
         std::fs::create_dir(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         super::create_private_dir(&dir).unwrap();
-        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
     }
 }
