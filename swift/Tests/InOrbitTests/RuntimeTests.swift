@@ -299,4 +299,3 @@ final class Tally: @unchecked Sendable {
         n += k
     }
 }
-

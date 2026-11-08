@@ -126,7 +126,11 @@ impl fmt::Debug for Operation<'_> {
             .field("path", &self.path)
             .field(
                 "query",
-                &self.query.iter().map(|(k, _)| k.as_ref()).collect::<Vec<_>>(),
+                &self
+                    .query
+                    .iter()
+                    .map(|(k, _)| k.as_ref())
+                    .collect::<Vec<_>>(),
             )
             .field(
                 "body",
@@ -1814,7 +1818,10 @@ mod tests {
             .unwrap();
         for shown in [format!("{op:?}"), format!("{op:#?}")] {
             assert!(!shown.contains("s3cr3t"), "{shown}");
-            assert!(shown.contains("/v1/keys") && shown.contains("password"), "{shown}");
+            assert!(
+                shown.contains("/v1/keys") && shown.contains("password"),
+                "{shown}"
+            );
         }
     }
 

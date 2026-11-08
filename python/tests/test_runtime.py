@@ -103,8 +103,13 @@ def test_secrets_never_serialise() -> None:
         f"{token} {token!r} {token!s:>40}",
     ):
         assert "tok-1" not in out, out
-    assert json.loads(TypeAdapter(Token).dump_json(token)) == {"access": "<redacted>", "expires_at": 1.5}
-    res = Resolution({}, {"token": "tok-1", "key_secret": "s3cr3t"}, Credential("code", "token"), None)
+    assert json.loads(TypeAdapter(Token).dump_json(token)) == {
+        "access": "<redacted>",
+        "expires_at": 1.5,
+    }
+    res = Resolution(
+        {}, {"token": "tok-1", "key_secret": "s3cr3t"}, Credential("code", "token"), None
+    )
     for out in (repr(res), str(res), f"{res}"):
         assert "tok-1" not in out and "s3cr3t" not in out, out
         assert "token" in out, out

@@ -70,7 +70,8 @@ class RuntimeTest {
         String json = plain.writeValueAsString(token);
         assertFalse(json.contains("tok-123"), json);
         assertEquals("<redacted>", plain.readTree(json).get("access").asText(), json);
-        assertEquals("2026-11-08T12:00:00Z", plain.readTree(json).get("expires_at").asText(), json);
+        assertEquals(
+                "2026-11-08T12:00:00Z", plain.readTree(json).get("expires_at").asText(), json);
         // A mapper that reads every field, as reflective loggers and serialisers do.
         ObjectMapper fields = new ObjectMapper()
                 .setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE)
@@ -103,7 +104,9 @@ class RuntimeTest {
         assertFalse(n.contains("k3y-pass") || n.contains("st0re-pass") || n.contains("pr0xy-pass"), n);
         assertTrue(n.contains("<redacted>"), n);
         Config.Resolution r = new Config.Resolution(
-                new ObjectMapper().createObjectNode(), Map.of("token", "tok-123"), new Config.Credential("code", "token"));
+                new ObjectMapper().createObjectNode(),
+                Map.of("token", "tok-123"),
+                new Config.Credential("code", "token"));
         assertFalse(r.toString().contains("tok-123"), r.toString());
         assertTrue(r.toString().contains("token"), r.toString());
     }
@@ -175,13 +178,15 @@ class RuntimeTest {
                         .token("t")
                         .baseUrl("https://api.inorbit.hr/v1")
                         .build());
-        for (String bad : List.of("http://127.example.com", "http://127.0.0.1.example.com", "http://localhost.example")) {
+        for (String bad :
+                List.of("http://127.example.com", "http://127.0.0.1.example.com", "http://localhost.example")) {
             assertThrows(
                     ConfigException.class,
                     () -> Client.builder().token("t").baseUrl(bad).build(),
                     bad);
         }
-        for (String good : List.of("http://127.0.0.1:8080", "http://127.1.2.3", "http://localhost:1", "http://[::1]:8080")) {
+        for (String good :
+                List.of("http://127.0.0.1:8080", "http://127.1.2.3", "http://localhost:1", "http://[::1]:8080")) {
             Client.builder().token("t").baseUrl(good).build();
         }
     }
