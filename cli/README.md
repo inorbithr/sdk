@@ -969,8 +969,8 @@ never sent to your shell. At rest it asks for none, so the shell keeps normal dr
 click on the pill opens the menu and every other click goes through to the program) or `off` (no
 mouse at all).
 
-Bare `iohr` inside the panel prints one line, that you are already in the iohr session and which
-key opens the menu, and exits 0. `iohr stop` inside the panel stops the session host and closes
+Bare `iohr` inside the panel prints one line, that the panel is on and which key
+opens the menu, and exits 0; after `iohr stop` it brings the panel back first. `iohr stop` inside the panel stops the session host and closes
 the panel with it; with no host running it says the panel is closed. If something cannot be read, the
 panel says "unavailable", never a number. Stub data appears only with `--demo` and is labelled "stub".
 

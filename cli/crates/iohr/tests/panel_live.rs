@@ -144,16 +144,22 @@ fn stop_then_run_again_gives_a_live_panel_not_the_already_in_note() {
     assert!(!menu_is_open(s.screen.screen()), "the stopped panel opened");
 
     type_line(&mut s, BIN);
-    s.until("the run again", |sc| any(sc, "opens the menu"));
+    s.until("the run again", |sc| any(sc, "the panel is on"));
+    // The owner's report: after a stop the re-run said "already in" over a dead panel.
+    assert!(
+        !any(s.screen.screen(), "already in"),
+        "{}",
+        s.screen.screen().contents()
+    );
     s.send(b"\x1bi");
     s.until("a live menu after the re-run", menu_is_open);
 }
 
 #[test]
-fn running_iohr_in_a_panel_that_is_not_stopped_only_says_it_is_there() {
+fn running_iohr_in_a_panel_that_is_not_stopped_only_says_it_is_on() {
     let mut s = panel(&home("inside"));
     type_line(&mut s, BIN);
-    s.until("the note", |sc| any(sc, "already in the iohr session"));
+    s.until("the note", |sc| any(sc, "the panel is on"));
     s.send(b"\x1bi");
     s.until("the menu", menu_is_open);
 }

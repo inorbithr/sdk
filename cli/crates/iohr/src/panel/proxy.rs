@@ -883,22 +883,20 @@ fn proxy_lives(var: &str) -> bool {
     )
 }
 
-/// What bare `iohr` says inside a running panel, instead of an error: the session is already
-/// here, and which key opens the menu. A panel that was stopped (`iohr stop`, "Stop panel" or
+/// What bare `iohr` says inside a panel, instead of an error: the panel is on in this shell,
+/// and which key opens the menu. A panel that was stopped (`iohr stop`, "Stop panel" or
 /// its host ending) is brought back first, so running `iohr` again gives a live panel. `None`
 /// outside a panel.
 pub(super) fn bare_inside_message(g: &Global) -> Option<String> {
     inside().then(|| {
         send_to_panel(RESUME_SEQ);
-        already_in(Settings::read(g).open_key)
+        panel_is_on(Settings::read(g).open_key)
     })
 }
 
-fn already_in(key: OpenKey) -> String {
-    format!(
-        "already in the iohr session; {} opens the menu",
-        key.label()
-    )
+/// True both when the panel was live and when this run just brought a stopped one back.
+fn panel_is_on(key: OpenKey) -> String {
+    format!("the panel is on; {} opens the menu", key.label())
 }
 
 /// Tells the panel proxy around this process to end, so `iohr stop` inside it closes the panel
@@ -1279,10 +1277,10 @@ mod tests {
     }
 
     #[test]
-    fn bare_inside_says_it_is_already_in_the_session_and_names_the_key() {
-        let msg = already_in(OpenKey::detect(Some("Apple_Terminal"), false));
-        assert_eq!(msg, "already in the iohr session; ^G opens the menu");
-        let msg = already_in(OpenKey::detect(Some("xterm"), false));
+    fn bare_inside_says_the_panel_is_on_and_names_the_key() {
+        let msg = panel_is_on(OpenKey::detect(Some("Apple_Terminal"), false));
+        assert_eq!(msg, "the panel is on; ^G opens the menu");
+        let msg = panel_is_on(OpenKey::detect(Some("xterm"), false));
         assert!(msg.contains("⌥i"), "{msg}");
     }
 
