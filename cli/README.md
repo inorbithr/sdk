@@ -370,7 +370,8 @@ says why (ADR 0012, point 6).
 listings that fit (a rule table in `commands/init_extensions.rs`) and, at a terminal, asks
 whether to install each one (default no) through the same path as `iohr ext install`. With
 `--yes`, `--json` or no terminal it prints one `iohr ext install ...` line and installs
-nothing. A listing marked coming is never offered for install.
+nothing. A listing marked coming is never offered for install; init says it is not released
+yet and that there is nothing to install, as a plain line, not as a skipped step.
 
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A
@@ -494,7 +495,8 @@ cannot be chosen), confirms the folder, shows each step as a spinner that ends o
 fail, folds what waits on an API into one line (`--verbose` lists it), and ends with the next
 commands. `--template` and `--yes` skip the menu and the confirmation. Without a terminal, or
 with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain `done:` and
-`not yet:` lines are printed as before, on stderr, and stdout stays data only.
+`not yet:` lines are printed as before (the editor's own ask, Code asking before it opens the
+folder, is said once in the ending, not as a line), on stderr, and stdout stays data only.
 
 ```sh
 iohr project init my-shop         # the coordinated template: a Planner plan comes with it
