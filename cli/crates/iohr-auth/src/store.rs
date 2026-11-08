@@ -194,11 +194,15 @@ fn failed(e: keyring_core::Error) -> StoreError {
 
 /// Whether a platform error is the Keychain saying it would have shown a prompt:
 /// `errSecInteractionNotAllowed` (-25308), which is what a call returns while
-/// [`QuietStore`] has switched the user interface off, or `errSecUserCanceled` (-128).
+/// [`QuietStore`] has switched the user interface off, `errSecUserCanceled` (-128), or
+/// `errSecAuthFailed` (-25293), which is the answer when the item's access list does not
+/// name this binary and the dialog could not be answered (every ad-hoc build is a new
+/// binary to it). All three mean the same to the person: the item is there, this `iohr`
+/// may not read it yet.
 #[cfg(target_os = "macos")]
 fn would_ask(e: &(dyn std::error::Error + 'static)) -> bool {
     e.downcast_ref::<security_framework::base::Error>()
-        .is_some_and(|e| matches!(e.code(), -25308 | -128))
+        .is_some_and(|e| matches!(e.code(), -25308 | -128 | -25293))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -669,7 +673,9 @@ mod tests {
         store.set(&k, &Redacted::new("x".into())).unwrap();
     }
 
-    /// `errSecInteractionNotAllowed` is how the Keychain says "I would have asked".
+    /// `errSecInteractionNotAllowed` is how the Keychain says "I would have asked", and
+    /// `errSecAuthFailed` is how it answers a binary whose signature it has not been told to
+    /// trust when it may not show the dialog (every ad-hoc rebuild is such a binary).
     #[cfg(target_os = "macos")]
     #[test]
     fn the_keychain_refusing_to_prompt_is_would_ask() {
@@ -681,6 +687,10 @@ mod tests {
         };
         assert!(matches!(platform(-25308), StoreError::WouldAsk));
         assert!(matches!(platform(-128), StoreError::WouldAsk));
-        assert!(matches!(platform(-25293), StoreError::Failed(_)));
+        assert!(matches!(platform(-25293), StoreError::WouldAsk));
+        // Anything else stays a failure: -25300 is errSecItemNotFound, -25291 is
+        // errSecNotAvailable.
+        assert!(matches!(platform(-25300), StoreError::Failed(_)));
+        assert!(matches!(platform(-25291), StoreError::Failed(_)));
     }
 }

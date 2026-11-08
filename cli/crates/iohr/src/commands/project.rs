@@ -9,7 +9,7 @@ use crate::ask::{self, Agent};
 use crate::atlas;
 use crate::cli::{Global, InitArgs, ProjectCommand, TemplateCommand};
 use crate::commands::ask::Run;
-use crate::context::{Ctx, session};
+use crate::context::{Ctx, shared_session};
 use crate::error::Error;
 use crate::handoff::{self, Stop};
 use crate::output::Out;
@@ -2110,7 +2110,7 @@ fn dry_report(
 /// found here and not later). `Some(who)` when signed in.
 async fn check_sign_in(g: &Global, env: &Env, ui: Ui) -> Option<String> {
     let sign_in = ui.step("Checking your sign-in");
-    let signed_in = match session(g, env).await {
+    let signed_in = match shared_session(g, env).await {
         Ok(s) => match s.api.get::<serde_json::Value>("/v1/me", &[]).await {
             Ok(me) => Some(format!(
                 "{} ({}, account {})",

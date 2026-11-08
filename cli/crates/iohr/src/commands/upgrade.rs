@@ -541,6 +541,29 @@ pub(crate) async fn run(g: &Global, env: &Env, check: bool, out: Out) -> Result<
 /// `upgrade_sign_identity` as the runner reads it: `IOHR_SIGN_IDENTITY`, then the run
 /// profile's `[profiles.<name>.runner]`, then `[runner]`. A config file that cannot be
 /// read leaves signing off: it never stops an upgrade.
+/// `iohr sign-binary PATH`: the signing an upgrade does, for a binary built here. `auto`
+/// unless `IOHR_SIGN_IDENTITY` names an identity; an unsigned result is an error (an
+/// upgrade may go on ad hoc, a preview install may not).
+pub(crate) fn sign_binary(env: &Env, path: &Path) -> Result<(), Error> {
+    let with = match env.sign_identity.as_deref().map(SignWith::parse) {
+        None | Some(SignWith::Off) => SignWith::Auto,
+        Some(other) => other,
+    };
+    match sign::here(path, &with) {
+        sign::Outcome::Signed(name) => {
+            Out::note(&format!(
+                "signed {} with {name} (identifier {})",
+                path.display(),
+                sign::IDENTIFIER
+            ));
+            Ok(())
+        }
+        sign::Outcome::AlreadySigned => Ok(()),
+        sign::Outcome::Off => Err(Error::Failed("signing needs macOS".to_owned())),
+        sign::Outcome::Kept(why) => Err(Error::Failed(format!("not signed: {why}"))),
+    }
+}
+
 fn sign_setting(g: &Global, env: &Env) -> crate::runner::settings::Setting<SignWith> {
     let none = iohr_auth::RunnerConfig::default();
     let ctx = Ctx::load(g).ok();

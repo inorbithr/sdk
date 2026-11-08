@@ -17,7 +17,8 @@ use crate::cli::SignIn;
 use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
 use crate::commands::session;
 use crate::context::{
-    Ctx, account as resolve_account, blocking, io_session, run_profile, session, session_for,
+    Ctx, Prompts, account as resolve_account, blocking, io_session, run_profile, session,
+    session_for,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -1037,7 +1038,7 @@ impl StoredKey {
             .map(|p| p.storage)
             .ok_or_else(|| Error::Failed(format!("there is no profile {profile}")))?;
         let key = EntryKey::new(profile, &format!("{account}_{name}"))?;
-        let store = ctx.store(storage)?;
+        let store = ctx.store(storage, Prompts::Allowed)?;
         let k = key.clone();
         let value = blocking(Arc::clone(&store), move |st| st.get(&k)).await?;
         Ok(Self { store, key, value })

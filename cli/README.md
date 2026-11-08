@@ -1193,7 +1193,8 @@ the old version running and backs off from 5 minutes. `--no-auto-upgrade` or
 On macOS, `upgrade_sign_identity = "auto"` (or `IOHR_SIGN_IDENTITY`) signs each new binary
 with a code-signing identity from your keychain, so a keychain "Always Allow" grant holds
 across upgrades; it is off by default. Keys, back-off and limits are in `docs/config.md`
-section 4.3.
+section 4.3. A build from a checkout gets the same signature with
+`mise run cli:preview-install` (macOS, installs `iohr-preview`).
 
 ### Capacity
 

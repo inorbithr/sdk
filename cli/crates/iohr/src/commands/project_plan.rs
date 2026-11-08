@@ -10,7 +10,7 @@ use std::path::Path;
 
 use toml_edit::{DocumentMut, value};
 
-use crate::context::{Api, Ctx, run_profile, session};
+use crate::context::{Api, Ctx, run_profile, shared_session};
 use crate::planner::{Plans, plan_segment};
 use crate::project::{Step, step};
 use crate::{Env, cli::Global};
@@ -58,12 +58,12 @@ enum Access<'a> {
 /// The session init would call with. Only a machine with no profile and no token is "not
 /// signed in"; any other refusal (a token for another audience, an expired one, a store
 /// that cannot be read) says what it is.
-async fn access(g: &Global, env: &Env) -> Result<crate::context::Session, String> {
+async fn access(g: &Global, env: &Env) -> Result<std::sync::Arc<crate::context::Session>, String> {
     let ctx = Ctx::load(g).map_err(|e| first_line(&e.to_string()))?;
     if env.token.is_none() && run_profile(g, env, &ctx).is_none() {
         return Err("you are not signed in".to_owned());
     }
-    session(g, env).await.map_err(|e| {
+    shared_session(g, env).await.map_err(|e| {
         format!(
             "your session cannot be used ({})",
             first_line(&e.to_string())

@@ -19,6 +19,22 @@ use crate::cli::Global;
 use crate::env_name;
 use crate::error::Error;
 
+/// Whether a credential-store call may wait on, or show, a prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prompts {
+    /// The Keychain may ask the person; the call waits for the answer.
+    Allowed,
+    /// The call never waits and never shows a prompt: where one would show, it fails with
+    /// [`Error::StoreWouldAsk`].
+    Never,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread opened a credential store (the tests count them).
+    static OPENED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The config directory and the config read from it.
 pub(crate) struct Ctx {
     pub(crate) dir: PathBuf,
@@ -39,20 +55,20 @@ impl Ctx {
         Ok(self.config.save(&self.dir)?)
     }
 
-    /// The store a profile's secret lives in.
-    pub(crate) fn store(&self, storage: Storage) -> Result<Arc<dyn Store>, Error> {
-        Ok(match storage {
-            Storage::File => Arc::new(FileStore::new(self.dir.join("secrets"))),
-            _ => Arc::new(KeyringStore::open()?),
-        })
-    }
-
-    /// [`store`](Self::store) for a path that must never wait on, or show, a credential
-    /// prompt: the OS store comes wrapped in a [`QuietStore`].
-    pub(crate) fn quiet_store(&self, storage: Storage) -> Result<Arc<dyn Store>, Error> {
-        Ok(match storage {
-            Storage::File => self.store(storage)?,
-            _ => Arc::new(QuietStore::new(Arc::new(KeyringStore::open()?))),
+    /// The store a profile's secret lives in. `prompts` says whether a call may wait on, or
+    /// show, a credential prompt: [`Prompts::Never`] wraps the OS store in a [`QuietStore`]
+    /// (the shell prompt's paths); the file store never prompts and is never wrapped.
+    pub(crate) fn store(
+        &self,
+        storage: Storage,
+        prompts: Prompts,
+    ) -> Result<Arc<dyn Store>, Error> {
+        #[cfg(test)]
+        OPENED.with(|n| n.set(n.get() + 1));
+        Ok(match (storage, prompts) {
+            (Storage::File, _) => Arc::new(FileStore::new(self.dir.join("secrets"))),
+            (_, Prompts::Allowed) => Arc::new(KeyringStore::open()?),
+            (_, Prompts::Never) => Arc::new(QuietStore::new(Arc::new(KeyringStore::open()?))),
         })
     }
 
@@ -402,6 +418,92 @@ pub(crate) async fn quiet_session(global: &Global, env: &Env) -> Result<Session,
     session_in(global, env, &ctx, chosen.as_ref(), true).await
 }
 
+/// Why a session was refused, kept so the same refusal can be given again.
+#[derive(Debug, Clone)]
+enum Refusal {
+    NotSignedIn(String),
+    WouldAsk(String),
+    Usage(String),
+    Failed(String),
+}
+
+impl From<Error> for Refusal {
+    fn from(e: Error) -> Self {
+        let said = e.to_string();
+        match e {
+            Error::NotSignedIn(_) => Self::NotSignedIn(said),
+            Error::StoreWouldAsk(_) => Self::WouldAsk(said),
+            Error::Usage(_) => Self::Usage(said),
+            _ => Self::Failed(said),
+        }
+    }
+}
+
+impl From<Refusal> for Error {
+    fn from(r: Refusal) -> Self {
+        match r {
+            Refusal::NotSignedIn(m) => Self::NotSignedIn(m),
+            Refusal::WouldAsk(m) => Self::StoreWouldAsk(m),
+            Refusal::Usage(m) => Self::Usage(m),
+            Refusal::Failed(m) => Self::Failed(m),
+        }
+    }
+}
+
+type Slot = Arc<tokio::sync::OnceCell<Result<Arc<Session>, Refusal>>>;
+
+/// The sessions of this process, by what makes one: the config directory, the profile, the
+/// API address and the tokens in the environment (as a hash, never the token).
+static SHARED: std::sync::Mutex<std::collections::BTreeMap<String, Slot>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// [`session`] for a run that asks for it more than once (`iohr project init` checks the
+/// sign-in, the space and the plan, one after the other): the first ask loads the
+/// credential, every later one in this process gets the same session, and a refusal is
+/// given again as it was, so the credential store is read once and, when it refuses, asked
+/// once. On a Mac, where each read can be a Keychain dialog, that is the difference
+/// between one prompt and six. Never for a process that outlives its sign-in (a runner,
+/// the panel): they call [`session`] and see a sign-out as it happens.
+///
+/// # Errors
+///
+/// What [`session`] returns.
+pub(crate) async fn shared_session(global: &Global, env: &Env) -> Result<Arc<Session>, Error> {
+    use std::hash::{Hash as _, Hasher as _};
+    let ctx = Ctx::load(global)?;
+    let chosen = run_profile(global, env, &ctx);
+    let secret = |t: Option<&Redacted<String>>| {
+        t.map(|t| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            t.expose().hash(&mut h);
+            h.finish()
+        })
+    };
+    let key = format!(
+        "{}|{}|{}|{:?}|{:?}",
+        ctx.dir.display(),
+        chosen.as_ref().map_or("", ProfileName::as_str),
+        global.base_url(),
+        secret(env.token.as_ref()),
+        secret(chosen.as_ref().and_then(|n| env.profile_token(n.as_str()))),
+    );
+    let slot = SHARED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(key)
+        .or_default()
+        .clone();
+    slot.get_or_init(|| async {
+        session_for(global, env, &ctx, chosen.as_ref())
+            .await
+            .map(Arc::new)
+            .map_err(Refusal::from)
+    })
+    .await
+    .clone()
+    .map_err(Error::from)
+}
+
 /// The profile a run uses: `--profile` or `IOHR_PROFILE`; none when `IOHR_TOKEN` is set
 /// without one; otherwise the default profile, if any.
 pub(crate) fn run_profile(global: &Global, env: &Env, ctx: &Ctx) -> Option<ProfileName> {
@@ -424,7 +526,7 @@ pub(crate) async fn session_for(
     session_in(global, env, ctx, name, false).await
 }
 
-/// `quiet`: the OS store is read through a [`QuietStore`] ([`Ctx::quiet_store`]).
+/// `quiet`: the OS store is read through a [`QuietStore`] ([`Prompts::Never`]).
 async fn session_in(
     global: &Global,
     env: &Env,
@@ -473,11 +575,14 @@ async fn session_in(
         ))
     })?;
     let key = EntryKey::new(name.clone(), &profile.account)?;
-    let store = if quiet {
-        ctx.quiet_store(profile.storage)?
-    } else {
-        ctx.store(profile.storage)?
-    };
+    let store = ctx.store(
+        profile.storage,
+        if quiet {
+            Prompts::Never
+        } else {
+            Prompts::Allowed
+        },
+    )?;
     let (credential, claims) = match profile.kind {
         Kind::Token => {
             let secret: Option<Redacted<String>> = blocking(store, move |s| s.get(&key)).await?;
@@ -576,4 +681,85 @@ pub(crate) fn account(session: &Session, flag: Option<String>) -> Result<String,
         ));
     }
     Ok(a)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "tests")]
+
+    use base64::Engine as _;
+    use clap::Parser as _;
+    use iohr_auth::{Config, EntryKey, FileStore, Kind, Profile, Redacted, Storage, Store as _};
+
+    use super::{OPENED, shared_session};
+    use crate::Env;
+    use crate::cli::Cli;
+    use crate::error::Error;
+
+    /// A config directory with the profile `work` holding an API token in the file store,
+    /// when `token` is true; the global flags that point at it.
+    fn machine(token: bool) -> (tempfile::TempDir, crate::cli::Global) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        let name: iohr_auth::ProfileName = "work".parse().unwrap();
+        config.profiles.insert(
+            name.clone(),
+            Profile::new(Kind::Token, "acc_1", Storage::File),
+        );
+        config.default = Some(name.clone());
+        config.save(dir.path()).unwrap();
+        if token {
+            let b64 = |v: serde_json::Value| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v.to_string())
+            };
+            let jwt = format!(
+                "{}.{}.sig",
+                b64(serde_json::json!({"alg": "none"})),
+                b64(serde_json::json!({"sub": "ak_x", "aud": ["iohr-api"], "org": "acc_1"}))
+            );
+            let key = EntryKey::new(name, "acc_1").unwrap();
+            FileStore::new(dir.path().join("secrets"))
+                .set(&key, &Redacted::new(jwt))
+                .unwrap();
+        }
+        let cli = Cli::try_parse_from([
+            "iohr",
+            "--config-dir",
+            dir.path().to_str().unwrap(),
+            "whoami",
+        ])
+        .unwrap();
+        (dir, cli.global)
+    }
+
+    fn opened() -> usize {
+        OPENED.with(std::cell::Cell::get)
+    }
+
+    /// Project init asks for the session six times; the credential store must be opened
+    /// (on a Mac: the Keychain read) once, whatever the number of asks.
+    #[tokio::test]
+    async fn one_credential_session_serves_every_ask_in_a_run() {
+        let (_dir, g) = machine(true);
+        let env = Env::default();
+        let before = opened();
+        for _ in 0..3 {
+            let s = shared_session(&g, &env).await.unwrap();
+            assert_eq!(s.label, "work");
+        }
+        assert_eq!(opened() - before, 1, "the store was opened again");
+    }
+
+    /// A refusal is remembered too: a denied Keychain read is not asked again.
+    #[tokio::test]
+    async fn a_refused_session_is_remembered_and_keeps_its_kind() {
+        let (_dir, g) = machine(false);
+        let env = Env::default();
+        let before = opened();
+        for _ in 0..3 {
+            let e = shared_session(&g, &env).await.err().unwrap();
+            assert!(matches!(e, Error::NotSignedIn(_)), "{e:?}");
+        }
+        assert_eq!(opened() - before, 1, "the store was opened again");
+    }
 }
