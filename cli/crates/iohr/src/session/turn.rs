@@ -175,6 +175,23 @@ pub(crate) fn run(
     }
 }
 
+/// After a Role's turn: its handoff note in the project the turn ran in (RFC 0213, S2), so
+/// its next turn starts from it. A note that cannot be written is said once on stderr and
+/// never fails the turn: the answer is already in the queue's reply.
+pub(crate) fn keep_notes(host_project: &Path, task: &Task, role: &str, stored_reply: &str) {
+    let Ok(payload) = Payload::parse(&task.payload) else {
+        return;
+    };
+    let Ok(reply) = serde_json::from_str::<Reply>(stored_reply) else {
+        return;
+    };
+    let root = crate::memory::find_root(Path::new(&payload.cwd))
+        .unwrap_or_else(|| host_project.to_path_buf());
+    if let Err(e) = crate::roles::notes::record(&root, role, &payload.question, &reply.text) {
+        crate::output::Out::note(&format!("iohr: no handoff note for Role {role}: {e}"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +252,26 @@ mod tests {
             payload: payload.into(),
             attempts: 1,
         }
+    }
+
+    #[test]
+    fn a_finished_turn_leaves_the_roles_handoff_in_the_folder_it_ran_in() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join(".git")).unwrap();
+        let cwd = d.path().to_string_lossy().into_owned();
+        let payload = serde_json::to_string(&Payload::new("a1", "why does it fail?", &cwd)).unwrap();
+        let reply = Reply {
+            text: "The lock is held.".into(),
+            model: "m".into(),
+            duration_ms: 5,
+        };
+        keep_notes(Path::new("/nowhere"), &task(&payload), "r", &reply.stored());
+        let note = crate::roles::notes::read(d.path(), "r");
+        assert!(note.contains("why does it fail?") && note.contains("The lock is held."), "{note}");
+        // A reply that is not a reply, or a Role name that is not safe, leaves nothing.
+        keep_notes(Path::new("/nowhere"), &task(&payload), "r", "not json");
+        keep_notes(Path::new("/nowhere"), &task(&payload), "../x", &reply.stored());
+        assert_eq!(std::fs::read_dir(d.path().join(".inorbit/handoff")).unwrap().count(), 1);
     }
 
     fn script(dir: &Path, body: &str) -> std::path::PathBuf {

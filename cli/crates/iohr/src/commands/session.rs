@@ -133,7 +133,13 @@ mod unix {
             let (stop, told) = (stop.clone(), told.clone());
             std::thread::spawn(move || {
                 // A Role's turn is `iohr ask --role` as a child of this host (RFC 0213, S2).
-                let turn = |task: &Task, role: &str| turn::run(&exe, &globals, task, role, &stop);
+                let turn = |task: &Task, role: &str| {
+                    let result = turn::run(&exe, &globals, task, role, &stop);
+                    if let Ok(reply) = &result {
+                        turn::keep_notes(&project, task, role, reply);
+                    }
+                    result
+                };
                 let result = host::serve(
                     &paths,
                     &roles,
