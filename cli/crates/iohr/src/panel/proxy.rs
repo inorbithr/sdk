@@ -31,7 +31,8 @@ use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::cells::{self, Rect};
+use super::cells::{self, Floating, Hit, Rect};
+use super::input::{Input, MOUSE_OFF, MOUSE_ON, Mouse, MouseMode, OpenKey, Reader};
 use super::model::{Ask, Effect, Key, Model, Source, View};
 use super::screen::{Boundary, Screen};
 use super::workloads::{self, Snapshot};
@@ -54,6 +55,11 @@ const SAVE: &[u8] = b"\x1b7";
 const RESTORE: &[u8] = b"\x1b8";
 const SYNC_ON: &[u8] = b"\x1b[?2026h";
 const SYNC_OFF: &[u8] = b"\x1b[?2026l";
+
+/// What `iohr stop` run inside the panel writes to the terminal to end the panel: an operating
+/// system command no terminal shows, which the proxy takes out of the shell's output (the shell
+/// and the proxy share no process, so a signal would need a pid the shell does not have).
+pub(super) const STOP_SEQ: &[u8] = b"\x1b]7771;iohr-panel-stop\x07";
 
 /// What to run and what to show.
 pub(super) struct Config {
@@ -140,6 +146,9 @@ impl RawMode {
 
 impl Drop for RawMode {
     fn drop(&mut self) {
+        // Whatever ended the proxy (an error, a panic), the terminal is not left reporting the
+        // mouse to a shell that never asked for it.
+        write_terminal(MOUSE_OFF);
         let _ =
             rustix::termios::tcsetattr(rustix::stdio::stdin(), OptionalActions::Drain, &self.saved);
     }
@@ -239,9 +248,71 @@ struct Proxy {
     dirty: bool,
     /// The panel was stopped from the menu: the shell goes on without it.
     stopped: bool,
+    /// When the panel asks the terminal for mouse reports.
+    mouse: MouseMode,
+    /// The terminal reports the mouse to the panel now.
+    mouse_on: bool,
 }
 
 impl Proxy {
+    fn new(model: Model, rows: usize, cols: usize, look: Look, mouse: MouseMode) -> Self {
+        Self {
+            model,
+            screen: Screen::new(rows, cols),
+            boundary: Boundary::new(),
+            look,
+            rows,
+            cols,
+            on_screen: None,
+            dirty: false,
+            stopped: false,
+            mouse,
+            mouse_on: false,
+        }
+    }
+
+    /// Where the panel is now: one place for the painting and for the hit-test.
+    fn layout(&self) -> Option<Floating> {
+        let width = self.model.width().min(self.cols.saturating_sub(2));
+        cells::place(&self.model.spec(width), self.cols)
+    }
+
+    /// Where a mouse report landed relative to the panel's box.
+    fn hit(&self, col: usize, row: usize) -> Hit {
+        self.layout().map_or(Hit::Outside, |f| f.rect.hit(col, row))
+    }
+
+    /// Whether the panel wants mouse reports now: while a view is open (always, unless off), and
+    /// at rest only when `always` is set and the program has no mouse mode of its own; never
+    /// once the panel is lifted or a program is on the alternate screen.
+    fn wants_mouse(&self) -> bool {
+        if self.stopped || self.screen.alt() {
+            return false;
+        }
+        match self.mouse {
+            MouseMode::Off => false,
+            MouseMode::Menu => self.model.open(),
+            MouseMode::Always => self.model.open() || !self.screen.uses_mouse(),
+        }
+    }
+
+    /// The bytes that bring the terminal's mouse reports in line with [`Self::wants_mouse`]:
+    /// on, or off with the program's own mode put back. Only between escape sequences.
+    fn mouse_sync(&mut self) -> Vec<u8> {
+        let want = self.wants_mouse();
+        if want == self.mouse_on || !self.boundary.clean() {
+            return Vec::new();
+        }
+        self.mouse_on = want;
+        if want {
+            MOUSE_ON.to_vec()
+        } else {
+            let mut out = MOUSE_OFF.to_vec();
+            out.extend(self.screen.own_mouse());
+            out
+        }
+    }
+
     fn can_paint(&self) -> bool {
         self.boundary.clean() && !self.screen.alt()
     }
@@ -271,8 +342,7 @@ impl Proxy {
         if self.stopped {
             return self.lift();
         }
-        let width = self.model.width().min(self.cols.saturating_sub(2));
-        let placed = cells::place(&self.model.spec(width), self.cols);
+        let placed = self.layout();
         let new_rect = placed
             .as_ref()
             .map(|f| f.rect.with_shadow(self.rows, self.cols));
@@ -301,14 +371,30 @@ impl Proxy {
         self.boundary.feed(chunk);
         self.screen.feed(chunk);
         out.extend(self.sync());
+        out.extend(self.mouse_sync());
         out.extend_from_slice(SYNC_OFF);
         out
+    }
+
+    /// One chunk of the shell's output, with the stop sequence (`iohr stop` run inside the panel)
+    /// taken out: the panel is lifted and the shell goes on.
+    fn shell_output(&mut self, chunk: &[u8]) -> Vec<u8> {
+        match find(chunk, STOP_SEQ) {
+            Some(at) => {
+                self.stopped = true;
+                let mut whole = chunk[..at].to_vec();
+                whole.extend_from_slice(&chunk[at + STOP_SEQ.len()..]);
+                self.child_output(&whole)
+            }
+            None => self.child_output(chunk),
+        }
     }
 
     /// A change of the panel with no output from the shell.
     fn redraw(&mut self) -> Vec<u8> {
         let mut out = SYNC_ON.to_vec();
         out.extend(self.sync());
+        out.extend(self.mouse_sync());
         out.extend_from_slice(SYNC_OFF);
         out
     }
@@ -322,6 +408,10 @@ impl Proxy {
         self.on_screen = None;
         self.redraw()
     }
+}
+
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
 }
 
 fn write_terminal(bytes: &[u8]) {
@@ -392,6 +482,8 @@ fn launch(command: &[String], rows: usize, cols: usize) -> Result<Shell, Error> 
 struct Session {
     proxy: Proxy,
     master: File,
+    /// The person's input, with a report a read ended in the middle of held for the next.
+    reader: Reader,
     stub: bool,
     g: Global,
     env: Env,
@@ -580,24 +672,62 @@ impl Session {
         }
     }
 
-    /// Keys from the person: the panel's while it is open (or for its own key), else the shell's.
+    /// Input from the person: the panel's while it is open (keys and mouse reports), or for
+    /// its own key, else the shell's. A mouse report goes to the panel or to a program that
+    /// asked for the mouse itself, never to a shell that did not.
     fn user_input(&mut self, bytes: &[u8]) {
         let panel_keys = !self.proxy.stopped && !self.proxy.screen.alt();
-        let effects: Vec<Effect> = if panel_keys && self.proxy.model.open() {
-            input::parse(bytes)
-                .into_iter()
-                .map(|k| self.proxy.model.key(k))
-                .collect()
-        } else if panel_keys && input::is_menu_key(bytes) {
-            vec![self.proxy.model.key(Key::Menu)]
+        let report = input::is_mouse_report(bytes);
+        let routed = panel_keys
+            && (self.proxy.model.open()
+                || self.reader.pending()
+                || (self.proxy.mouse_on && report));
+        let inputs = if routed {
+            self.reader.feed(bytes)
+        } else if panel_keys && self.proxy.model.open_key().is(bytes) {
+            vec![Input::Key(Key::Menu)]
         } else {
-            let _ = self.master.write_all(bytes);
+            if !report || self.proxy.screen.uses_mouse() {
+                let _ = self.master.write_all(bytes);
+            }
             return;
         };
-        for effect in effects {
+        for input in inputs {
+            let effect = match input {
+                Input::Key(k) => self.proxy.model.key(k),
+                Input::Mouse(m) => self.mouse(m),
+            };
             self.apply(effect);
         }
         write_terminal(&self.proxy.redraw());
+    }
+
+    /// A mouse report for the panel. Closed (at rest, `always`): a press on the pill opens the
+    /// menu. Open: a press on a row selects and opens it, a press outside closes the menu, the
+    /// wheel over the box moves the selection.
+    fn mouse(&mut self, m: Mouse) -> Effect {
+        match m {
+            Mouse::Press { col, row } => {
+                match (self.proxy.model.open(), self.proxy.hit(col, row)) {
+                    (false, Hit::Outside) | (true, Hit::Frame) => Effect::None,
+                    (false, _) | (true, Hit::Outside) => self.proxy.model.key(Key::Menu),
+                    (true, Hit::Line(line)) => self.proxy.model.click(line),
+                }
+            }
+            Mouse::WheelUp { col, row } | Mouse::WheelDown { col, row } => {
+                let key = if matches!(m, Mouse::WheelUp { .. }) {
+                    Key::Up
+                } else {
+                    Key::Down
+                };
+                if self.proxy.model.open() && self.proxy.hit(col, row) != Hit::Outside {
+                    self.proxy.model.key(key)
+                } else {
+                    Effect::None
+                }
+            }
+            Mouse::Release { .. } => Effect::None,
+        }
     }
 
     fn asks_done(&mut self, result: Result<Vec<PanelAsk>, Error>) {
@@ -672,6 +802,33 @@ fn initial_model(config: &Config) -> Model {
     model
 }
 
+/// What the panel reads from the person's setup: its mouse mode and the key that opens it.
+struct Settings {
+    mouse: MouseMode,
+    open_key: OpenKey,
+}
+
+impl Settings {
+    /// `[panel] mouse` (or `IOHR_PANEL_MOUSE`), `[ask] menu_key`, and `$TERM_PROGRAM`. A config
+    /// that cannot be read is the defaults.
+    fn read(g: &Global) -> Self {
+        let config = crate::context::Ctx::load(g).ok().map(|c| c.config);
+        let mouse = std::env::var("IOHR_PANEL_MOUSE")
+            .ok()
+            .or_else(|| config.as_ref().and_then(|c| c.panel.mouse.clone()));
+        let ask_ctrl_g = config.as_ref().is_some_and(|c| {
+            matches!(
+                crate::actions::MenuKey::parse(c.ask.menu_key.as_deref()),
+                Ok(crate::actions::MenuKey::CtrlG)
+            )
+        });
+        Self {
+            mouse: MouseMode::parse(mouse.as_deref()),
+            open_key: OpenKey::here(ask_ctrl_g),
+        }
+    }
+}
+
 /// Runs `config.command` under the panel until it exits; its exit code is ours.
 /// Whether the panel can be drawn here: a terminal on both ends, colour allowed, no `--json`.
 /// Bare `iohr` uses the same test to decide between entering the session and the usage report.
@@ -689,6 +846,35 @@ pub(super) fn fancy(g: &Global) -> bool {
 /// Whether this process already runs inside a panel.
 pub(super) fn inside() -> bool {
     std::env::var_os(INSIDE).is_some()
+}
+
+/// What bare `iohr` says inside a running panel, instead of an error: the session is already
+/// here, and which key opens the menu. `None` outside a panel.
+pub(super) fn bare_inside_message(g: &Global) -> Option<String> {
+    inside().then(|| already_in(Settings::read(g).open_key))
+}
+
+fn already_in(key: OpenKey) -> String {
+    format!(
+        "already in the iohr session; {} opens the menu",
+        key.label()
+    )
+}
+
+/// Tells the panel proxy around this process to end, so `iohr stop` inside it closes the panel
+/// with the session host. The proxy reads the sequence from the shell's output and lifts the
+/// panel (restoring its terminal modes). Returns whether it was sent: only inside a panel, and
+/// only when there is a terminal to send it to.
+pub(super) fn end_from_inside() -> bool {
+    use std::io::Write as _;
+    if !inside() {
+        return false;
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .and_then(|mut tty| tty.write_all(STOP_SEQ).and_then(|()| tty.flush()))
+        .is_ok()
 }
 
 /// Runs the shell (or the command) under the panel. `Ok(true)` means the session host stopped
@@ -719,19 +905,13 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
     let mut winch = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())
         .map_err(|e| io_err("cannot watch the window size", e))?;
 
+    let settings = Settings::read(g);
+    let mut model = initial_model(&config);
+    model.set_open_key(settings.open_key);
     let mut session = Session {
-        proxy: Proxy {
-            model: initial_model(&config),
-            screen: Screen::new(rows, cols),
-            boundary: Boundary::new(),
-            look: Look::detect(true),
-            rows,
-            cols,
-            on_screen: None,
-            dirty: false,
-            stopped: false,
-        },
+        proxy: Proxy::new(model, rows, cols, Look::detect(true), settings.mouse),
         master,
+        reader: Reader::default(),
         stub: config.stub,
         g: g.clone(),
         env,
@@ -755,7 +935,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
     loop {
         tokio::select! {
             chunk = from_child.recv() => match chunk {
-                Some(bytes) => write_terminal(&session.proxy.child_output(&bytes)),
+                Some(bytes) => write_terminal(&session.proxy.shell_output(&bytes)),
                 None => break,
             },
             bytes = from_user.recv(), if user_open => match bytes {
@@ -784,9 +964,12 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         }
     }
 
-    // Leave the screen as the shell had it, without the panel.
+    // Leave the screen as the shell had it, without the panel and with the mouse reports off.
     session.proxy.stopped = true;
     write_terminal(&session.proxy.redraw());
+    if session.proxy.mouse_on {
+        write_terminal(MOUSE_OFF);
+    }
     let host_stopped = session.host_stopped;
     match exit {
         Some(r) => r,
@@ -885,4 +1068,156 @@ fn deny(g: Global, env: Env, id: String) -> Fetch<(String, Result<(), Error>)> {
         };
         (id, r)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proxy(mouse: MouseMode) -> Proxy {
+        let look = Look {
+            fancy: true,
+            truecolor: true,
+        };
+        Proxy::new(Model::new(true), 24, 100, look, mouse)
+    }
+
+    fn has(bytes: &[u8], needle: &[u8]) -> bool {
+        find(bytes, needle).is_some()
+    }
+
+    #[test]
+    fn mouse_reports_are_on_only_while_a_view_is_open() {
+        let mut p = proxy(MouseMode::Menu);
+        assert!(!has(&p.redraw(), MOUSE_ON), "off at rest");
+        assert!(!p.mouse_on);
+
+        p.model.key(Key::Menu);
+        let opened = p.redraw();
+        assert!(has(&opened, MOUSE_ON), "on when the menu opens");
+        assert!(!has(&opened, b"?1002"), "never the drag reports");
+        assert!(p.mouse_on);
+        assert!(
+            !has(&p.redraw(), MOUSE_ON),
+            "turned on once, not at every redraw"
+        );
+
+        p.model.key(Key::Menu);
+        let closed = p.redraw();
+        assert!(has(&closed, MOUSE_OFF), "off again when the menu closes");
+        assert!(!p.mouse_on);
+    }
+
+    #[test]
+    fn the_mouse_is_off_for_a_program_on_the_alternate_screen_and_when_the_panel_stops() {
+        let mut p = proxy(MouseMode::Menu);
+        p.model.key(Key::Menu);
+        p.redraw();
+        assert!(p.mouse_on);
+
+        let alt = p.child_output(b"\x1b[?1049h");
+        assert!(
+            has(&alt, MOUSE_OFF),
+            "the program on the alternate screen owns the mouse"
+        );
+        assert!(!p.mouse_on);
+        let back = p.child_output(b"\x1b[?1049l");
+        assert!(
+            has(&back, MOUSE_ON),
+            "and the panel has it again when the program leaves"
+        );
+
+        let out = p.shell_output(b"a\x1b]7771;iohr-panel-stop\x07b");
+        assert!(p.stopped, "`iohr stop` inside the panel lifts the panel");
+        assert!(
+            !has(&out, STOP_SEQ),
+            "the sequence never reaches the terminal"
+        );
+        assert!(has(&out, MOUSE_OFF), "and the mouse reports end with it");
+        assert!(has(&out, b"ab") || (has(&out, b"a") && has(&out, b"b")));
+        assert!(!p.mouse_on);
+    }
+
+    #[test]
+    fn a_program_s_own_mouse_mode_is_put_back_when_the_panel_gives_the_mouse_up() {
+        let mut p = proxy(MouseMode::Menu);
+        p.child_output(b"\x1b[?1000h\x1b[?1006h");
+        p.model.key(Key::Menu);
+        assert!(has(&p.redraw(), MOUSE_ON));
+        p.model.key(Key::Menu);
+        let closed = p.redraw();
+        assert!(has(&closed, MOUSE_OFF));
+        assert!(
+            has(&closed, b"\x1b[?1000h\x1b[?1006h"),
+            "the program's reports come back"
+        );
+    }
+
+    #[test]
+    fn at_rest_the_mouse_follows_the_setting() {
+        let mut off = proxy(MouseMode::Off);
+        off.model.key(Key::Menu);
+        assert!(!has(&off.redraw(), MOUSE_ON), "never with off");
+
+        let mut always = proxy(MouseMode::Always);
+        assert!(has(&always.redraw(), MOUSE_ON), "on at rest with always");
+        let own = always.child_output(b"\x1b[?1000h");
+        assert!(
+            has(&own, MOUSE_OFF),
+            "but not over a program that asked for the mouse itself"
+        );
+    }
+
+    #[test]
+    fn the_mouse_is_not_switched_inside_an_escape_sequence() {
+        let mut p = proxy(MouseMode::Menu);
+        p.model.key(Key::Menu);
+        let cut = p.child_output(b"\x1b[3");
+        assert!(!has(&cut, MOUSE_ON), "the chunk ends inside a sequence");
+        let whole = p.child_output(b"1mx");
+        assert!(has(&whole, MOUSE_ON), "so it comes with the next one");
+    }
+
+    #[test]
+    fn a_click_lands_on_the_row_the_box_paints_there() {
+        let mut p = proxy(MouseMode::Menu);
+        p.model.key(Key::Menu);
+        let f = p.layout().expect("fits");
+        let (top, left, width) = (f.rect.top, f.rect.left, f.rect.width);
+        // Body line `i` is painted on row `top + 1 + i`; its text is in the cells of that row.
+        for (i, name) in ["Auto mode", "Approvals", "Workloads"].iter().enumerate() {
+            let row: String = f.cells[1 + i].iter().map(|c| c.ch).collect();
+            assert!(row.contains(name), "row {i} of the box is {name}: {row}");
+            assert_eq!(p.hit(left + 3, top + 1 + i), Hit::Line(i));
+        }
+        assert_eq!(p.hit(left, top + 1), Hit::Frame, "the side border");
+        assert_eq!(p.hit(left + width - 1, top + 1), Hit::Frame);
+        assert_eq!(p.hit(left + 3, top), Hit::Frame, "the title row");
+        assert_eq!(p.hit(left.saturating_sub(1), top + 1), Hit::Outside);
+        assert_eq!(p.hit(left + 3, top + f.rect.height), Hit::Outside);
+
+        // A click on a body line is the same as Enter on it.
+        let mut by_key = proxy(MouseMode::Menu);
+        by_key.model.key(Key::Menu);
+        by_key.model.key(Key::Down);
+        by_key.model.key(Key::Enter);
+        p.model.click(1);
+        assert_eq!(p.model.view, by_key.model.view);
+    }
+
+    #[test]
+    fn bare_inside_says_it_is_already_in_the_session_and_names_the_key() {
+        let msg = already_in(OpenKey::detect(Some("Apple_Terminal"), false));
+        assert_eq!(msg, "already in the iohr session; ^G opens the menu");
+        let msg = already_in(OpenKey::detect(Some("xterm"), false));
+        assert!(msg.contains("⌥i"), "{msg}");
+    }
+
+    #[test]
+    fn the_pill_is_where_a_click_at_rest_lands() {
+        let p = proxy(MouseMode::Always);
+        let f = p.layout().expect("fits");
+        assert_eq!(p.hit(f.rect.left + 3, f.rect.top + 1), Hit::Line(0));
+        assert_eq!(p.hit(0, 10), Hit::Outside);
+    }
 }

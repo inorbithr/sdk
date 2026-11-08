@@ -349,19 +349,31 @@ mod unix {
             Stopped::Gone(p) => ("stopped", Some(p)),
             Stopped::Stopping(p) => ("stopping", Some(p)),
         };
+        // Inside the panel the panel goes with the host: it lifts and leaves the terminal's modes
+        // as the shell had them. With no host running, that is still what was stopped.
+        let panel_closed = crate::panel::end_from_inside();
         if out.json {
             Out::print_json(&serde_json::json!({
                 "project": project,
                 "state": state,
                 "host_pid": pid,
+                "panel_closed": panel_closed,
             }));
         }
-        Out::note(&match stopped {
+        let line = match stopped {
+            Stopped::NotRunning if panel_closed => {
+                "the panel is closed; no session host ran".into()
+            }
             Stopped::NotRunning => format!("no session host runs for {}", project.display()),
             Stopped::Gone(p) => format!("session host {p} stopped"),
             Stopped::Stopping(p) => {
                 format!("session host {p} is stopping: each Role finishes the task it holds first")
             }
+        };
+        Out::note(&if panel_closed && pid.is_some() {
+            format!("{line}; the panel is closed")
+        } else {
+            line
         });
         Ok(())
     }

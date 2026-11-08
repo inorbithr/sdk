@@ -22,6 +22,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use super::cells::{ACC, AMBER, BoxSpec, FAINT, KEY, Line, MUTE, Span, TXT, bold, one_wide, sp};
+use super::input::OpenKey;
 use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
 use crate::commands::asks::{PanelAsk, PanelAuto};
@@ -98,7 +99,7 @@ pub(super) enum Key {
     Right,
     Char(char),
     Backspace,
-    /// The panel's key, Option+i.
+    /// The panel's key (see `OpenKey`), or a click that opens or closes the menu.
     Menu,
 }
 
@@ -182,6 +183,8 @@ pub(super) struct Model {
     /// The workload shown in place (`View::Workload`), by id.
     opened: Option<String>,
     act_sel: usize,
+    /// What opens the panel's menu in this terminal.
+    open_key: OpenKey,
 }
 
 impl Model {
@@ -204,7 +207,18 @@ impl Model {
             work_sel: 0,
             opened: None,
             act_sel: 0,
+            open_key: OpenKey::default(),
         }
+    }
+
+    /// Sets what opens the menu here, as the pill and the help name it.
+    pub(super) fn set_open_key(&mut self, key: OpenKey) {
+        self.open_key = key;
+    }
+
+    /// What opens the menu here.
+    pub(super) fn open_key(&self) -> OpenKey {
+        self.open_key
     }
 
     /// Whether the panel is taking the keys.
@@ -300,6 +314,56 @@ impl Model {
                 Effect::None
             }
         }
+    }
+
+    /// A click on body line `line` of the open panel (zero is the first row under the title):
+    /// on a row of the menu, the approvals or the workloads it selects the row and opens it,
+    /// as Enter does. Anywhere else in the box it does nothing.
+    pub(super) fn click(&mut self, line: usize) -> Effect {
+        if self.typing() || self.confirm.is_some() || self.stop_confirm.is_some() {
+            return Effect::None;
+        }
+        match self.view {
+            View::Menu if line < MENU.len() => {
+                self.menu_sel = line;
+                self.choose(line)
+            }
+            View::Approvals => match self.ask_at(line) {
+                Some(i) => {
+                    self.ask_sel = i;
+                    self.approvals_key(Key::Enter)
+                }
+                None => Effect::None,
+            },
+            View::Workloads => {
+                let start = self.work_sel.saturating_sub(VISIBLE - 1);
+                let shown = self.work_rows.len().saturating_sub(start).min(VISIBLE);
+                if line < shown {
+                    self.work_sel = start + line;
+                    self.work_key(Key::Enter)
+                } else {
+                    Effect::None
+                }
+            }
+            _ => Effect::None,
+        }
+    }
+
+    /// The ask on body line `line` of the approvals view: the rows above the selected ask, the
+    /// selected one with its detail lines under it, then the rows below.
+    fn ask_at(&self, line: usize) -> Option<usize> {
+        let list = self.list();
+        let start = self.ask_sel.saturating_sub(VISIBLE - 1);
+        let at = self.ask_sel - start;
+        let detail = list.get(self.ask_sel).map_or(0, |a| self.expanded(a).len());
+        let i = if line <= at {
+            start + line
+        } else if line <= at + detail {
+            return None;
+        } else {
+            self.ask_sel + (line - at - detail)
+        };
+        (i < list.len() && i < start + VISIBLE).then_some(i)
     }
 
     fn menu_key(&mut self, key: Key) -> Effect {
@@ -400,7 +464,16 @@ impl Model {
     /// The width the current view wants.
     pub(super) fn width(&self) -> usize {
         match self.view {
-            View::Rest => 44,
+            // The pill grows past the usual 44 when a longer state ("asks unavailable") needs it.
+            View::Rest => {
+                let pill: usize = self
+                    .pill()
+                    .spans
+                    .iter()
+                    .map(|s| console::measure_text_width(&s.text))
+                    .sum();
+                (pill + 4).max(44)
+            }
             View::Approvals => 50,
             View::Workloads => 60,
             View::Workload | View::Reader => 72,
@@ -425,7 +498,7 @@ impl Model {
             View::Reader => self.reader(),
             View::Run => Self::coming("Run", "run a command with an agent from here"),
             View::Status => Self::coming("Status", "platform and agent status"),
-            View::Help => Self::help(),
+            View::Help => Self::help(self.open_key),
         };
         title.extend(title_more);
         BoxSpec {
@@ -450,7 +523,11 @@ impl Model {
         let mut spans = self.mode_spans();
         spans.push(sp("   ", TXT));
         spans.extend(self.waiting_spans());
-        spans.extend([sp("   ", TXT), sp("⌥i", KEY), sp(" menu", MUTE)]);
+        spans.extend([
+            sp("   ", TXT),
+            sp(self.open_key.label(), KEY),
+            sp(" menu", MUTE),
+        ]);
         Line {
             spans,
             selected: false,
@@ -604,13 +681,13 @@ impl Model {
         )
     }
 
-    fn help() -> Parts {
+    fn help(open_key: OpenKey) -> Parts {
         let row = |k: &str, t: &str| Line {
             spans: vec![sp(k, KEY), sp(&format!("  {t}"), MUTE)],
             selected: false,
         };
         let body = vec![
-            row("⌥i", "open or close this panel"),
+            row(open_key.label(), "open or close this panel"),
             row("↑↓ ⏎", "move and open"),
             row("esc", "back, then close"),
             row("a d q o", "phone-approve, deny, ask, read"),

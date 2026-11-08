@@ -121,6 +121,36 @@ impl Rect {
     }
 }
 
+/// Where a mouse report landed, relative to a box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Hit {
+    /// Not on the box.
+    Outside,
+    /// On its border (or its title row).
+    Frame,
+    /// On this line of its body (zero is the first row under the title); the footer line, when
+    /// there is one, counts after the body.
+    Line(usize),
+}
+
+impl Rect {
+    /// Where the cell (`col`, `row`) is on this box: its first row is the title border, its
+    /// last the bottom border, the columns at both ends are the side borders.
+    pub(super) fn hit(self, col: usize, row: usize) -> Hit {
+        let inside = (self.left..self.left + self.width).contains(&col)
+            && (self.top..self.top + self.height).contains(&row);
+        if !inside {
+            return Hit::Outside;
+        }
+        let (down, across) = (row - self.top, col - self.left);
+        if down == 0 || down + 1 == self.height || across == 0 || across + 1 == self.width {
+            Hit::Frame
+        } else {
+            Hit::Line(down - 1)
+        }
+    }
+}
+
 /// A laid out box at a place on the screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Floating {
