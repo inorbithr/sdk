@@ -44,7 +44,9 @@ pub(crate) enum Provider {
 /// `^sha256:[0-9a-f]{64}$`.
 pub(crate) fn is_digest(s: &str) -> bool {
     s.strip_prefix("sha256:").is_some_and(|h| {
-        h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        h.len() == 64
+            && h.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     })
 }
 
@@ -53,7 +55,7 @@ pub(crate) fn is_param_name(s: &str) -> bool {
     let mut b = s.bytes();
     b.next().is_some_and(|c| c.is_ascii_lowercase())
         && s.len() <= 32
-        && b.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && b.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
 }
 
 /// The provider `doc` names: `"builtin"`, or none (a v0 document), is the runner's own.
@@ -164,9 +166,7 @@ fn scalar_params(params: &Map<String, Value>) -> Result<(), String> {
         }
         let ok = match v {
             Value::String(s) => {
-                !s.is_empty()
-                    && s.chars().count() <= MAX_STRING
-                    && !s.chars().any(char::is_control)
+                !s.is_empty() && s.chars().count() <= MAX_STRING && !s.chars().any(char::is_control)
             }
             Value::Number(n) => n.as_u64().is_some_and(|n| n <= MAX_INTEGER),
             _ => false,

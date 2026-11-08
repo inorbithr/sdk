@@ -219,9 +219,7 @@ impl HostAction {
             ));
         }
         if !(1..=MAX_TIMEOUT_SECS).contains(&self.timeout_secs) {
-            return bad(format!(
-                "{at}: timeout_secs is 1 to {MAX_TIMEOUT_SECS}"
-            ));
+            return bad(format!("{at}: timeout_secs is 1 to {MAX_TIMEOUT_SECS}"));
         }
         let declared = pieces(&self.effect).is_some_and(|p| {
             p.iter().all(|piece| match piece {
@@ -254,7 +252,9 @@ impl HostAction {
             }
         }
         for (k, t) in &self.params {
-            let v = params.get(k).ok_or_else(|| format!("/params/{k}: required"))?;
+            let v = params
+                .get(k)
+                .ok_or_else(|| format!("/params/{k}: required"))?;
             if !t.holds(v) {
                 return Err(format!("/params/{k}: not {}", t.words()));
             }
@@ -369,8 +369,16 @@ mod tests {
         let t = |v: Value| -> ParamType { serde_json::from_value(v).unwrap() };
         let cases = [
             (t(json!({"type": "word"})), json!("ok-1"), json!("a b")),
-            (t(json!({"type": "rev"})), json!("a".repeat(40)), json!("HEAD")),
-            (t(json!({"type": "repo"})), json!("acme/app.git"), json!("../x")),
+            (
+                t(json!({"type": "rev"})),
+                json!("a".repeat(40)),
+                json!("HEAD"),
+            ),
+            (
+                t(json!({"type": "repo"})),
+                json!("acme/app.git"),
+                json!("../x"),
+            ),
             (
                 t(json!({"type": "enum", "values": ["dev", "prod:eu"]})),
                 json!("prod:eu"),
@@ -394,11 +402,15 @@ mod tests {
         assert!(refused(&|_| {}, "other").contains("`other.<action>`"));
         assert!(refused(&|a| a.id = "example".into(), "example").contains("`example.<action>`"));
         assert!(refused(&|a| a.os = vec![], "example").contains("os lists"));
-        assert!(refused(&|a| a.os = vec!["linux".into(), "linux".into()], "example")
-            .contains("os lists"));
+        assert!(
+            refused(&|a| a.os = vec!["linux".into(), "linux".into()], "example")
+                .contains("os lists")
+        );
         assert!(refused(&|a| a.timeout_secs = 0, "example").contains("timeout_secs"));
-        assert!(refused(&|a| a.effect = "Restarts {nobody}.".into(), "example")
-            .contains("declared parameter"));
+        assert!(
+            refused(&|a| a.effect = "Restarts {nobody}.".into(), "example")
+                .contains("declared parameter")
+        );
         assert!(refused(&|a| a.effect = "Two\nlines".into(), "example").contains("one line"));
         assert!(refused(&|a| a.effect = "Stray } brace".into(), "example").contains("effect"));
         assert!(
@@ -420,8 +432,19 @@ mod tests {
             id: "docker.prune-images".into(),
             ..restart()
         };
-        assert!(builtin.check("docker").unwrap_err().0.contains("runner's own"));
+        assert!(
+            builtin
+                .check("docker")
+                .unwrap_err()
+                .0
+                .contains("runner's own")
+        );
         let twice = [restart(), restart()];
-        assert!(check_all(&twice, "example").unwrap_err().0.contains("twice"));
+        assert!(
+            check_all(&twice, "example")
+                .unwrap_err()
+                .0
+                .contains("twice")
+        );
     }
 }
