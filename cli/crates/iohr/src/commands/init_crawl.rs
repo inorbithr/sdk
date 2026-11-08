@@ -28,6 +28,8 @@ use crate::output::Out;
 use crate::project::{self, Step};
 use crate::ui::{Choice, Ui};
 
+mod progress;
+
 /// The extension that holds the crawler.
 const EXTENSION: &str = "agent";
 /// Where a crawl keeps its files, under the project.
@@ -35,6 +37,10 @@ const DIR: &str = ".inorbit/crawl";
 /// The hard caps of the crawler (`iohr-agent atlas crawl --help`); init never asks for more.
 const MAX_PAGES: u32 = 20_000;
 const MAX_MINUTES: u32 = 240;
+/// The crawler's own bounds for `--rate`, requests a second per host (RFC 0163); init never
+/// asks for more. The default lives on `--crawl-rate`.
+const MIN_RATE: u32 = 1;
+const MAX_RATE: u32 = 50;
 /// Init's other budgets, smaller than the crawler's own defaults (PRD 0190.1 sets pages and
 /// minutes; these three are init's own choice).
 const HOSTS: u32 = 10;
@@ -51,6 +57,8 @@ pub(crate) struct Plan {
     pub name: String,
     pub pages: u32,
     pub minutes: u32,
+    /// The most requests a second to one host (`--crawl-rate`).
+    pub rate: u32,
     /// `--crawl-subdomains`: follow every subdomain without asking.
     pub subdomains: bool,
 }
@@ -59,10 +67,11 @@ impl Plan {
     /// What a dry run says it would do.
     pub(crate) fn would(&self) -> String {
         format!(
-            "read {} on this machine with iohr-agent (up to {} pages or {} minutes; {}) into {DIR}/{}/, then write atlas facts and one memory entry; nothing is sent to InOrbit",
+            "read {} on this machine with iohr-agent (up to {} pages or {} minutes, at most {} a second; {}) into {DIR}/{}/, then write atlas facts and one memory entry; nothing is sent to InOrbit",
             self.url.as_str(),
             self.pages,
             self.minutes,
+            self.rate,
             if self.subdomains {
                 "its subdomains too"
             } else {
@@ -87,9 +96,21 @@ pub(crate) fn consent(p: &Plan) -> String {
         " A link to another name in its domain is asked about, once per name, before it is followed; with no terminal none is followed (--crawl-subdomains follows them)."
     };
     format!(
-        "This reads the public pages of {scope} on this machine, with iohr-agent: at most one request a second, robots.txt followed, up to {} pages or {} minutes.{more} What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
-        p.pages, p.minutes, p.name
+        "This reads the public pages of {scope} on this machine, with iohr-agent: at most {} a second to one host (a slower Crawl-delay in robots.txt wins), robots.txt followed, up to {} pages or {} minutes.{more} What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
+        requests(p.rate),
+        p.pages,
+        p.minutes,
+        p.name
     )
+}
+
+/// "1 request" or "10 requests", for the consent.
+fn requests(n: u32) -> String {
+    if n == 1 {
+        "1 request".into()
+    } else {
+        format!("{n} requests")
+    }
 }
 
 /// A site address: http or https, a host, no sign-in in it.
@@ -191,6 +212,7 @@ pub(crate) fn decide(
         url,
         pages: args.crawl_pages.clamp(1, MAX_PAGES),
         minutes: args.crawl_minutes.clamp(1, MAX_MINUTES),
+        rate: args.crawl_rate.clamp(MIN_RATE, MAX_RATE),
         subdomains: args.crawl_subdomains,
     };
     if !out.json {
@@ -480,6 +502,7 @@ struct Budget {
     minutes: u32,
     hosts: u32,
     megabytes: u32,
+    rate: u32,
 }
 
 impl Budget {
@@ -490,6 +513,7 @@ impl Budget {
             minutes: p.minutes,
             hosts: HOSTS,
             megabytes: MEGABYTES,
+            rate: p.rate,
         }
     }
 
@@ -517,12 +541,20 @@ impl Budget {
             minutes: p.minutes.saturating_sub(minutes_used).max(1),
             hosts: HOSTS - hosts,
             megabytes: MEGABYTES.saturating_sub(mb_used).max(1),
+            rate: p.rate,
         })
     }
 }
 
-/// The arguments of one pass, as the agent extension reads them.
-fn crawler_args(start: &str, b: &Budget, policy: &Path, out: &Path) -> Vec<std::ffi::OsString> {
+/// The arguments of one pass, as the agent extension reads them. `paced` adds `--rate` and
+/// `--progress`, which an agent from before RFC 0163 refuses (see [`progress::is_old_agent`]).
+fn crawler_args(
+    start: &str,
+    b: &Budget,
+    policy: &Path,
+    out: &Path,
+    paced: bool,
+) -> Vec<std::ffi::OsString> {
     let mut a: Vec<std::ffi::OsString> =
         ["atlas", "crawl", start, "--policy"].map(Into::into).into();
     a.push(policy.into());
@@ -537,6 +569,11 @@ fn crawler_args(start: &str, b: &Budget, policy: &Path, out: &Path) -> Vec<std::
     ] {
         a.push(flag.into());
         a.push(value.to_string().into());
+    }
+    if paced {
+        a.push("--rate".into());
+        a.push(b.rate.to_string().into());
+        a.push("--progress".into());
     }
     a
 }
@@ -728,11 +765,16 @@ struct Ctx<'a> {
     ui: Ui,
     out: Out,
     root: &'a Path,
+    /// The agent refused `--rate` and `--progress`: it is from before RFC 0163, so the later
+    /// passes of this run go without them, straight to the spinner and the agent's own pace.
+    old_agent: std::sync::atomic::AtomicBool,
 }
 
 impl Ctx<'_> {
     /// One run of the crawler over `start` under `policy`, into `dir`: its folder with the
-    /// policy and the JSON it left. A crawl that fails leaves no result behind.
+    /// policy and the JSON it left. A crawl that fails leaves no result behind. At a terminal
+    /// the step is a spinner with a live count until the crawler knows how much there is, then
+    /// a bar.
     async fn pass(
         &self,
         (label, start, b): PassOf<'_>,
@@ -741,9 +783,23 @@ impl Ctx<'_> {
     ) -> Result<Crawl, String> {
         prepare_dir(self.root, dir, policy)?;
         let crawl_json = dir.join("crawl.json");
-        let sp =
+        let mut sp =
             (!self.out.json).then(|| self.ui.step(&format!("Reading {label} on this machine")));
-        let ran = self.run_agent(start, &b, dir, &crawl_json).await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<progress::Line>();
+        let ran = {
+            let run = self.run_agent(start, &b, dir, &crawl_json, tx);
+            tokio::pin!(run);
+            loop {
+                tokio::select! {
+                    r = &mut run => break r,
+                    Some(line) = rx.recv() => {
+                        if let Some(sp) = sp.as_mut() {
+                            sp.progress(line.done(), line.length(), &line.message(label));
+                        }
+                    }
+                }
+            }
+        };
         match (&ran, sp) {
             (Ok(_), Some(sp)) => sp.clear(),
             (Err(e), Some(sp)) => sp.fail(&format!("The crawl failed: {e}")),
@@ -752,31 +808,55 @@ impl Ctx<'_> {
         ran
     }
 
+    /// Starts the crawler once and waits for it, within the plan's minutes and a minute more.
+    /// Its progress lines go to `tx`.
+    async fn launch(
+        &self,
+        args: &[std::ffi::OsString],
+        minutes: u32,
+        tx: tokio::sync::mpsc::UnboundedSender<progress::Line>,
+    ) -> Result<crate::ext::run::Quiet, String> {
+        let store = super::ext::store(self.g).map_err(|e| e.to_string())?;
+        let limit = Duration::from_secs(u64::from(minutes) * 60 + 60);
+        let ran = tokio::time::timeout(
+            limit,
+            crate::ext::run::run_quiet(self.g, self.env, &store, EXTENSION, args, move |l| {
+                if let Some(p) = progress::parse(l) {
+                    let _ = tx.send(p);
+                }
+            }),
+        )
+        .await;
+        match ran {
+            Err(_) => Err(format!(
+                "the crawler did not finish in {} minutes and was stopped",
+                minutes + 1
+            )),
+            Ok(Err(e)) => Err(e.to_string()),
+            Ok(Ok(q)) => Ok(q),
+        }
+    }
+
     async fn run_agent(
         &self,
         start: &str,
         b: &Budget,
         dir: &Path,
         crawl_json: &Path,
+        tx: tokio::sync::mpsc::UnboundedSender<progress::Line>,
     ) -> Result<Crawl, String> {
-        let store = super::ext::store(self.g).map_err(|e| e.to_string())?;
-        let args = crawler_args(start, b, &dir.join("policy.toml"), crawl_json);
-        let limit = Duration::from_secs(u64::from(b.minutes) * 60 + 60);
-        let ran = tokio::time::timeout(
-            limit,
-            crate::ext::run::run_quiet(self.g, self.env, &store, EXTENSION, &args),
-        )
-        .await;
-        let quiet = match ran {
-            Err(_) => {
-                return Err(format!(
-                    "the crawler did not finish in {} minutes and was stopped",
-                    b.minutes + 1
-                ));
-            }
-            Ok(Err(e)) => return Err(e.to_string()),
-            Ok(Ok(q)) => q,
-        };
+        use std::sync::atomic::Ordering::Relaxed;
+        let policy = dir.join("policy.toml");
+        let paced = !self.old_agent.load(Relaxed);
+        let args = crawler_args(start, b, &policy, crawl_json, paced);
+        let mut quiet = self.launch(&args, b.minutes, tx.clone()).await?;
+        if paced && progress::is_old_agent(quiet.code, &quiet.stderr) {
+            // An agent from before RFC 0163 refuses the new flags before it does anything, so
+            // running it again without them repeats nothing.
+            self.old_agent.store(true, Relaxed);
+            let args = crawler_args(start, b, &policy, crawl_json, false);
+            quiet = self.launch(&args, b.minutes, tx).await?;
+        }
         // Exit 0 is a complete crawl and 1 one that a budget stopped: both leave the JSON.
         let parsed = std::fs::read(crawl_json)
             .ok()
@@ -835,6 +915,7 @@ pub(crate) async fn run(
         ui,
         out,
         root,
+        old_agent: std::sync::atomic::AtomicBool::new(false),
     };
     let dir: PathBuf = root.join(DIR).join(&p.name);
     let host = p.url.host_str().unwrap_or_default();
@@ -933,6 +1014,7 @@ mod tests {
             no_crawl,
             crawl_pages: 200,
             crawl_minutes: 5,
+            crawl_rate: 10,
             crawl_subdomains: false,
         }
     }
@@ -944,6 +1026,7 @@ mod tests {
             url,
             pages: 200,
             minutes: 5,
+            rate: 10,
             subdomains: false,
         }
     }
@@ -1092,6 +1175,61 @@ mod tests {
     }
 
     #[test]
+    fn a_new_agent_gets_the_rate_and_progress_an_old_one_neither() {
+        let mut p = plan("https://acme.example/");
+        p.rate = 7;
+        let line = |paced| {
+            crawler_args(
+                p.url.as_str(),
+                &Budget::of(&p),
+                Path::new("/p/policy.toml"),
+                Path::new("/p/crawl.json"),
+                paced,
+            )
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+        };
+        assert!(
+            line(true).ends_with("--max-page-mb 2 --rate 7 --progress"),
+            "{}",
+            line(true)
+        );
+        assert!(!line(false).contains("--rate") && !line(false).contains("--progress"));
+    }
+
+    #[test]
+    fn the_consent_and_the_dry_run_say_the_rate() {
+        let mut p = plan("https://acme.example/");
+        assert!(
+            consent(&p).contains("at most 10 requests a second to one host"),
+            "{}",
+            consent(&p)
+        );
+        assert!(consent(&p).contains("a slower Crawl-delay in robots.txt wins"));
+        assert!(p.would().contains("at most 10 a second"), "{}", p.would());
+        p.rate = 1;
+        assert!(
+            consent(&p).contains("at most 1 request a second"),
+            "{}",
+            consent(&p)
+        );
+    }
+
+    #[test]
+    fn the_rate_is_clamped_to_the_crawlers_bounds() {
+        let ui = Ui::detect(true);
+        let out = Out { json: true };
+        for (asked, kept) in [(0, MIN_RATE), (10, 10), (1_000, MAX_RATE)] {
+            let mut a = args(Some("https://acme.example/"), false);
+            a.crawl_rate = asked;
+            let p = decide(&a, None, false, ui, out).unwrap().unwrap();
+            assert_eq!(p.rate, kept, "asked {asked}");
+        }
+    }
+
+    #[test]
     fn the_flag_is_consent_and_the_budgets_are_clamped() {
         let ui = Ui::detect(true);
         let out = Out { json: true };
@@ -1214,6 +1352,7 @@ mod tests {
             &Budget::of(&p),
             Path::new("/p/policy.toml"),
             Path::new("/p/crawl.json"),
+            false,
         )
         .iter()
         .map(|a| a.to_string_lossy().into_owned())

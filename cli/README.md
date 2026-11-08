@@ -513,6 +513,16 @@ you gave only, robots.txt honoured, at most `--crawl-pages` pages (default 200) 
 `--crawl-minutes` minutes (default 5, hard caps 20000 and 240), 10 hosts, 50 MB in all and 2 MB
 a page, and that nothing is sent to InOrbit. `--dry-run` says the same and reads nothing.
 
+The pace is `--crawl-rate N` requests a second to one host (default 10, 1 to 50; the variable
+`IOHR_CRAWL_RATE` is the same, the flag wins), and a slower `Crawl-delay` in robots.txt wins
+over it. The consent text states the rate. At a terminal the crawl shows a spinner with a live
+count (pages read, pages waiting) and, as soon as the crawler knows how much there is (a
+sitemap says so), a bar: pages done of the total, and how many the page limit still allows.
+It reads the crawler's `--progress` lines (RFC 0163: JSON on standard error, counts and the
+scope, never a page address). With `--json`, `NO_COLOR`, `TERM=dumb` or no terminal nothing
+is drawn. An `agent` extension from before RFC 0163 does not know `--rate` or `--progress`:
+init runs it again without them and it crawls at its own pace with the spinner only.
+
 The crawl stays on that host. When a page links to another name in the same domain
 (`blog.example.com` from `example.com`; from `www.example.com` that also means the apex and its
 siblings), init asks once per name at a terminal: yes, no, or yes to all, default no. A yes
@@ -524,6 +534,7 @@ in advance: the first pass is allowed the host and `*.host`, and nothing is aske
 
 ```sh
 iohr project init my-shop --crawl https://example.com --crawl-pages 50
+iohr project init my-shop --crawl https://example.com --crawl-rate 2
 iohr project init my-shop --crawl https://example.com --crawl-subdomains
 iohr project init my-shop --no-crawl
 ```

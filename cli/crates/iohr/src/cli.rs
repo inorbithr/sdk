@@ -2184,6 +2184,17 @@ pub struct InitCrawlArgs {
     /// The most minutes the crawl runs (the crawler's own cap is 240).
     #[arg(long, value_name = "N", default_value_t = 5)]
     pub crawl_minutes: u32,
+    /// The most requests a second the crawl asks of one host, 1 to 50 (the default is 10).
+    /// A slower `Crawl-delay` in the site's robots.txt still wins. An older agent keeps its
+    /// own fixed pace of one a second until it is updated.
+    #[arg(
+        long,
+        value_name = "N",
+        env = "IOHR_CRAWL_RATE",
+        default_value_t = 10,
+        value_parser = clap::value_parser!(u32).range(1..=50)
+    )]
+    pub crawl_rate: u32,
     /// Follow every other name in the site's domain (a link to `blog.acme.example` from
     /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
     /// terminal init asks once per such name (yes, no, yes to all; the default is no), and

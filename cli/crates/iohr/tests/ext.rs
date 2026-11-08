@@ -7,6 +7,7 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+mod pty;
 mod support;
 
 use std::path::PathBuf;
@@ -1769,6 +1770,354 @@ mod init_crawl {
                     && (r.method.as_str() == "GET" || path == "/v1/coordinator/plans")
             }),
             "{seen:?}"
+        );
+    }
+
+    /// The progress line the agent writes under `--progress` (RFC 0163): `total` only once a
+    /// sitemap has said how much there is.
+    fn progress_line(read: u32, queued: u32, total: Option<u32>) -> String {
+        let total = total.map_or_else(String::new, |t| format!(",\"total\":{t}"));
+        format!(
+            "{{\"event\":\"progress\",\"v\":1,\"scope\":\"site.test\",\"phase\":\"pages\",\"read\":{read},\"failed\":0,\"queued\":{queued}{total},\"cap\":200}}"
+        )
+    }
+
+    /// The fake agent, that first writes `lines` to standard error a second apart, as a crawl
+    /// that takes a while would.
+    fn agent_that_reports(lines: &[String]) -> Vec<u8> {
+        let said: String = lines
+            .iter()
+            .map(|l| format!("echo '{l}' >&2\nsleep 1\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen("curl -s", &format!("{said}curl -s"), 1)
+            .into_bytes()
+    }
+
+    /// An agent from before RFC 0163: clap's refusal of the flags it does not know, then the
+    /// same crawl when run without them.
+    fn old_agent() -> Vec<u8> {
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen(
+                "all=\"$*\"\n",
+                "all=\"$*\"\ncase \"$all\" in *--rate*|*--progress*)\n  \
+                 echo \"error: unexpected argument '--rate' found\" >&2\n  exit 2;;\nesac\n",
+                1,
+            )
+            .into_bytes()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_rate_is_ten_a_second_by_default_and_the_agent_is_told() {
+        let s = site(Some(fake_agent(0, &[], true)), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(
+            t.contains("at most 10 requests a second to one host"),
+            "the consent says the rate: {t}"
+        );
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(args.trim_end().ends_with("--rate 10 --progress"), "{args}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_rate_is_the_flag_or_the_environment_and_stays_in_bounds() {
+        let s = site(Some(fake_agent(0, &[], true)), 2..=2).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-rate", "3"]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("at most 3 requests a second"), "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(args.contains("--rate 3 "), "{args}");
+        // The flag is also a variable of the same name, and the flag wins over it.
+        let t = token(&["extensions:read", "agents:write"]);
+        let o =
+            s.b.cmd(&[
+                "project",
+                "init",
+                "made",
+                "--template",
+                "coordinated",
+                "--yes",
+                "--no-smoke",
+                "--no-sync",
+                "--dir",
+                s.dir.to_str().unwrap(),
+                "--crawl",
+                &s.url(),
+                "--crawl-rate",
+                "4",
+            ])
+            .env("HOME", s.b.dir.path())
+            .env("IOHR_BASE_URL", s.b.server.uri())
+            .env("IOHR_TOKEN", &t)
+            .env("IOHR_TOKEN_CI", &t)
+            .env("IOHR_CRAWL_RATE", "9")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(text(&o).contains("at most 4 requests"), "{}", text(&o));
+        // Nothing outside 1 to 50 is accepted, and nothing is read.
+        for bad in ["0", "51", "fast"] {
+            let o = s.init(&["--crawl", &s.url(), "--crawl-rate", bad]);
+            assert_eq!(code(&o), 2, "{bad}: {}", text(&o));
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_older_agent_is_run_again_without_the_flags_and_the_crawl_still_works() {
+        let s = site(Some(old_agent()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("read 2 pages in 3 s"), "{t}");
+        assert!(!t.contains("the crawler exited"), "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(
+            !args.contains("--rate") && !args.contains("--progress"),
+            "the second run had neither flag: {args}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_crawl_that_fails_for_another_reason_is_not_run_twice() {
+        // Exit 2 without the agent naming a flag is not an old agent: one run, one failure.
+        let agent = String::from_utf8(fake_agent(2, &[], false))
+            .unwrap()
+            .replacen("curl -s", "echo 'error: bad policy' >&2\ncurl -s", 1)
+            .into_bytes();
+        let s = site(Some(agent), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(
+            text(&o).contains("the crawler exited with 2: error: bad policy"),
+            "{}",
+            text(&o)
+        );
+    }
+
+    /// At a terminal the crawl is a spinner with a live count until the agent says how much
+    /// there is, then a bar that fills, and the step is gone when it ends.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn on_a_terminal_a_spinner_counts_until_a_total_then_a_bar_fills() {
+        let lines = [
+            progress_line(1, 4, None),
+            progress_line(2, 3, Some(5)),
+            progress_line(4, 1, Some(5)),
+        ];
+        let s = site(Some(agent_that_reports(&lines)), 1..=1).await;
+        let t = token(&["extensions:read", "agents:write"]);
+        let mut cmd = s.b.cmd(&[
+            "project",
+            "init",
+            "made",
+            "--template",
+            "coordinated",
+            "--yes",
+            "--no-smoke",
+            "--no-sync",
+            "--dir",
+            s.dir.to_str().unwrap(),
+            "--crawl",
+            &s.url(),
+        ]);
+        cmd.env("HOME", s.b.dir.path())
+            .env("IOHR_BASE_URL", s.b.server.uri())
+            .env("IOHR_TOKEN", &t)
+            .env("IOHR_TOKEN_CI", &t)
+            .env("TERM", "xterm-256color");
+        let mut term = pty::Session::spawn(cmd);
+        // No total yet: a count and the queue, no bar.
+        term.until("a spinner with a live count", |sc| {
+            pty::any(sc, "1 pages read, 4 waiting")
+        });
+        let reading = (0..pty::ROWS)
+            .map(|r| pty::row(term.screen.screen(), r))
+            .filter(|r| r.contains("Reading "))
+            .collect::<Vec<_>>();
+        assert!(
+            reading
+                .iter()
+                .all(|r| !r.contains(" pages, ") && !r.contains(" of ")),
+            "no total, so no bar: {reading:?}"
+        );
+        // A total: pages of it, and what the page limit still allows.
+        term.until("a bar with a total", |sc| {
+            pty::any(sc, "2 of 5 pages") || pty::any(sc, "4 of 5 pages")
+        });
+        let shown = term.screen.screen().contents();
+        assert!(shown.contains("left to the 200-page limit"), "{shown}");
+        let status = term.exited().expect("init ends");
+        assert!(status.success(), "{}", term.screen.screen().contents());
+        // The bar is gone once the crawl is over; the summary is there.
+        let end = term.screen.screen().contents();
+        assert!(!end.contains("pages read, 4 waiting"), "{end}");
+        assert!(end.contains("Nothing was sent to InOrbit"), "{end}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn without_a_terminal_or_with_json_the_progress_is_never_printed() {
+        let lines = [progress_line(1, 4, None), progress_line(2, 3, Some(5))];
+        let s = site(Some(agent_that_reports(&lines)), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(
+            !t.contains("pages read, ") && !t.contains("of 5 pages") && !t.contains("\"event\""),
+            "{t}"
+        );
+    }
+
+    /// The site the real crawler reads: robots.txt, a sitemap that lists `n` pages besides the
+    /// start page, and the pages, each request stamped when it arrives.
+    struct Timed {
+        origin: String,
+        pages: usize,
+        at: std::sync::Arc<std::sync::Mutex<Vec<(String, std::time::Instant)>>>,
+    }
+
+    impl wiremock::Respond for Timed {
+        fn respond(&self, r: &Request) -> ResponseTemplate {
+            let p = r.url.path().to_owned();
+            self.at
+                .lock()
+                .unwrap()
+                .push((p.clone(), std::time::Instant::now()));
+            let html = "<html><head><title>T</title></head><body><p>Enough words here to count \
+                        as a page with text, so nothing is tried in a browser.</p></body></html>";
+            match p.as_str() {
+                "/robots.txt" => ResponseTemplate::new(200)
+                    .set_body_raw("User-agent: *\nAllow: /\n", "text/plain"),
+                "/sitemap.xml" => {
+                    let urls: String = (1..=self.pages)
+                        .map(|i| format!("<url><loc>{}/p{i}</loc></url>", self.origin))
+                        .collect::<Vec<_>>()
+                        .concat();
+                    ResponseTemplate::new(200).set_body_raw(
+                        format!(
+                            "<?xml version=\"1.0\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>{}/</loc></url>{urls}</urlset>",
+                            self.origin
+                        ),
+                        "application/xml",
+                    )
+                }
+                _ => ResponseTemplate::new(200).set_body_raw(html, "text/html"),
+            }
+        }
+    }
+
+    /// A box with the real `iohr-agent` (at `IOHR_TEST_AGENT`) installed as the extension, and
+    /// a site of `pages` pages.
+    async fn real_agent_site(pages: usize) -> (Site, Timed) {
+        // The path of an iohr-agent that has `atlas crawl --rate`; unset fails the test here.
+        let real = std::env::var("IOHR_TEST_AGENT").unwrap();
+        let s = site(
+            Some(format!("#!/bin/sh\nexec '{real}' \"$@\"\n").into_bytes()),
+            0..=u64::MAX,
+        )
+        .await;
+        let timed = Timed {
+            origin: s.server.uri(),
+            pages,
+            at: std::sync::Arc::default(),
+        };
+        // The site is the mock the box made, answering through the stamping responder.
+        s.server.reset().await;
+        Mock::given(method("GET"))
+            .respond_with(Timed {
+                origin: timed.origin.clone(),
+                pages,
+                at: timed.at.clone(),
+            })
+            .mount(&s.server)
+            .await;
+        (s, timed)
+    }
+
+    /// The gaps between the requests for pages (not robots.txt and the sitemap).
+    fn page_gaps(t: &Timed) -> Vec<std::time::Duration> {
+        let at: Vec<_> =
+            t.at.lock()
+                .unwrap()
+                .iter()
+                .filter(|(p, _)| p != "/robots.txt" && p != "/sitemap.xml")
+                .map(|(_, i)| *i)
+                .collect();
+        at.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+
+    /// The real crawler under the real binary: on a terminal the bar appears as soon as the
+    /// sitemap has said how much there is and fills, and the requests keep to ten a second.
+    /// Needs the agent built from the dataplane's RFC 0163 change, so it is run by hand:
+    /// `IOHR_TEST_AGENT=<path> cargo test -p iohr --test ext real_agent -- --ignored`.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs IOHR_TEST_AGENT, the path of a built iohr-agent"]
+    async fn real_agent_a_bar_appears_and_ten_a_second_holds() {
+        let (s, timed) = real_agent_site(25).await;
+        let t = token(&["extensions:read", "agents:write"]);
+        let mut cmd = s.b.cmd(&[
+            "project",
+            "init",
+            "made",
+            "--template",
+            "coordinated",
+            "--yes",
+            "--no-smoke",
+            "--no-sync",
+            "--dir",
+            s.dir.to_str().unwrap(),
+            "--crawl",
+            &s.url(),
+        ]);
+        cmd.env("HOME", s.b.dir.path())
+            .env("IOHR_BASE_URL", s.b.server.uri())
+            .env("IOHR_TOKEN", &t)
+            .env("IOHR_TOKEN_CI", &t)
+            .env("TERM", "xterm-256color");
+        let mut term = pty::Session::spawn(cmd);
+        // 26 pages: the start page and the 25 the sitemap lists.
+        term.until("a bar with the sitemap's total", |sc| {
+            pty::any(sc, " of 26 pages")
+        });
+        let shown = term.screen.screen().contents();
+        assert!(shown.contains("left to the 200-page limit"), "{shown}");
+        let status = term.exited().expect("init ends");
+        let end = term.screen.screen().contents();
+        assert!(status.success(), "{end}");
+        assert!(end.contains("facts: 26 in atlas/"), "{end}");
+        let gaps = page_gaps(&timed);
+        assert_eq!(gaps.len(), 25, "26 pages, 25 gaps: {gaps:?}");
+        // Ten a second is 100 ms apart; a timer that fires a little early is no breach.
+        let least = gaps.iter().min().unwrap();
+        assert!(
+            *least >= std::time::Duration::from_millis(90),
+            "ten a second at most, the closest gap was {least:?}"
+        );
+        let span: std::time::Duration = gaps.iter().sum();
+        assert!(
+            span >= std::time::Duration::from_millis(2250),
+            "25 gaps of about 100 ms: {span:?}"
+        );
+    }
+
+    /// The same with the rate the flag names: two a second is 500 ms apart.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs IOHR_TEST_AGENT, the path of a built iohr-agent"]
+    async fn real_agent_the_flag_slows_the_crawl() {
+        let (s, timed) = real_agent_site(4).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-rate", "2"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(text(&o).contains("read 5 pages"), "{}", text(&o));
+        let gaps = page_gaps(&timed);
+        assert_eq!(gaps.len(), 4, "{gaps:?}");
+        let least = gaps.iter().min().unwrap();
+        assert!(
+            *least >= std::time::Duration::from_millis(450),
+            "two a second at most, the closest gap was {least:?}"
         );
     }
 
