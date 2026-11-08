@@ -6,8 +6,13 @@
 //! rebound DNS name cannot reach it), paths that cannot leave the UI folder or follow a
 //! link, `/api/*` only from this listener's own pages (`Sec-Fetch-Site` and `Origin`), a
 //! capped number of connections, and the same strict headers on every answer.
+//!
+//! `build`, `dev` and `check` run the UI package's own scripts through pnpm (the runner
+//! `iohr sdk add` uses: no shell, the exit code passed on), so a developer, mise and CI
+//! call one thing. A running `serve` records its address in the data folder
+//! (`ui/serving.json`, 0600) for `iohr ui open`, and removes it when it stops.
 
-use std::io;
+use std::io::{self, Read as _};
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -19,7 +24,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
-use crate::cli::{UiArgs, UiCommand, UiServe};
+use crate::cli::{Global, UiArgs, UiCommand, UiPackage, UiServe};
+use crate::commands::sdk_add::{resolve, run_program};
+use crate::commands::session::data_dir;
 use crate::error::Error;
 use crate::output::Out;
 use crate::ui::Ui;
@@ -35,24 +42,170 @@ const MAX_FILE: u64 = 32 * 1024 * 1024;
 const CSP: &str = "default-src 'self'; img-src 'self' data:; object-src 'none'; \
                    base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
+/// The file a running `serve` records its address in, below the data folder's `ui/`.
+const SERVING: &str = "serving.json";
+/// The largest `serving.json` read; it holds one address and one path.
+const MAX_SERVING: u64 = 16 * 1024;
+/// How long `open` waits to see the recorded server answer.
+const ALIVE_WINDOW: Duration = Duration::from_secs(1);
+
 /// `iohr ui [verb]`.
-pub(crate) async fn run(args: UiArgs, out: Out) -> Result<(), Error> {
+pub(crate) async fn run(g: &Global, args: UiArgs, out: Out) -> Result<(), Error> {
     match args.command {
         None => {
             let serve = UiServe {
                 open: true,
                 ..UiServe::default()
             };
-            serve_until_stopped(&serve, out).await
+            serve_until_stopped(g, &serve, out).await
         }
-        Some(UiCommand::Serve(serve)) => serve_until_stopped(&serve, out).await,
+        Some(UiCommand::Serve(serve)) => serve_until_stopped(g, &serve, out).await,
+        Some(UiCommand::Build(package)) => script(&package, "build", out),
+        Some(UiCommand::Dev(package)) => script(&package, "dev", out),
+        Some(UiCommand::Check(package)) => script(&package, "check", out),
+        Some(UiCommand::Open) => open(g, out).await,
     }
 }
 
-async fn serve_until_stopped(args: &UiServe, out: Out) -> Result<(), Error> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| Error::Failed(format!("the working folder: {}", e.kind())))?;
-    let root = ui_root(args.dir.as_deref(), &cwd)?;
+fn working_folder() -> Result<PathBuf, Error> {
+    std::env::current_dir().map_err(|e| Error::Failed(format!("the working folder: {}", e.kind())))
+}
+
+/// Runs the UI package's script `name` with pnpm and passes its exit code on.
+fn script(args: &UiPackage, name: &str, out: Out) -> Result<(), Error> {
+    let dir = ui_package(args.package.as_deref(), &working_folder()?)?;
+    let pnpm = resolve(Path::new("pnpm")).ok_or_else(|| {
+        Error::Usage(
+            "pnpm is not on PATH: install it (`corepack enable pnpm`), then run this again".into(),
+        )
+    })?;
+    Out::note(&format!("Running `pnpm run {name}` in {}", dir.display()));
+    run_program(
+        &pnpm,
+        &["run".to_owned(), name.to_owned()],
+        &dir,
+        "pnpm",
+        out.json,
+    )?;
+    if out.json {
+        Out::print_json(&serde_json::json!({ "script": name, "dir": dir.display().to_string() }));
+    }
+    Ok(())
+}
+
+/// The UI package folder: `package` when given (it must hold `package.json`), else the
+/// nearest `ui/` with a `package.json` at or above `from`.
+fn ui_package(package: Option<&Path>, from: &Path) -> Result<PathBuf, Error> {
+    if let Some(dir) = package {
+        if dir.join("package.json").is_file() {
+            return canonical(dir);
+        }
+        return Err(Error::Usage(format!(
+            "{} holds no package.json; point --package at the UI package",
+            dir.display()
+        )));
+    }
+    nearest(from, &["ui"], "package.json").ok_or_else(|| {
+        Error::Usage("no UI package here: run this in the sdk checkout, or pass --package".into())
+    })
+}
+
+/// The nearest `<ancestor>/<sub...>` at or above `from` that holds the file `marker`,
+/// canonical.
+fn nearest(from: &Path, sub: &[&str], marker: &str) -> Option<PathBuf> {
+    from.ancestors().find_map(|folder| {
+        let dir = sub.iter().fold(folder.to_path_buf(), |d, s| d.join(s));
+        if dir.join(marker).is_file() {
+            std::fs::canonicalize(&dir).ok()
+        } else {
+            None
+        }
+    })
+}
+
+fn canonical(dir: &Path) -> Result<PathBuf, Error> {
+    std::fs::canonicalize(dir)
+        .map_err(|e| Error::Failed(format!("{}: {}", dir.display(), e.kind())))
+}
+
+/// Opens the UI the running `serve` recorded, when it is a loopback address that answers.
+async fn open(g: &Global, out: Out) -> Result<(), Error> {
+    let folder = data_dir(g)?.join("ui");
+    let path = folder.join(SERVING);
+    let file = crate::runner::private::open_trusted(&path, false)
+        .map_err(Error::Failed)?
+        .ok_or_else(|| Error::Usage("nothing is being served: run `iohr ui serve` first".into()))?;
+    let mut text = String::new();
+    file.take(MAX_SERVING)
+        .read_to_string(&mut text)
+        .map_err(|e| Error::Failed(format!("{}: {}", path.display(), e.kind())))?;
+    let Some((url, addr)) = recorded_url(&text) else {
+        return Err(Error::Failed(format!(
+            "{} does not hold a loopback address; refused",
+            path.display()
+        )));
+    };
+    if !matches!(
+        timeout(ALIVE_WINDOW, TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    ) {
+        forget(&folder, &url);
+        return Err(Error::Usage(
+            "the recorded `iohr ui serve` is no longer running: start it again".into(),
+        ));
+    }
+    if out.json {
+        Out::print_json(&serde_json::json!({ "url": url }));
+    }
+    if !crate::browser::open(&url) {
+        if !out.json {
+            Out::raw(format!("{url}\n").as_bytes());
+        }
+        Out::note(&format!("Open {url} in a browser."));
+    }
+    Ok(())
+}
+
+/// The `url` in a recorded `serving.json`, and its address, when it is exactly
+/// `http://127.0.0.1:<port>/` or `http://[::1]:<port>/` with a port; anything else is
+/// `None`, so `open` never hands the browser another address.
+fn recorded_url(text: &str) -> Option<(String, SocketAddr)> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let url = value.get("url")?.as_str()?;
+    let addr: SocketAddr = url
+        .strip_prefix("http://")?
+        .strip_suffix('/')?
+        .parse()
+        .ok()?;
+    let own =
+        addr.ip().is_loopback() && addr.port() != 0 && format!("http://{}/", host_of(addr)) == url;
+    own.then(|| (url.to_owned(), addr))
+}
+
+/// Records `url` (served from `root`) for `iohr ui open`.
+fn remember(folder: &Path, url: &str, root: &Path) -> io::Result<()> {
+    let body = serde_json::json!({
+        "url": url,
+        "dir": root.display().to_string(),
+        "pid": std::process::id(),
+    });
+    iohr_auth::write_private(folder, SERVING, body.to_string().as_bytes())
+}
+
+/// Removes the record when it still names `url`: a later `serve` may have replaced it.
+fn forget(folder: &Path, url: &str) {
+    let path = folder.join(SERVING);
+    let ours = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| recorded_url(&t))
+        .is_some_and(|(u, _)| u == url);
+    if ours {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+async fn serve_until_stopped(g: &Global, args: &UiServe, out: Out) -> Result<(), Error> {
+    let root = ui_root(args.dir.as_deref(), &working_folder()?)?;
     let port = args.port.unwrap_or(0);
     let server = Server::bind(&root, port)
         .await
@@ -66,6 +219,16 @@ async fn serve_until_stopped(args: &UiServe, out: Out) -> Result<(), Error> {
         ui.info(&format!("Serving {} at {url}", root.display()));
         ui.info("Ctrl-C stops it.");
     }
+    let folder = data_dir(g).map(|d| d.join("ui"));
+    let recorded = match &folder {
+        Ok(f) => remember(f, &url, &root).map_err(|e| e.kind().to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    if let Err(why) = &recorded {
+        Out::note(&format!(
+            "`iohr ui open` will not find this server ({why})."
+        ));
+    }
     if args.open && !crate::browser::open(&url) {
         Out::note(&format!("Open {url} in a browser."));
     }
@@ -74,6 +237,9 @@ async fn serve_until_stopped(args: &UiServe, out: Out) -> Result<(), Error> {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await;
+    if let (Ok(folder), Ok(())) = (&folder, &recorded) {
+        forget(folder, &url);
+    }
     Ok(())
 }
 
@@ -93,24 +259,18 @@ fn listen_error(port: u16, e: &io::Error) -> Error {
 fn ui_root(dir: Option<&Path>, from: &Path) -> Result<PathBuf, Error> {
     if let Some(dir) = dir {
         if dir.join("index.html").is_file() {
-            return std::fs::canonicalize(dir)
-                .map_err(|e| Error::Failed(format!("{}: {}", dir.display(), e.kind())));
+            return canonical(dir);
         }
         return Err(Error::Usage(format!(
             "{} holds no index.html; point --dir (IOHR_UI_DIR) at a built UI",
             dir.display()
         )));
     }
-    for folder in from.ancestors() {
-        let dist = folder.join("ui").join("dist");
-        if dist.join("index.html").is_file() {
-            return std::fs::canonicalize(&dist)
-                .map_err(|e| Error::Failed(format!("{}: {}", dist.display(), e.kind())));
-        }
-    }
-    Err(Error::Usage(
-        "no built UI here: run `iohr ui build` in the sdk checkout, or pass --dir".into(),
-    ))
+    nearest(from, &["ui", "dist"], "index.html").ok_or_else(|| {
+        Error::Usage(
+            "no built UI here: run `iohr ui build` in the sdk checkout, or pass --dir".into(),
+        )
+    })
 }
 
 /// The UI listener: a canonical root and a loopback socket.
@@ -513,8 +673,8 @@ mod tests {
     use tokio::net::TcpStream;
 
     use super::{
-        Outside, Server, file_for, host_allowed, listen_error, percent_decode, resolve_inside,
-        ui_root,
+        Outside, Server, file_for, forget, host_allowed, listen_error, percent_decode,
+        recorded_url, remember, resolve_inside, ui_package, ui_root,
     };
 
     fn built_ui() -> tempfile::TempDir {
@@ -776,5 +936,73 @@ mod tests {
             assert_eq!(resolve_inside(&root, bad), Err(Outside::Malformed), "{bad}");
         }
         assert_eq!(resolve_inside(&root, "nope.js"), Err(Outside::Missing));
+    }
+
+    #[test]
+    fn the_package_is_the_flag_or_the_nearest_ui_with_a_package_json() {
+        let repo = tempfile::tempdir().expect("repo");
+        let ui = repo.path().join("ui");
+        std::fs::create_dir_all(&ui).expect("ui");
+        let deep = repo.path().join("cli/crates");
+        std::fs::create_dir_all(&deep).expect("deep");
+        assert!(ui_package(None, &deep).is_err(), "no package.json yet");
+        std::fs::write(ui.join("package.json"), "{}").expect("package");
+        let found = ui_package(None, &deep).expect("found");
+        assert_eq!(found, std::fs::canonicalize(&ui).expect("canon"));
+        assert_eq!(ui_package(Some(&ui), Path::new("/")).expect("flag"), found);
+        assert!(
+            ui_package(Some(&deep), &deep).is_err(),
+            "a folder without package.json"
+        );
+    }
+
+    #[test]
+    fn only_an_exact_loopback_url_with_a_port_is_taken_from_the_record() {
+        let ok = |url: &str| recorded_url(&format!(r#"{{"url":"{url}"}}"#)).map(|(u, _)| u);
+        assert_eq!(
+            ok("http://127.0.0.1:4321/").as_deref(),
+            Some("http://127.0.0.1:4321/")
+        );
+        assert_eq!(
+            ok("http://[::1]:4321/").as_deref(),
+            Some("http://[::1]:4321/")
+        );
+        for bad in [
+            "http://127.0.0.1:0/",
+            "http://127.0.0.1:4321",
+            "http://127.0.0.1:4321/x",
+            "https://127.0.0.1:4321/",
+            "http://localhost:4321/",
+            "http://10.1.2.3:4321/",
+            "http://0.0.0.0:4321/",
+            "http://127.0.0.1:04321/",
+            "http://user@127.0.0.1:4321/",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(ok(bad), None, "{bad}");
+        }
+        assert!(recorded_url("not json").is_none());
+        assert!(recorded_url(r#"{"url":7}"#).is_none());
+    }
+
+    #[test]
+    fn the_record_is_private_and_removed_only_by_its_own_server() {
+        let data = tempfile::tempdir().expect("data");
+        let folder = data.path().join("ui");
+        remember(&folder, "http://127.0.0.1:4321/", data.path()).expect("remember");
+        let path = folder.join("serving.json");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&path).expect("meta").permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let text = std::fs::read_to_string(&path).expect("read");
+        let (url, _) = recorded_url(&text).expect("valid");
+        assert_eq!(url, "http://127.0.0.1:4321/");
+        forget(&folder, "http://127.0.0.1:9999/");
+        assert!(path.exists(), "another server's url leaves the record");
+        forget(&folder, "http://127.0.0.1:4321/");
+        assert!(!path.exists(), "its own url removes it");
     }
 }

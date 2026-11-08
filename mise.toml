@@ -312,6 +312,30 @@ else
 fi
 """
 
+# ---------------------------------------------------------------- web UI (RFC 0217)
+# One path for a developer, mise and CI: each task is the `iohr ui` verb, run from this
+# checkout's own build. `iohr ui` finds the nearest `ui/` package from `cli/`.
+
+[tasks."ui:build"]
+description = "Web UI: build the UI package (`iohr ui build`, pnpm run build)"
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui build"
+
+[tasks."ui:dev"]
+description = "Web UI: the UI package's dev server (`iohr ui dev`)"
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui dev"
+
+[tasks."ui:check"]
+description = "Web UI: the UI package's checks (`iohr ui check`)"
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui check"
+
+[tasks."ui:serve"]
+description = "Web UI: serve the built UI on loopback (`iohr ui serve`)"
+dir = "cli"
+run = "cargo run --quiet --locked -p iohr -- ui serve"
+
 # ---------------------------------------------------------------- command line (ADR 0009)
 
 [tasks."cli:check"]

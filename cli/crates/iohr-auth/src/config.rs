@@ -816,7 +816,10 @@ fn storage_str(s: Storage) -> &'static str {
 
 /// Writes `bytes` to `dir/name` through a temporary file and a rename, with the
 /// directory mode 0700 and the file mode 0600 on Unix.
-pub(crate) fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+///
+/// # Errors
+/// The directory or the file could not be written.
+pub fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     create_private_dir(dir)?;
     let tmp = dir.join(format!(".{name}.tmp"));
     {

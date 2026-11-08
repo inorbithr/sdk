@@ -2754,6 +2754,28 @@ pub enum UiCommand {
     /// or a method other than those is refused. Unknown page paths get `index.html`, so
     /// the app's own routes load.
     Serve(UiServe),
+    /// Build the UI package into `ui/dist` (its `build` script).
+    ///
+    /// Runs `pnpm run build` in the UI package: the nearest `ui/` with a `package.json`
+    /// above this folder, or `--package`. The mise task `ui:build` runs this.
+    Build(UiPackage),
+    /// Run the UI package's dev server with live reload (its `dev` script).
+    Dev(UiPackage),
+    /// Check the UI package: types, lint and tests (its `check` script).
+    Check(UiPackage),
+    /// Open the UI that `iohr ui serve` is serving in the default browser.
+    ///
+    /// Reads the address the running `iohr ui serve` recorded and opens it; only a
+    /// loopback address is opened. With `IOHR_NO_BROWSER` set, prints it instead.
+    Open,
+}
+
+#[derive(Debug, Args, Default)]
+pub struct UiPackage {
+    /// The UI package folder, holding `package.json` (default: the nearest `ui/` above
+    /// this folder).
+    #[arg(long)]
+    pub package: Option<PathBuf>,
 }
 
 #[derive(Debug, Args, Default)]

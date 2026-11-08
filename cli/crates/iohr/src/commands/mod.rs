@@ -161,7 +161,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
             Ok(())
         }
         Command::Tunnel(args) => tunnel::run(g, &args, out),
-        Command::Ui(args) => web_ui::run(args, out).await,
+        Command::Ui(args) => web_ui::run(g, args, out).await,
         Command::External(argv) => ext::external(g, &env, argv).await,
         Command::Completion { shell } => {
             let mut buf = Vec::new();

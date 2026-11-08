@@ -3,11 +3,26 @@
 //! A shell never opens the queue and never touches a task: it joins the host's socket
 //! ([`crate::session::link`]) and the host does the rest.
 
+use std::path::PathBuf;
+
+use crate::cli::Global;
+use crate::error::Error;
+use crate::ext::install::Store;
+
 #[cfg(unix)]
-pub(crate) use unix::{data_dir, enter, open, start_host, stop};
+pub(crate) use unix::{enter, open, start_host, stop};
 
 #[cfg(not(unix))]
 pub(crate) use other::{enter, open, start_host, stop};
+
+/// The iohr data folder: `--data-dir` (`IOHR_DATA_DIR`), else the platform's data
+/// directory, the one extensions use. The session hosts and `iohr ui` keep files below it.
+pub(crate) fn data_dir(g: &Global) -> Result<PathBuf, Error> {
+    match &g.data_dir {
+        Some(d) => Ok(d.clone()),
+        None => Store::data_root().map_err(|e| Error::Failed(e.to_string())),
+    }
+}
 
 #[cfg(unix)]
 mod unix {
@@ -20,9 +35,9 @@ mod unix {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
+    use super::data_dir;
     use crate::cli::{Global, SessionArgs, StopArgs};
     use crate::error::Error;
-    use crate::ext::install::Store;
     use crate::output::Out;
     use crate::roles;
     use crate::session::host::{self, HostError, Options};
@@ -51,14 +66,6 @@ mod unix {
     /// platform's data directory, the one extensions use.
     fn paths_for(g: &Global, project: &Path) -> Result<Paths, Error> {
         Ok(Paths::for_project(&data_dir(g)?, project))
-    }
-
-    /// The iohr data folder the hosts keep their files below.
-    pub(crate) fn data_dir(g: &Global) -> Result<PathBuf, Error> {
-        match &g.data_dir {
-            Some(d) => Ok(d.clone()),
-            None => Store::data_root().map_err(|e| Error::Failed(e.to_string())),
-        }
     }
 
     /// The Roles a project hosts: the packs it holds, else what its language selects.
