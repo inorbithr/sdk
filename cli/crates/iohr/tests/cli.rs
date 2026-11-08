@@ -709,13 +709,19 @@ async fn verbose_output_never_shows_the_token() {
         "--verbose",
     ];
     let o = r.with_token(&t, &args);
-    assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
     let all = text(&o);
+    // The session host is unix only: elsewhere `stop` refuses (exit 1) and says why.
+    let (want_code, want_text) = if cfg!(unix) {
+        (0, "no session host runs")
+    } else {
+        (1, "the session host needs a unix system")
+    };
+    assert_eq!(code(&o), want_code, "{args:?}: {all}");
     assert!(
         !all.contains("TOKENSIGNATUREMARKER"),
         "{args:?} leaked the token"
     );
-    assert!(all.contains("no session host runs"), "{args:?}: {all}");
+    assert!(all.contains(want_text), "{args:?}: {all}");
     assert!(!all.contains("request id"), "{args:?} made a call");
     // `ext verify ARTIFACT` (RFC 0143) is offline too: an artifact with a bundle that
     // does not match fails (exit 1) and prints no token and no request line.
