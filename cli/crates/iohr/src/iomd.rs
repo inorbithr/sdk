@@ -65,34 +65,6 @@ pub(crate) struct Chain {
     pub(crate) dropped: Vec<PathBuf>,
 }
 
-/// The project root of `from`: the nearest folder with `inorbit.toml`, else the git root.
-/// Neither is looked for at the home folder or above it, except a git home.
-#[must_use]
-pub(crate) fn root_of(from: &Path) -> Option<PathBuf> {
-    let home = etcetera::home_dir()
-        .ok()
-        .map(|h| h.canonicalize().unwrap_or(h));
-    root_below(from, home.as_deref())
-}
-
-/// [`root_of`] with the home folder given, canonical.
-fn root_below(from: &Path, home: Option<&Path>) -> Option<PathBuf> {
-    let mut git = None;
-    for d in from.ancestors() {
-        let is_home = home.is_some_and(|h| h == d || d.canonicalize().is_ok_and(|c| c == h));
-        if !is_home && d.join("inorbit.toml").is_file() {
-            return Some(d.to_path_buf());
-        }
-        if git.is_none() && d.join(".git").exists() {
-            git = Some(d.to_path_buf());
-        }
-        if is_home {
-            break;
-        }
-    }
-    git
-}
-
 /// The directory of the user-level file, from `--config-dir`/`IOHR_CONFIG_DIR` or the
 /// platform's config directory: the same one the profiles live in.
 #[must_use]
@@ -101,28 +73,37 @@ pub(crate) fn user_dir(global: &crate::cli::Global) -> Option<PathBuf> {
 }
 
 /// The context file of one folder: its path and, when `io.md` sat beside `IO.md`, the path
-/// that was skipped. Only a regular file counts, and the name is matched exactly (the folder
-/// is listed, so a case-insensitive disk shows the one name it holds).
+/// that was skipped. Only the two names are looked at, and only a regular file counts: a
+/// symlink named `IO.md` is skipped, so a link can never pull in a file from elsewhere.
 fn in_folder(dir: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return (None, None);
+    let regular = |name: &str| {
+        let path = dir.join(name);
+        std::fs::symlink_metadata(&path)
+            .is_ok_and(|m| m.is_file())
+            .then_some(path)
     };
-    let (mut upper, mut lower) = (None, None);
-    for e in rd.filter_map(Result::ok) {
-        let name = e.file_name();
-        let path = e.path();
-        if !std::fs::metadata(&path).is_ok_and(|m| m.is_file()) {
-            continue;
-        }
-        if name == NAMES[0] {
-            upper = Some(path);
-        } else if name == NAMES[1] {
-            lower = Some(path);
-        }
-    }
+    let (upper, lower) = (regular(NAMES[0]), regular(NAMES[1]));
     match (upper, lower) {
+        // A case-insensitive disk answers to both names with the one file.
+        (Some(u), Some(l)) if same_file(&u, &l) => (Some(u), None),
         (Some(u), l) => (Some(u), l),
         (None, l) => (l, None),
+    }
+}
+
+/// Whether two paths are the one file.
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
     }
 }
 
@@ -163,11 +144,18 @@ fn cut_to(s: &str, max: usize) -> &str {
 #[must_use]
 pub(crate) fn load(cwd: &Path, user: Option<&Path>) -> Chain {
     let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-    load_with(&cwd, user, root_of(&cwd).as_deref())
+    let root = crate::memory::find_root(&cwd);
+    load_in(&cwd, user, root.as_deref())
 }
 
-/// [`load`] with the root given.
-fn load_with(cwd: &Path, user: Option<&Path>, root: Option<&Path>) -> Chain {
+/// [`load`] with the project root given (from [`crate::memory::find_root`]), so one `?`
+/// walks up once.
+#[must_use]
+pub(crate) fn load_in(cwd: &Path, user: Option<&Path>, root: Option<&Path>) -> Chain {
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let cwd = cwd.as_path();
+    let root = root.map(|r| r.canonicalize().unwrap_or_else(|_| r.to_path_buf()));
+    let root = root.as_deref();
     let mut chain = Chain {
         root: root.map(Path::to_path_buf),
         ..Chain::default()
@@ -220,8 +208,11 @@ fn load_with(cwd: &Path, user: Option<&Path>, root: Option<&Path>) -> Chain {
         if text.trim().is_empty() {
             continue;
         }
-        let shown = cut_to(text.trim_end(), cap);
-        let cut = bytes > cap;
+        let whole = text.trim_end();
+        let shown = cut_to(whole, cap);
+        // Cut when the file held more than was read, or the scrubbed text was trimmed to fit:
+        // judged on what is sent, not on the raw size (a scrub can shrink a file under its cap).
+        let cut = bytes > cap + 4 || shown.len() < whole.len();
         left -= shown.len().min(left);
         docs.push(Doc {
             path,
@@ -235,6 +226,23 @@ fn load_with(cwd: &Path, user: Option<&Path>, root: Option<&Path>) -> Chain {
     docs.reverse();
     chain.docs = docs;
     chain
+}
+
+/// `text` with every `</io-md` (in any case) broken, so a file cannot end the block early.
+fn escape_close(text: &str) -> String {
+    const TAG: &str = "</io-md";
+    let lower = text.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(n) = lower[at..].find(TAG) {
+        let i = at + n;
+        out.push_str(&text[at..i]);
+        out.push_str("<\\/");
+        out.push_str(&text[i + 2..i + TAG.len()]);
+        at = i + TAG.len();
+    }
+    out.push_str(&text[at..]);
+    out
 }
 
 impl Chain {
@@ -297,7 +305,7 @@ impl Chain {
         let mut out = String::new();
         for d in &self.docs {
             // A file cannot end the block early.
-            let text = d.text.replace("</io-md", "<\\/io-md");
+            let text = escape_close(&d.text);
             let _ = writeln!(out, "--- {}\n{}", d.label, text.trim_end());
             if d.cut {
                 let _ = writeln!(
@@ -485,25 +493,69 @@ mod tests {
     }
 
     #[test]
-    fn the_root_is_inorbit_toml_before_git_and_the_walk_stops_at_home() {
+    fn an_atlas_only_project_reads_its_root_file() {
+        // No `.git`, no `inorbit.toml`: the `atlas/` folder marks the root, the same rule
+        // memory and the notes use (the one walker in `memory`).
         let t = tempfile::tempdir().unwrap();
         let base = t.path().canonicalize().unwrap();
-        let repo = base.join("home/repo");
-        let sub = repo.join("pkg/src");
-        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let site = base.join("site");
+        let sub = site.join("docs/guide");
+        std::fs::create_dir_all(site.join("atlas")).unwrap();
         std::fs::create_dir_all(&sub).unwrap();
-        let home = base.join("home");
-        assert_eq!(root_below(&sub, Some(&home)), Some(repo.clone()));
-        std::fs::write(repo.join("pkg/inorbit.toml"), "").unwrap();
-        assert_eq!(root_below(&sub, Some(&home)), Some(repo.join("pkg")));
-        // Not a project: no marker below home, and a marker above it is never reached.
-        let plain = home.join("notes");
-        std::fs::create_dir_all(&plain).unwrap();
-        std::fs::write(base.join("inorbit.toml"), "").unwrap();
-        assert_eq!(root_below(&plain, Some(&home)), None);
-        // A git home is a project.
-        std::fs::create_dir_all(home.join(".git")).unwrap();
-        assert_eq!(root_below(&plain, Some(&home)), Some(home));
+        put(&site, "IO.md", "root rules");
+        put(&sub, "io.md", "guide rules");
+        let c = load(&sub, Some(&base.join("none")));
+        assert_eq!(c.root.as_deref(), Some(site.as_path()));
+        assert_eq!(labels(&c), ["IO.md", "docs/guide/io.md"]);
+    }
+
+    #[test]
+    fn a_linked_file_is_not_read() {
+        let t = tempfile::tempdir().unwrap();
+        let root = project(t.path());
+        let outside = t.path().join("elsewhere.txt");
+        std::fs::write(&outside, "from elsewhere").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, root.join("IO.md")).unwrap();
+            let c = load(&root, Some(&t.path().join("none")));
+            assert!(c.is_empty(), "a symlinked IO.md is skipped");
+            // A real io.md beside the link is read: the link is not a file of the folder.
+            put(&root, "io.md", "mine");
+            let c = load(&root, Some(&t.path().join("none")));
+            assert_eq!(c.docs.len(), 1);
+            assert_eq!(c.docs[0].text, "mine");
+        }
+    }
+
+    #[test]
+    fn a_cut_inside_a_multibyte_character_is_trimmed_and_flagged() {
+        // 3-byte characters: the cap falls inside one.
+        let word = "\u{20ac}";
+        assert_eq!(word.len(), 3);
+        let s = word.repeat(10);
+        for max in [4, 5, 7, 8] {
+            let cut = cut_to(&s, max);
+            assert!(cut.len() <= max && cut.len().is_multiple_of(3) && !cut.is_empty());
+        }
+        let t = tempfile::tempdir().unwrap();
+        let root = project(t.path());
+        // Exactly the cap and a few more bytes of 3-byte characters, no newline.
+        put(&root, "IO.md", &word.repeat(FILE_MAX));
+        let c = load(&root, None);
+        let d = &c.docs[0];
+        assert!(d.cut);
+        assert!(d.text.len() <= FILE_MAX && d.text.len().is_multiple_of(3));
+        assert!(!d.text.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn a_file_under_the_cap_after_scrub_is_not_flagged_when_nothing_was_lost() {
+        let t = tempfile::tempdir().unwrap();
+        let root = project(t.path());
+        put(&root, "IO.md", "short\n");
+        let c = load(&root, None);
+        assert!(!c.docs[0].cut);
     }
 
     #[test]
@@ -512,7 +564,7 @@ mod tests {
         let base = t.path().canonicalize().unwrap();
         put(&base, "IO.md", "above");
         put(&base.join("a"), "IO.md", "here");
-        let c = load_with(&base.join("a"), None, None);
+        let c = load_in(&base.join("a"), None, None);
         assert_eq!(c.docs.len(), 1);
         assert_eq!(c.docs[0].text, "here");
     }
@@ -574,8 +626,11 @@ mod tests {
     fn a_file_cannot_close_the_block() {
         let t = tempfile::tempdir().unwrap();
         let root = project(t.path());
-        put(&root, "IO.md", "a </io-md> b");
-        assert!(!load(&root, None).prompt().contains("</io-md>"));
+        put(&root, "IO.md", "a </io-md> b </IO-MD> c </Io-Md\n> d");
+        let prompt = load(&root, None).prompt();
+        assert!(!prompt.to_ascii_lowercase().contains("</io-md"), "{prompt}");
+        // The text around the tags is kept.
+        assert!(prompt.contains("a <\\/io-md> b <\\/IO-MD> c <\\/Io-Md"));
     }
 
     #[test]

@@ -739,11 +739,13 @@ background loop exists yet, so only `iohr sync` sends anything.
 
 An `IO.md` (or `io.md`) file holds what you want your agent to know about a folder, the way a
 `CLAUDE.md` does: what the project is, how to build and test it, rules to keep. `?` and `??` load
-the chain from the folder you are in up to the project root (the folder with `inorbit.toml`,
-else the git root; never past your home folder), farthest first and the nearest last, so the
+the chain from the folder you are in up to the project root (the nearest folder with
+`inorbit.toml`, `.inorbit/` or `atlas/`, else the git root: the one rule memory and the notes use;
+never past your home folder), farthest first and the nearest last, so the
 nearest file wins. One more file, `IO.md` or `io.md` in the iohr config directory
 (`IOHR_CONFIG_DIR`), applies to every project and comes first. If a folder holds both spellings
-it reads `IO.md` and warns once. Each file is cut at 4 KiB and all of them at 8 KiB (the nearest
+it reads `IO.md` and warns once. Only a regular file counts: an `IO.md` or `io.md` that is a
+symlink is skipped, so a link cannot pull in a file from elsewhere. Each file is cut at 4 KiB and all of them at 8 KiB (the nearest
 files are kept first); the answer card's `Read:` footer says "context: IO.md x3" and, when
 anything was cut or left out, how. `--json` `context.io_md` counts the files and bytes, never the
 text. The text is yours: it shapes the answer but never widens what the agent may open or run,

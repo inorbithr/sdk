@@ -563,7 +563,12 @@ fn context_of(
     };
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let root = crate::memory::find_root(Path::new(&cwd));
-    let io_md = crate::iomd::load(Path::new(&cwd), crate::iomd::user_dir(g).as_deref());
+    // One walk up for the project root serves the notes and the IO.md chain.
+    let io_md = crate::iomd::load_in(
+        Path::new(&cwd),
+        crate::iomd::user_dir(g).as_deref(),
+        root.as_deref(),
+    );
     let ctx =
         Context {
             files: headless::list_folder(Path::new(&cwd)),
