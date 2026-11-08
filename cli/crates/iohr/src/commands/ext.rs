@@ -119,6 +119,12 @@ fn setup(g: &Global, env: &Env) -> Result<(Registry, Policy), Error> {
         .or_else(|| ctx.config.ext.registry.clone())
         .unwrap_or_else(|| DEFAULT_REGISTRY.to_owned());
     let source = Source::parse(&raw)?;
+    let registry = Registry::new(source, env.ext_registry_auth.clone(), g.verbose)?;
+    Ok((registry, trust_policy(&ctx)?))
+}
+
+/// The trust policy the config's `ext.trusted_keys` make.
+fn trust_policy(ctx: &Ctx) -> Result<Policy, Error> {
     let keys = ctx
         .config
         .ext
@@ -127,8 +133,16 @@ fn setup(g: &Global, env: &Env) -> Result<(Registry, Policy), Error> {
         .map(|pem| TrustedKey::from_pem(pem))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| Error::Failed(format!("ext.trusted_keys: {e}")))?;
-    let registry = Registry::new(source, env.ext_registry_auth.clone(), g.verbose)?;
-    Ok((registry, Policy::inorbit(keys)))
+    Ok(Policy::inorbit(keys))
+}
+
+/// The installed extensions and the trust policy a runner checks each one against again
+/// before it carries out a host action the extension declares.
+///
+/// # Errors
+/// The store has no folder, or a trusted key does not read.
+pub(crate) fn host_extensions(g: &Global, ctx: &Ctx) -> Result<(Store, Policy), Error> {
+    Ok((store(g)?, trust_policy(ctx)?))
 }
 
 #[allow(clippy::too_many_lines, reason = "one arm per command")]
@@ -872,7 +886,7 @@ fn verify(
     let mut rows = Vec::new();
     for n in &names {
         match store.verify(n, &policy) {
-            Ok((entry, record)) => {
+            Ok((entry, record, _)) => {
                 rows.push(vec![
                     n.clone(),
                     entry.version,

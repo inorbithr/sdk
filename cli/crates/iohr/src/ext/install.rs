@@ -425,16 +425,21 @@ impl Store {
     }
 
     /// Checks an installed version again, offline: the program's hash and every kept
-    /// bundle against `policy`, and the signer against the lock.
+    /// bundle against `policy`, and the signer against the lock. The path is the checked
+    /// program's.
     ///
     /// # Errors
     ///
     /// [`ExtError`] naming what no longer holds.
-    pub fn verify(&self, name: &str, policy: &Policy) -> Result<(Entry, Record), ExtError> {
+    pub fn verify(
+        &self,
+        name: &str,
+        policy: &Policy,
+    ) -> Result<(Entry, Record, PathBuf), ExtError> {
         let (entry, record, dir) = self
             .installed(name)?
             .ok_or_else(|| ExtError::Usage(format!("{name} is not installed")))?;
-        check_program(&record, &dir)?;
+        let program = check_program(&record, &dir)?;
         check_confirmed(&entry, &record)?;
         let mut bundles = Vec::new();
         for (file, digest) in &record.bundles {
@@ -455,7 +460,7 @@ impl Store {
                 v.signer, entry.signer
             ))));
         }
-        Ok((entry, record))
+        Ok((entry, record, program))
     }
 }
 

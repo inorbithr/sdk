@@ -1676,38 +1676,61 @@ impl HostRunner {
         } else if let Some(dir) = self.folder(tool)? {
             c.current_dir(dir);
         }
-        c.args(&full)
-            .env_clear()
-            .envs(env)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        // Its own process group, so a timeout takes what the tool started with it.
-        #[cfg(unix)]
-        c.process_group(0);
-        let mut child = c
-            .spawn()
-            .map_err(|e| format!("{name} did not start: {}", e.kind()))?;
-        let mut group = GroupGuard::new(child.id());
-        let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
-        let all = async {
-            let (out, err, status) = tokio::join!(drain(stdout), drain(stderr), child.wait());
-            Ok::<_, std::io::Error>((out?, err?, status?))
-        };
-        let ((stdout, tally), (stderr, _), status) = tokio::time::timeout(tool.timeout(), all)
-            .await
-            .map_err(|_| format!("{name} took over {}s", tool.timeout().as_secs()))?
-            .map_err(|e| format!("{name} failed: {}", e.kind()))?;
-        // Reaped: its pid may be reused, so nothing is left to kill.
-        group.disarm();
-        Ok(Output {
-            success: status.success(),
-            stdout,
-            stderr,
-            tally,
-        })
+        c.args(&full).env_clear().envs(env);
+        collect(c, name, tool.timeout(), None).await
     }
+}
+
+/// Starts `c` in its own process group and reads both its streams through [`Capture`],
+/// `input` written to its standard input and then closed (no input: none at all), killed
+/// with what it started when it outlives `limit`. `name` is what an error calls it.
+async fn collect(
+    mut c: tokio::process::Command,
+    name: &str,
+    limit: Duration,
+    input: Option<&[u8]>,
+) -> Result<Output, String> {
+    c.stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true);
+    // Its own process group, so a timeout takes what the tool started with it.
+    #[cfg(unix)]
+    c.process_group(0);
+    let mut child = c
+        .spawn()
+        .map_err(|e| format!("{name} did not start: {}", e.kind()))?;
+    let mut group = GroupGuard::new(child.id());
+    let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+    let feed = async move {
+        use tokio::io::AsyncWriteExt as _;
+        if let (Some(mut w), Some(bytes)) = (stdin, input) {
+            // A program that exits without reading its input still reports its own result.
+            if w.write_all(bytes).await.is_ok() {
+                w.shutdown().await.ok();
+            }
+        }
+    };
+    let all = async {
+        let ((), out, err, status) = tokio::join!(feed, drain(stdout), drain(stderr), child.wait());
+        Ok::<_, std::io::Error>((out?, err?, status?))
+    };
+    let ((stdout, tally), (stderr, _), status) = tokio::time::timeout(limit, all)
+        .await
+        .map_err(|_| format!("{name} took over {}s", limit.as_secs()))?
+        .map_err(|e| format!("{name} failed: {}", e.kind()))?;
+    // Reaped: its pid may be reused, so nothing is left to kill.
+    group.disarm();
+    Ok(Output {
+        success: status.success(),
+        stdout,
+        stderr,
+        tally,
+    })
 }
 
 /// What a tool said, made safe to put in a report: any URL, `host:port`, IP address,
