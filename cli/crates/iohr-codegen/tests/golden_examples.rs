@@ -56,7 +56,10 @@ const PROGRAM: &[(&str, &[&str])] = &[
     ("swift", &["FileHandle.standardError.write(", "exit(1)"]),
     (
         "rust",
-        &["async fn main() -> Result<(), Error> {", "Client::from_env()?;"],
+        &[
+            "async fn main() -> Result<(), Error> {",
+            "Client::from_env()?;",
+        ],
     ),
 ];
 
