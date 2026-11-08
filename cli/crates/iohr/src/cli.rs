@@ -1647,6 +1647,62 @@ pub enum AtlasCommand {
     /// The built-in roles of this project.
     #[command(subcommand, alias = "personalities")]
     Roles(RolesCommand),
+    /// Search the text of the sites this project crawled (PRD 0192).
+    ///
+    /// The best matching chunks of page text, each with its page, heading path and offsets.
+    /// Local: it reads `.inorbit/crawl/kb.duckdb`, which `iohr project init --crawl` builds.
+    /// The search is lexical (BM25); there is no embedding model on this machine.
+    Search {
+        /// What to look for.
+        #[arg(value_name = "QUERY")]
+        query: String,
+        /// Only this site (a name as the crawl folders have it).
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most chunks to show.
+        #[arg(long, default_value_t = 8, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// The facts the site model holds, each with the chunk it came from.
+    ///
+    /// `contact_email`, `phone`, `lists_price`, `offers`, `located_in`, `has_profile`,
+    /// `names_person`, `hosts_event`, `published`, `built_with`, `mentions_organization`,
+    /// `description`, `language`.
+    Facts {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Only this predicate (for example `contact_email`).
+        #[arg(long, value_name = "NAME")]
+        predicate: Option<String>,
+        /// Only facts whose value or subject contains this text.
+        #[arg(long, value_name = "TEXT")]
+        grep: Option<String>,
+        /// The most facts to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
+    Index {
+        /// List the pages of the sites instead of the sites.
+        #[arg(long)]
+        pages: bool,
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most pages to show with `--pages`.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
