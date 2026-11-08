@@ -214,7 +214,8 @@ mod tests {
         let said = read(d.path(), "security");
         assert!(said.contains("Keys rotate every 90 days."), "{said}");
         assert!(said.contains(".inorbit/memory/security/"));
-        assert!(Store::project(d.path()).load().unwrap().is_empty());
+        let project_store = Store::project(d.path()).load().unwrap();
+        assert!(project_store.is_empty(), "the project store holds {project_store:?}");
         assert_eq!(read(d.path(), "rust-engineer"), "");
     }
 
