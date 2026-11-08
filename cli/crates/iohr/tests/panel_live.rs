@@ -38,9 +38,13 @@ fn home(name: &str) -> PathBuf {
     let dir = PathBuf::from(format!("/tmp/iohr-live-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    // A bare `iohr` runs the person's own zsh, which with no rc file at all starts its
-    // new-user menu (Linux does; macOS ships one) and draws it over the panel. A one-line
-    // `.zshrc` keeps that away; `zsh -f` shells ignore it.
+    // A bare `iohr` runs the person's own zsh, whose start the machine can interrupt with a
+    // question that eats what the test types next: with no rc file, the new-user menu (Linux);
+    // and Ubuntu's /etc/zsh/zshrc runs `compinit`, which asks "Ignore insecure directories?"
+    // when a completion directory is group-writable (a CI runner's are). A one-line `.zshrc`
+    // and `skip_global_compinit` (the knob that file documents) keep both away; `zsh -f`
+    // shells ignore the files.
+    std::fs::write(dir.join(".zshenv"), "skip_global_compinit=1\n").unwrap();
     std::fs::write(dir.join(".zshrc"), "PS1='$ '\n").unwrap();
     dir
 }
