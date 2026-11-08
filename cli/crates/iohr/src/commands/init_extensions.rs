@@ -40,8 +40,10 @@ pub(crate) struct Rule {
 /// seed (`crates/extensions/seed/inorbit.json`).
 pub(crate) const RULES: &[Rule] = &[
     Rule {
-        listing: "crawler",
-        why: "reads your public site on your machine and turns it into facts for your atlas and memory",
+        // The crawler ships inside the agent extension (`iohr agent atlas crawl <URL>`), so
+        // this row points at the agent's listing; `plan` offers it once.
+        listing: "agent",
+        why: "crawls your public site on your machine for your atlas and memory; once it is installed, run `iohr agent atlas crawl <URL>`",
         fits: wants_crawler,
     },
     Rule {
@@ -107,25 +109,29 @@ pub(crate) struct Offer {
 }
 
 /// The rules that fit these signals and are in `listings`, in table order. A rule whose
-/// listing the catalogue does not show this account is left out.
+/// listing the catalogue does not show this account is left out, and two rules that name
+/// one listing give one offer (the first rule's reason).
 pub(crate) fn plan(signals: &Signals<'_>, listings: &[Value]) -> Vec<Offer> {
-    RULES
-        .iter()
-        .filter(|r| (r.fits)(signals))
-        .filter_map(|r| {
-            let id = format!("{FIRST_PARTY}/{}", r.listing);
-            let found = listings.iter().find(|x| ident(x) == id)?;
-            Some(Offer {
-                id,
-                why: r.why,
-                state: if is_coming(found) {
-                    State::Coming
-                } else {
-                    State::Installable
-                },
-            })
-        })
-        .collect()
+    let mut offers: Vec<Offer> = Vec::new();
+    for r in RULES.iter().filter(|r| (r.fits)(signals)) {
+        let id = format!("{FIRST_PARTY}/{}", r.listing);
+        if offers.iter().any(|o| o.id == id) {
+            continue;
+        }
+        let Some(found) = listings.iter().find(|x| ident(x) == id) else {
+            continue;
+        };
+        offers.push(Offer {
+            id,
+            why: r.why,
+            state: if is_coming(found) {
+                State::Coming
+            } else {
+                State::Installable
+            },
+        });
+    }
+    offers
 }
 
 /// What init does with the offers.
@@ -234,6 +240,20 @@ pub(crate) fn summary(
     }
 }
 
+/// Installs one extension the way `ext install` does, trust prompt and signature check
+/// included. Init's offer and init's crawl both go through here.
+pub(crate) async fn install_one(g: &Global, env: &Env, out: Out, id: &str) -> Result<(), Error> {
+    let cmd = ExtCommand::Install {
+        extension: id.to_owned(),
+        lock: None,
+        yes: false,
+        no_service: false,
+        interfaces: Vec::new(),
+        all_interfaces: false,
+    };
+    super::ext::run(g, env, cmd, out).await
+}
+
 /// The one call init makes: reads the catalogue when something fits, offers or hints,
 /// and installs what the person said yes to through `ext install`. It never fails the
 /// init: a catalogue that cannot be read or an install that fails is one line. It returns
@@ -262,7 +282,15 @@ pub(crate) async fn offer(
             return None;
         }
     };
-    let offers = plan(signals, &listings);
+    let mut offers = plan(signals, &listings);
+    // What is installed already (the crawl step may have just installed the agent) is not
+    // offered again.
+    if let Ok(store) = super::ext::store(g) {
+        offers.retain(|o| {
+            let name = o.id.rsplit('/').next().unwrap_or(&o.id);
+            !matches!(store.installed(name), Ok(Some(_)))
+        });
+    }
     if offers.is_empty() {
         return None;
     }
@@ -293,15 +321,7 @@ pub(crate) async fn offer(
     let mut installed = Vec::new();
     let mut failed = Vec::new();
     for id in ids {
-        let cmd = ExtCommand::Install {
-            extension: id.clone(),
-            lock: None,
-            yes: false,
-            no_service: false,
-            interfaces: Vec::new(),
-            all_interfaces: false,
-        };
-        match super::ext::run(g, env, cmd, out).await {
+        match install_one(g, env, out, &id).await {
             Ok(()) => installed.push(id),
             Err(e) => failed.push(format!(
                 "could not install {id}: {e}; `{bin} ext install {id}` tries again"
@@ -337,8 +357,15 @@ mod tests {
         vec![
             json!({"publisher": "inorbit", "name": "agent", "kind": "program", "coming": false}),
             json!({"publisher": "inorbit", "name": "capture", "kind": "program", "coming": false}),
-            json!({"publisher": "inorbit", "name": "crawler", "kind": "program", "coming": true}),
         ]
+    }
+
+    fn coming(id: &str) -> Offer {
+        Offer {
+            id: id.to_owned(),
+            why: "does a thing",
+            state: State::Coming,
+        }
     }
 
     fn ids(o: &[Offer]) -> Vec<&str> {
@@ -349,13 +376,19 @@ mod tests {
     fn the_rule_table_maps_signals_to_listings() {
         let c = catalogue();
         let site = plan(&sig("blank", Some("Read my site https://example.com")), &c);
-        assert_eq!(ids(&site), ["inorbit/crawler"]);
+        assert_eq!(ids(&site), ["inorbit/agent"]);
+        let why = site[0].why;
+        assert!(why.contains("iohr agent atlas crawl <URL>"), "{why}");
         let traffic = plan(&sig("demo", Some("count the traffic per route")), &c);
         assert_eq!(ids(&traffic), ["inorbit/capture"]);
         let coordinated = plan(&sig("coordinated", None), &c);
         assert_eq!(ids(&coordinated), ["inorbit/agent"]);
         let both = plan(&sig("coordinated", Some("crawl our website")), &c);
-        assert_eq!(ids(&both), ["inorbit/crawler", "inorbit/agent"]);
+        assert_eq!(
+            ids(&both),
+            ["inorbit/agent"],
+            "the crawler is the agent's: one offer"
+        );
         // Nothing in the signals, nothing offered; a word is a whole word.
         assert_eq!(ids(&plan(&sig("blank", None), &c)), Vec::<&str>::new());
         assert_eq!(
@@ -369,12 +402,12 @@ mod tests {
 
     #[test]
     fn a_rule_whose_listing_the_catalogue_does_not_show_is_left_out() {
-        let only_agent = vec![catalogue()[0].clone()];
+        let only_capture = vec![catalogue()[1].clone()];
         assert_eq!(
-            ids(&plan(&sig("blank", Some("read my site")), &only_agent)),
+            ids(&plan(&sig("blank", Some("read my site")), &only_capture)),
             Vec::<&str>::new()
         );
-        let other = vec![json!({"publisher": "acme", "name": "crawler", "coming": false})];
+        let other = vec![json!({"publisher": "acme", "name": "agent", "coming": false})];
         assert_eq!(
             ids(&plan(&sig("blank", Some("read my site")), &other)),
             Vec::<&str>::new()
@@ -383,10 +416,7 @@ mod tests {
 
     #[test]
     fn a_coming_listing_is_marked_coming_and_never_offered_for_install() {
-        let c = catalogue();
-        let offers = plan(&sig("coordinated", Some("crawl our website")), &c);
-        let crawler = offers.iter().find(|o| o.id == "inorbit/crawler");
-        assert_eq!(crawler.map(|o| o.state), Some(State::Coming));
+        let offers = [coming("inorbit/crawler")];
         for m in [Mode::Ask, Mode::Hint, Mode::Skip] {
             let mut asked = Vec::new();
             let mut said = Vec::new();

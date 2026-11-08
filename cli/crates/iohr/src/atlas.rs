@@ -406,6 +406,58 @@ pub fn new_document(
     Ok((rel, number))
 }
 
+/// Writes a document with its own text (a program wrote it, not a stub) into the atlas of
+/// `root`. A file of the kind whose name carries this title's slug is rewritten in place:
+/// it keeps its number and any sync bookkeeping ([`LOCAL_KEYS`] other than `kind` and
+/// `number`), so a second run updates the document and never makes a second one. Returns
+/// the path relative to `root`, the number, and whether a file was there already.
+///
+/// # Errors
+///
+/// A message saying what could not be written.
+pub fn put_document(
+    root: &Path,
+    kind: Kind,
+    title: &str,
+    summary: &str,
+    date: &str,
+    text: &str,
+) -> Result<(String, u32, bool), String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("the title is empty".to_owned());
+    }
+    let dir = kind_dir(root, kind);
+    let tail = format!("-{}.md", slug(title));
+    let same = md_files(&dir)
+        .into_iter()
+        .find(|n| n.ends_with(&tail) && number_of_file(n).is_some());
+    let (name, number, old) = if let Some(n) = same {
+        let number = number_of_file(&n).unwrap_or(1);
+        let old = std::fs::read_to_string(dir.join(&n)).ok();
+        (n, number, old)
+    } else {
+        let number = next_number(root, kind);
+        (file_name(number, title), number, None)
+    };
+    let mut doc = document(kind, number, title, summary, date, text);
+    let existed = old.is_some();
+    if let Some(old) = old {
+        let keep: Vec<(&str, String)> = LOCAL_KEYS
+            .iter()
+            .filter(|k| !matches!(**k, "kind" | "number"))
+            .filter_map(|k| get(&old, k).map(|v| (*k, v)))
+            .collect();
+        if !keep.is_empty() {
+            doc = set_keys(&doc, &keep);
+        }
+    }
+    let rel = format!("{DIR}/{}/{name}", kind.folder());
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    std::fs::write(root.join(&rel), doc).map_err(|e| format!("cannot write {rel}: {e}"))?;
+    Ok((rel, number, existed))
+}
+
 // ---------------------------------------------------------------- canvas, 3D, README
 
 /// The starter canvas: `iohr.canvas` version 3, one frame and one note, so it opens in the
