@@ -178,7 +178,10 @@ pub(super) enum ChatKey {
 pub(super) enum Do {
     None,
     /// Hand this question to the shell, in this answer mode.
-    Send { line: String, mode: String },
+    Send {
+        line: String,
+        mode: String,
+    },
     /// Stop the answer: the proxy writes Ctrl-C to the shell's terminal.
     Stop,
     /// Bytes for the shell as if the box were not there (Down opens the answer's menu).
@@ -206,6 +209,10 @@ struct Run {
 
 /// The box.
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts the shell and the person set"
+)]
 pub(super) struct Chat {
     /// `[panel] chat` is not `off`, and the shell is one the hook speaks to.
     pub(super) enabled: bool,
@@ -576,14 +583,18 @@ impl Chat {
         let right_len = right_text.chars().count();
         // The same test `lay_out` makes: the right header goes first when the title is long.
         let right_fits = 3 + title_len + right_len + 4 <= inner;
-        let chip_fits = 3 + title_len + 1 <= inner;
+        let chip_fits = 3 + title_len < inner;
 
         // The input row: prompt, mark, the visible part of the line, the sent tag.
         let mark = if self.deeper { "?? " } else { "? " };
         let tag = if self.sent { "sent ✓" } else { "" };
         let spans_room = width - 4;
         let prefix = 2 + mark.chars().count();
-        let tag_room = if tag.is_empty() { 0 } else { tag.chars().count() + 1 };
+        let tag_room = if tag.is_empty() {
+            0
+        } else {
+            tag.chars().count() + 1
+        };
         let room = spans_room.saturating_sub(prefix + tag_room + 1).max(1);
         let from = if self.cursor >= room {
             self.cursor + 1 - room
@@ -606,7 +617,10 @@ impl Chat {
         }
         let used: usize = input.iter().map(|s| s.text.chars().count()).sum();
         if !tag.is_empty() {
-            input.push(sp(&" ".repeat(spans_room.saturating_sub(used + tag_room)), TXT));
+            input.push(sp(
+                &" ".repeat(spans_room.saturating_sub(used + tag_room)),
+                TXT,
+            ));
             input.push(sp(tag, GREEN));
         }
         let cursor_col = (self.focus && !running).then(|| 3 + prefix + (self.cursor - from));
@@ -645,7 +659,10 @@ impl Chat {
         let key = |k: &str| bold(k, KEY);
         let Some(run) = &self.run else {
             let spans = if !self.at_prompt && self.delivered.is_none() {
-                vec![sp("a command is running; the box waits for the prompt", MUTE)]
+                vec![sp(
+                    "a command is running; the box waits for the prompt",
+                    MUTE,
+                )]
             } else if self.focus {
                 vec![
                     key("↵"),
@@ -701,7 +718,10 @@ impl Chat {
             sp(&label, TXT),
             sp("  ", TXT),
         ];
-        let tail = format!("  {count}{}{time}", if count.is_empty() { "" } else { "  " });
+        let tail = format!(
+            "  {count}{}{time}",
+            if count.is_empty() { "" } else { "  " }
+        );
         let used: usize = spans.iter().map(|s| s.text.chars().count()).sum();
         // The bar takes what is left between the label and the count, at most 24 cells.
         let bar_room = room.saturating_sub(used + tail.chars().count() + stop_len + 2);
@@ -765,7 +785,8 @@ impl Chat {
         if row < r.top || row >= r.top + r.height || col >= r.left + r.width {
             return Hit::Outside;
         }
-        let within = |span: Option<(usize, usize)>| span.is_some_and(|(a, b)| (a..b).contains(&col));
+        let within =
+            |span: Option<(usize, usize)>| span.is_some_and(|(a, b)| (a..b).contains(&col));
         match row - laid.top {
             0 if within(laid.hide) => Hit::Hide,
             0 if within(laid.chip) => Hit::Chip,
@@ -795,31 +816,28 @@ impl Laid {
 /// The progress bar: filled for a known total; with none, a short bar that travels, so it never
 /// reads as a percentage.
 fn bar(width: usize, run: &Run, elapsed: Duration) -> Vec<Span> {
-    match run.total {
-        Some(total) => {
-            let done = (run.steps.min(total) * width).div_ceil(total).min(width);
-            vec![
-                sp(&"━".repeat(done), ACC),
-                sp(&"─".repeat(width - done), FAINT),
-            ]
-        }
-        None => {
-            let head = 4.min(width);
-            let travel = width - head;
-            let tick = (elapsed.as_millis() / 80) as usize;
-            let period = (2 * travel).max(1);
-            let p = tick % period;
-            let at = if p <= travel { p } else { period - p };
-            vec![
-                sp(&"─".repeat(at), FAINT),
-                sp(&"━".repeat(head), ACC),
-                sp(&"─".repeat(travel - at), FAINT),
-            ]
-        }
+    if let Some(total) = run.total {
+        let done = (run.steps.min(total) * width).div_ceil(total).min(width);
+        return vec![
+            sp(&"━".repeat(done), ACC),
+            sp(&"─".repeat(width - done), FAINT),
+        ];
     }
+    let head = 4.min(width);
+    let travel = width - head;
+    let tick = (elapsed.as_millis() / 80) as usize;
+    let period = (2 * travel).max(1);
+    let p = tick % period;
+    let at = if p <= travel { p } else { period - p };
+    vec![
+        sp(&"─".repeat(at), FAINT),
+        sp(&"━".repeat(head), ACC),
+        sp(&"─".repeat(travel - at), FAINT),
+    ]
 }
 
 /// The keys in `bytes`; `paste` is whether a bracketed paste is open (kept between reads).
+#[allow(clippy::too_many_lines, reason = "one arm per key sequence")]
 pub(super) fn parse(bytes: &[u8], paste: &mut bool) -> Vec<ChatKey> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -848,12 +866,10 @@ pub(super) fn parse(bytes: &[u8], paste: &mut bool) -> Vec<ChatKey> {
                             (b'B', _) => Some(ChatKey::Down),
                             (b'C', _) => Some(ChatKey::Right),
                             (b'D', _) => Some(ChatKey::Left),
-                            (b'H', _) => Some(ChatKey::Home),
-                            (b'F', _) => Some(ChatKey::End),
+                            (b'H', _) | (b'~', b"1" | b"7") => Some(ChatKey::Home),
+                            (b'F', _) | (b'~', b"4" | b"8") => Some(ChatKey::End),
                             (b'Z', _) if !ss3 => Some(ChatKey::BackTab),
                             (b'~', b"3") => Some(ChatKey::Delete),
-                            (b'~', b"1" | b"7") => Some(ChatKey::Home),
-                            (b'~', b"4" | b"8") => Some(ChatKey::End),
                             (b'~', b"200") => {
                                 *paste = true;
                                 None

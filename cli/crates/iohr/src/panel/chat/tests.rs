@@ -41,7 +41,7 @@ fn reports_are_taken_out_of_the_output() {
             ring: vec!["manual".into(), "plan".into(), "auto".into()]
         }]
     );
-    assert!(held.is_empty());
+    assert_eq!(held, Vec::<u8>::new());
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn other_escapes_and_a_lone_prefix_start_pass_through() {
     let (out, msgs) = extract(&mut held, b"\x1b[31mred\x1b]0;title\x07\x1b");
     // The lone ESC could start a report, so it waits; everything before it goes.
     assert_eq!(out, b"\x1b[31mred\x1b]0;title\x07");
-    assert!(msgs.is_empty());
+    assert_eq!(msgs, Vec::<Msg>::new());
     let (out, _) = extract(&mut held, b"[0m");
     assert_eq!(out, b"\x1b[0m");
 }
@@ -85,7 +85,7 @@ fn unknown_verbs_are_swallowed_and_a_runaway_one_is_not_held_forever() {
     let mut runaway = PREFIX.to_vec();
     runaway.extend(vec![b'x'; MAX_BODY + 10]);
     let (out, _) = extract(&mut held, &runaway);
-    assert!(held.is_empty());
+    assert_eq!(held, Vec::<u8>::new());
     assert_eq!(out.len(), runaway.len());
 }
 
@@ -229,7 +229,11 @@ fn editing_keys_work_in_the_line() {
     typed(&mut chat, "\x15");
     assert_eq!(chat.text.iter().collect::<String>(), "g ");
     typed(&mut chat, "é");
-    assert_eq!(chat.text.iter().collect::<String>(), "é");
+    assert_eq!(
+        chat.text.iter().collect::<String>(),
+        "ég ",
+        "typed at the cursor, which Ctrl-U left at the start"
+    );
 }
 
 #[test]
@@ -313,7 +317,9 @@ fn the_rest_box_is_four_rows_with_the_hint_row() {
     assert!(top.contains("◆ iohr") && top.contains("ask · auto") && top.contains("⌄ hide ^]"));
     assert!(row_text(&laid, 1).contains("❯ ? why is the roll slow"));
     let status = row_text(&laid, 2);
-    assert!(status.contains("↵ send") && status.contains("esc clear") && status.contains("mode: auto"));
+    assert!(
+        status.contains("↵ send") && status.contains("esc clear") && status.contains("mode: auto")
+    );
     assert!(status.contains("↑ last question"));
 }
 
@@ -325,7 +331,10 @@ fn a_sent_question_says_so_on_the_input_row() {
     typed(&mut chat, "why\r");
     let laid = chat.layout(80, 20, now());
     let input = row_text(&laid, 1);
-    assert!(input.contains("❯ ? why") && input.contains("sent ✓"), "{input}");
+    assert!(
+        input.contains("❯ ? why") && input.contains("sent ✓"),
+        "{input}"
+    );
 }
 
 #[test]
@@ -345,7 +354,10 @@ fn while_answering_the_status_row_shows_progress_and_a_stop_button() {
     let laid = chat.layout(80, 20, t0 + Duration::from_millis(6100));
     let status = row_text(&laid, 2);
     assert!(status.contains("reading 3 files"), "{status}");
-    assert!(status.contains("2/3") && status.contains("6.1s"), "{status}");
+    assert!(
+        status.contains("2/3") && status.contains("6.1s"),
+        "{status}"
+    );
     assert!(status.contains("■ Stop esc"), "{status}");
     assert!(status.contains('━') && status.contains('─'));
 }
@@ -372,7 +384,10 @@ fn with_no_total_the_bar_travels_and_the_count_is_steps_not_a_percentage() {
             s.chars().position(|c| c == '━').expect("a bar")
         })
         .collect();
-    assert!(heads.windows(2).any(|w| w[0] != w[1]), "it moves: {heads:?}");
+    assert!(
+        heads.windows(2).any(|w| w[0] != w[1]),
+        "it moves: {heads:?}"
+    );
 }
 
 #[test]
@@ -415,7 +430,10 @@ fn a_narrow_box_still_has_four_equal_rows() {
     for width in [24, 30, 40] {
         let laid = chat.layout(width, 10, now());
         assert_eq!(laid.floating.cells.len(), ROWS);
-        assert!(laid.floating.cells.iter().all(|r| r.len() == width), "{width}");
+        assert!(
+            laid.floating.cells.iter().all(|r| r.len() == width),
+            "{width}"
+        );
     }
 }
 
@@ -461,10 +479,16 @@ fn the_folded_chip_names_the_key_and_shows_progress() {
 fn keys_parse_the_way_a_terminal_sends_them() {
     let mut paste = false;
     assert_eq!(parse(b"\x1b", &mut paste), vec![ChatKey::Esc]);
-    assert_eq!(parse(b"\x1b[A\x1bOB", &mut paste), vec![ChatKey::Up, ChatKey::Down]);
+    assert_eq!(
+        parse(b"\x1b[A\x1bOB", &mut paste),
+        vec![ChatKey::Up, ChatKey::Down]
+    );
     assert_eq!(parse(b"\x1b[3~", &mut paste), vec![ChatKey::Delete]);
     assert_eq!(parse(b"\x1b[1;5C", &mut paste), vec![ChatKey::Right]);
     assert_eq!(parse(b"\x1bb", &mut paste), vec![]);
     assert_eq!(parse(b"\x03", &mut paste), vec![ChatKey::CtrlC]);
-    assert_eq!(parse("é€".as_bytes(), &mut paste), vec![ChatKey::Char('é'), ChatKey::Char('€')]);
+    assert_eq!(
+        parse("é€".as_bytes(), &mut paste),
+        vec![ChatKey::Char('é'), ChatKey::Char('€')]
+    );
 }
