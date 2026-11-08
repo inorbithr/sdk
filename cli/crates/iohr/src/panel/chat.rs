@@ -412,6 +412,7 @@ impl Chat {
                 self.back = b;
                 if b {
                     self.focus = false;
+                    self.delivered = None;
                 }
             }
             Msg::Mode(m) => self.mode = m,
@@ -657,6 +658,17 @@ impl Chat {
     /// it.
     fn status(&self, room: usize, now: Instant) -> (Vec<Span>, Option<(usize, usize)>) {
         let key = |k: &str| bold(k, KEY);
+        // The ask waits for the person (a trust question, a question back, a command to allow),
+        // before a run began as well as during one.
+        if self.back {
+            return (
+                vec![
+                    bold("✎ ", AMBER),
+                    sp("Io asks you something: answer in the terminal above", TXT),
+                ],
+                None,
+            );
+        }
         let Some(run) = &self.run else {
             let spans = if !self.at_prompt && self.delivered.is_none() {
                 vec![sp(
@@ -688,15 +700,6 @@ impl Chat {
             };
             return (spans, None);
         };
-        if self.back {
-            return (
-                vec![
-                    bold("✎ ", AMBER),
-                    sp("Io asks you something: answer in the terminal above", TXT),
-                ],
-                None,
-            );
-        }
         let elapsed = now.saturating_duration_since(run.since);
         let frame = (elapsed.as_millis() / 90) as usize;
         let label = if run.label.is_empty() {

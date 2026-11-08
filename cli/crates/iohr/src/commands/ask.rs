@@ -919,17 +919,18 @@ fn grant_access(
         }
         let may_ask = terminal && matches!(mode, Mode::Manual | Mode::Auto);
         let kept = trust::is_trusted(chosen.dir, &req.folder);
-        let asked = (!kept && may_ask).then(|| match trust::ask(&req.folder) {
-            trust::Answer::Always => {
-                if let Err(why) = trust::remember(chosen.dir, &req.folder) {
-                    let _ = console::Term::stderr()
-                        .write_line(&format!("Trusted for this time only: {why}"));
+        let asked =
+            (!kept && may_ask).then(|| match card::asking_person(|| trust::ask(&req.folder)) {
+                trust::Answer::Always => {
+                    if let Err(why) = trust::remember(chosen.dir, &req.folder) {
+                        let _ = console::Term::stderr()
+                            .write_line(&format!("Trusted for this time only: {why}"));
+                    }
+                    true
                 }
-                true
-            }
-            trust::Answer::Once => true,
-            trust::Answer::No => false,
-        });
+                trust::Answer::Once => true,
+                trust::Answer::No => false,
+            });
         if !(kept || asked == Some(true)) || ctx.also.len() >= MAX_FOLDERS {
             return Ok(Some(req));
         }
@@ -1481,9 +1482,7 @@ async fn ask_back(
     how: (Option<&Session>, Mode),
 ) -> Result<Option<(String, Vec<Step>, u64)>, Error> {
     // The box steps aside while the person is asked (the questions are drawn in the terminal).
-    crate::panel::chat_report("back;1");
-    let asked = askback::ask_person(questions);
-    crate::panel::chat_report("back;0");
+    let asked = card::asking_person(|| askback::ask_person(questions));
     let Some(answers) = asked else {
         return Ok(None);
     };

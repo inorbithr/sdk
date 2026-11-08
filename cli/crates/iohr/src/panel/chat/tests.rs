@@ -217,6 +217,27 @@ fn esc_and_ctrl_c_stop_an_answer_and_only_while_one_runs() {
 }
 
 #[test]
+fn a_question_to_the_person_before_the_run_began_shows_in_the_status_row() {
+    let mut chat = Chat::new(true, false);
+    idle(&mut chat);
+    chat.message(Msg::Focus, now());
+    typed(&mut chat, "hi\r");
+    assert!(chat.delivered.is_some());
+    // The ask asks about a folder first (no `begin` yet): the box steps aside at once.
+    chat.message(Msg::Back(true), now());
+    assert!(chat.waiting_for_person() && chat.delivered.is_none());
+    let laid = chat.layout(80, 20, now());
+    assert!(
+        row_text(&laid, 2).contains("Io asks you something"),
+        "{}",
+        row_text(&laid, 2)
+    );
+    chat.message(Msg::Back(false), now());
+    let laid = chat.layout(80, 20, now());
+    assert!(!row_text(&laid, 2).contains("Io asks you something"));
+}
+
+#[test]
 fn editing_keys_work_in_the_line() {
     let mut chat = Chat::new(true, false);
     idle(&mut chat);

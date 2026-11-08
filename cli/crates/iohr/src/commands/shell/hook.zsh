@@ -237,6 +237,10 @@ if [[ -o interactive && -z ${functions[_inorbit_accept]-} ]]; then
     # `??`), the command it suggests, the link it names and the permission rules this run saved
     # (what Undo takes back), separated by a 0x1e character, then the folder Io needs a yes for and
     # the next steps.
+    # Ctrl-C or Esc in the chat box stops the ask, and the same signal reaches this shell too:
+    # a trap that does nothing lets the hooks after this one (the box's "ready") still run.
+    setopt localtraps
+    trap ':' INT
     rec=$("${a[@]}" -- "$q"); local ok=$?
     [[ -n $outfile ]] && command rm -f -- "$outfile"
     if (( ok == 0 )); then
