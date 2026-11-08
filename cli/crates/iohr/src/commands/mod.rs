@@ -2,6 +2,7 @@
 
 mod accounts;
 mod ask;
+mod ask_roles;
 pub(crate) mod asks;
 mod atlas;
 mod auth;

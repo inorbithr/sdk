@@ -412,6 +412,7 @@ pub fn locals(root: &Path) -> Vec<Local> {
         .collect()
 }
 
+pub(crate) mod notes;
 pub(crate) mod runtime;
 
 // ---------------------------------------------------------------- the import
