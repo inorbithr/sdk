@@ -508,13 +508,23 @@ folder, is said once in the ending, not as a line), on stderr, and stdout stays 
 `inorbit/agent` extension (`iohr agent atlas crawl`), and keeps what it found in the project.
 At a terminal, a web address in the `--describe` text is asked about first (default no);
 `--crawl URL` is the consent, and with `--json`, `--yes` or no terminal nothing is read unless
-you pass it. `--no-crawl` never reads. Before it starts, init says what it will do: the host and
-its subdomains only, robots.txt honoured, at most `--crawl-pages` pages (default 200) and
+you pass it. `--no-crawl` never reads. Before it starts, init says what it will do: the host
+you gave only, robots.txt honoured, at most `--crawl-pages` pages (default 200) and
 `--crawl-minutes` minutes (default 5, hard caps 20000 and 240), 10 hosts, 50 MB in all and 2 MB
 a page, and that nothing is sent to InOrbit. `--dry-run` says the same and reads nothing.
 
+The crawl stays on that host. When a page links to another name in the same domain
+(`blog.example.com` from `example.com`; from `www.example.com` that also means the apex and its
+siblings), init asks once per name at a terminal: yes, no, or yes to all, default no. A yes
+runs one more pass on that name alone, inside what is left of the same pages, minutes, hosts
+and megabytes, and its raw record is in `.inorbit/crawl/<host>/more/<name>/`; everything lands
+in the one study and the one memory entry. With `--yes`, `--json` or no terminal init follows
+none, and the summary lists the names it left out. `--crawl-subdomains` is the yes to all given
+in advance: the first pass is allowed the host and `*.host`, and nothing is asked.
+
 ```sh
 iohr project init my-shop --crawl https://example.com --crawl-pages 50
+iohr project init my-shop --crawl https://example.com --crawl-subdomains
 iohr project init my-shop --no-crawl
 ```
 

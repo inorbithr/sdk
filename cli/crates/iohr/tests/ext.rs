@@ -1557,6 +1557,16 @@ mod init_crawl {
     /// requests), writes the crawler's JSON to `--out`, records its arguments beside it and
     /// exits with `exit`.
     fn fake_agent(exit: u8, stopped_by: &[&str], json: bool) -> Vec<u8> {
+        fake_agent_with(exit, stopped_by, json, &serde_json::json!([]))
+    }
+
+    /// The same, with `blocked` as the links the crawler met and kept out.
+    fn fake_agent_with(
+        exit: u8,
+        stopped_by: &[&str],
+        json: bool,
+        blocked: &serde_json::Value,
+    ) -> Vec<u8> {
         let result = serde_json::json!({
             "start": "http://site.test/", "scope": "site.test",
             "complete": stopped_by.is_empty(), "stopped_by": stopped_by,
@@ -1570,7 +1580,7 @@ mod init_crawl {
             ],
             "hosts": [{"host": "site.test", "robots": "rules", "pages": 3, "disallowed": 2,
                        "media_skipped": 0, "refused": false}],
-            "blocked": [], "links": [], "listings": [],
+            "blocked": blocked, "links": [], "listings": [],
             "used": {"pages": 3, "hosts": 1, "bytes": 30, "seconds": 3, "requests": 4, "renders": 0}
         })
         .to_string();
@@ -1760,6 +1770,58 @@ mod init_crawl {
             }),
             "{seen:?}"
         );
+    }
+
+    /// A site that links to a subdomain, which the crawler keeps out by its policy.
+    fn agent_that_meets_a_subdomain() -> Vec<u8> {
+        fake_agent_with(
+            0,
+            &[],
+            true,
+            &serde_json::json!([
+                {"url": "http://blog.site.test/", "reason": "policy: host not allowed"},
+                {"url": "http://site.test/private", "reason": "robots.txt"}
+            ]),
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_subdomain_is_not_followed_without_a_yes() {
+        // No terminal (and `--yes`): the one asked-for host is read, the subdomain is not,
+        // and the report says which name was left out and how to read it.
+        let s = site(Some(agent_that_meets_a_subdomain()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("not read: blog.site.test"), "{t}");
+        assert!(t.contains("--crawl-subdomains"), "{t}");
+        assert!(
+            !t.contains("and its subdomains"),
+            "the consent names the host only: {t}"
+        );
+        let dirc = s.crawl_dir();
+        assert!(!dirc.join("more").exists(), "no second pass ran");
+        let policy = std::fs::read_to_string(dirc.join("policy.toml")).unwrap();
+        assert!(!policy.contains("blog"), "{policy}");
+        let study = s.dir.read_dir_of("atlas/studies");
+        let study = study.iter().find(|n| n.contains("site-crawl")).unwrap();
+        let study = std::fs::read_to_string(s.dir.join("atlas/studies").join(study)).unwrap();
+        assert!(study.contains("were not read: blog.site.test"), "{study}");
+        assert_eq!(crawl_memories(&s.dir), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_subdomain_flag_is_the_yes_to_all_and_asks_nothing() {
+        let s = site(Some(agent_that_meets_a_subdomain()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-subdomains"]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("and its subdomains"), "{t}");
+        assert!(!t.contains("not read:"), "{t}");
+        assert!(!s.crawl_dir().join("more").exists());
+        // The flag and the refusal to crawl cannot be given together.
+        let o = s.init(&["--no-crawl", "--crawl-subdomains"]);
+        assert_ne!(code(&o), 0, "{}", text(&o));
     }
 
     #[tokio::test(flavor = "multi_thread")]

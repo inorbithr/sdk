@@ -1339,7 +1339,7 @@ fn report_of(lease: &Lease, pack: &Pack, runner: &RunnerInfo, f: &Finished) -> T
         outcome: f.outcome.clone(),
         say,
         state,
-        actions: actions_of(&actions, pack, f, &today()),
+        actions: actions_of(&actions, pack, f, &crate::front::today()),
         evidence: evidence.iter().map(text_of).collect(),
         left: left.iter().map(text_of).collect(),
         provider: super::claude::PROVIDER.into(),
@@ -1408,12 +1408,6 @@ fn actions_of(actions: &[serde_json::Value], pack: &Pack, f: &Finished, date: &s
 fn prompt_digest(system: &str, prompt: &str) -> String {
     use sha2::{Digest as _, Sha256};
     super::claude::hex(&Sha256::digest(format!("{system}\n\n{prompt}").as_bytes()))
-}
-
-/// Today in UTC, `YYYY-MM-DD`.
-fn today() -> String {
-    let d = time::OffsetDateTime::now_utc().date();
-    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
 }
 
 /// A list element as text: a string as is, anything else as its JSON.

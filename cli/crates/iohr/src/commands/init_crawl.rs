@@ -26,7 +26,7 @@ use crate::error::Error;
 use crate::memory::store::{self, Kind as MemKind};
 use crate::output::Out;
 use crate::project::{self, Step};
-use crate::ui::Ui;
+use crate::ui::{Choice, Ui};
 
 /// The extension that holds the crawler.
 const EXTENSION: &str = "agent";
@@ -51,16 +51,23 @@ pub(crate) struct Plan {
     pub name: String,
     pub pages: u32,
     pub minutes: u32,
+    /// `--crawl-subdomains`: follow every subdomain without asking.
+    pub subdomains: bool,
 }
 
 impl Plan {
     /// What a dry run says it would do.
     pub(crate) fn would(&self) -> String {
         format!(
-            "read {} on this machine with iohr-agent (up to {} pages or {} minutes) into {DIR}/{}/, then write atlas facts and one memory entry; nothing is sent to InOrbit",
+            "read {} on this machine with iohr-agent (up to {} pages or {} minutes; {}) into {DIR}/{}/, then write atlas facts and one memory entry; nothing is sent to InOrbit",
             self.url.as_str(),
             self.pages,
             self.minutes,
+            if self.subdomains {
+                "its subdomains too"
+            } else {
+                "a subdomain only after you say yes"
+            },
             self.name
         )
     }
@@ -69,8 +76,18 @@ impl Plan {
 /// The consent init shows before the first request.
 pub(crate) fn consent(p: &Plan) -> String {
     let host = p.url.host_str().unwrap_or_default();
+    let scope = if p.subdomains {
+        format!("{host} and its subdomains")
+    } else {
+        host.to_owned()
+    };
+    let more = if p.subdomains {
+        ""
+    } else {
+        " A link to another name in its domain is asked about, once per name, before it is followed; with no terminal none is followed (--crawl-subdomains follows them)."
+    };
     format!(
-        "This reads the public pages of {host} and its subdomains on this machine, with iohr-agent: at most one request a second, robots.txt followed, up to {} pages or {} minutes. What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
+        "This reads the public pages of {scope} on this machine, with iohr-agent: at most one request a second, robots.txt followed, up to {} pages or {} minutes.{more} What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
         p.pages, p.minutes, p.name
     )
 }
@@ -127,16 +144,19 @@ fn folder_name(url: &Url) -> String {
         .collect()
 }
 
-/// The policy the agent runs under: this host and its subdomains, nothing else. An address
-/// that is an IP or `localhost` has no subdomains, so it is the one name.
-fn policy_text(url: &Url) -> String {
-    let host = url.host_str().unwrap_or_default();
-    let names =
-        if host == "localhost" || host.parse::<std::net::IpAddr>().is_ok() || host.contains(':') {
-            format!("\"{host}\"")
-        } else {
-            format!("\"{host}\", \"*.{host}\"")
-        };
+/// The policy the agent runs under: this host and, only when `subdomains` is set, its
+/// subdomains; nothing else. An address that is an IP or `localhost` has no subdomains, so it
+/// is the one name.
+fn policy_text(host: &str, subdomains: bool) -> String {
+    let names = if !subdomains
+        || host == "localhost"
+        || host.parse::<std::net::IpAddr>().is_ok()
+        || host.contains(':')
+    {
+        format!("\"{host}\"")
+    } else {
+        format!("\"{host}\", \"*.{host}\"")
+    };
     format!(
         "# Written by `iohr project init`: the crawler may reach this site and nothing else.\nenvironment = \"staging\"\n\n[domains]\nbound = []\n\n[networks]\nallow = [{names}]\n"
     )
@@ -171,6 +191,7 @@ pub(crate) fn decide(
         url,
         pages: args.crawl_pages.clamp(1, MAX_PAGES),
         minutes: args.crawl_minutes.clamp(1, MAX_MINUTES),
+        subdomains: args.crawl_subdomains,
     };
     if !out.json {
         ui.note("Crawl", &consent(&plan));
@@ -198,7 +219,20 @@ pub(crate) struct Crawl {
     pub stopped_by: Vec<String>,
     pub pages: Vec<Page>,
     pub hosts: Vec<HostRow>,
+    /// Links the crawler met and did not follow, each with the reason.
+    pub blocked: Vec<Blocked>,
     pub used: Used,
+    /// Names in the site's domain that were not read: declined, or past a limit. Not in the
+    /// crawler's JSON; init fills it.
+    #[serde(skip)]
+    pub not_followed: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct Blocked {
+    pub url: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -224,6 +258,7 @@ pub(crate) struct HostRow {
 #[serde(default)]
 pub(crate) struct Used {
     pub seconds: u64,
+    pub bytes: u64,
 }
 
 impl Page {
@@ -246,6 +281,7 @@ pub(crate) struct Counts {
     pub robots: usize,
     pub seconds: u64,
     pub stopped: Vec<String>,
+    pub not_followed: Vec<String>,
 }
 
 impl Crawl {
@@ -256,6 +292,7 @@ impl Crawl {
             robots: self.hosts.iter().map(|h| h.disallowed).sum(),
             seconds: self.used.seconds,
             stopped: self.stopped_by.clone(),
+            not_followed: self.not_followed.clone(),
         }
     }
 }
@@ -294,6 +331,13 @@ fn study_text(c: &Crawl, n: &Counts, name: &str, crawled: &str) -> String {
         n.robots,
         stopped_line(&n.stopped, false),
     );
+    if !n.not_followed.is_empty() {
+        let _ = writeln!(
+            t,
+            "Names in the same domain that were not read: {}.\n",
+            n.not_followed.join(", ")
+        );
+    }
     let _ = writeln!(t, "## Pages\n");
     for p in c.pages.iter().take(LISTED) {
         let title = if p.title.trim().is_empty() {
@@ -353,8 +397,16 @@ fn stopped_line(stopped: &[String], hint: bool) -> String {
 pub(crate) fn summary(name: &str, n: &Counts, facts: usize, memories: usize) -> String {
     let robots = n.robots;
     let failed = n.failed;
+    let left_out = if n.not_followed.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n  not read: {} (another name in the site's domain; `--crawl-subdomains` reads them without asking)",
+            n.not_followed.join(", ")
+        )
+    };
     format!(
-        "Crawl   {name}   on this machine, by iohr-agent\n  read {} pages in {} s, {robots} skipped by robots.txt, {failed} failed\n  {}\n  facts: {facts} in atlas/   memory: {memories} entr{}   local files: {DIR}/{name}/\nNothing was sent to InOrbit. Run iohr sync when you want it there.",
+        "Crawl   {name}   on this machine, by iohr-agent\n  read {} pages in {} s, {robots} skipped by robots.txt, {failed} failed\n  {}{left_out}\n  facts: {facts} in atlas/   memory: {memories} entr{}   local files: {DIR}/{name}/\nNothing was sent to InOrbit. Run iohr sync when you want it there.",
         n.read,
         n.seconds,
         stopped_line(&n.stopped, true),
@@ -421,19 +473,66 @@ pub(crate) fn keep(root: &Path, name: &str, c: &Crawl, crawled: &str) -> Result<
     })
 }
 
-/// The arguments of the crawl, as the agent extension reads them.
-fn crawler_args(p: &Plan, policy: &Path, out: &Path) -> Vec<std::ffi::OsString> {
-    let mut a: Vec<std::ffi::OsString> = ["atlas", "crawl", p.url.as_str(), "--policy"]
-        .map(Into::into)
-        .into();
+/// What one pass of the crawler may use: what is left of the plan's limits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Budget {
+    pages: u32,
+    minutes: u32,
+    hosts: u32,
+    megabytes: u32,
+}
+
+impl Budget {
+    /// The first pass gets the plan's limits whole.
+    fn of(p: &Plan) -> Self {
+        Self {
+            pages: p.pages,
+            minutes: p.minutes,
+            hosts: HOSTS,
+            megabytes: MEGABYTES,
+        }
+    }
+
+    /// What is left of the plan after `so_far`, or the limit that is used up. Every pass the
+    /// person agrees to stays inside the same pages, minutes, hosts and megabytes as the first.
+    fn left(p: &Plan, so_far: &Crawl) -> Result<Self, &'static str> {
+        let pages = u32::try_from(so_far.pages.len()).unwrap_or(u32::MAX);
+        let hosts = u32::try_from(so_far.hosts.len()).unwrap_or(u32::MAX);
+        if pages >= p.pages {
+            return Err("pages");
+        }
+        if so_far.used.seconds >= u64::from(p.minutes) * 60 {
+            return Err("minutes");
+        }
+        if hosts >= HOSTS {
+            return Err("hosts");
+        }
+        if so_far.used.bytes >= u64::from(MEGABYTES) * 1_048_576 {
+            return Err("bytes");
+        }
+        let minutes_used = u32::try_from(so_far.used.seconds / 60).unwrap_or(u32::MAX);
+        let mb_used = u32::try_from(so_far.used.bytes / 1_048_576).unwrap_or(u32::MAX);
+        Ok(Self {
+            pages: p.pages - pages,
+            minutes: p.minutes.saturating_sub(minutes_used).max(1),
+            hosts: HOSTS - hosts,
+            megabytes: MEGABYTES.saturating_sub(mb_used).max(1),
+        })
+    }
+}
+
+/// The arguments of one pass, as the agent extension reads them.
+fn crawler_args(start: &str, b: &Budget, policy: &Path, out: &Path) -> Vec<std::ffi::OsString> {
+    let mut a: Vec<std::ffi::OsString> =
+        ["atlas", "crawl", start, "--policy"].map(Into::into).into();
     a.push(policy.into());
     a.push("--out".into());
     a.push(out.into());
     for (flag, value) in [
-        ("--max-pages", p.pages),
-        ("--max-hosts", HOSTS),
-        ("--max-minutes", p.minutes),
-        ("--max-mb", MEGABYTES),
+        ("--max-pages", b.pages),
+        ("--max-hosts", b.hosts),
+        ("--max-minutes", b.minutes),
+        ("--max-mb", b.megabytes),
         ("--max-page-mb", PAGE_MEGABYTES),
     ] {
         a.push(flag.into());
@@ -441,6 +540,170 @@ fn crawler_args(p: &Plan, policy: &Path, out: &Path) -> Vec<std::ffi::OsString> 
     }
     a
 }
+
+// ---------------------------------------------------------------- subdomains
+
+/// What the person says about a subdomain the crawl met.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Answer {
+    Yes,
+    No,
+    /// Yes, and every other one too.
+    All,
+}
+
+/// Asks about one subdomain at a terminal; the default is no.
+fn ask_about(ui: Ui, site: &str, host: &str) -> Result<Answer, Error> {
+    let choice = |value: &str, label: &str, hint: &str| Choice {
+        value: value.into(),
+        label: label.into(),
+        hint: hint.into(),
+        available: true,
+        key: None,
+    };
+    let said = ui.select(
+        &format!(
+            "The site links to {host}, another name under the same domain as {site}. Read it too?"
+        ),
+        &[
+            choice("no", "No", "skip it, the default"),
+            choice("yes", "Yes", "read its public pages as well"),
+            choice(
+                "all",
+                "Yes to all",
+                "read every such name without asking again",
+            ),
+        ],
+        "no",
+    )?;
+    Ok(match said.as_str() {
+        "yes" => Answer::Yes,
+        "all" => Answer::All,
+        _ => Answer::No,
+    })
+}
+
+/// A name in the crawl's own domain that the policy kept the crawler from: the host and the
+/// first address on it. The crawler visits such a link and records it as blocked with a
+/// `policy` reason; it reads nothing from it. The domain is the crawl's `scope` (the
+/// registrable one), so a site started on `www.` also offers its apex and its siblings.
+fn blocked_hosts(c: &Crawl, site_host: &str) -> Vec<(String, String)> {
+    let scope = if c.scope.is_empty() {
+        site_host
+    } else {
+        c.scope.as_str()
+    }
+    .to_ascii_lowercase();
+    let mut found: Vec<(String, String)> = Vec::new();
+    for b in &c.blocked {
+        if !b.reason.starts_with("policy") {
+            continue;
+        }
+        let Ok(url) = Url::parse(&b.url) else {
+            continue;
+        };
+        // The name the policy refused: for a redirect that is the target (the entry's own
+        // URL is the page that redirected), so it is read from the reason when it says.
+        let refused = b
+            .reason
+            .split_once(" is neither named in")
+            .and_then(|(head, _)| head.rsplit(' ').next())
+            .map(str::to_ascii_lowercase);
+        let (host, start) = match (refused, url.host_str()) {
+            (Some(h), Some(own)) if h != own.to_ascii_lowercase() => {
+                let start = format!("{}://{h}/", url.scheme());
+                (h, start)
+            }
+            (_, Some(own)) => (own.to_ascii_lowercase(), b.url.clone()),
+            _ => continue,
+        };
+        let inside = host == scope || host.ends_with(&format!(".{scope}"));
+        if inside && !found.iter().any(|(h, _)| *h == host) {
+            found.push((host, start));
+        }
+    }
+    found
+}
+
+/// Joins a further pass into the crawl so far: one crawl, one study, one memory entry.
+fn absorb(into: &mut Crawl, more: Crawl) {
+    into.pages.extend(more.pages);
+    into.hosts.extend(more.hosts);
+    into.blocked.extend(more.blocked);
+    into.complete &= more.complete;
+    for s in more.stopped_by {
+        if !into.stopped_by.contains(&s) {
+            into.stopped_by.push(s);
+        }
+    }
+    into.used.seconds += more.used.seconds;
+    into.used.bytes += more.used.bytes;
+}
+
+/// What a pass needs to be run: the name it is for, where it starts and what it may use.
+type PassOf<'a> = (&'a str, &'a str, Budget);
+
+/// The crawl starts on the one host. For each subdomain it met (blocked by the policy) this
+/// asks once: `No` leaves it out and says so in the result, `Yes` runs a further pass on that
+/// host alone, `All` does that for it and every later one without asking. Every pass is inside
+/// the plan's remaining limits; when one is used up the rest are left out and the limit is
+/// named in `stopped_by`.
+async fn explore<F, Fut>(
+    p: &Plan,
+    mut crawl: Crawl,
+    mut ask: impl FnMut(&str) -> Answer,
+    mut pass: F,
+) -> Crawl
+where
+    F: FnMut(String, String, Budget) -> Fut,
+    Fut: std::future::Future<Output = Result<Crawl, String>>,
+{
+    let site = p.url.host_str().unwrap_or_default().to_ascii_lowercase();
+    let mut seen: Vec<String> = vec![site.clone()];
+    seen.extend(crawl.hosts.iter().map(|h| h.host.to_ascii_lowercase()));
+    let mut queue = std::collections::VecDeque::new();
+    let offer = |c: &Crawl, seen: &mut Vec<String>, queue: &mut std::collections::VecDeque<_>| {
+        for (host, url) in blocked_hosts(c, &site) {
+            if !seen.contains(&host) {
+                seen.push(host.clone());
+                queue.push_back((host, url));
+            }
+        }
+    };
+    offer(&crawl, &mut seen, &mut queue);
+    let mut all = false;
+    while let Some((host, start)) = queue.pop_front() {
+        let budget = match Budget::left(p, &crawl) {
+            Ok(b) => b,
+            Err(limit) => {
+                if !crawl.stopped_by.iter().any(|s| s == limit) {
+                    crawl.stopped_by.push(limit.to_owned());
+                }
+                crawl.not_followed.push(host);
+                crawl
+                    .not_followed
+                    .extend(queue.drain(..).map(|(h, _): (String, String)| h));
+                break;
+            }
+        };
+        let answer = if all { Answer::Yes } else { ask(&host) };
+        if answer == Answer::No {
+            crawl.not_followed.push(host);
+            continue;
+        }
+        all |= answer == Answer::All;
+        match pass(host.clone(), start, budget).await {
+            Ok(more) => {
+                offer(&more, &mut seen, &mut queue);
+                absorb(&mut crawl, more);
+            }
+            Err(_) => crawl.not_followed.push(host),
+        }
+    }
+    crawl
+}
+
+// ---------------------------------------------------------------- the passes
 
 /// Whether the agent extension is installed.
 fn have_agent(g: &Global) -> bool {
@@ -456,6 +719,80 @@ fn failed(said: impl Into<String>) -> Step {
 
 fn skipped(said: impl Into<String>) -> Step {
     project::step("crawl", "Crawl", "skipped", said, "")
+}
+
+/// What every pass of one run shares.
+struct Ctx<'a> {
+    g: &'a Global,
+    env: &'a Env,
+    ui: Ui,
+    out: Out,
+    root: &'a Path,
+}
+
+impl Ctx<'_> {
+    /// One run of the crawler over `start` under `policy`, into `dir`: its folder with the
+    /// policy and the JSON it left. A crawl that fails leaves no result behind.
+    async fn pass(
+        &self,
+        (label, start, b): PassOf<'_>,
+        policy: &str,
+        dir: &Path,
+    ) -> Result<Crawl, String> {
+        prepare_dir(self.root, dir, policy)?;
+        let crawl_json = dir.join("crawl.json");
+        let sp =
+            (!self.out.json).then(|| self.ui.step(&format!("Reading {label} on this machine")));
+        let ran = self.run_agent(start, &b, dir, &crawl_json).await;
+        match (&ran, sp) {
+            (Ok(_), Some(sp)) => sp.clear(),
+            (Err(e), Some(sp)) => sp.fail(&format!("The crawl failed: {e}")),
+            _ => {}
+        }
+        ran
+    }
+
+    async fn run_agent(
+        &self,
+        start: &str,
+        b: &Budget,
+        dir: &Path,
+        crawl_json: &Path,
+    ) -> Result<Crawl, String> {
+        let store = super::ext::store(self.g).map_err(|e| e.to_string())?;
+        let args = crawler_args(start, b, &dir.join("policy.toml"), crawl_json);
+        let limit = Duration::from_secs(u64::from(b.minutes) * 60 + 60);
+        let ran = tokio::time::timeout(
+            limit,
+            crate::ext::run::run_quiet(self.g, self.env, &store, EXTENSION, &args),
+        )
+        .await;
+        let quiet = match ran {
+            Err(_) => {
+                return Err(format!(
+                    "the crawler did not finish in {} minutes and was stopped",
+                    b.minutes + 1
+                ));
+            }
+            Ok(Err(e)) => return Err(e.to_string()),
+            Ok(Ok(q)) => q,
+        };
+        // Exit 0 is a complete crawl and 1 one that a budget stopped: both leave the JSON.
+        let parsed = std::fs::read(crawl_json)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Crawl>(&b).ok());
+        match (quiet.code, parsed) {
+            (0 | 1, Some(c)) => Ok(c),
+            (code, _) => {
+                let tail = quiet.stderr.trim();
+                Err(if tail.is_empty() {
+                    format!("the crawler exited with {code} and left no result")
+                } else {
+                    format!("the crawler exited with {code}: {}", one_line(tail))
+                })
+            }
+        }
+    }
 }
 
 /// Runs the crawl and keeps what it found. The report step says how it went; the summary is
@@ -492,62 +829,55 @@ pub(crate) async fn run(
             return skipped(format!("{id} is not installed; `{install}` installs it"));
         }
     }
+    let ctx = Ctx {
+        g,
+        env,
+        ui,
+        out,
+        root,
+    };
     let dir: PathBuf = root.join(DIR).join(&p.name);
-    if let Err(e) = prepare_dir(root, &dir, p) {
-        return failed(e);
-    }
-    let crawl_json = dir.join("crawl.json");
-    let sp = (!out.json).then(|| ui.step(&format!("Reading {} on this machine", p.name)));
-    let store = match super::ext::store(g) {
-        Ok(s) => s,
-        Err(e) => return finish_failed(sp, e.to_string()),
+    let host = p.url.host_str().unwrap_or_default();
+    let first = match ctx
+        .pass(
+            (&p.name, p.url.as_str(), Budget::of(p)),
+            &policy_text(host, p.subdomains),
+            &dir,
+        )
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => return failed(e),
     };
-    let args = crawler_args(p, &dir.join("policy.toml"), &crawl_json);
-    let limit = Duration::from_secs(u64::from(p.minutes) * 60 + 60);
-    let ran = tokio::time::timeout(
-        limit,
-        crate::ext::run::run_quiet(g, env, &store, EXTENSION, &args),
-    )
-    .await;
-    let quiet = match ran {
-        Err(_) => {
-            return finish_failed(
-                sp,
-                format!(
-                    "the crawler did not finish in {} minutes and was stopped",
-                    p.minutes + 1
-                ),
-            );
-        }
-        Ok(Err(e)) => return finish_failed(sp, e.to_string()),
-        Ok(Ok(q)) => q,
-    };
-    // Exit 0 is a complete crawl and 1 one that a budget stopped: both leave the JSON.
-    let parsed = std::fs::read(&crawl_json)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Crawl>(&b).ok());
-    let crawl = match (quiet.code, parsed) {
-        (0 | 1, Some(c)) => c,
-        (code, _) => {
-            let tail = quiet.stderr.trim();
-            let said = if tail.is_empty() {
-                format!("the crawler exited with {code} and left no result")
+    // With the flag the first pass already read the subdomains; without it each one is asked
+    // about, at a terminal, and left out anywhere else.
+    let crawl = if p.subdomains {
+        first
+    } else {
+        let ask = |h: &str| {
+            if interactive && !out.json {
+                ask_about(ui, host, h).unwrap_or(Answer::No)
             } else {
-                format!("the crawler exited with {code}: {}", one_line(tail))
-            };
-            return finish_failed(sp, said);
-        }
+                Answer::No
+            }
+        };
+        let more_dir = dir.join("more");
+        explore(p, first, ask, |sub, start, b| {
+            let (ctx, dir) = (&ctx, more_dir.join(folder_part(&sub)));
+            async move {
+                ctx.pass((&sub, &start, b), &policy_text(&sub, false), &dir)
+                    .await
+            }
+        })
+        .await
     };
     let crawled = crate::front::today();
     let kept = match keep(root, &p.name, &crawl, &crawled) {
         Ok(k) => k,
-        Err(e) => return finish_failed(sp, e),
+        Err(e) => return failed(e),
     };
     let n = crawl.counts();
     let text = summary(&p.name, &n, kept.facts, kept.memories);
-    if let Some(sp) = sp {
-        sp.clear();
-    }
     if !out.json {
         ui.note("Crawl", &text);
     }
@@ -563,27 +893,32 @@ pub(crate) async fn run(
     )
 }
 
-fn finish_failed(sp: Option<crate::ui::Step>, said: String) -> Step {
-    if let Some(sp) = sp {
-        sp.fail(&format!("The crawl failed: {said}"));
-    }
-    failed(said)
+/// A host as a folder name: safe characters only.
+fn folder_part(host: &str) -> String {
+    host.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// Makes the crawl's folder with its policy, and a `.gitignore` for the raw record so the
 /// project's own git does not commit a crawl (the study and the memory entry are what the
 /// project keeps). A result of an earlier run is removed, so a crawl that fails is never
 /// read as the last one that worked.
-fn prepare_dir(root: &Path, dir: &Path, p: &Plan) -> Result<(), String> {
+fn prepare_dir(root: &Path, dir: &Path, policy: &str) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let ignore = root.join(DIR).join(".gitignore");
     if !ignore.exists() {
         std::fs::write(&ignore, "*\n")
             .map_err(|e| format!("cannot write {}: {e}", ignore.display()))?;
     }
-    let policy = dir.join("policy.toml");
-    std::fs::write(&policy, policy_text(&p.url))
-        .map_err(|e| format!("cannot write {}: {e}", policy.display()))?;
+    let path = dir.join("policy.toml");
+    std::fs::write(&path, policy).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     let _ = std::fs::remove_file(dir.join("crawl.json"));
     Ok(())
 }
@@ -598,6 +933,7 @@ mod tests {
             no_crawl,
             crawl_pages: 200,
             crawl_minutes: 5,
+            crawl_subdomains: false,
         }
     }
 
@@ -608,6 +944,60 @@ mod tests {
             url,
             pages: 200,
             minutes: 5,
+            subdomains: false,
+        }
+    }
+
+    fn blocked(url: &str, reason: &str) -> Blocked {
+        Blocked {
+            url: url.into(),
+            reason: reason.into(),
+        }
+    }
+
+    /// What the crawler leaves after reading `acme.example`, which links to `shop` and `blog`
+    /// (kept out by the policy) and to a page robots.txt forbids.
+    fn first_pass() -> Crawl {
+        Crawl {
+            start: "https://acme.example/".into(),
+            scope: "acme.example".into(),
+            complete: true,
+            pages: vec![page("https://acme.example/", 200, None)],
+            hosts: vec![HostRow {
+                host: "acme.example".into(),
+                disallowed: 0,
+            }],
+            blocked: vec![
+                blocked("https://shop.acme.example/", "policy: host not allowed"),
+                blocked("https://blog.acme.example/a", "policy: host not allowed"),
+                blocked("https://blog.acme.example/b", "policy: host not allowed"),
+                blocked("https://acme.example/private", "robots.txt"),
+                blocked("https://other.example/", "policy: host not allowed"),
+            ],
+            used: Used {
+                seconds: 3,
+                bytes: 100,
+            },
+            ..Crawl::default()
+        }
+    }
+
+    /// A pass over `host`: one page on it.
+    fn pass_over(host: &str) -> Crawl {
+        Crawl {
+            start: format!("https://{host}/"),
+            scope: "acme.example".into(),
+            complete: true,
+            pages: vec![page(&format!("https://{host}/"), 200, None)],
+            hosts: vec![HostRow {
+                host: host.into(),
+                disallowed: 0,
+            }],
+            used: Used {
+                seconds: 2,
+                bytes: 50,
+            },
+            ..Crawl::default()
         }
     }
 
@@ -659,13 +1049,16 @@ mod tests {
     }
 
     #[test]
-    fn the_policy_allows_the_host_and_its_subdomains_only() {
-        let p = policy_text(&parse_site("https://acme.example/").unwrap());
+    fn the_policy_is_the_host_alone_until_subdomains_are_asked_for() {
+        let p = policy_text("acme.example", false);
+        assert!(p.contains("allow = [\"acme.example\"]"), "{p}");
+        assert!(!p.contains('*'), "{p}");
+        let s = policy_text("acme.example", true);
         assert!(
-            p.contains("allow = [\"acme.example\", \"*.acme.example\"]"),
-            "{p}"
+            s.contains("allow = [\"acme.example\", \"*.acme.example\"]"),
+            "{s}"
         );
-        let l = policy_text(&parse_site("http://127.0.0.1:9/").unwrap());
+        let l = policy_text("127.0.0.1", true);
         assert!(l.contains("allow = [\"127.0.0.1\"]"), "{l}");
         assert!(!l.contains('*'), "{l}");
     }
@@ -739,7 +1132,10 @@ mod tests {
                 },
             ],
             stopped_by: vec!["pages".into()],
-            used: Used { seconds: 7 },
+            used: Used {
+                seconds: 7,
+                bytes: 0,
+            },
             ..Crawl::default()
         };
         let n = c.counts();
@@ -754,6 +1150,7 @@ mod tests {
             robots: 3,
             seconds: 9,
             stopped: vec![],
+            not_followed: vec![],
         };
         let s = summary("acme.example", &n, 13, 1);
         assert!(
@@ -812,11 +1209,15 @@ mod tests {
     #[test]
     fn the_crawler_gets_the_budgets_and_the_policy() {
         let p = plan("https://acme.example/");
-        let a: Vec<String> =
-            crawler_args(&p, Path::new("/p/policy.toml"), Path::new("/p/crawl.json"))
-                .iter()
-                .map(|a| a.to_string_lossy().into_owned())
-                .collect();
+        let a: Vec<String> = crawler_args(
+            p.url.as_str(),
+            &Budget::of(&p),
+            Path::new("/p/policy.toml"),
+            Path::new("/p/crawl.json"),
+        )
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
         let line = a.join(" ");
         assert!(
             line.starts_with(
@@ -846,5 +1247,176 @@ mod tests {
             t.contains("3 more pages are in `.inorbit/crawl/a/facts.jsonl`"),
             "{t}"
         );
+    }
+
+    use std::cell::RefCell;
+
+    /// Runs `explore` over `first_pass()` with scripted answers (by host); returns the crawl
+    /// and the hosts a further pass was run for, each with its budget.
+    async fn explored(
+        p: &Plan,
+        answers: &[(&str, Answer)],
+        first: Crawl,
+    ) -> (Crawl, Vec<(String, Budget)>, Vec<String>) {
+        let passes = RefCell::new(Vec::new());
+        let asked = RefCell::new(Vec::new());
+        let crawl = explore(
+            p,
+            first,
+            |h| {
+                asked.borrow_mut().push(h.to_owned());
+                answers
+                    .iter()
+                    .find(|(host, _)| *host == h)
+                    .map_or(Answer::No, |(_, a)| *a)
+            },
+            |host, _start, b| {
+                passes.borrow_mut().push((host.clone(), b));
+                async move { Ok(pass_over(&host)) }
+            },
+        )
+        .await;
+        (crawl, passes.into_inner(), asked.into_inner())
+    }
+
+    #[test]
+    fn only_names_the_policy_kept_out_inside_the_domain_are_offered() {
+        let found = blocked_hosts(&first_pass(), "acme.example");
+        let hosts: Vec<&str> = found.iter().map(|(h, _)| h.as_str()).collect();
+        // robots.txt is not a policy block, other.example is outside the domain, and
+        // blog.acme.example is offered once, at its first address.
+        assert_eq!(hosts, ["shop.acme.example", "blog.acme.example"]);
+        assert_eq!(found[1].1, "https://blog.acme.example/a");
+    }
+
+    #[test]
+    fn a_redirect_the_policy_refused_offers_the_name_it_went_to() {
+        // `www.` redirects to the apex: the entry's URL is the page that redirected, the reason
+        // names the refused host (the text the real crawler wrote for www.rust-lang.org).
+        let c = Crawl {
+            scope: "rust-lang.org".into(),
+            blocked: vec![blocked(
+                "https://www.rust-lang.org/",
+                "policy: refused: rust-lang.org:443: rust-lang.org is neither named in networks.allow nor inside a bound domain",
+            )],
+            ..Crawl::default()
+        };
+        assert_eq!(
+            blocked_hosts(&c, "www.rust-lang.org"),
+            [(
+                "rust-lang.org".to_owned(),
+                "https://rust-lang.org/".to_owned()
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_subdomain_is_not_followed_without_a_yes() {
+        let p = plan("https://acme.example/");
+        let (crawl, passes, asked) = explored(&p, &[], first_pass()).await;
+        assert_eq!(
+            asked,
+            ["shop.acme.example", "blog.acme.example"],
+            "asked once each"
+        );
+        assert!(passes.is_empty(), "no pass was run: {passes:?}");
+        assert_eq!(crawl.pages.len(), 1);
+        assert_eq!(
+            crawl.not_followed,
+            ["shop.acme.example", "blog.acme.example"]
+        );
+        let s = summary("acme.example", &crawl.counts(), 1, 1);
+        assert!(
+            s.contains("not read: shop.acme.example, blog.acme.example"),
+            "{s}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_subdomain_is_followed_after_a_yes_and_only_that_one() {
+        let p = plan("https://acme.example/");
+        let (crawl, passes, _) =
+            explored(&p, &[("shop.acme.example", Answer::Yes)], first_pass()).await;
+        let hosts: Vec<&str> = passes.iter().map(|(h, _)| h.as_str()).collect();
+        assert_eq!(hosts, ["shop.acme.example"]);
+        assert_eq!(crawl.pages.len(), 2);
+        assert_eq!(crawl.not_followed, ["blog.acme.example"]);
+        assert_eq!(crawl.used.seconds, 5, "the passes' time adds up");
+        assert!(crawl.complete);
+        // The further pass gets what is left: 199 pages, 9 hosts, 5 minutes (3 s used).
+        let b = &passes[0].1;
+        assert_eq!((b.pages, b.hosts, b.minutes, b.megabytes), (199, 9, 5, 50));
+    }
+
+    #[tokio::test]
+    async fn yes_to_all_follows_every_name_and_asks_once() {
+        let p = plan("https://acme.example/");
+        let (crawl, passes, asked) =
+            explored(&p, &[("shop.acme.example", Answer::All)], first_pass()).await;
+        assert_eq!(asked, ["shop.acme.example"]);
+        assert_eq!(passes.len(), 2);
+        assert_eq!(crawl.pages.len(), 3);
+        assert!(crawl.not_followed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_limits_cover_every_pass_together() {
+        let mut p = plan("https://acme.example/");
+        p.pages = 2;
+        let (crawl, passes, _) =
+            explored(&p, &[("shop.acme.example", Answer::All)], first_pass()).await;
+        // One page from the first pass, one from shop; the page limit is then used up, so
+        // blog is left out and the limit is named.
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[0].1.pages, 1);
+        assert_eq!(crawl.not_followed, ["blog.acme.example"]);
+        assert!(crawl.stopped_by.contains(&"pages".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn a_pass_that_fails_leaves_the_name_out_and_the_rest_stands() {
+        let p = plan("https://acme.example/");
+        let crawl = explore(
+            &p,
+            first_pass(),
+            |_| Answer::Yes,
+            |_, _, _| async { Err("the crawler exited with 2".to_owned()) },
+        )
+        .await;
+        assert_eq!(crawl.pages.len(), 1);
+        assert_eq!(
+            crawl.not_followed,
+            ["shop.acme.example", "blog.acme.example"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_followed_name_can_offer_its_own_neighbours() {
+        let p = plan("https://acme.example/");
+        let first = Crawl {
+            blocked: vec![blocked(
+                "https://a.acme.example/",
+                "policy: host not allowed",
+            )],
+            ..first_pass()
+        };
+        let crawl = explore(
+            &p,
+            first,
+            |_| Answer::Yes,
+            |host, _, _| async move {
+                let mut c = pass_over(&host);
+                if host == "a.acme.example" {
+                    c.blocked = vec![
+                        blocked("https://b.acme.example/", "policy: host not allowed"),
+                        blocked("https://a.acme.example/", "policy: host not allowed"),
+                    ];
+                }
+                Ok(c)
+            },
+        )
+        .await;
+        let hosts: Vec<&str> = crawl.hosts.iter().map(|h| h.host.as_str()).collect();
+        assert_eq!(hosts, ["acme.example", "a.acme.example", "b.acme.example"]);
     }
 }
