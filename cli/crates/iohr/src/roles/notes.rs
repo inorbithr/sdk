@@ -88,7 +88,11 @@ pub(crate) fn read(root: &Path, role: &str) -> String {
     }
     if let Some(dir) = memory_dir(root, role) {
         let mut mem = Store::new(dir, Scope::Project).load().unwrap_or_default();
-        mem.sort_by(|a, b| b.pinned.cmp(&a.pinned).then_with(|| b.updated.cmp(&a.updated)));
+        mem.sort_by(|a, b| {
+            b.pinned
+                .cmp(&a.pinned)
+                .then_with(|| b.updated.cmp(&a.updated))
+        });
         let mut lines = String::new();
         for e in mem.iter().take(MEMORY_COUNT) {
             let line = format!("- {}\n", one_line(&e.text, 300));
@@ -156,9 +160,18 @@ mod tests {
     #[test]
     fn a_turn_leaves_a_note_the_next_one_reads_and_one_role_never_reads_anothers() {
         let d = tmp();
-        record(d.path(), "security", "is the key safe?", "Yes, it is in the vault.").unwrap();
+        record(
+            d.path(),
+            "security",
+            "is the key safe?",
+            "Yes, it is in the vault.",
+        )
+        .unwrap();
         let note = read(d.path(), "security");
-        assert!(note.contains("is the key safe?") && note.contains("in the vault"), "{note}");
+        assert!(
+            note.contains("is the key safe?") && note.contains("in the vault"),
+            "{note}"
+        );
         assert!(note.contains(".inorbit/handoff/security.md"));
         assert_eq!(read(d.path(), "rust-engineer"), "");
         // Overwritten, not appended; no temporary file left.
@@ -210,7 +223,13 @@ mod tests {
         let d = tmp();
         let area = Store::new(memory_dir(d.path(), "security").unwrap(), Scope::Project);
         for i in 0..30 {
-            let mut e = Entry::new(&format!("fact number {i} {}", "x".repeat(250)), Kind::Fact, "", vec![], false);
+            let mut e = Entry::new(
+                &format!("fact number {i} {}", "x".repeat(250)),
+                Kind::Fact,
+                "",
+                vec![],
+                false,
+            );
             e.id = format!("m{i}");
             e.updated = format!("2026-11-08T10:00:{i:02}Z");
             area.save(&e).unwrap();

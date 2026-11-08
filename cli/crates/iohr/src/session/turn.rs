@@ -259,7 +259,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir(d.path().join(".git")).unwrap();
         let cwd = d.path().to_string_lossy().into_owned();
-        let payload = serde_json::to_string(&Payload::new("a1", "why does it fail?", &cwd)).unwrap();
+        let payload =
+            serde_json::to_string(&Payload::new("a1", "why does it fail?", &cwd)).unwrap();
         let reply = Reply {
             text: "The lock is held.".into(),
             model: "m".into(),
@@ -267,11 +268,24 @@ mod tests {
         };
         keep_notes(Path::new("/nowhere"), &task(&payload), "r", &reply.stored());
         let note = crate::roles::notes::read(d.path(), "r");
-        assert!(note.contains("why does it fail?") && note.contains("The lock is held."), "{note}");
+        assert!(
+            note.contains("why does it fail?") && note.contains("The lock is held."),
+            "{note}"
+        );
         // A reply that is not a reply, or a Role name that is not safe, leaves nothing.
         keep_notes(Path::new("/nowhere"), &task(&payload), "r", "not json");
-        keep_notes(Path::new("/nowhere"), &task(&payload), "../x", &reply.stored());
-        assert_eq!(std::fs::read_dir(d.path().join(".inorbit/handoff")).unwrap().count(), 1);
+        keep_notes(
+            Path::new("/nowhere"),
+            &task(&payload),
+            "../x",
+            &reply.stored(),
+        );
+        assert_eq!(
+            std::fs::read_dir(d.path().join(".inorbit/handoff"))
+                .unwrap()
+                .count(),
+            1
+        );
     }
 
     fn script(dir: &Path, body: &str) -> std::path::PathBuf {
