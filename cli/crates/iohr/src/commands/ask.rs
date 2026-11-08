@@ -551,7 +551,10 @@ fn role_cwd(h: &HeadlessArgs) -> std::path::PathBuf {
     )
 }
 
-fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>), Error> {
+fn context_of(
+    h: &HeadlessArgs,
+    g: &Global,
+) -> Result<(Context, Option<std::path::PathBuf>), Error> {
     let cwd = match &h.cwd {
         Some(c) => c.clone(),
         None => std::env::current_dir()
@@ -560,6 +563,7 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
     };
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let root = crate::memory::find_root(Path::new(&cwd));
+    let io_md = crate::iomd::load(Path::new(&cwd), crate::iomd::user_dir(g).as_deref());
     let ctx =
         Context {
             files: headless::list_folder(Path::new(&cwd)),
@@ -590,6 +594,7 @@ fn context_of(h: &HeadlessArgs) -> Result<(Context, Option<std::path::PathBuf>),
             prior: h.prior_question.clone().zip(h.prior_answer.clone()),
             refresh: false,
             role: String::new(),
+            io_md,
         };
     Ok((ctx, root))
 }
@@ -688,7 +693,7 @@ async fn headless(
     let Chosen {
         bin, agent, model, ..
     } = *chosen;
-    let (mut ctx, root) = context_of(h)?;
+    let (mut ctx, root) = context_of(h, g)?;
     if let Some(r) = chosen.role {
         ctx.role = r.system_text();
     }
