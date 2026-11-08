@@ -135,6 +135,9 @@ the code, status and request id, and never echo request values.
 makes to the API and the token endpoint: no usage pings, no crash reports, no update
 checks. The command line has one exception, the extension registry, under SR-25;
 `iohr sdk add` contacts nothing itself and runs the project's package manager (SR-31).
+The runner (`iohr runner run`) is a service you start, not a library call: its heartbeat
+and its automatic upgrade are disclosed, with what they send and how to turn the upgrade
+off, in [SECURITY.md, "What leaves your machine"](../../SECURITY.md#what-leaves-your-machine).
 - Verify: review; conformance runs with only the replay server reachable.
 - Refs: CRA I.2(g).
 

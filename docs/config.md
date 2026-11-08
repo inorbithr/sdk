@@ -415,6 +415,10 @@ command-line keys and leaves its SDK keys; the table goes when nothing is left.
 profile's keys win), and its flags win over both. `iohr upgrade` reads
 `upgrade_sign_identity` from the same two tables. The SDK does not read them.
 
+`iohr runner` runs on macOS and Linux. It is not supported on Windows yet: `iohr runner
+run` refuses to start there. What a runner sends, the hosts it reaches and how its
+automatic upgrade is checked are in [SECURITY.md, "The runner"](../SECURITY.md#the-runner).
+
 | Key | Values | Default | Read by |
 |---|---|---|---|
 | `capacity` | 1 to 32 | as registered | `register` and `run`: the turns the runner takes at once |

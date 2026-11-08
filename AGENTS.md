@@ -76,7 +76,8 @@ A task for a language whose package does not exist yet prints a skip line and ex
 - **Stubs and unfinished paths are labelled.** Code that is not implemented returns an
   explicit "not implemented" error, never a fake value.
 - **The SDK talks only to the public API and the token endpoint.** No other host, no
-  telemetry sent anywhere.
+  telemetry sent anywhere. The rule, and the disclosed exceptions of `iohr` and its
+  runner, are written once in [SECURITY.md, "What leaves your machine"](SECURITY.md#what-leaves-your-machine).
 
 ## Security and compliance
 
