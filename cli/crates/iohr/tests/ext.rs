@@ -1548,6 +1548,7 @@ async fn verifying_an_artifact_accepts_a_good_bundle_and_refuses_a_tampered_one(
 /// and a memory entry, and nothing sent anywhere.
 #[cfg(unix)]
 mod init_crawl {
+    use std::fmt::Write as _;
     use std::path::Path;
 
     use super::*;
@@ -1773,6 +1774,146 @@ mod init_crawl {
         );
     }
 
+    /// The fake agent, that also leaves the HTML of the pages it read in `pages/` beside its
+    /// result when it is told `--keep-pages`, under the names the real one gives them.
+    fn agent_that_keeps_pages() -> Vec<u8> {
+        let pages = [
+            (
+                "http://site.test/",
+                "<h1>Home</h1><p>Site Test builds warehouse picking robots for logistics teams.</p>",
+            ),
+            (
+                "http://site.test/about",
+                "<h1>About us</h1><p>Write to hello@site.test about the Picker robot, which costs $1,299.00 per month.</p>",
+            ),
+        ];
+        let mut writes = String::new();
+        for (url, body) in pages {
+            let name = iohr::kb::fetch::cache_path(Path::new(""), url);
+            let _ = writeln!(
+                writes,
+                "  printf '%s' '<html><head><title>T</title></head><body><main>{body}</main></body></html>' > \"$dir/pages/{}\"",
+                name.file_name().unwrap().to_string_lossy()
+            );
+        }
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen(
+                "echo \"$all\" > \"$dir/args.txt\"\n",
+                &format!("echo \"$all\" > \"$dir/args.txt\"\ncase \"$all\" in *--keep-pages*)\n  mkdir -p \"$dir/pages\"\n{writes};;\nesac\n"),
+                1,
+            )
+            .into_bytes()
+    }
+
+    /// An agent that knows `--rate` but not `--keep-pages`.
+    fn agent_without_keep_pages() -> Vec<u8> {
+        String::from_utf8(fake_agent(0, &[], true))
+            .unwrap()
+            .replacen(
+                "all=\"$*\"\n",
+                "all=\"$*\"\ncase \"$all\" in *--keep-pages*)\n  \
+                 echo \"error: unexpected argument '--keep-pages' found\" >&2\n  exit 2;;\nesac\n",
+                1,
+            )
+            .into_bytes()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_kept_pages_become_a_knowledge_base_with_no_second_fetch_and_one_study() {
+        let s = site(Some(agent_that_keeps_pages()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(args.trim_end().ends_with("--keep-pages"), "{args}");
+        assert!(
+            t.contains("page text: 2 from files on this machine, 0 requested now"),
+            "{t}"
+        );
+        // The model is in the crawl's own facts and its one study; no model file, no second study.
+        let dirc = s.crawl_dir();
+        let facts = std::fs::read_to_string(dirc.join("facts.jsonl")).unwrap();
+        assert!(
+            facts.contains("\"kind\":\"page\"") && facts.contains("\"kind\":\"entity\""),
+            "{facts}"
+        );
+        assert!(!dirc.join("model.jsonl").exists());
+        let studies: Vec<String> = s
+            .dir
+            .read_dir_of("atlas/studies")
+            .into_iter()
+            .filter(|n| n.contains("site-crawl"))
+            .collect();
+        assert_eq!(
+            studies.len(),
+            1,
+            "one crawl study, no separate model study: {studies:?}"
+        );
+        let study = std::fs::read_to_string(s.dir.join("atlas/studies").join(&studies[0])).unwrap();
+        assert!(
+            study.contains("## Site model") && study.contains("## Pages"),
+            "{study}"
+        );
+        // The index answers, with the page it came from.
+        let o =
+            s.b.cmd(&["atlas", "search", "how much does the picker cost", "--json"])
+                .env("HOME", s.b.dir.path())
+                .current_dir(&s.dir)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert!(
+            v["hits"][0]["url"].as_str().unwrap().ends_with("/about"),
+            "{v}"
+        );
+        assert!(
+            v["hits"][0]["text"].as_str().unwrap().contains("$1,299.00"),
+            "{v}"
+        );
+        // The site was asked once, by the agent (the mock fails on any other count), and a
+        // second init over the same files makes no request for them either.
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_without_keep_pages_is_run_again_and_iohr_asks_only_inside_the_scope() {
+        let s = site(Some(agent_without_keep_pages()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(!t.contains("the crawler exited"), "{t}");
+        let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+        assert!(
+            args.contains("--rate") && !args.contains("--keep-pages"),
+            "the second run kept its rate and dropped the flag: {args}"
+        );
+        // The fake agent's pages are on site.test, outside the scope of the 127.0.0.1 crawl:
+        // none is requested, and the box says so.
+        assert!(t.contains("0 requested now"), "{t}");
+        assert!(
+            t.contains("not requested (outside the scope or robots.txt)"),
+            "{t}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn init_json_stays_one_document_with_the_knowledge_base_in_the_crawl_step() {
+        let s = site(Some(agent_that_keeps_pages()), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url(), "--json"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        let out = String::from_utf8_lossy(&o.stdout).into_owned();
+        let v: serde_json::Value =
+            serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{e}: {out}"));
+        assert!(out.contains("knowledge base: "), "{out}");
+        assert!(
+            !out.contains("Reading the text"),
+            "no spinner in json: {out}"
+        );
+        let _ = v;
+    }
+
     /// The progress line the agent writes under `--progress` (RFC 0163): `total` only once a
     /// sitemap has said how much there is.
     fn progress_line(read: u32, queued: u32, total: Option<u32>) -> String {
@@ -1821,7 +1962,11 @@ mod init_crawl {
             "the consent says the rate: {t}"
         );
         let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
-        assert!(args.trim_end().ends_with("--rate 10 --progress"), "{args}");
+        assert!(
+            args.trim_end()
+                .ends_with("--rate 10 --progress --keep-pages"),
+            "{args}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

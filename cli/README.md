@@ -556,6 +556,53 @@ time; the crawler records no per-page fetch time.
 
 #### The site knowledge base (PRD 0192)
 
+The crawler keeps the HTML it read (`--keep-pages`, in `.inorbit/crawl/<host>/pages/`, one file
+per page, a redirect followed to the page it names) and init reads those files: the pages are
+not fetched a second time. Only an agent that does not know `--keep-pages` (older than the
+agent release that added it) leaves iohr to ask for the pages itself, as a fallback: inside the
+crawl's scope, only where `robots.txt` allows it, at the crawl rate or the site's `Crawl-delay`
+when that is slower, no redirect followed, 2 MB a page, within the same `--crawl-minutes`. The
+box says how many pages came from files and how many were requested. A page whose HTML is an
+empty shell (a rendered page whose text only a browser run shows) is counted and named, not
+indexed. The text is cleaned (main text, title, headings, links, language; blocks that repeat
+across the site are left out), cut along its headings into chunks of about 180 words with a
+word count and a stable id (`ch_...`) and its URL and character offsets, and indexed in one
+DuckDB file, `.inorbit/crawl/kb.duckdb`. Search is lexical (BM25 over a term table, heading and
+title words weigh more); there is no embedding model on this machine, and the crawl box and `--json` say
+`embeddings: stub` rather than pass a lexical score for a vector one.
+
+The site model lives in the crawl's own files, not a third one: entities (organizations,
+products, people, places, events, technologies, emails, phones, prices, profiles; from the
+page's own JSON-LD first, then patterns) and facts are lines in `.inorbit/crawl/<host>/facts.jsonl`
+beside the page facts (`kind`, `site`, `url`, `crawled`, plus the chunk each came from), and
+the sections with their extractive summary are a "Site model" part of the one "Site crawl"
+study. `iohr atlas search|facts|index` read them, and `?` and `??` add the best five chunks for
+the question to what the model is given, as `<sources>` with each page URL and chunk id (the
+page text is escaped, so a page cannot close the block or add instructions to it), so an answer
+about the site can name where it came from. All of it stays on this machine, gitignored, until
+you run `iohr sync`. A build that fails does not fail the crawl.
+
+```sh
+iohr project init my-shop --crawl https://example.com --crawl-pages 50
+iohr project init my-shop --crawl https://example.com --crawl-rate 2
+iohr project init my-shop --crawl https://example.com --crawl-subdomains
+iohr project init my-shop --no-crawl
+```
+
+Files land in `.inorbit/crawl/<host>/` (`crawl.json`, the raw record; `facts.jsonl`, one
+fact per page with the day it was crawled; `policy.toml`, the policy it ran under); a
+`.gitignore` there keeps them out of the project's git. The same facts become one local study,
+`atlas/studies/NNNN-site-crawl-<host>.md` (a second crawl rewrites it in place), which
+`iohr sync --dry-run` lists and `iohr sync` carries; and one project memory entry that points
+at the study. The summary says how many pages were read, how many robots.txt skipped and how
+many failed, whether a limit stopped it (and the flag that raises it), and ends with "Nothing
+was sent to InOrbit. Run iohr sync when you want it there." Without the `agent` extension,
+init says so in one line and offers to install it at a terminal. A crawl that fails does not
+fail init: it is a failed step with the extension's own error. The crawl day is the evidence
+time; the crawler records no per-page fetch time.
+
+#### The site knowledge base (PRD 0192)
+
 After the crawl, init reads the text of each HTML page it found, once, in a second pass that
 is separate from the crawl and does not change its rate: one request at a time, one a second,
 no redirect followed, 2 MB a page, within the same `--crawl-minutes`, and only pages the

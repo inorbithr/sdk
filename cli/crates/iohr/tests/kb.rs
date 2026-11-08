@@ -89,6 +89,8 @@ async fn a_crawled_site_is_indexed_searched_and_modelled_with_sources() {
     let root = tmp.path().join("proj");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(root.join(".inorbit")).unwrap();
+    // The project's root is the folder with atlas/, where init's study is written.
+    std::fs::create_dir_all(root.join("atlas")).unwrap();
 
     let input: Vec<iohr::kb::PageIn> = ["/", "/pricing", "/contact"]
         .iter()
@@ -96,29 +98,27 @@ async fn a_crawled_site_is_indexed_searched_and_modelled_with_sources() {
             url: format!("{}{p}", server.uri()),
             title: String::new(),
             depth: 0,
+            rendered: false,
         })
         .collect();
-    let opts = iohr::kb::Opts {
-        deadline: Duration::from_secs(30),
-        pace: Duration::ZERO,
-        crawled: "2026-11-08".into(),
-    };
+    let opts = opts_for(&server);
     let none = |_: usize, _: usize| {};
     let built = iohr::kb::build(&root, "acme.test", &input, &opts, &none)
         .await
         .unwrap();
+    let report = &built.report;
     assert_eq!(
-        (built.pages, built.fetched, built.cached, built.failed),
+        (report.pages, report.fetched, report.cached, report.failed),
         (3, 3, 0, 0),
         "{built:?}"
     );
     assert!(
-        built.chunks >= 3 && built.tokens > 20 && built.entities >= 4,
+        report.chunks >= 3 && report.tokens > 20 && report.entities >= 4,
         "{built:?}"
     );
-    assert!(built.index_error.is_none(), "{built:?}");
+    assert!(report.index_error.is_none(), "{built:?}");
     assert!(root.join(".inorbit/crawl/kb.duckdb").is_file());
-    assert!(built.lines("acme.test").contains("embeddings: stub"));
+    assert!(report.lines("acme.test").contains("embeddings: stub"));
 
     // Search, as the person asks: the pricing chunk is first, with its source.
     let o = iohr(
@@ -174,22 +174,224 @@ async fn a_crawled_site_is_indexed_searched_and_modelled_with_sources() {
     assert!(o.status.success());
     assert!(text(&o).contains("nothing in the knowledge base matches"));
 
-    // The model is local: the model file lists entities, sections and facts, in fact shape.
-    let model_file =
-        std::fs::read_to_string(root.join(".inorbit/crawl/acme.test/model.jsonl")).unwrap();
+    // The model is local and rides in the crawl's own fact shape: entities, sections and facts
+    // as JSON lines for `facts.jsonl`, and its text for the one "Site crawl" study.
     for kind in ["entity", "section", "fact"] {
         assert!(
-            model_file.contains(&format!("\"kind\":\"{kind}\"")),
-            "{kind} in {model_file}"
+            built.jsonl.contains(&format!("\"kind\":\"{kind}\"")),
+            "{kind} in {}",
+            built.jsonl
         );
     }
+    assert!(built.study.contains("## Entities"), "{}", built.study);
+    assert!(
+        !root.join(".inorbit/crawl/acme.test/model.jsonl").exists(),
+        "no second model file"
+    );
 
     // A second build reads nothing again: the pages come from the cache.
     let again = iohr::kb::build(&root, "acme.test", &input, &opts, &none)
         .await
         .unwrap();
-    assert_eq!((again.fetched, again.cached), (0, 3));
-    assert_eq!(again.chunks, built.chunks);
+    assert_eq!((again.report.fetched, again.report.cached), (0, 3));
+    assert_eq!(again.report.chunks, built.report.chunks);
+}
+
+/// The options a test uses: the fixture's own host is the scope and nothing waits long.
+fn opts_for(server: &MockServer) -> iohr::kb::Opts {
+    iohr::kb::Opts {
+        deadline: Duration::from_secs(30),
+        rate: 50,
+        scope: server.address().ip().to_string(),
+        also: Vec::new(),
+        redirects: Vec::new(),
+        crawled: "2026-11-08".into(),
+    }
+}
+
+fn input_of(server: &MockServer, paths: &[&str]) -> Vec<iohr::kb::PageIn> {
+    paths
+        .iter()
+        .map(|p| iohr::kb::PageIn {
+            url: format!("{}{p}", server.uri()),
+            title: String::new(),
+            depth: 0,
+            rendered: false,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn pages_the_crawler_kept_are_read_without_asking_the_site() {
+    // A site that answers nothing: any request would be a 404 and a recorded request.
+    let server = MockServer::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("proj");
+    let dir = root.join(".inorbit/crawl/acme.test");
+    let input = input_of(&server, &["/", "/pricing"]);
+    for (p, body) in [
+        (
+            "/",
+            "<h1>Acme</h1><p>Warehouse robots for logistics teams.</p>",
+        ),
+        (
+            "/pricing",
+            "<h1>Pricing</h1><p>The Picker costs $1,299.00 per month.</p>",
+        ),
+    ] {
+        let file = iohr::kb::fetch::cache_path(&dir, &format!("{}{p}", server.uri()));
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            file,
+            format!("<html><title>{p}</title><body>{body}</body></html>"),
+        )
+        .unwrap();
+    }
+    let none = |_: usize, _: usize| {};
+    let built = iohr::kb::build(&root, "acme.test", &input, &opts_for(&server), &none)
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            built.report.cached,
+            built.report.fetched,
+            built.report.pages
+        ),
+        (2, 0, 2),
+        "{built:?}"
+    );
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "the agent kept the pages, so the site is not asked again"
+    );
+    assert!(
+        built
+            .report
+            .lines("acme.test")
+            .contains("from files on this machine")
+    );
+}
+
+#[tokio::test]
+async fn a_page_without_a_file_is_requested_within_robots_and_scope() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/robots.txt"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("User-agent: *\nDisallow: /private\n"),
+        )
+        .mount(&server)
+        .await;
+    for (p, body) in [
+        ("/open", "<h1>Open</h1><p>Anyone may read this page.</p>"),
+        ("/private/x", "<h1>Private</h1><p>Secret page text.</p>"),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(page("T", body))
+            .mount(&server)
+            .await;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("proj");
+    let mut input = input_of(&server, &["/open", "/private/x"]);
+    input.push(iohr::kb::PageIn {
+        url: "http://elsewhere.invalid/z".into(),
+        title: String::new(),
+        depth: 1,
+        rendered: false,
+    });
+    let none = |_: usize, _: usize| {};
+    let built = iohr::kb::build(&root, "acme.test", &input, &opts_for(&server), &none)
+        .await
+        .unwrap();
+    let r = &built.report;
+    assert_eq!((r.fetched, r.refused, r.pages), (1, 2, 1), "{built:?}");
+    assert!(r.lines("acme.test").contains("2 not requested"));
+    let asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|q| q.url.path().to_owned())
+        .collect();
+    assert!(asked.contains(&"/open".to_owned()), "{asked:?}");
+    assert!(
+        !asked.iter().any(|p| p.starts_with("/private")),
+        "{asked:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_deadline_that_has_passed_leaves_the_rest_out_and_says_so() {
+    let server = site().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("proj");
+    let mut opts = opts_for(&server);
+    opts.deadline = Duration::ZERO;
+    let none = |_: usize, _: usize| {};
+    let built = iohr::kb::build(
+        &root,
+        "acme.test",
+        &input_of(&server, &["/", "/pricing", "/contact"]),
+        &opts,
+        &none,
+    )
+    .await
+    .unwrap();
+    assert_eq!((built.report.late, built.report.pages), (3, 0), "{built:?}");
+    assert!(
+        built
+            .report
+            .lines("acme.test")
+            .contains("3 left out when the time ran out")
+    );
+}
+
+#[tokio::test]
+async fn a_link_to_a_redirected_address_ends_at_the_page_it_went_to() {
+    let server = site().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("proj");
+    let mut opts = opts_for(&server);
+    opts.redirects = vec![(
+        format!("{}/old-pricing", server.uri()),
+        format!("{}/pricing", server.uri()),
+    )];
+    let input = input_of(&server, &["/pricing"]);
+    let none = |_: usize, _: usize| {};
+    let built = iohr::kb::build(&root, "acme.test", &input, &opts, &none)
+        .await
+        .unwrap();
+    assert_eq!(built.report.pages, 1, "{built:?}");
+}
+
+#[tokio::test]
+async fn a_rendered_page_that_has_no_text_is_counted_as_a_shell() {
+    let server = MockServer::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("proj");
+    let dir = root.join(".inorbit/crawl/acme.test");
+    let url = format!("{}/app", server.uri());
+    let file = iohr::kb::fetch::cache_path(&dir, &url);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(
+        file,
+        "<html><body><div id=\"root\"></div><script src=\"/a.js\"></script></body></html>",
+    )
+    .unwrap();
+    let input = vec![iohr::kb::PageIn {
+        url,
+        title: String::new(),
+        depth: 0,
+        rendered: true,
+    }];
+    let none = |_: usize, _: usize| {};
+    let built = iohr::kb::build(&root, "acme.test", &input, &opts_for(&server), &none)
+        .await
+        .unwrap();
+    assert_eq!(built.report.shells, 1, "{built:?}");
+    assert!(built.report.lines("acme.test").contains("empty shell"));
 }
 
 #[test]
@@ -199,9 +401,14 @@ fn without_an_index_search_says_how_to_make_one() {
     let root = tmp.path().join("proj");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(root.join(".inorbit")).unwrap();
+    std::fs::create_dir_all(root.join("atlas")).unwrap();
     let o = iohr(&home, &root, &["atlas", "search", "anything"]);
     assert!(!o.status.success());
-    assert!(!text(&o).is_empty(), "the failure says why");
+    assert!(
+        text(&o).contains("iohr project init --crawl"),
+        "{}",
+        text(&o)
+    );
     // `?` never fails for a missing index: it just adds nothing.
     assert!(iohr::kb::sources(&root, "anything", 5).is_empty());
 }
