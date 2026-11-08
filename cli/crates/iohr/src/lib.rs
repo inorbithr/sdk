@@ -11,6 +11,7 @@ pub mod cli;
 pub mod environments;
 pub mod ext;
 pub mod front;
+pub mod kb;
 pub mod memory;
 pub mod project;
 pub mod roles;

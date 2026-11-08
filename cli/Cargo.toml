@@ -34,6 +34,9 @@ keyring-core = "1"
 minijinja = { version = "3", features = ["serde"] }
 prettyplease = "0.3"
 quote = "1"
+# The crawl knowledge base cleans the pages it kept (RFC 0205, PRD 0192): a real HTML parser, no
+# regex over markup.
+scraper = "0.29"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
 # Held at 0.8: typify's API takes schemars 0.8 types (`RootSchema`); see the `ignore` in
 # .github/dependabot.yml. Moves to 1.x with typify (oxidecomputer/typify#886).
