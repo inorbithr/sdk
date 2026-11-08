@@ -18,6 +18,7 @@ mod domains;
 mod ext;
 mod ext_catalogue;
 mod ext_packages;
+mod handoff;
 mod init_crawl;
 mod init_extensions;
 mod lab;
@@ -119,6 +120,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Domains(cmd) => domains::run(g, &env, cmd, out).await,
         Command::Coordinator(cmd) => coordinator::run(g, &env, cmd, out).await,
         Command::Memory(cmd) => memory::run(g, &env, cmd, out).await,
+        Command::Handoff(cmd) => handoff::run(cmd, out),
         Command::Connectors(cmd) => connectors::run(g, &env, cmd, out).await,
         Command::Connections(cmd) => connections::run(g, &env, cmd, out).await,
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,

@@ -1,16 +1,19 @@
 //! The handoff note of a stopped agent run: `.inorbit/handoff.md` in the project.
 //!
-//! When the agent `iohr project init` starts stops at its turn or time cap, what it did is on
-//! disk but what it meant to do next is in its head. This writes a short note: what was asked,
-//! which files were written, and the agent's last words (its own summary of what is left). The
-//! next run in the folder (`iohr ask --allow-edits`) reads it into its prompt. It is the first,
-//! small step; the full compaction and handoff system comes later and builds on this file.
+//! When an agent run stops at its turn or time cap (or fails) what it did is on disk but what it
+//! meant to do next is in its head. This writes a short note: what was asked, which files were
+//! written, and the agent's last words (its own summary of what is left). The next run in the
+//! folder (`iohr ask --allow-edits`) reads it into its prompt and removes it when it ends well.
+//!
+//! The note is compacted: a second stop does not overwrite the first, it folds it to one line
+//! under "Earlier runs" (the newest few kept, the oldest folded into a count), so the note stays
+//! short however many runs it spans. `iohr handoff show|compact|clear` reads and tends it.
 //!
 //! The note is the person's own text and the agent's own words, kept in their project folder
 //! and nowhere else: nothing here logs, sends or traces it.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Where the note is, under the project root.
@@ -23,6 +26,12 @@ const SAID_MAX: usize = 2500;
 const FILES_MAX: usize = 60;
 /// The most of a note a prompt takes.
 const READ_MAX: usize = 6000;
+/// Earlier runs kept one line each; the older ones are folded into a count.
+const EARLIER_MAX: usize = 6;
+const DIGEST_ASKED: usize = 160;
+const DIGEST_SAID: usize = 240;
+/// The first line of a note: how many runs it covers and how many older ones were folded.
+const MARK: &str = "<!-- iohr-handoff";
 
 /// Why the run stopped, in the person's words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +60,10 @@ fn clip(text: &str, max: usize) -> String {
     c
 }
 
+fn one_line(s: &str, max: usize) -> String {
+    clip(&s.split_whitespace().collect::<Vec<_>>().join(" "), max)
+}
+
 /// The files the run changed or added, as git sees the project (`git status --porcelain
 /// -uall`): paths only, never contents. Empty when git is missing or the folder is no repository.
 pub(crate) fn changed_files(dir: &Path) -> Vec<String> {
@@ -74,12 +87,126 @@ pub(crate) fn changed_files(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// The text of the note.
-pub(crate) fn render(asked: &str, files: &[String], said: &str, why: &str, bin: &str) -> String {
-    let mut t = String::from(
-        "# Handoff: the agent run stopped before it finished\n\n\
-         Written by iohr when the run stopped. A first, small handoff note; read it before \
-         you go on, and delete the file when the work is done.\n\n",
+/// The parts of a note read back from disk, for compaction.
+#[derive(Debug, Default)]
+struct Parsed {
+    runs: usize,
+    folded: usize,
+    earlier: Vec<String>,
+    why: String,
+    asked: String,
+    files: Vec<String>,
+    file_count: usize,
+    said: String,
+}
+
+/// The body of `## head`, up to the next `## `.
+fn section<'a>(text: &'a str, head: &str) -> &'a str {
+    let key = format!("## {head}\n");
+    let Some(i) = text.find(&key) else {
+        return "";
+    };
+    let rest = &text[i + key.len()..];
+    let end = rest.find("\n## ").unwrap_or(rest.len());
+    rest[..end].trim()
+}
+
+fn marker_num(text: &str, key: &str) -> usize {
+    text.lines()
+        .find(|l| l.starts_with(MARK))
+        .and_then(|l| l.split(key).nth(1))
+        .and_then(|r| {
+            r.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0)
+}
+
+fn parse(text: &str) -> Parsed {
+    let done = section(text, "What was done");
+    Parsed {
+        // A note of the first kind (no marker) covers one run.
+        runs: marker_num(text, "runs=").max(1),
+        folded: marker_num(text, "folded="),
+        earlier: section(text, "Earlier runs")
+            .lines()
+            .filter(|l| l.starts_with("- run "))
+            .map(str::to_owned)
+            .collect(),
+        why: section(text, "Why it stopped")
+            .trim_end_matches('.')
+            .to_owned(),
+        asked: section(text, "What was asked").to_owned(),
+        files: done
+            .lines()
+            .filter_map(|l| l.strip_prefix("- `")?.strip_suffix('`'))
+            .map(str::to_owned)
+            .collect(),
+        file_count: done
+            .split_whitespace()
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0),
+        said: section(text, "What is left")
+            .lines()
+            .filter_map(|l| l.strip_prefix("> "))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+impl Parsed {
+    /// This run folded to one line, numbered `n`.
+    fn digest(&self, n: usize) -> String {
+        let left = if self.said.is_empty() {
+            "(nothing said)".to_owned()
+        } else {
+            one_line(&self.said, DIGEST_SAID)
+        };
+        format!(
+            "- run {n}: {}; asked: {}; {} files; left: {left}",
+            one_line(&self.why, 80),
+            one_line(&self.asked, DIGEST_ASKED),
+            self.file_count,
+        )
+    }
+}
+
+/// Keeps the newest `EARLIER_MAX` lines; each older one is folded into the count.
+fn compact_earlier(earlier: &mut Vec<String>, folded: &mut usize) {
+    while earlier.len() > EARLIER_MAX {
+        earlier.remove(0);
+        *folded += 1;
+    }
+}
+
+/// What a note says of the runs before it.
+struct History<'a> {
+    /// How many runs the note covers, this one included.
+    runs: usize,
+    /// One line per earlier run, oldest first.
+    earlier: &'a [String],
+    /// How many older runs were folded away.
+    folded: usize,
+}
+
+fn render_with(
+    asked: &str,
+    files: &[String],
+    said: &str,
+    why: &str,
+    bin: &str,
+    h: &History<'_>,
+) -> String {
+    let mut t = format!(
+        "{MARK} runs={} folded={} -->\n# Handoff: the agent run stopped before it finished\n\n\
+         Written by iohr when the run stopped. Read it before you go on, and delete the file \
+         when the work is done (`{bin} handoff clear`). Earlier runs are kept as one line each \
+         and the oldest are folded away, so the note stays short.\n\n",
+        h.runs, h.folded
     );
     let _ = write!(t, "## Why it stopped\n\n{why}.\n\n");
     let _ = write!(t, "## What was asked\n\n{}\n\n", clip(asked, ASKED_MAX));
@@ -104,6 +231,15 @@ pub(crate) fn render(asked: &str, files: &[String], said: &str, why: &str, bin: 
             let _ = writeln!(t, "> {l}");
         }
     }
+    if !h.earlier.is_empty() || h.folded > 0 {
+        let _ = write!(t, "\n## Earlier runs\n\n");
+        if h.folded > 0 {
+            let _ = writeln!(t, "{} older runs were folded away.\n", h.folded);
+        }
+        for e in h.earlier {
+            let _ = writeln!(t, "{e}");
+        }
+    }
     let _ = write!(
         t,
         "\n## Continue\n\nRun `{bin} ask --allow-edits \"continue the work\"` in this folder.\n"
@@ -111,7 +247,25 @@ pub(crate) fn render(asked: &str, files: &[String], said: &str, why: &str, bin: 
     t
 }
 
-/// Writes the note under `dir`.
+/// The text of a first note (no earlier runs).
+pub(crate) fn render(asked: &str, files: &[String], said: &str, why: &str, bin: &str) -> String {
+    let h = History {
+        runs: 1,
+        earlier: &[],
+        folded: 0,
+    };
+    render_with(asked, files, said, why, bin, &h)
+}
+
+fn save(path: &Path, text: &str) -> Result<(), String> {
+    let tmp = path.with_extension("md.tmp");
+    std::fs::write(&tmp, text)
+        .and_then(|()| std::fs::rename(&tmp, path))
+        .map_err(|e| format!("cannot write {FILE}: {}", e.kind()))
+}
+
+/// Writes the note under `dir`. A note already there is not overwritten but compacted: its run
+/// becomes one line under "Earlier runs", and only the newest lines are kept.
 ///
 /// # Errors
 /// A message saying what could not be written.
@@ -128,9 +282,61 @@ pub(crate) fn write(
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {}", parent.display(), e.kind()))?;
     }
-    std::fs::write(&path, render(asked, &files, said, why, bin))
-        .map_err(|e| format!("cannot write {FILE}: {}", e.kind()))?;
+    let (mut runs, mut earlier, mut folded) = (1, Vec::new(), 0);
+    if let Some(old) = std::fs::read_to_string(&path)
+        .ok()
+        .filter(|t| !t.trim().is_empty())
+    {
+        let p = parse(&old);
+        earlier = p.earlier.clone();
+        earlier.push(p.digest(p.runs));
+        folded = p.folded;
+        runs = p.runs + 1;
+        compact_earlier(&mut earlier, &mut folded);
+    }
+    let h = History {
+        runs,
+        earlier: &earlier,
+        folded,
+    };
+    save(&path, &render_with(asked, &files, said, why, bin, &h))?;
     Ok(files.len())
+}
+
+/// Re-compacts the note on disk (one edited by hand, or written by an older iohr): returns how
+/// many earlier runs this call folded away.
+///
+/// # Errors
+/// A message when there is no note or it cannot be written.
+pub(crate) fn compact(root: &Path, bin: &str) -> Result<usize, String> {
+    let path = root.join(FILE);
+    let text = std::fs::read_to_string(&path).map_err(|_| format!("no {FILE} here"))?;
+    let mut p = parse(&text);
+    let before = p.folded;
+    compact_earlier(&mut p.earlier, &mut p.folded);
+    let h = History {
+        runs: p.runs,
+        earlier: &p.earlier,
+        folded: p.folded,
+    };
+    save(
+        &path,
+        &render_with(&p.asked, &p.files, &p.said, &p.why, bin, &h),
+    )?;
+    Ok(p.folded - before)
+}
+
+/// How many runs the note at `root` covers, when it has one.
+pub(crate) fn runs(root: &Path) -> Option<usize> {
+    let t = std::fs::read_to_string(root.join(FILE)).ok()?;
+    (!t.trim().is_empty()).then(|| parse(&t).runs)
+}
+
+/// The project root of the current folder.
+pub(crate) fn root_here() -> Option<PathBuf> {
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| crate::memory::find_root(&d))
 }
 
 /// The note of the project at `root`, when it has one (cut to what a prompt takes).
@@ -160,11 +366,10 @@ pub(crate) fn preface(note: &str) -> String {
 
 /// The project root whose note a run goes on from, and the question with the note in front of
 /// it. `edits` is false for a run that changes nothing: it takes no note and the question stays.
-pub(crate) fn continue_from(edits: bool, question: String) -> (Option<std::path::PathBuf>, String) {
+pub(crate) fn continue_from(edits: bool, question: String) -> (Option<PathBuf>, String) {
     let root = edits
-        .then(|| std::env::current_dir().ok())
+        .then(root_here)
         .flatten()
-        .and_then(|d| crate::memory::find_root(&d))
         .filter(|r| read(r).is_some());
     match root.as_deref().and_then(read) {
         Some(note) => {
@@ -216,6 +421,47 @@ mod tests {
         assert!(preface(&n).contains("handoff note"));
         clear(d.path());
         assert!(read(d.path()).is_none());
+    }
+
+    #[test]
+    fn a_second_stop_folds_the_first_and_old_runs_become_a_count() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 1..=9 {
+            write(
+                d.path(),
+                &format!("task {i}"),
+                &format!("left {i}"),
+                "why",
+                "iohr",
+            )
+            .unwrap();
+        }
+        let n = std::fs::read_to_string(d.path().join(FILE)).unwrap();
+        assert_eq!(runs(d.path()), Some(9));
+        assert!(n.contains("## What was asked\n\ntask 9"), "{n}");
+        assert!(n.contains("- run 8: why; asked: task 8"), "{n}");
+        assert!(!n.contains("- run 2:"), "{n}");
+        assert!(n.contains("2 older runs were folded away"), "{n}");
+        assert_eq!(n.matches("\n- run ").count(), EARLIER_MAX);
+    }
+
+    #[test]
+    fn compact_keeps_the_note_and_folds_a_long_history() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(compact(d.path(), "iohr").is_err());
+        write(d.path(), "a", "b", "w", "iohr").unwrap();
+        write(d.path(), "c", "d", "w", "iohr").unwrap();
+        let before = std::fs::read_to_string(d.path().join(FILE)).unwrap();
+        assert_eq!(compact(d.path(), "iohr").unwrap(), 0);
+        assert_eq!(before, std::fs::read_to_string(d.path().join(FILE)).unwrap());
+        // A hand-grown history is cut to the newest lines.
+        let mut long = before.replace("\n## Continue", "");
+        for i in 10..20 {
+            let _ = writeln!(long, "- run {i}: w; asked: t; 0 files; left: x");
+        }
+        std::fs::write(d.path().join(FILE), long).unwrap();
+        assert!(compact(d.path(), "iohr").unwrap() >= 5);
+        assert_eq!(runs(d.path()), Some(2));
     }
 
     #[test]

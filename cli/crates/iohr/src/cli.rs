@@ -488,6 +488,15 @@ pub enum Command {
     /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
     #[command(subcommand)]
     Permissions(PermissionsCommand),
+    /// Read and tend the handoff note an agent run leaves when it stops early.
+    ///
+    /// When `iohr ask --allow-edits` or `iohr project init` stops at its turn or time cap, or
+    /// fails, `.inorbit/handoff.md` says what was asked, which files changed and what is left.
+    /// A second stop folds the first to one line, and the oldest runs are folded into a count,
+    /// so the note stays short. The next `iohr ask --allow-edits` in the folder goes on from
+    /// it and removes it when it ends well. Local files only, no sign-in, no network.
+    #[command(subcommand)]
+    Handoff(HandoffCommand),
     /// Runs your shell with the floating InOrbit panel over it (menu, approvals, workloads).
     ///
     /// `--demo` fills the panel with labelled stub data; `--demo --variant rail|accordion|band`
@@ -1731,6 +1740,16 @@ pub enum PermissionsCommand {
         /// The command, the file or the address.
         input: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HandoffCommand {
+    /// Print the note of this project, or say there is none.
+    Show,
+    /// Fold the note's earlier runs to the newest few (the oldest become a count).
+    Compact,
+    /// Delete the note: the work is done, or you do not want the next run to go on from it.
+    Clear,
 }
 
 #[derive(Debug, Subcommand)]
