@@ -33,6 +33,7 @@ mod headless;
 mod hints;
 mod io_signin;
 mod lock;
+mod mac_sign;
 mod output;
 mod panel;
 mod paths;
