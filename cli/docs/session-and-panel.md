@@ -20,8 +20,19 @@ session host if none runs, joins it, and stays open until Ctrl-C or SIGTERM. The
 this same `iohr` as `iohr runner run --session DIR`, a process of its own that runs the
 [runner](runner.md) (heartbeats, a 90-second lease on the service, turns on your `claude -p`,
 no self-upgrade while it hosts) plus the project's roles at work on one local queue. With
-`--json` it prints `{project, host_pid, roles}`; notes go to stderr. It needs a registered
-runner (`iohr runner register`).
+`--json` it prints `{project, host_pid, roles}`; notes go to stderr.
+
+The host needs a runner of its own. It signs in as the profile `session`, whatever
+`--profile` the shell has, with its own runner key: sharing the live runner's key would make
+the two overwrite one heartbeat row and take each other's leases. Set it up once:
+
+```sh
+iohr login --profile session
+iohr --profile session runner register --name HOST-session
+```
+
+Without them the host stops at once and says which one is missing. If the host stops at
+once for any reason, the message carries the last line of its `host.log`.
 
 The host stops when the last session has left (a shell that was killed counts as left), on
 `iohr stop`, or on SIGTERM (exit 0). A host nobody joins within 30 seconds ends by itself.
@@ -126,8 +137,9 @@ open.
 Under `NO_COLOR`, with `--json`, or off a terminal, bare `iohr` prints the usage report and
 exits 2. `iohr --help` and `iohr help` print the help.
 
-Inside the panel, bare `iohr` prints one line (that you are already in the session, and which
-key opens the menu) and exits 0. If nothing runs it, `iohr stop` says the panel is closed.
+Inside the panel, bare `iohr` prints one line (that the panel is on, and which key opens the
+menu) and exits 0. After `iohr stop` it brings the panel back first. If nothing runs it,
+`iohr stop` says the panel is closed.
 
 ### How it draws
 
@@ -139,7 +151,15 @@ corner after every chunk of output, saving and restoring the cursor.
 - Nothing is drawn under `NO_COLOR`, off a terminal, or on the alternate screen (vim,
   less); it comes back when the program ends.
 - Colours are truecolor when `COLORTERM=truecolor`, else the nearest of the 256.
-- The shell runs with `IOHR_PANEL=1`; a nested panel runs plainly.
+- The shell runs with `IOHR_PANEL` set to the pid of the panel around it, which counts only
+  while that process lives. A nested panel runs plainly and a bare `iohr` says it is already
+  in the session. When the panel was stopped (`iohr stop`, "Stop panel", or its host ending),
+  a bare `iohr` brings it back first, so running `iohr` again gives a live panel. A shell
+  that outlived its panel starts a new one.
+- While the panel is stopped, `^G` is not sent to the shell (it would echo as `^G` under a
+  command).
+- Arrows count in the menu with any modifier (Shift, Option, Ctrl, or the kitty keyboard
+  form); a release event is ignored.
 
 `iohr panel [--demo] [-- COMMAND...]` runs the same panel on its own, without a session
 host, around your shell or COMMAND. It is hidden from the help. `--demo` fills it with stub
