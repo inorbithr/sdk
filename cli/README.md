@@ -905,10 +905,29 @@ the nearest of the 256.
 Bare `iohr` on a terminal runs this same panel inside the project's session (see `iohr session`);
 `iohr panel` runs it on its own, without a host.
 
-The panel has these views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns).
-`⌥i` opens the menu (42 columns): `a` auto mode, `p` approvals, `w` workloads, `r` run, `s` status,
+The panel has these views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns or
+as wide as its text needs). The pill names the key that works in your terminal: `⌥i` where Option
+is Meta, and `^G` (Ctrl-G) in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, which type
+a dead key `ˆ` for Option+i by default (found through `TERM_PROGRAM`). Ctrl-G is a letter, so it
+is the same on every keyboard layout; it has no meaning for the terminal driver, and its only
+shell binding is "abort" in readline and zsh. Both keys always work. The key opens the menu
+(42 columns): `a` auto mode, `p` approvals, `w` workloads, `r` run, `s` status,
 `?` help, `x` stop the panel; arrows and Enter move and open, Esc closes. Keys are taken only while
-the panel is open; every other byte goes to your shell untouched. If something cannot be read, the
+the panel is open; every other byte goes to your shell untouched.
+
+The mouse works on the menu and the views while they are open: a click on a row selects it and
+opens it, as Enter does; a click outside closes the view; the wheel moves the selection. The
+panel asks the terminal for mouse reports (SGR, `?1000h` with `?1006h`, never drag tracking) only
+while a view is open, and turns them off when it closes, when the program on the screen enters
+the alternate screen, and when the panel ends (or stops, or the process panics). Reports are
+never sent to your shell. At rest it asks for none, so the shell keeps normal drag-to-select. The
+`[panel] mouse` setting (or `IOHR_PANEL_MOUSE`) changes that: `menu` (the default), `always` (a
+click on the pill opens the menu and every other click goes through to the program) or `off` (no
+mouse at all).
+
+Bare `iohr` inside the panel prints one line, that you are already in the iohr session and which
+key opens the menu, and exits 0. `iohr stop` inside the panel stops the session host and closes
+the panel with it; with no host running it says the panel is closed. If something cannot be read, the
 panel says "unavailable", never a number. Stub data appears only with `--demo` and is labelled "stub".
 
 Auto mode (`a`, 56 columns) is the real auto mode: the account's auto-approve policy (ADR 0142),
@@ -952,9 +971,11 @@ title, and every action says "stub: nothing was ..." and does nothing.
 
 Not built yet, and shown as "coming next": the Run and Status views. Only zsh is tried; bash and
 fish are untested (the pty test uses `/bin/sh`). `⌥i` needs the terminal to send Option as Esc or
-Meta (iTerm2: Profiles, Keys, "Esc+"; Terminal.app: "Use Option as Meta key"). The panel saves and
+Meta (iTerm2: Profiles, Keys, "Esc+"; Terminal.app: "Use Option as Meta key"); without that setting
+use `^G`. If `[ask] menu_key = "ctrl-g"` is set, the panel leaves Ctrl-G to the `?` menu and shows
+`⌥i`. The panel saves and
 restores the cursor with DECSC and DECRC, which can overwrite a program's own saved cursor. The
-shell runs with `IOHR_PANEL=1`, and a nested `iohr panel` (or a bare `iohr`) then runs plainly;
+shell runs with `IOHR_PANEL=1`, and a nested `iohr panel` runs plainly and a bare `iohr` says it is already in the session;
 `IOHR_PANEL_LEADER` is internal (the proxy re-executes itself to become the shell's session
 leader).
 

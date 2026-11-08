@@ -20,6 +20,9 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(e) => return iohr::report_usage_clap(&args, json, &e),
     };
+    if cli.command.is_none() && iohr::bare_inside(&cli.global) {
+        return ExitCode::SUCCESS;
+    }
     if cli.command.is_none() && !iohr::bare_enters(&cli.global) {
         // Bare `iohr` with no terminal, or under NO_COLOR or --json: the usage report, as before.
         let e = iohr::cli::command(json).error(

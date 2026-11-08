@@ -312,7 +312,7 @@ fn rows(view: PanelView, m: &Model, nested: bool) -> Vec<Row> {
             vec![
                 Row::Text(format!("auto  {value}"), t),
                 Row::Text(format!("{} approvals waiting", PENDING.len()), Tone::Amber),
-                Row::Text("⌥i  open the menu".to_owned(), Tone::Dim),
+                Row::Text(format!("{}  open the menu", open_key_label()), Tone::Dim),
             ]
         }
         PanelView::Menu => menu_rows(m, None),
@@ -472,7 +472,7 @@ fn lines(
                 look.amber().apply_to(STUB),
                 dim.apply_to("│"),
                 look.amber().apply_to(format!("{} waiting", PENDING.len())),
-                dim.apply_to("⌥i menu"),
+                dim.apply_to(format!("{} menu", open_key_label())),
             );
             let right = |s: &str| {
                 let gap = cols.saturating_sub(measure_text_width(s));
@@ -600,6 +600,39 @@ pub(crate) fn bare_enters(g: &Global) -> bool {
 
 #[cfg(not(unix))]
 pub(crate) fn bare_enters(_: &Global) -> bool {
+    false
+}
+
+/// The key the static designs name: the live panel's own choice for this terminal.
+#[cfg(unix)]
+fn open_key_label() -> String {
+    input::OpenKey::here(false).label().to_owned()
+}
+
+#[cfg(not(unix))]
+fn open_key_label() -> String {
+    "⌥i".to_owned()
+}
+
+/// What bare `iohr` says when it runs inside a panel (the session is already here), else `None`.
+#[cfg(unix)]
+pub(crate) fn bare_inside_message(g: &Global) -> Option<String> {
+    proxy::bare_inside_message(g)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn bare_inside_message(_: &Global) -> Option<String> {
+    None
+}
+
+/// Closes the panel around this process when `iohr stop` runs inside one; whether it did.
+#[cfg(unix)]
+pub(crate) fn end_from_inside() -> bool {
+    proxy::end_from_inside()
+}
+
+#[cfg(not(unix))]
+pub(crate) fn end_from_inside() -> bool {
     false
 }
 

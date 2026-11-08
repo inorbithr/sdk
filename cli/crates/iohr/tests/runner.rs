@@ -2102,6 +2102,7 @@ async fn bare_iohr_on_a_terminal_enters_the_session_and_stop_closes_the_panel() 
     let p = project.to_str().unwrap().to_owned();
     let mut c = session_cmd(&server, dir.path(), &[]);
     c.current_dir(&project)
+        .env_remove("TERM_PROGRAM")
         .env("TERM", "xterm-256color")
         .env("COLORTERM", "truecolor")
         .env("SHELL", "/bin/sh")

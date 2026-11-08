@@ -29,6 +29,32 @@ impl Screen {
         self.parser.screen().alternate_screen()
     }
 
+    /// Whether the program asked the terminal for mouse reports itself (a full screen program
+    /// does; a shell does not).
+    pub(super) fn uses_mouse(&self) -> bool {
+        self.parser.screen().mouse_protocol_mode() != vt100::MouseProtocolMode::None
+    }
+
+    /// The sequences that put the program's own mouse mode back on the terminal, after the
+    /// panel turned the reports off; empty when the program asked for none.
+    pub(super) fn own_mouse(&self) -> Vec<u8> {
+        let screen = self.parser.screen();
+        let mode: &[u8] = match screen.mouse_protocol_mode() {
+            vt100::MouseProtocolMode::None => return Vec::new(),
+            vt100::MouseProtocolMode::Press => b"\x1b[?9h",
+            vt100::MouseProtocolMode::PressRelease => b"\x1b[?1000h",
+            vt100::MouseProtocolMode::ButtonMotion => b"\x1b[?1002h",
+            vt100::MouseProtocolMode::AnyMotion => b"\x1b[?1003h",
+        };
+        let mut out = mode.to_vec();
+        match screen.mouse_protocol_encoding() {
+            vt100::MouseProtocolEncoding::Default => {}
+            vt100::MouseProtocolEncoding::Utf8 => out.extend_from_slice(b"\x1b[?1005h"),
+            vt100::MouseProtocolEncoding::Sgr => out.extend_from_slice(b"\x1b[?1006h"),
+        }
+        out
+    }
+
     /// The character at a cell; a space for an empty cell, a wide character's second half, or
     /// a wide character (the shadow cannot dim half of one).
     pub(super) fn char_at(&self, row: usize, col: usize) -> char {
