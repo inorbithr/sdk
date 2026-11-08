@@ -24,7 +24,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 from urllib.parse import quote
 
 import httpx
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import core_schema
 
+from inorbithr._config import REDACTED as _REDACTED
 from inorbithr._errors import AuthError, ConfigError, InOrbitError
 from inorbithr._retry import backoff, retry_after, retryable_status
 
@@ -42,7 +45,6 @@ _REFRESH_AT = 0.8
 _SOFT_RETRY = 5.0
 _FILE_CHECK = 60.0
 _CLI_TIMEOUT = 10.0
-_REDACTED = "<redacted>"
 
 #: Called with a log event's name and fields: how providers report a failed refresh.
 Observer = Callable[[str, Mapping[str, object]], None]
@@ -56,6 +58,18 @@ class Token:
     """The token. Never log it."""
     expires_at: float | None = None
     """When it expires, in `time.time()` seconds, if the provider knows."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source: type[Any], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        """Pydantic's JSON form: the marker in place of the token."""
+        schema = handler(source)
+        schema["serialization"] = core_schema.plain_serializer_function_ser_schema(cls._json)
+        return schema
+
+    def _json(self) -> dict[str, object]:
+        return {"access": _REDACTED, "expires_at": self.expires_at}
 
 
 @runtime_checkable

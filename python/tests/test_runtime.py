@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from inorbithr import (
     MAX_BODY,
@@ -31,6 +31,8 @@ from inorbithr import (
     codegen,
     parse_timestamp,
 )
+from inorbithr._auth import Token
+from inorbithr._config import Credential, Resolution
 from inorbithr._errors import CODES, code_for_status
 from inorbithr._retry import backoff
 
@@ -77,6 +79,37 @@ def test_secrets_never_print() -> None:
     assert "tok-1" not in repr(StaticToken("tok-1").token())
 
 
+def test_an_operation_never_prints_its_values() -> None:
+    op = Operation(
+        "POST",
+        "/v1/keys",
+        name="keys.create",
+        query=[("filter", "value-1")],
+        body={"secret": "body-1"},
+        params=[("key_id", "param-1")],
+    )
+    for out in (repr(op), str(op), f"{op!r}"):
+        assert "value-1" not in out and "body-1" not in out and "param-1" not in out, out
+        assert "keys.create" in out
+
+
+def test_secrets_never_serialise() -> None:
+    token = Token("tok-1", 1.5)
+    for out in (
+        TypeAdapter(Token).dump_json(token).decode(),
+        TypeAdapter(list[Token]).dump_json([token]).decode(),
+        json.dumps(TypeAdapter(Token).dump_python(token, mode="json")),
+        json.dumps({"t": token}, default=str),
+        f"{token} {token!r} {token!s:>40}",
+    ):
+        assert "tok-1" not in out, out
+    assert json.loads(TypeAdapter(Token).dump_json(token)) == {"access": "<redacted>", "expires_at": 1.5}
+    res = Resolution({}, {"token": "tok-1", "key_secret": "s3cr3t"}, Credential("code", "token"), None)
+    for out in (repr(res), str(res), f"{res}"):
+        assert "tok-1" not in out and "s3cr3t" not in out, out
+        assert "token" in out, out
+
+
 def test_a_named_profile_reads_only_its_own_variables(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INORBIT_TOKEN", "bare")
     for name in ("INORBIT_ACME_CI_TOKEN", "INORBIT_ACME_CI_KEY_ID"):
@@ -91,6 +124,9 @@ def test_a_named_profile_reads_only_its_own_variables(monkeypatch: pytest.Monkey
 
 
 def test_plain_http_only_to_this_machine() -> None:
+    for bad in ("http://127.example.com", "http://127.0.0.1.example.com", "http://localhost.example"):
+        with pytest.raises(ConfigError, match="https"):
+            Client(token="t", base_url=bad)
     with pytest.raises(ConfigError, match="https"):
         Client(token="t", base_url="http://api.example.test")
     with pytest.raises(ConfigError, match="origin only"):
