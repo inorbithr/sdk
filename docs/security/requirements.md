@@ -149,14 +149,20 @@ file or stdin; it stays in wiped memory until the one request that carries it, a
 never stored, printed or accepted as an argument. `iohr auth token` prints a profile's access token on
 standard output, for a program that runs it (the SDKs' `cli` source); the refresh token
 never leaves the credential store, and the command writes nothing but the store's own
-rotation.
+rotation. A path that must never show a prompt (the shell prompt's count, the terminal
+panel) calls the credential store with a time limit: 1.5 s to read, 10 s to write, at
+most four such calls in one process at a time. While four wait, the next call fails at
+once and starts no thread, so a store that holds its lock never piles up waiting calls.
 - Why: a developer machine holds credentials for several accounts; shell history, the
-  process list and dotfile backups are where tokens leak.
+  process list and dotfile backups are where tokens leak. A long-running process that
+  left one thread per timed-out call kept the store locked for every other program.
 - Verify: unit tests for entry keys and file modes; a test that refuses a token in
   `argv`; a test that runs every command with `--verbose` and finds no token or
   connection secret in the output; a test that a connection secret travels only in the
   body of the call that makes the connection; a test that `iohr auth token` prints the
-  access token and never the refresh token; the credential store tested on each operating system in CI.
+  access token and never the refresh token; tests that a quiet store call stuck in the
+  store makes the next call fail at once without a thread, and that calls work again
+  once it returns; the credential store tested on each operating system in CI.
 - Refs: CRA I.2(e); clig.dev "Arguments and flags".
 
 **SR-29. No secrets in the config file.** The SDK refuses a key secret, a token, a
@@ -200,12 +206,20 @@ checked against its SHA-256 digest and declared size. An artifact is installed o
 with a signature and SLSA provenance from InOrbit's release workflow (Sigstore keyless:
 Fulcio certificate chain, SCT, Rekor entry, identity
 `https://github.com/inorbithr/<repo>/.github/workflows/release.yml@refs/tags/*`, issuer
-`https://token.actions.githubusercontent.com`, provenance naming the same repository),
-or with a signature by a public key in `ext.trusted_keys`. Every installed program is
-re-hashed before it runs. No option skips a check.
+`https://token.actions.githubusercontent.com`, Fulcio's build signer, source repository
+and source ref claims agreeing with that identity, signature and provenance under one
+identity, the provenance agreeing with the certificate, and the repository the one the
+extension is named after), or with a signature by a public key in `ext.trusted_keys`.
+The `iohr` release archives (`iohr upgrade`, the runner, the installers) are accepted
+only from exactly `https://github.com/inorbithr/sdk/.github/workflows/release.yml@refs/heads/main`
+with the source ref `refs/heads/main`. Every installed program is re-hashed before it
+runs. No option skips a check.
 - Why: the registry and any mirror in between are not trusted; the release workflow is.
 - Verify: unit tests against a real Sigstore bundle (accepted for its own signer,
-  refused for another identity, a tampered signature or another digest); integration
+  refused for another identity, a tampered signature or another digest), unit tests for
+  certificate claims and provenance that disagree with the identity, another branch or
+  tag of the `iohr` release workflow, and a repository not named after the extension, and
+  a test that holds the installers to the release identity; integration
   tests for a tampered blob, an unsigned artifact, a stranger's key and a program
   changed on disk.
 - Refs: SSDF PS.2, PW.4; CRA I.2(a), I.2(f); SLSA Build L3 (consumer side).

@@ -83,7 +83,8 @@ For the capped run, exactly this, and nothing else:
 | The names at the top of the folder | 60 names and 2 KiB; dotfiles left out except `.inorbit`, `.github`, `.gitignore` and `.claude`; names the folder's own `.gitignore` hides left out; never file contents |
 | The last command and its exit status | The command at 1 KiB |
 | Output, only when attached | The last 8 KiB (200 lines), with secrets redacted: passwords, tokens, bearer values, URLs, hosts, IP addresses |
-| The whole message | 16 KiB |
+| The `IO.md` files of the folder chain | 8 KiB, secrets scrubbed; see [IO.md](projects.md#iomd-instructions-for-the-folder) |
+| The whole message | 24 KiB |
 
 The card's `Read:` line says exactly what was sent, including "output not sent" when none
 went. Io signs in with your own `claude` login, never an API key, and `iohr` stores neither

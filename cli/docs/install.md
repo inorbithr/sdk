@@ -24,7 +24,8 @@ are short enough to read before you run them. Each one:
 
 1. downloads the archive for your machine from the GitHub release;
 2. refuses it unless its SHA-256 matches the release's `SHA256SUMS`, and, when the GitHub
-   CLI is installed and signed in, unless its build attestation checks;
+   CLI is installed and signed in, unless its build attestation names this repository's
+   release workflow on `main`; without it, they say that only the checksum was checked;
 3. copies one binary into your user directory, with no sudo or administrator rights:
    `~/.local/bin` on Linux and macOS, `%LOCALAPPDATA%\Programs\iohr` on Windows (which it
    adds to your user `PATH`, saying so). `install.sh` changes no shell profile.
@@ -74,7 +75,7 @@ iohr upgrade --check    # only say whether a newer release exists and what would
 | Installed with | What `iohr upgrade` does |
 |---|---|
 | Homebrew | Runs `brew upgrade inorbithr/tap/iohr`, and tells you to run `brew trust inorbithr/tap` when Homebrew refuses the tap |
-| The install script | Downloads the new archive, checks it against `SHA256SUMS` and its GitHub build attestation, and replaces the binary in place. The attestation is checked inside `iohr`, so the GitHub CLI is not needed; a release without one is refused |
+| The install script | Downloads the new archive, checks it against `SHA256SUMS` and its GitHub build attestation, and replaces the binary in place. The attestation is checked inside `iohr`, so the GitHub CLI is not needed; a release without one, or signed by anything but this repository's release workflow on `main`, is refused |
 | APT, or anything else | Prints the command to run |
 
 A machine that runs `iohr runner run` can upgrade itself; see
