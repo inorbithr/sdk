@@ -9,7 +9,8 @@
 
 use std::collections::BTreeSet;
 
-use scraper::{ElementRef, Html, Selector, node::Node};
+use html5ever::{ParseOpts, parse_document, tendril::TendrilSink};
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use url::Url;
 
 use crate::memory::text;
@@ -108,8 +109,125 @@ const SKIP_WORDS: &[&str] = &[
 /// Text of a code block is cut here.
 const CODE_MAX: usize = 2000;
 
-fn select(css: &str) -> Option<Selector> {
-    Selector::parse(css).ok()
+/// An element of the parsed page: its tag name, attributes and children, read straight from
+/// the parser's tree (no selector engine).
+#[derive(Clone)]
+struct El(Handle);
+
+/// A child of an element: text, an element, or something that holds no page text (a comment).
+enum Kid {
+    Text(String),
+    El(El),
+}
+
+impl El {
+    fn wrap(h: &Handle) -> Option<Self> {
+        matches!(h.data, NodeData::Element { .. }).then(|| Self(h.clone()))
+    }
+
+    fn name(&self) -> &str {
+        match &self.0.data {
+            NodeData::Element { name, .. } => &name.local,
+            _ => "",
+        }
+    }
+
+    fn attr(&self, key: &str) -> Option<String> {
+        match &self.0.data {
+            NodeData::Element { attrs, .. } => attrs
+                .borrow()
+                .iter()
+                .find(|a| &*a.name.local == key)
+                .map(|a| a.value.to_string()),
+            _ => None,
+        }
+    }
+
+    fn kids(&self) -> Vec<Kid> {
+        self.0
+            .children
+            .borrow()
+            .iter()
+            .filter_map(|c| match &c.data {
+                NodeData::Text { contents } => Some(Kid::Text(contents.borrow().to_string())),
+                NodeData::Element { .. } => Some(Kid::El(Self(c.clone()))),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn elements(&self) -> Vec<Self> {
+        self.kids()
+            .into_iter()
+            .filter_map(|k| match k {
+                Kid::El(e) => Some(e),
+                Kid::Text(_) => None,
+            })
+            .collect()
+    }
+
+    /// The elements below this one in document order, this one not included.
+    fn descendants(&self) -> Vec<Self> {
+        let mut out = Vec::new();
+        let mut stack: Vec<Self> = self.elements().into_iter().rev().collect();
+        while let Some(e) = stack.pop() {
+            stack.extend(e.elements().into_iter().rev());
+            out.push(e);
+        }
+        out
+    }
+
+    /// All the text below this element, in order.
+    fn text(&self) -> String {
+        let mut out = String::new();
+        let mut stack: Vec<Handle> = vec![self.0.clone()];
+        while let Some(n) = stack.pop() {
+            match &n.data {
+                NodeData::Text { contents } => out.push_str(&contents.borrow()),
+                _ => stack.extend(n.children.borrow().iter().rev().cloned()),
+            }
+        }
+        out
+    }
+}
+
+/// A parsed page. It owns the parser's tree: dropping an `RcDom` empties its nodes, so the
+/// elements read from it are only good while this is alive.
+struct Doc {
+    root: El,
+    _dom: RcDom,
+}
+
+impl Doc {
+    fn parse(html: &str) -> Self {
+        let dom = parse_document(RcDom::default(), ParseOpts::default())
+            .from_utf8()
+            .one(html.as_bytes());
+        // The document node's only element child is `html`.
+        let root = dom
+            .document
+            .children
+            .borrow()
+            .iter()
+            .find_map(El::wrap)
+            .unwrap_or_else(|| El(dom.document.clone()));
+        Self { root, _dom: dom }
+    }
+
+    /// The first element, in document order, that `pred` accepts (the root included).
+    fn find(&self, pred: impl Fn(&El) -> bool) -> Option<El> {
+        std::iter::once(self.root.clone())
+            .chain(self.root.descendants())
+            .find(|e| pred(e))
+    }
+
+    /// Every element that `pred` accepts, in document order.
+    fn all(&self, pred: impl Fn(&El) -> bool) -> Vec<El> {
+        std::iter::once(self.root.clone())
+            .chain(self.root.descendants())
+            .filter(|e| pred(e))
+            .collect()
+    }
 }
 
 /// One space between words, nothing at the ends.
@@ -124,34 +242,36 @@ fn words_of(attr: &str) -> impl Iterator<Item = String> + '_ {
 }
 
 /// Whether `el` (inside the main content or not) is boilerplate or hidden.
-fn skipped(el: ElementRef<'_>, in_content: bool) -> bool {
-    let v = el.value();
-    let name = v.name();
+fn skipped(el: &El, in_content: bool) -> bool {
+    let name = el.name();
     if SKIP_TAGS.contains(&name) {
         return true;
     }
     if name == "header" && !in_content {
         return true;
     }
-    if v.attr("hidden").is_some() || v.attr("aria-hidden") == Some("true") {
+    if el.attr("hidden").is_some() || el.attr("aria-hidden").as_deref() == Some("true") {
         return true;
     }
-    if v.attr("style").is_some_and(|s| {
+    if el.attr("style").is_some_and(|s| {
         let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
         s.contains("display:none") || s.contains("visibility:hidden")
     }) {
         return true;
     }
-    if v.attr("role").is_some_and(|r| SKIP_ROLES.contains(&r)) {
+    if el
+        .attr("role")
+        .is_some_and(|r| SKIP_ROLES.contains(&r.as_str()))
+    {
         return true;
     }
     if matches!(name, "body" | "html" | "main" | "article") {
         return false;
     }
-    [v.attr("class"), v.attr("id")]
+    [el.attr("class"), el.attr("id")]
         .into_iter()
         .flatten()
-        .any(|a| words_of(a).any(|w| SKIP_WORDS.contains(&w.as_str())))
+        .any(|a| words_of(&a).any(|w| SKIP_WORDS.contains(&w.as_str())))
 }
 
 fn is_inline(name: &str) -> bool {
@@ -159,11 +279,10 @@ fn is_inline(name: &str) -> bool {
 }
 
 /// Whether an element below `el` is a block (so an inline element that holds one is a container).
-fn has_block(el: ElementRef<'_>) -> bool {
+fn has_block(el: &El) -> bool {
     el.descendants()
-        .skip(1)
-        .filter_map(ElementRef::wrap)
-        .any(|d| !is_inline(d.value().name()) && !SKIP_TAGS.contains(&d.value().name()))
+        .iter()
+        .any(|d| !is_inline(d.name()) && !SKIP_TAGS.contains(&d.name()))
 }
 
 #[derive(Default)]
@@ -171,7 +290,11 @@ struct Walk {
     buf: String,
     link_chars: usize,
     out: Vec<Block>,
+    depth: usize,
 }
+
+/// Elements nested deeper than this are not read, so a hostile page cannot exhaust the stack.
+const MAX_DEPTH: usize = 200;
 
 impl Walk {
     fn flush(&mut self, kind: BlockKind) {
@@ -190,63 +313,65 @@ impl Walk {
         self.out.push(Block { kind, text: t });
     }
 
-    fn inline(&mut self, el: ElementRef<'_>, in_content: bool, in_a: bool) {
-        for child in el.children() {
-            match child.value() {
-                Node::Text(t) => {
-                    self.buf.push_str(t);
+    fn inline(&mut self, el: &El, in_content: bool, in_a: bool) {
+        if self.depth >= MAX_DEPTH {
+            return;
+        }
+        self.depth += 1;
+        for child in el.kids() {
+            match child {
+                Kid::Text(t) => {
+                    self.buf.push_str(&t);
                     if in_a {
                         self.link_chars += t.trim().chars().count();
                     }
                 }
-                Node::Element(_) => {
-                    let Some(c) = ElementRef::wrap(child) else {
-                        continue;
-                    };
-                    if skipped(c, in_content) {
+                Kid::El(c) => {
+                    if skipped(&c, in_content) {
                         continue;
                     }
-                    if c.value().name() == "br" {
+                    if c.name() == "br" {
                         self.buf.push(' ');
                         continue;
                     }
-                    self.inline(c, in_content, in_a || c.value().name() == "a");
+                    self.inline(&c, in_content, in_a || c.name() == "a");
                 }
-                _ => {}
             }
         }
+        self.depth -= 1;
     }
 
-    fn walk(&mut self, el: ElementRef<'_>, in_content: bool, kind: BlockKind) {
-        for child in el.children() {
-            match child.value() {
-                Node::Text(t) => self.buf.push_str(t),
-                Node::Element(_) => {
-                    let Some(c) = ElementRef::wrap(child) else {
-                        continue;
-                    };
-                    if skipped(c, in_content) {
+    fn walk(&mut self, el: &El, in_content: bool, kind: BlockKind) {
+        if self.depth >= MAX_DEPTH {
+            return;
+        }
+        self.depth += 1;
+        for child in el.kids() {
+            match child {
+                Kid::Text(t) => self.buf.push_str(&t),
+                Kid::El(c) => {
+                    if skipped(&c, in_content) {
                         continue;
                     }
-                    let name = c.value().name();
-                    if is_inline(name) && !has_block(c) {
+                    let name = c.name();
+                    if is_inline(name) && !has_block(&c) {
                         if name == "br" {
                             self.buf.push(' ');
                         } else {
-                            self.inline(c, in_content, name == "a");
+                            self.inline(&c, in_content, name == "a");
                         }
                         continue;
                     }
                     self.flush(kind);
-                    self.block(c, name, in_content);
+                    self.block(&c, name, in_content);
                 }
-                _ => {}
             }
         }
         self.flush(kind);
+        self.depth -= 1;
     }
 
-    fn block(&mut self, c: ElementRef<'_>, name: &str, in_content: bool) {
+    fn block(&mut self, c: &El, name: &str, in_content: bool) {
         let content = in_content || matches!(name, "main" | "article");
         match name {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
@@ -255,7 +380,7 @@ impl Walk {
                 self.flush(BlockKind::Heading(level));
             }
             "pre" => {
-                let raw: String = c.text().collect();
+                let raw: String = c.text();
                 let t = raw.trim_matches('\n');
                 let cut: String = t.chars().take(CODE_MAX).collect();
                 if !cut.trim().is_empty() {
@@ -267,9 +392,9 @@ impl Walk {
             }
             "tr" => {
                 let mut cells = Vec::new();
-                for cell in c.children().filter_map(ElementRef::wrap) {
-                    if matches!(cell.value().name(), "td" | "th") && !skipped(cell, content) {
-                        self.inline(cell, content, false);
+                for cell in c.elements() {
+                    if matches!(cell.name(), "td" | "th") && !skipped(&cell, content) {
+                        self.inline(&cell, content, false);
                         let t = squash(&self.buf);
                         self.buf.clear();
                         if !t.is_empty() {
@@ -291,19 +416,16 @@ impl Walk {
     }
 }
 
-fn meta(doc: &Html, css: &str) -> String {
-    select(css)
-        .and_then(|s| {
-            doc.select(&s)
-                .next()
-                .and_then(|e| e.value().attr("content").map(squash))
-        })
+/// The `content` of the first `<meta>` whose `key` attribute is `value`.
+fn meta(doc: &Doc, key: &str, value: &str) -> String {
+    doc.find(|e| e.name() == "meta" && e.attr(key).as_deref() == Some(value))
+        .and_then(|e| e.attr("content").map(|c| squash(&c)))
         .unwrap_or_default()
 }
 
-fn blocks_of(root: ElementRef<'_>) -> Vec<Block> {
+fn blocks_of(root: &El) -> Vec<Block> {
     let mut w = Walk::default();
-    let content = matches!(root.value().name(), "main" | "article");
+    let content = matches!(root.name(), "main" | "article");
     w.walk(root, content, BlockKind::Text);
     w.out
 }
@@ -315,14 +437,11 @@ fn word_count(blocks: &[Block]) -> usize {
         .sum()
 }
 
-fn links_of(doc: &Html, base: &Url) -> Vec<Link> {
-    let Some(sel) = select("a[href]") else {
-        return Vec::new();
-    };
+fn links_of(doc: &Doc, base: &Url) -> Vec<Link> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
-    for a in doc.select(&sel) {
-        let Some(href) = a.value().attr("href") else {
+    for a in doc.all(|e| e.name() == "a" && e.attr("href").is_some()) {
+        let Some(href) = a.attr("href") else {
             continue;
         };
         let href = href.trim();
@@ -344,12 +463,11 @@ fn links_of(doc: &Html, base: &Url) -> Vec<Link> {
         if !seen.insert(url.clone()) {
             continue;
         }
-        let t: String = squash(&a.text().collect::<String>());
+        let t: String = squash(&a.text());
         let label = if t.is_empty() {
-            a.value()
-                .attr("aria-label")
-                .or_else(|| a.value().attr("title"))
-                .map(squash)
+            a.attr("aria-label")
+                .or_else(|| a.attr("title"))
+                .map(|l| squash(&l))
                 .unwrap_or_default()
         } else {
             t
@@ -362,13 +480,12 @@ fn links_of(doc: &Html, base: &Url) -> Vec<Link> {
     out
 }
 
-fn structured_of(doc: &Html) -> Vec<serde_json::Value> {
-    let Some(sel) = select("script[type=\"application/ld+json\"]") else {
-        return Vec::new();
-    };
+fn structured_of(doc: &Doc) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
-    for s in doc.select(&sel) {
-        let raw: String = s.text().collect();
+    for s in doc
+        .all(|e| e.name() == "script" && e.attr("type").as_deref() == Some("application/ld+json"))
+    {
+        let raw: String = s.text();
         let Ok(v) = serde_json::from_str::<serde_json::Value>(raw.trim()) else {
             continue;
         };
@@ -393,13 +510,10 @@ fn flatten(v: serde_json::Value, out: &mut Vec<serde_json::Value>) {
 }
 
 /// The language of the page: the `lang` attribute, else a guess from the most common words.
-fn language(doc: &Html, blocks: &[Block]) -> String {
-    let attr = select("html")
-        .and_then(|s| {
-            doc.select(&s)
-                .next()
-                .and_then(|e| e.value().attr("lang").map(str::to_owned))
-        })
+fn language(doc: &Doc, blocks: &[Block]) -> String {
+    let attr = doc
+        .find(|e| e.name() == "html")
+        .and_then(|e| e.attr("lang"))
         .unwrap_or_default();
     let first = attr
         .split(['-', '_'])
@@ -495,18 +609,18 @@ fn guess_language(sample: &str) -> &'static str {
 /// The cleaned page for `html`, fetched from `url`.
 #[must_use]
 pub fn clean(html: &str, url: &Url) -> Page {
-    let doc = Html::parse_document(html);
-    let root = select("main, [role=\"main\"]")
-        .and_then(|s| doc.select(&s).next())
-        .map(blocks_of)
+    let doc = Doc::parse(html);
+    let root = doc
+        .find(|e| e.name() == "main" || e.attr("role").as_deref() == Some("main"))
+        .map(|e| blocks_of(&e))
         .unwrap_or_default();
     // A page with no `main`, or one whose `main` holds almost nothing, is read from its body.
     let blocks = if word_count(&root) >= 30 {
         root
     } else {
-        let body = select("body")
-            .and_then(|s| doc.select(&s).next())
-            .map(blocks_of)
+        let body = doc
+            .find(|e| e.name() == "body")
+            .map(|e| blocks_of(&e))
             .unwrap_or_default();
         if word_count(&body) > word_count(&root) {
             body
@@ -514,12 +628,9 @@ pub fn clean(html: &str, url: &Url) -> Page {
             root
         }
     };
-    let mut title = select("title")
-        .and_then(|s| {
-            doc.select(&s)
-                .next()
-                .map(|e| squash(&e.text().collect::<String>()))
-        })
+    let mut title = doc
+        .find(|e| e.name() == "title")
+        .map(|e| squash(&e.text()))
         .unwrap_or_default();
     if title.is_empty() {
         title = blocks
@@ -528,25 +639,23 @@ pub fn clean(html: &str, url: &Url) -> Page {
             .map(|b| b.text.clone())
             .unwrap_or_default();
     }
-    let mut description = meta(&doc, "meta[name=\"description\"]");
+    let mut description = meta(&doc, "name", "description");
     if description.is_empty() {
-        description = meta(&doc, "meta[property=\"og:description\"]");
+        description = meta(&doc, "property", "og:description");
     }
-    let canonical = select("link[rel=\"canonical\"]").and_then(|s| {
-        doc.select(&s)
-            .next()
-            .and_then(|e| e.value().attr("href"))
-            .and_then(|h| url.join(h).ok())
-            .map(|u| u.to_string())
-    });
+    let canonical = doc
+        .find(|e| e.name() == "link" && e.attr("rel").as_deref() == Some("canonical"))
+        .and_then(|e| e.attr("href"))
+        .and_then(|h| url.join(&h).ok())
+        .map(|u| u.to_string());
     let lang = language(&doc, &blocks);
     Page {
         title,
         description,
         lang,
         canonical,
-        site_name: meta(&doc, "meta[property=\"og:site_name\"]"),
-        generator: meta(&doc, "meta[name=\"generator\"]"),
+        site_name: meta(&doc, "property", "og:site_name"),
+        generator: meta(&doc, "name", "generator"),
         links: links_of(&doc, url),
         structured: structured_of(&doc),
         blocks,
@@ -614,6 +723,18 @@ mod tests {
         ] {
             assert!(!joined.contains(gone), "{gone} should be gone: {joined}");
         }
+    }
+
+    #[test]
+    fn a_page_nested_thousands_deep_is_cut_not_a_crash() {
+        let html = format!(
+            "<html><body><p>Shallow text stays.</p>{}deep text{}</body></html>",
+            "<div>".repeat(5000),
+            "</div>".repeat(5000)
+        );
+        let p = clean(&html, &Url::parse("https://a.test/").unwrap());
+        assert!(p.blocks.iter().any(|b| b.text == "Shallow text stays."));
+        assert!(p.blocks.iter().all(|b| !b.text.contains("deep text")));
     }
 
     #[test]
