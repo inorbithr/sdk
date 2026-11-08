@@ -1541,3 +1541,335 @@ async fn verifying_an_artifact_accepts_a_good_bundle_and_refuses_a_tampered_one(
     let o = b.run(&["ext", "verify", "/no/such/file", "--bundle", good_s]);
     assert_ne!(code(&o), 0);
 }
+
+/// `project init` reads a public site on this machine through the agent extension (PRD
+/// 0190.1): consent first, the files under `.inorbit/crawl/<host>/`, a study the sync lists
+/// and a memory entry, and nothing sent anywhere.
+#[cfg(unix)]
+mod init_crawl {
+    use std::path::Path;
+
+    use super::*;
+
+    const SPACE: &str = "lab_1";
+
+    /// A stand-in for `iohr-agent`: asks the site for its start page (so the test counts the
+    /// requests), writes the crawler's JSON to `--out`, records its arguments beside it and
+    /// exits with `exit`.
+    fn fake_agent(exit: u8, stopped_by: &[&str], json: bool) -> Vec<u8> {
+        let result = serde_json::json!({
+            "start": "http://site.test/", "scope": "site.test",
+            "complete": stopped_by.is_empty(), "stopped_by": stopped_by,
+            "pages": [
+                {"url": "http://site.test/", "status": 200, "title": "Home",
+                 "content_type": "text/html", "size": 10, "depth": 0, "rendered": false},
+                {"url": "http://site.test/about", "status": 200, "title": "About us",
+                 "content_type": "text/html", "size": 20, "depth": 1, "rendered": false},
+                {"url": "http://site.test/gone", "status": 404, "content_type": "text/html",
+                 "size": 0, "depth": 1, "rendered": false}
+            ],
+            "hosts": [{"host": "site.test", "robots": "rules", "pages": 3, "disallowed": 2,
+                       "media_skipped": 0, "refused": false}],
+            "blocked": [], "links": [], "listings": [],
+            "used": {"pages": 3, "hosts": 1, "bytes": 30, "seconds": 3, "requests": 4, "renders": 0}
+        })
+        .to_string();
+        let write = if json {
+            format!("printf '%s' '{result}' > \"$out\"\n")
+        } else {
+            String::new()
+        };
+        format!(
+            "#!/bin/sh\nall=\"$*\"\nurl=\"$3\"\nwhile [ $# -gt 0 ]; do\n  \
+             if [ \"$1\" = \"--out\" ]; then out=\"$2\"; fi\n  shift\ndone\n\
+             curl -s -o /dev/null \"$url\"\ndir=$(dirname \"$out\")\n\
+             echo \"$all\" > \"$dir/args.txt\"\n{write}exit {exit}\n"
+        )
+        .into_bytes()
+    }
+
+    struct Site {
+        b: Box_,
+        server: MockServer,
+        dir: PathBuf,
+    }
+
+    /// A box with the fake agent installed (or not) and a site that must be asked `hits`
+    /// times (a mock that is asked a different number of times fails the test when dropped).
+    async fn site(agent: Option<Vec<u8>>, hits: std::ops::RangeInclusive<u64>) -> Site {
+        let b = Box_::new().await;
+        if let Some(program) = agent {
+            let key = KeyPair::generate_ecdsa_p256().unwrap();
+            b.trust(&key);
+            let a = Artifact::new("agent", "1.0.0", &["agents:write"], &program);
+            publish(&b.server, "agent", "1.0.0", &a, Some(&key)).await;
+            let o = b.run(&["ext", "install", "agent@1.0.0"]);
+            assert_eq!(code(&o), 0, "{}", text(&o));
+        }
+        let site = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<title>Home</title>"))
+            .expect(hits)
+            .mount(&site)
+            .await;
+        let dir = b.dir.path().join("work/made");
+        Site {
+            b,
+            server: site,
+            dir,
+        }
+    }
+
+    impl Site {
+        fn init(&self, extra: &[&str]) -> Output {
+            let t = token(&["extensions:read", "agents:write"]);
+            let mut args = vec![
+                "project",
+                "init",
+                "made",
+                "--template",
+                "coordinated",
+                "--yes",
+                "--no-smoke",
+                "--no-sync",
+                "--dir",
+                self.dir.to_str().unwrap(),
+            ];
+            args.extend_from_slice(extra);
+            self.b
+                .cmd(&args)
+                .env("HOME", self.b.dir.path())
+                .env("IOHR_BASE_URL", self.b.server.uri())
+                .env("IOHR_TOKEN", &t)
+                .env("IOHR_TOKEN_CI", &t)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap()
+        }
+
+        /// The folder a crawl of this site keeps its files in.
+        fn crawl_dir(&self) -> PathBuf {
+            let addr = self.server.address();
+            self.dir
+                .join(format!(".inorbit/crawl/{}-{}", addr.ip(), addr.port()))
+        }
+
+        fn url(&self) -> String {
+            format!("{}/", self.server.uri())
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_crawl_and_no_terminal_read_nothing() {
+        // No flag and no terminal: no consent, so no request and no crawl folder.
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        let o = s.init(&[]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(!s.dir.join(".inorbit/crawl").exists(), "{}", text(&o));
+        assert!(!text(&o).contains("Crawl"), "{}", text(&o));
+        // Even with a URL in the flag's place, --no-crawl wins and the two do not mix.
+        let o = s.init(&["--no-crawl"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(!s.dir.join(".inorbit/crawl").exists());
+        let o = s.init(&["--no-crawl", "--crawl", &s.url()]);
+        assert_eq!(code(&o), 2, "{}", text(&o));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn crawl_keeps_the_files_a_study_and_a_memory_and_sends_nothing() {
+        let s = site(Some(fake_agent(0, &[], true)), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        // Consent first, then the summary.
+        let consent = t.find("Nothing is sent to InOrbit").expect(&t);
+        let said = t
+            .find("read 2 pages in 3 s, 2 skipped by robots.txt, 1 failed")
+            .expect(&t);
+        assert!(consent < said, "{t}");
+        assert!(t.contains("stopped: no limit reached"), "{t}");
+        assert!(
+            t.contains("Nothing was sent to InOrbit. Run iohr sync when you want it there."),
+            "{t}"
+        );
+        // The raw record, under the host's folder, with the policy it ran under.
+        let dirc = s.crawl_dir();
+        assert!(dirc.join("crawl.json").is_file(), "{t}");
+        assert_eq!(
+            std::fs::read_to_string(dirc.join("facts.jsonl"))
+                .unwrap()
+                .lines()
+                .count(),
+            3
+        );
+        let policy = std::fs::read_to_string(dirc.join("policy.toml")).unwrap();
+        assert!(policy.contains("allow = [\"127.0.0.1\"]"), "{policy}");
+        let args = std::fs::read_to_string(dirc.join("args.txt")).unwrap();
+        assert!(
+            args.contains("--max-pages 200") && args.contains("--max-minutes 5"),
+            "{args}"
+        );
+        assert!(
+            args.starts_with(&format!("atlas crawl {}", s.url())),
+            "{args}"
+        );
+        // The raw record stays out of the project's git.
+        assert_eq!(
+            std::fs::read_to_string(s.dir.join(".inorbit/crawl/.gitignore")).unwrap(),
+            "*\n"
+        );
+        // The study the sync carries, and one memory entry that points at it.
+        let study = s
+            .dir
+            .read_dir_of("atlas/studies")
+            .into_iter()
+            .find(|n| n.contains("site-crawl"))
+            .expect("a site crawl study");
+        let text_of = std::fs::read_to_string(s.dir.join("atlas/studies").join(&study)).unwrap();
+        assert!(text_of.contains("http://site.test/about"), "{text_of}");
+        assert_eq!(
+            crawl_memories(&s.dir),
+            1,
+            "one memory entry points at the crawl"
+        );
+        // `iohr sync --dry-run` lists the study and sends nothing.
+        let o =
+            s.b.cmd(&["sync", "--dry-run", "--space", SPACE])
+                .env("HOME", s.b.dir.path())
+                .current_dir(&s.dir)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        assert!(
+            text(&o).contains(&format!("atlas/studies/{study}")),
+            "{}",
+            text(&o)
+        );
+        // Nothing the crawl found went to the InOrbit server of the test.
+        let seen = s.b.server.received_requests().await.unwrap_or_default();
+        // Init's own plan record is the one write; no atlas or decisions path,
+        // and no body carries a crawled page.
+        assert!(
+            seen.iter().all(|r| {
+                let path = r.url.path();
+                !path.contains("atlas")
+                    && !path.contains("decisions")
+                    && !String::from_utf8_lossy(&r.body).contains("site.test")
+                    && (r.method.as_str() == "GET" || path == "/v1/coordinator/plans")
+            }),
+            "{seen:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_budget_stop_is_a_finished_crawl_that_says_how_to_raise_the_limit() {
+        let s = site(Some(fake_agent(1, &["pages"], true)), 2..=2).await;
+        let o = s.init(&["--crawl", &s.url(), "--crawl-pages", "3", "--json"]);
+        assert_eq!(code(&o), 0, "{}", text(&o));
+        let v = stdout_json(&o);
+        let step = v["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == "crawl")
+            .unwrap_or_else(|| panic!("no crawl step: {v}"));
+        assert_eq!(step["state"], "done", "{v}");
+        assert!(s.crawl_dir().join("facts.jsonl").is_file());
+        assert!(
+            std::fs::read_to_string(s.crawl_dir().join("args.txt"))
+                .unwrap()
+                .contains("--max-pages 3")
+        );
+        // The same crawl, plain: the stop and the way to raise it.
+        let o = s.init(&["--crawl", &s.url(), "--crawl-pages", "3"]);
+        assert!(
+            text(&o).contains(
+                "stopped at the page limit; raise it with --crawl-pages / --crawl-minutes"
+            ),
+            "{}",
+            text(&o)
+        );
+        // A second crawl rewrites the one study and the one memory.
+        let studies = s.dir.read_dir_of("atlas/studies");
+        assert_eq!(
+            studies.iter().filter(|n| n.contains("site-crawl")).count(),
+            1,
+            "{studies:?}"
+        );
+        assert_eq!(crawl_memories(&s.dir), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_crawler_that_fails_does_not_fail_init() {
+        // Exit 3 and no JSON: the step fails, init still finishes, nothing is kept.
+        let s = site(Some(fake_agent(3, &[], false)), 1..=1).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("the crawler exited with 3"), "{t}");
+        assert!(!s.crawl_dir().join("facts.jsonl").exists(), "{t}");
+        assert!(!s.dir.join("atlas/studies").read_dir().is_ok_and(|mut d| {
+            d.any(|e| e.is_ok_and(|e| e.file_name().to_string_lossy().contains("site-crawl")))
+        }));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn without_the_agent_extension_it_says_so_in_a_line_and_reads_nothing() {
+        let s = site(None, 0..=0).await;
+        let o = s.init(&["--crawl", &s.url()]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("is not installed"), "{t}");
+        assert!(t.contains("ext install inorbit/agent"), "{t}");
+        assert!(!s.crawl_dir().exists(), "{t}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dry_run_says_what_it_would_read_and_reads_nothing() {
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        let o = s.init(&["--crawl", &s.url(), "--dry-run"]);
+        let t = text(&o);
+        assert_eq!(code(&o), 0, "{t}");
+        assert!(t.contains("would: read"), "{t}");
+        assert!(t.contains("nothing is sent to InOrbit"), "{t}");
+        assert!(!s.crawl_dir().exists(), "{t}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_address_that_is_not_a_web_address_is_refused_before_anything_runs() {
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        let o = s.init(&["--crawl", "ftp://acme.example"]);
+        assert_eq!(code(&o), 2, "{}", text(&o));
+        assert!(text(&o).contains("not a web address"), "{}", text(&o));
+    }
+
+    /// How many of the project's memory entries say a site was crawled (init seeds others).
+    fn crawl_memories(dir: &Path) -> usize {
+        std::fs::read_dir(dir.join(".inorbit/memory"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                std::fs::read_to_string(e.path())
+                    .is_ok_and(|t| t.contains("was crawled on this machine"))
+            })
+            .count()
+    }
+
+    trait ReadDirOf {
+        fn read_dir_of(&self, rel: &str) -> Vec<String>;
+    }
+
+    impl ReadDirOf for PathBuf {
+        /// The file names in a folder under this one; none when it is not there.
+        fn read_dir_of(&self, rel: &str) -> Vec<String> {
+            std::fs::read_dir(self.join(rel))
+                .map(|d| {
+                    d.filter_map(Result::ok)
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    }
+}
