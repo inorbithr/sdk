@@ -68,6 +68,20 @@ pub(crate) struct NewTask<'a> {
     pub(crate) payload: &'a str,
 }
 
+/// One task of an ask, as the shell reads it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Answer {
+    pub(crate) id: i64,
+    /// The Role the task was tagged for (`role_hint`).
+    pub(crate) role: String,
+    /// `queued`, `claimed`, `running`, `done` or `failed`.
+    pub(crate) state: String,
+    /// What the Role's handler returned, when `done`.
+    pub(crate) result: Option<String>,
+    /// Why it failed, when `failed`.
+    pub(crate) reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Enqueued {
     pub(crate) id: i64,
@@ -420,6 +434,61 @@ impl Queue {
                 event(tx, id, now, name, extra)?;
             }
             Ok(n == 1)
+        })
+    }
+
+    /// A Role gives back the task it holds untried (the host is stopping): it goes back to
+    /// `queued`, and the try it used is not counted, so a stop never spends a task's
+    /// [`MAX_ATTEMPTS`].
+    pub(crate) fn release(
+        &self,
+        id: i64,
+        role: &str,
+        why: &str,
+        now: i64,
+    ) -> Result<bool, QueueError> {
+        self.held(
+            id,
+            role,
+            now,
+            "state = 'queued', lease_until = NULL, claimed_by = NULL, \
+             attempts = GREATEST(attempts - 1, 0), updated_at = $3",
+            "released",
+            Some(why),
+        )
+    }
+
+    /// Every task of one ask, oldest first: the ask's tasks have an `external_id` that starts
+    /// with `prefix` (one task per Role, see [`super::route`]).
+    pub(crate) fn answers(&self, prefix: &str) -> Result<Vec<Answer>, QueueError> {
+        self.retrying(|tx| {
+            let mut stmt = tx.prepare(
+                "SELECT id, role_hint, state, result_ref, reason FROM tasks \
+                 WHERE starts_with(external_id, $1) ORDER BY id",
+            )?;
+            let rows = stmt
+                .query_map(params![prefix], |r| {
+                    Ok(Answer {
+                        id: r.get(0)?,
+                        role: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                        state: r.get(2)?,
+                        result: r.get(3)?,
+                        reason: r.get(4)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// The Roles this host runs, by name.
+    pub(crate) fn role_names(&self) -> Result<Vec<String>, QueueError> {
+        self.retrying(|tx| {
+            let mut stmt = tx.prepare("SELECT role FROM roles ORDER BY role")?;
+            let rows = stmt
+                .query_map([], |r| r.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            Ok(rows)
         })
     }
 
