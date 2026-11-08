@@ -41,6 +41,10 @@ pub(crate) const MAX_PIECE: usize = 4096;
 const MAX_LEASES: usize = 4;
 /// Pieces waiting to be posted before the session's reader waits.
 const QUEUE: usize = 256;
+/// Written to a session as it starts, before the person speaks, so the first request's
+/// cold start (several seconds, RFC 0215) is paid while the call is still connecting.
+/// Its answer is turn 0, which is never live: nobody hears it.
+const WARM_UP: &str = "The call is connecting. Reply with one word.";
 
 /// One piece of an answer, as `ReportVoice` takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,8 +189,9 @@ impl Turns {
             .pop_front()
     }
 
+    /// Whether `seq` is the turn the person is waiting on. Turn 0 is the warm-up.
     fn live(&self, seq: u64) -> bool {
-        seq == self.latest.load(Ordering::Acquire)
+        seq != 0 && seq == self.latest.load(Ordering::Acquire)
     }
 }
 
@@ -286,14 +291,16 @@ async fn open(
     let stdout = child.stdout.take().ok_or("spawn")?;
     let turns = Arc::new(Turns::default());
     let reader = tokio::spawn(read(lease_id.to_owned(), stdout, turns.clone(), tx));
-    Ok(Session {
+    let mut s = Session {
         args: args.to_vec(),
         stdin,
         turns,
         reader,
         _group: group,
         _child: child,
-    })
+    };
+    s.send(0, WARM_UP).await.map_err(|_| "write")?;
+    Ok(s)
 }
 
 /// Reads a session's stdout, turns it into pieces of the turn it answers, and fails each
@@ -592,16 +599,18 @@ impl Session {
     /// Writes turn `seq`; it is the lease's newest from here on.
     async fn write(&mut self, seq: u64, text: &str) -> std::io::Result<()> {
         self.turns.latest.store(seq, Ordering::Release);
+        self.send(seq, text).await
+    }
+
+    /// Writes `text` as turn `seq`, whose answer is the next one not yet read.
+    async fn send(&mut self, seq: u64, text: &str) -> std::io::Result<()> {
         self.turns
             .written
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push_back(seq);
-        let wrote = self.stdin.write_all(user_line(text).as_bytes()).await;
-        match wrote {
-            Ok(()) => self.stdin.flush().await,
-            Err(e) => Err(e),
-        }
+        self.stdin.write_all(user_line(text).as_bytes()).await?;
+        self.stdin.flush().await
     }
 }
 
@@ -796,6 +805,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(QUEUE);
         let mut leases = Leases::new(&exec, tx);
         let notes = Mutex::new(Vec::<String>::new());
+        // (The warm-up's answer, turn 0, must not come out below.)
         let note = |l: &str| notes.lock().unwrap().push(l.to_owned());
         leases.on(open_frame(), &note).await;
         leases.on(turn(1, "first"), &note).await;
@@ -840,7 +850,7 @@ mod tests {
         // before the first answer starts.
         let exec = fake_claude(
             dir.path(),
-            &format!("read -r a\nread -r b\n{ANSWER}{ANSWER}cat > /dev/null"),
+            &format!("read -r w\nread -r a\nread -r b\n{ANSWER}{ANSWER}{ANSWER}cat > /dev/null"),
         );
         let (tx, mut rx) = mpsc::channel(QUEUE);
         let mut leases = Leases::new(&exec, tx);
@@ -860,7 +870,10 @@ mod tests {
     async fn a_session_that_dies_fails_its_turn_and_starts_again() {
         let dir = tempfile::tempdir().unwrap();
         // Counts its starts, then exits after reading one turn without answering it.
-        let exec = fake_claude(dir.path(), "echo 1 >> \"$d/starts.txt\"\nread -r a\nexit 1");
+        let exec = fake_claude(
+            dir.path(),
+            "echo 1 >> \"$d/starts.txt\"\nread -r w\nread -r a\nexit 1",
+        );
         let (tx, mut rx) = mpsc::channel(QUEUE);
         let mut leases = Leases::new(&exec, tx);
         leases.on(open_frame(), &|_: &str| {}).await;
