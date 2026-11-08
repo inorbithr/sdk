@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_leaves_a_note_the_next_one_reads_and_one_role_never_reads_anothers() {
+    fn a_turn_leaves_a_note_the_next_one_reads_and_one_role_never_reads_the_notes_of_another() {
         let d = tmp();
         record(
             d.path(),
