@@ -2158,13 +2158,13 @@ fn finish(
 }
 
 /// What init does not do, listed only under `--verbose`: the steps that wait on an API that
-/// does not exist yet (`not yet:`) and the editor's own ask (`asked:`), which Desktop makes,
-/// not init. The default output says nothing about them; the outro already says Code asks first.
+/// does not exist yet (`not yet:`). The editor's own ask is Desktop's, not init's, so it is not
+/// a line here: the ending already says Code asks first.
 fn not_built_yet(lines: &[String]) -> Option<String> {
     let picked: Vec<&str> = lines
         .iter()
         .map(String::as_str)
-        .filter(|l| l.starts_with("not yet:") || l.starts_with("asked:"))
+        .filter(|l| l.starts_with("not yet:"))
         .collect();
     (!picked.is_empty()).then(|| picked.join("\n"))
 }
@@ -2215,7 +2215,6 @@ mod tests {
     fn only_steps_init_did_not_do_are_listed_and_only_when_there_are_some() {
         let lines: Vec<String> = [
             "done: wrote inorbit.toml",
-            "asked: the editor may open it",
             "not yet: a Keychain slot for the project's own token",
             "not yet: its own monitors",
         ]
@@ -2223,9 +2222,7 @@ mod tests {
         .to_vec();
         assert_eq!(
             not_built_yet(&lines).as_deref(),
-            Some(
-                "asked: the editor may open it\nnot yet: a Keychain slot for the project's own token\nnot yet: its own monitors"
-            )
+            Some("not yet: a Keychain slot for the project's own token\nnot yet: its own monitors")
         );
         assert_eq!(
             not_built_yet(&["done: wrote inorbit.toml".to_owned()]),
