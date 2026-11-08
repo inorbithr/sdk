@@ -826,8 +826,8 @@ pub enum RunnerServiceCommand {
     ///
     /// Writes the `LaunchAgent` (macOS) or systemd user unit (Linux) that runs this `iohr`
     /// as `iohr runner run` (with `--profile`, for that profile), and starts it: on macOS
-    /// with `launchctl bootstrap gui/<uid>`, on Linux with `systemctl --user enable
-    /// --now`. Says each step first. Needs no sign-in and never sudo; the runner itself
+    /// with `launchctl bootstrap gui/<uid>`, on Linux with `systemctl --user enable` and
+    /// `restart`. Says each step first. Needs no sign-in and never sudo; the runner itself
     /// needs `iohr runner register` first.
     Install {
         /// Print the steps and the file; write and start nothing.

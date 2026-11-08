@@ -788,11 +788,7 @@ async fn verbose_output_never_shows_the_token() {
     // The runner's housekeeping is offline: `runner prune` with nothing to remove, and
     // `runner service install --dry-run`, which writes and loads nothing (macOS and
     // Linux only; elsewhere it says so and exits 1).
-    let service = if cfg!(any(target_os = "macos", target_os = "linux")) {
-        0
-    } else {
-        1
-    };
+    let service = i32::from(!cfg!(any(target_os = "macos", target_os = "linux")));
     for (args, want) in [
         (vec!["runner", "prune", "--dry-run", "--verbose"], 0),
         (vec!["runner", "prune", "--json", "--verbose"], 0),
