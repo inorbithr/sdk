@@ -309,6 +309,7 @@ async fn fetch_open(
 }
 
 /// An ask waiting for the person, as the terminal panel lists it.
+#[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PanelAsk {
     pub(crate) id: String,
@@ -321,6 +322,7 @@ pub(crate) struct PanelAsk {
 
 /// The asks that are the person's turn (the same rule as the count: `pending` only), oldest
 /// first as the service returns them. The terminal panel's list.
+#[cfg(unix)]
 pub(crate) async fn pending_asks(g: &Global, env: &Env) -> Result<Vec<PanelAsk>, Error> {
     let rows = fetch_open(g, env, None).await?;
     Ok(rows
@@ -338,6 +340,7 @@ pub(crate) async fn pending_asks(g: &Global, env: &Env) -> Result<Vec<PanelAsk>,
 
 /// Denies one ask, quietly (no output): what `asks deny` does, for the terminal panel, which
 /// confirms with the person first. Approving is never done here: it needs the phone's key.
+#[cfg(unix)]
 pub(crate) async fn deny_quiet(g: &Global, env: &Env, id: &str) -> Result<(), Error> {
     let s = quiet_session(g, env).await?;
     let svc = service(&s, Some(id), None)?;
@@ -349,6 +352,7 @@ pub(crate) async fn deny_quiet(g: &Global, env: &Env, id: &str) -> Result<(), Er
 
 /// Sends the agent a question on one ask, quietly: what `asks question` does, for the terminal
 /// panel. The ask stays open.
+#[cfg(unix)]
 pub(crate) async fn question_quiet(
     g: &Global,
     env: &Env,
@@ -369,6 +373,7 @@ pub(crate) async fn question_quiet(
 
 /// One ask opened in the terminal panel: its labelled lines (what `asks show` prints under the
 /// title), plain text, and whether it is still waiting for a decision.
+#[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PanelAskDetail {
     pub(crate) pairs: Vec<(String, String)>,
@@ -376,6 +381,7 @@ pub(crate) struct PanelAskDetail {
 }
 
 /// Reads one ask in full, for the terminal panel (the same lines as `asks show`).
+#[cfg(unix)]
 pub(crate) async fn detail_quiet(g: &Global, env: &Env, id: &str) -> Result<PanelAskDetail, Error> {
     let s = quiet_session(g, env).await?;
     let svc = service(&s, Some(id), None)?;
@@ -388,6 +394,7 @@ pub(crate) async fn detail_quiet(g: &Global, env: &Env, id: &str) -> Result<Pane
 
 /// The account's auto-approve policy as the panel shows it (ADR 0142): the one setting the
 /// Mac app and the phone read and write, not the ask mode a shell started in.
+#[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PanelAuto {
     /// Set, not expired and not revoked.
@@ -400,6 +407,7 @@ pub(crate) struct PanelAuto {
     pub(crate) never_kinds: Vec<String>,
 }
 
+#[cfg(unix)]
 fn strings(v: &Value, key: &str) -> Vec<String> {
     v.get(key)
         .and_then(Value::as_array)
@@ -411,6 +419,7 @@ fn strings(v: &Value, key: &str) -> Vec<String> {
 }
 
 /// `GetAutoApprovePolicy`'s answer as the panel keeps it.
+#[cfg(unix)]
 pub(crate) fn auto_of(v: &Value) -> PanelAuto {
     let policy = v.get("policy").unwrap_or(&Value::Null);
     let active = policy.get("active").and_then(Value::as_bool) == Some(true);
@@ -430,6 +439,7 @@ pub(crate) fn auto_of(v: &Value) -> PanelAuto {
 }
 
 /// Reads the account's auto-approve policy.
+#[cfg(unix)]
 pub(crate) async fn auto_state(g: &Global, env: &Env) -> Result<PanelAuto, Error> {
     let s = quiet_session(g, env).await?;
     let svc = service(&s, None, None)?;
@@ -437,10 +447,12 @@ pub(crate) async fn auto_state(g: &Global, env: &Env) -> Result<PanelAuto, Error
 }
 
 /// The longest window the service grants (ADR 0142), and the Mac app's default.
+#[cfg(unix)]
 pub(crate) const AUTO_WINDOW_HOURS: i64 = 8;
 
 /// Asks the phone to turn auto-approve on for [`AUTO_WINDOW_HOURS`]: the ask is put to the
 /// phone, which approves it with its device key. Nothing is on until it does.
+#[cfg(unix)]
 pub(crate) async fn auto_request(g: &Global, env: &Env) -> Result<String, Error> {
     let until = time::OffsetDateTime::now_utc() + time::Duration::hours(AUTO_WINDOW_HOURS);
     let until = until
@@ -458,6 +470,7 @@ pub(crate) async fn auto_request(g: &Global, env: &Env) -> Result<String, Error>
 }
 
 /// Turns auto-approve off at once (no proof is needed to turn it off).
+#[cfg(unix)]
 pub(crate) async fn auto_revoke(g: &Global, env: &Env) -> Result<(), Error> {
     let s = quiet_session(g, env).await?;
     let svc = service(&s, None, None)?;
