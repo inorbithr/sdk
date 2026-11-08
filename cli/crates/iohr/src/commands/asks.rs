@@ -288,10 +288,177 @@ async fn fetch_waiting(
     env: &Env,
     account_flag: Option<String>,
 ) -> Result<Waiting, Error> {
+    Ok(Waiting::of(&fetch_open(g, env, account_flag).await?))
+}
+
+/// The open asks, read through the quiet store (see [`fetch_waiting`]).
+async fn fetch_open(
+    g: &Global,
+    env: &Env,
+    account_flag: Option<String>,
+) -> Result<Vec<Value>, Error> {
     let s = quiet_session(g, env).await?;
     let svc = service(&s, None, account_flag)?;
-    let rows = svc.list_approvals("open", "").await.map_err(scoped)?;
-    Ok(Waiting::of(&rows))
+    svc.list_approvals("open", "").await.map_err(scoped)
+}
+
+/// An ask waiting for the person, as the terminal panel lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PanelAsk {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) created_at: String,
+    /// The name the asking agent gives itself: how a workload that waits on this ask is found.
+    pub(crate) agent: String,
+}
+
+/// The asks that are the person's turn (the same rule as the count: `pending` only), oldest
+/// first as the service returns them. The terminal panel's list.
+pub(crate) async fn pending_asks(g: &Global, env: &Env) -> Result<Vec<PanelAsk>, Error> {
+    let rows = fetch_open(g, env, None).await?;
+    Ok(rows
+        .iter()
+        .filter(|a| str_of(a, "status") == "pending")
+        .map(|a| PanelAsk {
+            id: str_of(a, "approval_id").to_owned(),
+            title: headline(str_of(a, "title"), 200),
+            kind: str_of(a, "kind").to_owned(),
+            created_at: str_of(a, "created_at").to_owned(),
+            agent: str_of(a, "agent").to_owned(),
+        })
+        .collect())
+}
+
+/// Denies one ask, quietly (no output): what `asks deny` does, for the terminal panel, which
+/// confirms with the person first. Approving is never done here: it needs the phone's key.
+pub(crate) async fn deny_quiet(g: &Global, env: &Env, id: &str) -> Result<(), Error> {
+    let s = quiet_session(g, env).await?;
+    let svc = service(&s, Some(id), None)?;
+    svc.decide_approval(id, "deny", "denied from the terminal panel")
+        .await
+        .map_err(scoped)?;
+    Ok(())
+}
+
+/// Sends the agent a question on one ask, quietly: what `asks question` does, for the terminal
+/// panel. The ask stays open.
+pub(crate) async fn question_quiet(
+    g: &Global,
+    env: &Env,
+    id: &str,
+    text: &str,
+) -> Result<(), Error> {
+    let note = note_text(text);
+    if note.is_empty() {
+        return Err(Error::Usage("a question cannot be empty".into()));
+    }
+    let s = quiet_session(g, env).await?;
+    let svc = service(&s, Some(id), None)?;
+    svc.decide_approval(id, "question", &note)
+        .await
+        .map_err(scoped)?;
+    Ok(())
+}
+
+/// One ask opened in the terminal panel: its labelled lines (what `asks show` prints under the
+/// title), plain text, and whether it is still waiting for a decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PanelAskDetail {
+    pub(crate) pairs: Vec<(String, String)>,
+    pub(crate) open: bool,
+}
+
+/// Reads one ask in full, for the terminal panel (the same lines as `asks show`).
+pub(crate) async fn detail_quiet(g: &Global, env: &Env, id: &str) -> Result<PanelAskDetail, Error> {
+    let s = quiet_session(g, env).await?;
+    let svc = service(&s, Some(id), None)?;
+    let a = svc.get_approval(id).await.map_err(scoped)?;
+    Ok(PanelAskDetail {
+        pairs: show_pairs(Paint::from_parts(false, true, None, None), &a),
+        open: open(str_of(&a, "status")),
+    })
+}
+
+/// The account's auto-approve policy as the panel shows it (ADR 0142): the one setting the
+/// Mac app and the phone read and write, not the ask mode a shell started in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PanelAuto {
+    /// Set, not expired and not revoked.
+    pub(crate) active: bool,
+    /// When the active policy ends (RFC 3339); empty when none is active.
+    pub(crate) expires_at: String,
+    /// How many asks the policy decided.
+    pub(crate) approved: u64,
+    /// The kinds no policy decides, from the server's rules.
+    pub(crate) never_kinds: Vec<String>,
+}
+
+fn strings(v: &Value, key: &str) -> Vec<String> {
+    v.get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|s| headline(s, 40))
+        .collect()
+}
+
+/// `GetAutoApprovePolicy`'s answer as the panel keeps it.
+pub(crate) fn auto_of(v: &Value) -> PanelAuto {
+    let policy = v.get("policy").unwrap_or(&Value::Null);
+    let active = policy.get("active").and_then(Value::as_bool) == Some(true);
+    PanelAuto {
+        active,
+        expires_at: if active {
+            str_of(policy, "expires_at").to_owned()
+        } else {
+            String::new()
+        },
+        approved: policy
+            .get("approved_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        never_kinds: strings(v.get("rules").unwrap_or(&Value::Null), "never_kinds"),
+    }
+}
+
+/// Reads the account's auto-approve policy.
+pub(crate) async fn auto_state(g: &Global, env: &Env) -> Result<PanelAuto, Error> {
+    let s = quiet_session(g, env).await?;
+    let svc = service(&s, None, None)?;
+    Ok(auto_of(&svc.auto_approve_policy().await.map_err(scoped)?))
+}
+
+/// The longest window the service grants (ADR 0142), and the Mac app's default.
+pub(crate) const AUTO_WINDOW_HOURS: i64 = 8;
+
+/// Asks the phone to turn auto-approve on for [`AUTO_WINDOW_HOURS`]: the ask is put to the
+/// phone, which approves it with its device key. Nothing is on until it does.
+pub(crate) async fn auto_request(g: &Global, env: &Env) -> Result<String, Error> {
+    let until = time::OffsetDateTime::now_utc() + time::Duration::hours(AUTO_WINDOW_HOURS);
+    let until = until
+        .replace_nanosecond(0)
+        .map_err(|e| Error::Failed(e.to_string()))?
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|e| Error::Failed(e.to_string()))?;
+    let s = quiet_session(g, env).await?;
+    let svc = service(&s, None, None)?;
+    let a = svc
+        .request_auto_approve(&until, "iohr")
+        .await
+        .map_err(scoped)?;
+    Ok(str_of(&a, "approval_id").to_owned())
+}
+
+/// Turns auto-approve off at once (no proof is needed to turn it off).
+pub(crate) async fn auto_revoke(g: &Global, env: &Env) -> Result<(), Error> {
+    let s = quiet_session(g, env).await?;
+    let svc = service(&s, None, None)?;
+    svc.revoke_auto_approve("turned off from the terminal panel")
+        .await
+        .map_err(scoped)?;
+    Ok(())
 }
 
 fn service<'a>(

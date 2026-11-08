@@ -30,8 +30,10 @@ use crate::environments::{self, Environment, Environments};
 pub struct Cli {
     #[command(flatten)]
     pub global: Global,
+    /// None is bare `iohr`: on a terminal it enters the session (the shell with the panel);
+    /// anywhere else the binary prints the usage report.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 /// Flags every command takes.
@@ -486,6 +488,12 @@ pub enum Command {
     /// to `.inorbit/permissions.log` (the tool and the rule, never output or file contents).
     #[command(subcommand)]
     Permissions(PermissionsCommand),
+    /// Runs your shell with the floating InOrbit panel over it (menu, approvals, workloads).
+    ///
+    /// `--demo` fills the panel with labelled stub data; `--demo --variant rail|accordion|band`
+    /// prints the older static design drawings instead.
+    #[command(hide = true)]
+    Panel(PanelArgs),
     /// Serves the permission questions of one `iohr ask` run to Claude Code (not for you).
     #[command(name = "permission-server", hide = true)]
     PermissionServer {
@@ -1862,6 +1870,87 @@ pub struct SyncArgs {
     pub dir: Option<PathBuf>,
 }
 
+/// `iohr panel`: runs your shell (or the command after `--`) with the floating panel over its
+/// top right corner. `--demo` runs it on labelled stub data (with an older `--variant`, it
+/// draws that static design instead). Bare `iohr` on a terminal runs the same panel inside the
+/// project's session; `iohr stop` closes it.
+#[derive(Debug, Args)]
+pub struct PanelArgs {
+    /// Stub data: draw a static design (see `--variant`), or with `--variant float` run the
+    /// floating panel on stub asks.
+    #[arg(long)]
+    pub demo: bool,
+    /// The command to run under the panel (after `--`); your shell by default.
+    #[arg(last = true)]
+    pub command: Vec<String>,
+    /// The layout: a framed rail, an accordion, or a band for terminals without margins.
+    #[arg(long, value_enum, default_value = "rail")]
+    pub variant: PanelVariant,
+    /// What the panel shows (default: the resting pill; a static demo's default is the menu).
+    #[arg(long, value_enum)]
+    pub view: Option<PanelView>,
+    /// The state of auto mode in the demo.
+    #[arg(long, value_enum, default_value = "on")]
+    pub auto: PanelAuto,
+    /// The terminal's width in columns.
+    #[arg(long, default_value_t = 100)]
+    pub cols: u16,
+    /// The terminal's height in rows.
+    #[arg(long, default_value_t = 28)]
+    pub rows: u16,
+    /// The highlighted row, counted from 0.
+    #[arg(long, default_value_t = 0)]
+    pub selected: usize,
+    /// Print the lines only, one per row, with no cursor movement.
+    #[arg(long)]
+    pub lines: bool,
+    /// Also print the sequences that reserve (and, last, give back) the panel's room.
+    #[arg(long)]
+    pub setup: bool,
+}
+
+/// How the panel is laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelVariant {
+    /// A framed column at the top right; a submenu replaces the list in place.
+    Rail,
+    /// A ruled column; a submenu opens under its row.
+    Accordion,
+    /// Top rows across the terminal: for terminals that cannot reserve columns.
+    Band,
+    /// The floating band: a small box at the top right over the shell, painted last, taking no
+    /// room. The panel `iohr panel` runs; with `--demo` on stub asks.
+    Float,
+}
+
+/// What the demo panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelView {
+    /// Closed: three quiet lines.
+    Rest,
+    /// The menu.
+    Menu,
+    /// Waiting approvals, with deny, question and details.
+    Approvals,
+    /// The workload tree: sessions on this Mac and the coordinator's queue.
+    Workloads,
+    /// Subcommands that can be run.
+    Run,
+    /// The auto mode switch.
+    Auto,
+    /// Where the panel stands.
+    Status,
+}
+
+/// The auto mode the demo shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PanelAuto {
+    Off,
+    /// Asked, waiting for the phone.
+    Asking,
+    On,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ShellCommand {
     /// Print the hook for a shell, to be evaluated by it: `? question` (and `?? follow-up`)
@@ -3022,7 +3111,7 @@ mod grammar_tests {
             "what is in them",
         ])
         .unwrap();
-        let super::Command::Ask(a) = cli.command else {
+        let Some(super::Command::Ask(a)) = cli.command else {
             panic!("not ask")
         };
         let got: Vec<_> = a
@@ -3035,7 +3124,7 @@ mod grammar_tests {
         assert!(a.headless.has_context());
         // Not given: no folders and no context of its own.
         let cli = super::Cli::try_parse_from(["iohr", "ask", "hi"]).unwrap();
-        let super::Command::Ask(a) = cli.command else {
+        let Some(super::Command::Ask(a)) = cli.command else {
             panic!("not ask")
         };
         assert_eq!(a.headless.read.len(), 0);

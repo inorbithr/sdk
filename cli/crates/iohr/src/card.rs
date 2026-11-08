@@ -22,6 +22,53 @@ const RAIL: &str = "│  ";
 /// The braille spinner, one frame per tick.
 const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// A colour as red, green, blue.
+pub(crate) type Rgb = (u8, u8, u8);
+
+/// The palette every drawn surface takes its colours from (the `?` card, the terminal panel).
+pub(crate) mod palette {
+    use super::Rgb;
+    pub(crate) const VIOLET: Rgb = (167, 139, 250);
+    pub(crate) const GREEN: Rgb = (74, 222, 128);
+    pub(crate) const CYAN: Rgb = (125, 211, 252);
+    pub(crate) const DIM: Rgb = (139, 144, 163);
+    pub(crate) const AMBER: Rgb = (251, 191, 36);
+}
+
+/// The xterm 256-colour index nearest to `rgb`: the 6x6x6 cube or the grey ramp, whichever
+/// is closer (squared distance), for terminals without 24-bit colour.
+pub(crate) fn nearest_256(rgb: Rgb) -> u8 {
+    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let dist = |a: Rgb, b: Rgb| -> u32 {
+        let d = |x: u8, y: u8| u32::from(x.abs_diff(y)).pow(2);
+        d(a.0, b.0) + d(a.1, b.1) + d(a.2, b.2)
+    };
+    let nearest_level = |v: u8| -> usize {
+        (0..LEVELS.len())
+            .min_by_key(|&i| LEVELS[i].abs_diff(v))
+            .unwrap_or(0)
+    };
+    let (ri, gi, bi) = (
+        nearest_level(rgb.0),
+        nearest_level(rgb.1),
+        nearest_level(rgb.2),
+    );
+    let cube = (LEVELS[ri], LEVELS[gi], LEVELS[bi]);
+    let cube_index = u8::try_from(16 + 36 * ri + 6 * gi + bi).unwrap_or(16);
+    // The grey ramp: 24 steps from 8 to 238.
+    let avg =
+        u8::try_from((u32::from(rgb.0) + u32::from(rgb.1) + u32::from(rgb.2)) / 3).unwrap_or(0);
+    let step = u8::try_from(((u32::from(avg).saturating_sub(8)) + 5) / 10)
+        .unwrap_or(23)
+        .min(23);
+    let grey = 8 + 10 * step;
+    if dist(rgb, (grey, grey, grey)) < dist(rgb, cube) {
+        232 + step
+    } else {
+        cube_index
+    }
+}
+
 /// How the card is drawn: colour or not, and 24-bit colour where the terminal has it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Look {
@@ -49,25 +96,43 @@ impl Look {
             s.color256(ansi)
         }
     }
+
+    /// A style for any colours: the exact ones with 24-bit colour, else the nearest of the
+    /// 256 (the terminal panel's cells, which the palette's named styles do not cover).
+    pub(crate) fn rgb(self, fg: Rgb, bg: Option<Rgb>) -> Style {
+        let mut s = Style::new().force_styling(self.fancy);
+        if self.truecolor {
+            s = s.true_color(fg.0, fg.1, fg.2);
+            if let Some(b) = bg {
+                s = s.on_true_color(b.0, b.1, b.2);
+            }
+        } else {
+            s = s.color256(nearest_256(fg));
+            if let Some(b) = bg {
+                s = s.on_color256(nearest_256(b));
+            }
+        }
+        s
+    }
     pub(crate) fn violet(self) -> Style {
-        self.style((167, 139, 250), 141)
+        self.style(palette::VIOLET, 141)
     }
     pub(crate) fn green(self) -> Style {
-        self.style((74, 222, 128), 114)
+        self.style(palette::GREEN, 114)
     }
     pub(crate) fn cyan(self) -> Style {
-        self.style((125, 211, 252), 117)
+        self.style(palette::CYAN, 117)
     }
     pub(crate) fn dim(self) -> Style {
-        self.style((139, 144, 163), 246)
+        self.style(palette::DIM, 246)
     }
     pub(crate) fn amber(self) -> Style {
-        self.style((251, 191, 36), 214)
+        self.style(palette::AMBER, 214)
     }
     fn badge(self) -> Style {
         let s = Style::new().force_styling(self.fancy).black().bold();
         if self.truecolor {
-            s.on_true_color(167, 139, 250)
+            s.on_true_color(palette::VIOLET.0, palette::VIOLET.1, palette::VIOLET.2)
         } else {
             s.on_color256(141)
         }
