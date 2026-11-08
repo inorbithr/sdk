@@ -33,6 +33,7 @@ mod handoff;
 mod headless;
 mod hints;
 mod io_signin;
+mod iomd;
 mod lock;
 mod mac_sign;
 mod output;
