@@ -869,7 +869,7 @@ eval "$(iohr shell hook zsh)"
 ```
 
 Then type `? why did that fail` at the prompt. The line is never run by the shell and is not
-kept in its history; the answer prints under it, after the label `Io · AI answer -- Io running
+kept in its history; the answer prints under it, after the label `Io -- Io running
 on Claude Code (local), an AI model, under your own subscription; ...` and a line that says
 what was read. `?? and the second one` asks a follow-up with the last question and answer as
 context. A line such as `?.txt` or `? ` alone runs as it always did. An accept-line widget you

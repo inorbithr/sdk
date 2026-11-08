@@ -131,7 +131,7 @@ fn json_is_the_documented_shape_and_never_the_question() {
     // The AI label (AI Act Art. 50) travels with the answer.
     let label = v["label"].as_str().unwrap();
     assert!(
-        label.contains("Io · AI answer -- Io running on Claude Code (local)"),
+        label.contains("Io -- Io running on Claude Code (local)"),
         "{label}"
     );
     assert!(
@@ -161,7 +161,7 @@ fn text_mode_prints_the_label_then_the_answer() {
     );
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
     assert_eq!(err.lines().count(), 1, "{err}");
-    assert!(err.starts_with("Io · AI answer -- Io running on Claude Code (local)"));
+    assert!(err.starts_with("Io -- Io running on Claude Code (local)"));
     assert!(
         r.saw("claude.stdin")
             .contains("Question: why is the sky blue")
@@ -187,7 +187,7 @@ fn card_mode_off_a_terminal_is_the_plain_label_and_answer_with_the_answer_on_std
     assert!(!err.contains('\u{1b}'), "{err:?}");
     let lines: Vec<&str> = err.lines().collect();
     assert_eq!(lines.len(), 1, "{err}");
-    assert!(lines[0].starts_with("Io · AI answer -- Io running on Claude Code (local)"));
+    assert!(lines[0].starts_with("Io -- Io running on Claude Code (local)"));
     // Without a terminal the rules decide, and the label says commands may run under them.
     assert!(
         lines[0].ends_with("a command runs only when you or your rules allow it."),
