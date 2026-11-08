@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.sun.net.httpserver.HttpServer;
 import hr.inorbit.sdk.auth.ClientCredentials;
 import hr.inorbit.sdk.auth.StaticToken;
@@ -23,6 +26,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +58,52 @@ class RuntimeTest {
         assertFalse(new Token("tok-123", null).toString().contains("tok-123"));
         Client client = Client.builder().token("tok-123").build();
         assertFalse(client.toString().contains("tok-123"), client.toString());
+    }
+
+    @Test
+    void secretsNeverSerialise() throws Exception {
+        HttpClient http = HttpClient.newHttpClient();
+        ClientCredentials cc = new ClientCredentials(
+                "ak_1", "s3cr3t", List.of("identity:read"), URI.create("https://auth.inorbit.hr/oauth2/token"), http);
+        Token token = new Token("tok-123", Instant.parse("2026-11-08T12:00:00Z"));
+        ObjectMapper plain = new ObjectMapper();
+        String json = plain.writeValueAsString(token);
+        assertFalse(json.contains("tok-123"), json);
+        assertEquals("<redacted>", plain.readTree(json).get("access").asText(), json);
+        assertEquals("2026-11-08T12:00:00Z", plain.readTree(json).get("expires_at").asText(), json);
+        // A mapper that reads every field, as reflective loggers and serialisers do.
+        ObjectMapper fields = new ObjectMapper()
+                .setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE)
+                .setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)
+                .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+        for (Object v : List.of(token, new StaticToken("tok-123"), cc, List.of(token), Map.of("t", token))) {
+            String out = fields.writeValueAsString(v);
+            assertFalse(out.contains("tok-123") || out.contains("s3cr3t"), out);
+            String text = String.format("%s %10s %-5s", v, v, v);
+            assertFalse(text.contains("tok-123") || text.contains("s3cr3t"), text);
+        }
+    }
+
+    @Test
+    void internalSettingsNeverPrintASecret() {
+        Transport.Net net = new Transport.Net(
+                Duration.ofSeconds(5),
+                new NoProxy("http://user:pr0xy-pass@proxy.example:8080", true, List.of()),
+                null,
+                true,
+                "/tmp/c.pem",
+                "/tmp/k.pem",
+                "k3y-pass",
+                null,
+                "st0re-pass".toCharArray(),
+                List.of());
+        String n = net.toString();
+        assertFalse(n.contains("k3y-pass") || n.contains("st0re-pass") || n.contains("pr0xy-pass"), n);
+        assertTrue(n.contains("<redacted>"), n);
+        Config.Resolution r = new Config.Resolution(
+                new ObjectMapper().createObjectNode(), Map.of("token", "tok-123"), new Config.Credential("code", "token"));
+        assertFalse(r.toString().contains("tok-123"), r.toString());
+        assertTrue(r.toString().contains("token"), r.toString());
     }
 
     @Test
@@ -123,7 +173,15 @@ class RuntimeTest {
                         .token("t")
                         .baseUrl("https://api.inorbit.hr/v1")
                         .build());
-        Client.builder().token("t").baseUrl("http://127.0.0.1:8080").build();
+        for (String bad : List.of("http://127.example.com", "http://127.0.0.1.example.com", "http://localhost.example")) {
+            assertThrows(
+                    ConfigException.class,
+                    () -> Client.builder().token("t").baseUrl(bad).build(),
+                    bad);
+        }
+        for (String good : List.of("http://127.0.0.1:8080", "http://127.1.2.3", "http://localhost:1", "http://[::1]:8080")) {
+            Client.builder().token("t").baseUrl(good).build();
+        }
     }
 
     @Test
