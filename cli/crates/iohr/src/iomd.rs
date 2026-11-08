@@ -509,23 +509,22 @@ mod tests {
         assert_eq!(labels(&c), ["IO.md", "docs/guide/io.md"]);
     }
 
+    // Symlinks need no extra rights only on unix, so the test runs there.
+    #[cfg(unix)]
     #[test]
     fn a_linked_file_is_not_read() {
         let t = tempfile::tempdir().unwrap();
         let root = project(t.path());
         let outside = t.path().join("elsewhere.txt");
         std::fs::write(&outside, "from elsewhere").unwrap();
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&outside, root.join("IO.md")).unwrap();
-            let c = load(&root, Some(&t.path().join("none")));
-            assert!(c.is_empty(), "a symlinked IO.md is skipped");
-            // A real io.md beside the link is read: the link is not a file of the folder.
-            put(&root, "io.md", "mine");
-            let c = load(&root, Some(&t.path().join("none")));
-            assert_eq!(c.docs.len(), 1);
-            assert_eq!(c.docs[0].text, "mine");
-        }
+        std::os::unix::fs::symlink(&outside, root.join("IO.md")).unwrap();
+        let c = load(&root, Some(&t.path().join("none")));
+        assert!(c.is_empty(), "a symlinked IO.md is skipped");
+        // A real io.md beside the link is read: the link is not a file of the folder.
+        put(&root, "io.md", "mine");
+        let c = load(&root, Some(&t.path().join("none")));
+        assert_eq!(c.docs.len(), 1);
+        assert_eq!(c.docs[0].text, "mine");
     }
 
     #[test]
