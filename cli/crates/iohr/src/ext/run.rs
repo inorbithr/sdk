@@ -77,14 +77,14 @@ impl Minter for ProfileMinter {
     }
 }
 
-/// Runs extension `name` with `args`; returns its exit code.
-pub(crate) async fn run(
-    global: &Global,
-    env: &Env,
-    store: &Store,
-    name: &str,
-    args: &[OsString],
-) -> Result<u8, Error> {
+/// What a run needs before the program starts: its path and the token channel's context.
+struct Prepared {
+    program: std::path::PathBuf,
+    base: url::Url,
+    ctx: Arc<Ctx<ProfileMinter>>,
+}
+
+fn prepare(global: &Global, env: &Env, store: &Store, name: &str) -> Result<Prepared, Error> {
     let Some((entry, record, dir)) = store
         .installed(name)
         .map_err(|e| Error::Failed(e.to_string()))?
@@ -100,15 +100,88 @@ pub(crate) async fn run(
         verbose: global.verbose,
         log: false,
     });
-    let c = command(&program, args);
+    Ok(Prepared { program, base, ctx })
+}
+
+/// Runs extension `name` with `args`; returns its exit code.
+pub(crate) async fn run(
+    global: &Global,
+    env: &Env,
+    store: &Store,
+    name: &str,
+    args: &[OsString],
+) -> Result<u8, Error> {
+    let p = prepare(global, env, store, name)?;
+    let c = command(&p.program, args);
     serve(
         c,
-        &program,
-        base.as_str().trim_end_matches('/'),
-        ctx,
+        &p.program,
+        p.base.as_str().trim_end_matches('/'),
+        p.ctx,
         |_| Vec::new(),
     )
     .await
+}
+
+/// How much of a quiet run's error output is kept, from its end.
+const TAIL: usize = 2048;
+
+/// What a quiet run left: its exit code and the end of what it wrote to standard error.
+pub(crate) struct Quiet {
+    pub code: u8,
+    pub stderr: String,
+}
+
+/// Runs extension `name` with `args` like [`run`], but with no terminal: standard input is
+/// closed, standard output is dropped and the last [`TAIL`] bytes of standard error are
+/// returned, so the caller (init) prints its own lines.
+pub(crate) async fn run_quiet(
+    global: &Global,
+    env: &Env,
+    store: &Store,
+    name: &str,
+    args: &[OsString],
+) -> Result<Quiet, Error> {
+    let p = prepare(global, env, store, name)?;
+    let mut c = tokio::process::Command::new(&p.program);
+    c.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    strip_credentials(&mut c);
+    let kept = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let sink = Arc::clone(&kept);
+    let code = serve(
+        c,
+        &p.program,
+        p.base.as_str().trim_end_matches('/'),
+        p.ctx,
+        move |child| {
+            let Some(mut err) = child.stderr.take() else {
+                return Vec::new();
+            };
+            vec![tokio::spawn(async move {
+                use tokio::io::AsyncReadExt as _;
+                let mut buf = [0_u8; 1024];
+                while let Ok(n) = err.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    if let Ok(mut k) = sink.lock() {
+                        k.extend_from_slice(&buf[..n]);
+                        let over = k.len().saturating_sub(TAIL);
+                        k.drain(..over);
+                    }
+                }
+            })]
+        },
+    )
+    .await?;
+    let stderr = kept
+        .lock()
+        .map(|k| String::from_utf8_lossy(&k).into_owned())
+        .unwrap_or_default();
+    Ok(Quiet { code, stderr })
 }
 
 /// The API's origin for `IOHR_EXT_API`: HTTPS, or plain HTTP to this machine only
