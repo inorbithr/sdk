@@ -80,6 +80,8 @@ const OUTBOX_MAX: usize = 8;
 const FETCH_TRIES: u32 = 10;
 /// The longest a job's checkout may take to make (a first fetch of a large repository).
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(600);
+/// How long after the start the first retention sweep waits.
+const SWEEP_FIRST: Duration = Duration::from_mins(5);
 /// The most turns one runner holds at once; the service clamps to the same.
 pub(crate) const MAX_CAPACITY: usize = settings::MAX_CAPACITY as usize;
 
@@ -117,6 +119,12 @@ pub(crate) struct LoopConfig {
     pub(crate) workspaces: Option<Arc<Workspaces>>,
     /// Lets the self-upgrade drain the loop; `None`: never drained.
     pub(crate) drain: Option<Arc<Drain>>,
+    /// `allow_host_git_credentials`: a lease with no token of its own may use this host's
+    /// `gh` sign-in ([`Access::allowed`]); off by default.
+    pub(crate) allow_host_git: bool,
+    /// The workspace retention sweep, run while the loop holds no lease, at most every
+    /// [`hygiene::SWEEP_EVERY`]; `None` turns it off.
+    pub(crate) sweep: Option<hygiene::Sweep>,
 }
 
 /// What the run loop runs for the Checked gate (RFC 0120); the same check and the same
@@ -159,6 +167,8 @@ impl Default for LoopConfig {
             gate: None,
             workspaces: None,
             drain: None,
+            allow_host_git: false,
+            sweep: None,
         }
     }
 }
@@ -246,8 +256,12 @@ struct Owned {
     checkout: Prepared,
     document_id: String,
     /// How git and gh reach GitHub for this lease (RFC 0120): its own installation token,
-    /// or this host's sign-in where the platform says the App is not installed.
+    /// or this host's sign-in where the platform says the App is not installed and
+    /// `allow_host_git_credentials` lets it.
     access: Access,
+    /// The checkout's lock, held from before it was made until the lease's work has
+    /// ended, so no prune removes it ([`hygiene::try_hold`]).
+    hold: Arc<hygiene::Hold>,
 }
 
 /// The sending of one gate report, with the lease it was for.
@@ -586,6 +600,10 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
     let mut lease_beat_started = start;
     let interval = |service: Option<Duration>| cfg.interval.or(service).unwrap_or(DEFAULT_INTERVAL);
     let mut drain_watch = cfg.drain.as_ref().map(|d| d.watch());
+    // The retention sweep in flight, and when the next may start: never at once, so a
+    // runner that starts and stops (scripts, tests) never sweeps.
+    let mut sweeping: Option<JoinHandle<Option<String>>> = None;
+    let mut next_sweep = start + SWEEP_FIRST;
 
     loop {
         let held = held_leases(&busy, &fetching, &gating, &outbox);
@@ -596,6 +614,28 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
             );
         }
         let now = Instant::now();
+        if sweeping.as_ref().is_some_and(JoinHandle::is_finished)
+            && let Some(done) = sweeping.take()
+        {
+            match done.await {
+                Ok(Some(line)) => log(&line),
+                Ok(None) => {}
+                Err(e) => log(&format!("workspace prune: stopped: {e}")),
+            }
+        }
+        // Only while nothing is held: a lease's checkout is locked anyway, and the sweep
+        // keeps its disk work out of a turn's way.
+        if let Some(sw) = &cfg.sweep
+            && sweeping.is_none()
+            && now >= next_sweep
+            && !has_held
+            && accepting.is_empty()
+            && fetch_ops.is_empty()
+        {
+            let sw = sw.clone();
+            sweeping = Some(tokio::task::spawn_blocking(move || hygiene::sweep(&sw)));
+            next_sweep = now + hygiene::SWEEP_EVERY;
+        }
         if lease_beating.is_none() && now >= next_lease_beat && has_held {
             lease_beat_started = now;
             let limit = cfg.op_timeout;
@@ -816,7 +856,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                                 ));
                             } else {
                                 accepting_ids.push(lease.lease_id.clone());
-                                accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), lease, cfg.op_timeout, log)));
+                                accepting.push(Box::pin(accept_lease(svc, exec, cfg.workspaces.as_deref(), lease, (cfg.op_timeout, cfg.allow_host_git), log)));
                             }
                         }
                     }
@@ -935,7 +975,7 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         let access = if o.access.fresh(time::OffsetDateTime::now_utc()) {
                             Ok(o.access.clone())
                         } else {
-                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout).await
+                            github_access(svc, &b.lease, &o.checkout.repository, cfg.op_timeout, cfg.allow_host_git).await
                         };
                         Some((Arc::clone(w), o.checkout.clone(), access))
                     }
@@ -952,11 +992,14 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                         (repo, g.command.clone(), g.timeout, env)
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
+                    // The checkout stays held until its push and check have ended.
+                    let hold = b.owned.as_ref().map(|o| Arc::clone(&o.hold));
                     gating.push(Gating {
                         lease: b.lease,
                         job_id,
                         report,
                         check: Some(tokio::spawn(async move {
+                            let _hold = hold;
                             let shipped = match (ship, &owned) {
                                 (Some(m), Some((w, p, Ok(access)))) => Some(w.ship(p, &m, access).await),
                                 (Some(_), Some((_, _, Err(e)))) => Some(Err(format!("nothing pushed: {e}"))),
@@ -1212,20 +1255,24 @@ fn check_pack(p: &Pack, lease: &Lease, owned: Option<&str>) -> Result<(), OpErr>
 /// How git and gh reach GitHub for `lease` on `repository` (RFC 0120): the installation
 /// token connections mints for that one repository, or this host's sign-in only where
 /// the platform says our App is not installed there, or the platform is older than the
-/// call. Any other refusal (a permission the App lacks, a lease the coordinator did not
-/// confirm, a token for another repository) is an error: never a silent fallback. The
-/// token never reaches a log line or an error.
+/// call, and then only with `allow_host` (`allow_host_git_credentials`); without it, a
+/// refusal that says why. Any other refusal (a permission the App lacks, a lease the
+/// coordinator did not confirm, a token for another repository) is an error: never a
+/// silent fallback. The token never reaches a log line or an error.
 async fn github_access<S: Service>(
     svc: &S,
     lease: &Lease,
     repository: &str,
     op_timeout: Duration,
+    allow_host: bool,
 ) -> Result<Access, String> {
     match tokio::time::timeout(op_timeout, svc.runner_github_token(lease)).await {
-        Ok(Ok(m)) => m.access(repository, time::OffsetDateTime::now_utc()),
-        Ok(Err(e)) if e.is_missing() => Ok(Access::host(
-            "this platform does not mint runner tokens yet",
-        )),
+        Ok(Ok(m)) => m
+            .access(repository, time::OffsetDateTime::now_utc())
+            .and_then(|a| a.allowed(allow_host)),
+        Ok(Err(e)) if e.is_missing() => {
+            Access::host("this platform does not mint runner tokens yet").allowed(allow_host)
+        }
         Ok(Err(e)) => Err(format!("no GitHub token for the lease: {e}")),
         Err(_) => Err("no GitHub token for the lease: timed out".into()),
     }
@@ -1243,7 +1290,7 @@ async fn accept_lease<S: Service, X: Exec>(
     exec: &Arc<X>,
     workspaces: Option<&Workspaces>,
     lease: Lease,
-    op_timeout: Duration,
+    (op_timeout, allow_host): (Duration, bool),
     log: Log<'_>,
 ) -> Result<(Lease, Option<Owned>), String> {
     let refuse = |why: &str| {
@@ -1262,8 +1309,13 @@ async fn accept_lease<S: Service, X: Exec>(
             Err(_) => return Err(refuse("its job could not be read: timed out")),
         };
         if let Some(job) = job.filter(|j| !j.repository.is_empty()) {
-            let access = match github_access(svc, &lease, &job.repository, op_timeout).await {
+            let access = match github_access(svc, &lease, &job.repository, op_timeout, allow_host).await {
                 Ok(a) => a,
+                Err(e) => return Err(refuse(&e)),
+            };
+            // Held before it is made, so a prune never sees it half made.
+            let hold = match w.hold(&lease.job_id).await {
+                Ok(h) => Arc::new(h),
                 Err(e) => return Err(refuse(&e)),
             };
             log(&format!(
@@ -1292,6 +1344,7 @@ async fn accept_lease<S: Service, X: Exec>(
                         checkout: p,
                         document_id: job.document_id,
                         access,
+                        hold,
                     });
                 }
                 Err(e) => return Err(refuse(&format!("its checkout could not be made: {e}"))),
@@ -1986,6 +2039,10 @@ mod tests {
             workspaces: None,
             drain: None,
             report_host: false,
+            // Most tests offer leases with no token of their own on a platform that mints
+            // none: the old fallback; the test of the setting turns it off.
+            allow_host_git: true,
+            sweep: None,
         }
     }
 
@@ -3343,7 +3400,7 @@ mod tests {
         assert!(!p.workdir.join("checkouts").exists());
     }
     #[tokio::test]
-    async fn a_lease_without_its_own_token_uses_the_host_only_where_the_app_is_not_installed() {
+    async fn a_lease_without_its_own_token_uses_the_host_only_where_the_app_is_not_installed_and_allowed() {
         use crate::runner::access::Minted;
         use crate::runner::access::tests::FAKE;
         use crate::runner::workspace::tests::{FakeForge, place, spaces};
@@ -3383,36 +3440,103 @@ mod tests {
             );
             assert!(lines.iter().all(|l| !l.contains(FAKE)), "{lines:?}");
         }
-        // Not installed (or a platform older than the call): the host's sign-in, said.
-        for (minted, why) in [
-            (
-                Some(Minted::refused(
-                    "not_installed",
-                    "this account has not installed our GitHub App",
-                )),
-                "no GitHub App installation",
-            ),
-            (None, "does not mint runner tokens yet"),
-        ] {
-            let p = place();
-            let fake = Fake {
-                job: job(),
-                minted,
-                ..Fake::default()
-            };
-            offer(&fake, &[job_lease("lease_1", 7)]);
-            let c = LoopConfig {
-                workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
-                ..cfg(4)
-            };
-            let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
-            assert_eq!(stats.accepted, 1, "{lines:?}");
-            assert!(
-                lines
-                    .iter()
-                    .any(|l| l.contains("this host's gh sign-in") && l.contains(why)),
-                "{lines:?}"
-            );
+        // Not installed (or a platform older than the call): the host's sign-in, said,
+        // only where `allow_host_git_credentials` is on; off (the default), refused with
+        // the reason and the setting, nothing made.
+        let cases = || {
+            [
+                (
+                    Some(Minted::refused(
+                        "not_installed",
+                        "this account has not installed our GitHub App",
+                    )),
+                    "no GitHub App installation",
+                ),
+                (None, "does not mint runner tokens yet"),
+            ]
+        };
+        for allow in [false, true] {
+            for (minted, why) in cases() {
+                let p = place();
+                let fake = Fake {
+                    job: job(),
+                    minted,
+                    ..Fake::default()
+                };
+                offer(&fake, &[job_lease("lease_1", 7)]);
+                let c = LoopConfig {
+                    workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+                    allow_host_git: allow,
+                    ..cfg(4)
+                };
+                let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+                if allow {
+                    assert_eq!(stats.accepted, 1, "{lines:?}");
+                    assert!(
+                        lines
+                            .iter()
+                            .any(|l| l.contains("this host's gh sign-in") && l.contains(why)),
+                        "{lines:?}"
+                    );
+                } else {
+                    assert_eq!((stats.accepted, stats.turns), (0, 0), "{lines:?}");
+                    assert_eq!(calls_of(&fake, "accept "), 0);
+                    assert!(!p.workdir.join("checkouts/job_1").exists());
+                    assert!(
+                        lines.iter().any(|l| l.contains("lease lease_1 not accepted")
+                            && l.contains(why)
+                            && l.contains("allow_host_git_credentials")),
+                        "{lines:?}"
+                    );
+                    assert!(lines.iter().all(|l| !l.contains("this host's gh sign-in")), "{lines:?}");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_job_checkout_is_held_while_its_lease_runs_and_let_go_after() {
+        use crate::runner::workspace::tests::{FakeForge, place, spaces};
+        let p = place();
+        let fake = Fake {
+            job: Some(JobInfo {
+                repository: "acme/app".into(),
+                document_id: String::new(),
+            }),
+            ..Fake::default()
+        };
+        offer(&fake, &[job_lease("lease_1", 7)]);
+        let checkouts = p.workdir.join("checkouts");
+        // Another holder (a prune, another runner process) has it: this one waits, then
+        // refuses the lease and makes nothing.
+        let other = hygiene::try_hold(&checkouts, "job_1").unwrap().unwrap();
+        let c = LoopConfig {
+            workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+            ..cfg(4)
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert_eq!(stats.accepted, 0, "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l.contains("lease lease_1 not accepted")
+                && l.contains("held by another runner process")),
+            "{lines:?}"
+        );
+        assert!(!checkouts.join("job_1").exists());
+        drop(other);
+        offer(&fake, &[job_lease("lease_1", 7)]);
+        let c = LoopConfig {
+            workspaces: Some(Arc::new(spaces(&p, Arc::new(FakeForge::default())))),
+            ..cfg(4)
+        };
+        let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
+        assert_eq!(stats.accepted, 1, "{lines:?}");
+        assert!(checkouts.join("job_1").is_dir());
+        // The lease's work (its ship included, which may outlive the loop here) has
+        // ended: the lock is free again.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while hygiene::try_hold(&checkouts, "job_1").unwrap().is_none() {
+            assert!(Instant::now() < deadline, "the checkout is still held");
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 

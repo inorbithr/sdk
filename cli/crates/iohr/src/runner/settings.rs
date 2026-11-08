@@ -130,6 +130,14 @@ pub(crate) struct Effective {
     pub(crate) user_units: Option<Setting<Vec<String>>>,
     /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
     pub(crate) core_checkout: Option<Setting<String>>,
+    /// Whether git may use the host's own `gh` sign-in where the platform has no GitHub
+    /// App installation for the account (default no: such a job is refused).
+    pub(crate) allow_host_git_credentials: Setting<bool>,
+    /// Days an unused checkout, mirror or build directory is kept (default
+    /// [`super::hygiene::KEEP_DAYS`]).
+    pub(crate) workspace_keep_days: Setting<u32>,
+    /// The most they may take together, in GB; `None`, no cap.
+    pub(crate) workspace_max_gb: Option<Setting<u64>>,
 }
 
 /// The first of the flag, the profile's table and the file's table that sets a value.
@@ -260,7 +268,51 @@ pub(crate) fn resolve(
         upgrade_sign,
         user_units,
         core_checkout,
+        allow_host_git_credentials: pick(None, profile, file, |c| c.allow_host_git_credentials)
+            .unwrap_or(Setting {
+                value: false,
+                source: Source::Default,
+            }),
+        workspace_keep_days: keep_days_of(profile, file)?,
+        workspace_max_gb: max_gb_of(profile, file)?,
     })
+}
+
+/// `workspace_keep_days`: 1 to [`super::hygiene::MAX_KEEP_DAYS`], else
+/// [`super::hygiene::KEEP_DAYS`].
+fn keep_days_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<u32>, String> {
+    use super::hygiene::{KEEP_DAYS, MAX_KEEP_DAYS};
+    let days = pick(None, profile, file, |c| c.workspace_keep_days).unwrap_or(Setting {
+        value: KEEP_DAYS,
+        source: Source::Default,
+    });
+    if !(1..=MAX_KEEP_DAYS).contains(&days.value) {
+        return Err(format!(
+            "runner workspace_keep_days ({}) is {}: it must be 1 to {MAX_KEEP_DAYS}",
+            days.source, days.value
+        ));
+    }
+    Ok(days)
+}
+
+/// `workspace_max_gb`: at least 1 when set.
+fn max_gb_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Option<Setting<u64>>, String> {
+    let cap = pick(None, profile, file, |c| c.workspace_max_gb);
+    if let Some(c) = &cap
+        && c.value == 0
+    {
+        return Err(format!(
+            "runner workspace_max_gb ({}) is 0: leave it unset for no cap",
+            c.source
+        ));
+    }
+    Ok(cap)
 }
 
 /// `upgrade_sign_identity`: `IOHR_SIGN_IDENTITY`, then the profile's table, then
@@ -784,5 +836,53 @@ mod tests {
             err.contains("core_checkout") && err.contains("work"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn host_git_credentials_are_off_unless_a_table_turns_them_on() {
+        let file = RunnerConfig::default();
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(
+            e.allow_host_git_credentials,
+            Setting {
+                value: false,
+                source: Source::Default
+            }
+        );
+        let mut work = RunnerConfig::default();
+        work.allow_host_git_credentials = Some(true);
+        let e = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap();
+        assert_eq!(
+            e.allow_host_git_credentials,
+            Setting {
+                value: true,
+                source: Source::Profile("work".into())
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_retention_has_a_default_and_refuses_values_out_of_range() {
+        let mut file = RunnerConfig::default();
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(e.workspace_keep_days.value, super::super::hygiene::KEEP_DAYS);
+        assert_eq!(e.workspace_keep_days.source, Source::Default);
+        assert_eq!(e.workspace_max_gb, None);
+        file.workspace_keep_days = Some(3);
+        file.workspace_max_gb = Some(200);
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(e.workspace_keep_days.value, 3);
+        assert_eq!(e.workspace_max_gb.map(|c| c.value), Some(200));
+        for (days, cap, word) in [
+            (Some(0), None, "workspace_keep_days"),
+            (Some(100_000), None, "workspace_keep_days"),
+            (None, Some(0), "workspace_max_gb"),
+        ] {
+            let mut bad = RunnerConfig::default();
+            bad.workspace_keep_days = days;
+            bad.workspace_max_gb = cap;
+            let err = resolve(&bad, None, &Flags::default()).unwrap_err();
+            assert!(err.contains(word), "{err}");
+        }
     }
 }
