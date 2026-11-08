@@ -160,6 +160,7 @@ impl HttpService<'_> {
 
     /// The account's auto-approve policy and the server's rules (`GetAutoApprovePolicy`): the
     /// answer as the service gives it, `policy` unset when the account never had one.
+    #[cfg(unix)]
     pub(crate) async fn auto_approve_policy(&self) -> Result<Value, ServiceError> {
         let v: Value = self
             .api
@@ -175,6 +176,7 @@ impl HttpService<'_> {
     /// over every kind the never list allows (`RequestAutoApprove`). It creates an
     /// `auto_approve` ask for the phone; the policy is set only when the phone's device key
     /// approves it (ADR 0142), never from here. Answers the ask.
+    #[cfg(unix)]
     pub(crate) async fn request_auto_approve(
         &self,
         until: &str,
@@ -196,6 +198,7 @@ impl HttpService<'_> {
 
     /// Turns the auto-approve policy off at once (`RevokeAutoApprovePolicy`): no proof, always
     /// safe, and idempotent. Answers the policy as it is now.
+    #[cfg(unix)]
     pub(crate) async fn revoke_auto_approve(&self, note: &str) -> Result<Value, ServiceError> {
         let raw = self
             .api
