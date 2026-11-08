@@ -8,5 +8,9 @@ hr = "hr"
 # The gzip crate (flate2).
 flate = "flate"
 
+[default.extend-identifiers]
+# A pydantic-core function name.
+plain_serializer_function_ser_schema = "plain_serializer_function_ser_schema"
+
 [files]
 extend-exclude = ["LICENSE", "CODE_OF_CONDUCT.md", "spec/*.json", "**/generated/**", "**/CHANGELOG.md", "cli/crates/iohr/tests/data/host-action/vectors/", "cli/crates/iohr/tests/data/ask-claude.jsonl"]
