@@ -56,6 +56,24 @@ fn api_with_no_arguments_says_what_is_missing_and_shows_examples() {
     assert!(!err.contains('\u{1b}'), "{err:?}");
 }
 
+/// Bare `iohr` with no terminal (a pipe) is not the session: the usage report, exit 2, as
+/// before the session existed. With a terminal it enters the session (`tests/runner.rs`).
+#[test]
+fn bare_iohr_without_a_terminal_prints_the_usage_report() {
+    let o = run(&[], &[]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(o.stdout.is_empty(), "{:?}", o.stdout);
+    let err = stderr(&o);
+    assert!(err.contains("Usage: iohr"), "{err}");
+    assert!(err.contains("iohr --help"), "{err}");
+    let json = run(&[], &["--json"]);
+    assert_eq!(json.status.code(), Some(2));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stderr(&json)).unwrap()["code"],
+        "usage"
+    );
+}
+
 #[test]
 fn json_gives_the_error_envelope_on_stderr_and_nothing_on_stdout() {
     let o = run(&[], &["api", "--json"]);

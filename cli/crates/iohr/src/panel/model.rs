@@ -1,26 +1,30 @@
 //! The panel's state machine: which view is open, what is selected, what each key does.
 //!
-//! Pure. A key goes in, an [`Effect`] comes out (nothing, a deny to send, stop the panel,
-//! refresh the asks); a view goes out as a [`BoxSpec`] for [`super::cells`] to lay out.
+//! Pure. A key goes in, an [`Effect`] comes out (nothing, a deny or a question to send, a
+//! message to a session, auto mode on or off, stop the panel, refresh the asks); a view goes
+//! out as a [`BoxSpec`] for [`super::cells`] to lay out.
 //! Data that has not arrived, or could not be read, is shown as such, never as a number.
 //!
 //! States: `Rest` (the pill; keys go to the shell) and the open views `Menu`, `Approvals`,
-//! `Workloads`, `Workload` (one opened), `Auto`, `Run`, `Status`, `Help` (the panel swallows
-//! every key). The menu key toggles
+//! `Workloads`, `Workload` (one opened), `Reader` (an ask's details, a transcript), `Auto`,
+//! `Run`, `Status`, `Help` (the panel swallows every key). The menu key toggles
 //! between `Rest` and `Menu`; `Esc` goes one level back (Approvals, Auto, Run, Status and Help
-//! to the menu, the menu to rest); a deny is two keys (`d`, then `y`), `n` or `Esc` cancels it.
+//! to the menu, the menu to rest); a deny and a stop are two keys (`d` or `x`, then `y`), `n` or
+//! `Esc` cancels it; a question or a message is a line typed (`Enter` sends, `Esc` drops it).
+//! Approving is never done here: it hands over to the phone ([`super::approve`]).
 
+mod auto;
+mod entry;
+mod reader;
 mod work;
 
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use super::cells::{
-    ACC, AMBER, BoxSpec, FAINT, GREEN, KEY, Line, MUTE, Span, TXT, bold, one_wide, sp,
-};
+use super::cells::{ACC, AMBER, BoxSpec, FAINT, KEY, Line, MUTE, Span, TXT, bold, one_wide, sp};
 use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
-use crate::commands::asks::PanelAsk;
+use crate::commands::asks::{PanelAsk, PanelAuto};
 
 /// Where a piece of data stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +80,7 @@ pub(super) enum View {
     Approvals,
     Workloads,
     Workload,
+    Reader,
     Run,
     Status,
     Auto,
@@ -92,6 +97,7 @@ pub(super) enum Key {
     Left,
     Right,
     Char(char),
+    Backspace,
     /// The panel's key, Option+i.
     Menu,
 }
@@ -102,8 +108,35 @@ pub(super) enum Effect {
     None,
     /// Deny this ask (the person confirmed).
     Deny(String),
+    /// Ask this ask a question (the person typed it).
+    Question {
+        id: String,
+        text: String,
+    },
+    /// Read this ask's details.
+    Detail(String),
     /// Read the asks again.
     Refresh,
+    /// Ask the phone to turn auto mode on.
+    AutoOn,
+    /// Turn auto mode off.
+    AutoOff,
+    /// Say this to the session (a workload id).
+    Message {
+        id: String,
+        text: String,
+    },
+    /// Bring the session's terminal forward.
+    Terminal(String),
+    /// Read the session's transcript.
+    Transcript(String),
+    /// Open the workload's pull request (`pr` is the one it names, when it names one).
+    Pr {
+        id: String,
+        pr: Option<String>,
+    },
+    /// Interrupt the session (the person confirmed).
+    StopWork(String),
     /// Stop the panel: the shell goes on without it.
     Stop,
 }
@@ -128,9 +161,17 @@ pub(super) struct Model {
     menu_sel: usize,
     ask_sel: usize,
     pub(super) asks: Source<Vec<Ask>>,
-    /// The ask mode the shell started with (`manual`, `plan`, `auto`, ...).
-    pub(super) mode: Source<String>,
+    /// The account's auto-approve policy (the real auto mode).
+    pub(super) auto: Source<PanelAuto>,
+    /// The phone was asked to turn it on and has not answered.
+    auto_asked: bool,
     confirm: Option<String>,
+    /// A session whose stop awaits the second key.
+    stop_confirm: Option<String>,
+    /// The line being typed.
+    entry: Option<entry::Entry>,
+    /// The page open in `View::Reader`.
+    reader: Option<reader::Reader>,
     note: Option<String>,
     stub: bool,
     /// What the sessions registry and the coordinator's picture gave.
@@ -150,8 +191,12 @@ impl Model {
             menu_sel: 0,
             ask_sel: 0,
             asks: Source::Loading,
-            mode: Source::Loading,
+            auto: Source::Loading,
+            auto_asked: false,
             confirm: None,
+            stop_confirm: None,
+            entry: None,
+            reader: None,
             note: None,
             stub,
             work: Source::Loading,
@@ -200,6 +245,14 @@ impl Model {
         self.note = Some(format!("deny failed: {}", one_wide(why)));
     }
 
+    /// What an action said, shown in the panel: the answer, or why it could not.
+    pub(in crate::panel) fn acted(&mut self, result: Result<String, String>) {
+        self.note = Some(match result {
+            Ok(s) => one_wide(&s),
+            Err(e) => format!("failed: {}", one_wide(&e)),
+        });
+    }
+
     fn list(&self) -> &[Ask] {
         match &self.asks {
             Source::Ready(l) => l,
@@ -216,6 +269,8 @@ impl Model {
         if key == Key::Menu {
             self.note = None;
             self.confirm = None;
+            self.stop_confirm = None;
+            self.entry = None;
             return if self.open() {
                 self.view = View::Rest;
                 Effect::None
@@ -224,13 +279,21 @@ impl Model {
                 Effect::Refresh
             };
         }
+        if self.typing() {
+            return self.entry_key(key);
+        }
         match self.view {
             View::Rest => Effect::None,
             View::Menu => self.menu_key(key),
             View::Approvals => self.approvals_key(key),
             View::Workloads => self.work_key(key),
             View::Workload => self.work_open_key(key),
-            View::Auto | View::Run | View::Status | View::Help => {
+            View::Auto => self.auto_key(key),
+            View::Reader => {
+                self.reader_key(key);
+                Effect::None
+            }
+            View::Run | View::Status | View::Help => {
                 if key == Key::Esc {
                     self.view = View::Menu;
                 }
@@ -262,7 +325,7 @@ impl Model {
                     self.menu_sel = i;
                     self.choose(i)
                 }),
-            Key::Menu | Key::Left | Key::Right => Effect::None,
+            Key::Menu | Key::Left | Key::Right | Key::Backspace => Effect::None,
         }
     }
 
@@ -310,9 +373,25 @@ impl Model {
                 }
             }
             Key::Char('d') if len > 0 => self.confirm = self.selected_ask().map(|a| a.id.clone()),
-            Key::Char('q') if len > 0 => self.note = Some("question".into()),
-            Key::Char('o') if len > 0 => self.note = Some("more".into()),
-            Key::Enter if len > 0 => self.note = Some("phone".into()),
+            Key::Char('q') if len > 0 => {
+                if let Some(id) = self.selected_ask().map(|a| a.id.clone()) {
+                    self.begin_entry(entry::For::Question(id));
+                }
+            }
+            Key::Char('a') if len > 0 => {
+                if let Some(a) = self.selected_ask() {
+                    let super::approve::Outcome::Phone(line) = super::approve::attempt(&a.kind);
+                    self.note = Some(line);
+                }
+            }
+            Key::Char('o') | Key::Enter if len > 0 => {
+                if let Some((id, title)) =
+                    self.selected_ask().map(|a| (a.id.clone(), a.title.clone()))
+                {
+                    self.open_reader(&title, View::Approvals, false);
+                    return Effect::Detail(id);
+                }
+            }
             _ => {}
         }
         Effect::None
@@ -324,7 +403,8 @@ impl Model {
             View::Rest => 44,
             View::Approvals => 50,
             View::Workloads => 60,
-            View::Workload => 72,
+            View::Workload | View::Reader => 72,
+            View::Auto => 56,
             _ => 42,
         }
     }
@@ -341,7 +421,8 @@ impl Model {
             View::Approvals => self.approvals(width),
             View::Workloads => self.workloads(width),
             View::Workload => self.workload(width),
-            View::Auto => self.auto(),
+            View::Auto => self.auto_view(),
+            View::Reader => self.reader(),
             View::Run => Self::coming("Run", "run a command with an agent from here"),
             View::Status => Self::coming("Status", "platform and agent status"),
             View::Help => Self::help(),
@@ -353,17 +434,6 @@ impl Model {
             right,
             body,
             footer,
-        }
-    }
-
-    fn mode_spans(&self) -> Vec<Span> {
-        match &self.mode {
-            Source::Ready(m) if m == "auto" => {
-                vec![sp("auto ", MUTE), sp("●", GREEN), sp(" on", GREEN)]
-            }
-            Source::Ready(_) => vec![sp("auto ", MUTE), sp("○", MUTE), sp(" off", MUTE)],
-            Source::Loading => vec![sp("auto ", MUTE), sp("…", MUTE)],
-            Source::Unavailable(_) => vec![sp("auto ", MUTE), sp("unavailable", FAINT)],
         }
     }
 
@@ -393,12 +463,7 @@ impl Model {
             Source::Loading => ("… ›".to_owned(), MUTE),
             Source::Unavailable(_) => ("n/a ›".to_owned(), FAINT),
         };
-        let mode = match &self.mode {
-            Source::Ready(m) if m == "auto" => ("● on".to_owned(), GREEN),
-            Source::Ready(_) => ("○ off".to_owned(), MUTE),
-            Source::Loading => ("…".to_owned(), MUTE),
-            Source::Unavailable(_) => ("n/a".to_owned(), FAINT),
-        };
+        let mode = self.auto_menu_right();
         let rights = [
             mode,
             waiting,
@@ -467,7 +532,9 @@ impl Model {
                 }
             }
         }
-        let footer = if self.confirm.is_some() {
+        let footer = if let Some(f) = self.entry_footer() {
+            f
+        } else if self.confirm.is_some() {
             vec![
                 sp("deny this ask?  ", AMBER),
                 sp("y", KEY),
@@ -480,7 +547,7 @@ impl Model {
                 sp("↑↓", KEY),
                 sp(" move   ", MUTE),
                 sp("⏎", KEY),
-                sp(" choose   ", MUTE),
+                sp(" open   ", MUTE),
                 sp("esc", KEY),
                 sp(" back", MUTE),
             ]
@@ -499,6 +566,8 @@ impl Model {
             line(vec![sp(&format!("  {kind} · approve on your phone"), MUTE)]),
             line(vec![
                 sp("  ", TXT),
+                sp("a", KEY),
+                sp(" approve   ", MUTE),
                 sp("d", KEY),
                 sp(" deny   ", MUTE),
                 sp("q", KEY),
@@ -507,43 +576,14 @@ impl Model {
                 sp(" more", MUTE),
             ]),
         ];
-        match self.note.as_deref() {
-            Some("question") => out.extend([
-                line(vec![sp("  to ask: iohr asks question", MUTE)]),
-                line(vec![sp(&format!("  {}", a.id), KEY)]),
-            ]),
-            Some("more") => out.extend([
-                line(vec![sp("  to read it: iohr asks show", MUTE)]),
-                line(vec![sp(&format!("  {}", a.id), KEY)]),
-            ]),
-            Some("phone") => out.push(line(vec![sp("  approving needs your phone's key", AMBER)])),
-            Some(other) => out.push(line(vec![sp(&format!("  {other}"), AMBER)])),
-            None => {}
+        if let Some(mut l) = self.entry_line(46) {
+            l.selected = true;
+            l.spans.insert(0, sp("  ", TXT));
+            out.push(l);
+        } else if let Some(n) = self.note.as_deref() {
+            out.push(line(vec![sp(&format!("  {}", work::cut(n, 44)), AMBER)]));
         }
         out
-    }
-
-    fn auto(&self) -> Parts {
-        let plain = |t: &str, fg| Line {
-            spans: vec![sp(t, fg)],
-            selected: false,
-        };
-        let mode = match &self.mode {
-            Source::Ready(m) => format!("Ask mode at start: {m}"),
-            Source::Loading => "Ask mode at start: …".into(),
-            Source::Unavailable(why) => format!("Ask mode unavailable: {why}"),
-        };
-        let body = vec![
-            plain(&mode, TXT),
-            plain("`auto` shows as on; any other mode as off.", MUTE),
-            plain("Auto-approve from the phone: coming next.", FAINT),
-        ];
-        (
-            vec![sp(" › ", FAINT), bold("Auto mode", TXT)],
-            vec![],
-            body,
-            Some(back_footer()),
-        )
     }
 
     fn coming(name: &str, what: &str) -> Parts {
@@ -573,6 +613,7 @@ impl Model {
             row("⌥i", "open or close this panel"),
             row("↑↓ ⏎", "move and open"),
             row("esc", "back, then close"),
+            row("a d q o", "phone-approve, deny, ask, read"),
             row("d y", "deny an ask, then confirm"),
             row("", "your command line is kept as is"),
         ];
@@ -638,8 +679,17 @@ mod tests {
                 .map(|i| ask(&format!("apr_{i}"), &format!("Ask {i}")))
                 .collect(),
         ));
-        m.mode = Source::Ready("auto".into());
+        m.set_auto(Source::Ready(policy(true)));
         m
+    }
+
+    fn policy(active: bool) -> PanelAuto {
+        PanelAuto {
+            active,
+            expires_at: "2026-11-07T18:00:00Z".into(),
+            approved: 2,
+            never_kinds: vec!["roll".into()],
+        }
     }
 
     fn rows(m: &Model) -> Vec<String> {
@@ -672,9 +722,9 @@ mod tests {
         assert!(rows(&m)[1].contains("asks unavailable"));
         m.set_asks(Source::Loading);
         assert!(rows(&m)[1].contains("asks …"));
-        m.mode = Source::Ready("manual".into());
+        m.set_auto(Source::Ready(policy(false)));
         assert!(rows(&m)[1].contains("auto ○ off"));
-        m.mode = Source::Unavailable("x".into());
+        m.set_auto(Source::Unavailable("x".into()));
         assert!(rows(&m)[1].contains("auto unavailable"));
         assert_eq!(
             Model::new(true)
@@ -731,7 +781,7 @@ mod tests {
         let text = rows(&m).join("\n");
         assert!(text.contains("Approvals") && text.contains("3 waiting"));
         assert!(text.contains("pull request · approve on your phone"));
-        assert!(text.contains("d deny   q ask   o more"));
+        assert!(text.contains("a approve   d deny   q ask   o more"));
         assert!(!text.contains("Ask 1 ") || text.matches("approve on your phone").count() == 1);
         m.key(Key::Down);
         assert_eq!(m.ask_sel, 1);
@@ -751,16 +801,37 @@ mod tests {
         let mut m = model(1);
         m.key(Key::Menu);
         m.key(Key::Char('p'));
-        m.key(Key::Char('q'));
-        let t = rows(&m).join("\n");
+        // `a` never approves here: the phone's key signs it.
+        assert_eq!(m.key(Key::Char('a')), Effect::None);
         assert!(
-            t.contains("iohr asks question") && t.contains("apr_0"),
-            "{t}"
+            rows(&m).join("\n").contains("approve on your phone"),
+            "{:?}",
+            rows(&m)
         );
-        m.key(Key::Char('o'));
-        assert!(rows(&m).join("\n").contains("iohr asks show"));
-        m.key(Key::Enter);
-        assert!(rows(&m).join("\n").contains("needs your phone"));
+        // `q` types a question; an empty line sends nothing, esc drops it.
+        m.key(Key::Char('q'));
+        assert!(rows(&m).join("\n").contains("ask ›"));
+        assert_eq!(m.key(Key::Enter), Effect::None, "an empty line is not sent");
+        m.key(Key::Esc);
+        assert_eq!(m.view, View::Approvals, "esc drops the line, not the view");
+        m.key(Key::Char('q'));
+        for c in "why now".chars() {
+            m.key(Key::Char(c));
+        }
+        assert_eq!(
+            m.key(Key::Enter),
+            Effect::Question {
+                id: "apr_0".into(),
+                text: "why now".into()
+            }
+        );
+        // `o` reads the details in the reader; esc comes back to the list.
+        assert_eq!(m.key(Key::Char('o')), Effect::Detail("apr_0".into()));
+        assert_eq!(m.view, View::Reader);
+        m.reader_done(Ok(vec!["Kind  merge".into()]));
+        assert!(rows(&m).join("\n").contains("Kind  merge"));
+        m.key(Key::Esc);
+        assert_eq!(m.view, View::Approvals);
         m.set_asks(Source::Ready(vec![]));
         assert!(rows(&m).join("\n").contains("Nothing is waiting"));
         assert_eq!(m.key(Key::Char('d')), Effect::None, "nothing to deny");
@@ -830,8 +901,13 @@ mod tests {
         assert!(by("└ ○ Atlas sync  job").contains("idle 18 min"));
         assert!(by("Coordinator service  queue").contains("3 jobs"));
         assert!(by("esc back").contains("↑↓ move  ⏎ open  m message  t terminal"));
+        // On the coordinator row, which is no session, `m` says why nothing happens.
         assert_eq!(m.key(Key::Char('m')), Effect::None);
-        assert!(rows(&m).join("\n").contains("message: coming next"));
+        assert!(
+            rows(&m)
+                .join("\n")
+                .contains("message: only a session on this Mac can")
+        );
         m.key(Key::Esc);
         assert_eq!(m.view, View::Menu);
     }
@@ -868,10 +944,44 @@ mod tests {
         m.key(Key::Left);
         m.key(Key::Left);
         assert_eq!(m.act_sel, 5, "wraps to stop");
+        // Stop asks first; only a yes stops, and the effect names the session.
         assert_eq!(m.key(Key::Enter), Effect::None);
-        assert!(rows(&m).join("\n").contains("stop: coming next"));
-        assert_eq!(m.key(Key::Char('l')), Effect::None);
-        assert!(rows(&m).join("\n").contains("transcript: coming next"));
+        let t = rows(&m).join("\n");
+        assert!(t.contains("stop this session?"), "{t}");
+        assert_eq!(m.key(Key::Char('n')), Effect::None);
+        assert!(!rows(&m).join("\n").contains("stop this session?"));
+        m.key(Key::Char('x'));
+        let Effect::StopWork(id) = m.key(Key::Char('y')) else {
+            panic!("y stops the session");
+        };
+        assert!(id.starts_with("s:stub-"), "{id}");
+        // The transcript opens the reader and asks for its lines; esc comes back.
+        let Effect::Transcript(tid) = m.key(Key::Char('l')) else {
+            panic!("l reads the transcript");
+        };
+        assert_eq!(tid, id);
+        assert_eq!(m.view, View::Reader);
+        assert!(rows(&m).join("\n").contains("transcript"));
+        m.reader_done(Ok(vec!["first line".into(), "second line".into()]));
+        let t = rows(&m).join("\n");
+        assert!(t.contains("first line") && t.contains("second line"), "{t}");
+        m.key(Key::Esc);
+        assert_eq!(m.view, View::Workload);
+        // A message is typed, then sent as one effect.
+        assert_eq!(m.key(Key::Char('m')), Effect::None);
+        for c in "hi".chars() {
+            m.key(Key::Char(c));
+        }
+        m.key(Key::Backspace);
+        m.key(Key::Char('o'));
+        assert_eq!(
+            m.key(Key::Enter),
+            Effect::Message {
+                id: id.clone(),
+                text: "ho".into()
+            }
+        );
+        assert_eq!(m.key(Key::Char('t')), Effect::Terminal(id));
         assert_eq!(m.key(Key::Char('a')), Effect::Refresh);
         assert_eq!(m.view, View::Approvals, "approval is the Approvals view");
         assert_eq!(m.ask_sel, 0);
@@ -946,8 +1056,11 @@ mod tests {
             View::Status,
             View::Auto,
             View::Help,
+            View::Reader,
         ] {
             let mut m = model(3);
+            m.open_reader("a long title that is cut to fit", View::Menu, false);
+            m.reader_done(Ok(vec!["x ".repeat(80); 20]));
             m.view = view;
             m.note = Some("question".into());
             let w = m.width();
@@ -964,5 +1077,57 @@ mod tests {
         assert!(f.cells.iter().all(|r| r.len() == 50));
         let text: String = f.cells[1].iter().map(|c| c.ch).collect();
         assert!(text.contains('…') && text.contains("4m  1"), "{text}");
+    }
+
+    #[test]
+    fn auto_mode_is_the_real_policy_off_asks_the_phone_once_and_on_turns_off() {
+        let mut m = model(1);
+        m.set_auto(Source::Ready(policy(false)));
+        m.key(Key::Menu);
+        m.key(Key::Char('a'));
+        assert_eq!(m.view, View::Auto);
+        let t = rows(&m).join("\n");
+        assert!(t.contains("Off. Nothing is approved without you."), "{t}");
+        assert!(t.contains("asks your phone for 8 hours"), "{t}");
+        assert_eq!(m.key(Key::Enter), Effect::AutoOn);
+        // A second press does not ask again at once; the one after it does.
+        assert_eq!(m.key(Key::Enter), Effect::None);
+        assert_eq!(m.key(Key::Enter), Effect::AutoOn);
+        // The phone approved: the policy is read again and shows on, with what it never does.
+        m.set_auto(Source::Ready(policy(true)));
+        let t = rows(&m).join("\n");
+        assert!(t.contains("On until 18:00 UTC."), "{t}");
+        assert!(t.contains("2 asks decided by it so far."), "{t}");
+        assert!(t.contains("Never by it: roll"), "{t}");
+        assert_eq!(m.key(Key::Enter), Effect::AutoOff);
+        // An unreadable policy is never changed blind.
+        m.set_auto(Source::Unavailable("signed out".into()));
+        assert_eq!(m.key(Key::Enter), Effect::None);
+        m.key(Key::Esc);
+        assert_eq!(m.view, View::Menu);
+    }
+
+    #[test]
+    fn the_reader_scrolls_within_its_lines_and_wraps_long_ones() {
+        let mut m = model(1);
+        m.open_reader("t", View::Menu, false);
+        assert!(rows(&m).join("\n").contains('…'), "loading is said");
+        m.reader_done(Ok((0..30).map(|i| format!("line {i}")).collect()));
+        let t = rows(&m).join("\n");
+        assert!(t.contains("line 0") && !t.contains("line 20"), "{t}");
+        for _ in 0..100 {
+            m.key(Key::Down);
+        }
+        let t = rows(&m).join("\n");
+        assert!(t.contains("line 29") && !t.contains("line 0 "), "{t}");
+        m.key(Key::Up);
+        assert!(rows(&m).join("\n").contains("line 28"));
+        m.reader_done(Err("no file".into()));
+        assert!(rows(&m).join("\n").contains("no file"));
+        assert!(
+            reader::wrap(&"word ".repeat(40), reader::ROOM)
+                .iter()
+                .all(|r| r.chars().count() <= reader::ROOM)
+        );
     }
 }

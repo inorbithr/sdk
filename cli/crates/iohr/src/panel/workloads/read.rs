@@ -38,15 +38,11 @@ fn minutes_since(at: &str, now: OffsetDateTime) -> Option<u64> {
     u64::try_from((now - at).whole_minutes().max(0)).ok()
 }
 
-/// The live sessions of the registry under `root` (`~/.inorbit`). `alive` says whether a pid
-/// runs and `uses` gives each pid's memory and CPU, so tests answer without processes.
-pub(in crate::panel) fn sessions(
-    root: &Path,
-    now: OffsetDateTime,
-    alive: &dyn Fn(u32) -> bool,
-    uses: &dyn Fn(&[u32]) -> HashMap<u32, String>,
-) -> Vec<Workload> {
-    let mut found: Vec<(Workload, u32)> = Vec::new();
+/// The registry's files under `root` (`~/.inorbit/agents/sessions`) as (the id the panel
+/// names the session by, the file's own object): `claude_session_id`, else `session_id`, else
+/// the file's `id`, else its name. One reader for the list and for the actions on a session.
+fn registry(root: &Path) -> Vec<(String, Value)> {
+    let mut out = Vec::new();
     for entry in std::fs::read_dir(root.join("agents/sessions"))
         .into_iter()
         .flatten()
@@ -62,14 +58,6 @@ pub(in crate::panel) fn sessions(
         else {
             continue;
         };
-        let Some(pid) = o
-            .get("pid")
-            .and_then(Value::as_u64)
-            .and_then(|p| u32::try_from(p).ok())
-            .filter(|p| alive(*p))
-        else {
-            continue;
-        };
         let stem = path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -80,6 +68,32 @@ pub(in crate::panel) fn sessions(
         ))
         .filter(|s| !s.is_empty())
         .map_or(stem, str::to_owned);
+        out.push((id, o));
+    }
+    out
+}
+
+/// The pid of a registry object (a number or a string of digits).
+fn pid_of(o: &Value) -> Option<u32> {
+    let v = o.get("pid")?;
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+        .and_then(|p| u32::try_from(p).ok())
+}
+
+/// The live sessions of the registry under `root` (`~/.inorbit`). `alive` says whether a pid
+/// runs and `uses` gives each pid's memory and CPU, so tests answer without processes.
+pub(in crate::panel) fn sessions(
+    root: &Path,
+    now: OffsetDateTime,
+    alive: &dyn Fn(u32) -> bool,
+    uses: &dyn Fn(&[u32]) -> HashMap<u32, String>,
+) -> Vec<Workload> {
+    let mut found: Vec<(Workload, u32)> = Vec::new();
+    for (id, o) in registry(root) {
+        let Some(pid) = pid_of(&o).filter(|p| alive(*p)) else {
+            continue;
+        };
         found.push((one_session(&o, &id, now), pid));
     }
     found.sort_by(|a, b| {
@@ -138,18 +152,96 @@ fn one_session(o: &Value, id: &str, now: OffsetDateTime) -> Workload {
     w
 }
 
+/// The last [`TAIL`] bytes of a file as text.
+fn read_tail(path: &Path) -> std::io::Result<String> {
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(TAIL)))?;
+    let mut bytes = Vec::new();
+    f.take(TAIL).read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The last `max` lines said in a transcript (JSON lines): `you` and `agent` text, one line
+/// per paragraph, oldest first. Empty when the file is missing or says nothing.
+pub(in crate::panel) fn transcript_lines(path: &Path, max: usize) -> Vec<String> {
+    let Ok(tail) = read_tail(path) else {
+        return Vec::new();
+    };
+    let mut said: Vec<String> = Vec::new();
+    for line in tail.lines().rev() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let msg = v.get("message").unwrap_or(&Value::Null);
+        let who = match msg.get("role").and_then(Value::as_str) {
+            Some("assistant") => "agent",
+            Some("user") => "you",
+            _ => continue,
+        };
+        let content = msg.get("content");
+        let texts: Vec<&str> = match content {
+            Some(Value::String(t)) => vec![t.as_str()],
+            Some(Value::Array(a)) => a
+                .iter()
+                .filter(|c| c.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|c| c.get("text").and_then(Value::as_str))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let mut block: Vec<String> = texts
+            .iter()
+            .flat_map(|t| t.lines())
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| format!("{who}: {l}"))
+            .collect();
+        block.reverse();
+        said.extend(block);
+        if said.len() >= max {
+            break;
+        }
+    }
+    said.truncate(max);
+    said.reverse();
+    said
+}
+
+/// What the panel needs to act on one session of the registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::panel) struct SessionRef {
+    /// The id the inbox is keyed by (the file's own `id`).
+    pub(in crate::panel) inbox_id: String,
+    pub(in crate::panel) pid: Option<u32>,
+    /// The terminal's device name as `ps` writes it (`ttys003`); empty when none.
+    pub(in crate::panel) tty: String,
+    pub(in crate::panel) cwd: String,
+    pub(in crate::panel) branch: String,
+    pub(in crate::panel) transcript: PathBuf,
+}
+
+/// The registry entry of the workload `id` (`s:<id>`), if the registry still has it.
+pub(in crate::panel) fn session_ref(root: &Path, workload_id: &str) -> Option<SessionRef> {
+    let want = workload_id.strip_prefix("s:")?;
+    registry(root)
+        .into_iter()
+        .find(|(id, _)| id == want)
+        .map(|(id, o)| SessionRef {
+            inbox_id: Some(text(&o, &["id"]))
+                .filter(|s| !s.is_empty())
+                .map_or(id, str::to_owned),
+            pid: pid_of(&o),
+            tty: text(&o, &["tty"]).trim_start_matches("/dev/").to_owned(),
+            cwd: text(&o, &["cwd"]).to_owned(),
+            branch: text(&o, &["branch"]).to_owned(),
+            transcript: PathBuf::from(text(&o, &["transcript"])),
+        })
+}
+
 /// The model family and the latest thing the assistant said, from the end of a transcript
 /// (JSON lines). Both `None` when the file is missing or says neither.
 fn transcript_tail(path: &Path) -> (Option<String>, Option<String>) {
-    let read = || -> std::io::Result<String> {
-        let mut f = std::fs::File::open(path)?;
-        let len = f.metadata()?.len();
-        f.seek(SeekFrom::Start(len.saturating_sub(TAIL)))?;
-        let mut bytes = Vec::new();
-        f.take(TAIL).read_to_end(&mut bytes)?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
-    };
-    let Ok(tail) = read() else {
+    let Ok(tail) = read_tail(path) else {
         return (None, None);
     };
     let (mut model, mut latest) = (None, None);

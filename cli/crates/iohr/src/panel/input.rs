@@ -12,7 +12,7 @@ pub(super) fn is_menu_key(bytes: &[u8]) -> bool {
     MENU_KEYS.contains(&bytes)
 }
 
-/// The keys in one read while the panel is open. A lone Esc is Esc; arrows are
+/// The keys in one read while the panel is open. A lone Esc is Esc; Backspace is DEL or BS; arrows are
 /// `ESC [ A` or `ESC O A`; Enter is a carriage return or a newline; every other
 /// sequence is skipped; text is one `Char` per character.
 pub(super) fn parse(bytes: &[u8]) -> Vec<Key> {
@@ -54,6 +54,7 @@ pub(super) fn parse(bytes: &[u8]) -> Vec<Key> {
             },
             '\u{2c6}' => keys.push(Key::Menu),
             '\r' | '\n' => keys.push(Key::Enter),
+            '\x7f' | '\x08' => keys.push(Key::Backspace),
             c if c.is_control() => {}
             c => keys.push(Key::Char(c)),
         }
@@ -101,5 +102,9 @@ mod tests {
             "Alt-x is not the panel's"
         );
         assert_eq!(parse(b"\x03a"), [Key::Char('a')], "controls are dropped");
+        assert_eq!(
+            parse(b"a\x7f\x08"),
+            [Key::Char('a'), Key::Backspace, Key::Backspace]
+        );
     }
 }

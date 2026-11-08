@@ -19,6 +19,10 @@ use crate::cli::{Global, PanelArgs, PanelAuto, PanelVariant, PanelView};
 use crate::error::Error;
 use crate::output::Out;
 
+#[cfg(unix)]
+mod act;
+#[cfg(unix)]
+mod approve;
 mod workloads;
 // The live panel is a pty proxy (rustix, unix terminals); off unix only the static designs run.
 #[cfg(unix)]
@@ -559,9 +563,44 @@ async fn live(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
             stub: args.demo,
             initial,
             command: args.command,
+            host_gone: None,
         },
     )
     .await
+    .map(|_| ())
+}
+
+/// Bare `iohr`: the person's shell under the panel, in the session the caller joined. Answers
+/// `true` when the session host stopped while the shell was open (`iohr stop`).
+#[cfg(unix)]
+pub(crate) async fn session_shell(
+    g: &Global,
+    env: Env,
+    host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> Result<bool, Error> {
+    proxy::run(
+        g,
+        env,
+        proxy::Config {
+            stub: false,
+            initial: model::View::Rest,
+            command: Vec::new(),
+            host_gone,
+        },
+    )
+    .await
+}
+
+/// Whether bare `iohr` enters the session: a terminal, colour allowed, no `--json`, and not
+/// already inside a panel. Anything else keeps the usage report.
+#[cfg(unix)]
+pub(crate) fn bare_enters(g: &Global) -> bool {
+    proxy::fancy(g) && !proxy::inside()
+}
+
+#[cfg(not(unix))]
+pub(crate) fn bare_enters(_: &Global) -> bool {
+    false
 }
 
 /// Off unix there is no pseudo-terminal to proxy: the live panel is not built, and the static

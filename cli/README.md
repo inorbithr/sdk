@@ -140,6 +140,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr asks count [--cache] [--json] [--account A]` | How many asks wait for you: "3 asks", nothing for none; only asks whose turn is yours (`pending`) count, one you already answered with a note (`question`) is the agent's turn and is left out (`iohr asks list` still shows it), `{"count": N}` with `--json`; `--cache` keeps just the number in `~/.inorbit/term/asks-count` and does nothing while that file is under 30 seconds old (the shell hook's prompt segment uses it). It reads the sign-in through a quiet credential store: no Keychain dialog (macOS interaction is switched off) and no wait past 1.5 s; when the store would ask, `--cache` keeps the last number and prints nothing, without `--cache` it exits 1 saying so |
 | `iohr permissions list\|allow RULE\|deny RULE\|remove RULE\|check TOOL INPUT [--project\|--user] [--json]` | The rules for what Io may run or open when you ask it something (Claude Code's rule grammar) in `.inorbit/permissions.toml` and the user file in the iohr config folder; `allow` refuses rules that could open a secret file and a blanket `Bash(*)` (exit 2); `check` prints `allow`, `deny` or `ask` and the rule; every ask decision is logged to `.inorbit/permissions.log` (no output, no contents); see `docs/config.md`, section 4.5 |
 | `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu; Shift+Tab on a `?` line cycles manual, plan and auto): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
+| `iohr` (no subcommand) | On a terminal: enters the session. It joins this folder's session host (starting it if none runs, as `iohr session` does) and gives your shell with the floating panel over it; if the host cannot start it says so on stderr and the panel still runs without one. Under `NO_COLOR`, with `--json`, or off a terminal it prints the usage report and exits 2, as before; `iohr --help` and `iohr help` print the help. `iohr stop` ends the host, which closes the panel and leaves your shell open. Unix only |
 | `iohr panel [--demo] [-- COMMAND...]` | Runs your shell (or COMMAND) with a floating panel at the top right of the terminal, drawn over the output and taking no rows (see "The floating panel"); `--demo` fills it with labelled stub asks; with `--demo --variant rail\|accordion\|band` it prints the older static design drawings instead |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
 
@@ -901,13 +902,28 @@ is resized. Nothing is drawn under `NO_COLOR`, off a terminal, or on the alterna
 less); it comes back when the program ends. Colours are truecolor when `COLORTERM=truecolor`, else
 the nearest of the 256.
 
-The panel has four views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns).
+Bare `iohr` on a terminal runs this same panel inside the project's session (see `iohr session`);
+`iohr panel` runs it on its own, without a host.
+
+The panel has these views. At rest it is a pill, `auto ● on   N waiting   ⌥i menu` (44 columns).
 `⌥i` opens the menu (42 columns): `a` auto mode, `p` approvals, `w` workloads, `r` run, `s` status,
-`?` help, `x` stop the panel; arrows and Enter move and open, Esc closes. In approvals (50 columns) the selected
-ask expands to its kind and "approve on your phone", and `d` denies it after a y/n confirmation
-through the same call as the asks command. Keys are taken only while the panel is open; every other
-byte goes to your shell untouched. If the asks cannot be read, the panel says "unavailable", never a
-number. Stub data appears only with `--demo` and is labelled "stub".
+`?` help, `x` stop the panel; arrows and Enter move and open, Esc closes. Keys are taken only while
+the panel is open; every other byte goes to your shell untouched. If something cannot be read, the
+panel says "unavailable", never a number. Stub data appears only with `--demo` and is labelled "stub".
+
+Auto mode (`a`, 56 columns) is the real auto mode: the account's auto-approve policy (ADR 0142),
+the one the Mac app and the phone show. The view reads it (`GET /v1/approvals/auto-approve`): on
+until a time, how many asks it decided, and the kinds it never decides. Enter turns it off
+(`DELETE`, the same call as the Mac app). Turning it on files an ask for 8 hours that goes to your
+phone (`POST`); only the phone sets the policy, so the panel says "asked your phone" and shows the
+new state at the next read. A second Enter before the phone answers asks once more.
+
+Approvals (50 columns, `p`) are full approvals through the CLI's own approvals client: `↑↓` pick an
+ask, `o` or Enter opens its details (a reader, `↑↓` scroll, Esc back), `q` types a question that is
+sent to the asker, `d` denies after a y/n confirmation, and `a` approves. Approving needs the
+device-key proof (RFC 0113), so from the CLI it is phone-only: `a` says "approve on your phone".
+Merge, roll, migration and auto-approve always stay on the phone. Touch ID signing (PR 450,
+`feat/mac-touchid-sign`) plugs in at `panel::approve::attempt`.
 
 Workloads (60 columns, `w`) is the Mac app's workload tree, flattened: a Coordinator root for this
 machine, its children with `├` and `└`, then one "Coordinator service" row for the queue. A dot
@@ -920,21 +936,27 @@ and the latest assistant line come from the end of its transcript, memory and CP
 the coordinator picture (`GET /v1/coordinator/picture`: jobs and the queue). A session "needs you"
 when an open ask names it (its name, its id, or an id prefix of 6 or more characters), the Mac app's
 rule. If the coordinator cannot be reached the service row says "unavailable" and the sessions
-still show; the public picture tier is marked redacted. `↑↓` move, Enter opens a row in place (72
-columns: Why, Latest, Since, Uses, Waits, PR, then the actions), Esc goes back to the list. In an
-opened workload `a` goes to the approvals view on its ask (or says none is waiting). Message,
-terminal, transcript, PR and stop are shown as "coming next" and do nothing. Not available yet and
-shown as "not available": a session's PR and checks, worker nodes under a session, and the stuck
-and failed states of a session (only jobs can be stuck). Under `--demo` the list is the design's
-stub tree, labelled "stub" in the title.
+still show; the public picture tier is marked redacted. `m` messages the highlighted session and
+`t` opens its terminal from the list; `↑↓` move, Enter opens a row in place (72 columns: Why,
+Latest, Since, Uses, Waits, PR, then the actions), Esc goes back. In an opened workload the
+actions are `m` message (typed in the panel; one JSON line `{at, from, to, text}` appended to the
+session's `~/.inorbit/agents/inbox/<id>.jsonl` and to `~/.inorbit/agents/log.jsonl`, what
+`iohr-agents send` writes), `t` terminal (brings the Terminal.app or iTerm2 window with that tty
+forward through `osascript`; macOS only, and it says so elsewhere), `l` transcript (the end of its
+transcript in a scrolling reader), `p` PR (opens the pull request in the browser: a job's own, else the one `gh pr view`
+finds for the session's branch; says so when there is none), `a` its approval, and `x` stop (a y/n confirmation, then SIGINT, a second after 600 ms, never
+SIGKILL, as the Mac app stops a terminal). Not available yet and shown as "not available": a
+session's checks, worker nodes under a session, and the stuck and failed states of a session (only
+jobs can be stuck). Under `--demo` the list is the design's stub tree, labelled "stub" in the
+title, and every action says "stub: nothing was ..." and does nothing.
 
-Not built yet, and shown as "coming next": the Run and Status views, auto-approve from the phone,
-and typing a question inside the panel. Approving is on your phone only. Only zsh is tried; bash and
-fish are untested. `⌥i` needs the terminal to send Option as Esc or Meta (iTerm2: Profiles, Keys,
-"Esc+"; Terminal.app: "Use Option as Meta key"). The panel saves and restores the cursor with DECSC
-and DECRC, which can overwrite a program's own saved cursor. The shell runs with `IOHR_PANEL=1`,
-and a nested `iohr panel` then runs the command plainly; `IOHR_PANEL_LEADER` is internal (the proxy
-re-executes itself to become the shell's session leader).
+Not built yet, and shown as "coming next": the Run and Status views. Only zsh is tried; bash and
+fish are untested (the pty test uses `/bin/sh`). `⌥i` needs the terminal to send Option as Esc or
+Meta (iTerm2: Profiles, Keys, "Esc+"; Terminal.app: "Use Option as Meta key"). The panel saves and
+restores the cursor with DECSC and DECRC, which can overwrite a program's own saved cursor. The
+shell runs with `IOHR_PANEL=1`, and a nested `iohr panel` (or a bare `iohr`) then runs plainly;
+`IOHR_PANEL_LEADER` is internal (the proxy re-executes itself to become the shell's session
+leader).
 
 ## Runner
 

@@ -19,7 +19,9 @@
 #[cfg(unix)]
 mod read;
 #[cfg(unix)]
-pub(super) use read::{home_root, pid_alive, ps_uses, queue, sessions};
+pub(super) use read::{
+    SessionRef, home_root, pid_alive, ps_uses, queue, session_ref, sessions, transcript_lines,
+};
 
 /// Where a workload stands: the dot's colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

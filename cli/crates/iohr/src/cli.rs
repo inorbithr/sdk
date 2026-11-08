@@ -30,8 +30,10 @@ use crate::environments::{self, Environment, Environments};
 pub struct Cli {
     #[command(flatten)]
     pub global: Global,
+    /// None is bare `iohr`: on a terminal it enters the session (the shell with the panel);
+    /// anywhere else the binary prints the usage report.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 /// Flags every command takes.
@@ -1869,7 +1871,8 @@ pub struct SyncArgs {
 
 /// `iohr panel`: runs your shell (or the command after `--`) with the floating panel over its
 /// top right corner. `--demo` runs it on labelled stub data (with an older `--variant`, it
-/// draws that static design instead).
+/// draws that static design instead). Bare `iohr` on a terminal runs the same panel inside the
+/// project's session; `iohr stop` closes it.
 #[derive(Debug, Args)]
 pub struct PanelArgs {
     /// Stub data: draw a static design (see `--variant`), or with `--variant float` run the
@@ -3107,7 +3110,7 @@ mod grammar_tests {
             "what is in them",
         ])
         .unwrap();
-        let super::Command::Ask(a) = cli.command else {
+        let Some(super::Command::Ask(a)) = cli.command else {
             panic!("not ask")
         };
         let got: Vec<_> = a
@@ -3120,7 +3123,7 @@ mod grammar_tests {
         assert!(a.headless.has_context());
         // Not given: no folders and no context of its own.
         let cli = super::Cli::try_parse_from(["iohr", "ask", "hi"]).unwrap();
-        let super::Command::Ask(a) = cli.command else {
+        let Some(super::Command::Ask(a)) = cli.command else {
             panic!("not ask")
         };
         assert_eq!(a.headless.read.len(), 0);

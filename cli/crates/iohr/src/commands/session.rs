@@ -4,10 +4,10 @@
 //! ([`crate::session::link`]) and the host does the rest.
 
 #[cfg(unix)]
-pub(crate) use unix::{open, start_host, stop};
+pub(crate) use unix::{enter, open, start_host, stop};
 
 #[cfg(not(unix))]
-pub(crate) use other::{open, start_host, stop};
+pub(crate) use other::{enter, open, start_host, stop};
 
 #[cfg(unix)]
 mod unix {
@@ -175,12 +175,23 @@ mod unix {
             }
             i += 1;
         }
+        let Some(at) = at else {
+            // Bare `iohr`: only global flags, the command is added after them.
+            let mut out = argv.to_vec();
+            out.extend([
+                "runner".into(),
+                "run".into(),
+                "--session".into(),
+                project.into(),
+            ]);
+            return out;
+        };
         let mut out: Vec<OsString> = Vec::new();
         for (i, a) in argv.iter().enumerate() {
-            if Some(i) == at {
+            if i == at {
                 out.push("runner".into());
                 out.push("run".into());
-            } else if at.is_some_and(|c| i > c) && dir.is_some_and(|d| a == d.as_os_str()) {
+            } else if i > at && dir.is_some_and(|d| a == d.as_os_str()) {
                 // The folder is passed as the flag's value instead.
             } else {
                 out.push(a.clone());
@@ -241,20 +252,63 @@ mod unix {
     }
 
     /// `iohr session`: joins the host, starting it when none runs, and stays open.
-    pub(crate) async fn open(g: &Global, args: &SessionArgs, out: Out) -> Result<(), Error> {
-        let project = project_dir(args.dir.as_deref())?;
-        let paths = paths_for(g, &project)?;
-        let (g, dir, spawn_paths, spawn_project) =
-            (g.clone(), args.dir.clone(), paths.clone(), project.clone());
-        let joined = tokio::task::spawn_blocking(move || {
-            if link::running(&spawn_paths).is_none() {
-                start_process(&g, dir.as_deref(), &spawn_project, &spawn_paths)?;
+    /// Joins the host of `project`, starting it first when none runs: what `iohr session` and
+    /// bare `iohr` both do.
+    async fn join_host(
+        g: &Global,
+        dir: Option<PathBuf>,
+        project: &Path,
+    ) -> Result<link::Session, Error> {
+        let paths = paths_for(g, project)?;
+        let (g, project) = (g.clone(), project.to_path_buf());
+        tokio::task::spawn_blocking(move || {
+            if link::running(&paths).is_none() {
+                start_process(&g, dir.as_deref(), &project, &paths)?;
             }
-            link::join(&spawn_paths)
-                .map_err(|e| Error::Failed(format!("cannot join the host: {e}")))
+            link::join(&paths).map_err(|e| Error::Failed(format!("cannot join the host: {e}")))
         })
         .await
-        .map_err(|e| Error::Failed(e.to_string()))??;
+        .map_err(|e| Error::Failed(e.to_string()))?
+    }
+
+    /// Bare `iohr` on a terminal: joins (or starts) the host of the current folder and floats
+    /// the panel over the person's shell until it exits. When the host cannot be had, says so
+    /// and still gives the shell with the panel: the asks and Workloads need no host.
+    pub(crate) async fn enter(g: &Global, env: crate::Env) -> Result<(), Error> {
+        let project = project_dir(None)?;
+        let joined = match join_host(g, None, &project).await {
+            Ok(j) => Some(j),
+            Err(e) => {
+                Out::note(&format!("no session host: {e}; the panel runs without one"));
+                None
+            }
+        };
+        let gone = joined
+            .as_ref()
+            .and_then(|j| j.watcher().ok())
+            .map(|watcher| {
+                let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+                // A plain thread: it blocks until the host closes, and must not hold the runtime
+                // open once the shell has exited.
+                std::thread::spawn(move || {
+                    if watcher.wait_for_host() {
+                        let _ = tx.send(());
+                    }
+                });
+                rx
+            });
+        let stopped = crate::panel::session_shell(g, env, gone).await;
+        drop(joined);
+        if stopped? {
+            Out::note("the session host stopped");
+        }
+        Ok(())
+    }
+
+    /// `iohr session`: joins the host, starting it when none runs, and stays open.
+    pub(crate) async fn open(g: &Global, args: &SessionArgs, out: Out) -> Result<(), Error> {
+        let project = project_dir(args.dir.as_deref())?;
+        let joined = join_host(g, args.dir.clone(), &project).await?;
         let roles = host_roles(&project);
         if out.json {
             Out::print_json(&serde_json::json!({
@@ -365,6 +419,11 @@ mod unix {
                     "session"
                 ])
             );
+            // Bare `iohr`: only global flags, the command follows them.
+            assert_eq!(
+                host_args(&os(&["--env", "local"]), None, p),
+                os(&["--env", "local", "runner", "run", "--session", "session"])
+            );
             // The `=` form is one word, and is never mistaken for the command either.
             assert_eq!(
                 host_args(&os(&["--profile=session", "session"]), None, p),
@@ -397,6 +456,10 @@ mod other {
         _: &Path,
         _: impl FnOnce() + Send + 'static,
     ) -> Result<Hosted, Error> {
+        Err(Error::Failed(NEEDS_UNIX.into()))
+    }
+
+    pub(crate) async fn enter(_: &Global, _: crate::Env) -> Result<(), Error> {
         Err(Error::Failed(NEEDS_UNIX.into()))
     }
 

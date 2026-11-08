@@ -3,10 +3,12 @@
 //!
 //! The rows come from [`workloads::tree`], joined to the open asks the model already holds, so a
 //! session that an ask names shows as `needs you`. Anything the sources do not give is shown
-//! as `not available`, never as a guess; an action with nothing behind it yet says `coming
-//! next` and does nothing, and `approval` hands over to the Approvals view.
+//! as `not available`, never as a guess. The actions are real: message (a typed line to the
+//! session's inbox), terminal (brings its window forward), transcript (read in place), pr (opens
+//! it), approval (hands over to the Approvals view) and stop (two keys, then an interrupt).
+//! Each is an [`Effect`] the proxy runs; the model only checks that the workload can take it.
 
-use super::{Effect, Key, Model, Parts, Source, View};
+use super::{Effect, Key, Model, Parts, Source, View, entry};
 use crate::panel::cells::{
     AMBER, FAINT, GREEN, KEY, Line, MUTE, RED, Span, TXT, bold, one_wide, sp,
 };
@@ -43,7 +45,7 @@ fn dot(s: State) -> &'static str {
 }
 
 /// `s` cut to `max` characters with an ellipsis, its text made one cell wide first.
-fn cut(s: &str, max: usize) -> String {
+pub(super) fn cut(s: &str, max: usize) -> String {
     let s = one_wide(s);
     if s.chars().count() <= max {
         return s;
@@ -142,14 +144,28 @@ impl Model {
                     self.view = View::Workload;
                 }
             }
-            Key::Char('m') if len > 0 => self.note = Some("message: coming next".into()),
-            Key::Char('t') if len > 0 => self.note = Some("terminal: coming next".into()),
+            Key::Char('m') if len > 0 => {
+                self.opened = self.work_rows.get(self.work_sel).map(|w| w.id.clone());
+                return self.do_action('m');
+            }
+            Key::Char('t') if len > 0 => {
+                self.opened = self.work_rows.get(self.work_sel).map(|w| w.id.clone());
+                return self.do_action('t');
+            }
             _ => {}
         }
         Effect::None
     }
 
     pub(super) fn work_open_key(&mut self, key: Key) -> Effect {
+        if let Some(id) = self.stop_confirm.take() {
+            self.note = None;
+            return if matches!(key, Key::Char('y' | 'Y')) {
+                Effect::StopWork(id)
+            } else {
+                Effect::None
+            };
+        }
         match key {
             Key::Esc => {
                 self.view = View::Workloads;
@@ -181,24 +197,63 @@ impl Model {
         }
     }
 
-    /// One action of the open view: approval opens the Approvals view on the ask this workload
-    /// waits on; the rest are not built yet and say so.
-    fn do_action(&mut self, c: char) -> Effect {
-        if c == 'a' {
-            let ask = self.opened().and_then(|w| w.ask.clone());
-            let at = ask.and_then(|id| self.list().iter().position(|a| a.id == id));
-            if let Some(i) = at {
-                self.ask_sel = i;
-                self.view = View::Approvals;
-                self.note = None;
-                return Effect::Refresh;
-            }
-            self.note = Some("no ask is waiting on this".into());
-            return Effect::None;
+    /// The opened workload's id when it is a session on this Mac; otherwise says so.
+    fn opened_session(&mut self, what: &str) -> Option<String> {
+        let id = self.opened().map(|w| w.id.clone())?;
+        if id.starts_with("s:") {
+            Some(id)
+        } else {
+            self.note = Some(format!("{what}: only a session on this Mac can"));
+            None
         }
-        let name = ACTIONS.iter().find(|a| a.0 == c).map_or("action", |a| a.1);
-        self.note = Some(format!("{name}: coming next"));
-        Effect::None
+    }
+
+    /// One action of the open view: approval opens the Approvals view on the ask this workload
+    /// waits on; the others are effects the proxy runs, after the model has checked the
+    /// workload can take them.
+    fn do_action(&mut self, c: char) -> Effect {
+        self.note = None;
+        match c {
+            'a' => {
+                let ask = self.opened().and_then(|w| w.ask.clone());
+                let at = ask.and_then(|id| self.list().iter().position(|a| a.id == id));
+                if let Some(i) = at {
+                    self.ask_sel = i;
+                    self.view = View::Approvals;
+                    return Effect::Refresh;
+                }
+                self.note = Some("no ask is waiting on this".into());
+                Effect::None
+            }
+            'm' => {
+                if let Some(id) = self.opened_session("message") {
+                    self.begin_entry(entry::For::Message(id));
+                }
+                Effect::None
+            }
+            't' => self
+                .opened_session("terminal")
+                .map_or(Effect::None, Effect::Terminal),
+            'l' => {
+                let Some(id) = self.opened_session("transcript") else {
+                    return Effect::None;
+                };
+                let title = self
+                    .opened()
+                    .map_or(String::new(), |w| format!("{} transcript", w.label));
+                self.open_reader(&title, View::Workload, true);
+                Effect::Transcript(id)
+            }
+            'p' => match self.opened().map(|w| (w.id.clone(), w.pr.clone())) {
+                Some((id, pr)) => Effect::Pr { id, pr },
+                None => Effect::None,
+            },
+            'x' => {
+                self.stop_confirm = self.opened_session("stop");
+                Effect::None
+            }
+            _ => Effect::None,
+        }
     }
 
     fn note_line(&self) -> Option<Line> {
@@ -246,19 +301,22 @@ impl Model {
                 }
             }
         }
+        body.extend(self.entry_line(width.saturating_sub(6)));
         body.extend(self.note_line());
-        let footer = vec![
-            sp("↑↓", KEY),
-            sp(" move  ", MUTE),
-            sp("⏎", KEY),
-            sp(" open  ", MUTE),
-            sp("m", KEY),
-            sp(" message  ", MUTE),
-            sp("t", KEY),
-            sp(" terminal  ", MUTE),
-            sp("esc", KEY),
-            sp(" back", MUTE),
-        ];
+        let footer = self.entry_footer().unwrap_or_else(|| {
+            vec![
+                sp("↑↓", KEY),
+                sp(" move  ", MUTE),
+                sp("⏎", KEY),
+                sp(" open  ", MUTE),
+                sp("m", KEY),
+                sp(" message  ", MUTE),
+                sp("t", KEY),
+                sp(" terminal  ", MUTE),
+                sp("esc", KEY),
+                sp(" back", MUTE),
+            ]
+        });
         (more, right, body, Some(footer))
     }
 
@@ -316,15 +374,28 @@ impl Model {
             spans: acts,
             selected: true,
         });
+        body.extend(self.entry_line(width.saturating_sub(6)));
         body.extend(self.note_line());
-        let footer = vec![
-            sp("←→", KEY),
-            sp(" pick   ", MUTE),
-            sp("⏎", KEY),
-            sp(" do it   ", MUTE),
-            sp("esc", KEY),
-            sp(" back to list", MUTE),
-        ];
+        let footer = if let Some(f) = self.entry_footer() {
+            f
+        } else if self.stop_confirm.is_some() {
+            vec![
+                sp("stop this session?  ", AMBER),
+                sp("y", KEY),
+                sp(" yes   ", MUTE),
+                sp("n", KEY),
+                sp(" no", MUTE),
+            ]
+        } else {
+            vec![
+                sp("←→", KEY),
+                sp(" pick   ", MUTE),
+                sp("⏎", KEY),
+                sp(" do it   ", MUTE),
+                sp("esc", KEY),
+                sp(" back to list", MUTE),
+            ]
+        };
         (more, right, body, Some(footer))
     }
 }
