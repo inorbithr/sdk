@@ -25,6 +25,7 @@ use crate::runner::drain::Drain;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
 use crate::runner::host_action::HostRunner;
+use crate::runner::host_action::extension::Extensions;
 use crate::runner::provider::{self, AuthState};
 use crate::runner::run_loop::{self, GateCheck, LoopConfig, run_loop};
 use crate::runner::self_upgrade::{
@@ -345,6 +346,14 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let mut asks = approvals_setup(&ctx, &s, &svc, &account, &set).await;
             if let Some(a) = asks.as_mut() {
                 a.drain = Some(drain.clone());
+                // Host actions an installed extension declares, each checked again
+                // against the installed copy before it runs.
+                match super::ext::host_extensions(g, &ctx) {
+                    Ok((store, policy)) => {
+                        a.tools.extensions = Some(Extensions::new(store, policy));
+                    }
+                    Err(e) => Out::note(&format!("extension host actions: off, {e}")),
+                }
             }
             let (stop_asks, asks_stopped) = watch::channel(false);
             let upgrader = Version::parse(env!("CARGO_PKG_VERSION")).ok().map(|current| {

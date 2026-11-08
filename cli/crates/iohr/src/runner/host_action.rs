@@ -79,6 +79,7 @@ use super::exec::GroupGuard;
 use super::provider;
 
 mod disk_prune;
+pub(crate) mod extension;
 mod install_checks;
 mod labs_reattribute;
 mod runner_scale;
@@ -617,17 +618,13 @@ impl Action {
     }
 }
 
-/// The registry: the action `doc` names, from a document [`validate`] passed, on this
-/// runner's system. An id that is not in the catalog is `unknown action`.
+/// The registry: the action `doc` names, from a document [`validate`] passed, for a
+/// runner on `os` (`std::env::consts::OS`). An id that is not in the catalog is
+/// `unknown action`.
 ///
 /// # Errors
 /// `unknown action`, a parameter of the wrong type, a namespace refused by
 /// [`namespace_allowed`], or an action this system cannot carry out.
-pub(crate) fn lookup(doc: &Value) -> Result<Action, String> {
-    lookup_on(doc, std::env::consts::OS)
-}
-
-/// [`lookup`] for a runner on `os` (`std::env::consts::OS`).
 pub(crate) fn lookup_on(doc: &Value, os: &str) -> Result<Action, String> {
     let text = |key: &str| -> Result<String, String> {
         doc.pointer(&format!("/params/{key}"))
@@ -1309,6 +1306,31 @@ pub(crate) trait ArgvRunner {
     async fn settle(&self) {
         tokio::time::sleep(install_checks::SETTLE).await;
     }
+
+    /// The installed extension `name`, verified again, whose declared host actions this
+    /// runner carries out.
+    ///
+    /// # Errors
+    /// This runner carries out no extension's actions, or `name` is not installed or no
+    /// longer verifies.
+    fn installed_extension(&self, _name: &str) -> Result<extension::Installed, String> {
+        Err("this runner carries out no extension's host actions".to_owned())
+    }
+
+    /// Starts an extension's `program` as `<program> host-action <id>` with `input` on its
+    /// standard input, killed after `limit`.
+    ///
+    /// # Errors
+    /// It did not start or outlived `limit`.
+    async fn run_extension(
+        &self,
+        _program: &Path,
+        _id: &str,
+        _input: &[u8],
+        _limit: Duration,
+    ) -> Result<Output, String> {
+        Err("this runner carries out no extension's host actions".to_owned())
+    }
 }
 
 /// The cluster every `kubectl` call is pinned to: a context of the kubeconfig, a
@@ -1409,6 +1431,8 @@ pub(crate) struct HostRunner {
     pub(crate) ssh_env: Vec<(OsString, OsString)>,
     /// The account this runner's approvals belong to (`labs.reattribute-document`).
     pub(crate) account: Option<String>,
+    /// The installed extensions whose declared host actions this runner carries out.
+    pub(crate) extensions: Option<extension::Extensions>,
 }
 
 impl HostRunner {
@@ -1436,6 +1460,7 @@ impl HostRunner {
             core_checkout: core_checkout.map(PathBuf::from),
             ssh_env: pass(&["SSH_AUTH_SOCK", "INORBIT_SSH_HOST"]),
             account: None,
+            extensions: None,
         }
     }
 
@@ -1577,6 +1602,32 @@ impl ArgvRunner for HostRunner {
         self.account
             .clone()
             .ok_or_else(|| "this runner does not know its account".to_owned())
+    }
+
+    fn installed_extension(&self, name: &str) -> Result<extension::Installed, String> {
+        self.extensions
+            .as_ref()
+            .ok_or_else(|| "this runner carries out no extension's host actions".to_owned())?
+            .installed(name)
+    }
+
+    async fn run_extension(
+        &self,
+        program: &Path,
+        id: &str,
+        input: &[u8],
+        limit: Duration,
+    ) -> Result<Output, String> {
+        let mut c = tokio::process::Command::new(program);
+        c.args(["host-action", id]).env_clear().envs(
+            self.env
+                .iter()
+                .filter(|(k, _)| {
+                    k != "KUBECONFIG" && !k.to_str().is_some_and(crate::ext::run::is_credential)
+                })
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+        collect(c, id, limit, Some(input)).await
     }
 }
 
@@ -2082,7 +2133,7 @@ pub(crate) mod testing {
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
-    use super::{Action, ArgvRunner, Output, Tool};
+    use super::{Action, ArgvRunner, Output, Tool, extension};
 
     pub(crate) struct Fake {
         /// What `kubectl get namespaces` answers.
@@ -2106,6 +2157,10 @@ pub(crate) mod testing {
         pub(crate) account: Option<String>,
         /// The folders of the calls made with `run_in`, in order.
         pub(crate) folders: Mutex<Vec<std::path::PathBuf>>,
+        /// The installed extensions, by name.
+        pub(crate) extensions: Vec<(String, extension::Installed)>,
+        /// The extension programs started: program, action id and standard input.
+        pub(crate) ext_calls: Mutex<Vec<(std::path::PathBuf, String, Vec<u8>)>>,
     }
 
     impl Fake {
@@ -2157,6 +2212,42 @@ pub(crate) mod testing {
             self.run(tool, argv).await
         }
 
+        fn installed_extension(&self, name: &str) -> Result<extension::Installed, String> {
+            self.extensions
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, i)| i.clone())
+                .ok_or_else(|| format!("{name} is not installed"))
+        }
+
+        async fn run_extension(
+            &self,
+            program: &std::path::Path,
+            id: &str,
+            input: &[u8],
+            _limit: std::time::Duration,
+        ) -> Result<Output, String> {
+            if let Some(why) = &self.missing {
+                return Err(why.clone());
+            }
+            self.ext_calls.lock().unwrap().push((
+                program.to_path_buf(),
+                id.to_owned(),
+                input.to_vec(),
+            ));
+            if let Some(out) = self.script.lock().unwrap().pop_front() {
+                return Ok(out);
+            }
+            if let Some(out) = &self.answer {
+                return Ok(out.clone());
+            }
+            Ok(Output::new(
+                !self.fail,
+                "",
+                if self.fail { "forbidden" } else { "" },
+            ))
+        }
+
         async fn run(&self, tool: Tool, argv: &[String]) -> Result<Output, String> {
             if let Some(why) = &self.missing {
                 return Err(why.clone());
@@ -2197,6 +2288,8 @@ pub(crate) mod testing {
             state: None,
             account: None,
             folders: Mutex::new(Vec::new()),
+            extensions: Vec::new(),
+            ext_calls: Mutex::new(Vec::new()),
         }
     }
 }

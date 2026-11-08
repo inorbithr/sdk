@@ -39,6 +39,7 @@ use inorbithr::Method;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
+use super::host_action::extension::{self, NotRouted, Routed};
 use super::host_action::v1::HOST_ACTION_V1;
 use super::host_action::{self, ArgvRunner, HOST_ACTION};
 use super::private;
@@ -859,12 +860,7 @@ impl<K: ArgvRunner> Asks<K> {
     /// The checks before anything runs; the action to carry out when all pass.
     /// `retry`: the decision was recorded by this process already (its `started` was not
     /// taken), so the record is not a replay.
-    fn check(
-        &self,
-        a: &Approved,
-        run: &Value,
-        retry: bool,
-    ) -> Result<host_action::Action, Refusal> {
+    fn check(&self, a: &Approved, run: &Value, retry: bool) -> Result<Routed, Refusal> {
         let payload = stored_payload(run)?;
         let now = (self.clock)();
         if payload.get("action").is_none() && payload.get("schema_id").is_none() {
@@ -877,11 +873,10 @@ impl<K: ArgvRunner> Asks<K> {
         if !retry && self.seen.contains(&a.approval_id, &proof) {
             return Err(Refusal::Replay);
         }
-        let action = host_action::lookup(&payload["action"]).map_err(Refusal::SchemaInvalid)?;
-        match self.tools.refuses(&action) {
-            Some(why) => Err(Refusal::NotAllowedHere(why)),
-            None => Ok(action),
-        }
+        extension::route(&payload["action"], &self.tools).map_err(|e| match e {
+            NotRouted::Schema(why) => Refusal::SchemaInvalid(why),
+            NotRouted::NotHere(why) => Refusal::NotAllowedHere(why),
+        })
     }
 
     /// One poll: every approved run pinned to this runner is checked, then refused or
@@ -947,7 +942,10 @@ impl<K: ArgvRunner> Asks<K> {
                 a.approval_id,
                 action.id()
             ));
-            let result = host_action::carry_out(&action, &self.tools).await;
+            let result = match &action {
+                Routed::Builtin(a) => host_action::carry_out(a, &self.tools).await,
+                Routed::Extension(c) => extension::carry_out(c, &self.tools).await,
+            };
             let (step, said) = match result {
                 Ok(out) => {
                     t.done += 1;

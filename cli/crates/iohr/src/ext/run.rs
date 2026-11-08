@@ -219,12 +219,15 @@ fn command(program: &Path, args: &[OsString]) -> tokio::process::Command {
     c
 }
 
+/// Whether the environment variable `k` holds an iohr credential.
+pub(crate) fn is_credential(k: &str) -> bool {
+    k == "IOHR_TOKEN" || k.starts_with("IOHR_TOKEN_")
+}
+
 /// Credentials stay with iohr: the extension asks the channel instead.
 pub(crate) fn strip_credentials(c: &mut tokio::process::Command) {
     for (k, _) in std::env::vars_os() {
-        if k.to_str()
-            .is_some_and(|k| k == "IOHR_TOKEN" || k.starts_with("IOHR_TOKEN_"))
-        {
+        if k.to_str().is_some_and(is_credential) {
             c.env_remove(k);
         }
     }
