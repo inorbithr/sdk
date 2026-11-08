@@ -367,6 +367,159 @@ fn the_agent_gets_the_folders_top_level_names_and_never_their_contents() {
     );
 }
 
+/// A project with an `IO.md` at the root, one in a folder below it and the user's own in the
+/// config folder; the walk goes by `inorbit.toml`.
+fn io_md_project(r: &Rig) -> PathBuf {
+    let root = r.home.path().join("proj");
+    let deep = root.join("web/app");
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(root.join("inorbit.toml"), "[project]\nname = \"proj\"\n").unwrap();
+    std::fs::write(root.join("IO.md"), "ROOT-RULES: build with make.\n").unwrap();
+    std::fs::write(deep.join("io.md"), "DEEP-RULES: use pnpm.\n").unwrap();
+    std::fs::create_dir_all(r.home.path().join("config")).unwrap();
+    std::fs::write(
+        r.home.path().join("config/IO.md"),
+        "USER-RULES: be brief.\n",
+    )
+    .unwrap();
+    deep
+}
+
+#[test]
+fn a_question_loads_the_io_md_chain_root_first_and_the_card_says_so() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let deep = io_md_project(&r);
+    let out = r.run(
+        &[
+            "ask",
+            "--cwd",
+            deep.to_str().unwrap(),
+            "--",
+            "how do I build?",
+        ],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let m = r.saw("claude.stdin");
+    let (u, root, deeper) = (
+        m.find("USER-RULES").expect("user file sent"),
+        m.find("ROOT-RULES").expect("root file sent"),
+        m.find("DEEP-RULES").expect("nested file sent"),
+    );
+    assert!(
+        u < root && root < deeper,
+        "farthest first, nearest last: {m}"
+    );
+    assert!(
+        m.contains("<io-md>") && m.contains("--- web/app/io.md"),
+        "{m}"
+    );
+    assert!(text(&out).contains("context: IO.md x3"), "{}", text(&out));
+    // Outside the project nothing is loaded and the card does not mention it.
+    let plain = r.home.path().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let out = r.run(
+        &["ask", "--cwd", plain.to_str().unwrap(), "--", "hi"],
+        OK_JSON,
+        "0",
+    );
+    let m = r.saw("claude.stdin");
+    assert!(m.contains("USER-RULES") && !m.contains("ROOT-RULES"), "{m}");
+    assert!(text(&out).contains("context: IO.md x1"), "{}", text(&out));
+}
+
+#[test]
+fn the_json_context_counts_the_io_md_files_and_never_holds_their_text() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let deep = io_md_project(&r);
+    let out = r.run(
+        &[
+            "--json",
+            "ask",
+            "--headless",
+            "--cwd",
+            deep.to_str().unwrap(),
+            "build?",
+        ],
+        OK_JSON,
+        "0",
+    );
+    assert!(out.status.success(), "{}", text(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["context"]["io_md"]["files"], 3);
+    assert_eq!(v["context"]["io_md"]["cut"], 0);
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("ROOT-RULES"));
+}
+
+#[test]
+fn iohr_context_prints_the_chain_a_question_would_load() {
+    let r = Rig::new();
+    let deep = io_md_project(&r);
+    let out = r.run(&["context", deep.to_str().unwrap()], "", "0");
+    assert!(out.status.success(), "{}", text(&out));
+    let t = text(&out);
+    let (u, root, deeper) = (
+        t.find("user IO.md").unwrap(),
+        t.find("\nIO.md").unwrap(),
+        t.find("web/app/io.md").unwrap(),
+    );
+    assert!(u < root && root < deeper, "{t}");
+    assert!(
+        t.contains("project root") && t.contains("Farthest first"),
+        "{t}"
+    );
+    let out = r.run(
+        &["--json", "context", "--full", deep.to_str().unwrap()],
+        "",
+        "0",
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["files"].as_array().unwrap().len(), 3);
+    assert_eq!(v["files"][2]["kind"], "project");
+    assert!(v["text"].as_str().unwrap().contains("DEEP-RULES"));
+    // No file anywhere: it says so and points at init.
+    let none = r.home.path().join("empty");
+    std::fs::create_dir_all(&none).unwrap();
+    std::fs::remove_file(r.home.path().join("config/IO.md")).unwrap();
+    let out = r.run(&["context", none.to_str().unwrap()], "", "0");
+    assert!(
+        text(&out).contains("No IO.md or io.md found"),
+        "{}",
+        text(&out)
+    );
+}
+
+#[test]
+fn a_long_io_md_is_cut_and_the_card_and_context_say_so() {
+    let r = Rig::new();
+    r.fake("claude", FAKE_CLAUDE);
+    let deep = io_md_project(&r);
+    std::fs::write(
+        r.home.path().join("proj/IO.md"),
+        "a rule that goes on and on\n".repeat(400),
+    )
+    .unwrap();
+    let out = r.run(
+        &[
+            "ask",
+            "--cwd",
+            deep.to_str().unwrap(),
+            "--",
+            "how do I build?",
+        ],
+        OK_JSON,
+        "0",
+    );
+    let m = r.saw("claude.stdin");
+    assert!(m.contains("[IO.md is cut here:"), "{m}");
+    assert!(text(&out).contains("1 cut to 4 KiB each"), "{}", text(&out));
+    let out = r.run(&["context", deep.to_str().unwrap()], "", "0");
+    assert!(text(&out).contains("cut"), "{}", text(&out));
+}
+
 #[test]
 fn a_failed_run_exits_1_and_never_quotes_the_question_or_the_agents_text() {
     let r = Rig::new();
@@ -2046,7 +2199,8 @@ fn the_card_says_the_output_was_not_sent_and_json_carries_the_same_facts() {
         v["context"],
         serde_json::json!({
             "folder": "/work/api", "folders": [], "command": true, "exit_code": 101,
-            "output": "not_sent", "output_bytes": 0, "can_attach": true
+            "output": "not_sent", "output_bytes": 0, "can_attach": true,
+            "io_md": {"files": 0, "bytes": 0, "cut": 0, "not_read": 0}
         })
     );
     // A question that does not ask why is not offered the attach.

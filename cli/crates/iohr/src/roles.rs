@@ -949,6 +949,9 @@ pub fn usage_lines(bin: &str) -> String {
          `.inorbit/memory/README.md`.\n\
          - Sync: the person sends `atlas/` to the project's Decisions space with `{bin} sync`. \
          `{bin} atlas sync --dry-run` lists what would be sent and sends nothing.\n\
+         - Context: `IO.md` (or `io.md`) files hold what the person wants Io to know about a folder \
+         and its project; `?` and `??` load them from the project root down to the current \
+         folder, the nearest last. `{bin} context` shows what would be loaded; keep them short.\n\
          - The built-in roles for this project are in `atlas/roles/`.\n"
     )
 }
