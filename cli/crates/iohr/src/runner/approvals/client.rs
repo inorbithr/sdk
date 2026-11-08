@@ -71,24 +71,91 @@ impl HttpService<'_> {
     }
 
     /// Decides an ask without a proof (`Decide`): `deny` or `question`. Approving and
-    /// cancelling need a device key's proof, which only the phone holds (ADR 0215).
+    /// cancelling need a device key's proof (ADR 0215); see [`Self::decide_signed`].
     pub(crate) async fn decide_approval(
         &self,
         approval_id: &str,
         decision: &str,
         note: &str,
     ) -> Result<Value, ServiceError> {
-        let body = json!({
+        self.decide_with(approval_id, decision, note, None).await
+    }
+
+    /// Decides an ask with a device key's `proof` (`{key_id, signed_at, nonce, signature}`):
+    /// the only way to approve (RFC 0113). The service checks the proof; a refusal is an
+    /// error carrying its reason.
+    pub(crate) async fn decide_signed(
+        &self,
+        approval_id: &str,
+        decision: &str,
+        note: &str,
+        proof: &Value,
+    ) -> Result<Value, ServiceError> {
+        self.decide_with(approval_id, decision, note, Some(proof))
+            .await
+    }
+
+    async fn decide_with(
+        &self,
+        approval_id: &str,
+        decision: &str,
+        note: &str,
+        proof: Option<&Value>,
+    ) -> Result<Value, ServiceError> {
+        let mut body = json!({
             "account_id": self.account,
             "decision": decision,
             "note": note,
         });
+        if let (Some(proof), Some(map)) = (proof, body.as_object_mut()) {
+            map.insert("proof".to_owned(), proof.clone());
+        }
         let v: Value = self
             .api
             .send_body(Method::Post, &id_path(approval_id, "/decision")?, &body)
             .await?
             .json()?;
         Ok(v.get("approval").cloned().unwrap_or(Value::Null))
+    }
+
+    /// Enrols a person's device key (`EnrollKey`); `body` is
+    /// `{public_key, platform, label, device_id, countersign?}`. Returns the key.
+    pub(crate) async fn enroll_key(&self, body: &Value) -> Result<Value, ServiceError> {
+        let v: Value = self
+            .api
+            .send_body(Method::Post, "/v1/approvals/keys", body)
+            .await?
+            .json()?;
+        Ok(v.get("key").cloned().unwrap_or(Value::Null))
+    }
+
+    /// The caller's device keys (`ListKeys`), without their public keys.
+    pub(crate) async fn list_keys(&self) -> Result<Vec<Value>, ServiceError> {
+        let v: Value = self.api.get("/v1/approvals/keys", &[]).await?;
+        Ok(v.get("keys")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Revokes a device key (`RevokeKey`).
+    pub(crate) async fn revoke_key(&self, key_id: &str) -> Result<(), ServiceError> {
+        if !key_id.starts_with("apk_")
+            || !key_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(ServiceError::Refused("a key id that is not one"));
+        }
+        self.api
+            .send(
+                Method::Delete,
+                &format!("/v1/approvals/keys/{key_id}"),
+                &[],
+                None,
+            )
+            .await?;
+        Ok(())
     }
 
     /// The account's auto-approve policy and the server's rules (`GetAutoApprovePolicy`): the
