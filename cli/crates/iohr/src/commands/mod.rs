@@ -50,6 +50,21 @@ use crate::cli::{
 use crate::error::Error;
 use crate::output::Out;
 
+/// Commands that call no API, so an environment with a placeholder address is no bar to
+/// them (`check_environment`): a tunnel reaches an environment over ssh, the permission
+/// commands answer on this machine, and `sign-binary` signs a file on this Mac.
+fn calls_no_api(command: Option<&Command>) -> bool {
+    matches!(
+        command,
+        Some(
+            Command::Tunnel(_)
+                | Command::Permissions(_)
+                | Command::PermissionServer { .. }
+                | Command::SignBinary { .. }
+        )
+    )
+}
+
 /// Runs the parsed command.
 ///
 /// # Errors
@@ -67,11 +82,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         return crate::permissions::server::run(socket)
             .map_err(|e| Error::Failed(format!("permission server: {}", e.kind())));
     }
-    // A tunnel reaches an environment over ssh and calls no API, so a placeholder address is no bar.
-    if !matches!(
-        cli.command,
-        Some(Command::Tunnel(_) | Command::Permissions(_) | Command::PermissionServer { .. })
-    ) {
+    if !calls_no_api(cli.command.as_ref()) {
         g.check_environment()?;
     }
     if g.sign_in.is_some()
@@ -224,4 +235,25 @@ pub(crate) fn str_of<'a>(v: &'a serde_json::Value, k: &str) -> &'a str {
     v.get(k)
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+
+    use super::calls_no_api;
+    use crate::cli::Cli;
+
+    /// `sign-binary` signs a file and calls no API, so a placeholder environment does not stop
+    /// it; a command that does call the API is still held to a real address.
+    #[test]
+    fn sign_binary_is_exempt_from_the_environment_check_like_its_siblings() {
+        let parse = |args: &[&str]| {
+            let mut v = vec!["iohr"];
+            v.extend_from_slice(args);
+            Cli::try_parse_from(v).unwrap().command
+        };
+        assert!(calls_no_api(parse(&["sign-binary", "/tmp/iohr"]).as_ref()));
+        assert!(!calls_no_api(parse(&["whoami"]).as_ref()));
+    }
 }

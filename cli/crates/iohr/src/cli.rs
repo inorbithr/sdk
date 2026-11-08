@@ -425,7 +425,8 @@ pub enum Command {
     ///
     /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
     /// certificate and the identifier `hr.inorbit.iohr`, the same signing `iohr upgrade`
-    /// does (`IOHR_SIGN_IDENTITY` names an identity; unset is `auto`), so the Keychain
+    /// does (`IOHR_SIGN_IDENTITY` names an identity; unset is `auto`; `-`, which
+    /// means "do not sign", is refused), so the Keychain
     /// trusts every build of it alike. Fails when it cannot sign: a preview that stays
     /// ad hoc is the problem this exists to remove.
     #[command(hide = true)]

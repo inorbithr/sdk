@@ -43,7 +43,10 @@ chmod 755 "$staged"
 "$built" sign-binary "$staged"
 
 # What the Keychain will see: the identifier and a team, not an ad-hoc hash.
-details=$(codesign -dvv "$staged" 2>&1)
+details=$(codesign -dvv "$staged" 2>&1) || {
+  echo "cli:preview-install: codesign cannot read the signature of the signed copy $staged: $details" >&2
+  exit 1
+}
 printf '%s\n' "$details" | grep -qx "Identifier=$identifier" || {
   echo "cli:preview-install: the signed copy's identifier is not $identifier" >&2
   exit 1
@@ -52,7 +55,10 @@ printf '%s\n' "$details" | grep -q '^Authority=' || {
   echo "cli:preview-install: the signed copy has no certificate (still ad hoc)" >&2
   exit 1
 }
-team=$(printf '%s\n' "$details" | sed -n 's/^TeamIdentifier=//p')
+team=$(printf '%s\n' "$details" | sed -n 's/^TeamIdentifier=//p') || {
+  echo "cli:preview-install: cannot read the team identifier from the signed copy" >&2
+  exit 1
+}
 { [ -n "$team" ] && [ "$team" != "not set" ]; } || {
   echo "cli:preview-install: the signed copy has no team identifier" >&2
   exit 1
@@ -60,9 +66,8 @@ team=$(printf '%s\n' "$details" | sed -n 's/^TeamIdentifier=//p')
 codesign --verify --strict "$staged"
 
 # Never cp over a running or installed binary (macOS kills the process that next runs it):
-# remove it, then put the new file in its place.
-rm -f "$dest"
-mv "$staged" "$dest"
+# rename the new file over it, which replaces the directory entry in one step.
+mv -f "$staged" "$dest"
 trap - EXIT
 
 codesign -dv "$dest" 2>&1 | grep -E '^(Identifier|TeamIdentifier)='

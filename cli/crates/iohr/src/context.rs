@@ -418,39 +418,7 @@ pub(crate) async fn quiet_session(global: &Global, env: &Env) -> Result<Session,
     session_in(global, env, &ctx, chosen.as_ref(), true).await
 }
 
-/// Why a session was refused, kept so the same refusal can be given again.
-#[derive(Debug, Clone)]
-enum Refusal {
-    NotSignedIn(String),
-    WouldAsk(String),
-    Usage(String),
-    Failed(String),
-}
-
-impl From<Error> for Refusal {
-    fn from(e: Error) -> Self {
-        let said = e.to_string();
-        match e {
-            Error::NotSignedIn(_) => Self::NotSignedIn(said),
-            Error::StoreWouldAsk(_) => Self::WouldAsk(said),
-            Error::Usage(_) => Self::Usage(said),
-            _ => Self::Failed(said),
-        }
-    }
-}
-
-impl From<Refusal> for Error {
-    fn from(r: Refusal) -> Self {
-        match r {
-            Refusal::NotSignedIn(m) => Self::NotSignedIn(m),
-            Refusal::WouldAsk(m) => Self::StoreWouldAsk(m),
-            Refusal::Usage(m) => Self::Usage(m),
-            Refusal::Failed(m) => Self::Failed(m),
-        }
-    }
-}
-
-type Slot = Arc<tokio::sync::OnceCell<Result<Arc<Session>, Refusal>>>;
+type Slot = Arc<tokio::sync::OnceCell<Arc<Session>>>;
 
 /// The sessions of this process, by what makes one: the config directory, the profile, the
 /// API address and the tokens in the environment (as a hash, never the token).
@@ -459,11 +427,12 @@ static SHARED: std::sync::Mutex<std::collections::BTreeMap<String, Slot>> =
 
 /// [`session`] for a run that asks for it more than once (`iohr project init` checks the
 /// sign-in, the space and the plan, one after the other): the first ask loads the
-/// credential, every later one in this process gets the same session, and a refusal is
-/// given again as it was, so the credential store is read once and, when it refuses, asked
-/// once. On a Mac, where each read can be a Keychain dialog, that is the difference
-/// between one prompt and six. Never for a process that outlives its sign-in (a runner,
-/// the panel): they call [`session`] and see a sign-out as it happens.
+/// credential and every later one in this process gets the same session, so the credential
+/// store is read once. On a Mac, where each read can be a Keychain dialog, that is the
+/// difference between one prompt and six. Only a session is kept, never a refusal: a
+/// refused ask (a Keychain dialog answered No, a sign-in made since) can succeed on the
+/// next one. Never for a process that outlives its sign-in (a runner, the panel): they
+/// call [`session`] and see a sign-out as it happens.
 ///
 /// # Errors
 ///
@@ -493,15 +462,13 @@ pub(crate) async fn shared_session(global: &Global, env: &Env) -> Result<Arc<Ses
         .entry(key)
         .or_default()
         .clone();
-    slot.get_or_init(|| async {
+    slot.get_or_try_init(|| async {
         session_for(global, env, &ctx, chosen.as_ref())
             .await
             .map(Arc::new)
-            .map_err(Refusal::from)
     })
     .await
-    .clone()
-    .map_err(Error::from)
+    .cloned()
 }
 
 /// The profile a run uses: `--profile` or `IOHR_PROFILE`; none when `IOHR_TOKEN` is set
@@ -696,6 +663,22 @@ mod tests {
     use crate::cli::Cli;
     use crate::error::Error;
 
+    /// Puts the profile `work`'s API token in the file store under `dir`.
+    fn sign_in(dir: &std::path::Path) {
+        let b64 = |v: serde_json::Value| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v.to_string())
+        };
+        let jwt = format!(
+            "{}.{}.sig",
+            b64(serde_json::json!({"alg": "none"})),
+            b64(serde_json::json!({"sub": "ak_x", "aud": ["iohr-api"], "org": "acc_1"}))
+        );
+        let key = EntryKey::new("work".parse().unwrap(), "acc_1").unwrap();
+        FileStore::new(dir.join("secrets"))
+            .set(&key, &Redacted::new(jwt))
+            .unwrap();
+    }
+
     /// A config directory with the profile `work` holding an API token in the file store,
     /// when `token` is true; the global flags that point at it.
     fn machine(token: bool) -> (tempfile::TempDir, crate::cli::Global) {
@@ -709,18 +692,7 @@ mod tests {
         config.default = Some(name.clone());
         config.save(dir.path()).unwrap();
         if token {
-            let b64 = |v: serde_json::Value| {
-                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v.to_string())
-            };
-            let jwt = format!(
-                "{}.{}.sig",
-                b64(serde_json::json!({"alg": "none"})),
-                b64(serde_json::json!({"sub": "ak_x", "aud": ["iohr-api"], "org": "acc_1"}))
-            );
-            let key = EntryKey::new(name, "acc_1").unwrap();
-            FileStore::new(dir.path().join("secrets"))
-                .set(&key, &Redacted::new(jwt))
-                .unwrap();
+            sign_in(dir.path());
         }
         let cli = Cli::try_parse_from([
             "iohr",
@@ -750,16 +722,23 @@ mod tests {
         assert_eq!(opened() - before, 1, "the store was opened again");
     }
 
-    /// A refusal is remembered too: a denied Keychain read is not asked again.
+    /// A refusal is not remembered: the ask that failed (no sign-in yet) does not decide the
+    /// next one, which finds the credential once it is there.
     #[tokio::test]
-    async fn a_refused_session_is_remembered_and_keeps_its_kind() {
-        let (_dir, g) = machine(false);
+    async fn a_refused_session_is_not_cached_so_a_later_ask_can_succeed() {
+        let (dir, g) = machine(false);
         let env = Env::default();
         let before = opened();
-        for _ in 0..3 {
-            let e = shared_session(&g, &env).await.err().unwrap();
-            assert!(matches!(e, Error::NotSignedIn(_)), "{e:?}");
-        }
-        assert_eq!(opened() - before, 1, "the store was opened again");
+        let e = shared_session(&g, &env).await.err().unwrap();
+        assert!(matches!(e, Error::NotSignedIn(_)), "{e:?}");
+        // The person signs in between the two asks.
+        sign_in(dir.path());
+        let s = shared_session(&g, &env).await.unwrap();
+        assert_eq!(s.label, "work");
+        assert_eq!(
+            opened() - before,
+            2,
+            "the second ask must read the store again"
+        );
     }
 }
