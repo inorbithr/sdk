@@ -87,8 +87,8 @@ impl Line {
 /// The crawl is then run again without them, at that agent's own pace.
 pub(super) fn is_old_agent(code: u8, stderr: &str) -> bool {
     code == 2
-        && stderr.contains("unexpected argument")
-        && (stderr.contains("--rate") || stderr.contains("--progress"))
+        && (stderr.contains("unexpected argument '--rate'")
+            || stderr.contains("unexpected argument '--progress'"))
 }
 
 #[cfg(test)]
@@ -165,6 +165,15 @@ mod tests {
         ));
         // Another usage error, or another failure, is not.
         assert!(!is_old_agent(2, "error: unexpected argument '--zzz' found"));
+        // The flag has to be the argument clap refused, not a word elsewhere in the text.
+        assert!(!is_old_agent(
+            2,
+            "error: unexpected argument '--zzz' found\n  tip: a similar argument exists: '--rate'"
+        ));
+        assert!(!is_old_agent(
+            2,
+            "error: the value '--progress' is not a valid unexpected argument name"
+        ));
         assert!(!is_old_agent(1, clap));
         assert!(!is_old_agent(2, ""));
     }

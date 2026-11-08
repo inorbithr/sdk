@@ -514,7 +514,8 @@ you gave only, robots.txt honoured, at most `--crawl-pages` pages (default 200) 
 a page, and that nothing is sent to InOrbit. `--dry-run` says the same and reads nothing.
 
 The pace is `--crawl-rate N` requests a second to one host (default 10, 1 to 50; the variable
-`IOHR_CRAWL_RATE` is the same, the flag wins), and a slower `Crawl-delay` in robots.txt wins
+`IOHR_CRAWL_RATE` is the same, the flag wins; a value outside 1 to 50 is refused only when a
+crawl would run, so `--no-crawl` never reads it), and a slower `Crawl-delay` in robots.txt wins
 over it. The consent text states the rate. At a terminal the crawl shows a spinner with a live
 count (pages read, pages waiting) and, as soon as the crawler knows how much there is (a
 sitemap says so), a bar: pages done of the total, and how many the page limit still allows.
