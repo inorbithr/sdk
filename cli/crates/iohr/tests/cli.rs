@@ -2808,7 +2808,7 @@ fn rfc_doc(id: &str, number: i32, part: i32, version: i32, status: &str) -> serd
         "document_id": id, "space_id": SPACE, "kind": "rfc", "number": number,
         "slug": "rfcs-everywhere", "title": "RFCs everywhere", "status": status,
         "public": false, "summary": "", "current_version": version, "superseded_by": "",
-        "path": format!("docs/rfcs/{display}-rfcs-everywhere.md"), "created_by": "ops:nevio",
+        "path": format!("docs/rfcs/{display}-rfcs-everywhere.md"), "created_by": "ops:ada",
         "created_at": "2026-10-06T00:00:00Z", "updated_at": "2026-10-07T00:00:00Z",
         "parent_id": "", "child_index": part, "display_number": display, "children": 0,
         "headline": "", "headline_note": "", "supersedes_id": "", "measures_id": "",
@@ -2846,7 +2846,7 @@ async fn mount_decisions(server: &MockServer) {
         .and(path(&one))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "document": rfc_doc(RFC_ID, 65, 0, 4, "open"), "text": "---\ntitle: RFCs everywhere\n---\n\nBody.\n",
-            "version": 4, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-07T00:00:00Z",
+            "version": 4, "message": "m", "author": "ops:ada", "saved_at": "2026-10-07T00:00:00Z",
             "findings": [], "children": [], "mentions": [], "mentioned_in": [],
             "successors": [], "measured_by": [], "context": [], "context_for": [],
             "diagrams": [], "implements": [], "implemented_by": []
@@ -3285,7 +3285,7 @@ async fn decisions_kinds_name_prds_and_adrs() {
         .and(path(format!("{docs}/ldoc_adr3")))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "document": adr_shown, "text": "---\ntitle: Stale is not false\n---\n\nBody.\n",
-            "version": 2, "message": "m", "author": "ops:nevio", "saved_at": "2026-10-08T00:00:00Z",
+            "version": 2, "message": "m", "author": "ops:ada", "saved_at": "2026-10-08T00:00:00Z",
             "findings": [], "children": [], "mentions": [], "mentioned_in": [],
             "successors": [], "measured_by": [], "context": [], "context_for": [],
             "diagrams": [], "implements": [], "implemented_by": []

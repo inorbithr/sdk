@@ -81,7 +81,7 @@ async fn me(server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/v1/accounts/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "account": {"id": SELF, "slug": "nevio", "name": "Nevio", "plan": "free"},
+            "account": {"id": SELF, "slug": "ada-example", "name": "Ada Example", "plan": "free"},
             "teams": [{"id": TEAM, "slug": "acme", "name": "Acme", "plan": "team"}]
         })))
         .mount(server)

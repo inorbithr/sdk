@@ -1,4 +1,4 @@
-Copied from inorbithr/core PR #1429 (head 2372641bd191425fc93d96327cc8b713e48664a6), 2026-10-29: testdata/host-action/vectors/ -> vectors/, schemas/runner/host-action/ -> schema/. Schema, examples and invalid files copied again 2026-10-31 from core branch feat/host-action-agent-install-checks (head d1591d402ff589fbfac6d32914056408880fb0ce, on main f5aeb2d080 / #1431): agent.install-checks, and the roll.task example with services. The checks/ folder of that schema directory (the coordinator's precondition and post-check documents, #1420) is not copied: the runner never reads it. Schema, examples and invalid files copied again 2026-11-02 from core branch feat/host-actions-disk-prune-runner-scale (head af4dca248ee93a8b9b3de967b83574d6a5cd2e4c, PR #1562): disk.prune and helm.runner-scale. Schema, examples and invalid files copied again 2026-11-05 from core branch feat/host-action-labs-reattribute (head 47c265f1ec7cd285d3e08ccec18bbc4a1080186e): labs.reattribute-document. Never edit here; copy again when core changes them. The verifier these vectors hold to is crates/common/src/approval_messages/pinned.rs at that head.
+Copied from inorbithr/core PR #1429 (head 2372641bd191425fc93d96327cc8b713e48664a6), 2026-10-29: testdata/host-action/vectors/ -> vectors/, schemas/runner/host-action/ -> schema/. Schema, examples and invalid files copied again 2026-10-31 from core branch feat/host-action-agent-install-checks (head d1591d402ff589fbfac6d32914056408880fb0ce, on main f5aeb2d080 / #1431): agent.install-checks, and the roll.task example with services. The checks/ folder of that schema directory (the coordinator's precondition and post-check documents, #1420) is not copied: the runner never reads it. Schema, examples and invalid files copied again 2026-11-02 from core branch feat/host-actions-disk-prune-runner-scale (head af4dca248ee93a8b9b3de967b83574d6a5cd2e4c, PR #1562): disk.prune and helm.runner-scale. Schema, examples and invalid files copied again 2026-11-05 from core branch feat/host-action-labs-reattribute (head 47c265f1ec7cd285d3e08ccec18bbc4a1080186e): labs.reattribute-document. Never edit here; copy again when core changes them. The labs.reattribute-document files here carry synthetic document and subject ids in place of the ones copied (2026-11-08); the hashes below are of the files as they are now. The verifier these vectors hold to is crates/common/src/approval_messages/pinned.rs at that head.
 
 SHA-256 of each file as copied:
 1786064842bc56ec420658c87e39e0a0120f46611073b886019801f7b2950a9b  schema/examples/cancel-run.json
@@ -7,7 +7,7 @@ e9f17a9853897e4a92b018f92a430fee14c239b6f7926bd39a53c15e3e363160  schema/example
 a9d842cebe5ac44d6474fbc8cecf19e65b18044247fdb217fe0a0eac58907e75  schema/examples/disk-prune-k3d.json
 b91c4681e8a4bc6012c4da1e6f386d13114cb2ea1a2bb923a3595406293c4858  schema/examples/install-checks-service.json
 76026e7d178a246965b41ba75d60ae702db006b4ad03092550703f9d0a018c20  schema/examples/install-checks.json
-567ec877508a36f8ef1912105523f601b3a166b511c548286c814b843b6341f2  schema/examples/labs-reattribute-document.json
+3abe281051ad81b2854503854cc48a666d4176846435463f6059baaa717fcf32  schema/examples/labs-reattribute-document.json
 305757ad3a91a93e068892b21b01453795cbeded2b235a5f53cda2f794d0059d  schema/examples/minimal.json
 8f0388a9aa86b2d81dfbf18d3365e755a09949e2c5451e5b384eea8b28d4cff2  schema/examples/one-namespace.json
 bf8ab4599f625d6dae32e51617d8ec124107fffd870cb374caf9d686e69b539b  schema/examples/preview-take.json
@@ -40,11 +40,11 @@ f57986078d8a947f278405c834c11afe9007a978ceed7e86fb5e8fc850b496c3  schema/invalid
 2ad683dd0e92d44636ebdb161f62af8baa92946642d650c79e16d467bfd04430  schema/invalid/install-checks-shell-service.json
 8963a2421a30aeed189fd18f38bf2cb9601dc648804d38fa4ce5bcfad263383a  schema/invalid/install-checks-short-commit.json
 6451dc91fd28e556dd6d1cd6c1e870d3a6f992a9d549ed1c84bcda5f48b9efec  schema/invalid/install-checks-uppercase-commit.json
-efd6f103a4f638bf6a4dcdbd33d3812d4a6957e87e9ab4744c427f7ecc12ca94  schema/invalid/labs-reattribute-bad-document.json
-3936a61ab15cee3f7fbd990502cdefa690ce199b593d65602ff050a2c68641d7  schema/invalid/labs-reattribute-bad-evidence.json
-3cb120ea4993a52dd2f32996e0d1d9faa23e8b4d430bfae47f12b0647f5f2d45  schema/invalid/labs-reattribute-extra-param.json
-7842db1e7f04d3900da7e4c8d68dd86d7c7eb509e7b4ffe4fcf26af14e9918b2  schema/invalid/labs-reattribute-missing-count.json
-8368a050d304c2a485aec5c4a9ff0fecf5bf9df9a5a6679083a8246992eb4865  schema/invalid/labs-reattribute-string-count.json
+1e5942dd6c74bdb2efe66c5f9284f327f6f2e058c441a56e7dc0dec1d07ff546  schema/invalid/labs-reattribute-bad-document.json
+a519319221e72b4e0a5a85775ff63686dd92549d57dd452b29fcf68da48fc253  schema/invalid/labs-reattribute-bad-evidence.json
+6ff8d9118f86a9d0c83492f08f55f05d7deabf0ad3421cc086e0422433c21f12  schema/invalid/labs-reattribute-extra-param.json
+c83cdd2d3af306b3f52ae49c26d00c5fe990be3054f9a6f27042cab945e50b21  schema/invalid/labs-reattribute-missing-count.json
+5002f0013464d20e95e023fcd37e4928a231e9e4c661011947352be944f0f06a  schema/invalid/labs-reattribute-string-count.json
 61978f035de3c60dc9c173d957bac75712b1b43e82aaf1286f4e887737c4199b  schema/invalid/missing-effect.json
 139313800d808f8d3bc657a2355ec587a1bb4e83685cef0f7aa885d4b80fc87d  schema/invalid/multi-line-effect.json
 13c30b8fa2bc58728212ec9c84fec1876acf847e08e06b94f277985cf0fed377  schema/invalid/preview-take-dot-dot.json
@@ -79,7 +79,7 @@ d37abf7f8074258a4511bfc183a2cf3eb17a5d63a7a2b721615b643859b01a69  schema/invalid
 021f8a038cc53d802a39abc9a328754ff0867f80ed3e2c855c4638e16fa36aeb  schema/invalid/user-restart-bad-unit.json
 d946b0da1e225a270ab825764fa63289be423b7ed5c8bc27a0559aa4630c76d9  schema/invalid/user-restart-shell-unit.json
 5aaa24df869dc07cbe13bb15e5180fe093b780450d579f9bc38de82b71cf34ea  schema/invalid/user-restart-unknown-param.json
-53a4e5259cfffc128cd23a92ac2c288f5a894629e2141a9028a5cebccd7314ff  schema/v0.json
+03b1bfa4c61907ac9c1300bd1ac0d7e2d3c962db0f2d197c9becee3bb91ccb6a  schema/v0.json
 86522d2d7ec5ceedae8d2d7e95785773e2085b62de03d0915da931f1db060057  vectors/bad_signature.json
 9777993372cb92842acc3a34cfc9c5940955479bde1bc7fb2abcdd3ff511a3b1  vectors/expired.json
 1a61e24b2c46c38f672cc0e2cd63800a47d6b29793b6b98218f30fb0150eebe0  vectors/hash_mismatch.json
