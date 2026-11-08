@@ -2,6 +2,7 @@
 //! `no_proxy` matcher, the same in every runtime, pinned by
 //! `conformance/vectors/no-proxy/`.
 
+use std::fmt;
 use std::net::IpAddr;
 
 use url::Url;
@@ -22,12 +23,29 @@ enum Entry {
 }
 
 /// The proxy, whether it was set explicitly, and the hosts that skip it.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct ProxyRules {
     proxy: Option<Url>,
     /// Code, `INORBIT_PROXY` or the file: applies to loopback too.
     explicit: bool,
     entries: Vec<Entry>,
+}
+
+/// The proxy with its user-info redacted (it may hold a password), and the entries.
+impl fmt::Debug for ProxyRules {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProxyRules")
+            .field(
+                "proxy",
+                &self
+                    .proxy
+                    .as_ref()
+                    .map(|u| super::resolve::redact_userinfo(u.as_str())),
+            )
+            .field("explicit", &self.explicit)
+            .field("entries", &self.entries)
+            .finish()
+    }
 }
 
 impl ProxyRules {
@@ -189,5 +207,14 @@ mod tests {
         assert!(!via(&["10.0.0.0/8"], "https://10.9.9.9/"));
         assert!(via(&["example.com:8443"], "https://example.com/"));
         assert!(!via(&[], "https://localhost:1/"));
+    }
+
+    #[test]
+    fn the_rules_never_print_the_proxy_password() {
+        let rules = ProxyRules::new(Some("http://user:pr0xy-pass@proxy.example:3128"), true, &[]).unwrap();
+        for shown in [format!("{rules:?}"), format!("{rules:#?}")] {
+            assert!(!shown.contains("pr0xy-pass"), "{shown}");
+            assert!(shown.contains("<redacted>@proxy.example"), "{shown}");
+        }
     }
 }
