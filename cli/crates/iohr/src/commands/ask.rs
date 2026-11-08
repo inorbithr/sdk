@@ -15,6 +15,7 @@ use crate::askback;
 use crate::attach;
 use crate::card::{self, Body, Card, Look as CardLook, Status};
 use crate::cli::{AskArgs, Global, HeadlessArgs};
+use crate::commands::ask_roles;
 use crate::commands::asks;
 use crate::context::Ctx;
 use crate::error::Error;
@@ -133,7 +134,28 @@ async fn role_of(g: &Global, env: &Env, args: &AskArgs) -> Result<Option<runtime
     .map(Some)
 }
 
-pub(crate) async fn run(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
+/// `iohr ask`: Io answers, and where a session host runs, the Roles answer beside it
+/// ([`super::ask_roles`], RFC 0213). The Roles take the ask first, so they work while Io does;
+/// Io's card is the one it always was, and each Role's card follows as its answer lands. When
+/// the Roles answer, Io's own run is not in a Role (`--role` chose which of them answer).
+pub(crate) async fn run(g: &Global, env: &Env, mut args: AskArgs, out: Out) -> Result<(), Error> {
+    let plan = ask_roles::plan(g, &args, out.json);
+    let routed = match plan {
+        Some(p) => ask_roles::start(p).await,
+        None => None,
+    };
+    if routed.is_some() {
+        args.role = None;
+        args.job = None;
+    }
+    let result = run_io(g, env, args, out).await;
+    if let (Some(routed), Ok(())) = (routed, &result) {
+        routed.show().await;
+    }
+    result
+}
+
+async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
         return menu(g, &args);
     }

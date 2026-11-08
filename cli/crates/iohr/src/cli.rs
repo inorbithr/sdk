@@ -508,13 +508,14 @@ pub enum Command {
     /// nothing on stdout; Ctrl-C, SIGTERM or the terminal closing leaves it. The host stops
     /// when the last session has left, or on `iohr stop`.
     ///
-    /// Slice S1 of RFC 0213: no tasks are accepted from the server yet, and a task a Role
-    /// claims fails with "not built". The host, its Roles, the durable queue and the session
-    /// link work; `iohr ask --work` and the real handler come next.
+    /// RFC 0213: every `?` and `??` ask in the project's folder is queued for the hosted
+    /// Roles (`--role` narrows them), which answer it at the same time and show each answer
+    /// as it lands. A task still waiting when the host stops is answered by the next host.
     Session(SessionArgs),
     /// Stop this project's session host.
     ///
-    /// Tells the project's session host to stop. Each Role finishes the task it holds, then
+    /// Tells the project's session host to stop. An answer a Role is still writing is cut
+    /// short and goes back to the queue (the next host gives it again), then
     /// the host ends; `--wait` (15 seconds by default) waits until it has, and says
     /// `stopping` when it has not yet. A task cut short by a crash instead is taken again by
     /// the next host as soon as it starts.
