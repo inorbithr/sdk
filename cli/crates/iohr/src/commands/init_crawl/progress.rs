@@ -91,6 +91,13 @@ pub(super) fn is_old_agent(code: u8, stderr: &str) -> bool {
         && (stderr.contains("--rate") || stderr.contains("--progress"))
 }
 
+/// Whether an agent that exited with `code` and said `stderr` knows `--rate` but not
+/// `--keep-pages`: the same usage error, naming that flag. The crawl is then run again without
+/// it, and iohr requests the page text itself, once.
+pub(super) fn is_no_keep(code: u8, stderr: &str) -> bool {
+    code == 2 && stderr.contains("unexpected argument") && stderr.contains("--keep-pages")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +174,14 @@ mod tests {
         assert!(!is_old_agent(2, "error: unexpected argument '--zzz' found"));
         assert!(!is_old_agent(1, clap));
         assert!(!is_old_agent(2, ""));
+    }
+
+    #[test]
+    fn an_agent_that_refuses_only_keep_pages_is_not_an_old_agent() {
+        let clap = "error: unexpected argument '--keep-pages' found";
+        assert!(is_no_keep(2, clap));
+        assert!(!is_old_agent(2, clap));
+        assert!(!is_no_keep(1, clap));
+        assert!(!is_no_keep(2, "error: unexpected argument '--rate' found"));
     }
 }

@@ -54,17 +54,6 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AtlasCommand, out: Out) -> R
     }
 }
 
-/// The project that holds the knowledge base: the folder `ask` reads it from.
-fn kb_root(dir: Option<PathBuf>) -> Result<PathBuf, Error> {
-    let from = start(dir)?;
-    crate::memory::find_root(&from).ok_or_else(|| {
-        Error::Usage(format!(
-            "no project folder in {} or above it; run `iohr project init --crawl` in one",
-            from.display()
-        ))
-    })
-}
-
 fn kb_site(site: Option<&str>) -> Option<String> {
     site.map(crate::kb::site_name)
 }
@@ -77,7 +66,7 @@ fn kb_search(
     dir: Option<PathBuf>,
     out: Out,
 ) -> Result<(), Error> {
-    let root = kb_root(dir)?;
+    let root = root_of(dir)?;
     let site = kb_site(site);
     let hits = crate::kb::search(&root, query, site.as_deref(), limit.clamp(1, 50))
         .map_err(Error::Failed)?;
@@ -131,7 +120,7 @@ fn kb_facts(
     dir: Option<PathBuf>,
     out: Out,
 ) -> Result<(), Error> {
-    let root = kb_root(dir)?;
+    let root = root_of(dir)?;
     let site = kb_site(site);
     let rows = crate::kb::facts(&root, site.as_deref(), predicate, grep, limit.clamp(1, 500))
         .map_err(Error::Failed)?;
@@ -177,7 +166,7 @@ fn kb_index(
     dir: Option<PathBuf>,
     out: Out,
 ) -> Result<(), Error> {
-    let root = kb_root(dir)?;
+    let root = root_of(dir)?;
     let site = kb_site(site);
     if pages {
         let rows = crate::kb::pages(&root, site.as_deref(), limit.clamp(1, 1000))
