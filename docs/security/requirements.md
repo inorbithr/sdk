@@ -149,14 +149,20 @@ file or stdin; it stays in wiped memory until the one request that carries it, a
 never stored, printed or accepted as an argument. `iohr auth token` prints a profile's access token on
 standard output, for a program that runs it (the SDKs' `cli` source); the refresh token
 never leaves the credential store, and the command writes nothing but the store's own
-rotation.
+rotation. A path that must never show a prompt (the shell prompt's count, the terminal
+panel) calls the credential store with a time limit: 1.5 s to read, 10 s to write, at
+most four such calls in one process at a time. While four wait, the next call fails at
+once and starts no thread, so a store that holds its lock never piles up waiting calls.
 - Why: a developer machine holds credentials for several accounts; shell history, the
-  process list and dotfile backups are where tokens leak.
+  process list and dotfile backups are where tokens leak. A long-running process that
+  left one thread per timed-out call kept the store locked for every other program.
 - Verify: unit tests for entry keys and file modes; a test that refuses a token in
   `argv`; a test that runs every command with `--verbose` and finds no token or
   connection secret in the output; a test that a connection secret travels only in the
   body of the call that makes the connection; a test that `iohr auth token` prints the
-  access token and never the refresh token; the credential store tested on each operating system in CI.
+  access token and never the refresh token; tests that a quiet store call stuck in the
+  store makes the next call fail at once without a thread, and that calls work again
+  once it returns; the credential store tested on each operating system in CI.
 - Refs: CRA I.2(e); clig.dev "Arguments and flags".
 
 **SR-29. No secrets in the config file.** The SDK refuses a key secret, a token, a
