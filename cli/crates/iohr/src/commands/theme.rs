@@ -373,7 +373,6 @@ fn list(cat: &Catalogue, dir: &Path, out: Out) {
             state.prompt.word()
         ));
     }
-    Ok(())
 }
 
 fn show(cat: &Catalogue, dir: &Path, name: &str, out: Out) -> Result<(), Error> {
