@@ -62,13 +62,18 @@ fn fake_claude(dir: &Path, auth: &str) {
 }
 
 fn iohr(server: &MockServer, dir: &Path, args: &[&str]) -> Command {
+    iohr_as(server, dir, "p", args)
+}
+
+/// [`iohr`] as another profile.
+fn iohr_as(server: &MockServer, dir: &Path, profile: &str, args: &[&str]) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_iohr"));
     c.args(args)
         .env_clear()
         .env("IOHR_NO_BROWSER", "1")
         .env("IOHR_BASE_URL", server.uri())
         .env("IOHR_CONFIG_DIR", dir.join("config"))
-        .env("IOHR_PROFILE", "p")
+        .env("IOHR_PROFILE", profile)
         .env("HOME", dir)
         .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
         // What must never reach claude or the coordinator.
@@ -86,6 +91,11 @@ fn iohr(server: &MockServer, dir: &Path, args: &[&str]) -> Command {
 /// Signs `iohr` in as profile `p` with `tok`, the token kept in an owner-only file (the
 /// test machine has no Keychain to use; the runner's key goes to the same store).
 async fn login(server: &MockServer, dir: &Path, tok: &str) {
+    login_as(server, dir, tok, "p").await;
+}
+
+/// [`login`] as another profile.
+async fn login_as(server: &MockServer, dir: &Path, tok: &str, profile: &str) {
     Mock::given(method("GET"))
         .and(path("/v1/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -93,15 +103,16 @@ async fn login(server: &MockServer, dir: &Path, tok: &str) {
         })))
         .mount(server)
         .await;
-    let mut c = iohr(
+    let mut c = iohr_as(
         server,
         dir,
+        profile,
         &[
             "login",
             "--with-token",
             "--insecure-storage",
             "--profile",
-            "p",
+            profile,
         ],
     );
     c.stdin(Stdio::piped())
@@ -716,6 +727,23 @@ async fn registered_and_idle(dir: &Path) -> MockServer {
         )
         .mount(&server)
         .await;
+    server
+}
+
+/// [`registered_and_idle`], and the session host's own runner: it signs in as the `session`
+/// profile with a key of its own, never the profile the live runner uses.
+async fn host_registered(dir: &Path) -> MockServer {
+    let server = registered_and_idle(dir).await;
+    let first = MockServer::start().await;
+    login_as(&first, dir, &token(), "session").await;
+    mount_register(&first).await;
+    let o = run(&mut iohr_as(
+        &first,
+        dir,
+        "session",
+        &["runner", "register", "--name", "mac-session"],
+    ));
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
     server
 }
 
@@ -1953,10 +1981,47 @@ async fn wait_until(what: &str, mut ok: impl FnMut() -> bool) {
     panic!("gave up waiting for {what}");
 }
 
+/// The live runner's key is the Mac's only one: a host that borrowed it would overwrite the
+/// live runner's heartbeat row and take its leases. With only that profile signed in, the
+/// host stops at once and sends nothing.
+#[tokio::test]
+async fn a_session_host_never_borrows_the_live_runners_profile_or_key() {
+    let dir = tempfile::tempdir().unwrap();
+    // Profile `p` is registered and its runner is listed: a borrowing host would beat.
+    let server = registered_and_idle(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let o = run(&mut session_cmd(&server, dir.path(), &["session", p]));
+    let said = text(&o);
+    assert_ne!(o.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("session host has no profile of its own")
+            && said.contains("login --profile session")
+            && said.contains("--profile session runner register --name mac-session"),
+        "{said}"
+    );
+    // Signed in as `session` but with no key of its own: the one command that makes it.
+    let first = MockServer::start().await;
+    login_as(&first, dir.path(), &token(), "session").await;
+    let o = run(&mut session_cmd(&server, dir.path(), &["session", p]));
+    let said = text(&o);
+    assert_ne!(o.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("session host has no runner key of its own")
+            && said.contains("--profile session runner register --name mac-session"),
+        "{said}"
+    );
+    assert!(
+        bodies(&server, BEAT).await.is_empty(),
+        "the host beat as the live runner"
+    );
+}
+
 #[tokio::test]
 async fn session_starts_one_host_that_beats_and_stop_ends_it() {
     let dir = tempfile::tempdir().unwrap();
-    let server = registered_and_idle(dir.path()).await;
+    let server = host_registered(dir.path()).await;
     let project = dir.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
     let p = project.to_str().unwrap();
@@ -2028,7 +2093,7 @@ async fn session_starts_one_host_that_beats_and_stop_ends_it() {
 #[tokio::test]
 async fn a_killed_shell_takes_the_host_with_it() {
     let dir = tempfile::tempdir().unwrap();
-    let server = registered_and_idle(dir.path()).await;
+    let server = host_registered(dir.path()).await;
     let project = dir.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
     let p = project.to_str().unwrap();
@@ -2056,7 +2121,7 @@ async fn a_killed_shell_takes_the_host_with_it() {
 #[tokio::test]
 async fn sigterm_ends_a_host_run_by_hand() {
     let dir = tempfile::tempdir().unwrap();
-    let server = registered_and_idle(dir.path()).await;
+    let server = host_registered(dir.path()).await;
     let project = dir.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
     let p = project.to_str().unwrap();
@@ -2096,7 +2161,7 @@ async fn sigterm_ends_a_host_run_by_hand() {
 #[tokio::test]
 async fn bare_iohr_on_a_terminal_enters_the_session_and_stop_closes_the_panel() {
     let dir = tempfile::tempdir().unwrap();
-    let server = registered_and_idle(dir.path()).await;
+    let server = host_registered(dir.path()).await;
     let project = dir.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
     let p = project.to_str().unwrap().to_owned();
@@ -2175,5 +2240,37 @@ async fn bare_iohr_on_a_terminal_under_no_color_prints_the_usage_report() {
         s.screen.screen().contents().contains("Usage: iohr"),
         "{}",
         s.screen.screen().contents()
+    );
+}
+
+/// A shell killed after it started the host and before it joined it leaves nobody to join:
+/// the host ends at once, not when its 30 seconds for a first join are up.
+#[tokio::test]
+async fn a_shell_killed_before_it_joined_takes_the_host_with_it_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let mut shell = session_cmd(&server, dir.path(), &["session", p])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    // The moment the socket exists: the shell polls every 50 ms, so it has not joined yet.
+    while session_socket(&dir.path().join("data")).is_none() {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+    let killed = std::time::Instant::now();
+    wait_until("the host to end", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    assert!(
+        killed.elapsed() < std::time::Duration::from_secs(10),
+        "the host took {:?} to end",
+        killed.elapsed()
     );
 }
