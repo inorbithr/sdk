@@ -1,0 +1,22 @@
+# gitleaks: the default rules, and the made-up values our tests and docs use on purpose.
+# `mise run repo:secrets` scans every commit; CI runs it on every push
+# and pull request (.github/workflows/security.yml). A real secret is never allow-listed:
+# rotate it, then rewrite the test to use a value like the ones below.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fixed test inputs: redaction and lint tests feed these, and none was ever a key"
+# Matched against the value gitleaks reports, so a real key next to them is still found.
+regexes = [
+  '''^sk-live-0123456789$''',   # attach.rs and tests/shell_ask.rs: redaction input
+  '''^AKIAABCDEFGHIJKLMNOP$''', # ext/lint.rs: the lint's own example of an AWS key id
+  '''^dGhlIHNhbXBsZSBub25jZQ==$''', # conformance: the RFC 6455 sample Sec-WebSocket-Key
+]
+
+[[allowlists]]
+description = "docs/config.md: the sign-in table names the API key audience, not a key"
+condition = "AND"
+paths = ['''^docs/config\.md$''']
+regexes = ['''^audience=iohr-api$''']
