@@ -114,9 +114,7 @@ impl TryFrom<RawParam> for ParamType {
                 values: values.clone(),
             }),
             ("enum", ..) => Err("an `enum` parameter takes `values`".to_owned()),
-            _ => Err(
-                "a parameter type is word, dns-label, rev, repo, integer or enum".to_owned(),
-            ),
+            _ => Err("a parameter type is word, dns-label, rev, repo, integer or enum".to_owned()),
         }
     }
 }
@@ -436,7 +434,10 @@ mod tests {
             json!({"type": "integer", "min": 1}),
             json!({"type": "enum", "values": ["a"], "max": 2}),
         ] {
-            assert!(serde_json::from_value::<ParamType>(bad.clone()).is_err(), "{bad}");
+            assert!(
+                serde_json::from_value::<ParamType>(bad.clone()).is_err(),
+                "{bad}"
+            );
         }
         let int = json!({"type": "integer", "min": 1, "max": 9});
         assert_eq!(serde_json::to_value(t(int.clone())).unwrap(), int);
