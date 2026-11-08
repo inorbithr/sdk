@@ -25,6 +25,7 @@ use crate::runner::drain::Drain;
 use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
 use crate::runner::host_action::HostRunner;
+use crate::runner::hygiene;
 use crate::runner::provider::{self, AuthState};
 use crate::runner::run_loop::{self, GateCheck, LoopConfig, run_loop};
 use crate::runner::self_upgrade::{
@@ -58,6 +59,22 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
         let e = effective(&ctx.config, profile.as_ref(), &flags)?;
         show_settings(&e, out).await;
         return Ok(());
+    }
+    // Housekeeping on this machine: no sign-in needed (`uninstall --purge` signs in
+    // itself, to name the account whose keys it removes).
+    if let RunnerCommand::Prune { dry_run } = cmd {
+        let ctx = Ctx::load(g)?;
+        let profile = run_profile(g, env, &ctx);
+        let flags = Flags {
+            sign_identity: env.sign_identity.clone(),
+            ..Flags::default()
+        };
+        let e = effective(&ctx.config, profile.as_ref(), &flags)?;
+        return super::runner_ops::prune(&ctx, &e, dry_run, out).await;
+    }
+    if let RunnerCommand::Service(svc) = cmd {
+        let ctx = Ctx::load(g)?;
+        return super::runner_ops::service(g, env, &ctx, svc, out).await;
     }
     let ctx = Ctx::load(g)?;
     let s = match g.sign_in {
@@ -338,6 +355,15 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 // Job leases get their own checkout, `checkouts/<job_id>` on `job/<id>`,
                 // and a replied turn's pull request, through the host's git and `gh`.
                 workspaces: Some(Arc::new(Workspaces::for_runner(exec.workdir.clone()))),
+                allow_host_git: set.allow_host_git_credentials.value,
+                // While it holds no lease, what nothing used for the days kept goes.
+                sweep: Some(hygiene::Sweep {
+                    state: ctx.dir.join("runner"),
+                    retention: hygiene::Retention::of(
+                        set.workspace_keep_days.value,
+                        set.workspace_max_gb.as_ref().map(|c| c.value),
+                    ),
+                }),
                 ..LoopConfig::default()
             };
             // Approved pinned runs (RFC 0153), beside the turns, when this machine is set
@@ -639,7 +665,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             }
             Ok(())
         }
-        RunnerCommand::Config(RunnerConfigCommand::Show { .. }) => Ok(()),
+        RunnerCommand::Config(RunnerConfigCommand::Show { .. })
+        | RunnerCommand::Prune { .. }
+        | RunnerCommand::Service(_) => Ok(()),
     }
 }
 
@@ -791,6 +819,7 @@ fn reload_on_hangup(
 }
 
 /// `iohr runner config show`: each value and where it came from.
+#[allow(clippy::too_many_lines, reason = "one row per setting")]
 async fn show_settings(e: &Effective, out: Out) {
     let floor = BuildFloor::default();
     let free = settings::free_bytes(&floor.volume).await;
@@ -816,6 +845,10 @@ async fn show_settings(e: &Effective, out: Out) {
         || ("not set".to_owned(), "default".to_owned()),
         |u| (u.value.join(", "), u.source.to_string()),
     );
+    let (max_gb, max_gb_from) = e.workspace_max_gb.as_ref().map_or_else(
+        || ("not set".to_owned(), "default".to_owned()),
+        |c| (format!("{} GB", c.value), c.source.to_string()),
+    );
     let volume = floor.volume.display().to_string();
     let free_text = free.map_or_else(|| "unknown".to_owned(), |f| format!("{} GB", gb(f)));
     if out.json {
@@ -833,6 +866,9 @@ async fn show_settings(e: &Effective, out: Out) {
             "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
             "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
+            "allow_host_git_credentials": { "value": e.allow_host_git_credentials.value, "source": e.allow_host_git_credentials.source.to_string() },
+            "workspace_keep_days": { "value": e.workspace_keep_days.value, "source": e.workspace_keep_days.source.to_string() },
+            "workspace_max_gb": { "value": e.workspace_max_gb.as_ref().map(|c| c.value), "source": max_gb_from },
         }));
         return;
     }
@@ -885,6 +921,17 @@ async fn show_settings(e: &Effective, out: Out) {
             ),
             "fixed".to_owned(),
         ],
+        vec![
+            "allow_host_git_credentials".to_owned(),
+            e.allow_host_git_credentials.value.to_string(),
+            e.allow_host_git_credentials.source.to_string(),
+        ],
+        vec![
+            "workspace_keep_days".to_owned(),
+            format!("{} days", e.workspace_keep_days.value),
+            e.workspace_keep_days.source.to_string(),
+        ],
+        vec!["workspace_max_gb".to_owned(), max_gb, max_gb_from],
     ];
     Out::table(&["KEY", "VALUE", "SOURCE"], &rows);
 }
@@ -967,6 +1014,23 @@ struct StoredKey {
     value: Option<Redacted<String>>,
 }
 
+/// Removes the runner's keys of `account` (the runner key and the run key) from the
+/// profile's credential store; the names of those that were there.
+pub(super) async fn forget_keys(
+    ctx: &Ctx,
+    s: &crate::context::Session,
+    account: &str,
+) -> Result<Vec<String>, Error> {
+    let mut gone = Vec::new();
+    for name in ["runner_key", "approvals_runner_key"] {
+        let (store, key) = StoredKey::entry(ctx, s, account, name)?;
+        if blocking(store, move |st| st.delete(&key)).await? {
+            gone.push(format!("{account}_{name}"));
+        }
+    }
+    Ok(gone)
+}
+
 impl StoredKey {
     async fn open(
         ctx: &Ctx,
@@ -974,6 +1038,19 @@ impl StoredKey {
         account: &str,
         name: &str,
     ) -> Result<Self, Error> {
+        let (store, key) = Self::entry(ctx, s, account, name)?;
+        let k = key.clone();
+        let value = blocking(Arc::clone(&store), move |st| st.get(&k)).await?;
+        Ok(Self { store, key, value })
+    }
+
+    /// The profile's credential store and the entry's key in it.
+    fn entry(
+        ctx: &Ctx,
+        s: &crate::context::Session,
+        account: &str,
+        name: &str,
+    ) -> Result<(Arc<dyn iohr_auth::Store>, EntryKey), Error> {
         let profile = s.profile.clone().ok_or_else(|| {
             Error::Failed(
                 "the runner's keys are kept in your profile's credential store: sign in with `iohr login`, not with IOHR_TOKEN alone".into(),
@@ -985,10 +1062,7 @@ impl StoredKey {
             .map(|p| p.storage)
             .ok_or_else(|| Error::Failed(format!("there is no profile {profile}")))?;
         let key = EntryKey::new(profile, &format!("{account}_{name}"))?;
-        let store = ctx.store(storage)?;
-        let k = key.clone();
-        let value = blocking(Arc::clone(&store), move |st| st.get(&k)).await?;
-        Ok(Self { store, key, value })
+        Ok((ctx.store(storage)?, key))
     }
 
     /// The stored bytes, if any.

@@ -327,7 +327,12 @@ fn item(kind: Kind, path: PathBuf, idle: Duration, repo: Repo) -> Item {
 
 /// Every checkout, mirror and build directory under `state`; a held checkout goes into
 /// `in_use` instead, its repository into `held`.
-fn scan(state: &Path, now: SystemTime, in_use: &mut Vec<PathBuf>, held: &mut Vec<Repo>) -> Vec<Item> {
+fn scan(
+    state: &Path,
+    now: SystemTime,
+    in_use: &mut Vec<PathBuf>,
+    held: &mut Vec<Repo>,
+) -> Vec<Item> {
     let mut items = Vec::new();
     let checkouts = state.join("coordinate").join("checkouts");
     for (job, path) in dirs_in(&checkouts) {
@@ -351,7 +356,12 @@ fn scan(state: &Path, now: SystemTime, in_use: &mut Vec<PathBuf>, held: &mut Vec
         for (dir, path) in dirs_in(&owner_dir) {
             if let Some(name) = dir.strip_suffix(".git") {
                 let idle = mirror_idle(&path, now);
-                items.push(item(Kind::Mirror, path, idle, Some((owner.clone(), name.to_owned()))));
+                items.push(item(
+                    Kind::Mirror,
+                    path,
+                    idle,
+                    Some((owner.clone(), name.to_owned())),
+                ));
             }
         }
     }
@@ -506,7 +516,10 @@ pub(crate) fn apply(state: &Path, r: Retention, plan: Plan, now: SystemTime) -> 
         }
         match (&it.kind, &it.repo) {
             (Kind::Checkout, Some((owner, name))) => {
-                let m = state.join("mirrors").join(owner).join(format!("{name}.git"));
+                let m = state
+                    .join("mirrors")
+                    .join(owner)
+                    .join(format!("{name}.git"));
                 if m.is_dir() && !pruned.contains(&m) {
                     let _ = std::process::Command::new("git")
                         .arg("--git-dir")
@@ -528,7 +541,13 @@ pub(crate) fn apply(state: &Path, r: Retention, plan: Plan, now: SystemTime) -> 
     done
 }
 
-fn remove_checkout(checkouts: &Path, job: &str, path: &Path, limit: Duration, now: SystemTime) -> Result<(), String> {
+fn remove_checkout(
+    checkouts: &Path,
+    job: &str,
+    path: &Path,
+    limit: Duration,
+    now: SystemTime,
+) -> Result<(), String> {
     let hold = match try_hold(checkouts, job) {
         Ok(Some(h)) => h,
         Ok(None) => return Err("a lease holds it now: kept".into()),
@@ -553,11 +572,62 @@ const REMOVING: &str = ".removing";
 /// the middle never leaves a half-removed checkout or mirror where the runner would use
 /// it again; the next prune removes the rest.
 fn remove_whole(path: &Path) -> Result<(), String> {
-    let name = path.file_name().ok_or("no name")?.to_string_lossy().into_owned();
+    let name = path
+        .file_name()
+        .ok_or("no name")?
+        .to_string_lossy()
+        .into_owned();
     let gone = path.with_file_name(format!(".{name}{REMOVING}"));
     let _ = fs::remove_dir_all(&gone);
     fs::rename(path, &gone).map_err(|e| e.to_string())?;
     fs::remove_dir_all(&gone).map_err(|e| e.to_string())
+}
+
+/// What `uninstall --purge` removes of the runner's shared state, in this order.
+const SHARED: [&str; 4] = ["coordinate", "mirrors", "target", "last-upgrade"];
+
+/// The paths [`remove_shared`] would remove, those that exist.
+pub(crate) fn shared(state: &Path) -> Vec<PathBuf> {
+    SHARED
+        .iter()
+        .map(|n| state.join(n))
+        .filter(|p| p.exists())
+        .collect()
+}
+
+/// Removes the runner's shared state under `state` (every checkout, mirror and build
+/// directory, and the upgrade ledger) whole, or nothing at all while a lease holds a
+/// checkout: every checkout is held first, so none is taken while the rest go.
+pub(crate) fn remove_shared(state: &Path) -> Result<Vec<PathBuf>, String> {
+    let checkouts = state.join("coordinate").join("checkouts");
+    let mut holds = Vec::new();
+    for (job, _) in dirs_in(&checkouts) {
+        if valid_job_id(&job).is_err() {
+            continue;
+        }
+        match try_hold(&checkouts, &job) {
+            Ok(Some(h)) => holds.push(h),
+            Ok(None) => {
+                return Err(format!(
+                    "a lease holds the checkout of {job}: nothing removed; stop that runner first"
+                ));
+            }
+            Err(e) => return Err(format!("the checkout of {job} could not be held: {e}")),
+        }
+    }
+    let mut removed = Vec::new();
+    for path in shared(state) {
+        if path.is_dir() {
+            remove_whole(&path)?;
+        } else {
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+        removed.push(path);
+    }
+    drop(holds);
+    // The runner directory itself, once nothing else is in it.
+    let _ = fs::remove_dir(state);
+    Ok(removed)
 }
 
 /// `bytes` as GB with one decimal.
@@ -567,7 +637,11 @@ pub(crate) fn gb(bytes: u64) -> String {
 
 /// One line for the log: what went and what stayed.
 pub(crate) fn summary(done: &[Done]) -> String {
-    let removed: Vec<&Item> = done.iter().filter(|(_, r)| r.is_ok()).map(|(i, _)| i).collect();
+    let removed: Vec<&Item> = done
+        .iter()
+        .filter(|(_, r)| r.is_ok())
+        .map(|(i, _)| i)
+        .collect();
     let count = |k: Kind| removed.iter().filter(|i| i.kind == k).count();
     let mut line = format!(
         "workspace prune: removed {} checkouts, {} mirrors, {} build directories",
@@ -581,7 +655,11 @@ pub(crate) fn summary(done: &[Done]) -> String {
     }
     let kept: Vec<String> = done
         .iter()
-        .filter_map(|(i, r)| r.as_ref().err().map(|e| format!("{}: {e}", i.path.display())))
+        .filter_map(|(i, r)| {
+            r.as_ref()
+                .err()
+                .map(|e| format!("{}: {e}", i.path.display()))
+        })
         .collect();
     if !kept.is_empty() {
         let _ = write!(line, "; not removed: {}", kept.join("; "));
@@ -679,7 +757,10 @@ mod tests {
     fn until_free(checkouts: &Path, job_id: &str) {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while is_held(checkouts, job_id) {
-            assert!(std::time::Instant::now() < deadline, "{job_id} is still held");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{job_id} is still held"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
     }
@@ -699,7 +780,9 @@ mod tests {
     fn checkout(state: &Path, job: &str, repo: &str, bytes: usize) -> PathBuf {
         let dir = state.join("coordinate/checkouts").join(job);
         fs::create_dir_all(&dir).unwrap();
-        let gitdir = state.join("mirrors").join(format!("{repo}.git/worktrees/{job}"));
+        let gitdir = state
+            .join("mirrors")
+            .join(format!("{repo}.git/worktrees/{job}"));
         fs::write(dir.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
         fs::write(dir.join("file"), vec![b'x'; bytes]).unwrap();
         dir
@@ -729,7 +812,12 @@ mod tests {
     fn removed(p: &Plan) -> Vec<(Kind, String)> {
         p.remove
             .iter()
-            .map(|i| (i.kind, i.path.file_name().unwrap().to_string_lossy().into_owned()))
+            .map(|i| {
+                (
+                    i.kind,
+                    i.path.file_name().unwrap().to_string_lossy().into_owned(),
+                )
+            })
             .collect()
     }
 
@@ -757,7 +845,11 @@ mod tests {
                 (Kind::Target, "r".into()),
             ]
         );
-        assert!(plan.remove.iter().all(|i| i.why == "unused" && i.idle_days >= 19));
+        assert!(
+            plan.remove
+                .iter()
+                .all(|i| i.why == "unused" && i.idle_days >= 19)
+        );
         // A dry run is the plan alone: nothing changed.
         for p in [&old, &young, &m_r, &m_u, &t_r, &t_u] {
             assert!(p.is_dir(), "{}", p.display());
@@ -771,11 +863,17 @@ mod tests {
             assert!(p.is_dir(), "{}", p.display());
         }
         // Nothing half removed is left behind, and the line says what went.
-        assert!(fs::read_dir(s.join("coordinate/checkouts")).unwrap().flatten().all(|e| {
-            !e.file_name().to_string_lossy().ends_with(REMOVING)
-        }));
+        assert!(
+            fs::read_dir(s.join("coordinate/checkouts"))
+                .unwrap()
+                .flatten()
+                .all(|e| { !e.file_name().to_string_lossy().ends_with(REMOVING) })
+        );
         let line = summary(&done);
-        assert!(line.contains("removed 1 checkouts, 1 mirrors, 1 build directories"), "{line}");
+        assert!(
+            line.contains("removed 1 checkouts, 1 mirrors, 1 build directories"),
+            "{line}"
+        );
     }
 
     #[test]
@@ -790,12 +888,13 @@ mod tests {
         age(&co, 30 * D);
         age(&m, 30 * D);
         let p = plan(&s, r, SystemTime::now());
-        assert_eq!(p.in_use, [co.clone()]);
+        assert_eq!(p.in_use, std::slice::from_ref(&co));
         assert!(removed(&p).is_empty(), "{:?}", removed(&p));
         drop(hold);
         until_free(&checkouts, "job_1");
         // Taking the lock counts as a use: young again until the lock is old too.
-        assert!(removed(&plan(&s, Retention::of(1, None), SystemTime::now())).is_empty());
+        let young = removed(&plan(&s, Retention::of(1, None), SystemTime::now()));
+        assert!(young.is_empty(), "{young:?}");
         age(&checkouts.join(HELD), 30 * D);
         // Held after the plan, before the removal: the removal leaves it, and says why.
         let p = plan(&s, Retention::of(1, None), SystemTime::now());
@@ -803,13 +902,20 @@ mod tests {
         let hold = try_hold(&checkouts, "job_1").unwrap().unwrap();
         let done = apply(&s, Retention::of(1, None), p, SystemTime::now());
         assert!(
-            done[0].1.as_ref().is_err_and(|e| e.contains("a lease holds it")),
+            done[0]
+                .1
+                .as_ref()
+                .is_err_and(|e| e.contains("a lease holds it")),
             "{done:?}"
         );
         assert!(co.is_dir());
         drop(hold);
     }
 
+    #[allow(
+        clippy::many_single_char_names,
+        reason = "one letter per directory, as in the comment"
+    )]
     #[test]
     fn over_the_cap_the_oldest_go_first_but_never_what_was_used_within_the_grace() {
         let (_t, s) = state();
@@ -832,14 +938,31 @@ mod tests {
         // is younger, the mirror is used by a kept checkout, `job_c` is in its grace.
         assert_eq!(
             removed(&p),
-            [(Kind::Checkout, "job_a".into()), (Kind::Checkout, "job_b".into())]
+            [
+                (Kind::Checkout, "job_a".into()),
+                (Kind::Checkout, "job_b".into())
+            ]
         );
-        assert!(p.remove.iter().all(|i| i.why == "over_cap" && i.bytes > Some(1000)));
+        assert!(
+            p.remove
+                .iter()
+                .all(|i| i.why == "over_cap" && i.bytes > Some(1000))
+        );
         // A cap nothing can meet removes all it may and no more.
-        let p = plan(&s, Retention { max_bytes: Some(1), ..r }, SystemTime::now());
+        let p = plan(
+            &s,
+            Retention {
+                max_bytes: Some(1),
+                ..r
+            },
+            SystemTime::now(),
+        );
         let gone = removed(&p);
         assert!(gone.contains(&(Kind::Target, "r".into())), "{gone:?}");
-        assert!(!gone.contains(&(Kind::Checkout, "job_c".into())), "{gone:?}");
+        assert!(
+            !gone.contains(&(Kind::Checkout, "job_c".into())),
+            "{gone:?}"
+        );
         assert!(!gone.contains(&(Kind::Mirror, "r.git".into())), "{gone:?}");
         assert!([a, b, c, m, t].iter().all(|p| p.is_dir()));
     }
@@ -875,9 +998,33 @@ mod tests {
     }
 
     #[test]
+    fn a_purge_removes_all_shared_state_or_nothing_while_a_lease_holds_a_checkout() {
+        let (_t, s) = state();
+        checkout(&s, "job_1", "o/r", 10);
+        mirror(&s, "o/r", 10);
+        target(&s, "o/r", 10);
+        fs::write(s.join("last-upgrade"), "x").unwrap();
+        fs::create_dir_all(s.join("approvals/acct")).unwrap();
+        let checkouts = s.join("coordinate/checkouts");
+        let hold = try_hold(&checkouts, "job_1").unwrap().unwrap();
+        let e = remove_shared(&s).unwrap_err();
+        assert!(e.contains("a lease holds the checkout of job_1"), "{e}");
+        assert_eq!(shared(&s).len(), 4);
+        drop(hold);
+        until_free(&checkouts, "job_1");
+        let gone = remove_shared(&s).unwrap();
+        assert_eq!(gone.len(), 4, "{gone:?}");
+        let left = shared(&s);
+        assert!(left.is_empty(), "{left:?}");
+        // What is not shared (another account's approvals state) stays, and so does the
+        // runner directory holding it.
+        assert!(s.join("approvals/acct").is_dir());
+    }
+
+    #[test]
     fn retention_is_counted_in_days_and_gigabytes() {
         let r = Retention::of(14, Some(50));
-        assert_eq!(r.keep, Duration::from_secs(14 * 86_400));
+        assert_eq!(r.keep, Duration::from_hours(14 * 24));
         assert_eq!(r.max_bytes, Some(50_000_000_000));
         assert_eq!(gb(1_250_000_000), "1.2 GB");
     }

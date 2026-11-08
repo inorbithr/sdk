@@ -865,7 +865,10 @@ mod tests {
     fn workspace_retention_has_a_default_and_refuses_values_out_of_range() {
         let mut file = RunnerConfig::default();
         let e = resolve(&file, None, &Flags::default()).unwrap();
-        assert_eq!(e.workspace_keep_days.value, super::super::hygiene::KEEP_DAYS);
+        assert_eq!(
+            e.workspace_keep_days.value,
+            super::super::hygiene::KEEP_DAYS
+        );
         assert_eq!(e.workspace_keep_days.source, Source::Default);
         assert_eq!(e.workspace_max_gb, None);
         file.workspace_keep_days = Some(3);

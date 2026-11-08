@@ -993,13 +993,13 @@ pub(crate) async fn run_loop<S: Service, X: Exec>(
                     });
                     let job_id = if b.pack.job_id.is_empty() { b.lease.job_id.clone() } else { b.pack.job_id.clone() };
                     // The checkout stays held until its push and check have ended.
-                    let hold = b.owned.as_ref().map(|o| Arc::clone(&o.hold));
+                    let checkout_hold = b.owned.as_ref().map(|o| Arc::clone(&o.hold));
                     gating.push(Gating {
                         lease: b.lease,
                         job_id,
                         report,
                         check: Some(tokio::spawn(async move {
-                            let _hold = hold;
+                            let _hold = checkout_hold;
                             let shipped = match (ship, &owned) {
                                 (Some(m), Some((w, p, Ok(access)))) => Some(w.ship(p, &m, access).await),
                                 (Some(_), Some((_, _, Err(e)))) => Some(Err(format!("nothing pushed: {e}"))),
@@ -1309,10 +1309,11 @@ async fn accept_lease<S: Service, X: Exec>(
             Err(_) => return Err(refuse("its job could not be read: timed out")),
         };
         if let Some(job) = job.filter(|j| !j.repository.is_empty()) {
-            let access = match github_access(svc, &lease, &job.repository, op_timeout, allow_host).await {
-                Ok(a) => a,
-                Err(e) => return Err(refuse(&e)),
-            };
+            let access =
+                match github_access(svc, &lease, &job.repository, op_timeout, allow_host).await {
+                    Ok(a) => a,
+                    Err(e) => return Err(refuse(&e)),
+                };
             // Held before it is made, so a prune never sees it half made.
             let hold = match w.hold(&lease.job_id).await {
                 Ok(h) => Arc::new(h),
@@ -3400,7 +3401,8 @@ mod tests {
         assert!(!p.workdir.join("checkouts").exists());
     }
     #[tokio::test]
-    async fn a_lease_without_its_own_token_uses_the_host_only_where_the_app_is_not_installed_and_allowed() {
+    async fn a_lease_without_its_own_token_uses_the_host_only_where_the_app_is_not_installed_and_allowed()
+     {
         use crate::runner::access::Minted;
         use crate::runner::access::tests::FAKE;
         use crate::runner::workspace::tests::{FakeForge, place, spaces};
@@ -3483,12 +3485,17 @@ mod tests {
                     assert_eq!(calls_of(&fake, "accept "), 0);
                     assert!(!p.workdir.join("checkouts/job_1").exists());
                     assert!(
-                        lines.iter().any(|l| l.contains("lease lease_1 not accepted")
-                            && l.contains(why)
-                            && l.contains("allow_host_git_credentials")),
+                        lines
+                            .iter()
+                            .any(|l| l.contains("lease lease_1 not accepted")
+                                && l.contains(why)
+                                && l.contains("allow_host_git_credentials")),
                         "{lines:?}"
                     );
-                    assert!(lines.iter().all(|l| !l.contains("this host's gh sign-in")), "{lines:?}");
+                    assert!(
+                        lines.iter().all(|l| !l.contains("this host's gh sign-in")),
+                        "{lines:?}"
+                    );
                 }
             }
         }
@@ -3517,8 +3524,10 @@ mod tests {
         let (stats, lines) = go_logged(&fake, FakeExec::default(), c).await;
         assert_eq!(stats.accepted, 0, "{lines:?}");
         assert!(
-            lines.iter().any(|l| l.contains("lease lease_1 not accepted")
-                && l.contains("held by another runner process")),
+            lines
+                .iter()
+                .any(|l| l.contains("lease lease_1 not accepted")
+                    && l.contains("held by another runner process")),
             "{lines:?}"
         );
         assert!(!checkouts.join("job_1").exists());
