@@ -13,7 +13,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use iohr_auth::RunnerConfig;
+use iohr_auth::{RunnerConfig, ToolCeiling};
+
+use super::{sandbox, trust};
 
 use crate::commands::upgrade::{SignWith, sign};
 
@@ -130,6 +132,23 @@ pub(crate) struct Effective {
     pub(crate) user_units: Option<Setting<Vec<String>>>,
     /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
     pub(crate) core_checkout: Option<Setting<String>>,
+    /// The most tools a turn gets (SR-35); default [`trust::DEFAULT_TOOLS`].
+    pub(crate) tool_ceiling: Setting<trust::Ceiling>,
+    /// The repositories a job turn may be checked out in (SR-35); default none.
+    pub(crate) repositories: Setting<trust::Repositories>,
+    /// Whether turns run in the OS sandbox (SR-35); default `auto`.
+    pub(crate) sandbox: Setting<sandbox::Mode>,
+}
+
+impl Effective {
+    /// The ceiling, the allow-list and the sandbox mode, as the turns use them.
+    pub(crate) fn trust(&self) -> trust::Trust {
+        trust::Trust {
+            ceiling: self.tool_ceiling.value.clone(),
+            repositories: self.repositories.value.clone(),
+            sandbox: self.sandbox.value,
+        }
+    }
 }
 
 /// The first of the flag, the profile's table and the file's table that sets a value.
@@ -166,7 +185,9 @@ fn pick<T: Clone>(
 /// A message naming the key and where the bad value came from: a capacity outside 1 to
 /// 32, an empty kinds list, a kind other than `coordinate` and `build`, an upgrade
 /// interval outside 5 to 10080 minutes, a restart mode other than `exec` and `exit`, or a
-/// `user_units` entry that is not a user service unit.
+/// `user_units` entry that is not a user service unit, a `tool_ceiling` that is neither a
+/// known name nor a list of tools, a `repositories` entry that is not `owner/name` or
+/// `owner/*`, or a `sandbox` other than `auto` and `off`.
 pub(crate) fn resolve(
     file: &RunnerConfig,
     profile: Option<(&str, &RunnerConfig)>,
@@ -246,6 +267,9 @@ pub(crate) fn resolve(
             c.source
         ));
     }
+    let tool_ceiling = ceiling_of(profile, file)?;
+    let repositories = repositories_of(profile, file)?;
+    let sandbox = sandbox_of(profile, file)?;
     Ok(Effective {
         capacity,
         kinds,
@@ -260,6 +284,104 @@ pub(crate) fn resolve(
         upgrade_sign,
         user_units,
         core_checkout,
+        tool_ceiling,
+        repositories,
+        sandbox,
+    })
+}
+
+/// `tool_ceiling`, checked: `default`, `coordinator` or a list of tool entries.
+fn ceiling_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<trust::Ceiling>, String> {
+    let Some(c) = pick(None, profile, file, |c| c.tool_ceiling.clone()) else {
+        return Ok(Setting {
+            value: trust::Ceiling::default(),
+            source: Source::Default,
+        });
+    };
+    let value = match &c.value {
+        ToolCeiling::Named(n) if n.trim() == trust::DEFAULT => trust::Ceiling::default(),
+        ToolCeiling::Named(n) if n.trim() == trust::COORDINATOR => trust::Ceiling::Coordinator,
+        ToolCeiling::Named(n) => {
+            return Err(format!(
+                "runner tool_ceiling {n:?} ({}) is not \"{}\", \"{}\" or a list of tools",
+                c.source,
+                trust::DEFAULT,
+                trust::COORDINATOR
+            ));
+        }
+        ToolCeiling::Tools(t) => {
+            if let Some(bad) = t.iter().find(|e| !trust::is_tool_entry(e.trim())) {
+                return Err(format!(
+                    "runner tool_ceiling ({}): {bad:?} is not a tool name or a rule like Bash(git status:*)",
+                    c.source
+                ));
+            }
+            trust::Ceiling::Tools(t.iter().map(|e| e.trim().to_owned()).collect())
+        }
+        // A form a newer config file may hold.
+        _ => {
+            return Err(format!(
+                "runner tool_ceiling ({}) is not understood",
+                c.source
+            ));
+        }
+    };
+    Ok(Setting {
+        value,
+        source: c.source,
+    })
+}
+
+/// `sandbox`, checked: `auto` (the default) or `off`.
+fn sandbox_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<sandbox::Mode>, String> {
+    let Some(m) = pick(None, profile, file, |c| c.sandbox.clone()) else {
+        return Ok(Setting {
+            value: sandbox::Mode::Auto,
+            source: Source::Default,
+        });
+    };
+    let value = sandbox::Mode::parse(&m.value).ok_or_else(|| {
+        format!(
+            "runner sandbox {:?} ({}) is not auto or off",
+            m.value, m.source
+        )
+    })?;
+    Ok(Setting {
+        value,
+        source: m.source,
+    })
+}
+
+/// `repositories`, checked: each `owner/name` or `owner/*`.
+fn repositories_of(
+    profile: Option<(&str, &RunnerConfig)>,
+    file: &RunnerConfig,
+) -> Result<Setting<trust::Repositories>, String> {
+    let Some(r) = pick(None, profile, file, |c| c.repositories.clone()) else {
+        return Ok(Setting {
+            value: trust::Repositories::default(),
+            source: Source::Default,
+        });
+    };
+    if let Some(bad) = r
+        .value
+        .iter()
+        .find(|p| !trust::is_repository_pattern(p.trim()))
+    {
+        return Err(format!(
+            "runner repositories ({}): {bad:?} is not owner/name or owner/*",
+            r.source
+        ));
+    }
+    Ok(Setting {
+        value: trust::Repositories(r.value.iter().map(|p| p.trim().to_owned()).collect()),
+        source: r.source,
     })
 }
 
@@ -783,6 +905,56 @@ mod tests {
         assert!(
             err.contains("core_checkout") && err.contains("work"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn the_trust_keys_default_closed_and_a_bad_value_names_its_source() {
+        let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
+        assert_eq!(none.tool_ceiling.value, trust::Ceiling::default());
+        assert_eq!(none.tool_ceiling.source, Source::Default);
+        assert_eq!(none.repositories.value.0, Vec::<String>::new());
+        assert_eq!(none.sandbox.value, sandbox::Mode::Auto);
+
+        let mut file = RunnerConfig::default();
+        file.tool_ceiling = Some(ToolCeiling::Named("coordinator".into()));
+        file.repositories = Some(vec!["acme/*".into()]);
+        file.sandbox = Some("off".into());
+        let e = resolve(&file, None, &Flags::default()).unwrap();
+        assert_eq!(e.trust().ceiling, trust::Ceiling::Coordinator);
+        assert!(e.trust().repositories.allows("acme/app"));
+        assert_eq!(
+            (e.sandbox.value, e.sandbox.source),
+            (sandbox::Mode::Off, Source::File)
+        );
+
+        let mut work = RunnerConfig::default();
+        work.tool_ceiling = Some(ToolCeiling::Tools(vec!["Read".into(), "--bare".into()]));
+        let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
+        assert!(
+            err.contains("tool_ceiling") && err.contains("work") && err.contains("--bare"),
+            "{err}"
+        );
+        let mut c = RunnerConfig::default();
+        c.tool_ceiling = Some(ToolCeiling::Named("everything".into()));
+        assert!(
+            resolve(&c, None, &Flags::default())
+                .unwrap_err()
+                .contains("everything")
+        );
+        let mut c = RunnerConfig::default();
+        c.repositories = Some(vec!["*/*".into()]);
+        assert!(
+            resolve(&c, None, &Flags::default())
+                .unwrap_err()
+                .contains("owner/name")
+        );
+        let mut c = RunnerConfig::default();
+        c.sandbox = Some("on".into());
+        assert!(
+            resolve(&c, None, &Flags::default())
+                .unwrap_err()
+                .contains("auto or off")
         );
     }
 }

@@ -10,12 +10,15 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::watch;
 
 use super::claude::{self, Outcome, Parsed, Session, TurnSpec};
 use super::env;
 use super::hygiene;
 use super::provider::{self, AuthState};
+use super::sandbox::{self, Confine};
 use super::service::{Pack, ProviderState};
+use super::trust::{Ceiling, Narrowed};
 
 /// The most a provider may print; more is cut, and the parse then fails.
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
@@ -34,6 +37,9 @@ pub(crate) struct Finished {
     pub(crate) provider_version: String,
     /// The model the turn ran on; empty when it never started.
     pub(crate) model: String,
+    /// What the turn asked for that the tool ceiling took away (SR-35): tool entries only,
+    /// for the log.
+    pub(crate) dropped_tools: Vec<String>,
 }
 
 impl Finished {
@@ -46,6 +52,7 @@ impl Finished {
             detail: detail.into(),
             provider_version: String::new(),
             model: String::new(),
+            dropped_tools: Vec::new(),
         }
     }
 }
@@ -74,6 +81,15 @@ pub(crate) struct ClaudeExec {
     pub(crate) claude_dir: Option<PathBuf>,
     pub(crate) runner_id: String,
     pub(crate) user: String,
+    /// The local tool ceiling (SR-35), read again for every turn (a SIGHUP reload sends a
+    /// new one). The default ceiling until the command sets it.
+    pub(crate) ceiling: watch::Receiver<Ceiling>,
+    /// How `claude` is confined (SR-35), decided once at start. [`Confine::Missing`]
+    /// until the command decides, so a turn never runs unconfined by default.
+    pub(crate) confine: Confine,
+    /// The runner's configuration folder: unreadable inside the sandbox, except the
+    /// working directory and the turn's own mirror and build directory.
+    pub(crate) config_dir: Option<PathBuf>,
 }
 
 impl ClaudeExec {
@@ -94,6 +110,9 @@ impl ClaudeExec {
             claude_dir,
             runner_id,
             user,
+            ceiling: watch::channel(Ceiling::default()).1,
+            confine: Confine::Missing,
+            config_dir: None,
         }
     }
 
@@ -107,7 +126,12 @@ impl ClaudeExec {
     }
 
     fn command(&self, args: &[String]) -> Command {
-        let mut c = Command::new(&self.program);
+        self.command_of(&self.program, args)
+    }
+
+    /// `program args` with the scrubbed environment, piped, in its own process group.
+    fn command_of(&self, program: &Path, args: &[String]) -> Command {
+        let mut c = Command::new(program);
         c.args(args)
             .env_clear()
             .envs(self.env.iter().map(|(k, v)| (k, v)))
@@ -161,19 +185,68 @@ impl ClaudeExec {
     /// The turn's command: its model's `cargo` builds into its repository's shared
     /// directory, not into a `target/` of the job's checkout (RFC 0189). `checkout` is
     /// relative to the working directory.
-    fn turn_command(&self, args: &[String], checkout: &str) -> Command {
-        let mut cmd = self.command(args);
-        cmd.current_dir(&self.workdir);
+    ///
+    /// Under the OS sandbox (SR-35) the command is the sandbox tool with `claude` after it;
+    /// an unconfined runner that may not run unconfined gets an error, never a command.
+    fn turn_command(&self, args: &[String], checkout: &str) -> Result<Command, String> {
         let rel = Path::new(checkout);
-        if !checkout.is_empty()
+        let own = (!checkout.is_empty()
             && rel
                 .components()
-                .all(|c| matches!(c, std::path::Component::Normal(_)))
-            && let Some(t) = hygiene::target_for(&self.workdir, &self.workdir.join(rel))
-        {
+                .all(|c| matches!(c, std::path::Component::Normal(_))))
+        .then(|| self.workdir.join(rel));
+        let target = own
+            .as_deref()
+            .and_then(|c| hygiene::target_for(&self.workdir, c));
+        let mut cmd = match &self.confine {
+            Confine::Missing => return Err(sandbox::no_sandbox()),
+            Confine::Off => self.command(args),
+            Confine::With(kind) => {
+                let paths = self.sandbox_paths(own.as_deref(), target.as_deref())?;
+                let (tool, wrapped) = sandbox::wrap(kind, &paths, &self.program, args);
+                self.command_of(&tool, &wrapped)
+            }
+        };
+        cmd.current_dir(&self.workdir);
+        if let Some(t) = target {
             cmd.env(hygiene::TARGET_VAR, t);
         }
-        cmd
+        Ok(cmd)
+    }
+
+    /// The folders the sandbox draws for a turn whose checkout is `own` (when it has
+    /// one): it writes there, or in the working directory when it has none.
+    fn sandbox_paths(
+        &self,
+        own: Option<&Path>,
+        target: Option<&Path>,
+    ) -> Result<sandbox::Paths, String> {
+        let var = |k: &str| {
+            self.env
+                .iter()
+                .find(|(n, _)| n == k)
+                .map(|(_, v)| PathBuf::from(v))
+                .filter(|p| p.is_absolute())
+        };
+        // Sandbox rules match real paths (macOS `/var` is `/private/var`).
+        let real = |p: PathBuf| p.canonicalize().unwrap_or(p);
+        let home = var("HOME")
+            .or_else(|| etcetera::home_dir().ok())
+            .ok_or("the home folder is not known, so the sandbox cannot be drawn")?;
+        let write_root = own.filter(|c| c.is_dir()).unwrap_or(&self.workdir);
+        Ok(sandbox::Paths {
+            write_root: real(write_root.to_path_buf()),
+            home: real(home),
+            tmp: var("TMPDIR").map(real),
+            claude_dir: var("CLAUDE_CONFIG_DIR").map(real),
+            config_dir: self.config_dir.clone().map(real),
+            workdir: real(self.workdir.clone()),
+            read_also: own
+                .and_then(|c| hygiene::mirror_for(&self.workdir, c))
+                .into_iter()
+                .collect(),
+            write_also: target.map(Path::to_path_buf).into_iter().collect(),
+        })
     }
 
     /// Why this turn may not start here, if it may not: another person's seat, another
@@ -205,12 +278,31 @@ impl ClaudeExec {
         }
     }
 
-    async fn run_turn(&self, pack: &Pack) -> Finished {
-        if let Some(no) = self.refusal(pack).await {
-            return no;
+    /// The local ceiling cuts the turn's tools down (SR-35); a turn that asked for
+    /// tools and is left with none does not start.
+    fn narrow_tools(&self, pack: &Pack) -> Result<(Ceiling, Narrowed), Box<Finished>> {
+        let ceiling = self.ceiling.borrow().clone();
+        let narrowed = ceiling.narrow(&pack.allowed_tools);
+        if narrowed.nothing_left() {
+            return Err(Box::new(Finished {
+                dropped_tools: narrowed.dropped.clone(),
+                ..Finished::refused(
+                    "refused_tool",
+                    format!(
+                        "every tool the turn asked for ({}) is outside this runner's tool_ceiling ({}): \
+                         widen tool_ceiling in the [runner] table of config.toml and send the runner SIGHUP",
+                        narrowed.dropped.join(", "),
+                        ceiling.describe()
+                    ),
+                )
+            }));
         }
-        let provider_version = self.version().await;
-        let session = claude::choose_session(
+        Ok((ceiling, narrowed))
+    }
+
+    /// The session this turn resumes or starts.
+    fn session_for(&self, pack: &Pack) -> Session {
+        claude::choose_session(
             &pack.resume_session,
             &pack.resume_runner_id,
             &self.runner_id,
@@ -222,7 +314,20 @@ impl ClaudeExec {
             |id| claude::recorded_context(&self.context_dir(), id),
             pack.context_ceiling,
             claude::new_session_id,
-        );
+        )
+    }
+
+    async fn run_turn(&self, pack: &Pack) -> Finished {
+        if let Some(no) = self.refusal(pack).await {
+            return no;
+        }
+        let (ceiling, narrowed) = match self.narrow_tools(pack) {
+            Ok(n) => n,
+            Err(no) => return *no,
+        };
+        let names = narrowed.tool_names();
+        let provider_version = self.version().await;
+        let session = self.session_for(pack);
         let model = if pack.model.trim().is_empty() && pack.kind == "review" {
             claude::CRITIC_MODEL
         } else {
@@ -232,8 +337,9 @@ impl ClaudeExec {
             system_prompt: &pack.system_prompt,
             model,
             max_turns: pack.max_turns,
-            allowed_tools: &pack.allowed_tools,
+            allowed_tools: &narrowed.kept,
             session: &session,
+            tools: ceiling.restricts().then_some(names.as_slice()),
         }) {
             Ok(a) => a,
             Err(e) => return Finished::refused("failed", e.to_string()),
@@ -243,12 +349,16 @@ impl ClaudeExec {
             session_id: session.id().to_owned(),
             provider_version: provider_version.clone(),
             model: model.to_owned(),
+            dropped_tools: narrowed.dropped.clone(),
             ..Finished::refused("failed", detail)
         };
         if let Err(e) = tokio::fs::create_dir_all(&self.workdir).await {
             return fail(format!("the working directory: {e}"));
         }
-        let mut cmd = self.turn_command(&args, &pack.checkout);
+        let mut cmd = match self.turn_command(&args, &pack.checkout) {
+            Ok(c) => c,
+            Err(e) => return fail(e),
+        };
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return fail(format!("claude did not start: {e}")),
@@ -302,6 +412,7 @@ impl ClaudeExec {
             detail: String::new(),
             provider_version,
             model: model.to_owned(),
+            dropped_tools: narrowed.dropped,
         }
     }
 }
@@ -561,14 +672,81 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
     }
 
     fn exec(dir: &std::path::Path, auth: &str) -> ClaudeExec {
-        ClaudeExec::new(
-            fake_claude(dir, auth),
-            dir.join("work"),
+        ClaudeExec {
+            confine: Confine::Off,
+            ..ClaudeExec::new(
+                fake_claude(dir, auth),
+                dir.join("work"),
+                dirty_parent(),
+                Some(dir.join("claudedir")),
+                ME.into(),
+                "usr_me".into(),
+            )
+        }
+    }
+
+    /// SR-35: a runner built without a sandbox decision (`Confine::Missing`, what
+    /// `ClaudeExec::new` gives) never starts claude.
+    #[tokio::test]
+    async fn a_turn_with_no_os_sandbox_decided_is_refused_and_claude_never_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = ClaudeExec::new(
+            fake_claude(dir.path(), SUB),
+            dir.path().join("work"),
             dirty_parent(),
-            Some(dir.join("claudedir")),
+            Some(dir.path().join("claudedir")),
             ME.into(),
             "usr_me".into(),
-        )
+        );
+        let f = e.execute(pack("usr_me")).await;
+        assert_eq!(f.outcome, "failed");
+        assert!(f.detail.contains("no OS sandbox"), "{}", f.detail);
+        assert!(!dir.path().join("args.txt").exists(), "claude ran");
+    }
+
+    /// SR-35: the ceiling narrows what the coordinator asks for. Bash alone is refused
+    /// before claude starts; Read and Bash runs with Read only, under `--restricted`, and
+    /// the report names Bash as dropped.
+    #[tokio::test]
+    async fn the_tool_ceiling_drops_what_it_does_not_list_and_refuses_a_turn_left_with_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut e = exec(dir.path(), SUB);
+        let (_keep, ceiling) = watch::channel(Ceiling::default());
+        e.ceiling = ceiling;
+        let mut p = pack("usr_me");
+        p.allowed_tools = vec!["Bash(cargo test:*)".into()];
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "refused_tool", "{}", f.detail);
+        assert!(f.detail.contains("tool_ceiling"), "{}", f.detail);
+        assert_eq!(f.dropped_tools, vec!["Bash(cargo test:*)".to_owned()]);
+        assert!(!dir.path().join("args.txt").exists(), "claude ran");
+
+        let mut p = pack("usr_me");
+        p.allowed_tools = vec!["Read".into(), "Bash".into()];
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "replied", "{}", f.detail);
+        assert_eq!(f.dropped_tools, vec!["Bash".to_owned()]);
+        let args: Vec<String> = std::fs::read_to_string(dir.path().join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        let at = |flag: &str| args.iter().position(|a| a == flag);
+        let tools = at("--tools").expect("no --tools");
+        assert!(at("--restricted").is_some(), "{args:?}");
+        assert_eq!(args[tools + 1], "Read");
+        assert!(!args.iter().any(|a| a.contains("Bash")), "{args:?}");
+
+        // `coordinator` keeps the coordinator's list, as before the ceiling.
+        let (_keep, ceiling) = watch::channel(Ceiling::Coordinator);
+        e.ceiling = ceiling;
+        let mut p = pack("usr_me");
+        p.allowed_tools = vec!["Read".into(), "Bash".into()];
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "replied", "{}", f.detail);
+        assert_eq!(f.dropped_tools, Vec::<String>::new());
+        let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+        assert!(!args.lines().any(|a| a == "--restricted"), "{args}");
     }
 
     /// RFC 0189: the model's `cargo` builds into its repository's shared directory, so
@@ -782,14 +960,17 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         )
         .unwrap();
         settle_script(&p);
-        ClaudeExec::new(
-            p,
-            dir.join("work"),
-            dirty_parent(),
-            None,
-            ME.into(),
-            "usr_me".into(),
-        )
+        ClaudeExec {
+            confine: Confine::Off,
+            ..ClaudeExec::new(
+                p,
+                dir.join("work"),
+                dirty_parent(),
+                None,
+                ME.into(),
+                "usr_me".into(),
+            )
+        }
     }
 
     #[tokio::test]

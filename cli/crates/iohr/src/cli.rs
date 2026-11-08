@@ -684,6 +684,19 @@ pub enum RunnerCommand {
     ///
     /// Run the loop: heartbeat, accept a lease, run its turn on `claude -p`, report it.
     /// Stops on Ctrl-C.
+    ///
+    /// Three settings in the `[runner]` table of config.toml bound what a turn may do on
+    /// this machine (SR-35), and SIGHUP reads the first two again:
+    ///
+    /// - `repositories`: the repositories a job may name, `owner/name` or `owner/*`. The
+    ///   default is an empty list, which refuses every job that names a repository,
+    ///   before anything is cloned.
+    /// - `tool_ceiling`: the most tools a turn gets, whatever the coordinator asks for.
+    ///   The default is `["Read", "Grep", "Glob", "Edit", "Write"]`: no shell, no web.
+    ///   `"coordinator"` gives each turn the tools the coordinator asks for.
+    /// - `sandbox`: `"auto"` (the default) runs each turn under `sandbox-exec` on macOS
+    ///   or `bwrap` on Linux, and the runner does not start when neither is there.
+    ///   `"off"` runs turns unconfined and says so on every start.
     Run {
         /// The runner's name (default: this machine's host name).
         #[arg(long, conflicts_with = "runner")]

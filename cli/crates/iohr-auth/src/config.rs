@@ -383,6 +383,33 @@ pub struct RunnerConfig {
     /// `target:sweep` or `target:guard` in. Unset, the runner refuses every sweep.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub core_checkout: Option<String>,
+    /// The most tools a coordinator turn gets on this machine: a list of tool names or
+    /// Claude Code permission rules (`["Read", "Grep", "Glob"]`, `"Bash(git status:*)"`),
+    /// `"default"` (read, search, edit and write files; no shell, no web) or
+    /// `"coordinator"` (whatever the coordinator asks for). Unset is `"default"`. What a
+    /// turn asks for beyond it is dropped and logged by tool name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_ceiling: Option<ToolCeiling>,
+    /// The only repositories a job turn is checked out and run in, as `owner/name` or
+    /// `owner/*`. Unset or empty, the runner refuses every repository, before any clone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repositories: Option<Vec<String>>,
+    /// Whether a turn's `claude` runs in the OS sandbox (`sandbox-exec` on macOS, `bwrap`
+    /// on Linux): `auto` (the default; with no sandbox the runner does not start) or `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<String>,
+}
+
+/// `tool_ceiling` in the `[runner]` table: a named ceiling (`"default"`,
+/// `"coordinator"`) or a list of tools.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum ToolCeiling {
+    /// A named ceiling.
+    Named(String),
+    /// At most these tools.
+    Tools(Vec<String>),
 }
 
 impl RunnerConfig {
@@ -402,6 +429,9 @@ impl RunnerConfig {
             && self.upgrade_sign_identity.is_none()
             && self.user_units.is_none()
             && self.core_checkout.is_none()
+            && self.tool_ceiling.is_none()
+            && self.repositories.is_none()
+            && self.sandbox.is_none()
     }
 }
 
@@ -849,7 +879,7 @@ fn private_file(path: &Path) -> io::Result<fs::File> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, Kind, Profile, ProfileName, RunnerConfig, Storage};
+    use super::{Config, Kind, Profile, ProfileName, RunnerConfig, Storage, ToolCeiling};
 
     fn name(s: &str) -> ProfileName {
         s.parse().unwrap()
@@ -924,6 +954,31 @@ mod tests {
         assert!(saved.contains("template = \"coordinated\""), "{saved}");
         assert!(saved.contains("root = \"~/code\""), "{saved}");
         assert!(saved.contains("agent_turns = 90"), "{saved}");
+    }
+
+    #[test]
+    fn the_runner_trust_keys_take_a_named_ceiling_or_a_list() {
+        let path = std::path::Path::new("config.toml");
+        let c = Config::parse(
+            "[runner]\ntool_ceiling = \"coordinator\"\nrepositories = [\"acme/app\", \"acme/*\"]\nsandbox = \"off\"\n",
+            path,
+        )
+        .unwrap();
+        assert_eq!(
+            c.runner.tool_ceiling,
+            Some(ToolCeiling::Named("coordinator".into()))
+        );
+        assert_eq!(
+            c.runner.repositories,
+            Some(vec!["acme/app".to_owned(), "acme/*".to_owned()])
+        );
+        assert_eq!(c.runner.sandbox.as_deref(), Some("off"));
+        assert!(!c.runner.is_empty());
+        let c = Config::parse("[runner]\ntool_ceiling = [\"Read\", \"Grep\"]\n", path).unwrap();
+        assert_eq!(
+            c.runner.tool_ceiling,
+            Some(ToolCeiling::Tools(vec!["Read".into(), "Grep".into()]))
+        );
     }
 
     #[test]
