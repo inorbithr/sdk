@@ -111,9 +111,16 @@ mod tests {
         std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
     }
 
+    /// A folder only its owner can write, whatever the umask of the shell running the test.
+    fn private_tempdir() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        mode(d.path(), 0o700);
+        d
+    }
+
     #[test]
     fn a_file_only_its_owner_can_write_is_opened() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let p = dir.path().join("keys");
         std::fs::write(&p, "x").unwrap();
         for m in [0o600, 0o644, 0o444, 0o400] {
@@ -129,7 +136,7 @@ mod tests {
 
     #[test]
     fn a_group_or_world_writable_file_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let p = dir.path().join("keys");
         std::fs::write(&p, "x").unwrap();
         for m in [0o620, 0o602, 0o666, 0o660, 0o606] {
@@ -141,7 +148,7 @@ mod tests {
 
     #[test]
     fn a_group_or_world_writable_directory_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let p = dir.path().join("keys");
         std::fs::write(&p, "x").unwrap();
         mode(dir.path(), 0o777);
@@ -152,7 +159,7 @@ mod tests {
 
     #[test]
     fn a_directory_is_not_a_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let p = dir.path().join("keys");
         std::fs::create_dir(&p).unwrap();
         assert!(
@@ -164,7 +171,7 @@ mod tests {
 
     #[test]
     fn appending_makes_the_file_and_directory_private() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let p = dir.path().join("a").join("b").join("seen");
         assert!(open_trusted(&p, true).unwrap().is_some());
         assert_eq!(
@@ -193,7 +200,7 @@ mod tests {
 
     #[test]
     fn appending_never_follows_a_link_and_tightens_what_is_there() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let outside = tempfile::tempdir().unwrap();
         let elsewhere = outside.path().join("elsewhere");
         std::fs::write(&elsewhere, "kept").unwrap();
