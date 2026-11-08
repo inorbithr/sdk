@@ -1222,23 +1222,23 @@ mod tests {
         let out = Out { json: true };
         for (asked, kept) in [("1", 1), ("10", 10), ("50", 50), (" 7 ", 7)] {
             let mut a = args(Some("https://acme.example/"), false);
-            a.crawl_rate = CrawlRate::parse(asked).unwrap();
+            a.crawl_rate = asked.parse::<CrawlRate>().unwrap();
             let p = decide(&a, None, false, ui, out).unwrap().unwrap();
             assert_eq!(p.rate, kept, "asked {asked}");
         }
         for bad in ["0", "51", "-1", "1000", "fast", "", "2.5"] {
             let mut a = args(Some("https://acme.example/"), false);
-            a.crawl_rate = CrawlRate::parse(bad).unwrap();
+            a.crawl_rate = bad.parse::<CrawlRate>().unwrap();
             let e = decide(&a, None, false, ui, out).unwrap_err();
             assert!(matches!(e, Error::Usage(_)), "{bad}: {e:?}");
             assert!(e.to_string().contains("1 to 50"), "{bad}: {e}");
         }
         // Nothing is asked of the rate when no crawl runs.
         let mut a = args(None, true);
-        a.crawl_rate = CrawlRate::parse("fast").unwrap();
+        a.crawl_rate = "fast".parse::<CrawlRate>().unwrap();
         assert!(decide(&a, None, false, ui, out).unwrap().is_none());
         let mut a = args(None, false);
-        a.crawl_rate = CrawlRate::parse("fast").unwrap();
+        a.crawl_rate = "fast".parse::<CrawlRate>().unwrap();
         assert!(decide(&a, None, false, ui, out).unwrap().is_none());
     }
 

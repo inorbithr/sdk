@@ -2180,15 +2180,6 @@ pub const CRAWL_RATE_DEFAULT: u32 = 10;
 pub struct CrawlRate(String);
 
 impl CrawlRate {
-    /// The clap value parser.
-    ///
-    /// # Errors
-    /// Never: the value is checked later, by [`CrawlRate::get`].
-    #[must_use]
-    pub fn parse(raw: &str) -> Result<Self, std::convert::Infallible> {
-        Ok(Self(raw.trim().to_owned()))
-    }
-
     /// A rate already known to be right (a test, a caller in code).
     #[must_use]
     pub fn of(per_second: u32) -> Self {
@@ -2208,6 +2199,15 @@ impl CrawlRate {
                 self.0
             )),
         }
+    }
+}
+
+impl std::str::FromStr for CrawlRate {
+    type Err = std::convert::Infallible;
+
+    /// Never fails: the value is checked later, by [`CrawlRate::get`].
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Ok(Self(raw.trim().to_owned()))
     }
 }
 
@@ -2251,7 +2251,7 @@ pub struct InitCrawlArgs {
         value_name = "N",
         env = "IOHR_CRAWL_RATE",
         default_value_t = CrawlRate::default(),
-        value_parser = CrawlRate::parse
+        value_parser = clap::value_parser!(CrawlRate)
     )]
     pub crawl_rate: CrawlRate,
     /// Follow every other name in the site's domain (a link to `blog.acme.example` from
