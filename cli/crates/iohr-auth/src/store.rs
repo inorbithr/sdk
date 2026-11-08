@@ -619,33 +619,34 @@ mod tests {
         assert_eq!(mode, 0o600);
     }
 
-    /// Runs against the real OS store. Where the machine has none, or it is locked, the
-    /// test says so and returns: an absent store is reported, never faked. CI sets
-    /// `IOHR_TEST_REQUIRE_STORE`, which turns that into a failure.
+    /// Runs against the real OS store, and only where `IOHR_TEST_REQUIRE_STORE` is set: CI
+    /// on macOS and Windows, and `mise run cli:keyring` on Linux. There a missing or
+    /// locked store is a failure. Without the variable the test says so and returns,
+    /// because on a developer's Mac the login Keychain can wait on an access prompt
+    /// nobody sees and hold the Keychain lock, which stalls every other `iohr` that
+    /// reads its credentials, sign-in included.
     #[test]
     fn os_credential_store() {
-        let skip = |why: &str| {
-            let required = std::env::var("IOHR_TEST_REQUIRE_STORE").is_ok_and(|v| !v.is_empty());
-            assert!(!required, "credential store required: {why}");
-            eprintln!("os_credential_store: skipped, {why}");
-        };
-        match KeyringStore::open() {
-            Ok(store) => {
-                let k = key("iohr-test", &format!("t{}", std::process::id()));
-                let _ = store.delete(&k);
-                match store.set(&k, &Redacted::new("probe".into())) {
-                    Err(StoreError::Unavailable(why)) => {
-                        skip(&format!("store locked or absent: {why}"));
-                    }
-                    other => {
-                        other.unwrap();
-                        assert_eq!(store.get(&k).unwrap().unwrap().expose(), "probe");
-                        assert!(store.delete(&k).unwrap());
-                    }
-                }
-            }
-            Err(e) => skip(&e.to_string()),
+        let required = std::env::var("IOHR_TEST_REQUIRE_STORE").is_ok_and(|v| !v.is_empty());
+        if !required {
+            eprintln!(
+                "os_credential_store: skipped, the real OS store is tested only where \
+                 IOHR_TEST_REQUIRE_STORE is set (CI, mise run cli:keyring)"
+            );
+            return;
         }
+        let store =
+            KeyringStore::open().unwrap_or_else(|e| panic!("credential store required: {e}"));
+        let k = key("iohr-test", &format!("t{}", std::process::id()));
+        let _ = store.delete(&k);
+        match store.set(&k, &Redacted::new("probe".into())) {
+            Err(StoreError::Unavailable(why)) => {
+                panic!("credential store required: store locked or absent: {why}")
+            }
+            other => other.unwrap(),
+        }
+        assert_eq!(store.get(&k).unwrap().unwrap().expose(), "probe");
+        assert!(store.delete(&k).unwrap());
     }
 
     #[tokio::test]
