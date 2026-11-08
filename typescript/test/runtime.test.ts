@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { describe, it } from "node:test";
 import { inspect } from "node:util";
 import { bearer } from "../src/auth.js";
 import { CODES, codeForStatus } from "../src/errors.js";
