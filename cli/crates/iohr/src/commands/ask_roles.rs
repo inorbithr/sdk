@@ -331,6 +331,8 @@ mod imp {
     }
 
     impl Routed {
+        // Stub of the unix `show`: same signature for the caller, nothing to await or use.
+        #[allow(clippy::unused_async, clippy::unused_self)]
         pub(crate) async fn show(self) {}
     }
 }
