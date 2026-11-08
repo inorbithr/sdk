@@ -286,8 +286,10 @@ it runs only in the runner's own bare mirror after its configuration is checked 
 credential, proxy, URL rewrite, include or hook key; `origin` exactly the job's
 repository). `gh` gets it as `GH_TOKEN` on that one child. A token for another repository
 is refused. The host's own `gh` sign-in is used only where the platform says its App is
-not installed for the account (or the platform is older than the call), and the log says
-so; any other refusal leaves the lease unaccepted. The model's process and the check's
+not installed for the account (or the platform is older than the call), only when the
+machine's settings allow it (`allow_host_git_credentials = true`; off by default), and
+the log says so; without that setting the job fails before its checkout with a reason
+that names the setting, and any other refusal leaves the lease unaccepted. The model's process and the check's
 process run with an empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's
 credential helpers cleared and its prompts off (RFC 0147 containment).
 - Why: a person's long-lived sign-in on a runner can push to every repository they can,
@@ -296,7 +298,8 @@ credential helpers cleared and its prompts off (RFC 0147 containment).
   that `git credential fill` answers the token for `github.com` only and never a host
   helper; that no credential is in any git configuration and an old one is removed; that
   a mirror with configuration the runner did not set is not used; that no hook runs with
-  the token; that only "not installed" falls back to the host; that `gh` in the model's
+  the token; that only "not installed" falls back to the host, and only with
+  `allow_host_git_credentials` set (refused by default, allowed when set); that `gh` in the model's
   environment is signed out and git there asks no helper.
 - Refs: CRA I.2(d); least privilege.
 
