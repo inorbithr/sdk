@@ -410,5 +410,5 @@ fn without_an_index_search_says_how_to_make_one() {
         text(&o)
     );
     // `?` never fails for a missing index: it just adds nothing.
-    assert!(iohr::kb::sources(&root, "anything", 5).is_empty());
+    assert_eq!(iohr::kb::sources(&root, "anything", 5), Vec::new());
 }

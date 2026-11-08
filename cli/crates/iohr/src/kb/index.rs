@@ -677,15 +677,14 @@ mod tests {
         let s = filled();
         let hits = s.search("pricing", Some("a.test"), 5).unwrap();
         assert_eq!(hits[0].url, "https://a.test/pricing");
-        assert!(s.search("zzzz nothing", None, 5).unwrap().is_empty());
+        assert_eq!(s.search("zzzz nothing", None, 5).unwrap(), Vec::new());
         assert!(
             s.search("the of and", None, 5).unwrap().is_empty(),
             "only stop words"
         );
-        assert!(
-            s.search("battery", Some("other.test"), 5)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            s.search("battery", Some("other.test"), 5).unwrap(),
+            Vec::new()
         );
     }
 

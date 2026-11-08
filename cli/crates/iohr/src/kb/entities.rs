@@ -312,6 +312,9 @@ mod tests {
 
     #[test]
     fn a_page_with_nothing_has_nothing() {
-        assert!(of_page("https://a.test/", &Page::default(), &[]).is_empty());
+        assert_eq!(
+            of_page("https://a.test/", &Page::default(), &[]),
+            Vec::new()
+        );
     }
 }

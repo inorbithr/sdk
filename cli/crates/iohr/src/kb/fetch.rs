@@ -448,7 +448,7 @@ mod tests {
             why,
             ["answered 404", "answered 301", "not HTML", "over 2 MB"]
         );
-        assert!(got.pages.is_empty());
+        assert_eq!(got.pages, Vec::new());
     }
 
     #[tokio::test]

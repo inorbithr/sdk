@@ -381,7 +381,10 @@ mod tests {
             &HashSet::new(),
         );
         assert_eq!(c.chunks.len(), 1);
-        assert!(chunk("https://a/e", &[], &HashSet::new()).chunks.is_empty());
+        assert_eq!(
+            chunk("https://a/e", &[], &HashSet::new()).chunks,
+            Vec::new()
+        );
     }
 
     #[test]
