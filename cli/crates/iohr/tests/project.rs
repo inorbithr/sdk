@@ -661,7 +661,7 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     assert!(out.status.success(), "{}", text(&out));
     let t = text(&out);
     assert!(
-        t.contains("would: write 85 files into ./my-shop (in the folder you are in)"),
+        t.contains("would: write 86 files into ./my-shop (in the folder you are in)"),
         "{t}"
     );
     assert!(
@@ -1463,6 +1463,88 @@ fn the_documents_language_makes_an_atlas_and_memory_project_with_no_smoke_test()
     assert!(
         agents.contains("atlas new") && agents.contains("memory remember"),
         "{agents}"
+    );
+}
+
+/// Init writes a starter IO.md at the project root naming the binary that ran it, `--no-io-md`
+/// skips it, and an IO.md or io.md the person already has is never touched.
+#[test]
+fn init_writes_a_starter_io_md_and_never_overwrites_one() {
+    let h = tempfile::tempdir().unwrap();
+    let d = h.path().join("w/starter");
+    let o = iohr(
+        h.path(),
+        &[
+            "project",
+            "init",
+            "starter",
+            "--template",
+            "blank",
+            "--dir",
+            d.to_str().unwrap(),
+            "--no-smoke",
+            "--yes",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    let io = std::fs::read_to_string(d.join("IO.md")).unwrap();
+    assert!(
+        io.contains("starter") && io.to_lowercase().contains("test"),
+        "{io}"
+    );
+    assert!(io.contains(" context"), "{io}");
+
+    let skip = h.path().join("w/skip");
+    let o = iohr(
+        h.path(),
+        &[
+            "project",
+            "init",
+            "skip",
+            "--template",
+            "blank",
+            "--dir",
+            skip.to_str().unwrap(),
+            "--no-smoke",
+            "--no-io-md",
+            "--yes",
+        ],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(!skip.join("IO.md").exists() && !skip.join("io.md").exists());
+
+    // Run again in its own folder: an IO.md the person edited, or an io.md in its place, stays.
+    let args = [
+        "project",
+        "init",
+        "starter",
+        "--template",
+        "blank",
+        "--dir",
+        d.to_str().unwrap(),
+        "--no-smoke",
+        "--yes",
+    ];
+    std::fs::write(d.join("IO.md"), "MY OWN RULES\n").unwrap();
+    let o = iohr(h.path(), &args);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(
+        std::fs::read_to_string(d.join("IO.md")).unwrap(),
+        "MY OWN RULES\n"
+    );
+    std::fs::remove_file(d.join("IO.md")).unwrap();
+    std::fs::write(d.join("io.md"), "lower case\n").unwrap();
+    let o = iohr(h.path(), &args);
+    assert!(o.status.success(), "{}", text(&o));
+    let names: Vec<String> = std::fs::read_dir(&d)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.eq_ignore_ascii_case("io.md"))
+        .collect();
+    assert_eq!(names, ["io.md"], "no second spelling is written");
+    assert_eq!(
+        std::fs::read_to_string(d.join("io.md")).unwrap(),
+        "lower case\n"
     );
 }
 
