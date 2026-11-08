@@ -4,7 +4,7 @@
 //! words the note; the card, the terminal ask and the stored yes live where they already do
 //! ([`crate::permissions::trust`], [`crate::actions`]).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::headless::{Blocked, blocked};
 use crate::permissions::secrets;
@@ -96,6 +96,27 @@ fn word_path(word: &str) -> Option<&str> {
         .then_some(w)
 }
 
+/// `word`, written with `/` as a question is, taken from `base` (an absolute word replaces it).
+/// On Windows a canonical `base` is a `\\?\` path, which the system takes literally: `/` is not a
+/// separator in it and `..` is not resolved. So there the word is made `\`-separated and its
+/// `.` and `..` are folded here, by component; elsewhere this is `base.join(word)`.
+fn join_word(base: &Path, word: &str) -> PathBuf {
+    if !cfg!(windows) {
+        return base.join(word);
+    }
+    let mut out = PathBuf::new();
+    for part in base.join(word.replace('/', "\\")).components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// The folders the question names (`/etc/nginx`, `~/Downloads/x`, `../api`, `src/`), in order,
 /// each one that exists, can be listed, is not the folder it was asked in and is not a secret
 /// place. A bare name such as `Downloads` is the model's to offer, not guessed here.
@@ -110,9 +131,9 @@ pub(crate) fn named_folders<'a>(
         let at = if w == "~" {
             home?.to_path_buf()
         } else if let Some(rest) = w.strip_prefix("~/") {
-            home?.join(rest)
+            join_word(home?, rest)
         } else {
-            cwd.join(w)
+            join_word(cwd, w)
         };
         let real = allowable_at(&at, cwd, home, Source::Card).ok()?;
         (Some(&real) != here.as_ref()).then_some(real)
@@ -127,7 +148,7 @@ pub(crate) fn expand_home(path: &Path, home: Option<&Path>) -> PathBuf {
         (Some("~"), Some(h)) => h.to_path_buf(),
         (Some(p), Some(h)) => p
             .strip_prefix("~/")
-            .map_or_else(|| path.to_path_buf(), |r| h.join(r)),
+            .map_or_else(|| path.to_path_buf(), |r| join_word(h, r)),
         _ => path.to_path_buf(),
     }
 }
@@ -412,7 +433,7 @@ mod tests {
         let r = needed(&q, &work, Some(&home), (true, &[])).unwrap();
         assert_eq!(r.why, Why::Named);
         assert!(!r.is_cwd);
-        assert_eq!(r.folder, home.join("Downloads/x"));
+        assert_eq!(r.folder, home.join("Downloads").join("x"));
         // `~/` and `../` name folders too.
         let tilde = needed("list ~/Downloads", &work, Some(&home), (true, &[])).unwrap();
         assert_eq!(tilde.folder, home.join("Downloads"));

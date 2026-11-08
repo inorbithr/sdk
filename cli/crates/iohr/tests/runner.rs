@@ -1923,6 +1923,29 @@ fn session_socket(data: &Path) -> Option<std::path::PathBuf> {
         .find(|p| p.exists())
 }
 
+/// How many sessions the host counts, asked on its socket (`status`): none while no host
+/// answers. A shell that was started is in the count only once it has joined, not when the
+/// socket first appears.
+fn host_sessions(data: &Path) -> usize {
+    use std::io::{BufRead as _, BufReader};
+    let Some(sock) = session_socket(data) else {
+        return 0;
+    };
+    let Ok(mut s) = std::os::unix::net::UnixStream::connect(sock) else {
+        return 0;
+    };
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    if writeln!(s, "status").is_err() {
+        return 0;
+    }
+    let mut line = String::new();
+    let _ = BufReader::new(s).read_line(&mut line);
+    line.split("sessions=")
+        .nth(1)
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 /// What the shell and the host wrote, for a failure message.
 fn session_diag(dir: &Path) -> String {
     let host = std::fs::read_dir(dir.join("data/session"))
@@ -2042,6 +2065,12 @@ async fn a_killed_shell_takes_the_host_with_it() {
     })
     .await;
     assert!(beats_at_least(&server, 1).await >= 1);
+    // Kill only a shell the host has counted: one killed before it joined leaves a host nobody
+    // joined, which waits out its first-join window (30 s) and not the pipe's close.
+    wait_until("the shell to join", || {
+        host_sessions(&dir.path().join("data")) >= 1
+    })
+    .await;
     // SIGKILL: the shell cannot say goodbye; the kernel closes its end of the pipe.
     shell.kill().unwrap();
     shell.wait().unwrap();
