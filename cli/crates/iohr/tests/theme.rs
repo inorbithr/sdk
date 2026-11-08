@@ -137,17 +137,16 @@ fn list_show_install_and_off_work_and_say_what_they_write() {
     assert!(!hook(&rig).contains("_iohr_prompt_precmd"));
 }
 
-/// The colour of the first cell on the screen that holds `glyph`.
-fn colour_of(screen: &vt100::Screen, glyph: &str) -> Option<(u8, u8, u8)> {
+/// The colour of the first cell of the first `text` on the screen.
+fn colour_of(screen: &vt100::Screen, text: &str) -> Option<(u8, u8, u8)> {
     for r in 0..ROWS {
-        for c in 0..COLS {
-            let cell = screen.cell(r, c)?;
-            if cell.contents() == glyph {
-                return match cell.fgcolor() {
-                    vt100::Color::Rgb(r, g, b) => Some((r, g, b)),
-                    _ => None,
-                };
-            }
+        let line = pty::row(screen, r);
+        if let Some(at) = line.find(text) {
+            let col = u16::try_from(line[..at].chars().count()).unwrap();
+            return match screen.cell(r, col)?.fgcolor() {
+                vt100::Color::Rgb(r, g, b) => Some((r, g, b)),
+                _ => None,
+            };
         }
     }
     None
@@ -209,7 +208,7 @@ fn zsh_with_the_hook_and_the_theme_on_draws_the_prompt_in_the_themes_colours() {
     let screen = s.screen.screen();
     assert_eq!(colour_of(screen, "❯"), Some((0xff, 0x9e, 0x1b)));
     assert_eq!(
-        colour_of(screen, "m"),
+        colour_of(screen, "main"),
         Some((0xc0, 0x84, 0xfc)),
         "the branch name"
     );

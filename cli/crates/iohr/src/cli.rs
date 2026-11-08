@@ -232,6 +232,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "asks",
             "permissions",
             "shell",
+            "theme",
             "runner",
             "session",
             "stop",
