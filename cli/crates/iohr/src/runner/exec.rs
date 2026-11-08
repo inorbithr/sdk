@@ -158,6 +158,13 @@ impl ClaudeExec {
             .unwrap_or_default()
     }
 
+    /// A voice lease's session (core RFC 0215): the scrubbed command, run in `dir`.
+    pub(crate) fn session_command(&self, args: &[String], dir: &Path) -> Command {
+        let mut cmd = self.command(args);
+        cmd.current_dir(dir);
+        cmd
+    }
+
     /// The turn's command: its model's `cargo` builds into its repository's shared
     /// directory, not into a `target/` of the job's checkout (RFC 0189). `checkout` is
     /// relative to the working directory.
