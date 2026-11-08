@@ -91,7 +91,9 @@ fn word_path(word: &str) -> Option<&str> {
         || w.starts_with('/')
         || w.starts_with("./")
         || w.starts_with("../")
-        || w.contains('/');
+        || w.contains('/')
+        // Windows also writes `C:\Users\me`, `..\api` and `~\Downloads`.
+        || (cfg!(windows) && w.contains('\\'));
     (path_like && w.len() <= 512 && !w.contains("://") && !w.chars().any(char::is_control))
         .then_some(w)
 }
@@ -107,12 +109,22 @@ pub(crate) fn named_folders<'a>(
     let here = cwd.canonicalize().ok();
     question.split_whitespace().filter_map(move |word| {
         let w = word_path(word)?;
+        // Both slashes separate on Windows, but not after a `\\?\` prefix, which
+        // `canonicalize` gives: a `/` there is part of the name.
+        let w = if cfg!(windows) {
+            std::borrow::Cow::Owned(w.replace('/', "\\"))
+        } else {
+            std::borrow::Cow::Borrowed(w)
+        };
+        let home_rest = w
+            .strip_prefix("~/")
+            .or_else(|| w.strip_prefix("~\\").filter(|_| cfg!(windows)));
         let at = if w == "~" {
             home?.to_path_buf()
-        } else if let Some(rest) = w.strip_prefix("~/") {
+        } else if let Some(rest) = home_rest {
             home?.join(rest)
         } else {
-            cwd.join(w)
+            cwd.join(&*w)
         };
         let real = allowable_at(&at, cwd, home, Source::Card).ok()?;
         (Some(&real) != here.as_ref()).then_some(real)
@@ -424,6 +436,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(up.folder, home.join("Downloads"));
+        // A Windows path, written with its own separator, is named as well.
+        #[cfg(windows)]
+        {
+            let q = format!("what is in {}?", home.join("Downloads").join("x").display());
+            let r = needed(&q, &work, Some(&home), (true, &[])).unwrap();
+            assert_eq!(r.folder, home.join("Downloads/x"));
+            let up = needed("look at ..\\Downloads", &work, Some(&home), (true, &[])).unwrap();
+            assert_eq!(up.folder, home.join("Downloads"));
+        }
     }
 
     #[test]
