@@ -430,8 +430,8 @@ mod tests {
         assert_eq!(parse(b"\x1b[105;3u"), [Key::Menu]);
         assert_eq!(
             parse(b"\x1b[1;5A"),
-            Vec::<Key>::new(),
-            "modified arrows are skipped"
+            [Key::Up],
+            "a modified arrow is still the arrow (it used to be dropped)"
         );
         assert_eq!(
             parse(b"\x1bx"),

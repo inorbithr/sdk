@@ -452,11 +452,9 @@ mod unix {
                     "this sign-in lacks coordinator:runner: sign in with `iohr login --scope coordinator:runner`"
                 )
             );
-            let secret = last_line("failed: Bearer abc123 at https://u:p@host/x").unwrap();
-            assert!(
-                !secret.contains("abc123") && !secret.contains("u:p"),
-                "{secret}"
-            );
+            let cut = last_line("failed: Bearer abc123 at https://u:p@host/x").unwrap();
+            let leaked = cut.contains("abc123") || cut.contains("u:p");
+            assert!(!leaked, "the host's last line kept a credential");
             assert_eq!(last_line("  \n\n"), None);
             assert!(last_line(&"x ".repeat(400)).unwrap().chars().count() <= 300);
         }
