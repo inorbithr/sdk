@@ -184,6 +184,9 @@ fn a_session_host_that_stops_at_once_says_why_not_just_its_exit_status() {
     // Bare `iohr` in a terminal joins the session host, starting it; signed out, it cannot run.
     let mut s = iohr(&home, &[]);
     s.until("the note", |sc| any(sc, "no session host"));
+    // Read only once the panel's box is painted: it covers the top right corner, and a note
+    // printed there is lost under it. A slow machine paints before the read, a fast one after.
+    s.until("the box", |sc| any(sc, "◆ iohr"));
     let screen = s.screen.screen().contents();
     assert!(screen.contains("stopped at once"), "{screen}");
     let log = screen

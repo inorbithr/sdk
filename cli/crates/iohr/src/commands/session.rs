@@ -336,7 +336,9 @@ mod unix {
         let joined = match join_host(g, None, &project).await {
             Ok(j) => Some(j),
             Err(e) => {
-                Out::note(&format!("no session host: {e}; the panel runs without one"));
+                crate::panel::note_below_the_box(&format!(
+                    "no session host: {e}; the panel runs without one"
+                ));
                 None
             }
         };
