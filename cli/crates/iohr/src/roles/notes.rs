@@ -14,6 +14,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+#[cfg(any(unix, test))]
 use crate::front;
 use crate::memory::store::{PROJECT_DIR, Scope, Store};
 
@@ -24,7 +25,9 @@ const MEMORY_COUNT: usize = 8;
 /// The most characters of the area one turn carries.
 const MEMORY_MAX: usize = 2_000;
 /// The most characters of the question and of the answer kept in the note.
+#[cfg(any(unix, test))]
 const ASKED_MAX: usize = 800;
+#[cfg(any(unix, test))]
 const SAID_MAX: usize = 2_000;
 /// The most of a note a turn takes.
 const READ_MAX: usize = 3_000;
@@ -116,6 +119,7 @@ pub(crate) fn read(root: &Path, role: &str) -> String {
 ///
 /// # Errors
 /// A message saying what could not be written (never the text).
+#[cfg(any(unix, test))]
 pub(crate) fn record(root: &Path, role: &str, asked: &str, said: &str) -> Result<(), String> {
     let path =
         handoff_file(root, role).ok_or_else(|| format!("`{role}` is not a safe Role name"))?;
