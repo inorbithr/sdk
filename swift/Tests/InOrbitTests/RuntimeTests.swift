@@ -57,6 +57,62 @@ final class RuntimeTests: XCTestCase {
             try Client<Public>(ClientOptions(token: Secret("t"), baseURL: URL(string: "https://api.example.com")!)))
     }
 
+    func testPlainHTTPGoesOnlyToThisMachine() {
+        for host in ["127.example.com", "127.0.0.1.example.com", "localhost.example", "::2", "[::1].example"] {
+            XCTAssertFalse(Client<Public>.isLoopback(host), host)
+        }
+        for host in ["localhost", "LocalHost", "127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1"] {
+            XCTAssertTrue(Client<Public>.isLoopback(host), host)
+        }
+        XCTAssertThrowsError(
+            try Client<Public>(ClientOptions(token: Secret("t"), baseURL: URL(string: "http://127.example.com")!)))
+        XCTAssertNoThrow(
+            try Client<Public>(ClientOptions(token: Secret("t"), baseURL: URL(string: "http://[::1]:8080")!)))
+    }
+
+    func testARequestNeverPrintsItsToken() {
+        let request = HTTPRequest(
+            method: .get, url: URL(string: "https://api.example.com/v1/me")!,
+            headers: ["authorization": "Bearer tok-do-not-print", "accept": "application/json"],
+            body: Data("{}".utf8), timeout: 5)
+        var dumped = ""
+        dump(request, to: &dumped)
+        for text in ["\(request)", String(reflecting: request), dumped] {
+            XCTAssertFalse(text.contains("do-not-print"), text)
+        }
+        XCTAssertTrue("\(request)".contains("authorization: <redacted>"), "\(request)")
+    }
+
+    // MARK: answer size
+
+    func testAnOversizedChunkedAnswerIsRefusedWhileItStreams() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [EndlessBody.self]
+        let transport = URLSessionTransport(configuration: config)
+        let request = HTTPRequest(
+            method: .get, url: URL(string: "https://endless.test/")!, headers: [:], body: nil, timeout: 30)
+        do {
+            _ = try await transport.send(request)
+            XCTFail("an answer past 16 MiB was read")
+        } catch let e as BodyTooLarge {
+            XCTAssertEqual(e.limit, 16 << 20)
+        }
+        // It stopped near the limit, not at the end of the body.
+        XCTAssertLessThan(EndlessBody.sent.value, (16 << 20) + 8 * EndlessBody.chunk)
+
+        // A caller's own transport that reads it whole is refused by the client.
+        var options = ClientOptions(token: Secret("t"), baseURL: URL(string: "https://endless.test")!)
+        options.transport = TooBig()
+        let client = try Client<Public>(options)
+        let op = Codegen.Operation(name: "me", method: .get, path: "/v1/me", template: "/v1/me", scopes: [])
+        do {
+            _ = try await client.call(op, options: CallOptions())
+            XCTFail("an answer past 16 MiB was accepted")
+        } catch let e as TooLargeError {
+            XCTAssertTrue(e.message.contains("16 MiB"), e.message)
+        }
+    }
+
     func testTheUserAgentNamesTheSDK() {
         let ua = Core.userAgent(suffix: "my-app/1.0")
         XCTAssertTrue(ua.hasPrefix("inorbithr-sdk-swift/\(SDK.version) swift/"), ua)
@@ -188,3 +244,59 @@ actor Counter {
     private(set) var value = 0
     func add() { value += 1 }
 }
+
+/// Answers a chunked body that never ends, one `chunk` at a time, until the client stops.
+final class EndlessBody: URLProtocol, @unchecked Sendable {
+    static let chunk = 64 << 10
+    static let sent = Tally()
+    private var stopped = Tally()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["transfer-encoding": "chunked", "content-type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        let block = Data(repeating: 0x20, count: Self.chunk)
+        DispatchQueue.global().async {
+            // 64 MiB at most, so a broken cap fails the test rather than hanging it.
+            for _ in 0..<1024 where self.stopped.value == 0 {
+                Self.sent.add(Self.chunk)
+                self.client?.urlProtocol(self, didLoad: block)
+            }
+            if self.stopped.value == 0 { self.client?.urlProtocolDidFinishLoading(self) }
+        }
+    }
+
+    override func stopLoading() { stopped.add(1) }
+}
+
+/// A transport that answers 16 MiB and one byte, whole.
+struct TooBig: HTTPTransport {
+    func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        HTTPResponse(head: HTTPResponseHead(status: 200, headers: [:]), body: Data(count: (16 << 20) + 1))
+    }
+
+    func open(_ request: HTTPRequest) async throws -> (HTTPResponseHead, AsyncThrowingStream<Data, any Error>) {
+        throw TransportFailure.connection("no streams here")
+    }
+}
+
+/// A count shared across threads.
+final class Tally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return n
+    }
+    func add(_ k: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        n += k
+    }
+}
+

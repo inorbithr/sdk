@@ -36,6 +36,34 @@ public struct HTTPRequest: Sendable {
     public var timeout: TimeInterval
 }
 
+/// Printed, a request shows its method, URL, header names and body size; the
+/// `authorization` value only as the marker [SR-10].
+extension HTTPRequest: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    public var description: String {
+        let names = headers.keys.sorted().map { $0 == "authorization" ? "\($0): \(Secret.marker)" : $0 }
+        return "HTTPRequest(\(method.rawValue) \(url), headers: [\(names.joined(separator: ", "))], body: \(body?.count ?? 0) bytes)"
+    }
+
+    public var debugDescription: String { description }
+
+    public var customMirror: Mirror {
+        Mirror(
+            self,
+            children: [
+                "method": method.rawValue, "url": url, "headers": headers.keys.sorted(),
+                "body": "\(body?.count ?? 0) bytes", "timeout": timeout,
+            ])
+    }
+}
+
+/// The most of an answer's body `send` reads, decoded: 16 MiB.
+let maxBody = 16 << 20
+
+/// The answer's body grew past the limit while it was read; the request was cancelled.
+struct BodyTooLarge: Error {
+    let limit: Int
+}
+
 /// An answer's status and headers.
 public struct HTTPResponseHead: Sendable {
     /// The HTTP status.
@@ -90,8 +118,12 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
     private let delegate: SessionDelegate
 
     /// A transport on a session of its own.
-    public init() {
-        let config = URLSessionConfiguration.ephemeral
+    public convenience init() {
+        self.init(configuration: .ephemeral)
+    }
+
+    /// A transport on `configuration`, hardened the same way (tests add a `URLProtocol`).
+    init(configuration config: URLSessionConfiguration) {
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.urlCache = nil
@@ -119,38 +151,41 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         return r
     }
 
+    /// Reads the answer as it streams in and stops at `maxBody` bytes, decoded: past it the
+    /// request is cancelled and the call fails, so an oversized answer is never held whole.
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
-        let req = urlRequest(request)
-        let box = TaskBox()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<HTTPResponse, any Error>) in
-                let task = session.dataTask(with: req) { data, response, error in
-                    if let error {
-                        cont.resume(throwing: Self.failure(error))
-                        return
-                    }
-                    guard let http = response as? HTTPURLResponse else {
-                        cont.resume(throwing: TransportFailure.connection("the answer was not HTTP"))
-                        return
-                    }
-                    cont.resume(returning: HTTPResponse(head: Self.head(http), body: data ?? Data()))
-                }
-                box.set(task)
-                task.resume()
+        let (head, chunks, box) = try await start(request, limit: maxBody)
+        var body = Data()
+        do {
+            for try await chunk in chunks {
+                body.append(chunk)
+                if body.count > maxBody { throw BodyTooLarge(limit: maxBody) }
             }
-        } onCancel: {
+        } catch {
             box.cancel()
+            throw error
         }
+        try Task.checkCancellation()
+        return HTTPResponse(head: head, body: body)
     }
 
     public func open(_ request: HTTPRequest) async throws -> (HTTPResponseHead, AsyncThrowingStream<Data, any Error>) {
+        let (head, chunks, _) = try await start(request, limit: nil)
+        return (head, chunks)
+    }
+
+    /// Starts `request` and answers once the head arrives. With a `limit`, the delegate ends
+    /// the body with `BodyTooLarge` and cancels the request as soon as more has arrived.
+    private func start(_ request: HTTPRequest, limit: Int?) async throws -> (
+        HTTPResponseHead, AsyncThrowingStream<Data, any Error>, TaskBox
+    ) {
         let req = urlRequest(request)
         let (chunks, chunkContinuation) = AsyncThrowingStream<Data, any Error>.makeStream()
         let box = TaskBox()
         let head = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<HTTPResponseHead, any Error>) in
                 let task = session.dataTask(with: req)
-                delegate.register(task, head: cont, chunks: chunkContinuation)
+                delegate.register(task, head: cont, chunks: chunkContinuation, limit: limit)
                 chunkContinuation.onTermination = { _ in task.cancel() }
                 box.set(task)
                 task.resume()
@@ -158,7 +193,7 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         } onCancel: {
             box.cancel()
         }
-        return (head, chunks)
+        return (head, chunks, box)
     }
 
     static func head(_ http: HTTPURLResponse) -> HTTPResponseHead {
@@ -209,6 +244,8 @@ private final class SessionDelegate: NSObject, URLSessionDataDelegate, @unchecke
     private struct Entry {
         var head: CheckedContinuation<HTTPResponseHead, any Error>?
         let chunks: AsyncThrowingStream<Data, any Error>.Continuation
+        let limit: Int?
+        var received = 0
     }
 
     private let lock = NSLock()
@@ -216,11 +253,11 @@ private final class SessionDelegate: NSObject, URLSessionDataDelegate, @unchecke
 
     func register(
         _ task: URLSessionTask, head: CheckedContinuation<HTTPResponseHead, any Error>,
-        chunks: AsyncThrowingStream<Data, any Error>.Continuation
+        chunks: AsyncThrowingStream<Data, any Error>.Continuation, limit: Int?
     ) {
         lock.lock()
         defer { lock.unlock() }
-        entries[task.taskIdentifier] = Entry(head: head, chunks: chunks)
+        entries[task.taskIdentifier] = Entry(head: head, chunks: chunks, limit: limit)
     }
 
     private func take(_ id: Int, finish: Bool) -> Entry? {
@@ -247,7 +284,22 @@ private final class SessionDelegate: NSObject, URLSessionDataDelegate, @unchecke
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        take(dataTask.taskIdentifier, finish: false)?.chunks.yield(data)
+        lock.lock()
+        let id = dataTask.taskIdentifier
+        guard var entry = entries[id] else {
+            lock.unlock()
+            return
+        }
+        entry.received += data.count
+        let over = entry.limit.map { entry.received > $0 } ?? false
+        if over { entries.removeValue(forKey: id) } else { entries[id] = entry }
+        lock.unlock()
+        if over, let limit = entry.limit {
+            entry.chunks.finish(throwing: BodyTooLarge(limit: limit))
+            dataTask.cancel()
+        } else {
+            entry.chunks.yield(data)
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
