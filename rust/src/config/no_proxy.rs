@@ -211,7 +211,8 @@ mod tests {
 
     #[test]
     fn the_rules_never_print_the_proxy_password() {
-        let rules = ProxyRules::new(Some("http://user:pr0xy-pass@proxy.example:3128"), true, &[]).unwrap();
+        let rules =
+            ProxyRules::new(Some("http://user:pr0xy-pass@proxy.example:3128"), true, &[]).unwrap();
         for shown in [format!("{rules:?}"), format!("{rules:#?}")] {
             assert!(!shown.contains("pr0xy-pass"), "{shown}");
             assert!(shown.contains("<redacted>@proxy.example"), "{shown}");
