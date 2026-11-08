@@ -130,6 +130,22 @@ Boundary: the approvals service to the runner, and the runner to `kubectl` (SR-3
 | E | An ask runs something outside the catalogue or in the cluster's own namespaces | SR-34: a fixed catalogue in the binary; `kubectl` by argument vector, no shell; `kube-system`, `kube-public`, `kube-node-lease` and non-DNS-label names refused |
 | S | Another machine reports progress as this runner | SR-34: each report is signed with this runner's enrolled P-256 key, kept in the credential store |
 
+### `iohr runner` and the coordinator
+
+Boundary: the coordinator to the runner, and the runner to the `claude` process it starts
+on the machine (SR-35).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| E | A turn asks for a shell or another tool the machine's owner never meant to give | SR-35: the local `tool_ceiling` (default `Read`, `Grep`, `Glob`, `Edit`, `Write`, no `Bash`) cuts the turn's tools; `claude` runs with `--restricted --tools`, so a tool outside it does not exist; a turn left with none is refused |
+| R | A tool is taken away without anyone noticing | SR-35: each dropped tool is named in the runner's log for that lease; a turn refused for it says which were dropped in its report |
+| E | A job checks out and works in a repository the owner did not choose | SR-35: the `repositories` allow-list is checked before a token is asked for or anything is cloned; empty by default, which refuses every repository |
+| T | The model writes outside its job: another project, the shell's start files, a git hook | SR-35: the OS sandbox allows writes only in the checkout (never its `.git`), the temporary and cache folders and Claude Code's own state |
+| I | The model reads keys or the runner's own configuration | SR-35: the sandbox hides the home folder's secret folders and the runner's configuration folder outside its working directory; Claude Code's deny rules also cover the secret folders |
+| I | The model sends what it read to any host | SR-35 on macOS: outbound network only to TCP 443, DNS and loopback. Partial: `bwrap` cannot filter by port, so on Linux the network is not limited, and TCP 443 reaches any host |
+| E | A machine with no sandbox runs turns unconfined without its owner knowing | SR-35: the runner does not start unless `sandbox = "off"` is set, and then warns at every start |
+| E | A flag, a lease or a job widens the limits | SR-35: the three keys have no flag and are read only from the local `config.toml`; a `SIGHUP` reload reads the same file |
+
 ### `iohr sdk add`
 
 Boundary: `iohr` to the package manager it runs in the person's project (SR-31).

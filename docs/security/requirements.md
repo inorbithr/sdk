@@ -353,6 +353,43 @@ vectors; that a missing tool, a bad param or systemd off Linux runs nothing;
   that each report verifies with the run key.
 - Refs: CRA I.2(d); least privilege.
 
+**SR-35. A runner limits what a coordinator's turn may do on this machine.**
+`iohr runner run` holds three local limits that no flag, lease or job can widen, read from
+the `[runner]` table of `config.toml` (and read again on `SIGHUP`, except the sandbox,
+which is decided at start).
+`tool_ceiling` caps the tools a turn gets: the tools the coordinator asks for are
+intersected with it, each tool taken away is named in the log, and `claude` gets
+`--restricted` and `--tools` with what is left, so a tool outside the ceiling does not
+exist for the model. The default is `Read`, `Grep`, `Glob`, `Edit` and `Write`, with no
+`Bash`: a shell can do whatever the user can, which the other limits cannot hold.
+`"coordinator"` keeps the coordinator's list as it is. A turn that asked for tools and is
+left with none is not started and is reported `refused_tool` with what was dropped.
+`repositories` is the allow-list of repositories a job is checked out and run in, each
+`owner/name` or `owner/*`. A job for any other repository is refused before a token is
+asked for or anything is cloned, and is reported `failed` with the reason; the default is
+empty, which refuses every repository, and the help and the error both say so.
+`sandbox` (`"auto"` by default) runs `claude` under the OS sandbox: on macOS
+`sandbox-exec` with a profile written for the turn, on Linux `bwrap` when it is installed
+and runs. Writes are allowed only in the turn's checkout (never its `.git`; the runner
+commits outside the sandbox), the temporary folders, the user's cache folder and Claude
+Code's own state; the contents of the home folder's secret folders and of the runner's
+configuration folder outside its working directory cannot be read; on macOS outbound
+network is limited to TCP 443, DNS and loopback (`bwrap` cannot filter by port, so on
+Linux only the file limits apply). With no working sandbox the runner does not start
+unless `sandbox = "off"`, and with `"off"` it prints a warning at every start.
+- Why: a runner on a person's machine starts a model with that person's rights for work
+  a remote service hands it; the machine's owner, not the service, decides how far that
+  reaches.
+- Verify: unit tests that the ceiling drops what it does not list and refuses a turn left
+  with nothing, that `claude` gets only the kept tools, that a turn with no sandbox
+  decision never starts `claude`; that an unlisted repository is refused with no token
+  call and no checkout, for an empty and a non-empty list; that the macOS profile denies
+  writes outside its folders, the checkout's `.git` and the secret folders, and limits the
+  network; that the `bwrap` arguments mount the root read-only; integration tests that a
+  refused turn never runs `claude` and that `config show` reports all three with their
+  source.
+- Refs: CRA I.2(d); least privilege.
+
 ## Reliability and traceability
 
 **SR-17. Request ids both ways.** Every request carries a client-generated request id
