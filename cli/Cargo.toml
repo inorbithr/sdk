@@ -38,7 +38,7 @@ regex = { version = "1", default-features = false, features = ["std", "perf", "u
 # Held at 0.8: typify's API takes schemars 0.8 types (`RootSchema`); see the `ignore` in
 # .github/dependabot.yml. Moves to 1.x with typify (oxidecomputer/typify#886).
 schemars = "0.8"
-rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "pty", "termios", "fs", "stdio"] }
 semver = "1"
 sigstore-verify = { version = "0.15", default-features = false, features = ["aws-lc-rs"] }
 syn = { version = "3", features = ["full"] }
@@ -56,6 +56,9 @@ tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util"
 toml = "1"
 toml_edit = "0.25"
 url = "2"
+# The terminal panel keeps a model of the child's screen: what lies under the floating box (its
+# shadow) and whether the child is on the alternate screen (ADR 0225).
+vt100 = { version = "0.16", default-features = false }
 zeroize = "1"
 
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
