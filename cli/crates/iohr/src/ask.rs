@@ -355,7 +355,7 @@ pub(crate) const CHECK: &str = "Check it before you rely on it.";
 #[must_use]
 pub(crate) fn label(agent: Agent) -> String {
     format!(
-        "Io · AI answer -- Io running on {}, an AI model, {PROVIDER} {CHECK}",
+        "Io -- Io running on {}, an AI model, {PROVIDER} {CHECK}",
         agent.display()
     )
 }
@@ -668,7 +668,7 @@ mod tests {
     fn the_label_names_the_agent_and_the_provider() {
         let l = label(Agent::Claude);
         assert!(
-            l.starts_with("Io · AI answer")
+            l.starts_with("Io -- Io running on")
                 && l.contains("Claude Code (local)")
                 && l.contains("goes to that provider")
         );

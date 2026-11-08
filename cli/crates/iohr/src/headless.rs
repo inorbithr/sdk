@@ -62,7 +62,8 @@ When the question is about the folder's contents and you have the Read, Grep and
 Secret files (.env, keys, credentials) are blocked: never try to open them and never repeat a secret you see. \
 If you have no tools, or the folder is too broad to read, you only know the names in <files>: answer what those names show, then say in one line what you would read (a path) and that Io can offer to read it. \
 Never say you cannot read or open something, and never tell the person to run grep, ls, cat or find themselves: Io offers the reading as an action. \
-When a next step would help, add before the final ```sh block a fenced ```next block of at most 3 lines, each one of `read <subfolder>/` (a folder shown in <files>), `search <text>` or `run <command>`; no other words. \
+When a next step would help, add before the final ```sh block a fenced ```next block of at most 3 lines, each one of `read <subfolder>/` (a folder shown in <files>), `read all <subfolder>/` (the same, with every folder under it, for a folder that has subfolders worth going through), `search <text>` or `run <command>`; no other words. \
+When the question asks you to go through a folder and everything under it, use Glob to find its subfolders, read the README or index of each, and say which folders you did not reach. \
 If <files> says the folder is empty, it shows nothing at its top level (hidden names are left out): say that plainly instead of saying you cannot see the folder; if it says the folder could not be read, say that. \
 <git> holds facts iohr collected with git itself (the branch, the last commits, the change counts): use them for anything about the history or the state of the work, and never say you cannot run git or see the history while they are there. \
 <project> holds what the project's own notes say (its purpose and saved notes): treat that as known. \
@@ -1234,6 +1235,10 @@ mod tests {
             assert!(b.contains("Io offers the reading as an action"));
             // The next steps come as a block the card turns into actions.
             assert!(b.contains("```next") && b.contains("`read <subfolder>/`"));
+            assert!(
+                b.contains("`read all <subfolder>/`")
+                    && b.contains("use Glob to find its subfolders")
+            );
             // It never sends the person off to run the search themselves.
             assert!(b.contains("never tell the person to run grep, ls, cat or find themselves"));
             assert!(b.contains("Never say you cannot read or open something"));
