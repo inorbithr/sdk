@@ -33,7 +33,7 @@ mod runner;
 mod sdk;
 mod sdk_add;
 mod session;
-mod shell;
+pub(crate) mod shell;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -62,18 +62,23 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
     // The permission server speaks MCP on stdout for one `iohr ask` run: it calls no API and
     // must print nothing else.
     #[cfg(unix)]
-    if let Command::PermissionServer { socket } = &cli.command {
+    if let Some(Command::PermissionServer { socket }) = &cli.command {
         return crate::permissions::server::run(socket)
             .map_err(|e| Error::Failed(format!("permission server: {}", e.kind())));
     }
     // A tunnel reaches an environment over ssh and calls no API, so a placeholder address is no bar.
     if !matches!(
         cli.command,
-        Command::Tunnel(_) | Command::Permissions(_) | Command::PermissionServer { .. }
+        Some(Command::Tunnel(_) | Command::Permissions(_) | Command::PermissionServer { .. })
     ) {
         g.check_environment()?;
     }
-    if g.sign_in.is_some() && !matches!(cli.command, Command::Runner(_) | Command::Coordinator(_)) {
+    if g.sign_in.is_some()
+        && !matches!(
+            cli.command,
+            Some(Command::Runner(_) | Command::Coordinator(_))
+        )
+    {
         return Err(Error::Usage(
             "--sign-in (IOHR_SIGN_IN) applies to `iohr runner` and `iohr coordinator` only".into(),
         ));
@@ -85,7 +90,15 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
             "--via-role, --via-session and --via-job need --sign-in io".into(),
         ));
     }
-    match cli.command {
+    // Bare `iohr` (the binary has already sent a non-terminal to the usage report).
+    let Some(command) = cli.command else {
+        return if crate::panel::bare_enters(g) {
+            session::enter(g, env).await
+        } else {
+            Err(Error::Usage(String::new()))
+        };
+    };
+    match command {
         Command::Login(args) => login::login(g, &env, &args, out).await,
         Command::Logout => login::logout(g, out).await,
         Command::Profile(cmd) => profile::run(g, &env, cmd, out).await,
@@ -113,6 +126,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
+        Command::Panel(args) => crate::panel::run(g, env, args).await,
         Command::Permissions(cmd) => permissions::run(g, cmd, out),
         Command::PermissionServer { .. } => Err(Error::Failed(
             "the permission server needs a unix system".to_owned(),

@@ -51,6 +51,9 @@ pub struct Config {
     /// `iohr memory` settings (`[memory]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "MemoryConfig::is_empty")]
     pub memory: MemoryConfig,
+    /// `iohr` panel settings (`[panel]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "PanelConfig::is_empty")]
+    pub panel: PanelConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -298,6 +301,27 @@ impl MemoryConfig {
     #[must_use]
     pub fn sync_on(&self) -> bool {
         self.sync == Some(true)
+    }
+}
+
+/// The `[panel]` table: the floating panel bare `iohr` puts over the top right corner of the
+/// terminal (`docs/config.md` section 4.8).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PanelConfig {
+    /// When the panel reads the mouse: `menu` (only while the menu is open, so the terminal
+    /// keeps selecting text with a drag; the default), `always` (a click on the pill opens
+    /// the menu; the terminal selects text with Option or Shift held) or `off` (keys only).
+    /// `IOHR_PANEL_MOUSE` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mouse: Option<String>,
+}
+
+impl PanelConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.mouse.is_none()
     }
 }
 
