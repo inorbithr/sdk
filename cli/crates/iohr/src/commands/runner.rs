@@ -328,7 +328,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 // What it registered with, until a heartbeat declares another.
                 capacity: usize::try_from(me.capacity).unwrap_or(1),
                 declared: Some(declared),
-                build_floor: Some(BuildFloor::default()),
+                build_floor: build_floor(&set),
                 report_host: true,
                 gate: Some(GateCheck {
                     // The pack names the checkout relative to the turns' working directory.
@@ -790,10 +790,23 @@ fn reload_on_hangup(
     }
 }
 
+/// The build-disk guard `run` keeps, read at start; with no `build_volume`, none, and a
+/// line says so.
+fn build_floor(set: &Effective) -> Option<BuildFloor> {
+    let floor = set.build_floor.as_ref().map(|f| f.value.clone());
+    if floor.is_none() {
+        Out::note("no build_volume is set: build turns never pause for disk space");
+    }
+    floor
+}
+
 /// `iohr runner config show`: each value and where it came from.
 async fn show_settings(e: &Effective, out: Out) {
-    let floor = BuildFloor::default();
-    let free = settings::free_bytes(&floor.volume).await;
+    let floor = e.build_floor.as_ref();
+    let free = match floor {
+        Some(f) => settings::free_bytes(&f.value.volume).await,
+        None => None,
+    };
     let gb = |b: u64| b / 1_000_000_000;
     let (capacity, capacity_from) = e.capacity.as_ref().map_or_else(
         || ("as registered".to_owned(), "registration".to_owned()),
@@ -816,7 +829,8 @@ async fn show_settings(e: &Effective, out: Out) {
         || ("not set".to_owned(), "default".to_owned()),
         |u| (u.value.join(", "), u.source.to_string()),
     );
-    let volume = floor.volume.display().to_string();
+    let volume = floor.map(|f| f.value.volume.display().to_string());
+    let floor_bytes = floor.map(|f| f.value.bytes);
     let free_text = free.map_or_else(|| "unknown".to_owned(), |f| format!("{} GB", gb(f)));
     if out.json {
         Out::print_json(&serde_json::json!({
@@ -832,7 +846,7 @@ async fn show_settings(e: &Effective, out: Out) {
             "upgrade_sign_identity": { "value": e.upgrade_sign.value.to_string(), "source": e.upgrade_sign.source.to_string() },
             "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
             "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
-            "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
+            "build_floor": { "volume": volume, "floor_bytes": floor_bytes, "free_bytes": free, "source": floor.map_or_else(|| "default".to_owned(), |f| f.source.to_string()) },
         }));
         return;
     }
@@ -877,16 +891,28 @@ async fn show_settings(e: &Effective, out: Out) {
             e.upgrade_sign.value.to_string(),
             e.upgrade_sign.source.to_string(),
         ],
-        vec![
-            "build_floor".to_owned(),
-            format!(
-                "{volume}: {free_text} free, build turns need {} GB",
-                gb(floor.bytes)
-            ),
-            "fixed".to_owned(),
-        ],
+        floor_row(floor, &free_text),
     ];
     Out::table(&["KEY", "VALUE", "SOURCE"], &rows);
+}
+
+/// The `build_floor` row of `config show`: the volume, its free space and the floor, or
+/// off when no `build_volume` is set.
+fn floor_row(floor: Option<&settings::Setting<BuildFloor>>, free_text: &str) -> Vec<String> {
+    let (value, source) = floor.map_or_else(
+        || ("not set (off)".to_owned(), "default".to_owned()),
+        |f| {
+            (
+                format!(
+                    "{}: {free_text} free, build turns need {} GB",
+                    f.value.volume.display(),
+                    f.value.bytes / 1_000_000_000
+                ),
+                f.source.to_string(),
+            )
+        },
+    );
+    vec!["build_floor".to_owned(), value, source]
 }
 
 /// The first 12 characters of a commit.

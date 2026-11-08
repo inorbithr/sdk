@@ -356,6 +356,15 @@ pub struct RunnerConfig {
     /// absolute path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kubeconfig: Option<String>,
+    /// The volume build turns write to (an absolute path). While it has less than
+    /// `build_volume_min_free_gb` free, the runner takes no new build turn. Unset, there
+    /// is no such pause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_volume: Option<String>,
+    /// The free space, in GB, `build_volume` must keep for new build turns (default 100).
+    /// Needs `build_volume`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_volume_min_free_gb: Option<u64>,
     /// Whether `iohr runner run` upgrades itself to the newest complete release and
     /// restarts (default true). `false` leaves upgrades to a person.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -396,6 +405,8 @@ impl RunnerConfig {
             && self.id.is_none()
             && self.kube_context.is_none()
             && self.kubeconfig.is_none()
+            && self.build_volume.is_none()
+            && self.build_volume_min_free_gb.is_none()
             && self.auto_upgrade.is_none()
             && self.upgrade_interval_minutes.is_none()
             && self.upgrade_restart.is_none()

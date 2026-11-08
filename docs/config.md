@@ -424,6 +424,8 @@ profile's keys win), and its flags win over both. `iohr upgrade` reads
 | `id` | a runner id (`rnr_...`) | not set | `run` and `gate-report`: the runner they drive when this machine's key matches more than one; `register` refreshes that one. `--runner` and `IOHR_RUNNER_ID` win over it |
 | `kube_context` | a kubeconfig context name | not set | `run`: the cluster approved host actions reach, passed to every `kubectl` call as `--context` |
 | `kubeconfig` | an absolute path | not set | `run`: the kubeconfig the pinned `kubectl` reads, passed as `--kubeconfig` |
+| `build_volume` | an absolute path | not set | `run`, at start: the volume whose free space pauses new build turns; unset, there is no such pause |
+| `build_volume_min_free_gb` | a whole number of GB, 1 or more; needs `build_volume` | 100 | `run`, at start: the free space `build_volume` keeps for new build turns |
 | `auto_upgrade` | true or false | true | `run`: look for a newer `iohr` release and install it (below); `--no-auto-upgrade` turns it off for one run |
 | `upgrade_interval_minutes` | 5 to 10080 | 60 | `run`: minutes between looks for a newer release |
 | `upgrade_restart` | `exec` or `exit` | `exec` | `run`: how the runner starts the new binary (below) |
@@ -447,11 +449,12 @@ is refused with a note and the settings in use stay. Lowering `capacity` never s
 running turn; new turns wait until fewer run. A coordinator older than this sends a 400
 for the new fields, and the runner falls back to the old heartbeat.
 
-When `/mnt/build` exists and has less than 100 GB free, the runner drops `build` from
-the kinds it declares until the volume has room again (`none` when nothing is left, so
-the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
-value in effect, where it came from and the build volume's free space, without signing
-in.
+With `build_volume` set, while that volume exists and has less than
+`build_volume_min_free_gb` (default 100) GB free, the runner drops `build` from the kinds
+it declares until the volume has room again (`none` when nothing is left, so the
+coordinator offers it nothing new). With no `build_volume` there is no such pause, and
+`run` says so when it starts. `iohr runner config show [--json]` prints each value in
+effect, where it came from and the build volume's free space, without signing in.
 
 `iohr runner run` keeps itself on the latest released `iohr`. About a minute after it
 starts, and then every `upgrade_interval_minutes` plus up to 10 percent of jitter, it asks

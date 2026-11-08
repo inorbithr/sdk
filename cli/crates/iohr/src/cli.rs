@@ -703,8 +703,8 @@ pub enum RunnerCommand {
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=32))]
         capacity: Option<u32>,
         /// The turn classes to take, comma separated: `coordinate`, `build` (default:
-        /// `[runner] kinds`, else both). Build turns pause while /mnt/build has under
-        /// 100 GB free.
+        /// `[runner] kinds`, else both). With `[runner] build_volume` set, build turns
+        /// pause while it has under `build_volume_min_free_gb` (default 100) GB free.
         #[arg(long, value_delimiter = ',')]
         kinds: Option<Vec<String>>,
         /// Never look for a newer iohr or restart into one (default: `[runner]

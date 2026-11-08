@@ -1203,8 +1203,9 @@ kinds = ["coordinate", "build"]
 
 `run` sends them on every heartbeat, so a change reaches the coordinator within one beat;
 `kill -HUP <pid>` makes a running `run` read the file again. Lowering the capacity never
-stops a running turn. Below 100 GB free on `/mnt/build` the runner takes no new build
-turn until there is room. `iohr runner config show` prints what is in effect and where
+stops a running turn. With `build_volume` set, below `build_volume_min_free_gb` (default
+100) GB free on it the runner takes no new build turn until there is room; with none set
+there is no such pause. `iohr runner config show` prints what is in effect and where
 each value came from (`docs/config.md`, section 4.3).
 
 ### Gate report
