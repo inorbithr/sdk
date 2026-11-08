@@ -91,13 +91,11 @@ fn cursor_type(style: &str) -> u8 {
 /// `over` laid on `under`, opaque: Terminal's selection colour is drawn as it is, and the
 /// app's is translucent white, so the blend is what the app shows.
 pub(super) fn composite(over: Rgba, under: Rgba) -> Rgba {
-    let a = f64::from(over.a) / 255.0;
+    let a = u32::from(over.a);
+    // Whole numbers, rounded half up: (o*a + u*(255-a)) / 255.
     let mix = |o: u8, u: u8| -> u8 {
-        let v = f64::from(o) * a + f64::from(u) * (1.0 - a);
-        // `v` is between 0 and 255 by construction.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let v = v.round() as u8;
-        v
+        let top = u32::from(o) * a + u32::from(u) * (255 - a);
+        u8::try_from((2 * top + 255) / 510).unwrap_or(u8::MAX)
     };
     Rgba {
         r: mix(over.r, under.r),

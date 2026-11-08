@@ -1991,7 +1991,6 @@ pub enum ThemeCommand {
 }
 
 #[derive(Debug, Args)]
-#[allow(clippy::struct_excessive_bools)] // independent command-line switches, not a state
 pub struct ThemeInstallArgs {
     /// The theme (`iohr theme list`).
     pub name: String,
