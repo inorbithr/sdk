@@ -12,9 +12,16 @@
 //! - [`host`]: the host's loop.
 //! - [`pool`]: the Roles at work.
 //! - [`queue`]: the durable task queue.
+//! - [`route`]: how an ask goes to the Roles and how its answers come back.
+//! - [`turn`]: a Role's turn on an ask: `iohr ask --role` as a child of the host.
 
 pub(crate) mod host;
 pub(crate) mod lifecycle;
 pub(crate) mod link;
 pub(crate) mod pool;
 pub(crate) mod queue;
+pub(crate) mod route;
+pub(crate) mod turn;
+
+#[cfg(test)]
+mod answer_tests;

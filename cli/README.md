@@ -128,8 +128,8 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
 | `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--session DIR] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on your subscription only (below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
-| `iohr session [DIR] [--json]` | Open a session on a project (platform RFC 0213): starts the project's one session host if none runs (this same `iohr` as `runner run --session DIR`, a process of its own that hosts the project's Roles and the runner's turn loop), joins it, and stays open until Ctrl-C or SIGTERM. The host stops when the last session has left (a shell that is killed counts as left), on `iohr stop`, or on SIGTERM; a host nobody joins within 30 s ends by itself. With `--json` it prints `{project, host_pid, roles}`; notes go to stderr. Needs a registered runner (`iohr runner register`). S1: no tasks are accepted yet, a claimed task fails "not built". Unix only |
-| `iohr stop [DIR] [--wait S] [--json]` | Stop the project's session host and wait up to `--wait` seconds (0 to 600, default 15) for it to end; each Role finishes the task it holds first. Prints `stopped` only when the host's lock is free, `stopping` while a Role still holds a task; says on stderr that no host runs when none does, and exits 0 either way; `--json` prints `{project, state, host_pid}` with `state` one of `not running`, `stopped`, `stopping`. Makes no API call; Unix only |
+| `iohr session [DIR] [--json]` | Open a session on a project (platform RFC 0213): starts the project's one session host if none runs (this same `iohr` as `runner run --session DIR`, a process of its own that hosts the project's Roles and the runner's turn loop), joins it, and stays open until Ctrl-C or SIGTERM. The host stops when the last session has left (a shell that is killed counts as left), on `iohr stop`, or on SIGTERM; a host nobody joins within 30 s ends by itself. With `--json` it prints `{project, host_pid, roles}`; notes go to stderr. Needs a registered runner (`iohr runner register`). Every `?`/`??` ask asked in the project's folder is answered by its Roles too (see Session mode). Unix only |
+| `iohr stop [DIR] [--wait S] [--json]` | Stop the project's session host and wait up to `--wait` seconds (0 to 600, default 15) for it to end; an answer a Role is still writing is cut short and goes back to the queue for the next host. Prints `stopped` only when the host's lock is free, `stopping` while a Role still holds a task; says on stderr that no host runs when none does, and exits 0 either way; `--json` prints `{project, state, host_pid}` with `state` one of `not running`, `stopped`, `stopping`. Makes no API call; Unix only |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
 | `iohr upgrade [--check]` | Update iohr the way it was installed (Homebrew, the install script, or the command to run); `--check` only reports; needs no sign-in |
@@ -372,7 +372,10 @@ listings that fit (a rule table in `commands/init_extensions.rs`) and, at a term
 whether to install each one (default no) through the same path as `iohr ext install`. With
 `--yes`, `--json` or no terminal it prints one `iohr ext install ...` line and installs
 nothing. A listing marked coming is never offered for install; init says it is not released
-yet and that there is nothing to install, as a plain line, not as a skipped step.
+yet and that there is nothing to install, as a plain line, not as a skipped step. The site
+crawler is not a listing of its own: it is released inside `inorbit/agent` as
+`iohr agent atlas crawl <URL>`, so init offers `inorbit/agent` for it (and offers nothing for
+an extension that is already installed).
 
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A
@@ -498,6 +501,44 @@ commands. `--template` and `--yes` skip the menu and the confirmation. Without a
 with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain `done:` and
 `not yet:` lines are printed as before (the editor's own ask, Code asking before it opens the
 folder, is said once in the ending, not as a line), on stderr, and stdout stays data only.
+
+#### Reading your public site (PRD 0190.1)
+
+`iohr project init --crawl https://example.com` reads that site on this machine, with the
+`inorbit/agent` extension (`iohr agent atlas crawl`), and keeps what it found in the project.
+At a terminal, a web address in the `--describe` text is asked about first (default no);
+`--crawl URL` is the consent, and with `--json`, `--yes` or no terminal nothing is read unless
+you pass it. `--no-crawl` never reads. Before it starts, init says what it will do: the host
+you gave only, robots.txt honoured, at most `--crawl-pages` pages (default 200) and
+`--crawl-minutes` minutes (default 5, hard caps 20000 and 240), 10 hosts, 50 MB in all and 2 MB
+a page, and that nothing is sent to InOrbit. `--dry-run` says the same and reads nothing.
+
+The crawl stays on that host. When a page links to another name in the same domain
+(`blog.example.com` from `example.com`; from `www.example.com` that also means the apex and its
+siblings), init asks once per name at a terminal: yes, no, or yes to all, default no. A yes
+runs one more pass on that name alone, inside what is left of the same pages, minutes, hosts
+and megabytes, and its raw record is in `.inorbit/crawl/<host>/more/<name>/`; everything lands
+in the one study and the one memory entry. With `--yes`, `--json` or no terminal init follows
+none, and the summary lists the names it left out. `--crawl-subdomains` is the yes to all given
+in advance: the first pass is allowed the host and `*.host`, and nothing is asked.
+
+```sh
+iohr project init my-shop --crawl https://example.com --crawl-pages 50
+iohr project init my-shop --crawl https://example.com --crawl-subdomains
+iohr project init my-shop --no-crawl
+```
+
+Files land in `.inorbit/crawl/<host>/` (`crawl.json`, the raw record; `facts.jsonl`, one
+fact per page with the day it was crawled; `policy.toml`, the policy it ran under); a
+`.gitignore` there keeps them out of the project's git. The same facts become one local study,
+`atlas/studies/NNNN-site-crawl-<host>.md` (a second crawl rewrites it in place), which
+`iohr sync --dry-run` lists and `iohr sync` carries; and one project memory entry that points
+at the study. The summary says how many pages were read, how many robots.txt skipped and how
+many failed, whether a limit stopped it (and the flag that raises it), and ends with "Nothing
+was sent to InOrbit. Run iohr sync when you want it there." Without the `agent` extension,
+init says so in one line and offers to install it at a terminal. A crawl that fails does not
+fail init: it is a failed step with the extension's own error. The crawl day is the evidence
+time; the crawler records no per-page fetch time.
 
 ```sh
 iohr project init my-shop         # the coordinated template: a Planner plan comes with it
@@ -1103,16 +1144,37 @@ goes back to `queued` with the attempt counted, and after 3 attempts becomes `fa
 reason. A task is meant to be worked once at a time; a host killed in the middle of one runs
 it again on the next start (at least once), so a handler must be safe to repeat.
 
-`iohr stop` makes the host drain: each Role finishes the task it holds and takes no more, and
-until the last is done the host still answers `status` with `stopping` and still holds its
-lock. `--wait` polls that lock, so "stopped" is said only when the host has really ended, and
-"stopping" when the wait ran out first.
+`iohr stop` makes the host drain: a Role takes no more tasks, an answer it is still writing is
+cut short (its child process group is killed) and the task goes back to `queued` with the try not
+counted, and until the last Role has stopped the host still answers `status` with `stopping` and
+holds its lock. `--wait` polls that lock, so "stopped" is said only when the host has really
+ended, and "stopping" when the wait ran out first.
 
-This is slice S1 of RFC 0213: no tasks are accepted yet, and a claimed task fails "not built".
-Nothing in the command line puts a task in the queue (the socket takes `enqueue`, the `?`
-prompt does not send there yet), and a Role that claims a task fails it with a reason saying
-its turn handler is not built. No launchd or systemd unit
-starts a session host at login.
+Asks (slice S2 of RFC 0213). When a host runs for the folder an ask is made in (or one above it),
+each `?`/`??` ask is put in the queue once per Role (`external_id` `ask:<id>:<role>`, so a repeat
+adds nothing), for every Role the host runs, or only the ones `--role a,b` names. Each Role
+answers as a child of the host, `iohr --json ask --headless --role <Role> --cwd <folder>` (the
+way `--role` answers today; read-only, `plan` when the ask was `plan`), at the same time as
+Io's own answer. When Io's card is drawn, the Roles' answers follow, one card each as it lands
+(the stored answer is the task's `result_ref`: JSON `{text, model, duration_ms}`, the text cut
+at 48K characters). A Role that fails shows its reason in its card. Ctrl-C leaves the wait; the
+Roles keep working and `iohr stop` ends them. A task still queued or cut short when the host
+stops is answered by the next host. With no host, with `--json`, `--menu`, `--dry-run`,
+`--allow-edits` or `--mode auto`, with a `--role` the host does not run, or with an older host,
+the ask goes the way it always did. The socket's `roles` and `results <ask>` requests carry
+this. Nothing yet re-attaches to an ask's answers after the wait ended, and finished tasks are
+not pruned. No launchd or systemd unit starts a session host at login.
+
+Each Role keeps two things in the project between its turns (RFC 0213 S2). When a Role's turn
+ends the host writes its handoff note, `.inorbit/handoff/<role>.md`: what it was asked and what
+it answered (cut to 800 and 2000 characters, replaced by each turn, written through a temporary
+file and a rename). Its memory area is `.inorbit/memory/<role>/`, the same memory files as
+`iohr memory` (the project's own store skips the sub-folder, so a Role's lessons are not the
+project's). Every `iohr ask --role <Role>` turn, routed or not, is told the note and the newest
+eight memories of the area (about 2000 characters, pinned first) after the Role's text. A Role
+name that is not lower-case letters, digits, `-` and `_` (at most 64) keeps and reads nothing.
+Both are plain files in the project folder; nothing is sent anywhere. Nothing writes the memory
+area yet: a person adds a memory file there by hand, in the format of `.inorbit/memory/`.
 
 ### Staying current
 

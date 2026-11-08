@@ -1675,6 +1675,20 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
         report.steps.push(st);
     }
+    // A public site, read on this machine when the person said so (PRD 0190.1).
+    if let Some(plan) =
+        super::init_crawl::decide(&a.crawl, describe.as_deref(), interactive, ui, out)?
+    {
+        let what = plan.would();
+        let st = flow
+            .act_async("crawl", &what, || {
+                super::init_crawl::run(g, env, ui, out, interactive, &dir, &plan)
+            })
+            .await;
+        if let Some(st) = st {
+            report.steps.push(st);
+        }
+    }
     let mut smoke: Option<Smoke> = None;
     let mut agent_failed: Option<String> = None;
     let mut agent_built = false;

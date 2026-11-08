@@ -516,13 +516,14 @@ pub enum Command {
     /// nothing on stdout; Ctrl-C, SIGTERM or the terminal closing leaves it. The host stops
     /// when the last session has left, or on `iohr stop`.
     ///
-    /// Slice S1 of RFC 0213: no tasks are accepted from the server yet, and a task a Role
-    /// claims fails with "not built". The host, its Roles, the durable queue and the session
-    /// link work; `iohr ask --work` and the real handler come next.
+    /// RFC 0213: every `?` and `??` ask in the project's folder is queued for the hosted
+    /// Roles (`--role` narrows them), which answer it at the same time and show each answer
+    /// as it lands. A task still waiting when the host stops is answered by the next host.
     Session(SessionArgs),
     /// Stop this project's session host.
     ///
-    /// Tells the project's session host to stop. Each Role finishes the task it holds, then
+    /// Tells the project's session host to stop. An answer a Role is still writing is cut
+    /// short and goes back to the queue (the next host gives it again), then
     /// the host ends; `--wait` (15 seconds by default) waits until it has, and says
     /// `stopping` when it has not yet. A task cut short by a crash instead is taken again by
     /// the next host as soon as it starts.
@@ -2159,6 +2160,37 @@ pub struct InitArgs {
     /// Where the project lives in InOrbit: team, who reads it, or none.
     #[command(flatten)]
     pub space: InitSpaceArgs,
+    /// Reading a public site on this machine (the agent extension's crawler).
+    #[command(flatten)]
+    pub crawl: InitCrawlArgs,
+}
+
+/// The flags of `project init` that read a public site on this machine and keep what it finds
+/// in the project (PRD 0190.1). Nothing is sent to InOrbit.
+#[derive(Debug, Args)]
+pub struct InitCrawlArgs {
+    /// Read this public site on this machine with iohr-agent and keep its pages as atlas
+    /// facts and a memory entry: `--crawl https://acme.example`. Giving it is the consent;
+    /// without it, init asks at a terminal only when your description names a site, and
+    /// never without one. Needs the `inorbit/agent` extension.
+    #[arg(long, value_name = "URL")]
+    pub crawl: Option<String>,
+    /// Do not read a site, and do not ask about one.
+    #[arg(long, conflicts_with = "crawl")]
+    pub no_crawl: bool,
+    /// The most pages the crawl reads (the crawler's own cap is 20000).
+    #[arg(long, value_name = "N", default_value_t = 200)]
+    pub crawl_pages: u32,
+    /// The most minutes the crawl runs (the crawler's own cap is 240).
+    #[arg(long, value_name = "N", default_value_t = 5)]
+    pub crawl_minutes: u32,
+    /// Follow every other name in the site's domain (a link to `blog.acme.example` from
+    /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
+    /// terminal init asks once per such name (yes, no, yes to all; the default is no), and
+    /// with `--yes` or no terminal it follows none. The pages, minutes, host, size and
+    /// per-page limits cover them all together.
+    #[arg(long, conflicts_with = "no_crawl")]
+    pub crawl_subdomains: bool,
 }
 
 /// The flags of `project init` that say where the project lives in InOrbit.

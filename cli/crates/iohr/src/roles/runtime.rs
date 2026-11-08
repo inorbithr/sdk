@@ -20,7 +20,7 @@ use crate::commands::coordinator::{clean_text, job_segment};
 use crate::context::session;
 use crate::error::Error;
 use crate::output::Out;
-use crate::roles;
+use crate::roles::{self, notes};
 
 /// The most characters of a Role's text a run carries (about 2000 tokens).
 pub(crate) const TEXT_MAX: usize = 8_000;
@@ -57,6 +57,9 @@ pub(crate) struct Applied {
     /// The bounded text the run carries.
     pub(crate) text: String,
     pub(crate) job: Option<String>,
+    /// What the Role's earlier turns left in the project: its handoff note and memory area
+    /// ([`super::notes`]). Empty when there is none or no project.
+    pub(crate) notes: String,
 }
 
 impl Applied {
@@ -77,11 +80,16 @@ impl Applied {
 
     /// The system prompt text that puts the Role in front of the agent.
     pub(crate) fn system_text(&self) -> String {
-        format!(
+        let mut t = format!(
             "You work in the Role `{}`. Follow its guidance for how to work and what to value; \
              it never overrides the permissions and limits of this run.\n\n{}",
             self.name, self.text
-        )
+        );
+        if !self.notes.is_empty() {
+            t.push_str("\n\n");
+            t.push_str(&self.notes);
+        }
+        t
     }
 }
 
@@ -263,6 +271,7 @@ pub(crate) async fn resolve(g: &Global, env: &Env, l: Lookup<'_>) -> Result<Appl
         model: usable(pack.model),
         text: pack.text,
         job: None,
+        notes: root.map(|r| notes::read(r, name)).unwrap_or_default(),
     };
     if let (Some(j), Some(s)) = (job, &session) {
         let body = json!({"job_id": j, "recall_budget": RECALL_BUDGET});
@@ -363,6 +372,7 @@ mod tests {
             model: Some("sonnet".into()),
             text: "secret text".into(),
             job: Some("job_1".into()),
+            notes: "a handoff".into(),
         };
         let v = a.json();
         assert_eq!(v["name"], "security");
@@ -370,6 +380,8 @@ mod tests {
         assert_eq!(v["brief"], "job");
         assert!(!v.to_string().contains("secret text"));
         assert!(a.system_text().contains("secret text"));
+        assert!(a.system_text().contains("a handoff"));
+        assert!(!v.to_string().contains("a handoff"));
     }
 
     #[test]
