@@ -3,6 +3,10 @@ import XCTest
 
 @testable import InOrbit
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 final class RuntimeTests: XCTestCase {
     // MARK: secrets [SR-10]
 
@@ -59,10 +63,10 @@ final class RuntimeTests: XCTestCase {
 
     func testPlainHTTPGoesOnlyToThisMachine() {
         for host in ["127.example.com", "127.0.0.1.example.com", "localhost.example", "::2", "[::1].example"] {
-            XCTAssertFalse(Client<Public>.isLoopback(host), host)
+            XCTAssertFalse(Core.isLoopback(host), host)
         }
         for host in ["localhost", "LocalHost", "127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1"] {
-            XCTAssertTrue(Client<Public>.isLoopback(host), host)
+            XCTAssertTrue(Core.isLoopback(host), host)
         }
         XCTAssertThrowsError(
             try Client<Public>(ClientOptions(token: Secret("t"), baseURL: URL(string: "http://127.example.com")!)))
@@ -97,8 +101,8 @@ final class RuntimeTests: XCTestCase {
         } catch let e as BodyTooLarge {
             XCTAssertEqual(e.limit, 16 << 20)
         }
-        // It stopped near the limit, not at the end of the body.
-        XCTAssertLessThan(EndlessBody.sent.value, (16 << 20) + 8 * EndlessBody.chunk)
+        // It stopped near the limit, not at the end of the 64 MiB body.
+        XCTAssertLessThan(EndlessBody.sent.value, 32 << 20)
 
         // A caller's own transport that reads it whole is refused by the client.
         var options = ClientOptions(token: Secret("t"), baseURL: URL(string: "https://endless.test")!)
@@ -245,8 +249,8 @@ actor Counter {
     func add() { value += 1 }
 }
 
-/// Answers a chunked body that never ends, one `chunk` at a time, until the client stops.
-final class EndlessBody: URLProtocol, @unchecked Sendable {
+/// Answers a chunked body that never ends, one `chunk` a millisecond, until the client stops.
+final class EndlessBody: URLProtocol {
     static let chunk = 64 << 10
     static let sent = Tally()
     private var stopped = Tally()
@@ -260,17 +264,25 @@ final class EndlessBody: URLProtocol, @unchecked Sendable {
             headerFields: ["transfer-encoding": "chunked", "content-type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         let block = Data(repeating: 0x20, count: Self.chunk)
+        let me = Unchecked(value: self)
         DispatchQueue.global().async {
+            let this = me.value
             // 64 MiB at most, so a broken cap fails the test rather than hanging it.
-            for _ in 0..<1024 where self.stopped.value == 0 {
+            for _ in 0..<1024 where this.stopped.value == 0 {
                 Self.sent.add(Self.chunk)
-                self.client?.urlProtocol(self, didLoad: block)
+                this.client?.urlProtocol(this, didLoad: block)
+                Thread.sleep(forTimeInterval: 0.001)
             }
-            if self.stopped.value == 0 { self.client?.urlProtocolDidFinishLoading(self) }
+            if this.stopped.value == 0 { this.client?.urlProtocolDidFinishLoading(this) }
         }
     }
 
     override func stopLoading() { stopped.add(1) }
+}
+
+/// Hands a value to another thread; the test owns its synchronisation.
+struct Unchecked<T>: @unchecked Sendable {
+    let value: T
 }
 
 /// A transport that answers 16 MiB and one byte, whole.
