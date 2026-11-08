@@ -12,7 +12,7 @@ mod pty;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use pty::{COLS, ROWS, Session};
+use pty::{ROWS, Session};
 
 fn iohr() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_iohr"))
