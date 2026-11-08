@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use console::Key;
 
-use crate::card::Look;
+use crate::card::{Look, nearest_256};
 use crate::error::Error;
 use crate::prompt;
 
@@ -665,36 +665,6 @@ pub(crate) fn bar_lines_in(
 }
 
 impl Ui {
-    /// The 256-colour number nearest to a colour, for terminals without 24-bit colour.
-    fn nearest_256(c: (u8, u8, u8)) -> u8 {
-        // The 6x6x6 cube's levels; the 24 greys run from 8 in steps of 10.
-        const LEVELS: [i32; 6] = [0, 95, 135, 175, 215, 255];
-        let near = |v: u8| {
-            LEVELS
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, l)| (i32::from(v) - **l).abs())
-                .map_or(0, |(i, _)| i)
-        };
-        let (r, g, b) = (near(c.0), near(c.1), near(c.2));
-        let dist = |p: (i32, i32, i32)| {
-            let d = (
-                i32::from(c.0) - p.0,
-                i32::from(c.1) - p.1,
-                i32::from(c.2) - p.2,
-            );
-            d.0 * d.0 + d.1 * d.1 + d.2 * d.2
-        };
-        let cube_d = dist((LEVELS[r], LEVELS[g], LEVELS[b]));
-        let avg = (i32::from(c.0) + i32::from(c.1) + i32::from(c.2)) / 3;
-        let step = ((avg - 8).max(0) / 10).min(23);
-        let grey = 8 + 10 * step;
-        if dist((grey, grey, grey)) < cube_d {
-            return u8::try_from(232 + step).unwrap_or(255);
-        }
-        u8::try_from(16 + 36 * r + 6 * g + b).unwrap_or(16)
-    }
-
     /// The look for this run: drawn only when [`fancy_for`] says so.
     #[must_use]
     pub(crate) fn detect(json: bool) -> Self {

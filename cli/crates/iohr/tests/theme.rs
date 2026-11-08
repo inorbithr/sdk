@@ -110,7 +110,11 @@ fn list_show_install_and_off_work_and_say_what_they_write() {
     // The profile is a property list macOS can read.
     if have("plutil") {
         let p = rig.term().join("themes").join("nord.terminal");
-        let r = Command::new("plutil").arg("-lint").arg(&p).output().unwrap();
+        let r = Command::new("plutil")
+            .arg("-lint")
+            .arg(&p)
+            .output()
+            .unwrap();
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stdout));
     }
 
@@ -123,7 +127,11 @@ fn list_show_install_and_off_work_and_say_what_they_write() {
     // The hook has no prompt until it is asked for, then has it, then not again after `off`.
     let hook = |rig: &Rig| text(&rig.run(&["shell", "hook", "zsh"]));
     assert!(!hook(&rig).contains("_iohr_prompt_precmd"));
-    assert!(rig.run(&["theme", "install", "nord", "--prompt"]).status.success());
+    assert!(
+        rig.run(&["theme", "install", "nord", "--prompt"])
+            .status
+            .success()
+    );
     assert!(hook(&rig).contains("_iohr_prompt_precmd"));
     assert!(rig.run(&["theme", "off"]).status.success());
     assert!(!hook(&rig).contains("_iohr_prompt_precmd"));
@@ -179,24 +187,32 @@ fn zsh_with_the_hook_and_the_theme_on_draws_the_prompt_in_the_themes_colours() {
     let work = rig.home.path().join("core");
     std::fs::create_dir_all(&work).unwrap();
     let git = |args: &[&str]| {
-        let o = Command::new("git").args(args).current_dir(&work).output().unwrap();
+        let o = Command::new("git")
+            .args(args)
+            .current_dir(&work)
+            .output()
+            .unwrap();
         assert!(o.status.success(), "{o:?}");
     };
     git(&["init", "-q", "-b", "main"]);
 
-    assert!(rig.run(&["theme", "install", "inorbit", "--prompt"]).status.success());
-    let mut s = zsh_session(
-        &rig,
-        &work,
-        "eval \"$(iohr shell hook zsh)\"; clear\n",
+    assert!(
+        rig.run(&["theme", "install", "inorbit", "--prompt"])
+            .status
+            .success()
     );
+    let mut s = zsh_session(&rig, &work, "eval \"$(iohr shell hook zsh)\"; clear\n");
     s.until("the themed prompt", |screen| {
         pty::any(screen, "core") && pty::any(screen, "main") && pty::any(screen, "❯")
     });
     // The folder is the theme's blue, the branch its magenta, the arrow the app's amber accent.
     let screen = s.screen.screen();
     assert_eq!(colour_of(screen, "❯"), Some((0xff, 0x9e, 0x1b)));
-    assert_eq!(colour_of(screen, "m"), Some((0xc0, 0x84, 0xfc)), "the branch name");
+    assert_eq!(
+        colour_of(screen, "m"),
+        Some((0xc0, 0x84, 0xfc)),
+        "the branch name"
+    );
 
     // A failed command shows the status in red and turns the arrow red.
     s.send(b"false\n");
@@ -214,20 +230,30 @@ fn a_prompt_the_person_set_is_kept_unless_replace_prompt_was_asked() {
     let rig = Rig::new();
     let work = rig.home.path().to_path_buf();
 
-    assert!(rig.run(&["theme", "install", "nord", "--prompt"]).status.success());
+    assert!(
+        rig.run(&["theme", "install", "nord", "--prompt"])
+            .status
+            .success()
+    );
     let mut s = zsh_session(
         &rig,
         &work,
         "PROMPT='mine> '; eval \"$(iohr shell hook zsh)\"; clear\n",
     );
-    s.until("the person's own prompt", |screen| pty::any(screen, "mine>"));
+    s.until("the person's own prompt", |screen| {
+        pty::any(screen, "mine>")
+    });
     s.send(b"true\n");
     s.until("still the person's prompt", |screen| {
         pty::any(screen, "mine>") && !pty::any(screen, "❯")
     });
     s.send(b"exit\n");
 
-    assert!(rig.run(&["theme", "install", "nord", "--replace-prompt"]).status.success());
+    assert!(
+        rig.run(&["theme", "install", "nord", "--replace-prompt"])
+            .status
+            .success()
+    );
     let mut s = zsh_session(
         &rig,
         &work,
