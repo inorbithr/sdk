@@ -16,7 +16,9 @@ use crate::Env;
 use crate::cli::SignIn;
 use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
 use crate::commands::session;
-use crate::context::{Ctx, account as resolve_account, blocking, io_session, run_profile, session};
+use crate::context::{
+    Ctx, account as resolve_account, blocking, io_session, run_profile, session, session_for,
+};
 use crate::error::Error;
 use crate::output::Out;
 use crate::runner::approvals::{self, enrol};
@@ -77,8 +79,18 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
         return super::runner_ops::service(g, env, &ctx, svc, out).await;
     }
     let ctx = Ctx::load(g)?;
+    // A session host (RFC 0213) is a runner of its own: it signs in as the `session`
+    // profile, never as the profile the live runner uses (see `host_session`).
+    let hosting = matches!(
+        cmd,
+        RunnerCommand::Run {
+            session: Some(_),
+            ..
+        }
+    );
     let s = match g.sign_in {
         Some(SignIn::Io) => io_session(g, &ctx).await?,
+        None if hosting => host_session(g, env, &ctx).await?,
         None => session(g, env).await?,
     };
     // `run-key` calls only the approvals API, which checks the person account itself.
@@ -961,6 +973,48 @@ fn require_scopes(s: &crate::context::Session) -> Result<(), Error> {
     )))
 }
 
+/// The profile a session host (RFC 0213) signs in as, with its own runner key. The live
+/// runner's key sits in its own profile: sharing it would make the two overwrite one
+/// heartbeat row and take each other's leases, so the host never reads that profile.
+const HOST_PROFILE: &str = "session";
+
+/// What a missing runner key says: the host's own key is made by its own `register`, with the
+/// command spelled out; any other profile's by a plain `iohr runner register`.
+fn no_key_message(profile: Option<&ProfileName>) -> String {
+    if is_host_profile(profile) {
+        format!(
+            "the session host has no runner key of its own: run `{} --profile {HOST_PROFILE} runner register --name {}-session` once",
+            crate::commands::shell::running_bin(),
+            host_name()
+        )
+    } else {
+        "this machine has no runner key: run `iohr runner register` first".into()
+    }
+}
+
+fn is_host_profile(profile: Option<&ProfileName>) -> bool {
+    profile.is_some_and(|p| p.as_str() == HOST_PROFILE)
+}
+
+/// The session of a session host: the `session` profile whatever `--profile` the person
+/// started with (that flag is carried to the host, and would name the live runner's
+/// profile). With no such profile the error names the commands that make it.
+async fn host_session(g: &Global, env: &Env, ctx: &Ctx) -> Result<crate::context::Session, Error> {
+    let name: ProfileName = HOST_PROFILE
+        .parse()
+        .map_err(|_| Error::Failed("the session host's profile name is not valid".into()))?;
+    match session_for(g, env, ctx, Some(&name)).await {
+        Err(Error::NotSignedIn(_)) if ctx.config.profile(&name).is_none() => {
+            let bin = crate::commands::shell::running_bin();
+            Err(Error::NotSignedIn(format!(
+                "the session host has no profile of its own: run `{bin} login --profile {HOST_PROFILE}`, then `{bin} --profile {HOST_PROFILE} runner register --name {}-session`",
+                host_name()
+            )))
+        }
+        other => other,
+    }
+}
+
 /// The runner's Ed25519 key, from the credential store the profile uses (the macOS
 /// Keychain on a Mac; a file only when the profile was made with `--insecure-storage`).
 /// `create` makes one when there is none; otherwise a missing key says to register.
@@ -975,9 +1029,7 @@ async fn runner_signer(
         return Signer::from_seed(&seed).map_err(Error::Failed);
     }
     if !create {
-        return Err(Error::Failed(
-            "this machine has no runner key: run `iohr runner register` first".into(),
-        ));
+        return Err(Error::Failed(no_key_message(s.profile.as_ref())));
     }
     let (signer, seed) = Signer::generate().map_err(Error::Failed)?;
     stored.write(&seed).await?;
@@ -1253,6 +1305,28 @@ mod tests {
             public_key: key.into(),
             ..RunnerInfo::default()
         }
+    }
+
+    /// The session host signs in as the `session` profile and keeps its key there: a missing
+    /// key names the one command that makes it, and no other profile's message does.
+    #[test]
+    fn the_session_hosts_missing_key_names_the_register_command_for_its_own_profile() {
+        let own: ProfileName = HOST_PROFILE.parse().unwrap();
+        let live: ProfileName = "runner".parse().unwrap();
+        let said = no_key_message(Some(&own));
+        assert!(
+            said.contains("--profile session runner register --name "),
+            "{said}"
+        );
+        assert!(said.contains("-session` once"), "{said}");
+        assert!(is_host_profile(Some(&own)));
+        // The live runner's profile is never the host's, and says what it always did.
+        assert!(!is_host_profile(Some(&live)));
+        assert!(!is_host_profile(None));
+        assert_eq!(
+            no_key_message(Some(&live)),
+            "this machine has no runner key: run `iohr runner register` first"
+        );
     }
 
     #[test]
