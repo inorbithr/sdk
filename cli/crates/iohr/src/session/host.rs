@@ -11,6 +11,10 @@
 //! - `enqueue <json>`: adds a task (`external_id`, `role_hint`, `payload`) and answers
 //!   `queued <id> new` or `queued <id> repeated` (the same `external_id` adds nothing).
 //!
+//! - `roles`: `ok <name>,<name>...`, the Roles this host runs.
+//! - `results <ask>`: one line of JSON, the tasks of that ask (see [`super::route`]), each with
+//!   its Role, state and, once it landed, its answer or reason.
+//!
 //! Anything else is answered `error ...`, and so is every request past [`MAX_CONNECTIONS`]
 //! (`error busy`).
 //!
@@ -273,9 +277,39 @@ fn talk(stream: UnixStream, queue: &Queue, net: &Net<'_>) {
             },
             Err(e) => format!("error bad task: {e}"),
         },
+        "roles" => match queue.role_names() {
+            Ok(names) => format!("ok {}", names.join(",")),
+            Err(e) => format!("error {e}"),
+        },
+        "results" => results_line(queue, rest.trim()),
         _ => "error unknown request".to_owned(),
     };
     let _ = writeln!(out, "{reply}");
+}
+
+/// The `results` answer: the ask's tasks as one JSON array. An ask id is made of letters and
+/// digits and is not long, so nothing else is looked up.
+fn results_line(queue: &Queue, ask: &str) -> String {
+    if !super::route::valid_ask(ask) {
+        return "error bad ask id".to_owned();
+    }
+    match queue.answers(&super::route::prefix(ask)) {
+        Ok(tasks) => serde_json::Value::Array(
+            tasks
+                .into_iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "role": t.role,
+                        "state": t.state,
+                        "result": t.result,
+                        "reason": t.reason,
+                    })
+                })
+                .collect(),
+        )
+        .to_string(),
+        Err(e) => format!("error {e}"),
+    }
 }
 
 #[cfg(test)]

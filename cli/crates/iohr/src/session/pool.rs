@@ -2,7 +2,7 @@
 //! taking the next task for it, renewing the lease while it works, and finishing it.
 //!
 //! What a task does is the `handler`'s: `Ok(reference)` is `done`, `Err(reason)` is
-//! `failed`. A handler that never returns because the host was killed leaves its claim to the
+//! `failed`, and `Err(`[`INTERRUPTED`]`)` gives the task back to the queue untried. A handler that never returns because the host was killed leaves its claim to the
 //! next host, which gives every claim back when it starts
 //! ([`super::queue::Queue::recover_all`]). A Role whose thread ends (an error, a panic) is
 //! marked `stopped`, and while the host runs a reaper gives back what such a Role held once
@@ -13,6 +13,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use super::queue::{Queue, QueueError, Task, now_ms, tick};
+
+/// What a handler returns as its `Err` when the host is stopping and it gave up the task
+/// untried: the task goes back to the queue (`released`, the try not counted) instead of
+/// `failed`, so the next host answers it.
+pub(crate) const INTERRUPTED: &str = "interrupted: the host is stopping";
 
 /// How the pool paces itself.
 #[derive(Debug, Clone, Copy)]
@@ -114,6 +119,12 @@ where
         let outcome = with_heartbeat(q, role, task.id, pace.lease, || handler(&task, role))?;
         match outcome {
             Ok(reference) => q.complete(task.id, role, Some(&reference), now_ms())?,
+            Err(why) if why == INTERRUPTED => q.release(
+                task.id,
+                role,
+                "the host stopped before it answered",
+                now_ms(),
+            )?,
             Err(why) => q.fail(task.id, role, &why, now_ms())?,
         };
     }
