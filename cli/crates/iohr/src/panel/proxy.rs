@@ -1186,6 +1186,32 @@ mod tests {
     }
 
     #[test]
+    fn the_resume_sequence_brings_a_stopped_panel_back_and_never_reaches_the_terminal() {
+        let mut p = proxy(MouseMode::Menu);
+        p.shell_output(STOP_SEQ);
+        assert!(p.stopped);
+        let out = p.shell_output(b"a\x1b]7771;iohr-panel-resume\x07b");
+        assert!(!p.stopped, "running `iohr` again lifts the stop");
+        assert!(!has(&out, RESUME_SEQ), "the sequence is the proxy's own");
+        // Both in one read: the last one written wins.
+        p.shell_output(&[STOP_SEQ, RESUME_SEQ].concat());
+        assert!(!p.stopped);
+        p.shell_output(&[RESUME_SEQ, STOP_SEQ].concat());
+        assert!(p.stopped);
+    }
+
+    #[test]
+    fn the_panel_is_believed_only_while_its_proxy_lives() {
+        let mut child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let pid = child.id().to_string();
+        assert!(proxy_lives(&std::process::id().to_string()));
+        assert!(proxy_lives("1"), "the old value, written before pids");
+        assert!(proxy_lives("not a pid"));
+        child.wait().unwrap();
+        assert!(!proxy_lives(&pid), "a proxy that ended is no panel");
+    }
+
+    #[test]
     fn a_program_s_own_mouse_mode_is_put_back_when_the_panel_gives_the_mouse_up() {
         let mut p = proxy(MouseMode::Menu);
         p.child_output(b"\x1b[?1000h\x1b[?1006h");

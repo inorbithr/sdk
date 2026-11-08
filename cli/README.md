@@ -1019,8 +1019,14 @@ Meta (iTerm2: Profiles, Keys, "Esc+"; Terminal.app: "Use Option as Meta key"); w
 use `^G`. If `[ask] menu_key = "ctrl-g"` is set, the panel leaves Ctrl-G to the `?` menu and shows
 `⌥i`. The panel saves and
 restores the cursor with DECSC and DECRC, which can overwrite a program's own saved cursor. The
-shell runs with `IOHR_PANEL=1`, and a nested `iohr panel` runs plainly and a bare `iohr` says it is already in the session;
-`IOHR_PANEL_LEADER` is internal (the proxy re-executes itself to become the shell's session
+shell runs with `IOHR_PANEL` set to the pid of the panel around it, which counts only while that
+process lives: a nested `iohr panel` runs plainly and a bare `iohr` says it is already in the
+session, and when the panel was stopped (`iohr stop`, "Stop panel", or its host ending) the bare
+`iohr` brings it back first, so running `iohr` again gives a live panel. A shell that outlived
+its panel starts a new one. While the panel is stopped `^G` is not sent to the shell (it would
+echo as `^G` under a command). Arrows count in the menu with any modifier (Shift, Option, Ctrl,
+or the kitty keyboard form); a release event is ignored. If the session host stops at once, the
+message carries the last line of its `host.log`. `IOHR_PANEL_LEADER` is internal (the proxy re-executes itself to become the shell's session
 leader).
 
 ## Runner
