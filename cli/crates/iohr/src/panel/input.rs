@@ -193,7 +193,9 @@ fn mouse(params: &str, last: char) -> Option<Mouse> {
 /// or numbers split by `;` and `:` (`1;2` Shift, `1;3` Option, `1;1:3` a key released under the
 /// kitty keyboard protocol). Whatever the modifier, the key is the arrow.
 fn arrow_params(params: &str) -> bool {
-    params.bytes().all(|b| b.is_ascii_digit() || b == b';' || b == b':')
+    params
+        .bytes()
+        .all(|b| b.is_ascii_digit() || b == b';' || b == b':')
 }
 
 /// The arrow `key`, unless the parameters say the key was released (`:3` on the modifier field,

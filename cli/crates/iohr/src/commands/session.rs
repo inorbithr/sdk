@@ -448,10 +448,15 @@ mod unix {
             let log = "starting\n\nthis sign-in lacks coordinator:runner: sign in with `iohr login --scope coordinator:runner`\n  \n";
             assert_eq!(
                 last_line(log).as_deref(),
-                Some("this sign-in lacks coordinator:runner: sign in with `iohr login --scope coordinator:runner`")
+                Some(
+                    "this sign-in lacks coordinator:runner: sign in with `iohr login --scope coordinator:runner`"
+                )
             );
             let secret = last_line("failed: Bearer abc123 at https://u:p@host/x").unwrap();
-            assert!(!secret.contains("abc123") && !secret.contains("u:p"), "{secret}");
+            assert!(
+                !secret.contains("abc123") && !secret.contains("u:p"),
+                "{secret}"
+            );
             assert_eq!(last_line("  \n\n"), None);
             assert!(last_line(&"x ".repeat(400)).unwrap().chars().count() <= 300);
         }
@@ -465,7 +470,10 @@ mod unix {
             // This start wrote nothing: the old line is not its cause.
             assert_eq!(
                 stopped_at_once("exit status: 1", &log, from),
-                format!("the session host stopped at once (exit status: 1); see {}", log.display())
+                format!(
+                    "the session host stopped at once (exit status: 1); see {}",
+                    log.display()
+                )
             );
             std::fs::write(&log, "old failure\nno runner key\n").unwrap();
             assert!(stopped_at_once("exit status: 1", &log, from).contains(": no runner key; see"));
