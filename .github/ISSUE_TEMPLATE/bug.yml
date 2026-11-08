@@ -1,17 +1,24 @@
 name: Bug
-description: The SDK does something wrong or different from the docs.
+description: The SDK, the iohr command line or its runner does something wrong or different from the docs.
 labels: [bug]
 body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [SDK library, iohr command line, runner (iohr runner), Not sure]
+    validations: { required: true }
   - type: dropdown
     id: language
     attributes:
       label: Language
-      options: [Go, Rust, TypeScript, Python, All or several]
+      options: [Go, Rust, TypeScript, Python, All or several, None (iohr or the runner)]
     validations: { required: true }
   - type: input
     id: version
     attributes:
-      label: SDK version and runtime
+      label: Version and runtime
+      description: For iohr or the runner, the output of `iohr --version` and the OS.
       placeholder: "inorbithr 0.2.1, Python 3.13 on Linux"
     validations: { required: true }
   - type: textarea
