@@ -247,6 +247,9 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             session,
             account,
         } => {
+            if let Some(refused) = unsupported_os(std::env::consts::OS) {
+                return Err(refused);
+            }
             let account = resolve_account(&s, account.account)?;
             // Checked before anything is sent: a bad setting stops the start. A session
             // host (RFC 0213) is started by `iohr session` and ends with it: it never
@@ -1035,6 +1038,17 @@ fn local(g: &Global) -> Result<ClaudeExec, Error> {
     ))
 }
 
+/// `iohr runner run` on an OS the runner does not support yet: Windows, until its
+/// sandbox, service and credential paths are built and tested there (SECURITY.md, "The
+/// runner"). `None` on macOS and Linux.
+fn unsupported_os(os: &str) -> Option<Error> {
+    (os == "windows").then(|| {
+        Error::Failed(
+            "iohr runner is not supported on Windows yet: run it on macOS or Linux".into(),
+        )
+    })
+}
+
 const fn claude_name() -> &'static str {
     if cfg!(windows) {
         "claude.exe"
@@ -1171,6 +1185,14 @@ fn stop_on_sigterm(_: Arc<watch::Sender<bool>>) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_runner_refuses_to_start_on_windows_only() {
+        let refused = unsupported_os("windows").expect("windows is refused");
+        assert!(refused.to_string().contains("not supported on Windows yet"));
+        assert!(unsupported_os("macos").is_none());
+        assert!(unsupported_os("linux").is_none());
+    }
 
     fn r(id: &str, name: &str, key: &str) -> RunnerInfo {
         RunnerInfo {

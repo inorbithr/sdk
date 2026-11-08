@@ -1164,9 +1164,7 @@ mod tests {
         );
         let named = super::Picks::Named(vec!["eth0".into(), "eth1".into()]);
         let c = super::service_command(p, "agent", &named);
-        assert!(
-            super::shown(&c).ends_with("--agent-user agent --interface eth0 --interface eth1")
-        );
+        assert!(super::shown(&c).ends_with("--agent-user agent --interface eth0 --interface eth1"));
         let c = super::service_command(p, "agent", &super::Picks::All);
         assert!(super::shown(&c).ends_with("--agent-user agent --all"));
     }
