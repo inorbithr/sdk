@@ -78,8 +78,9 @@ checks Lab documents (`iohr lab check`), keeps RFCs, PRDs and ADRs in the Decisi
 runs coordinator turns on your own Claude subscription (`iohr runner`).
 It talks to `api.inorbit.hr` and
 `auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
-`sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry. `iohr upgrade`
-and a running `iohr runner` ask GitHub for the newest release; every host it reaches is in
+`sync` ([ADR 0012](docs/adr/0012-extensions.md)). What leaves your machine, including a
+running runner's upgrade checks, is in [SECURITY.md](SECURITY.md), section "What leaves
+your machine"; every host it reaches is in
 [cli/docs/files-and-dependencies.md](cli/docs/files-and-dependencies.md#the-hosts-it-talks-to). Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
 check with `gh attestation verify`. [cli/README.md](cli/README.md) is the guide, and [cli/docs/commands.md](cli/docs/commands.md) has every command.
 

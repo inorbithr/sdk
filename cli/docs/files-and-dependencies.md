@@ -28,7 +28,9 @@ keys. `iohr` changes only its own keys (`default`, a profile's `kind`, `account`
 
 ## The hosts it talks to
 
-`iohr` sends no telemetry. What it reaches, and when:
+What `iohr` sends, and the rule that nothing else leaves your machine, are in
+[SECURITY.md](../../SECURITY.md), section "What leaves your machine". The hosts it
+reaches, and when:
 
 | Host | When |
 |---|---|

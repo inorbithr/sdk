@@ -157,25 +157,20 @@ directory, so two builds of one repository take turns.
 
 ## Staying current
 
-`run` looks for a newer `iohr` release and, when there is one, takes no new work, waits for
-the running turns and approved runs to finish, installs it with the verified install of
-`iohr upgrade`, and restarts itself.
+A running runner keeps itself on the newest `iohr` release, and this is on by default.
+What it checks before it installs one, how often it looks and how to turn it off are in
+[SECURITY.md](../../SECURITY.md), section "Automatic upgrades"; this page adds only how a
+runner behaves around an upgrade.
 
 | What | Value |
 |---|---|
-| First check | 60 seconds after start, plus up to 10% |
-| Then | Every `upgrade_interval_minutes` (default 60, 5 to 10,080) |
+| Before installing | Takes no new work and waits up to 4 hours for the running turns and approved runs to finish |
 | After a failure | The old version keeps running; the wait backs off from 5 minutes, doubling, up to 6 hours, and never longer than the interval |
-| Drain | Waits up to 4 hours for running work |
 | Restart | `exec` of the same path, or exit 75 for a launchd or systemd supervisor with `upgrade_restart = "exit"` |
 
-- `--no-auto-upgrade` or `auto_upgrade = false` turns it off. A session host never upgrades
-  itself.
-- A copy installed by apt is reported (`sudo apt-get install --only-upgrade iohr`) and
-  skipped.
-- On macOS, `upgrade_sign_identity = "auto"` (or `IOHR_SIGN_IDENTITY`) signs each new binary
-  with a code-signing identity from your keychain, so a keychain "Always Allow" grant holds
-  across upgrades. It is off by default.
+On macOS, `upgrade_sign_identity = "auto"` (or `IOHR_SIGN_IDENTITY`) signs each new binary
+with a code-signing identity from your keychain, so a keychain "Always Allow" grant holds
+across upgrades. It is off by default.
 
 The keys and their limits: [docs/config.md](../../docs/config.md), section 4.3.
 
