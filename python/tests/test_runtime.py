@@ -124,7 +124,11 @@ def test_a_named_profile_reads_only_its_own_variables(monkeypatch: pytest.Monkey
 
 
 def test_plain_http_only_to_this_machine() -> None:
-    for bad in ("http://127.example.com", "http://127.0.0.1.example.com", "http://localhost.example"):
+    for bad in (
+        "http://127.example.com",
+        "http://127.0.0.1.example.com",
+        "http://localhost.example",
+    ):
         with pytest.raises(ConfigError, match="https"):
             Client(token="t", base_url=bad)
     with pytest.raises(ConfigError, match="https"):
