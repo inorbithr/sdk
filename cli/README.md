@@ -372,7 +372,10 @@ listings that fit (a rule table in `commands/init_extensions.rs`) and, at a term
 whether to install each one (default no) through the same path as `iohr ext install`. With
 `--yes`, `--json` or no terminal it prints one `iohr ext install ...` line and installs
 nothing. A listing marked coming is never offered for install; init says it is not released
-yet and that there is nothing to install, as a plain line, not as a skipped step.
+yet and that there is nothing to install, as a plain line, not as a skipped step. The site
+crawler is not a listing of its own: it is released inside `inorbit/agent` as
+`iohr agent atlas crawl <URL>`, so init offers `inorbit/agent` for it (and offers nothing for
+an extension that is already installed).
 
 `iohr ext search` and `iohr ext show` read the platform's extensions catalogue over the
 API host (`extensions:read`, or a signed-in person); they never contact the registry. A
@@ -498,6 +501,44 @@ commands. `--template` and `--yes` skip the menu and the confirmation. Without a
 with `--json`, `NO_COLOR` or `TERM=dumb`, nothing is drawn or asked: the plain `done:` and
 `not yet:` lines are printed as before (the editor's own ask, Code asking before it opens the
 folder, is said once in the ending, not as a line), on stderr, and stdout stays data only.
+
+#### Reading your public site (PRD 0190.1)
+
+`iohr project init --crawl https://example.com` reads that site on this machine, with the
+`inorbit/agent` extension (`iohr agent atlas crawl`), and keeps what it found in the project.
+At a terminal, a web address in the `--describe` text is asked about first (default no);
+`--crawl URL` is the consent, and with `--json`, `--yes` or no terminal nothing is read unless
+you pass it. `--no-crawl` never reads. Before it starts, init says what it will do: the host
+you gave only, robots.txt honoured, at most `--crawl-pages` pages (default 200) and
+`--crawl-minutes` minutes (default 5, hard caps 20000 and 240), 10 hosts, 50 MB in all and 2 MB
+a page, and that nothing is sent to InOrbit. `--dry-run` says the same and reads nothing.
+
+The crawl stays on that host. When a page links to another name in the same domain
+(`blog.example.com` from `example.com`; from `www.example.com` that also means the apex and its
+siblings), init asks once per name at a terminal: yes, no, or yes to all, default no. A yes
+runs one more pass on that name alone, inside what is left of the same pages, minutes, hosts
+and megabytes, and its raw record is in `.inorbit/crawl/<host>/more/<name>/`; everything lands
+in the one study and the one memory entry. With `--yes`, `--json` or no terminal init follows
+none, and the summary lists the names it left out. `--crawl-subdomains` is the yes to all given
+in advance: the first pass is allowed the host and `*.host`, and nothing is asked.
+
+```sh
+iohr project init my-shop --crawl https://example.com --crawl-pages 50
+iohr project init my-shop --crawl https://example.com --crawl-subdomains
+iohr project init my-shop --no-crawl
+```
+
+Files land in `.inorbit/crawl/<host>/` (`crawl.json`, the raw record; `facts.jsonl`, one
+fact per page with the day it was crawled; `policy.toml`, the policy it ran under); a
+`.gitignore` there keeps them out of the project's git. The same facts become one local study,
+`atlas/studies/NNNN-site-crawl-<host>.md` (a second crawl rewrites it in place), which
+`iohr sync --dry-run` lists and `iohr sync` carries; and one project memory entry that points
+at the study. The summary says how many pages were read, how many robots.txt skipped and how
+many failed, whether a limit stopped it (and the flag that raises it), and ends with "Nothing
+was sent to InOrbit. Run iohr sync when you want it there." Without the `agent` extension,
+init says so in one line and offers to install it at a terminal. A crawl that fails does not
+fail init: it is a failed step with the extension's own error. The crawl day is the evidence
+time; the crawler records no per-page fetch time.
 
 ```sh
 iohr project init my-shop         # the coordinated template: a Planner plan comes with it

@@ -2159,6 +2159,37 @@ pub struct InitArgs {
     /// Where the project lives in InOrbit: team, who reads it, or none.
     #[command(flatten)]
     pub space: InitSpaceArgs,
+    /// Reading a public site on this machine (the agent extension's crawler).
+    #[command(flatten)]
+    pub crawl: InitCrawlArgs,
+}
+
+/// The flags of `project init` that read a public site on this machine and keep what it finds
+/// in the project (PRD 0190.1). Nothing is sent to InOrbit.
+#[derive(Debug, Args)]
+pub struct InitCrawlArgs {
+    /// Read this public site on this machine with iohr-agent and keep its pages as atlas
+    /// facts and a memory entry: `--crawl https://acme.example`. Giving it is the consent;
+    /// without it, init asks at a terminal only when your description names a site, and
+    /// never without one. Needs the `inorbit/agent` extension.
+    #[arg(long, value_name = "URL")]
+    pub crawl: Option<String>,
+    /// Do not read a site, and do not ask about one.
+    #[arg(long, conflicts_with = "crawl")]
+    pub no_crawl: bool,
+    /// The most pages the crawl reads (the crawler's own cap is 20000).
+    #[arg(long, value_name = "N", default_value_t = 200)]
+    pub crawl_pages: u32,
+    /// The most minutes the crawl runs (the crawler's own cap is 240).
+    #[arg(long, value_name = "N", default_value_t = 5)]
+    pub crawl_minutes: u32,
+    /// Follow every other name in the site's domain (a link to `blog.acme.example` from
+    /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
+    /// terminal init asks once per such name (yes, no, yes to all; the default is no), and
+    /// with `--yes` or no terminal it follows none. The pages, minutes, host, size and
+    /// per-page limits cover them all together.
+    #[arg(long, conflicts_with = "no_crawl")]
+    pub crawl_subdomains: bool,
 }
 
 /// The flags of `project init` that say where the project lives in InOrbit.
