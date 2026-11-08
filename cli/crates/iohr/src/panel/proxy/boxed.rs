@@ -82,7 +82,17 @@ impl QuestionFile {
 impl Drop for QuestionFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(shown_marker(&self.0));
     }
+}
+
+/// The file that exists while the box's rows are on the screen, beside the question file: the
+/// ask process looks for it to know whether the box shows its progress (else it draws its own
+/// spinner, as it did before the box).
+pub(crate) fn shown_marker(question_file: &Path) -> PathBuf {
+    let mut name = question_file.as_os_str().to_owned();
+    name.push(".shown");
+    PathBuf::from(name)
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -93,6 +103,25 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .mode(0o600)
         .open(path)?;
     file.write_all(bytes)
+}
+
+/// Whether the chat box's rows are on the screen of the panel around this process.
+pub(super) fn shown() -> bool {
+    inside()
+        && std::env::var_os(FILE_ENV)
+            .map(PathBuf::from)
+            .is_some_and(|f| shown_marker(&f).exists())
+}
+
+/// One report to the chat box (`step;3;-;reading 3 files`), as the hook sends them: written to
+/// the terminal, where the panel takes it out of the output. Only when the box is on the
+/// screen; whether it was sent.
+pub(super) fn report(body: &str) -> bool {
+    let body: String = body
+        .chars()
+        .filter(|c| !c.is_control() || *c == ';')
+        .collect();
+    shown() && send_to_panel(format!("\x1b]7771;chat;{body}\x07").as_bytes())
 }
 
 /// Whether the shell to run is one the hook speaks to.
@@ -163,7 +192,21 @@ impl Proxy {
             self.screen.resize(self.rows, self.cols);
         }
         REGION.store(self.reserved, Ordering::Relaxed);
+        self.mark_shown();
         out
+    }
+
+    /// Keeps [`shown_marker`] in step with the reserved rows.
+    fn mark_shown(&self) {
+        let Some(path) = &self.chat_file else {
+            return;
+        };
+        let marker = shown_marker(path);
+        if self.reserved {
+            let _ = write_private(&marker, b"");
+        } else {
+            let _ = std::fs::remove_file(marker);
+        }
     }
 
     /// The terminal reset itself (`ESC c`): the region is gone, so the next chance sets it again.
@@ -172,6 +215,7 @@ impl Proxy {
             self.reserved = false;
             self.screen.resize(self.rows, self.cols);
             REGION.store(false, Ordering::Relaxed);
+            self.mark_shown();
         }
     }
 

@@ -1014,6 +1014,16 @@ pub(super) fn end_from_inside() -> bool {
     send_to_panel(STOP_SEQ)
 }
 
+/// Whether the chat box's rows are on the screen (see [`boxed::shown`]).
+pub(super) fn chat_shown() -> bool {
+    boxed::shown()
+}
+
+/// One report to the chat box; whether it was sent (see [`boxed::report`]).
+pub(super) fn chat_report(body: &str) -> bool {
+    boxed::report(body)
+}
+
 /// Writes `seq` to the controlling terminal for the panel proxy to read, only when a proxy
 /// runs around this process: with none, the sequence would reach the real terminal, which may
 /// print its bell as `^G`.

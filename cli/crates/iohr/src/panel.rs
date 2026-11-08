@@ -605,6 +605,30 @@ pub(crate) fn bare_enters(_: &Global) -> bool {
     false
 }
 
+/// Whether the panel's chat box is on the screen and shows an answer's progress (RFC 0212): the
+/// ask then leaves its own spinner out.
+#[cfg(unix)]
+pub(crate) fn chat_shown() -> bool {
+    proxy::chat_shown()
+}
+
+#[cfg(not(unix))]
+pub(crate) fn chat_shown() -> bool {
+    false
+}
+
+/// One progress report to the chat box (`begin`, `step;2;-;reading 2 files`, `end`, `back;1`);
+/// whether it was sent.
+#[cfg(unix)]
+pub(crate) fn chat_report(body: &str) -> bool {
+    proxy::chat_report(body)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn chat_report(_: &str) -> bool {
+    false
+}
+
 /// Says `line` on stderr where the panel will not cover it. The panel floats its box over the
 /// top right corner of the screen (ADR 0225), and a fresh terminal prints this note in those very
 /// rows, so the box would paint over the cause it is there to give. A terminal first scrolls the
