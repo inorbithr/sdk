@@ -141,6 +141,10 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr asks list \| show ID \| approve ID [--once] \| deny ID \| question ID \| decide ID \| key enroll [--label L] [--proof FILE] \| key show \| key remove` | The asks agents file for you (RFC 0204, ADR 0215). `approve` needs a device key's proof (RFC 0113). A Mac signs it with its own Secure Enclave key after Touch ID (a P-256 key made on first `key enroll`, kept as a 0600 blob only that chip can open, bound to the current fingerprints: change them and enrol again; the first `enroll` compiles a small Swift helper with the system `swiftc`, so Xcode's command line tools must be installed). `enroll` registers it as a `macos` device key; `--proof FILE` takes the countersignature JSON (`{key_id, signed_at, nonce, signature}`) an enrolled phone key made over the new public key, which activates it at once, otherwise the service holds a new key for 24 hours (the first key is active at once); `key show` reads it back and `key remove` revokes it and deletes the blob. Before Touch ID it prints the ask's title, kind and payload hash, and the prompt names the same title. Only a review, a document, a decision and a run may be signed here; a merge, a roll, a migration and an auto-approve rule (found in the kind, title, summary or what approve means) always say "Approve on your phone", and so does a Mac without a key, and every Windows or Linux machine (they never sign: `key enroll` refuses there). A refused Touch ID signs nothing and changes nothing. `deny` and `question` need no key |
 | `iohr permissions list\|allow RULE\|deny RULE\|remove RULE\|check TOOL INPUT [--project\|--user] [--json]` | The rules for what Io may run or open when you ask it something (Claude Code's rule grammar) in `.inorbit/permissions.toml` and the user file in the iohr config folder; `allow` refuses rules that could open a secret file and a blanket `Bash(*)` (exit 2); `check` prints `allow`, `deny` or `ask` and the rule; every ask decision is logged to `.inorbit/permissions.log` (no output, no contents); see `docs/config.md`, section 4.5 |
 | `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu; Shift+Tab on a `?` line cycles manual, plan and auto): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
+| `iohr theme list [--json]` | The terminal themes of the InOrbit app (`inorbit`, `solarized-dark`, `nord`, `light`) and the one that is on; local, no sign-in |
+| `iohr theme show NAME [--json]` | A theme's colours as swatches (24-bit colour where the terminal has it, the nearest of 256 otherwise, the hex values under `NO_COLOR` or a pipe), its font and its cursor |
+| `iohr theme install NAME [--terminal] [--prompt] [--replace-prompt] [--json]` | Writes the Terminal.app profile `~/.inorbit/term/themes/NAME.terminal` and remembers the theme in `~/.inorbit/term/theme.json`, and nothing else. `--terminal` opens the profile (macOS: Terminal.app imports it and opens a window; it is not made the default); `--prompt` turns on the zsh prompt; `--replace-prompt` does so and replaces a prompt you set yourself (see "The terminal theme") |
+| `iohr theme off [--json]` | Turns the prompt off and forgets the chosen theme; a profile already imported into Terminal.app stays |
 | `iohr` (no subcommand) | On a terminal: enters the session. It joins this folder's session host (starting it if none runs, as `iohr session` does) and gives your shell with the floating panel over it; if the host cannot start it says so on stderr and the panel still runs without one. Under `NO_COLOR`, with `--json`, or off a terminal it prints the usage report and exits 2, as before; `iohr --help` and `iohr help` print the help. `iohr stop` ends the host, which closes the panel and leaves your shell open. Unix only |
 | `iohr panel [--demo] [-- COMMAND...]` | Runs your shell (or COMMAND) with a floating panel at the top right of the terminal, drawn over the output and taking no rows (see "The floating panel"); `--demo` fills it with labelled stub asks; with `--demo --variant rail\|accordion\|band` it prints the older static design drawings instead |
 | `iohr completion <shell>` | A completion script for bash, zsh, fish, elvish or PowerShell |
@@ -936,6 +940,41 @@ Claude Code only: it signs in with your own `claude` login, never an API key, an
 stores neither question nor answer. Only zsh is built; `iohr shell hook bash` and `fish`
 exit 1 with "not built yet", and so do `--via io` and `--headless` with `--agent codex`. An answer is an AI
 answer: check it before you rely on it.
+
+## The terminal theme
+
+`iohr theme` gives the real Terminal.app and zsh the look of the terminal in the InOrbit Mac
+app (RFC 0212). The four themes, the font (Geist Mono 12.5, then SF Mono, then Menlo) and the
+cursor (a blinking bar) are the app's own: `tools/terminal-themes.py` reads `THEMES`,
+`DEFAULTS` and `fontStack` from the app's `src/lib/term-config.ts` and writes
+`cli/crates/iohr/src/commands/theme/themes.json`, and both the profile and the prompt are made
+from that file. `mise run cli:themes` regenerates it; `mise run cli:themes:check` fails when it
+drifted from the app (it needs an iohr-mac checkout, `IOHR_MAC_DIR`; CI runs the offline
+check that the file is whole).
+
+Nothing happens until you ask. `iohr theme install nord` writes two files, both under
+`~/.inorbit/term` (`IOHR_TERM_DIR` moves it), and says so: `themes/nord.terminal` and
+`theme.json`. It never edits `~/.zshrc`. Three things are flags:
+
+- `--terminal` runs `open` on the profile, so Terminal.app imports it as "InOrbit Nord" and opens a
+  window with it. It is not made your default profile: Terminal's Settings, Profiles, Default does that.
+  Terminal.app takes one face, so the profile uses Geist Mono when it is installed in
+  `~/Library/Fonts` or `/Library/Fonts`, else SF Mono, else Menlo.
+- `--prompt` turns on the zsh prompt: the folder, the git branch and, after a failed command, the
+  status on one line, and `❯` (the accent colour; red after a failure) on the next. It is part of
+  the shell hook, so `eval "$(iohr shell hook zsh)"` must be in `~/.zshrc`; `install` tells you
+  when it is not. The right prompt (the "3 asks" segment) is not touched. The colours are
+  24-bit where the terminal says so (`COLORTERM`), else the nearest of 256 (Terminal.app has no
+  24-bit colour, so the prompt there is an approximation of the profile's colours).
+- `--replace-prompt` is `--prompt` that also replaces a prompt you set yourself. Without it, the
+  prompt is set only when `PROMPT` is empty, is zsh's default (`%m%# `) or macOS's
+  (`%n@%m %1~ %# `), or is the one the theme set; a prompt of your own, or a framework's, stays.
+
+`INORBIT_PROMPT=0` turns the prompt off for one shell and `INORBIT_PROMPT_DIRTY=1` adds a mark
+when the working tree has changes (slower in a big repository). `iohr theme off` turns it off
+for new shells and forgets the theme; it does not remove a profile you imported into
+Terminal.app, and does not touch your shells that are already open. Under `--json` every
+subcommand prints one object and nothing else.
 
 ## The floating panel
 

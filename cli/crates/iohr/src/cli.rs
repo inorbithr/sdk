@@ -478,6 +478,16 @@ pub enum Command {
     /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
     #[command(subcommand)]
     Shell(ShellCommand),
+    /// The InOrbit app's terminal look for Terminal.app and zsh: themes, profile, prompt.
+    ///
+    /// `iohr theme list` shows the themes (the app's own, generated from it); `iohr theme
+    /// install NAME` writes the Terminal.app profile under ~/.inorbit/term and remembers the
+    /// theme; `--terminal` opens the profile in Terminal.app and `--prompt` turns on the zsh
+    /// prompt (it needs the shell hook, and keeps a prompt you set yourself unless you pass
+    /// `--replace-prompt`). `iohr theme off` turns the prompt off. Local files only; ~/.zshrc
+    /// is never edited.
+    #[command(subcommand)]
+    Theme(ThemeCommand),
     /// Rules for what Io may run or open when you ask it something.
     ///
     /// `iohr ask` (and `?` at your prompt) asks you before Io runs a command. Your answers
@@ -1962,6 +1972,37 @@ pub enum ShellCommand {
         #[arg(value_enum)]
         shell: HookShell,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ThemeCommand {
+    /// List the themes and the one that is on.
+    List,
+    /// Show a theme's colours, font and cursor.
+    Show {
+        /// The theme (`iohr theme list`).
+        name: String,
+    },
+    /// Write a theme's Terminal.app profile and remember it; the prompt and Terminal.app are flags.
+    Install(ThemeInstallArgs),
+    /// Turn the prompt off and forget the chosen theme (Terminal.app profiles stay).
+    Off,
+}
+
+#[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)] // independent command-line switches, not a state
+pub struct ThemeInstallArgs {
+    /// The theme (`iohr theme list`).
+    pub name: String,
+    /// Open the profile in Terminal.app, which imports it (macOS; it is not made the default).
+    #[arg(long)]
+    pub terminal: bool,
+    /// Turn on the zsh prompt (it comes with `eval "$(iohr shell hook zsh)"`); a prompt you set yourself is kept.
+    #[arg(long)]
+    pub prompt: bool,
+    /// Turn on the zsh prompt and replace the prompt you set yourself.
+    #[arg(long)]
+    pub replace_prompt: bool,
 }
 
 /// A shell `iohr shell hook` names.
