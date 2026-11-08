@@ -47,6 +47,7 @@ impl Host {
                         poll: Duration::from_millis(5),
                     },
                     first_join: Duration::from_secs(120),
+                    starter: None,
                 },
                 |_| {
                     let _ = ready_tx.send(());
