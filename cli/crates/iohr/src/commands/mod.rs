@@ -18,6 +18,7 @@ mod domains;
 mod ext;
 mod ext_catalogue;
 mod ext_packages;
+mod init_crawl;
 mod init_extensions;
 mod lab;
 mod login;
