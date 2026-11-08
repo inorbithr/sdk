@@ -205,6 +205,7 @@ async fn approve_points_at_the_phone_and_never_decides() {
     let o = iohr(&server, dir.path(), &["asks", "approve", ID, "--once"]);
     assert!(o.status.success(), "{}", err(&o));
     assert!(err(&o).contains("Approve on your phone"), "{}", err(&o));
+    assert!(err(&o).contains("this is a merge"), "{}", err(&o));
     let posts = server
         .received_requests()
         .await
@@ -481,4 +482,88 @@ async fn the_asks_zsh_prompt_segment_reads_the_cache_and_leaves_a_set_rprompt_al
         std::fs::read_to_string(&ran).unwrap().trim(),
         "asks count --cache"
     );
+}
+
+fn posts(reqs: &[wiremock::Request]) -> usize {
+    reqs.iter().filter(|r| r.method.as_str() == "POST").count()
+}
+
+fn review_ask() -> serde_json::Value {
+    let mut a = ask("pending");
+    a["kind"] = json!("review");
+    a["title"] = json!(format!("Review {SECRET_TEXT}"));
+    a["payload_sha256"] = json!("ab".repeat(32));
+    a["approve_means"] = json!("Accept the plan.");
+    a["payload"] = json!({"review": {"document": "rfc 0113"}});
+    a
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ask_the_mac_may_sign_still_goes_to_the_phone_without_an_enrolled_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/approvals/{ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approval": review_ask()})))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = iohr(&server, dir.path(), &["asks", "approve", ID, "--once"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let e = err(&o);
+    assert!(e.contains("Approve on your phone"), "{e}");
+    assert!(!e.contains("this is a merge"), "{e}");
+    assert!(
+        !e.contains(SECRET_TEXT),
+        "an ask's text never reaches stderr: {e}"
+    );
+    assert_eq!(posts(&server.received_requests().await.unwrap()), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_roll_and_a_migration_stay_on_the_phone() {
+    for (kind, word) in [("roll", "a roll"), ("run", "a migration")] {
+        let server = MockServer::start().await;
+        let mut a = review_ask();
+        a["kind"] = json!(kind);
+        if kind == "run" {
+            a["approve_means"] = json!("Apply the migration to the accounts database.");
+        }
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/approvals/{ID}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"approval": a})))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let o = iohr(&server, dir.path(), &["asks", "approve", ID, "--once"]);
+        assert!(o.status.success(), "{}", err(&o));
+        assert!(err(&o).contains(word), "{kind}: {}", err(&o));
+        assert_eq!(
+            posts(&server.received_requests().await.unwrap()),
+            0,
+            "{kind}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn key_show_and_remove_with_no_key_make_no_call() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = iohr(&server, dir.path(), &["asks", "key", "show"]);
+    assert!(!o.status.success());
+    assert!(err(&o).contains("no approval key"), "{}", err(&o));
+    let o = iohr(&server, dir.path(), &["asks", "key", "remove"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_mac_enrols_a_key() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let o = iohr(&server, dir.path(), &["asks", "key", "enroll"]);
+    assert!(!o.status.success());
+    assert!(err(&o).contains("approve on your phone"), "{}", err(&o));
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
