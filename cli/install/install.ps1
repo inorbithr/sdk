@@ -7,7 +7,9 @@
 #   2. downloads it and the release's SHA256SUMS from the GitHub release over HTTPS;
 #   3. refuses unless the archive's SHA-256 matches SHA256SUMS, and, when the GitHub CLI
 #      is installed and signed in, unless `gh attestation verify` confirms this
-#      repository's release workflow built it;
+#      repository's release workflow built it from `main` (the exact certificate
+#      identity and source ref below; `iohr upgrade` requires the same, from
+#      cli/crates/iohr/src/ext/trust.rs, and a test holds the two together);
 #   4. copies iohr.exe into %LOCALAPPDATA%\Programs\iohr (no administrator rights) and adds
 #      that directory to your user PATH, saying so.
 #
@@ -20,6 +22,8 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $repo = 'inorbithr/sdk'
+$identity = 'https://github.com/inorbithr/sdk/.github/workflows/release.yml@refs/heads/main'
+$sourceRef = 'refs/heads/main'
 $dir = if ($env:IOHR_INSTALL_DIR) { $env:IOHR_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\iohr' }
 $version = $env:IOHR_VERSION
 
@@ -68,11 +72,12 @@ try {
     try { & gh auth status *> $null; $ghReady = ($LASTEXITCODE -eq 0) } catch { $ghReady = $false }
   }
   if ($ghReady) {
-    & gh attestation verify (Join-Path $tmp $file) --repo $repo | Out-Null
+    & gh attestation verify (Join-Path $tmp $file) --repo $repo --cert-identity $identity --source-ref $sourceRef | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "gh attestation verify failed for $file; nothing was installed" }
-    Say "attestation ok (built by $repo's release workflow)"
+    Say "attestation ok (built by $repo's release workflow on main)"
   } else {
-    Say 'attestation not checked (needs the GitHub CLI, signed in); the checksum was'
+    Say 'attestation NOT checked: the GitHub CLI (gh) is not installed or not signed in.'
+    Say 'only the SHA-256 checksum was checked. To check the attestation too, sign in to gh and run this again.'
   }
 
   Expand-Archive -Path (Join-Path $tmp $file) -DestinationPath $tmp

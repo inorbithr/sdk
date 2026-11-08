@@ -399,8 +399,18 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     None => Outcome::Stopped,
                 }
             };
+            let exec = Arc::new(exec);
+            // Realtime call answers on warm sessions, beside the turns (core RFC 0215).
+            let voice = crate::runner::voice::serve(
+                &svc,
+                &exec,
+                &me.runner_id,
+                asks_stopped.clone(),
+                crate::runner::voice::Pace::default(),
+                &Out::note,
+            );
             let turns = async {
-                let ended = run_loop(&svc, &Arc::new(exec), &me, cfg, rx, &Out::note).await;
+                let ended = run_loop(&svc, &exec, &me, cfg, rx, &Out::note).await;
                 let _ = stop_asks.send(true);
                 ended
             };
@@ -409,7 +419,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     a.serve(&svc, asks_stopped, &Out::note).await;
                 }
             };
-            let ((end, stats), (), renewed) = tokio::join!(turns, approved, renewal);
+            let ((end, stats), (), renewed, ()) = tokio::join!(turns, approved, renewal, voice);
             Out::note(&format!(
                 "stopped ({end:?}): {} heartbeats, {} failed, {} leases accepted, {} turns, {} replies delivered",
                 stats.beats, stats.failures, stats.accepted, stats.turns, stats.reported
