@@ -789,6 +789,9 @@ fn chosen_mode(chosen: &Chosen<'_>, terminal: bool) -> Result<Mode, Error> {
 /// exception in `manual` at a terminal: `Bash` alone, each command asked) or when this system
 /// has no unix sockets. A broker that cannot start is an error the person sees, never a
 /// silent fall back to something more permissive.
+// Off unix there is no broker to start or to fail: the body is `Ok(None)`, and the signature stays
+// the unix one the caller uses.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn permission_session(
     chosen: &Chosen<'_>,
     ctx: &Context,
@@ -805,7 +808,10 @@ fn permission_session(
     #[cfg(unix)]
     return start_broker(mode, chosen, ctx).map(Some);
     #[cfg(not(unix))]
-    Ok(None)
+    {
+        let _ = chosen;
+        Ok(None)
+    }
 }
 
 /// The words that name a mode: the flag layer (`--mode`, `--permissions`, and their environment)

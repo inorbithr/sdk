@@ -483,6 +483,8 @@ mod other {
     pub(crate) struct Hosted;
 
     impl Hosted {
+        // Stub of the unix `finish`: same signature for the caller, nothing to finish.
+        #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
         pub(crate) fn finish(self) -> Result<(), Error> {
             Ok(())
         }
