@@ -913,7 +913,7 @@ mod tests {
             done,
             failed: "",
         };
-        for piece in [p(1, "Hel", false), p(1, "lo.", true), p(2, "Hi", true)] {
+        for piece in [p(1, "Hi th", false), p(1, "ere.", true), p(2, "Hi", true)] {
             tx.send(("vl_1".into(), piece)).await.unwrap();
         }
         drop(tx);
@@ -928,7 +928,7 @@ mod tests {
         assert_eq!(sent.len(), 2, "{sent:?}");
         assert_eq!(
             sent[0],
-            json!({"seq": "1", "text": "Hello.", "done": true, "failed": "", "account_id": "acc_1"})
+            json!({"seq": "1", "text": "Hi there.", "done": true, "failed": "", "account_id": "acc_1"})
         );
         assert_eq!(sent[1]["seq"], "2");
     }
