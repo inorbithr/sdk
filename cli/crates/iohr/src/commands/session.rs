@@ -145,7 +145,7 @@ mod unix {
                     &roles,
                     &turn,
                     &stop,
-                    Options::default(),
+                    Options::started_by_parent(),
                     |recovered| {
                         let _ = told.send(Ok(()));
                         if recovered.requeued + recovered.failed > 0 {

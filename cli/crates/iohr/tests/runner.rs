@@ -2242,3 +2242,35 @@ async fn bare_iohr_on_a_terminal_under_no_color_prints_the_usage_report() {
         s.screen.screen().contents()
     );
 }
+
+/// A shell killed after it started the host and before it joined it leaves nobody to join:
+/// the host ends at once, not when its 30 seconds for a first join are up.
+#[tokio::test]
+async fn a_shell_killed_before_it_joined_takes_the_host_with_it_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let p = project.to_str().unwrap();
+    let mut shell = session_cmd(&server, dir.path(), &["session", p])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    // The moment the socket exists: the shell polls every 50 ms, so it has not joined yet.
+    while session_socket(&dir.path().join("data")).is_none() {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+    let killed = std::time::Instant::now();
+    wait_until("the host to end", || {
+        session_socket(&dir.path().join("data")).is_none()
+    })
+    .await;
+    assert!(
+        killed.elapsed() < std::time::Duration::from_secs(10),
+        "the host took {:?} to end",
+        killed.elapsed()
+    );
+}
