@@ -37,6 +37,7 @@ pub(crate) mod palette {
 
 /// The xterm 256-colour index nearest to `rgb`: the 6x6x6 cube or the grey ramp, whichever
 /// is closer (squared distance), for terminals without 24-bit colour.
+#[cfg(unix)]
 pub(crate) fn nearest_256(rgb: Rgb) -> u8 {
     const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
     let dist = |a: Rgb, b: Rgb| -> u32 {
@@ -99,6 +100,7 @@ impl Look {
 
     /// A style for any colours: the exact ones with 24-bit colour, else the nearest of the
     /// 256 (the terminal panel's cells, which the palette's named styles do not cover).
+    #[cfg(unix)]
     pub(crate) fn rgb(self, fg: Rgb, bg: Option<Rgb>) -> Style {
         let mut s = Style::new().force_styling(self.fancy);
         if self.truecolor {
