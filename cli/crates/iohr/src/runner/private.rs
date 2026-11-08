@@ -13,9 +13,10 @@ use std::path::Path;
 /// Opens `path` and refuses it unless this user owns it and only this user can write it
 /// (no group or world write bit), and its directory too.
 ///
-/// Without `append`: read only; a file that is not there is `Ok(None)`. With `append`:
-/// the directory and the file are made (0700 and 0600) when missing, and the handle can
-/// be read and appended to.
+/// Without `append`: read only; a file (or directory) that is not there is `Ok(None)`.
+/// With `append`: the directory and the file are made (0700 and 0600) when missing, an
+/// existing one is made private too, a link at the file's name is refused, and the
+/// handle can be read and appended to.
 ///
 /// # Errors
 /// The file or its directory cannot be opened, belongs to another user, or is writable
@@ -26,27 +27,45 @@ pub(crate) fn open_trusted(path: &Path, append: bool) -> Result<Option<File>, St
     if append && let Some(dir) = dir {
         iohr_auth::create_private_dir(dir).map_err(|e| fail(&e))?;
     }
+    // The directory first: nothing is made in one another user could change.
+    if let Some(dir) = dir {
+        match std::fs::metadata(dir) {
+            Ok(meta) => check(&meta, dir, "directory")?,
+            Err(e) if !append && e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(fail(&e)),
+        }
+    }
     let mut o = std::fs::OpenOptions::new();
     o.read(true);
     if append {
         o.append(true).create(true);
+        // Mode 0600 as it is made, and never through a link at the name.
         #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            o.mode(0o600)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed());
+        }
     }
     let file = match o.open(path) {
         Ok(f) => f,
         Err(e) if !append && e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(fail(&e)),
     };
-    if let Some(dir) = dir {
-        let meta = std::fs::metadata(dir).map_err(|e| fail(&e))?;
-        check(&meta, dir, "directory")?;
-    }
     let meta = file.metadata().map_err(|e| fail(&e))?;
     if !meta.is_file() {
         return Err(format!("{} is not a regular file", path.display()));
     }
     check(&meta, path, "file")?;
+    // A file kept from before with a group or world read bit is made 0600 too.
+    #[cfg(unix)]
+    if append {
+        use std::os::unix::fs::PermissionsExt as _;
+        if meta.permissions().mode() & 0o077 != 0 {
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| fail(&e))?;
+        }
+    }
     Ok(Some(file))
 }
 
@@ -170,5 +189,26 @@ mod tests {
         }
         let e = open_trusted(Path::new("/etc/hosts"), false).unwrap_err();
         assert!(e.contains("owned by another user"), "{e}");
+    }
+
+    #[test]
+    fn appending_never_follows_a_link_and_tightens_what_is_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let elsewhere = outside.path().join("elsewhere");
+        std::fs::write(&elsewhere, "kept").unwrap();
+        let link = dir.path().join("seen");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        assert!(open_trusted(&link, true).is_err());
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "kept");
+
+        let p = dir.path().join("kept");
+        std::fs::write(&p, "x").unwrap();
+        mode(&p, 0o644);
+        mode(dir.path(), 0o755);
+        assert!(open_trusted(&p, true).unwrap().is_some());
+        let m = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m(&p), 0o600);
+        assert_eq!(m(dir.path()), 0o700);
     }
 }

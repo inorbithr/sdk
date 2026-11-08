@@ -728,7 +728,8 @@ fn replace_with(
     let dir = dest
         .parent()
         .ok_or_else(|| Error::Failed("the install path has no directory".into()))?;
-    let tmp = dir.join(format!(".iohr.upgrade-{}", std::process::id()));
+    // A random name, made new on each write: never a file or link that was there.
+    let tmp = iohr_auth::temp_path(dir, "iohr.upgrade");
     let result = (|| -> Result<(), Error> {
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             Error::Failed(format!(
@@ -737,7 +738,16 @@ fn replace_with(
             ))
         };
         let write = || -> Result<(), Error> {
-            std::fs::write(&tmp, program).map_err(|e| fail("cannot write", &e))?;
+            use std::io::Write as _;
+            match std::fs::remove_file(&tmp) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(fail("cannot write", &e));
+                }
+                _ => {}
+            }
+            iohr_auth::create_new_private(&tmp, 0o700)
+                .and_then(|mut f| f.write_all(program).and_then(|()| f.sync_all()))
+                .map_err(|e| fail("cannot write", &e))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt as _;
@@ -1044,6 +1054,35 @@ mod tests {
             std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
             0o755
         );
+    }
+
+    /// The temporary binary is made new each time it is written: a link left at its name
+    /// (between a signing step and the rewrite) is replaced, never written through.
+    #[cfg(unix)]
+    #[test]
+    fn the_new_binary_is_never_written_through_what_is_at_its_name() {
+        use super::replace_with;
+        use super::sign::Outcome;
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let elsewhere = outside.path().join("elsewhere");
+        std::fs::write(&elsewhere, "kept").unwrap();
+        let dest = dir.path().join("iohr");
+        std::fs::write(&dest, "old").unwrap();
+        let v = semver::Version::parse("1.2.3").unwrap();
+        let right = b"#!/bin/sh\necho 'iohr 1.2.3'\n";
+        let seen = std::cell::RefCell::new(Vec::new());
+        replace_with(&dest, right, &v, &|tmp| {
+            seen.borrow_mut().push(tmp.to_owned());
+            std::fs::remove_file(tmp).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, tmp).unwrap();
+            Outcome::Kept("codesign failed".into())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), right);
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "kept");
+        let name = seen.borrow()[0].file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(".iohr.upgrade.") && name.ends_with(".tmp"), "{name}");
     }
 
     /// The signing step sees the written, executable program before the version check,

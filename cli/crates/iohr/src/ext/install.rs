@@ -498,23 +498,14 @@ fn now() -> String {
 }
 
 fn create_private_dir(dir: &Path) -> Result<(), ExtError> {
-    let mut b = std::fs::DirBuilder::new();
-    b.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
-    b.create(dir).map_err(|e| io("create", dir, &e))
+    iohr_auth::create_private_dir(dir).map_err(|e| io("create", dir, &e))
 }
 
 fn write_file(path: &Path, bytes: &[u8], program: bool) -> Result<(), ExtError> {
     use std::io::Write as _;
-    let mut o = std::fs::OpenOptions::new();
-    o.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut o, if program { 0o700 } else { 0o600 });
-    #[cfg(not(unix))]
-    let _ = program;
-    let mut f = o.open(path).map_err(|e| io("create", path, &e))?;
+    let mut f = iohr_auth::create_new_private(path, if program { 0o700 } else { 0o600 })
+        .map_err(|e| io("create", path, &e))?;
     f.write_all(bytes)
         .and_then(|()| f.sync_all())
-        .map_err(|e| io("write", path, &e))
+.map_err(|e| io("write", path, &e))
 }

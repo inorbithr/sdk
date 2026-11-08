@@ -231,6 +231,14 @@ fn is_loopback(url: &Url) -> bool {
     }
 }
 
+/// Whether the configured registry credential may go to `realm`, a token service a
+/// challenge named: only on the registry's own origin (scheme, host and port). Any other
+/// service is asked anonymously. A redirect away from that origin drops the header too
+/// (the HTTP client removes `Authorization` when the host changes).
+fn credential_goes_to(registry: &Url, realm: &Url) -> bool {
+    registry.origin() == realm.origin()
+}
+
 /// An OCI descriptor: what a manifest or an index points at.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -633,7 +641,8 @@ impl Registry {
     }
 
     /// A pull token from the registry's token service (Docker token protocol):
-    /// anonymous, or with the configured credential.
+    /// anonymous, or with the configured credential when the service is on the
+    /// registry's own origin ([`credential_goes_to`]).
     async fn token(
         &self,
         params: &HashMap<String, String>,
@@ -659,8 +668,9 @@ impl Registry {
         if let Some(s) = params.get("service") {
             query.push(("service", s));
         }
+        let send_auth = credential_goes_to(&self.source.base, &realm);
         let mut req = self.http.get(realm).query(&query);
-        if let Some(a) = &self.auth {
+        if send_auth && let Some(a) = &self.auth {
             req = req.header(header::AUTHORIZATION, basic(a)?);
         }
         let reply = req.send().await.map_err(|e| self.unreachable(&e))?;
@@ -777,7 +787,7 @@ pub(crate) fn parse_challenge(params: &str) -> HashMap<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Digest, Source, parse_challenge};
+    use super::{Digest, Source, Url, credential_goes_to, parse_challenge};
 
     #[test]
     fn sources() {
@@ -830,5 +840,26 @@ mod tests {
         assert_eq!(c["realm"], "https://r.example/t");
         assert_eq!(c["service"], "r");
         assert!(parse_challenge("").is_empty());
+    }
+
+    #[test]
+    fn the_registry_credential_goes_to_its_own_origin_only() {
+        let u = |s: &str| Url::parse(s).unwrap();
+        let ghcr = u("https://ghcr.io/v2/");
+        assert!(credential_goes_to(&ghcr, &u("https://ghcr.io/token?x=1")));
+        assert!(credential_goes_to(&ghcr, &u("https://GHCR.io:443/token")));
+        for other in [
+            "https://auth.ghcr.io/token",
+            "https://ghcr.io.example/token",
+            "https://ghcr.io:8443/token",
+            "http://ghcr.io/token",
+            "https://example.com/token",
+        ] {
+            assert!(!credential_goes_to(&ghcr, &u(other)), "{other}");
+        }
+        let local = u("http://127.0.0.1:5000/");
+        assert!(credential_goes_to(&local, &u("http://127.0.0.1:5000/token")));
+        assert!(!credential_goes_to(&local, &u("http://127.0.0.1:5001/token")));
+        assert!(!credential_goes_to(&local, &u("http://localhost:5000/token")));
     }
 }
