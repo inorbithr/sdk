@@ -311,7 +311,8 @@ The first rule that applies wins:
 1. `config_file` in code (`off` reads no file);
 2. `INORBIT_CONFIG_FILE` (`off` reads no file);
 3. `$IOHR_CONFIG_DIR/config.toml`, the command line's own override;
-4. the command line's default directory (its `etcetera` native strategy, `cli/README.md`):
+4. the command line's default directory (its `etcetera` native strategy,
+   `cli/docs/files-and-dependencies.md`):
 
 | OS | File |
 |---|---|
@@ -539,7 +540,7 @@ upgraded by `brew` and keeps the signature it ships with. Other systems ignore t
 `iohr project init` (alias `create`) reads `[project]`; its `--template` flag wins over it.
 The coordinated template, the default, also makes the project's Planner plan; `--plan-id PLAN`
 uses one you have and `--no-plan` skips the step (signed out it is skipped on its own, with
-exit code 0; `cli/README.md`, "A project of your own").
+exit code 0; `cli/docs/projects.md`, "The Planner plan").
 The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 | Key | Values | Default | Read by |
