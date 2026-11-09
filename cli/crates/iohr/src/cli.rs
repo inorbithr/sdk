@@ -820,6 +820,62 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Remove job checkouts, mirrors and build directories nothing uses.
+    ///
+    /// Remove what nothing has used for `workspace_keep_days` (14 by default): job
+    /// checkouts, repository mirrors with no checkout left on them, and their build
+    /// directories; with `workspace_max_gb` set, also the oldest unused while everything
+    /// takes more than that. A checkout a live lease holds is never touched, nor anything
+    /// used in the last hour. The runner does the same on its own while it holds no
+    /// lease. Needs no sign-in.
+    Prune {
+        /// List what would be removed; remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Install the runner as a service of your user, started at login.
+    ///
+    /// On macOS a `LaunchAgent` (`hr.inorbit.runner`, or `hr.inorbit.runner-<profile>`
+    /// with `--profile`), on Linux a systemd user unit (`iohr-runner.service`, or
+    /// `iohr-runner-<profile>.service`); never needs sudo.
+    #[command(subcommand)]
+    Service(RunnerServiceCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerServiceCommand {
+    /// Write the service file and start `iohr runner run` as a service of your user.
+    ///
+    /// Writes the `LaunchAgent` (macOS) or systemd user unit (Linux) that runs this `iohr`
+    /// as `iohr runner run` (with `--profile`, for that profile), and starts it: on macOS
+    /// with `launchctl bootstrap gui/<uid>`, on Linux with `systemctl --user enable` and
+    /// `restart`. Says each step first. Needs no sign-in and never sudo; the runner itself
+    /// needs `iohr runner register` first.
+    Install {
+        /// Print the steps and the file; write and start nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace a service file of that name that differs from this one.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop the service and remove its file.
+    ///
+    /// Stops the service (`launchctl bootout`, or `systemctl --user disable --now`) and
+    /// removes its file. `--purge` also removes the profile's runner key and run key from
+    /// the credential store and the runner's approvals state; the shared checkouts,
+    /// mirrors and build directories go too once no other runner service is installed.
+    /// `--purge` needs the profile's sign-in, to name the account.
+    Uninstall {
+        /// Print the steps; stop and remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also remove the runner's keys and state.
+        #[arg(long)]
+        purge: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
 }
 
 #[derive(Debug, Subcommand)]

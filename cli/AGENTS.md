@@ -86,7 +86,8 @@ cli/
   A person profile sends `?account=` and the answer's stamp must name that account.
 - Output: results on stdout (tables, or JSON with `--json`), notes on stderr, so pipes
   get only data. `token create` prints the new token alone on stdout.
-- Dependencies: the table in `README.md`. A new one needs a reason there and in the PR.
+- Dependencies: the table in `docs/files-and-dependencies.md`. A new one needs a reason
+  there and in the PR.
 - The generator's output is deterministic and golden-tested per language
   (`iohr-codegen/tests/golden/<case>/expected/<lang>/`, and the language-neutral marks
   per operation in `expected/operations.json`; `IOHR_UPDATE_GOLDEN=1` rewrites,
