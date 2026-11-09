@@ -11,8 +11,11 @@
 //! ([`super::env::contained`]).
 //!
 //! Only when the platform says the GitHub App is not installed for the account, or is too
-//! old to mint a token, does the runner use the host's own `gh` sign-in, and it says why.
-//! Every other refusal (a lease that is not live, a repository the installation does not
+//! old to mint a token, may the runner use the host's own `gh` sign-in, and then only
+//! where the machine's settings allow it (`allow_host_git_credentials = true`; default
+//! off, [`Access::allowed`]): that answer comes from the coordinator, and the host's
+//! sign-in reaches every repository its person can, not one. Allowed, it says why in the
+//! log; not allowed, the job is refused with the reason. Every other refusal (a lease that is not live, a repository the installation does not
 //! list, a permission it lacks, GitHub unavailable) is an error: nothing is fetched or
 //! pushed.
 
@@ -191,6 +194,18 @@ impl Access {
         Self::Host(why.into())
     }
 
+    /// `self` when this machine may use it: a lease's own token always; the host's
+    /// sign-in only with `allow_host` (`allow_host_git_credentials`). Refused, the error
+    /// says why the platform offered no token and how to allow the fallback.
+    pub(crate) fn allowed(self, allow_host: bool) -> Result<Self, String> {
+        match self {
+            Self::Host(why) if !allow_host => Err(format!(
+                "no GitHub token for this job: {why}; this machine does not lend its own gh sign-in to a job (set allow_host_git_credentials = true in [runner] to allow it, or install the GitHub App for the account)"
+            )),
+            a => Ok(a),
+        }
+    }
+
     /// Good for the calls about to be made: the host's sign-in always, a token with more
     /// than [`REFRESH_BEFORE`] left.
     pub(crate) fn fresh(&self, now: OffsetDateTime) -> bool {
@@ -288,6 +303,15 @@ pub(crate) mod tests {
         assert_eq!(host.git_env(), None);
         assert_eq!(host.gh_token(), None);
         assert!(host.git_args()[3].ends_with("!gh auth git-credential"));
+        // The host's sign-in is lent only where the machine allows it.
+        let refused = host.clone().allowed(false).unwrap_err();
+        assert!(
+            refused.contains("no installation") && refused.contains("allow_host_git_credentials"),
+            "{refused}"
+        );
+        assert!(matches!(host.allowed(true), Ok(Access::Host(_))));
+        let token = token_for("acme/app");
+        assert!(matches!(token.allowed(false), Ok(Access::Token(_))));
         for reason in [
             "not_listed",
             "needs_permission",
