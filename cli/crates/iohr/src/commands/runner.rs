@@ -835,7 +835,7 @@ fn personal_use_command(ctx: &Ctx, accept: bool, withdraw: bool, out: Out) -> Re
     Out::note(match (holds, accept, withdraw) {
         (_, _, true) => "withdrawn: the runner no longer runs on your own Claude plan",
         (true, true, _) => {
-            "accepted on this machine for a year, or until the notice changes; it takes `claude_auth = \"any\"` in [runner] as well"
+            "accepted on this machine for a year, or until the notice changes; it takes `claude_auth = \"any\"` or `\"plan\"` in [runner] as well"
         }
         (true, _, _) => "accepted on this machine",
         (false, _, _) => {

@@ -383,13 +383,13 @@ pub struct RunnerConfig {
     /// `target:sweep` or `target:guard` in. Unset, the runner refuses every sweep.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub core_checkout: Option<String>,
-    /// Which sign-in Claude turns may run on: `api_only` (default; an Anthropic API key
-    /// the runner keeps in the credential store) or `any` (the key, or your own Claude
-    /// plan, which is for personal use only). Set here only: the account's policy can
-    /// make a runner stricter, never looser.
+    /// Which sign-in Claude turns may run on: `api` (default; an Anthropic API key the
+    /// runner keeps in the credential store), `plan` (your own Claude plan only, which
+    /// is for personal use only; the stored key is not used) or `any` (either). Set
+    /// here only: the account's policy can narrow a runner, never widen it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_auth: Option<String>,
-    /// The same for Codex turns: `any` (default) or `api_only`.
+    /// The same for Codex turns: `any` (default), `plan` or `api`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_auth: Option<String>,
     /// Whether git may use this machine's own `gh` sign-in for a job when the platform
