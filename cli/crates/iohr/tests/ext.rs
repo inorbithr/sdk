@@ -7,6 +7,8 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+// The pty helper is unix only; only the unix `init_crawl` tests use it.
+#[cfg(unix)]
 mod pty;
 mod support;
 
