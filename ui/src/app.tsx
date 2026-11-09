@@ -1,13 +1,16 @@
-import { House, Puzzle } from "lucide-react";
+import { House, PanelRight, Puzzle } from "lucide-react";
 import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "./frame/cn.ts";
 import { closeContextMenu, openContextMenu, showContextMenu } from "./frame/context-menu.tsx";
 import type { MenuEntry } from "./frame/context-menu-core.ts";
+import { Dock } from "./frame/dock.tsx";
+import { closeDock, setDockWidth, toggleDock } from "./frame/dock-frame.ts";
 import { extensionsMenu } from "./frame/extensions-menu.ts";
 import { Frame } from "./frame/frame.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
 import { keysOf, useFrameShortcuts } from "./frame/shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
+import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
@@ -16,13 +19,15 @@ import { useSidebar } from "./lib/sidebar-store.ts";
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
 // and the page body shows the chosen panel. The menus are the Mac app's one context menu (frame/context-menu.tsx,
 // C6): the Extensions menu, and a right click on an extension row. ⌘\ hides and shows the sidebar, as in the Mac
-// app. The dock (C7) is not here yet; the home page says so under a Stub label.
+// app. The Details button opens the right dock (frame/dock.tsx, C7), which shows what the listing says about the
+// page in front: the installed panels on Home, the chosen extension on its own page.
 //
 // A panel lives on its own page route, `/ext/<name>`: the server fixes a page's `frame-src` when it loads, so after a
 // start the page loads again on that route and its policy allows the new panel's port. Close stops the panel and
 // goes back to `/`.
 export function App() {
   const [sidebar, update] = useSidebar();
+  const [dock, updateDock] = useDock();
   const [listing, setListing] = useState<Listing | null>(null);
   const [open, setOpen] = useState(false);
   const menu = useRef<number | null>(null);
@@ -113,16 +118,31 @@ export function App() {
   );
 
   const actions = (
-    <button
-      type="button"
-      className="hover:bg-accent hover:text-foreground text-muted-foreground rounded-md px-2 py-1 text-[13px] disabled:opacity-50"
-      aria-haspopup="menu"
-      aria-expanded={open}
-      disabled={listing === null}
-      onClick={(e) => toggleMenu(e.currentTarget)}
-    >
-      Extensions
-    </button>
+    <>
+      <button
+        type="button"
+        className="hover:bg-accent hover:text-foreground text-muted-foreground rounded-md px-2 py-1 text-[13px] disabled:opacity-50"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={listing === null}
+        onClick={(e) => toggleMenu(e.currentTarget)}
+      >
+        Extensions
+      </button>
+      <button
+        type="button"
+        title={dock.open ? "Hide details" : "Show details"}
+        aria-label="Details"
+        aria-pressed={dock.open}
+        onClick={() => updateDock(toggleDock)}
+        className={cn(
+          "hover:bg-accent hover:text-foreground text-muted-foreground flex size-7 items-center justify-center rounded-md",
+          dock.open && "bg-accent text-foreground",
+        )}
+      >
+        <PanelRight className="size-4" />
+      </button>
+    </>
   );
 
   const sidebarBody = (rail: boolean) => (
@@ -160,7 +180,25 @@ export function App() {
   );
 
   return (
-    <Frame sidebar={sidebar} update={update} title={title} actions={actions} sidebarBody={sidebarBody}>
+    <Frame
+      sidebar={sidebar}
+      update={update}
+      title={title}
+      actions={actions}
+      sidebarBody={sidebarBody}
+      dock={
+        dock.open ? (
+          <Dock
+            title="Details"
+            width={dock.width}
+            onWidth={(w) => updateDock((s) => setDockWidth(s, w))}
+            onClose={() => updateDock(closeDock)}
+          >
+            <Details listing={listing} chosen={chosen} />
+          </Dock>
+        ) : null
+      }
+    >
       <div className={cn("h-full p-5", chosen && "flex flex-col")}>
         {listing?.state === "error" ? (
           <p className="notice" role="alert">
@@ -190,14 +228,46 @@ export function App() {
             <h2 className="mb-2 text-base font-semibold">Home</h2>
             <p className="text-muted-foreground text-sm">
               This is the Mac app's window frame: the sidebar, the page header and its context menu. Right-click an
-              extension for its actions, and press {keysOf("sidebar")} to hide or show the sidebar. The dock for pages
-              beside this one comes in a later slice of RFC 0217. Choose an extension in the sidebar or the Extensions
-              menu to start its panel.
+              extension for its actions, press {keysOf("sidebar")} to hide or show the sidebar, and open the dock on the
+              right with Details. Choose an extension in the sidebar or the Extensions menu to start its panel.
             </p>
           </section>
         )}
       </div>
     </Frame>
+  );
+}
+
+/** The dock's Details: what the extension listing says about the page in front, nothing made up. */
+function Details({ listing, chosen }: { listing: Listing | null; chosen: Panel | null }) {
+  if (listing === null) return <p className="text-muted-foreground p-4 text-[13px]">Loading the extensions…</p>;
+  if (listing.state === "error")
+    return (
+      <p className="text-muted-foreground p-4 text-[13px]" role="alert">
+        {listing.reason}
+      </p>
+    );
+  const rows = chosen ? [chosen] : listing.panels;
+  if (rows.length === 0)
+    return <p className="text-muted-foreground p-4 text-[13px]">No installed extension declares a panel.</p>;
+  return (
+    <div className="flex flex-col gap-3 p-4 text-[13px]">
+      {!chosen && <p className="text-muted-foreground">Installed extensions that declare a panel.</p>}
+      {rows.map((p) => (
+        <dl key={p.name} className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg border p-3">
+          <dt className="text-muted-foreground">Name</dt>
+          <dd className="truncate">{p.name}</dd>
+          <dt className="text-muted-foreground">Title</dt>
+          <dd className="truncate">{p.title}</dd>
+          <dt className="text-muted-foreground">Version</dt>
+          <dd className="truncate">{p.version}</dd>
+          <dt className="text-muted-foreground">Entry</dt>
+          <dd className="truncate font-mono text-[12px]">{p.entry}</dd>
+          <dt className="text-muted-foreground">State</dt>
+          <dd>{p.port === undefined ? "stopped" : "running"}</dd>
+        </dl>
+      ))}
+    </div>
   );
 }
 

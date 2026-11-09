@@ -180,7 +180,7 @@ export function RailFlyout({
 }) {
   const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const n = section.items.length;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new section changes the flyout's rows, so it is placed again; its height is read from the DOM, not from section.
+  // Placed again when its rows change size (a new section), the window resizes or the rail scrolls.
   useLayoutEffect(() => {
     const el = box.current;
     if (!el || !anchor) return;
@@ -192,13 +192,16 @@ export function RailFlyout({
         }),
       );
     place();
+    const rows = new ResizeObserver(place);
+    rows.observe(el);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true); // the rail scrolls: the flyout follows its icon
     return () => {
+      rows.disconnect();
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [anchor, box, section]);
+  }, [anchor, box]);
   const name = (
     <button
       type="button"

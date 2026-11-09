@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 InOrbit d.o.o.
 //
-// Moved from iohr-mac src/components/shell.tsx (the layout and ResizeEdge) and src/lib/sidebar-store.ts
+// Moved from iohr-mac src/components/shell.tsx (the layout) and src/lib/sidebar-store.ts
 // (useViewportWidth) (origin/main d3ac8759) under ADR 0230: the shell frame layer lives here under
 // Apache-2.0, and iohr-mac imports it (RFC 0217 C8 deletes its copy). The frame draws the window: the
 // sidebar column (title strip, body, footer, resize edge) and the page inset (header, actions, body),
@@ -9,10 +9,10 @@
 // owns no state, so each app keeps the sidebar where it likes (a file in the Mac app, the browser here).
 
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { type ReactNode, type PointerEvent as ReactPointerEvent, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { cn } from "./cn.ts";
+import { ResizeHandle } from "./resize-handle.tsx";
 import {
-  clampWidth,
   columnWidth,
   DEFAULT_WIDTH,
   effectiveMode,
@@ -60,7 +60,7 @@ export type FrameProps = {
   actions?: ReactNode;
   /** Room for a native window's traffic lights when the sidebar is hidden (the Mac app). */
   trafficLights?: boolean;
-  /** Pages docked beside the page (RFC 0217 C7). */
+  /** The right dock beside the page (frame/dock.tsx, RFC 0217 C7); the app decides what it holds. */
   dock?: ReactNode;
   children: ReactNode;
 };
@@ -129,12 +129,20 @@ export function Frame({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{sidebarBody(rail)}</div>
         {sidebarFooter && <div className="border-sidebar-border border-t p-2">{sidebarFooter(rail)}</div>}
+        {/* The expanded sidebar's right edge: drag to resize (200 to 360 px), arrows nudge, double-click resets. */}
         {!rail && !hidden && (
-          <ResizeEdge
+          <ResizeHandle
+            label="Resize sidebar"
             width={sidebar.width}
-            update={update}
+            min={MIN_WIDTH}
+            max={MAX_WIDTH}
+            edge="right"
+            step={16}
+            onWidth={(w) => update((s) => setWidth(s, w))}
+            onReset={() => update((s) => setWidth(s, DEFAULT_WIDTH))}
             onStart={() => setResizing(true)}
             onEnd={() => setResizing(false)}
+            className="hover:bg-sidebar-ring/40 focus-visible:bg-sidebar-ring/60"
           />
         )}
       </aside>
@@ -172,57 +180,5 @@ export function Frame({
       </div>
       {dock}
     </div>
-  );
-}
-
-/** The expanded sidebar's right edge: drag to resize (200 to 360 px), arrows nudge, double-click resets. */
-function ResizeEdge({
-  width,
-  update,
-  onStart,
-  onEnd,
-}: {
-  width: number;
-  update: UpdateSidebar;
-  onStart: () => void;
-  onEnd: () => void;
-}) {
-  const drag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-    const left = el.parentElement?.getBoundingClientRect().left ?? 0;
-    onStart();
-    const move = (m: PointerEvent) => update((s) => setWidth(s, m.clientX - left));
-    const up = () => {
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up);
-      el.removeEventListener("pointercancel", up);
-      onEnd();
-    };
-    el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", up);
-    el.addEventListener("pointercancel", up);
-  };
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: an <hr> cannot take focus or a drag; a focusable separator is the ARIA window splitter.
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize sidebar"
-      aria-valuenow={width}
-      aria-valuemin={MIN_WIDTH}
-      aria-valuemax={MAX_WIDTH}
-      tabIndex={0}
-      onPointerDown={drag}
-      onDoubleClick={() => update((s) => setWidth(s, DEFAULT_WIDTH))}
-      onKeyDown={(e) => {
-        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-          e.preventDefault();
-          update((s) => setWidth(s, clampWidth(s.width + (e.key === "ArrowRight" ? 16 : -16))));
-        }
-      }}
-      className="hover:bg-sidebar-ring/40 focus-visible:bg-sidebar-ring/60 absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize outline-none transition-colors"
-    />
   );
 }
