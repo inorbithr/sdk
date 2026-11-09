@@ -169,11 +169,15 @@ pub(crate) fn load_in(cwd: &Path, user: Option<&Path>, root: Option<&Path>) -> C
         let (file, skipped) = in_folder(d);
         chain.skipped.extend(skipped);
         if let Some(f) = file {
-            let rel = f
-                .strip_prefix(root.unwrap_or(cwd))
-                .unwrap_or(&f)
-                .display()
-                .to_string();
+            // A label is display text, so its parts are joined with `/` on every system.
+            let rel = match f.strip_prefix(root.unwrap_or(cwd)) {
+                Ok(r) => r
+                    .iter()
+                    .map(|p| p.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                Err(_) => f.display().to_string(),
+            };
             found.push((f, rel, Kind::Project));
         }
     }

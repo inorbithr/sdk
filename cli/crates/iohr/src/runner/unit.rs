@@ -406,7 +406,9 @@ pub(crate) fn others(u: &Unit) -> Vec<PathBuf> {
     found
 }
 
-#[cfg(test)]
+// A unit is installed only where `Manager::here()` names a service manager, never on
+// Windows, and these tests compare the unix paths a unit is written to.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
