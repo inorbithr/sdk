@@ -81,3 +81,7 @@ receives fixes.
   ([docs/security/requirements.md](docs/security/requirements.md)).
 - How to check that a package you installed is the one we built:
   [docs/security/verifying-releases.md](docs/security/verifying-releases.md).
+- `iohr runner` runs turns with the `claude` you installed, unmodified. `claude` sends
+  its requests to Anthropic directly; InOrbit does not proxy, read or store them. The
+  Anthropic API key the runner uses stays in your OS credential store and reaches only
+  the `claude` process it starts, never a log, an argument or InOrbit's servers.

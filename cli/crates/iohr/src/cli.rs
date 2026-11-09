@@ -423,6 +423,19 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Sign a built iohr the way releases are signed (the preview install, `cli:preview-install`).
+    ///
+    /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
+    /// certificate and the identifier `hr.inorbit.iohr`, the same signing `iohr upgrade`
+    /// does (`IOHR_SIGN_IDENTITY` names an identity; unset is `auto`; `-`, which
+    /// means "do not sign", is refused), so the Keychain
+    /// trusts every build of it alike. Fails when it cannot sign: a preview that stays
+    /// ad hoc is the problem this exists to remove.
+    #[command(hide = true)]
+    SignBinary {
+        /// The binary to sign, in place.
+        path: PathBuf,
+    },
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -524,7 +537,10 @@ pub enum Command {
     /// Run coordinator turns on this machine.
     ///
     /// The coordinator's runner: this machine runs coordinator turns on your own
-    /// installed `claude`, on your own subscription.
+    /// installed `claude`, on an Anthropic API key you store with `iohr runner api-key
+    /// set` (the path for an organisation's work). Running on your own Claude plan
+    /// instead is for personal use only: it is off until you turn it on in config.toml
+    /// and accept the notice `iohr runner personal-use` shows.
     #[command(subcommand)]
     Runner(RunnerCommand),
     /// Open this project's session: one process hosts its Roles while iohr is open.
@@ -667,9 +683,12 @@ pub enum RunnerCommand {
     ///
     /// Register this machine as one of your runners: its name, system and what it can run.
     ///
-    /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
-    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the seat
-    /// `claude auth status` names (organisation and email). Run it again and it says the runner exists; with
+    /// Needs `claude` on your PATH and an Anthropic API key stored with `iohr runner
+    /// api-key set`; or, for personal use only, `claude` signed in to your own plan
+    /// (`claude`, then `/login`) with `claude_auth = "any"` in `[runner]` and the notice
+    /// accepted. The key never leaves the machine; on your own plan nothing about the
+    /// sign-in does except a hash of the seat `claude auth status` names (organisation
+    /// and email). Run it again and it says the runner exists; with
     /// `--refresh` it sends the registration again with the key this machine holds, so
     /// the runner keeps its id and the coordinator records its current sign-in.
     Register {
@@ -789,6 +808,30 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Store or remove the Anthropic API key this machine's runner runs Claude on.
+    ///
+    /// The key is kept in your profile's credential store (the macOS Keychain on a Mac;
+    /// a file only for a profile made with `--insecure-storage`), never in config.toml,
+    /// and is given to `claude` alone when it starts, as `ANTHROPIC_API_KEY`. A running
+    /// runner reads it at start: restart it after a change.
+    #[command(subcommand)]
+    ApiKey(RunnerApiKeyCommand),
+    /// Read, accept or withdraw the personal-use notice for your own Claude plan.
+    ///
+    /// Running the runner on your own Claude plan, rather than an API key, is for
+    /// personal use only. With no flag this shows the notice and whether you accepted
+    /// it; `--accept` records that you accept it on this machine (the notice's version
+    /// and the date, kept in `runner/personal-use.json`, never sent), for a year or
+    /// until the notice changes. It takes `claude_auth = "any"` in `[runner]` as well.
+    /// Needs no sign-in.
+    PersonalUse {
+        /// Accept the notice shown.
+        #[arg(long)]
+        accept: bool,
+        /// Withdraw an acceptance: the runner no longer runs on your own plan.
+        #[arg(long, conflicts_with = "accept")]
+        withdraw: bool,
+    },
     /// Show or enrol this machine's run key.
     ///
     /// This machine's run key: the P-256 key that signs what it reports on approved
@@ -815,6 +858,84 @@ pub enum RunnerCommand {
         /// ask nothing.
         #[arg(long, conflicts_with_all = ["proof", "label"])]
         show: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Remove job checkouts, mirrors and build directories nothing uses.
+    ///
+    /// Remove what nothing has used for `workspace_keep_days` (14 by default): job
+    /// checkouts, repository mirrors with no checkout left on them, and their build
+    /// directories; with `workspace_max_gb` set, also the oldest unused while everything
+    /// takes more than that. A checkout a live lease holds is never touched, nor anything
+    /// used in the last hour. The runner does the same on its own while it holds no
+    /// lease. Needs no sign-in.
+    Prune {
+        /// List what would be removed; remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Install the runner as a service of your user, started at login.
+    ///
+    /// On macOS a `LaunchAgent` (`hr.inorbit.runner`, or `hr.inorbit.runner-<profile>`
+    /// with `--profile`), on Linux a systemd user unit (`iohr-runner.service`, or
+    /// `iohr-runner-<profile>.service`); never needs sudo.
+    #[command(subcommand)]
+    Service(RunnerServiceCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerServiceCommand {
+    /// Write the service file and start `iohr runner run` as a service of your user.
+    ///
+    /// Writes the `LaunchAgent` (macOS) or systemd user unit (Linux) that runs this `iohr`
+    /// as `iohr runner run` (with `--profile`, for that profile), and starts it: on macOS
+    /// with `launchctl bootstrap gui/<uid>`, on Linux with `systemctl --user enable` and
+    /// `restart`. Says each step first. Needs no sign-in and never sudo; the runner itself
+    /// needs `iohr runner register` first.
+    Install {
+        /// Print the steps and the file; write and start nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace a service file of that name that differs from this one.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop the service and remove its file.
+    ///
+    /// Stops the service (`launchctl bootout`, or `systemctl --user disable --now`) and
+    /// removes its file. `--purge` also removes the profile's runner key and run key from
+    /// the credential store and the runner's approvals state; the shared checkouts,
+    /// mirrors and build directories go too once no other runner service is installed.
+    /// `--purge` needs the profile's sign-in, to name the account.
+    Uninstall {
+        /// Print the steps; stop and remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also remove the runner's keys and state.
+        #[arg(long)]
+        purge: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerApiKeyCommand {
+    /// Store the key: asked for without echo on a terminal, or read from a file or
+    /// standard input. Never give it as an argument.
+    Set {
+        /// Read the key from this file (at most 64 KiB; surrounding white space is
+        /// dropped).
+        #[arg(long, value_name = "PATH", conflicts_with = "stdin")]
+        file: Option<std::path::PathBuf>,
+        /// Read the key from standard input.
+        #[arg(long)]
+        stdin: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Remove the stored key.
+    Remove {
         #[command(flatten)]
         account: AccountArg,
     },
@@ -1667,6 +1788,62 @@ pub enum AtlasCommand {
     /// The built-in roles of this project.
     #[command(subcommand, alias = "personalities")]
     Roles(RolesCommand),
+    /// Search the text of the sites this project crawled (PRD 0192).
+    ///
+    /// The best matching chunks of page text, each with its page, heading path and offsets.
+    /// Local: it reads `.inorbit/crawl/kb.duckdb`, which `iohr project init --crawl` builds.
+    /// The search is lexical (BM25); there is no embedding model on this machine.
+    Search {
+        /// What to look for.
+        #[arg(value_name = "QUERY")]
+        query: String,
+        /// Only this site (a name as the crawl folders have it).
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most chunks to show.
+        #[arg(long, default_value_t = 8, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// The facts the site model holds, each with the chunk it came from.
+    ///
+    /// `contact_email`, `phone`, `lists_price`, `offers`, `located_in`, `has_profile`,
+    /// `names_person`, `hosts_event`, `published`, `built_with`, `mentions_organization`,
+    /// `description`, `language`.
+    Facts {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Only this predicate (for example `contact_email`).
+        #[arg(long, value_name = "NAME")]
+        predicate: Option<String>,
+        /// Only facts whose value or subject contains this text.
+        #[arg(long, value_name = "TEXT")]
+        grep: Option<String>,
+        /// The most facts to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
+    Index {
+        /// List the pages of the sites instead of the sites.
+        #[arg(long)]
+        pages: bool,
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most pages to show with `--pages`.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2252,6 +2429,17 @@ pub struct InitCrawlArgs {
     /// The most minutes the crawl runs (the crawler's own cap is 240).
     #[arg(long, value_name = "N", default_value_t = 5)]
     pub crawl_minutes: u32,
+    /// The most requests a second the crawl asks of one host, 1 to 50 (the default is 10).
+    /// A slower `Crawl-delay` in the site's robots.txt still wins. An older agent keeps its
+    /// own fixed pace of one a second until it is updated.
+    #[arg(
+        long,
+        value_name = "N",
+        env = "IOHR_CRAWL_RATE",
+        default_value_t = 10,
+        value_parser = clap::value_parser!(u32).range(1..=50)
+    )]
+    pub crawl_rate: u32,
     /// Follow every other name in the site's domain (a link to `blog.acme.example` from
     /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
     /// terminal init asks once per such name (yes, no, yes to all; the default is no), and

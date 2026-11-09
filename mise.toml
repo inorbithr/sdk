@@ -336,6 +336,11 @@ run = "python3 tools/terminal-themes.py"
 description = "Fail if the committed terminal themes drifted from the Mac app's (needs an iohr-mac checkout; IOHR_MAC_DIR)"
 run = "python3 tools/terminal-themes.py --check"
 
+[tasks."cli:preview-install"]
+shell = "bash -e -o pipefail -c"
+description = "Command line, macOS: build iohr and install it as iohr-preview signed like the release (Apple Development, hr.inorbit.iohr), so the Keychain trusts every rebuild"
+run = "tools/preview-install.sh"
+
 [tasks."cli:fmt"]
 shell = "bash -e -o pipefail -c"
 dir = "cli"

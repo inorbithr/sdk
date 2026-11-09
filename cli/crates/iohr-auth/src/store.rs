@@ -3,7 +3,8 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use keyring_core::{CredentialStore, Entry};
 
@@ -195,10 +196,24 @@ fn failed(e: keyring_core::Error) -> StoreError {
 /// Whether a platform error is the Keychain saying it would have shown a prompt:
 /// `errSecInteractionNotAllowed` (-25308), which is what a call returns while
 /// [`QuietStore`] has switched the user interface off, or `errSecUserCanceled` (-128).
+///
+/// `errSecAuthFailed` (-25293) counts only while the user interface is off: then it is the
+/// answer when the item's access list does not name this binary and the dialog could not
+/// be shown (every ad-hoc build is a new binary to it), so the item is there and this
+/// `iohr` may not read it yet. With the interface on, the same code is a real
+/// authentication failure (the person answered No, or the password was wrong) and stays a
+/// [`StoreError::Failed`].
 #[cfg(target_os = "macos")]
 fn would_ask(e: &(dyn std::error::Error + 'static)) -> bool {
     e.downcast_ref::<security_framework::base::Error>()
-        .is_some_and(|e| matches!(e.code(), -25308 | -128))
+        .is_some_and(|e| match e.code() {
+            -25308 | -128 => true,
+            -25293 => {
+                !security_framework::os::macos::keychain::SecKeychain::user_interaction_allowed()
+                    .unwrap_or(true)
+            }
+            _ => false,
+        })
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -332,23 +347,39 @@ const QUIET_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500)
 /// sign-in; it only runs after a read the store allowed, so it is normally as quick.
 const QUIET_WRITE_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How many [`QuietStore`] calls may run at once on one gate. A call that outlives its
+/// budget keeps its thread until the store answers; the cap bounds those threads, and a
+/// call made while the gate is full fails at once without starting one. Four leaves room
+/// for the terminal panel's reads (asks, auto mode, the coordinator's picture) and one
+/// action at the same moment.
+const QUIET_IN_FLIGHT: usize = 4;
+
 /// A store for paths that must never block on, or show, a credential prompt: the zsh
-/// prompt's `asks count`. Reads and writes go to the inner store as usual; where the
-/// store would have asked the person, or has not answered within the budget, the call
-/// fails at once with [`StoreError::WouldAsk`].
+/// prompt's `asks count` and the terminal panel's reads. Reads and writes go to the inner
+/// store as usual; where the store would have asked the person, or has not answered within
+/// the budget, the call fails with [`StoreError::WouldAsk`].
 ///
 /// On macOS, building one calls `SecKeychain::disable_user_interaction`
 /// (`SecKeychainSetUserInteractionAllowed(false)`), so the Keychain returns
-/// `errSecInteractionNotAllowed` instead of drawing its dialog. The setting holds for the
-/// life of the process, which is the one short command that asked for it
+/// `errSecInteractionNotAllowed` instead of drawing its dialog. The setting holds while the
+/// store lives
 /// (<https://docs.rs/security-framework/3.7.0/security_framework/os/macos/keychain/struct.SecKeychain.html#method.disable_user_interaction>).
-/// The budget is the backstop for a store that waits without a dialog; the call still
-/// running is left on its own thread and ends with the process. Writes get a longer one
-/// (10 s): they save a refresh token the server has already rotated.
+/// The budget is the backstop for a store that waits without a dialog. A call past its
+/// budget cannot be stopped: it stays on its own thread until the store answers, and holds
+/// one of the gate's four places until then. While every place is taken, a
+/// get, set or delete fails at once with [`StoreError::WouldAsk`] and starts no thread, so
+/// a long-running process (the terminal panel reads every 20 s) never piles up threads
+/// waiting on a stuck Keychain. Writes get a longer budget (10 s): they save a refresh
+/// token the server has already rotated.
+///
+/// Every store made with [`new`](Self::new) shares one gate for the process, because they
+/// all wrap the one OS store and a call stuck in it holds the others back too.
+/// [`with_budgets`](Self::with_budgets) gives the store a gate of its own.
 pub struct QuietStore {
     inner: Arc<dyn Store>,
     budget: std::time::Duration,
     write_budget: std::time::Duration,
+    gate: Arc<Gate>,
     #[cfg(target_os = "macos")]
     _no_ui: Option<security_framework::os::macos::keychain::KeychainUserInteractionLock>,
 }
@@ -362,24 +393,86 @@ impl fmt::Debug for QuietStore {
     }
 }
 
-impl QuietStore {
-    /// `inner` with the Keychain's dialogs off, reads bounded to 1.5 s and writes to 10 s.
-    #[must_use]
-    pub fn new(inner: Arc<dyn Store>) -> Self {
-        Self::with_budgets(inner, QUIET_BUDGET, QUIET_WRITE_BUDGET)
+/// The calls of one or more [`QuietStore`]s that have not returned yet.
+#[derive(Debug)]
+struct Gate {
+    in_flight: AtomicUsize,
+    limit: usize,
+}
+
+impl Gate {
+    fn new(limit: usize) -> Arc<Self> {
+        Arc::new(Self {
+            in_flight: AtomicUsize::new(0),
+            limit,
+        })
     }
 
-    /// As [`new`](Self::new), with other budgets for reads and for writes.
+    /// A place for one call, or `None` while every place is taken.
+    fn enter(self: &Arc<Self>) -> Option<Place> {
+        let mut n = self.in_flight.load(Ordering::Acquire);
+        while n < self.limit {
+            match self.in_flight.compare_exchange_weak(
+                n,
+                n + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(Place(Arc::clone(self))),
+                Err(now) => n = now,
+            }
+        }
+        None
+    }
+}
+
+/// One call's place in its [`Gate`], given back when the call returns (or panics).
+struct Place(Arc<Gate>);
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// The gate every [`QuietStore::new`] shares.
+static OS_STORE_GATE: LazyLock<Arc<Gate>> = LazyLock::new(|| Gate::new(QUIET_IN_FLIGHT));
+
+impl QuietStore {
+    /// `inner` with the Keychain's dialogs off, reads bounded to 1.5 s and writes to 10 s,
+    /// on the process's one gate.
+    #[must_use]
+    pub fn new(inner: Arc<dyn Store>) -> Self {
+        Self::on_gate(
+            inner,
+            QUIET_BUDGET,
+            QUIET_WRITE_BUDGET,
+            Arc::clone(&OS_STORE_GATE),
+        )
+    }
+
+    /// As [`new`](Self::new), with other budgets for reads and for writes, on a gate of its
+    /// own.
     #[must_use]
     pub fn with_budgets(
         inner: Arc<dyn Store>,
         budget: std::time::Duration,
         write_budget: std::time::Duration,
     ) -> Self {
+        Self::on_gate(inner, budget, write_budget, Gate::new(QUIET_IN_FLIGHT))
+    }
+
+    fn on_gate(
+        inner: Arc<dyn Store>,
+        budget: std::time::Duration,
+        write_budget: std::time::Duration,
+        gate: Arc<Gate>,
+    ) -> Self {
         Self {
             inner,
             budget,
             write_budget,
+            gate,
             // When the switch fails the budget still bounds the wait.
             #[cfg(target_os = "macos")]
             _no_ui: security_framework::os::macos::keychain::SecKeychain::disable_user_interaction(
@@ -393,12 +486,18 @@ impl QuietStore {
         budget: std::time::Duration,
         f: impl FnOnce(&dyn Store) -> Result<T, StoreError> + Send + 'static,
     ) -> Result<T, StoreError> {
+        // Every place taken: earlier calls are still waiting on the store, so this one
+        // would too. Fail without starting another thread.
+        let place = self.gate.enter().ok_or(StoreError::WouldAsk)?;
         let (tx, rx) = std::sync::mpsc::channel();
         let inner = Arc::clone(&self.inner);
         std::thread::Builder::new()
             .name("iohr-quiet-store".into())
             .spawn(move || {
-                let _ = tx.send(f(inner.as_ref()));
+                let done = f(inner.as_ref());
+                // Given back before the answer, so a caller that has it can call again.
+                drop(place);
+                let _ = tx.send(done);
             })
             .map_err(|e| StoreError::Failed(format!("cannot start the store call: {e}")))?;
         match rx.recv_timeout(budget) {
@@ -670,7 +769,148 @@ mod tests {
         store.set(&k, &Redacted::new("x".into())).unwrap();
     }
 
+    /// A store whose calls wait until the test lets them go, as a Keychain does when it
+    /// holds its lock. `reached` counts the calls that got to it.
+    struct Held {
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        reached: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Held {
+        fn wait(&self) {
+            self.reached
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Dropping the sender lets every call go.
+            let _ = self.release.lock().unwrap().recv();
+        }
+    }
+
+    impl Store for Held {
+        fn get(&self, _: &EntryKey) -> Result<Option<Redacted<String>>, StoreError> {
+            self.wait();
+            Ok(Some(Redacted::new("held".into())))
+        }
+        fn set(&self, _: &EntryKey, _: &Redacted<String>) -> Result<(), StoreError> {
+            self.wait();
+            Ok(())
+        }
+        fn delete(&self, _: &EntryKey) -> Result<bool, StoreError> {
+            self.wait();
+            Ok(true)
+        }
+    }
+
+    fn until(what: &str, done: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "timed out: {what}");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// A quiet store whose every gate place is taken by a call stuck in the store, and the
+    /// sender that lets those calls go.
+    fn stuck_quiet() -> (
+        QuietStore,
+        std::sync::Arc<Held>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let held = std::sync::Arc::new(Held {
+            release: std::sync::Mutex::new(rx),
+            reached: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let ms = std::time::Duration::from_millis;
+        let store = QuietStore::with_budgets(
+            std::sync::Arc::clone(&held) as std::sync::Arc<dyn Store>,
+            ms(50),
+            ms(50),
+        );
+        let k = key("work", "acc_1");
+        for _ in 0..super::QUIET_IN_FLIGHT {
+            assert!(matches!(store.get(&k), Err(StoreError::WouldAsk)));
+        }
+        until("every stuck call reaches the store", || {
+            held.reached.load(std::sync::atomic::Ordering::SeqCst) == super::QUIET_IN_FLIGHT
+        });
+        (store, held, tx)
+    }
+
+    /// The long-running process: calls stuck in the store take every place, and the next
+    /// get, set or delete fails at once without starting a thread or reaching the store.
+    #[test]
+    fn a_quiet_store_with_calls_stuck_refuses_the_next_without_a_thread() {
+        let (store, held, _tx) = stuck_quiet();
+        let k = key("work", "acc_1");
+        for _ in 0..100 {
+            let started = std::time::Instant::now();
+            assert!(matches!(store.get(&k), Err(StoreError::WouldAsk)));
+            assert!(matches!(
+                store.set(&k, &Redacted::new("x".into())),
+                Err(StoreError::WouldAsk)
+            ));
+            assert!(matches!(store.delete(&k), Err(StoreError::WouldAsk)));
+            assert!(
+                started.elapsed() < std::time::Duration::from_millis(50),
+                "a refused call waited for its budget"
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(
+            held.reached.load(std::sync::atomic::Ordering::SeqCst),
+            super::QUIET_IN_FLIGHT,
+            "a refused call reached the store"
+        );
+        assert_eq!(
+            store
+                .gate
+                .in_flight
+                .load(std::sync::atomic::Ordering::SeqCst),
+            super::QUIET_IN_FLIGHT,
+            "only the stuck calls hold a place"
+        );
+    }
+
+    /// Once the stuck calls return, their places are free and calls work again.
+    #[test]
+    fn a_quiet_store_works_again_once_the_stuck_calls_return() {
+        let (store, held, tx) = stuck_quiet();
+        drop(tx);
+        until("the stuck calls give their places back", || {
+            store
+                .gate
+                .in_flight
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == 0
+        });
+        let k = key("work", "acc_1");
+        assert_eq!(store.get(&k).unwrap().unwrap().expose(), "held");
+        store.set(&k, &Redacted::new("x".into())).unwrap();
+        assert!(store.delete(&k).unwrap());
+        assert_eq!(
+            held.reached.load(std::sync::atomic::Ordering::SeqCst),
+            super::QUIET_IN_FLIGHT + 3
+        );
+    }
+
+    /// The prompt, the panel and every other caller build a quiet store per session, so
+    /// the bound holds only because they share one gate.
+    #[test]
+    fn quiet_stores_on_the_os_store_share_one_gate() {
+        let a = QuietStore::new(std::sync::Arc::new(MemoryStore::default()));
+        let b = QuietStore::new(std::sync::Arc::new(MemoryStore::default()));
+        assert!(std::sync::Arc::ptr_eq(&a.gate, &b.gate));
+        let own = QuietStore::with_budgets(
+            std::sync::Arc::new(MemoryStore::default()),
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(1),
+        );
+        assert!(!std::sync::Arc::ptr_eq(&a.gate, &own.gate));
+    }
+
     /// `errSecInteractionNotAllowed` is how the Keychain says "I would have asked".
+    /// `errSecAuthFailed` is that too, but only where the interface is off (a
+    /// [`QuietStore`]): with it on, it is a failure like any other.
     #[cfg(target_os = "macos")]
     #[test]
     fn the_keychain_refusing_to_prompt_is_would_ask() {
@@ -682,6 +922,20 @@ mod tests {
         };
         assert!(matches!(platform(-25308), StoreError::WouldAsk));
         assert!(matches!(platform(-128), StoreError::WouldAsk));
+        // The interface is on: -25293 is a failure, not "would ask".
         assert!(matches!(platform(-25293), StoreError::Failed(_)));
+        {
+            // The interface is off, as in a QuietStore: -25293 is the unprompted refusal.
+            let _off =
+                security_framework::os::macos::keychain::SecKeychain::disable_user_interaction()
+                    .unwrap();
+            assert!(matches!(platform(-25293), StoreError::WouldAsk));
+            assert!(matches!(platform(-25300), StoreError::Failed(_)));
+        }
+        assert!(matches!(platform(-25293), StoreError::Failed(_)));
+        // Anything else stays a failure: -25300 is errSecItemNotFound, -25291 is
+        // errSecNotAvailable.
+        assert!(matches!(platform(-25300), StoreError::Failed(_)));
+        assert!(matches!(platform(-25291), StoreError::Failed(_)));
     }
 }
