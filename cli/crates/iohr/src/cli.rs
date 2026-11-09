@@ -230,6 +230,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
         &[
             "ask",
             "asks",
+            "context",
             "permissions",
             "shell",
             "runner",
@@ -472,6 +473,14 @@ pub enum Command {
     /// commands are never allowed. iohr never stores the question or the answer. Defaults
     /// come from `[ask]` in config.toml; the flags win for one call.
     Ask(Box<AskArgs>),
+    /// The IO.md files `?` and `??` read in this folder.
+    ///
+    /// Prints the chain of `IO.md` (or `io.md`) files that `? question` loads, the way a
+    /// `CLAUDE.md` works: your own file in the config folder, then the project root's down
+    /// to this folder, farthest first, the nearest winning. The root is the folder with
+    /// `inorbit.toml`, else the git root. Each file is cut at 4 KiB, all together at 8 KiB;
+    /// a cut is said. `--full` also prints the text that is sent; `--json` the same as data.
+    Context(ContextArgs),
     /// Shell integration: `? question` at your prompt asks your AI agent.
     ///
     /// `iohr shell hook zsh` prints what makes `? question` at your prompt ask your own AI
@@ -1894,6 +1903,16 @@ pub enum MemoryCommand {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct ContextArgs {
+    /// The folder to read the chain for (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// Also print the text that goes to the model.
+    #[arg(long)]
+    pub full: bool,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct SessionArgs {
     /// The project folder (default: here).
     #[arg(value_name = "DIR")]
@@ -2132,6 +2151,7 @@ pub struct InitPlanArgs {
 /// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
 /// `PathBuf` is wider).
 #[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)] // independent command-line switches, not a state
 pub struct InitArgs {
     /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
     /// At a terminal it is asked for when missing (the folder's name is the default);
@@ -2209,6 +2229,13 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// Do not write the starter IO.md at the project root.
+    ///
+    /// `IO.md` is the file `?` and `??` read for context in this folder, like a CLAUDE.md:
+    /// what the project is, how to build and test it. An IO.md or io.md already there is
+    /// never touched, with or without this flag.
+    #[arg(long)]
+    pub no_io_md: bool,
     /// Where the project lives in InOrbit: team, who reads it, or none.
     #[command(flatten)]
     pub space: InitSpaceArgs,

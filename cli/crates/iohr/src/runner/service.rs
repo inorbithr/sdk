@@ -802,7 +802,7 @@ impl<'a> HttpService<'a> {
     }
 
     /// A request body with this service's `account_id` in it.
-    fn scoped(&self, mut body: Value) -> Value {
+    pub(crate) fn scoped(&self, mut body: Value) -> Value {
         if let Value::Object(m) = &mut body {
             m.insert("account_id".into(), Value::String(self.account.clone()));
         }

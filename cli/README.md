@@ -28,7 +28,8 @@ and what would run). It follows how iohr was installed: a Homebrew copy runs
 `brew upgrade inorbithr/tap/iohr` (and tells you to run `brew trust inorbithr/tap` when
 Homebrew refuses the tap); a copy from `install.sh` is downloaded, checked against the
 release's `SHA256SUMS` and its GitHub build attestation (checked inside iohr, so the GitHub
-CLI is not needed, and a release without one is refused), and replaced in place; an APT or
+CLI is not needed; a release without one, or signed by anything but this repository's
+release workflow on `main`, is refused), and replaced in place; an APT or
 other copy is told what to run. The Homebrew tap can lag a release until its formula pull
 request is merged.
 
@@ -39,7 +40,8 @@ stable one ([releasing](../docs/releasing.md)). The
 installers ([install.sh](install/install.sh), [install.ps1](install/install.ps1)) are short
 enough to read first: each downloads the archive for your machine from the GitHub release,
 refuses it unless its SHA-256 matches the release's `SHA256SUMS` (and, with the GitHub CLI
-signed in, unless its build attestation checks), and copies one binary into your user
+signed in, unless its build attestation names this repository's release workflow on
+`main`; without it, they say that only the checksum was checked), and copies one binary into your user
 directory. Every release also has archives, `.deb` and `.msi` files with provenance and
 SBOMs ([verifying releases](../docs/security/verifying-releases.md)). From source:
 
@@ -128,7 +130,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr lab check [PATH...] [--config FILE] [--strict FILE]` | Check RFCs and studies as the InOrbit site checks its own: file names, front matter (with the review's `reviewed: YYYY-MM-DD` and `reviewer`), status logs, classified span markers, and redaction on public documents as an uncleared reader sees them (text inside `[[classified:LEVEL reason="..."]]...[[/classified]]` or a ```` ```classified level=LEVEL reason="..." ```` block is exempt, its reason is not); `--strict` adds a rules file such as the platform's `docs/lab/strict.json`, whose hits name the rule and never what matched (its `pending-sweep.json` exemptions are not read); offline, exit 1 with every finding ([Lab documents](https://docs.inorbit.hr/docs/lab)) |
 | `iohr decisions list \| show \| create \| save \| status \| comment \| link-pr \| review \| diagram` | RFCs, PRDs and ADRs in the Decisions product (platform RFC 0065, RFC 0081; `iohr rfc` until core ADR 0056, removed with no alias) through the SDK's `decisions` operations (`/v1/decisions/...`), scopes `decisions:read` and `decisions:write`: a document by its number (`0065`, a part `0065.1`; `PRD 0001` or `ADR 0003` names its kind, else `--kind rfc|prd|adr|study|all`, default `rfc`) across the account's spaces (`--space` narrows), `create --kind` for a PRD or an ADR, `create` with `--file` saves the text straight away, `save` a new version from a file (refused when someone saved since), `status`, comments that name a pull request first (`owner/repo#N "title": open`, `merged`, `live`), review requests (`--reviewer` or `IOHR_DECISIONS_REVIEWER`; `--reason` as a comment), diagrams from a model file; `--json` on each |
 | `iohr runner register [--name N] [--capacity N] [--always-on] [--holder SUBJECT] [--refresh] [--account A] \| run [--name N \| --runner ID] [--interval 20] [--capacity N] [--kinds K,...] [--max-beats N] [--no-auto-upgrade] [--session DIR] [--account A] \| config show [--capacity N] [--kinds K,...] [--no-auto-upgrade] \| status [--account A] \| api-key set [--stdin \| --file PATH] [--account A] \| api-key remove [--account A] \| personal-use [--accept \| --withdraw] \| gate-report --job J --lease L --token N [--repo DIR] [--command C] [--timeout S] [--name N \| --runner ID] [--account A] \| run-key [--proof FILE] [--label L] [--wait MIN] [--account A]` | This machine as a coordinator runner (platform RFC 0120), in the profile's account or `--account A`; every call names it, because the sign-in token's own account is the personal one: `register` records its name, system, `--capacity` (1 to 32) and the one `claude` on your PATH; `run` heartbeats with the capacity, version and kinds in effect, accepts turns the coordinator offers, up to that capacity at once, and runs each on your installed, unmodified `claude -p`, on the Anthropic API key `api-key set` stored (or, for personal use only, your own Claude plan; below), and after a job turn that replied sends its gate report when the pack names the checkout (below); `status` lists your runners and what this machine can run; `api-key set` stores the key in the credential store from a prompt, `--stdin` or `--file`, never an argument, and `api-key remove` deletes it; `personal-use` shows the personal-use notice and `--accept` or `--withdraw` records your answer on this machine, without signing in; `gate-report` runs the check for a job whose lease you hold and sends the signed result (below); `run-key` makes and enrols the key `run` uses to carry out approved run asks (below) |
-| `iohr session [DIR] [--json]` | Open a session on a project (platform RFC 0213): starts the project's one session host if none runs (this same `iohr` as `runner run --session DIR`, a process of its own that hosts the project's Roles and the runner's turn loop), joins it, and stays open until Ctrl-C or SIGTERM. The host stops when the last session has left (a shell that is killed counts as left), on `iohr stop`, or on SIGTERM; a host nobody joins within 30 s ends by itself. With `--json` it prints `{project, host_pid, roles}`; notes go to stderr. Needs a registered runner (`iohr runner register`). Every `?`/`??` ask asked in the project's folder is answered by its Roles too (see Session mode). Unix only |
+| `iohr session [DIR] [--json]` | Open a session on a project (platform RFC 0213): starts the project's one session host if none runs (this same `iohr` as `runner run --session DIR`, a process of its own that hosts the project's Roles and the runner's turn loop), joins it, and stays open until Ctrl-C or SIGTERM. The host stops when the last session has left (a shell that is killed counts as left), on `iohr stop`, or on SIGTERM; a host nobody joins within 30 s ends by itself. With `--json` it prints `{project, host_pid, roles}`; notes go to stderr. Needs a runner of its own: the host signs in as the profile `session`, whatever `--profile` the shell has, with its own runner key, because sharing the live runner's key would make the two overwrite one heartbeat row and take each other's leases. One time: `iohr login --profile session`, then `iohr --profile session runner register --name HOST-session`; without them the host stops at once and says which one is missing. Every `?`/`??` ask asked in the project's folder is answered by its Roles too (see Session mode). Unix only |
 | `iohr stop [DIR] [--wait S] [--json]` | Stop the project's session host and wait up to `--wait` seconds (0 to 600, default 15) for it to end; an answer a Role is still writing is cut short and goes back to the queue for the next host. Prints `stopped` only when the host's lock is free, `stopping` while a Role still holds a task; says on stderr that no host runs when none does, and exits 0 either way; `--json` prints `{project, state, host_pid}` with `state` one of `not running`, `stopped`, `stopping`. Makes no API call; Unix only |
 | `iohr browser install [--print]` | Open the console's install page for InOrbit Trails, the browser extension, in the default browser: it adds Trails from that browser's store, or shows the load-unpacked steps while the store has no listing yet; `--print` prints the address for a browser on another machine (or where none can open) |
 | `iohr tunnel --host H [--env production\|local] [--port P] [--dry-run]` | A loopback pipe from this machine into an environment's Envoy edge: `ssh -N -L` to `H` (or `IOHR_TUNNEL_HOST`), bound to 127.0.0.1 on both ends, so the real site opens at `http://www.localhost:<port>/` (also `console`, `docs`, `auth`) with no DNS or certificate; `--port` moves the listening side, `--no-engine` skips the engine LB the local environment also forwards, `--dry-run` prints the addresses and the ssh command. It ends at Envoy, so every gate stays. Known gap: sign-in cookies belong to the production domain, so signed-in pages do not work on localhost |
@@ -140,6 +142,7 @@ iohr api GET /v1/webhooks/endpoints --all
 | `iohr asks count [--cache] [--json] [--account A]` | How many asks wait for you: "3 asks", nothing for none; only asks whose turn is yours (`pending`) count, one you already answered with a note (`question`) is the agent's turn and is left out (`iohr asks list` still shows it), `{"count": N}` with `--json`; `--cache` keeps just the number in `~/.inorbit/term/asks-count` and does nothing while that file is under 30 seconds old (the shell hook's prompt segment uses it). It reads the sign-in through a quiet credential store: no Keychain dialog (macOS interaction is switched off) and no wait past 1.5 s; when the store would ask, `--cache` keeps the last number and prints nothing, without `--cache` it exits 1 saying so |
 | `iohr asks list \| show ID \| approve ID [--once] \| deny ID \| question ID \| decide ID \| key enroll [--label L] [--proof FILE] \| key show \| key remove` | The asks agents file for you (RFC 0204, ADR 0215). `approve` needs a device key's proof (RFC 0113). A Mac signs it with its own Secure Enclave key after Touch ID (a P-256 key made on first `key enroll`, kept as a 0600 blob only that chip can open, bound to the current fingerprints: change them and enrol again; the first `enroll` compiles a small Swift helper with the system `swiftc`, so Xcode's command line tools must be installed). `enroll` registers it as a `macos` device key; `--proof FILE` takes the countersignature JSON (`{key_id, signed_at, nonce, signature}`) an enrolled phone key made over the new public key, which activates it at once, otherwise the service holds a new key for 24 hours (the first key is active at once); `key show` reads it back and `key remove` revokes it and deletes the blob. Before Touch ID it prints the ask's title, kind and payload hash, and the prompt names the same title. Only a review, a document, a decision and a run may be signed here; a merge, a roll, a migration and an auto-approve rule (found in the kind, title, summary or what approve means) always say "Approve on your phone", and so does a Mac without a key, and every Windows or Linux machine (they never sign: `key enroll` refuses there). A refused Touch ID signs nothing and changes nothing. `deny` and `question` need no key |
 | `iohr permissions list\|allow RULE\|deny RULE\|remove RULE\|check TOOL INPUT [--project\|--user] [--json]` | The rules for what Io may run or open when you ask it something (Claude Code's rule grammar) in `.inorbit/permissions.toml` and the user file in the iohr config folder; `allow` refuses rules that could open a secret file and a blanket `Bash(*)` (exit 2); `check` prints `allow`, `deny` or `ask` and the rule; every ask decision is logged to `.inorbit/permissions.log` (no output, no contents); see `docs/config.md`, section 4.5 |
+| `iohr context [DIR] [--full] [--json]` | The IO.md files a `?` or `??` question would load from DIR (default: here), the way a `CLAUDE.md` works: a table of each file with its bytes, how many were sent and why one was cut or left out, farthest first and the nearest winning; `--full` adds the text that would be sent, `--json` the same as data. Reads files only; asks no model and sends nothing |
 | `iohr shell hook zsh` | A zsh snippet for `eval "$(iohr shell hook zsh)"` (a Down arrow on an empty line, or `[ask] menu_key`, opens that menu; Shift+Tab on a `?` line cycles manual, plan and auto): a line that starts with `? ` (or `?? ` for a follow-up) is answered by `iohr ask` and never run; `bash` and `fish` say "not built yet" (below); the right prompt shows "3 asks" when asks wait for you, read from `~/.inorbit/term/asks-count` and refreshed in the background (`INORBIT_ASKS_PROMPT=0` turns it off) |
 | `iohr` (no subcommand) | On a terminal: enters the session. It joins this folder's session host (starting it if none runs, as `iohr session` does) and gives your shell with the floating panel over it; if the host cannot start it says so on stderr and the panel still runs without one. Under `NO_COLOR`, with `--json`, or off a terminal it prints the usage report and exits 2, as before; `iohr --help` and `iohr help` print the help. `iohr stop` ends the host, which closes the panel and leaves your shell open. Unix only |
 | `iohr panel [--demo] [-- COMMAND...]` | Runs your shell (or COMMAND) with a floating panel at the top right of the terminal, drawn over the output and taking no rows (see "The floating panel"); `--demo` fills it with labelled stub asks; with `--demo --variant rail\|accordion\|band` it prints the older static design drawings instead |
@@ -734,6 +737,27 @@ keys stay local. The canvas and the 3D folder are never sent, and the output say
 text reaches a log. The `[sync]` `background` key in `config.toml` is read (default `false`); no
 background loop exists yet, so only `iohr sync` sends anything.
 
+### IO.md: instructions for the folder
+
+An `IO.md` (or `io.md`) file holds what you want your agent to know about a folder, the way a
+`CLAUDE.md` does: what the project is, how to build and test it, rules to keep. `?` and `??` load
+the chain from the folder you are in up to the project root (the nearest folder with
+`inorbit.toml`, `.inorbit/` or `atlas/`, else the git root: the one rule memory and the notes use;
+never past your home folder), farthest first and the nearest last, so the
+nearest file wins. One more file, `IO.md` or `io.md` in the iohr config directory
+(`IOHR_CONFIG_DIR`), applies to every project and comes first. If a folder holds both spellings
+it reads `IO.md` and warns once. Only a regular file counts: an `IO.md` or `io.md` that is a
+symlink is skipped, so a link cannot pull in a file from elsewhere. Each file is cut at 4 KiB and all of them at 8 KiB (the nearest
+files are kept first); the answer card's `Read:` footer says "context: IO.md x3" and, when
+anything was cut or left out, how. `--json` `context.io_md` counts the files and bytes, never the
+text. The text is yours: it shapes the answer but never widens what the agent may open or run,
+and secrets in it are scrubbed before it is sent. `iohr context` prints the chain.
+
+`iohr project init` writes a starter `IO.md` at the project root (what it is, the build and test
+commands, the binary that ran init); `--no-io-md` skips it, and an `IO.md` or `io.md` you already
+have is never overwritten. The loader is one module (`src/iomd.rs`); the project brief planned in
+PRD 0193 is meant to join it as another kind of file rather than a second reader.
+
 ### Roles and memory
 
 `iohr project init` and `iohr atlas init` also write the built-in roles into
@@ -930,7 +954,8 @@ What goes to your provider: the question, the folder's path, the names at the to
 (at most 60 names and 2 KiB; dotfiles left out except `.inorbit`, `.github`, `.gitignore` and
 `.claude`; names the folder's own `.gitignore` hides left out; never file contents), the last
 command and its exit status, and, when output is attached (`--output-file`, or the menu's re-run or paste), the last 8 KiB (200 lines) of it with secrets redacted (passwords, tokens, bearer values, URLs, hosts, IP addresses);
-the whole message is capped at 16 KiB. The card's `Read:` line says exactly this, including "output not sent" when none went. A plain zsh hook cannot read a command's output, so
+the `IO.md` files of the folder chain (at most 8 KiB, scrubbed; see "IO.md: instructions for the folder");
+the whole message is capped at 24 KiB. The card's `Read:` line says exactly this, including "output not sent" when none went. A plain zsh hook cannot read a command's output, so
 it sends none; after a failed command and a question such as "why did that fail", the menu (Down on an empty line) offers Re-run with output (asked first, never automatic, 10 s and 16 KiB at most) and Paste output, and what you attach goes with the next ask only. Off a terminal the card says the output was not sent and how to attach it (`--output-file FILE`). Io runs on
 Claude Code only: it signs in with your own `claude` login, never an API key, and `iohr`
 stores neither question nor answer. Only zsh is built; `iohr shell hook bash` and `fish`
@@ -969,8 +994,8 @@ never sent to your shell. At rest it asks for none, so the shell keeps normal dr
 click on the pill opens the menu and every other click goes through to the program) or `off` (no
 mouse at all).
 
-Bare `iohr` inside the panel prints one line, that you are already in the iohr session and which
-key opens the menu, and exits 0. `iohr stop` inside the panel stops the session host and closes
+Bare `iohr` inside the panel prints one line, that the panel is on and which key
+opens the menu, and exits 0; after `iohr stop` it brings the panel back first. `iohr stop` inside the panel stops the session host and closes
 the panel with it; with no host running it says the panel is closed. If something cannot be read, the
 panel says "unavailable", never a number. Stub data appears only with `--demo` and is labelled "stub".
 
@@ -1019,8 +1044,14 @@ Meta (iTerm2: Profiles, Keys, "Esc+"; Terminal.app: "Use Option as Meta key"); w
 use `^G`. If `[ask] menu_key = "ctrl-g"` is set, the panel leaves Ctrl-G to the `?` menu and shows
 `⌥i`. The panel saves and
 restores the cursor with DECSC and DECRC, which can overwrite a program's own saved cursor. The
-shell runs with `IOHR_PANEL=1`, and a nested `iohr panel` runs plainly and a bare `iohr` says it is already in the session;
-`IOHR_PANEL_LEADER` is internal (the proxy re-executes itself to become the shell's session
+shell runs with `IOHR_PANEL` set to the pid of the panel around it, which counts only while that
+process lives: a nested `iohr panel` runs plainly and a bare `iohr` says it is already in the
+session, and when the panel was stopped (`iohr stop`, "Stop panel", or its host ending) the bare
+`iohr` brings it back first, so running `iohr` again gives a live panel. A shell that outlived
+its panel starts a new one. While the panel is stopped `^G` is not sent to the shell (it would
+echo as `^G` under a command). Arrows count in the menu with any modifier (Shift, Option, Ctrl,
+or the kitty keyboard form); a release event is ignored. If the session host stops at once, the
+message carries the last line of its `host.log`. `IOHR_PANEL_LEADER` is internal (the proxy re-executes itself to become the shell's session
 leader).
 
 ## Runner
