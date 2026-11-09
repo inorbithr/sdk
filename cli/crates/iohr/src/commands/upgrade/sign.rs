@@ -100,8 +100,9 @@ fn identity_of(line: &str) -> Option<Identity> {
     })
 }
 
-/// Whether `codesign -dv` says the code is signed with a certificate: an `Authority=`
-/// line. Ad-hoc code (`Signature=adhoc`) and unsigned code have none.
+/// Whether `codesign -dvv` says the code is signed with a certificate: an `Authority=`
+/// line (`-dv` never prints one; `-dvv` does). Ad-hoc code (`Signature=adhoc`) and unsigned
+/// code have none.
 pub(crate) fn has_certificate(details: &str) -> bool {
     details
         .lines()
@@ -214,8 +215,8 @@ pub(crate) fn sign(path: &Path, with: &SignWith, tools: &dyn Tools) -> Outcome {
         return Outcome::Off;
     }
     let arg = |s: &str| OsString::from(s);
-    // `codesign -dv` exits 1 for code that is not signed at all: that is signed too.
-    match tools.run(CODESIGN, &[arg("-dv"), path.into()], LOOK_LIMIT) {
+    // `codesign -dvv` exits 1 for code that is not signed at all: that is signed too.
+    match tools.run(CODESIGN, &[arg("-dvv"), path.into()], LOOK_LIMIT) {
         Ok(r) if r.ok && has_certificate(&r.said) => return Outcome::AlreadySigned,
         Ok(_) => {}
         Err(e) => return Outcome::Kept(e),
@@ -430,7 +431,7 @@ mod tests {
             Outcome::Signed("Developer ID Application: Someone (TEAM)".into())
         );
         let calls = tools.calls.borrow();
-        assert_eq!(calls[0].1, ["-dv", "/opt/bin/.iohr.upgrade-7"]);
+        assert_eq!(calls[0].1, ["-dvv", "/opt/bin/.iohr.upgrade-7"]);
         assert_eq!(calls[1].0, "/usr/bin/security");
         assert_eq!(calls[1].1, ["find-identity", "-v", "-p", "codesigning"]);
         assert_eq!(calls[2].0, "/usr/bin/codesign");

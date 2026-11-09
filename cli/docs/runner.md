@@ -1,12 +1,13 @@
 # Runner
 
 `iohr runner` makes this machine one of your account's coordinator runners: it takes turns
-from the coordinator and runs them on your own Claude Code subscription. This page covers
-setting one up, how a turn runs, GitHub access, keeping the runner current, capacity, the
-gate report and approved run asks. Back to the [iohr overview](../README.md).
+from the coordinator and runs them with Claude Code on an Anthropic API key (your own Claude
+plan only for personal use). This page covers setting one up, how a turn runs, GitHub
+access, keeping the runner current, capacity, the gate report and approved run asks. Back
+to the [iohr overview](../README.md).
 
 ```sh
-claude                                  # once: /login with your subscription
+iohr runner api-key set                 # once: your Anthropic API key, no echo
 iohr runner register --name laptop      # this machine; the default name is its host name
 iohr runner run                         # until Ctrl-C
 iohr runner status                      # your runners as the service sees them
@@ -32,6 +33,8 @@ iohr login --scope coordinator:runner,coordinator:read
 | `iohr runner config show [--capacity N] [--kinds K] [--no-auto-upgrade]` | The values `run` would use now, each with where it came from; needs no sign-in |
 | `iohr runner gate-report --job J --lease L --token N` | Run a job's check and send a signed report ([below](#gate-report)) |
 | `iohr runner run-key [--label L] [--wait M] [--proof FILE] [--show]` | This machine's run key for approved run asks ([below](#approved-run-asks)) |
+| `iohr runner api-key set [--stdin \| --file PATH] \| api-key remove` | Store the Anthropic API key in the credential store, from a prompt, `--stdin` or `--file`, never an argument; `remove` deletes it |
+| `iohr runner personal-use [--accept \| --withdraw]` | Show the personal-use notice and record your answer on this machine; needs no sign-in |
 
 The runner's settings live in the `[runner]` table of `config.toml` (or
 `[profiles.<name>.runner]`): [docs/config.md](../../docs/config.md), section 4.3.
@@ -60,15 +63,26 @@ A turn is one `claude -p` run of the `claude` first on your `PATH`, as you insta
 - `--setting-sources project,local` and `--strict-mcp-config`, so your own user-level
   hooks, plugins, skills and MCP servers are not loaded into a turn. Your sign-in is.
 
-### On your subscription only
+### On an API key
+
+It runs on an Anthropic API key, the path for organisations and teams. Your own Claude plan
+is for personal use only: it is off unless the runner table says `claude_auth = "any"` (or `"plan"`) and
+you accepted the notice `iohr runner personal-use` shows, and then the runner takes one turn
+at a time, only work you assigned yourself (`docs/config.md` section 4.3). `claude` sends
+its requests to Anthropic directly; InOrbit does not proxy them.
 
 - Before every turn it asks the binary (`claude auth status`) and refuses unless the answer
-  says `claude.ai` and `firstParty`. It never reads Claude Code's own credential files and
-  never signs in for you.
+  says `api_key` (or, where allowed, `claude.ai`) and `firstParty`. It never reads Claude
+  Code's own credential files and never signs in for you.
+- The stored key reaches only the `claude` process the runner starts, as
+  `ANTHROPIC_API_KEY` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` beside it; it is never an
+  argument, never printed, never logged and never sent to InOrbit. A key or token given as
+  an argument to `iohr` is refused before anything runs.
 - It never passes `--bare`, `--settings` or an endpoint, and never edits the binary or its
   requests. The arguments and the environment are table-tested, and a `--bare` or an
   `ANTHROPIC_BASE_URL` in them fails the build.
-- A turn is refused when its user is not the person the runner is registered to.
+- A turn is refused when its user is not the person the runner is registered to, and on
+  your own Claude plan when someone else assigned it.
 - When the runner stops (Ctrl-C or revocation), the running turn is aborted and `claude`
   and everything it started are killed.
 
@@ -170,7 +184,8 @@ runner behaves around an upgrade.
 
 On macOS, `upgrade_sign_identity = "auto"` (or `IOHR_SIGN_IDENTITY`) signs each new binary
 with a code-signing identity from your keychain, so a keychain "Always Allow" grant holds
-across upgrades. It is off by default.
+across upgrades. It is off by default. A build from a checkout gets the same signature with
+`mise run cli:preview-install` (macOS, installs `iohr-preview`).
 
 The keys and their limits: [docs/config.md](../../docs/config.md), section 4.3.
 

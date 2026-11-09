@@ -222,6 +222,19 @@ pub(crate) fn http_within(
     read: Option<Duration>,
     total: Duration,
 ) -> Result<reqwest::Client, Error> {
+    http_builder(base, connect, read, total)
+        .build()
+        .map_err(|e| Error::Failed(format!("cannot start the HTTP client: {e}")))
+}
+
+/// [`http_within`] before it is built, for a caller that sets more (the site reader turns
+/// redirects off, so it can check each address against the site's scope).
+pub(crate) fn http_builder(
+    base: &str,
+    connect: Duration,
+    read: Option<Duration>,
+    total: Duration,
+) -> reqwest::ClientBuilder {
     // https only, except a loopback address (a test double).
     let local = url::Url::parse(base)
         .ok()
@@ -238,20 +251,31 @@ pub(crate) fn http_within(
     if let Some(r) = read {
         b = b.read_timeout(r);
     }
-    b.build()
-        .map_err(|e| Error::Failed(format!("cannot start the HTTP client: {e}")))
+    b
 }
 
-/// A body of at most `max` bytes.
-pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
+/// What one request answered.
+pub(crate) struct Reply {
+    pub status: u16,
+    /// The `Content-Type`, lower case, empty when none came.
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// One `GET`: the status, the type and a body of at most `max` bytes, whatever the status.
+pub(crate) async fn fetch(c: &reqwest::Client, url: &str, max: usize) -> Result<Reply, Error> {
     let mut resp = c
         .get(url)
         .send()
         .await
         .map_err(|e| Error::Failed(format!("{url}: {}", e.without_url())))?;
-    if !resp.status().is_success() {
-        return Err(Error::Failed(format!("{url}: {}", resp.status())));
-    }
+    let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let mut body = Vec::new();
     while let Some(chunk) = resp
         .chunk()
@@ -263,7 +287,22 @@ pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Ve
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(body)
+    Ok(Reply {
+        status,
+        content_type,
+        body,
+    })
+}
+
+/// A body of at most `max` bytes, from a 2xx answer.
+pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
+    let r = fetch(c, url, max).await?;
+    if !(200..300).contains(&r.status) {
+        let said = reqwest::StatusCode::from_u16(r.status)
+            .map_or_else(|_| r.status.to_string(), |s| s.to_string());
+        return Err(Error::Failed(format!("{url}: {said}")));
+    }
+    Ok(r.body)
 }
 
 struct Sources {
@@ -538,6 +577,42 @@ pub(crate) async fn run(g: &Global, env: &Env, check: bool, out: Out) -> Result<
     Ok(())
 }
 
+/// What `sign-binary` signs with, from `IOHR_SIGN_IDENTITY`: unset is `auto`, `auto` or a
+/// name is itself. `-` is refused: in `upgrade_sign_identity` it means "do not sign", which
+/// is exactly what a preview install exists to rule out, and quietly turning it into `auto`
+/// would hide that the setting said otherwise.
+fn sign_binary_with(identity: Option<&str>) -> Result<SignWith, Error> {
+    match identity.map(SignWith::parse) {
+        None => Ok(SignWith::Auto),
+        Some(SignWith::Off) => Err(Error::Usage(
+            "IOHR_SIGN_IDENTITY=- turns signing off, and `iohr sign-binary` must sign: \
+             unset it, or set `auto` or a signing identity"
+                .into(),
+        )),
+        Some(other) => Ok(other),
+    }
+}
+
+/// `iohr sign-binary PATH`: the signing an upgrade does, for a binary built here. `auto`
+/// unless `IOHR_SIGN_IDENTITY` names an identity (`-` is refused); an unsigned result is an error (an
+/// upgrade may go on ad hoc, a preview install may not).
+pub(crate) fn sign_binary(env: &Env, path: &Path) -> Result<(), Error> {
+    let with = sign_binary_with(env.sign_identity.as_deref())?;
+    match sign::here(path, &with) {
+        sign::Outcome::Signed(name) => {
+            Out::note(&format!(
+                "signed {} with {name} (identifier {})",
+                path.display(),
+                sign::IDENTIFIER
+            ));
+            Ok(())
+        }
+        sign::Outcome::AlreadySigned => Ok(()),
+        sign::Outcome::Off => Err(Error::Failed("signing needs macOS".to_owned())),
+        sign::Outcome::Kept(why) => Err(Error::Failed(format!("not signed: {why}"))),
+    }
+}
+
 /// `upgrade_sign_identity` as the runner reads it: `IOHR_SIGN_IDENTITY`, then the run
 /// profile's `[profiles.<name>.runner]`, then `[runner]`. A config file that cannot be
 /// read leaves signing off: it never stops an upgrade.
@@ -810,7 +885,28 @@ mod tests {
 
     use std::path::{Path, PathBuf};
 
-    use super::{Layout, Method, brew_failure, bundles_of, detect, newest, sum_of, target};
+    use super::{
+        Layout, Method, brew_failure, bundles_of, detect, newest, sign_binary_with, sum_of, target,
+    };
+    use crate::commands::upgrade::sign::SignWith;
+    use crate::error::Error;
+
+    /// `IOHR_SIGN_IDENTITY=-` means "do not sign" everywhere else; `sign-binary` refuses it
+    /// rather than signing anyway, and signs with `auto` only when nothing was set.
+    #[test]
+    fn sign_binary_refuses_the_off_switch_and_defaults_to_auto() {
+        assert_eq!(sign_binary_with(None).unwrap(), SignWith::Auto);
+        assert_eq!(sign_binary_with(Some("auto")).unwrap(), SignWith::Auto);
+        assert_eq!(
+            sign_binary_with(Some("Apple Development: Someone (ABC123)")).unwrap(),
+            SignWith::Named("Apple Development: Someone (ABC123)".into())
+        );
+        let e = sign_binary_with(Some("-")).unwrap_err();
+        assert!(
+            matches!(&e, Error::Usage(m) if m.contains("IOHR_SIGN_IDENTITY=-")),
+            "{e:?}"
+        );
+    }
 
     fn layout() -> Layout {
         Layout {

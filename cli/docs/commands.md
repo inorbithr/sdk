@@ -38,6 +38,9 @@ ends its `--help` with real examples.
 |---|---|---|
 | `iohr init`, `iohr project init \| sync \| template ...` | Set up a project in this folder, from a template or built by your agent; `iohr init`, `iohr project init` and `iohr project create` are one command | [Projects](projects.md) |
 | `iohr atlas roles list \| import [--dry-run]` | The built-in roles and whether each is in your account | [Roles](roles-and-memory.md#built-in-roles) |
+| `iohr atlas search QUERY [--site S] [--limit N]` | The best chunks of the text of the sites you crawled, each with its page, heading path and offsets (local) | [Projects](projects.md#the-site-knowledge-base) |
+| `iohr atlas facts [--site S] [--predicate P] [--grep TEXT]` | The facts of the site model, each with the chunk it came from | [Projects](projects.md#the-site-knowledge-base) |
+| `iohr atlas index [--pages] [--site S]` | The crawled sites with pages, chunks, words, entities, facts and links; `--pages` lists the pages | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr sync` | Send the project's atlas to your account | [Projects](projects.md#the-atlas-and-iohr-sync) |
 | `iohr ext ...` | Find, install, verify, pin and build extensions; `iohr <name> ...` runs one | [Extensions](extensions.md) |
 | `iohr sdk add \| config \| generate \| check \| examples` | The SDKs in your project | [SDKs and the API](sdk.md) |
@@ -55,7 +58,10 @@ ends its `--help` with real examples.
 | `iohr permissions list \| allow \| deny \| remove \| check` | What your agent may run or open when you ask it something | [Permissions](ask.md#permission-rules) |
 | `iohr context [DIR] [--full] [--json]` | The IO.md files a `?` or `??` question would load from DIR (default: here), the way a `CLAUDE.md` works: a table of each file with its bytes, how many were sent and why one was cut or left out, farthest first and the nearest winning; `--full` adds the text that would be sent, `--json` the same as data. Reads files only; asks no model and sends nothing | [IO.md](projects.md#iomd-instructions-for-the-folder) |
 | `iohr shell hook zsh` | The `?` prompt for zsh | [The `?` prompt](ask.md#the--prompt-in-zsh) |
-| `iohr runner register \| run \| status \| config show \| gate-report \| run-key` | This machine as a coordinator runner | [Runner](runner.md) |
+| `iohr theme list \| show NAME` | The terminal themes of the InOrbit app (`inorbit`, `solarized-dark`, `nord`, `light`), the one that is on, and a theme's colours, font and cursor; local, no sign-in | [The terminal theme](terminal-theme.md) |
+| `iohr theme install NAME [--terminal] [--prompt] [--replace-prompt]` | Writes the Terminal.app profile `~/.inorbit/term/themes/NAME.terminal` and remembers the theme; `--terminal` opens the profile, `--prompt` turns on the zsh prompt, `--replace-prompt` replaces a prompt you set yourself | [The terminal theme](terminal-theme.md) |
+| `iohr theme off` | Turns the prompt off and forgets the chosen theme; an imported profile stays | [The terminal theme](terminal-theme.md) |
+| `iohr runner register \| run \| status \| config show \| gate-report \| run-key \| api-key \| personal-use` | This machine as a coordinator runner | [Runner](runner.md) |
 | `iohr session [DIR]`, `iohr stop [DIR]` | Open and stop a project's session | [Sessions](session-and-panel.md) |
 | `iohr coordinator ...` | The coordinator's jobs, asks and plans | [below](#iohr-coordinator) |
 | `iohr memory ...` | Memory kept as local files | [Memory](roles-and-memory.md#memory) |

@@ -254,6 +254,7 @@ upgrades it (`rustup update stable`, `brew upgrade go` when Homebrew installed i
 
 ```sh
 iohr project init my-shop --crawl https://example.com --crawl-pages 50
+iohr project init my-shop --crawl https://example.com --crawl-rate 2
 iohr project init my-shop --crawl https://example.com --crawl-subdomains
 iohr project init my-shop --no-crawl
 ```
@@ -269,6 +270,17 @@ project. Nothing is sent to InOrbit.
   robots.txt honoured, at most `--crawl-pages` pages (default 200) and `--crawl-minutes`
   minutes (default 5; the crawler's own caps are 20,000 pages and 240 minutes), 10 hosts,
   50 MB in all and 2 MB a page. `--dry-run` says the same and reads nothing.
+- **Pace.** `--crawl-rate N` requests a second to one host (default 10, 1 to 50; the
+  variable `IOHR_CRAWL_RATE` is the same, the flag wins; a value outside 1 to 50 is refused only when a crawl would run, `--no-crawl` never reads it), and a slower `Crawl-delay` in
+  robots.txt wins over it. The text init shows before it starts states the rate.
+- **Progress.** At a terminal the crawl shows a spinner with a live count (pages read, pages
+  waiting) and, as soon as the crawler knows how much there is (a sitemap says so), a bar:
+  pages done of the total, and how many the page limit still allows. The display updates at
+  most once a second. It reads the crawler's `--progress` lines (RFC 0163: JSON on standard
+  error, counts and the scope, never a page address). With `--json`, `NO_COLOR`,
+  `TERM=dumb` or no terminal nothing is drawn. An `agent` extension from before RFC 0163
+  does not know `--rate` or `--progress`: init runs it again without them and it crawls at
+  its own pace with the spinner only.
 - **Other names in the same domain.** The crawl stays on that host. When a page links to
   another name in the same domain (`blog.example.com` from `example.com`; from
   `www.example.com` that also means the apex and its siblings), init asks once per name at
@@ -293,6 +305,39 @@ InOrbit. Run iohr sync when you want it there." Without the `agent` extension, i
 in one line and offers to install it at a terminal. A crawl that fails does not fail init:
 it is a failed step with the extension's own error. The crawl day is the evidence time; the
 crawler records no fetch time per page.
+
+### The site knowledge base
+
+The crawler keeps the HTML it read (`--keep-pages`, in `.inorbit/crawl/<host>/pages/`, one
+file per page, a redirect followed to the page it names), and init reads those files: the
+pages are not fetched a second time.
+
+- **Older agents.** Only an agent that does not know `--keep-pages` leaves iohr to ask for
+  the pages itself, as a fallback: inside the crawl's scope, only where `robots.txt` allows
+  it, at the crawl rate or the site's `Crawl-delay` when that is slower, no redirect
+  followed, 2 MB a page, within the same `--crawl-minutes`. The text init shows says how
+  many pages came from files and how many were requested.
+- **Empty shells.** A page whose HTML is an empty shell (a rendered page whose text only a
+  browser run shows) is counted and named, not indexed.
+- **The index.** The text is cleaned (main text, title, headings, links, language; blocks
+  that repeat across the site are left out), cut along its headings into chunks of about
+  180 words with a word count, a stable id (`ch_...`), its URL and character offsets, and
+  indexed in one DuckDB file, `.inorbit/crawl/kb.duckdb`. Search is lexical (BM25 over a
+  term table; heading and title words weigh more). There is no embedding model on this
+  machine, so the summary and `--json` say `embeddings: stub` rather than pass a lexical
+  score for a vector one.
+- **The site model.** Entities (organizations, products, people, places, events,
+  technologies, emails, phones, prices, profiles; from the page's own JSON-LD first, then
+  patterns) and facts are lines in `.inorbit/crawl/<host>/facts.jsonl`, beside the page
+  facts (`kind`, `site`, `url`, `crawled`, plus the chunk each came from). The sections,
+  with their extractive summary, are a "Site model" part of the one "Site crawl" study.
+
+`iohr atlas search QUERY`, `iohr atlas facts` and `iohr atlas index` read all of this
+(`--site` picks a crawled site, `--json` gives data), and `?` and `??` add the best five
+chunks for the question to what the model is given, as `<sources>` with each page URL and
+chunk id (the page text is escaped, so a page cannot close the block or add instructions to
+it), so an answer about the site can name where it came from. All of it stays on this
+machine, gitignored, until you run `iohr sync`. A build that fails does not fail the crawl.
 
 ## The project record and the space link
 

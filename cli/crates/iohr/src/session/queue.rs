@@ -924,7 +924,9 @@ mod tests {
         put(&q, Some("ask_kill"), None);
         let t = q.claim("rust", SHORT, tick()).unwrap().unwrap();
         assert!(q.start(t.id, "rust", now_ms()).unwrap());
-        std::fs::write(dir.join("claimed"), t.id.to_string()).unwrap();
+        // Written beside it and renamed, so the parent never reads a half-written marker.
+        std::fs::write(dir.join("claimed.tmp"), t.id.to_string()).unwrap();
+        std::fs::rename(dir.join("claimed.tmp"), dir.join("claimed")).unwrap();
         std::thread::sleep(Duration::from_secs(120));
     }
 

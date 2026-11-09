@@ -310,8 +310,10 @@ it runs only in the runner's own bare mirror after its configuration is checked 
 credential, proxy, URL rewrite, include or hook key; `origin` exactly the job's
 repository). `gh` gets it as `GH_TOKEN` on that one child. A token for another repository
 is refused. The host's own `gh` sign-in is used only where the platform says its App is
-not installed for the account (or the platform is older than the call), and the log says
-so; any other refusal leaves the lease unaccepted. The model's process and the check's
+not installed for the account (or the platform is older than the call), only when the
+machine's settings allow it (`allow_host_git_credentials = true`; off by default), and
+the log says so; without that setting the job fails before its checkout with a reason
+that names the setting, and any other refusal leaves the lease unaccepted. The model's process and the check's
 process run with an empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's
 credential helpers cleared and its prompts off (RFC 0147 containment).
 - Why: a person's long-lived sign-in on a runner can push to every repository they can,
@@ -320,7 +322,8 @@ credential helpers cleared and its prompts off (RFC 0147 containment).
   that `git credential fill` answers the token for `github.com` only and never a host
   helper; that no credential is in any git configuration and an old one is removed; that
   a mirror with configuration the runner did not set is not used; that no hook runs with
-  the token; that only "not installed" falls back to the host; that `gh` in the model's
+  the token; that only "not installed" falls back to the host, and only with
+  `allow_host_git_credentials` set (refused by default, allowed when set); that `gh` in the model's
   environment is signed out and git there asks no helper.
 - Refs: CRA I.2(d); least privilege.
 
@@ -376,6 +379,32 @@ carries is capped and redacted of URLs, addresses and tokens.
 vectors; that a missing tool, a bad param or systemd off Linux runs nothing;
   that each report verifies with the run key.
 - Refs: CRA I.2(d); least privilege.
+
+**SR-36. A runner's model key reaches its `claude` alone, and its sign-in follows a local policy.**
+`iohr runner api-key set` reads an Anthropic API key from a prompt with no echo, stdin or
+a file named by a flag, never from an argument (`refuse_secrets_in_args` refuses an
+`sk-ant-` value before parsing), and stores it only in the profile's credential store,
+keyed by profile and account; `remove` deletes it. It is a `Redacted<String>` from the
+moment it is read until it is set as `ANTHROPIC_API_KEY`, with
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` beside it, on the `claude` processes the runner
+starts, and nowhere else: never an argument, a log line, an error, a `Debug`, a JSON
+answer, the config file or a request to the platform. The parent's own `ANTHROPIC_*`
+values are still dropped. How `claude` may sign in is a policy per provider,
+`api`, `plan` or `any`: the runner table sets it (`claude_auth` defaults to `api`,
+`codex_auth` to `any`), the lease can name one too, a turn runs only on a sign-in both
+allow, and an unknown value counts as `api`. Under `plan` the stored key is not passed to
+`claude`. Signing in with the person's own plan needs `any` or `plan` from the
+local file and the personal-use notice accepted on this machine; then the runner takes
+one turn at a time and refuses a turn someone else assigned.
+- Why: a key that reaches a tool, a log or the platform can be used by whoever reads it;
+  a policy the server could loosen would let it pick the person's own plan for work that
+  is not theirs.
+- Verify: unit tests that the one argument builder gives both sign-ins the same
+  arguments and only the key its environment, that `api` refuses the person's own
+  plan, `plan` withholds the stored key and the lease only narrows; an integration test that a stored key reaches the
+  stand-in `claude` and appears in no output, request or config file, and that a key
+  given as an argument is refused before anything runs.
+- Refs: CRA I.2(d), I.2(e); least privilege.
 
 ## Reliability and traceability
 
