@@ -33,11 +33,11 @@ test("loadExtensions asks this listener only and turns every failure into a reas
   assert.deepEqual(await loadExtensions(down), { state: "error", reason: "The local `iohr ui serve` did not answer." });
 });
 
-test("the Extensions menu lists each panel under one heading, or says how to install one", () => {
+test("the Extensions menu lists each panel with no heading of its own (the menu's label names it), or says how to install one", () => {
   const picked: string[] = [];
   const todo = { ...board, name: "todo", title: "Todo" };
   const menu = extensionsMenu([board, todo], (p) => picked.push(p.name));
-  assert.ok(isHeading(menu[0] ?? { sep: true }));
+  assert.equal(menu.filter(isHeading).length, 0);
   const rows = menu.filter(isAction);
   assert.deepEqual(
     rows.map((r) => [r.label, r.hint]),
@@ -49,7 +49,9 @@ test("the Extensions menu lists each panel under one heading, or says how to ins
   rows[1]?.run?.();
   assert.deepEqual(picked, ["todo"]);
 
-  const none = extensionsMenu([], () => {}).filter(isAction);
+  const empty = extensionsMenu([], () => {});
+  assert.equal(empty.filter(isHeading).length, 0);
+  const none = empty.filter(isAction);
   assert.equal(none.length, 1);
   assert.ok(none[0] && isOff(none[0]));
   assert.match(reasonOf(none[0] ?? { id: "", label: "" }), /iohr ext install/);
