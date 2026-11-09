@@ -2655,7 +2655,7 @@ mod tests {
         std::fs::write(
             &claude,
             format!(
-                "#!/bin/sh\ncase \"$1\" in\n  auth) echo '{{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"apiProvider\":\"firstParty\"}}'; exit 0;;\n  --version) echo 1; exit 0;;\nesac\nsleep 60 &\necho $! > {}\necho $$ > {}\nwait\n",
+                "#!/bin/sh\ncase \"$1\" in\n  auth) echo '{{\"loggedIn\":true,\"authMethod\":\"api_key\",\"apiProvider\":\"firstParty\"}}'; exit 0;;\n  --version) echo 1; exit 0;;\nesac\nsleep 60 &\necho $! > {}\necho $$ > {}\nwait\n",
                 kid.display(),
                 pid.display()
             ),

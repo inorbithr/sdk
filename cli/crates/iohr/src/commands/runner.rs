@@ -1,8 +1,10 @@
 //! `iohr runner`: this machine's half of a coordinator turn (platform RFC 0120).
 //!
 //! The runner signs in to InOrbit with the profile's own session, like every command, and
-//! to the model provider not at all: it starts the installed `claude`, which the person
-//! signed in themselves.
+//! to the model provider not at all: it starts the installed `claude`, on the Anthropic
+//! API key this machine keeps in the profile's credential store (`iohr runner api-key
+//! set`, RFC 0214), given to `claude` alone; or, for personal use only, on the plan the
+//! person signed `claude` in to themselves.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -14,7 +16,7 @@ use tokio::sync::watch;
 
 use crate::Env;
 use crate::cli::SignIn;
-use crate::cli::{Global, RunnerCommand, RunnerConfigCommand};
+use crate::cli::{Global, RunnerApiKeyCommand, RunnerCommand, RunnerConfigCommand};
 use crate::commands::session;
 use crate::context::{
     Ctx, account as resolve_account, blocking, io_session, run_profile, session, session_for,
@@ -28,7 +30,8 @@ use crate::runner::exec::{ClaudeExec, Exec as _};
 use crate::runner::gate;
 use crate::runner::host_action::HostRunner;
 use crate::runner::hygiene;
-use crate::runner::provider::{self, AuthState};
+use crate::runner::personal_use;
+use crate::runner::provider::{self, AuthState, LocalAuth};
 use crate::runner::run_loop::{self, GateCheck, LoopConfig, run_loop};
 use crate::runner::self_upgrade::{
     DRAIN_LIMIT, ExecRestarter, FileLedger, Outcome, Policy, RealSource, Upgrader,
@@ -61,6 +64,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
         let e = effective(&ctx.config, profile.as_ref(), &flags)?;
         show_settings(&e, out).await;
         return Ok(());
+    }
+    // Reads and writes only `runner/personal-use.json`: no sign-in needed.
+    if let RunnerCommand::PersonalUse { accept, withdraw } = cmd {
+        let ctx = Ctx::load(g)?;
+        return personal_use_command(&ctx, accept, withdraw, out);
     }
     // Housekeeping on this machine: no sign-in needed (`uninstall --purge` signs in
     // itself, to name the account whose keys it removes).
@@ -96,7 +104,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
     // `run-key` calls only the approvals API, which checks the person account itself.
     if !matches!(
         cmd,
-        RunnerCommand::Status { .. } | RunnerCommand::RunKey { .. }
+        RunnerCommand::Status { .. } | RunnerCommand::RunKey { .. } | RunnerCommand::ApiKey(_)
     ) {
         require_scopes(&s)?;
     }
@@ -125,10 +133,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 .name
                 .as_ref()
                 .map_or_else(host_name, |n| n.value.clone());
-            let exec = local(g)?;
+            let exec = with_stored_key(local(g)?, &ctx, &s, &account).await?;
             let state = exec.auth_status().await;
-            if !state.signed_in() {
-                return Err(provider_error(&state));
+            check_auth(&state, &local_auth(&ctx.dir, &set))?;
+            if state == AuthState::Subscription {
+                Out::note(OWN_PLAN_NOTE);
             }
             let svc = HttpService::new(&s.api, account.clone(), None);
             let mine = svc.list_runners(true).await?;
@@ -163,17 +172,23 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let signer = runner_signer(&ctx, &s, &account, true).await?;
             // The challenge is one-use and lives five minutes: asked last, signed at once.
             let challenge = svc.challenge().await?;
-            // The sign-in must name its seat (organisation and email): an answer that
-            // does not is refused here rather than registered without an identity.
-            let Some(line) = exec.identity_line().await else {
-                return Err(Error::Failed(
-                    "claude auth status names no organisation and email for this sign-in: run `claude`, then `/login`, and register again".into(),
-                ));
+            // On the person's own plan the sign-in must name its seat (organisation and
+            // email): an answer that does not is refused here rather than registered
+            // without an identity. An API key names no seat, and the key itself is
+            // never hashed or sent.
+            let identity = if state == AuthState::Subscription {
+                let Some(line) = exec.identity_line().await else {
+                    return Err(Error::Failed(
+                        "claude auth status names no organisation and email for this sign-in: run `claude`, then `/login`, and register again".into(),
+                    ));
+                };
+                BTreeMap::from([(
+                    "claude".to_owned(),
+                    provider::identity_sha256(&challenge.identity_salt, &line),
+                )])
+            } else {
+                BTreeMap::new()
             };
-            let identity = BTreeMap::from([(
-                "claude".to_owned(),
-                provider::identity_sha256(&challenge.identity_salt, &line),
-            )]);
             let public_key = signer.public_key();
             let signature = signer
                 .sign(signing::registration_message(&challenge.challenge, &public_key).as_bytes());
@@ -215,7 +230,12 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             let account = resolve_account(&s, account.account)?;
             let svc = HttpService::new(&s.api, account.clone(), None);
             let mine = svc.list_runners(true).await?;
-            let exec = local(g).ok();
+            let key_stored = stored_api_key(&ctx, &s, &account).await.unwrap_or_default();
+            let api_key_stored = key_stored.is_some();
+            let exec = local(g).ok().map(|e| match key_stored {
+                Some(k) => e.with_auth(claude::Auth::ApiKey(k)),
+                None => e,
+            });
             let local_state = match &exec {
                 Some(e) => Some((
                     e.program.display().to_string(),
@@ -233,7 +253,8 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     })).collect::<Vec<_>>(),
                     "this_machine": local_state.as_ref().map(|(p, v, a)| serde_json::json!({
                         "name": host_name(), "claude": p, "version": v,
-                        "subscription": a.signed_in(),
+                        "subscription": *a == AuthState::Subscription,
+                        "auth": a.method(), "api_key_stored": api_key_stored,
                     })),
                 }));
                 return Ok(());
@@ -256,8 +277,11 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                     "this machine ({}): claude {path} {version}; {}",
                     host_name(),
                     match auth {
-                        AuthState::Subscription => "signed in on the subscription".to_owned(),
-                        AuthState::SignedOut => "signed out: run claude, then /login".to_owned(),
+                        AuthState::ApiKey => "on an Anthropic API key".to_owned(),
+                        AuthState::Subscription =>
+                            "on your own Claude plan (personal use only)".to_owned(),
+                        AuthState::SignedOut =>
+                            "signed out: store an API key with `iohr runner api-key set`".to_owned(),
                         AuthState::Refused(why) => format!("refused: {why}"),
                     }
                 )),
@@ -287,8 +311,23 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 sign_identity: env.sign_identity.clone(),
                 ..Flags::default()
             };
-            let set = effective(&ctx.config, s.profile.as_ref(), &flags)?;
+            let mut set = effective(&ctx.config, s.profile.as_ref(), &flags)?;
+            let mut exec = with_stored_key(local(g)?, &ctx, &s, &account).await?;
+            let auth = exec.auth_status().await;
+            let allowed = local_auth(&ctx.dir, &set);
+            check_auth(&auth, &allowed)?;
             let signer = runner_signer(&ctx, &s, &account, false).await?;
+            // On the person's own plan, one turn at a time, whatever is configured.
+            let flags = if auth == AuthState::Subscription {
+                let one = Flags {
+                    capacity: Some(1),
+                    ..flags
+                };
+                set = effective(&ctx.config, s.profile.as_ref(), &one)?;
+                one
+            } else {
+                flags
+            };
             let local_key = signer.public_key();
             let svc = HttpService::new(&s.api, account.clone(), Some(signer)).holding();
             let all = svc.list_runners(true).await?;
@@ -304,13 +343,10 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                             "no such runner of yours: run `iohr runner register` first".into(),
                         )
                     })?;
-            let mut exec = local(g)?;
             exec.runner_id.clone_from(&me.runner_id);
             exec.user.clone_from(&me.user);
-            let auth = exec.auth_status().await;
-            if !auth.signed_in() {
-                return Err(provider_error(&auth));
-            }
+            let (local_tx, local_rx) = watch::channel(allowed);
+            let mut exec = exec.with_local(local_rx);
             exec.workdir = ctx.dir.join("runner").join("coordinate");
             let (tx, rx) = watch::channel(false);
             let tx = Arc::new(tx);
@@ -343,10 +379,22 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 me.runner_id,
                 declared.kinds.join(", ")
             ));
+            Out::note(match auth {
+                AuthState::ApiKey => "Claude: on an Anthropic API key",
+                _ => OWN_PLAN_NOTE,
+            });
+            let one_at_a_time = auth == AuthState::Subscription;
             let (declare, declared) = watch::channel(declared);
             let (policy, policy_rx) = watch::channel(Policy::of(&set));
             let signing = policy_rx.clone();
-            reload_on_hangup(ctx.dir.clone(), s.profile.clone(), flags, declare, policy);
+            reload_on_hangup(
+                ctx.dir.clone(),
+                s.profile.clone(),
+                flags,
+                declare,
+                policy,
+                local_tx,
+            );
             // One drain: the turn loop and the approved-run poller take no new work while
             // an upgrade is waiting to install, and say when nothing is left running.
             let drain = Arc::new(Drain::default());
@@ -354,8 +402,13 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
                 drain: Some(drain.clone()),
                 interval: interval.map(Duration::from_secs),
                 max_beats,
-                // What it registered with, until a heartbeat declares another.
-                capacity: usize::try_from(me.capacity).unwrap_or(1),
+                // What it registered with, until a heartbeat declares another; one on
+                // the person's own plan.
+                capacity: if one_at_a_time {
+                    1
+                } else {
+                    usize::try_from(me.capacity).unwrap_or(1)
+                },
                 declared: Some(declared),
                 build_floor: Some(BuildFloor::default()),
                 report_host: true,
@@ -687,10 +740,108 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: RunnerCommand, out: Out) -> 
             }
             Ok(())
         }
+        RunnerCommand::ApiKey(c) => api_key_command(&ctx, &s, c, out).await,
         RunnerCommand::Config(RunnerConfigCommand::Show { .. })
+        | RunnerCommand::PersonalUse { .. }
         | RunnerCommand::Prune { .. }
         | RunnerCommand::Service(_) => Ok(()),
     }
+}
+
+/// `iohr runner api-key set|remove`: the Anthropic API key, in the profile's credential
+/// store under `{account}_claude_api_key`. Its value is never printed.
+async fn api_key_command(
+    ctx: &Ctx,
+    s: &crate::context::Session,
+    cmd: RunnerApiKeyCommand,
+    out: Out,
+) -> Result<(), Error> {
+    const LABEL: &str = "the Anthropic API key";
+    match cmd {
+        RunnerApiKeyCommand::Set {
+            file,
+            stdin,
+            account,
+        } => {
+            let account = resolve_account(s, account.account)?;
+            let key = match (file, stdin) {
+                (Some(path), _) => crate::prompt::secret_from_file(LABEL, &path)?,
+                (None, true) => crate::prompt::secret_from_stdin(LABEL)?,
+                (None, false) if crate::prompt::interactive() => crate::prompt::secret(LABEL)?,
+                (None, false) => {
+                    return Err(Error::Usage(
+                        "there is no terminal to ask for the key on: pipe it in with `--stdin`, or name a file with `--file PATH`".into(),
+                    ));
+                }
+            };
+            if key.expose().chars().any(char::is_whitespace) {
+                return Err(Error::Usage(format!(
+                    "{LABEL} holds white space: check what was pasted"
+                )));
+            }
+            let stored = StoredKey::open(ctx, s, &account, API_KEY_ENTRY).await?;
+            stored.write(key.expose().as_bytes()).await?;
+            if out.json {
+                Out::print_json(&serde_json::json!({ "api_key_stored": true }));
+            } else {
+                Out::note(
+                    "stored the Anthropic API key in this profile's credential store; restart a running runner to use it",
+                );
+            }
+            Ok(())
+        }
+        RunnerApiKeyCommand::Remove { account } => {
+            let account = resolve_account(s, account.account)?;
+            let stored = StoredKey::open(ctx, s, &account, API_KEY_ENTRY).await?;
+            let removed = stored.delete().await?;
+            if out.json {
+                Out::print_json(&serde_json::json!({ "removed": removed }));
+            } else if removed {
+                Out::note("removed the stored Anthropic API key; restart a running runner");
+            } else {
+                Out::note("there was no stored Anthropic API key");
+            }
+            Ok(())
+        }
+    }
+}
+
+/// `iohr runner personal-use`: the notice, and its acceptance on this machine.
+fn personal_use_command(ctx: &Ctx, accept: bool, withdraw: bool, out: Out) -> Result<(), Error> {
+    if withdraw {
+        personal_use::remove(&ctx.dir).map_err(Error::Failed)?;
+    } else if accept {
+        personal_use::save(&ctx.dir, &personal_use::Accepted::now()).map_err(Error::Failed)?;
+    }
+    let holds = personal_use::load(&ctx.dir).is_some_and(|a| a.holds(std::time::SystemTime::now()));
+    if out.json {
+        Out::print_json(&serde_json::json!({
+            "notice": personal_use::NOTICE,
+            "acknowledgement": personal_use::ACKNOWLEDGEMENT,
+            "notice_version": personal_use::NOTICE_VERSION,
+            "accepted": holds,
+        }));
+        return Ok(());
+    }
+    Out::raw(
+        format!(
+            "{}\n\n{}\n",
+            personal_use::NOTICE,
+            personal_use::ACKNOWLEDGEMENT
+        )
+        .as_bytes(),
+    );
+    Out::note(match (holds, accept, withdraw) {
+        (_, _, true) => "withdrawn: the runner no longer runs on your own Claude plan",
+        (true, true, _) => {
+            "accepted on this machine for a year, or until the notice changes; it takes `claude_auth = \"any\"` in [runner] as well"
+        }
+        (true, _, _) => "accepted on this machine",
+        (false, _, _) => {
+            "not accepted on this machine: `iohr runner personal-use --accept` accepts it"
+        }
+    });
+    Ok(())
 }
 
 /// The approvals half of `iohr runner run`, when this machine has a run key the
@@ -794,6 +945,7 @@ fn reload_on_hangup(
     flags: Flags,
     declare: watch::Sender<Declared>,
     policy: watch::Sender<Policy>,
+    local: watch::Sender<LocalAuth>,
 ) {
     #[cfg(unix)]
     tokio::spawn(async move {
@@ -827,6 +979,18 @@ fn reload_on_hangup(
                         now.sign
                     ));
                     let _ = policy.send(now);
+                    let allowed = local_auth(&dir, &e);
+                    Out::note(&format!(
+                        "claude_auth {}, codex_auth {}, personal-use notice {}",
+                        allowed.claude.as_str(),
+                        allowed.codex.as_str(),
+                        if allowed.personal_use_holds() {
+                            "accepted"
+                        } else {
+                            "not accepted"
+                        }
+                    ));
+                    let _ = local.send(allowed);
                 }
                 Err(why) => Out::note(&format!(
                     "config.toml was not taken, the settings in use stay: {why}"
@@ -836,7 +1000,7 @@ fn reload_on_hangup(
     });
     #[cfg(not(unix))]
     {
-        let _ = (dir, profile, flags, declare, policy);
+        let _ = (dir, profile, flags, declare, policy, local);
     }
 }
 
@@ -887,6 +1051,8 @@ async fn show_settings(e: &Effective, out: Out) {
             "upgrade_sign_identity": { "value": e.upgrade_sign.value.to_string(), "source": e.upgrade_sign.source.to_string() },
             "user_units": { "value": e.user_units.as_ref().map(|u| &u.value), "source": user_units_from },
             "core_checkout": { "value": e.core_checkout.as_ref().map(|c| &c.value), "source": core_checkout_from },
+            "claude_auth": { "value": e.claude_auth.value.as_str(), "source": e.claude_auth.source.to_string() },
+            "codex_auth": { "value": e.codex_auth.value.as_str(), "source": e.codex_auth.source.to_string() },
             "build_floor": { "volume": volume, "floor_bytes": floor.bytes, "free_bytes": free },
             "allow_host_git_credentials": { "value": e.allow_host_git_credentials.value, "source": e.allow_host_git_credentials.source.to_string() },
             "workspace_keep_days": { "value": e.workspace_keep_days.value, "source": e.workspace_keep_days.source.to_string() },
@@ -914,6 +1080,16 @@ async fn show_settings(e: &Effective, out: Out) {
             "core_checkout".to_owned(),
             core_checkout,
             core_checkout_from,
+        ],
+        vec![
+            "claude_auth".to_owned(),
+            e.claude_auth.value.as_str().to_owned(),
+            e.claude_auth.source.to_string(),
+        ],
+        vec![
+            "codex_auth".to_owned(),
+            e.codex_auth.value.as_str().to_owned(),
+            e.codex_auth.source.to_string(),
         ],
         vec![
             "auto_upgrade".to_owned(),
@@ -1147,6 +1323,72 @@ impl StoredKey {
         let key = self.key;
         blocking(self.store, move |st| st.set(&key, &secret)).await
     }
+
+    /// Removes the entry; whether there was one.
+    async fn delete(self) -> Result<bool, Error> {
+        let key = self.key;
+        blocking(self.store, move |st| st.delete(&key)).await
+    }
+}
+
+/// The credential store entry (`{account}_claude_api_key`) of the Anthropic API key.
+const API_KEY_ENTRY: &str = "claude_api_key";
+
+/// The Anthropic API key this machine keeps for the account, if one is stored.
+async fn stored_api_key(
+    ctx: &Ctx,
+    s: &crate::context::Session,
+    account: &str,
+) -> Result<Option<Redacted<String>>, Error> {
+    let stored = StoredKey::open(ctx, s, account, API_KEY_ENTRY).await?;
+    let Some(bytes) = stored.read("the stored Anthropic API key is damaged")? else {
+        return Ok(None);
+    };
+    std::str::from_utf8(&bytes)
+        .map(|k| Some(Redacted::new(k.to_owned())))
+        .map_err(|_| Error::Failed("the stored Anthropic API key is damaged".into()))
+}
+
+/// What a runner on the person's own Claude plan says when it registers and starts.
+const OWN_PLAN_NOTE: &str = "Claude: on your own Claude plan, personal use only: work you assign yourself, one turn at a time";
+
+/// `exec` on the stored API key, when there is one; else on the person's own sign-in.
+/// No profile (`IOHR_TOKEN` alone) means no store, and so no key.
+async fn with_stored_key(
+    exec: ClaudeExec,
+    ctx: &Ctx,
+    s: &crate::context::Session,
+    account: &str,
+) -> Result<ClaudeExec, Error> {
+    if s.profile.is_none() {
+        return Ok(exec);
+    }
+    Ok(match stored_api_key(ctx, s, account).await? {
+        Some(k) => exec.with_auth(claude::Auth::ApiKey(k)),
+        None => exec,
+    })
+}
+
+/// What this machine allows (RFC 0214): the settings' `claude_auth` and `codex_auth`
+/// and the personal-use acceptance.
+fn local_auth(dir: &std::path::Path, set: &Effective) -> LocalAuth {
+    LocalAuth {
+        claude: set.auth_policy(claude::PROVIDER),
+        codex: set.auth_policy("codex"),
+        personal_use: personal_use::load(dir),
+    }
+}
+
+/// Whether the runner may start on `state`: signed in, and allowed here. The account's
+/// policy and who created each job are checked again on every turn.
+fn check_auth(state: &AuthState, allowed: &LocalAuth) -> Result<(), Error> {
+    if !state.signed_in() {
+        return Err(provider_error(state));
+    }
+    match allowed.refusal(claude::PROVIDER, state, None, ("", "")) {
+        Some((_, why)) => Err(Error::Failed(why)),
+        None => Ok(()),
+    }
 }
 
 /// `claude` as installed: the first one on the user's `PATH`.
@@ -1182,12 +1424,12 @@ const fn claude_name() -> &'static str {
 fn provider_error(state: &AuthState) -> Error {
     match state {
         AuthState::SignedOut => Error::Failed(
-            "claude is signed out: run `claude`, then `/login` (the subscription; the runner never signs in for you)".into(),
+            "claude has no sign-in the runner can use: store an Anthropic API key with `iohr runner api-key set` (the runner never signs in for you)".into(),
         ),
         AuthState::Refused(why) => Error::Failed(format!(
-            "the runner runs on the subscription only: {why}. Sign in again with `claude`, then `/login`."
+            "the runner runs on an Anthropic API key, or for personal use on your own Claude plan: {why}. Store a key with `iohr runner api-key set`."
         )),
-        AuthState::Subscription => Error::Failed("unreachable".into()),
+        AuthState::ApiKey | AuthState::Subscription => Error::Failed("unreachable".into()),
     }
 }
 

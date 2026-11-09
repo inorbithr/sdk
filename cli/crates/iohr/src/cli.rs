@@ -513,7 +513,10 @@ pub enum Command {
     /// Run coordinator turns on this machine.
     ///
     /// The coordinator's runner: this machine runs coordinator turns on your own
-    /// installed `claude`, on your own subscription.
+    /// installed `claude`, on an Anthropic API key you store with `iohr runner api-key
+    /// set` (the path for an organisation's work). Running on your own Claude plan
+    /// instead is for personal use only: it is off until you turn it on in config.toml
+    /// and accept the notice `iohr runner personal-use` shows.
     #[command(subcommand)]
     Runner(RunnerCommand),
     /// Open this project's session: one process hosts its Roles while iohr is open.
@@ -656,9 +659,12 @@ pub enum RunnerCommand {
     ///
     /// Register this machine as one of your runners: its name, system and what it can run.
     ///
-    /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
-    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the seat
-    /// `claude auth status` names (organisation and email). Run it again and it says the runner exists; with
+    /// Needs `claude` on your PATH and an Anthropic API key stored with `iohr runner
+    /// api-key set`; or, for personal use only, `claude` signed in to your own plan
+    /// (`claude`, then `/login`) with `claude_auth = "any"` in `[runner]` and the notice
+    /// accepted. The key never leaves the machine; on your own plan nothing about the
+    /// sign-in does except a hash of the seat `claude auth status` names (organisation
+    /// and email). Run it again and it says the runner exists; with
     /// `--refresh` it sends the registration again with the key this machine holds, so
     /// the runner keeps its id and the coordinator records its current sign-in.
     Register {
@@ -778,6 +784,30 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Store or remove the Anthropic API key this machine's runner runs Claude on.
+    ///
+    /// The key is kept in your profile's credential store (the macOS Keychain on a Mac;
+    /// a file only for a profile made with `--insecure-storage`), never in config.toml,
+    /// and is given to `claude` alone when it starts, as `ANTHROPIC_API_KEY`. A running
+    /// runner reads it at start: restart it after a change.
+    #[command(subcommand)]
+    ApiKey(RunnerApiKeyCommand),
+    /// Read, accept or withdraw the personal-use notice for your own Claude plan.
+    ///
+    /// Running the runner on your own Claude plan, rather than an API key, is for
+    /// personal use only. With no flag this shows the notice and whether you accepted
+    /// it; `--accept` records that you accept it on this machine (the notice's version
+    /// and the date, kept in `runner/personal-use.json`, never sent), for a year or
+    /// until the notice changes. It takes `claude_auth = "any"` in `[runner]` as well.
+    /// Needs no sign-in.
+    PersonalUse {
+        /// Accept the notice shown.
+        #[arg(long)]
+        accept: bool,
+        /// Withdraw an acceptance: the runner no longer runs on your own plan.
+        #[arg(long, conflicts_with = "accept")]
+        withdraw: bool,
+    },
     /// Show or enrol this machine's run key.
     ///
     /// This machine's run key: the P-256 key that signs what it reports on approved
@@ -860,6 +890,28 @@ pub enum RunnerServiceCommand {
         /// Also remove the runner's keys and state.
         #[arg(long)]
         purge: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerApiKeyCommand {
+    /// Store the key: asked for without echo on a terminal, or read from a file or
+    /// standard input. Never give it as an argument.
+    Set {
+        /// Read the key from this file (at most 64 KiB; surrounding white space is
+        /// dropped).
+        #[arg(long, value_name = "PATH", conflicts_with = "stdin")]
+        file: Option<std::path::PathBuf>,
+        /// Read the key from standard input.
+        #[arg(long)]
+        stdin: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Remove the stored key.
+    Remove {
         #[command(flatten)]
         account: AccountArg,
     },

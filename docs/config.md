@@ -433,6 +433,8 @@ profile's keys win), and its flags win over both. `iohr upgrade` reads
 | `upgrade_sign_identity` | `auto`, a code-signing identity, or `-` | not set (off) | `run` and `iohr upgrade`, macOS only: sign each new `iohr` with this identity before it is installed (below); `IOHR_SIGN_IDENTITY` wins over it |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 | `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
+| `claude_auth` | `api_only` or `any` | `api_only` | `register` and `run`: how `claude` may sign in for a turn: `api_only` takes only an Anthropic API key (`iohr runner api-key set`); `any` also allows your own Claude plan, for personal use only (below). A server policy can make it stricter, never looser |
+| `codex_auth` | `api_only` or `any` | `any` | `run`: the same for Codex turns |
 | `allow_host_git_credentials` | true or false | false | `run`: a job whose lease brings no GitHub token may use this machine's own `gh` sign-in to fetch and push; false, such a job fails before its checkout, saying why |
 | `workspace_keep_days` | 1 to 3650 | 14 | `run` and `prune`: a job checkout, repository mirror or build directory nothing has used for this many days is removed (below) |
 | `workspace_max_gb` | 1 or more (GB, 10^9 bytes) | not set (no cap) | `run` and `prune`: while the checkouts, mirrors and build directories take more than this, the oldest unused go first |
@@ -445,6 +447,34 @@ making a second one. When the key matches more than one runner (an older `iohr` 
 register twice), `run` and `gate-report` refuse to guess and list the ids: pin one with `id` in
 the profile's runner table (or `--runner <id>`, or `IOHR_RUNNER_ID`), then
 revoke the others. `register` prints the `id = "rnr_..."` line to add.
+
+#### How `claude` signs in
+
+A runner's `claude` turns run on an Anthropic API key, the path for organisations and
+teams. `iohr runner api-key set` stores the key in the profile's credential store (the
+OS keychain, or the owner-only file with `--insecure-storage`), keyed by account: it
+reads the key from a prompt with no echo, `--stdin` or `--file PATH`, never from an
+argument, and never prints it. `iohr runner api-key remove` deletes it. The runner reads
+the key when it starts (restart it after a change) and hands it only to the `claude`
+process it starts, as `ANTHROPIC_API_KEY` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
+beside it, so the tools `claude` runs do not inherit it. The key never reaches a log,
+the coordinator, the config file or another child. `claude` sends its requests to
+Anthropic directly; InOrbit does not proxy them.
+
+Running on your own Claude plan instead is personal use only and off by default. It
+takes both `claude_auth = "any"` in the runner table (only the local file turns it on;
+the server never does) and the notice accepted on this machine:
+`iohr runner personal-use` shows it, `--accept` accepts it and `--withdraw` takes the
+acceptance back. The acceptance is stored in `runner/personal-use.json` under the
+config directory, with the notice's version and the date only, and holds for 365 days
+or until the notice changes. In this mode the runner takes one turn at a time, only work
+you assigned yourself, and says so when it starts. Under `api_only`, a turn on your own
+plan is refused with a message that names `iohr runner api-key set`.
+
+The coordinator's lease can carry a policy per provider as well; the runner applies the
+stricter of that and its own setting, and treats a value it does not know as
+`api_only`. `claude_auth` and `codex_auth` are read again on SIGHUP; the stored key is
+not.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On

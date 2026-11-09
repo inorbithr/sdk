@@ -1487,7 +1487,8 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                         .map(runtime::Applied::system_text)
                         .as_deref(),
                     &prompt,
-                ),
+                )
+                .map_err(Error::Usage)?,
                 prompt,
                 model,
                 role: cx.role.as_ref().map(runtime::Applied::json),

@@ -119,6 +119,18 @@ Boundary: the runner to GitHub, and the runner to the model process it starts (S
 | E | Installing the runner as a service asks for administrator rights or runs it as another user | `iohr runner service install` writes only a per-user launchd agent or systemd user unit, never needs `sudo`, runs this `iohr` by its full path and prints every step; `--dry-run` changes nothing |
 | I | A removed runner leaves its key on the machine | `service uninstall --purge` deletes the runner key and the approvals run key from the credential store and the approvals state |
 
+### `iohr runner` and its model sign-in
+
+Boundary: the credential store to the runner, and the runner to the `claude` process it
+starts (SR-36). `claude` talks to Anthropic directly; the runner does not proxy it.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| I | The API key shows in a process list, a log, an error, a JSON answer or a request to the platform | SR-36: never an argument; `Redacted<String>` until it is set on the `claude` child; integration test over every output, request and the config file |
+| I | A tool the model runs inherits the key | SR-36: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` beside the key; no other child of the runner gets it |
+| E | The server, or a changed lease, turns on the person's own plan | SR-36: only the local file turns it on; the lease can only make the policy stricter, and an unknown value counts as `api_only` |
+| S | Work someone else assigned runs on the person's own plan | SR-36: refused unless the pack's creator is the runner's own user; one turn at a time |
+
 ### `iohr runner` and approved run asks
 
 Boundary: the approvals service to the runner, and the runner to `kubectl` (SR-34).
