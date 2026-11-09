@@ -50,6 +50,10 @@
 //! - `helm.runner-scale`: sets one ARC runner scale set's `maxRunners` and `minRunners`
 //!   with `helm upgrade --reuse-values` at the chart version the release already runs
 //!   (read with `helm get metadata`), then reads the values back. See [`runner_scale`].
+//! - `edge.caddy-site-call`: adds the fixed call site (`call.inorbit.hr`, `import api`) to
+//!   the edge Caddy config the running edge container mounts, after a backup, validates
+//!   and reloads Caddy (a failure puts the backup back), then waits for the site's
+//!   `/rtc/validate` to answer 401. No params. Linux only. See [`edge_site`].
 //!
 //! Every tool runs through one [`ArgvRunner`]: [`HostRunner`] starts the program from
 //! the runner's `PATH` directly (no shell) with the allowlisted environment, no standard
@@ -79,6 +83,7 @@ use super::exec::GroupGuard;
 use super::provider;
 
 mod disk_prune;
+mod edge_site;
 mod install_checks;
 mod labs_reattribute;
 mod runner_scale;
@@ -99,6 +104,7 @@ pub(crate) const RELEASE_RERUN: &str = "gh.release-rerun";
 pub(crate) const INSTALL_CHECKS: &str = "agent.install-checks";
 pub(crate) const DISK_PRUNE: &str = "disk.prune";
 pub(crate) const RUNNER_SCALE: &str = "helm.runner-scale";
+pub(crate) const EDGE_SITE_CALL: &str = "edge.caddy-site-call";
 pub(crate) const REATTRIBUTE_DOCUMENT: &str = "labs.reattribute-document";
 /// Core's task the action runs.
 pub(crate) const LABS_REATTRIBUTE: &str = "labs:reattribute";
@@ -357,6 +363,7 @@ pub(crate) fn effect_of(action: &str, params: &Value) -> Option<String> {
             )
         }
         REATTRIBUTE_DOCUMENT => return labs_reattribute::effect(params),
+        EDGE_SITE_CALL => edge_site::EFFECT.to_owned(),
         _ => return None,
     })
 }
@@ -454,7 +461,7 @@ pub(crate) fn validate(action: &Value) -> Result<(), String> {
             string_param(params, "repo", is_repo, "an inorbithr repository")?;
             integer_param(params, "run_id", 1, MAX_RUN_ID)?;
         }
-        UPGRADE => closed(params, &[], "/params")?,
+        UPGRADE | EDGE_SITE_CALL => closed(params, &[], "/params")?,
         PREVIEW_TAKE => {
             closed(params, &["branch"], "/params")?;
             string_param(params, "branch", is_preview_branch, "a Preview branch")?;
@@ -554,6 +561,8 @@ pub(crate) enum Action {
         evidence_ts: String,
         expected: labs_reattribute::Counts,
     },
+    /// `edge.caddy-site-call`: no params; the site, the file and the container are fixed.
+    EdgeSiteCall,
 }
 
 impl Action {
@@ -574,6 +583,7 @@ impl Action {
             Self::DiskPrune { .. } => DISK_PRUNE,
             Self::RunnerScale { .. } => RUNNER_SCALE,
             Self::ReattributeDocument { .. } => REATTRIBUTE_DOCUMENT,
+            Self::EdgeSiteCall => EDGE_SITE_CALL,
         }
     }
 
@@ -582,7 +592,7 @@ impl Action {
         match self {
             Self::DeleteFailedPods { .. } | Self::RolloutRestart { .. } => Tool::Kubectl,
             Self::UserRestart { .. } => Tool::Systemctl,
-            Self::PruneImages { .. } => Tool::Docker,
+            Self::PruneImages { .. } | Self::EdgeSiteCall => Tool::Docker,
             Self::CancelRun { .. } | Self::ReleaseRerun { .. } => Tool::Gh,
             Self::Upgrade => Tool::Iohr,
             Self::PreviewTake { .. } => Tool::Mise,
@@ -678,6 +688,7 @@ pub(crate) fn lookup_on(doc: &Value, os: &str) -> Result<Action, String> {
                 Some(_) => int("min_runners")?,
             },
         },
+        Some(EDGE_SITE_CALL) => Action::EdgeSiteCall,
         Some(REATTRIBUTE_DOCUMENT) => Action::ReattributeDocument {
             document: text("document")?,
             from: text("from")?,
@@ -803,7 +814,8 @@ impl Tool {
     }
 }
 
-/// What `disk.prune`, `helm.runner-scale` and `labs.reattribute-document` refuse before anything runs. Their calls
+/// What `disk.prune`, `helm.runner-scale`, `labs.reattribute-document` and
+/// `edge.caddy-site-call` refuse before anything runs. Their calls
 /// depend on what the host says first, so the modules build them, not `plan`.
 fn check_before_start(action: &Action, os: &str) -> Result<(), String> {
     match action {
@@ -822,6 +834,7 @@ fn check_before_start(action: &Action, os: &str) -> Result<(), String> {
             evidence_ts,
             expected,
         } => labs_reattribute::check(document, from, evidence_ts, expected),
+        Action::EdgeSiteCall => edge_site::check(os),
         _ => Ok(()),
     }
 }
@@ -913,7 +926,8 @@ pub(crate) fn plan(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>
         | Action::InstallChecks { .. }
         | Action::DiskPrune { .. }
         | Action::RunnerScale { .. }
-        | Action::ReattributeDocument { .. } => return plan_host_task(action, os),
+        | Action::ReattributeDocument { .. }
+        | Action::EdgeSiteCall => return plan_host_task(action, os),
     })
 }
 
@@ -989,7 +1003,8 @@ fn plan_host_task(action: &Action, os: &str) -> Result<Vec<(Tool, Vec<String>)>,
         }
         Action::DiskPrune { .. }
         | Action::RunnerScale { .. }
-        | Action::ReattributeDocument { .. } => {
+        | Action::ReattributeDocument { .. }
+        | Action::EdgeSiteCall => {
             check_before_start(action, os)?;
             Vec::new()
         }
@@ -1806,6 +1821,8 @@ pub(crate) async fn carry_out_on(
         runner_scale::scale(action, tools).await
     } else if matches!(action, Action::ReattributeDocument { .. }) {
         labs_reattribute::reattribute(action, tools).await
+    } else if matches!(action, Action::EdgeSiteCall) {
+        edge_site::add_site(action, tools).await
     } else {
         let mut done = Vec::new();
         for (tool, argv) in &calls {
@@ -1837,7 +1854,8 @@ fn summary(action: &Action, what: &str, tally: &Tally) -> Option<String> {
         | Action::InstallChecks { .. }
         | Action::DiskPrune { .. }
         | Action::RunnerScale { .. }
-        | Action::ReattributeDocument { .. } => None,
+        | Action::ReattributeDocument { .. }
+        | Action::EdgeSiteCall => None,
         Action::RolloutRestart {
             namespace,
             deployment,
