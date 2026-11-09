@@ -20,5 +20,6 @@ pub(crate) mod service;
 pub(crate) mod settings;
 pub(crate) mod signing;
 pub(crate) mod supervisor;
+pub(crate) mod unit;
 pub(crate) mod voice;
 pub(crate) mod workspace;

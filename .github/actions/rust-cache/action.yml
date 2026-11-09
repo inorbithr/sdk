@@ -1,0 +1,20 @@
+name: Rust cache
+description: >-
+  Restores the Cargo cache for one workspace, and saves it only from main, so pull
+  requests read main's cache and never evict it.
+inputs:
+  workspaces:
+    description: The Cargo workspace directory (cli or rust).
+    required: true
+  key:
+    description: An extra cache key, such as the toolchain of a matrix leg.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        workspaces: ${{ inputs.workspaces }}
+        key: ${{ inputs.key }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}

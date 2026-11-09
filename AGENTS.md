@@ -20,10 +20,11 @@ agent and for people. Language-specific rules live in each language directory's 
 
 The `iohr` guides live on the developer site (developers.inorbit.hr, pages `tools/iohr`,
 `projects`, `ask`, `extensions` and `preview`), built from the platform repository. A change
-to what `iohr` prints or accepts updates `cli/README.md` here in the same PR; the site's
-guides and their captured output are updated from the release that ships it. `iohr-preview`
-is the same program under another name, built ahead of a release: say in the README which
-parts only it has, and drop the note when the release carries them.
+to what `iohr` prints or accepts updates `cli/README.md` and its topic pages in `cli/docs/`
+here in the same PR; the site's guides and their captured output are updated from the
+release that ships it. `iohr-preview` is the same program under another name, built ahead
+of a release: say in the README which parts only it has, and drop the note when the
+release carries them.
 
 ## Source of truth
 
