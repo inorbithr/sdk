@@ -148,9 +148,9 @@ fn claude_runs_once_in_print_mode_with_the_small_model_and_no_session() {
             "stream-json",
             "--verbose",
             "--include-partial-messages",
-            "--no-session-persistence",
             "--model",
             "haiku",
+            "--no-session-persistence",
             "--",
             "q"
         ]
@@ -347,10 +347,7 @@ fn the_mode_reaches_claude_and_codex_and_plan_beats_allow_edits() {
     let a = r.args("claude");
     assert!(has_pair(&a, "--permission-mode", "plan"), "{a:?}");
     assert!(!a.iter().any(|x| x == "acceptEdits"), "{a:?}");
-    assert!(
-        a.iter().any(|x| x == "Bash") && a.iter().any(|x| x == "--disallowedTools"),
-        "{a:?}"
-    );
+    assert!(a.iter().any(|x| x == "--disallowedTools=Bash"), "{a:?}");
     assert!(r.run(&["ask", "--mode", "auto", "q"], "0").status.success());
     assert!(has_pair(
         &r.args("claude"),
@@ -494,7 +491,7 @@ fn dry_run_prints_the_exact_command_line_and_starts_nothing() {
     assert_eq!(
         line.trim_end(),
         format!(
-            "{} -p --output-format stream-json --verbose --include-partial-messages --no-session-persistence --model haiku -- 'what is this?'",
+            "{} -p --output-format stream-json --verbose --include-partial-messages --model haiku --no-session-persistence -- 'what is this?'",
             bin.display()
         )
     );

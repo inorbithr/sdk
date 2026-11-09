@@ -155,6 +155,10 @@ pub(crate) async fn run(g: &Global, env: &Env, mut args: AskArgs, out: Out) -> R
     result
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one ask from its flags to the agent's start, in order"
+)]
 async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
         return menu(g, &args);
@@ -192,7 +196,8 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
         None,
         role_text.as_deref(),
         &question,
-    );
+    )
+    .map_err(Error::Usage)?;
     if args.dry_run {
         dry_run(via, agent, bin.as_deref(), &command_line, role_json, out);
         return Ok(());

@@ -370,6 +370,31 @@ vectors; that a missing tool, a bad param or systemd off Linux runs nothing;
   that each report verifies with the run key.
 - Refs: CRA I.2(d); least privilege.
 
+**SR-36. A runner's model key reaches its `claude` alone, and its sign-in follows a local policy.**
+`iohr runner api-key set` reads an Anthropic API key from a prompt with no echo, stdin or
+a file named by a flag, never from an argument (`refuse_secrets_in_args` refuses an
+`sk-ant-` value before parsing), and stores it only in the profile's credential store,
+keyed by profile and account; `remove` deletes it. It is a `Redacted<String>` from the
+moment it is read until it is set as `ANTHROPIC_API_KEY`, with
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` beside it, on the `claude` processes the runner
+starts, and nowhere else: never an argument, a log line, an error, a `Debug`, a JSON
+answer, the config file or a request to the platform. The parent's own `ANTHROPIC_*`
+values are still dropped. How `claude` may sign in is a policy per provider,
+`api_only` or `any`: the runner table sets it (`claude_auth` defaults to `api_only`,
+`codex_auth` to `any`), the lease can name one too, the stricter wins and an unknown
+value counts as `api_only`. Signing in with the person's own plan needs `any` from the
+local file and the personal-use notice accepted on this machine; then the runner takes
+one turn at a time and refuses a turn someone else assigned.
+- Why: a key that reaches a tool, a log or the platform can be used by whoever reads it;
+  a policy the server could loosen would let it pick the person's own plan for work that
+  is not theirs.
+- Verify: unit tests that the one argument builder gives both sign-ins the same
+  arguments and only the key its environment, that `api_only` refuses the person's own
+  plan and the stricter policy wins; an integration test that a stored key reaches the
+  stand-in `claude` and appears in no output, request or config file, and that a key
+  given as an argument is refused before anything runs.
+- Refs: CRA I.2(d), I.2(e); least privilege.
+
 ## Reliability and traceability
 
 **SR-17. Request ids both ways.** Every request carries a client-generated request id
