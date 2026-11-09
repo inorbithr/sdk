@@ -9,6 +9,11 @@ Read the root `AGENTS.md`, `docs/design.md` sections 4 to 6 and
 - `mise run cli:check`: `cargo fmt --check`, clippy (pedantic, warnings are errors),
   `cargo nextest run`, doctests, `cargo deny check`.
 - `mise run cli:fmt`, `mise run cli:audit`.
+- `mise run cli:preview-install` (macOS): build the release `iohr` and install it as
+  `~/.local/bin/iohr-preview` signed like the released one (Apple Development or Developer ID
+  certificate, identifier `hr.inorbit.iohr`), so the Keychain trusts every rebuild. The
+  signing is `iohr sign-binary` (hidden), which is `upgrade/sign.rs`; a script never signs on
+  its own. Never `cp` over an installed binary (macOS kills it): the task removes it first.
 - `mise run cli:keyring` (Linux): the credential-store test against a throwaway Secret
   Service in a private D-Bus session.
 - `mise run cli:hydra`: browser and device sign-in, refresh and revocation against the
@@ -81,7 +86,8 @@ cli/
   A person profile sends `?account=` and the answer's stamp must name that account.
 - Output: results on stdout (tables, or JSON with `--json`), notes on stderr, so pipes
   get only data. `token create` prints the new token alone on stdout.
-- Dependencies: the table in `README.md`. A new one needs a reason there and in the PR.
+- Dependencies: the table in `docs/files-and-dependencies.md`. A new one needs a reason
+  there and in the PR.
 - The generator's output is deterministic and golden-tested per language
   (`iohr-codegen/tests/golden/<case>/expected/<lang>/`, and the language-neutral marks
   per operation in `expected/operations.json`; `IOHR_UPDATE_GOLDEN=1` rewrites,

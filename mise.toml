@@ -95,6 +95,8 @@ run = [
   "python3 tools/check-repo.py",
   "python3 tools/test_examples_gate.py",
   "python3 tools/test_cli_policy.py",
+  "python3 tools/test_terminal_themes.py",
+  "python3 tools/terminal-themes.py --offline",
 ]
 
 # ---------------------------------------------------------------- supply chain
@@ -357,6 +359,19 @@ cargo nextest run --locked --all-features
 cargo test --locked --doc --all-features
 cargo deny check
 """
+
+[tasks."cli:themes"]
+description = "Regenerate the terminal themes of `iohr theme` from the Mac app's term-config.ts (IOHR_MAC_DIR)"
+run = "python3 tools/terminal-themes.py"
+
+[tasks."cli:themes:check"]
+description = "Fail if the committed terminal themes drifted from the Mac app's (needs an iohr-mac checkout; IOHR_MAC_DIR)"
+run = "python3 tools/terminal-themes.py --check"
+
+[tasks."cli:preview-install"]
+shell = "bash -e -o pipefail -c"
+description = "Command line, macOS: build iohr and install it as iohr-preview signed like the release (Apple Development, hr.inorbit.iohr), so the Keychain trusts every rebuild"
+run = "tools/preview-install.sh"
 
 [tasks."cli:fmt"]
 shell = "bash -e -o pipefail -c"

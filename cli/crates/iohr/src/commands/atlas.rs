@@ -27,7 +27,229 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: AtlasCommand, out: Out) -> R
         AtlasCommand::New { kind, title, dir } => new(kind, &title, dir, out),
         AtlasCommand::Sync(args) => sync(g, env, &args, out).await,
         AtlasCommand::Roles(cmd) => roles_cmd(g, env, cmd, out).await,
+        AtlasCommand::Search {
+            query,
+            site,
+            limit,
+            dir,
+        } => kb_search(&query, site.as_deref(), limit, dir, out),
+        AtlasCommand::Facts {
+            site,
+            predicate,
+            grep,
+            limit,
+            dir,
+        } => kb_facts(
+            (site.as_deref(), predicate.as_deref(), grep.as_deref()),
+            limit,
+            dir,
+            out,
+        ),
+        AtlasCommand::Index {
+            pages,
+            site,
+            limit,
+            dir,
+        } => kb_index(pages, site.as_deref(), limit, dir, out),
     }
+}
+
+fn kb_site(site: Option<&str>) -> Option<String> {
+    site.map(crate::kb::site_name)
+}
+
+/// `iohr atlas search`: the best chunks for a query, with their sources.
+fn kb_search(
+    query: &str,
+    site: Option<&str>,
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    let site = kb_site(site);
+    let hits = crate::kb::search(&root, query, site.as_deref(), limit.clamp(1, 50))
+        .map_err(Error::Failed)?;
+    if out.json {
+        let items: Vec<_> = hits
+            .iter()
+            .map(|h| {
+                serde_json::json!({
+                    "chunk": h.id, "site": h.site, "url": h.url, "title": h.title,
+                    "heading": h.heading, "path": h.path, "start": h.start, "end": h.end,
+                    "tokens": h.tokens, "score": h.score, "text": h.text,
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({
+            "query": query, "embeddings": crate::kb::embed::STATUS, "hits": items,
+        }));
+        return Ok(());
+    }
+    if hits.is_empty() {
+        Out::note(&format!("nothing in the knowledge base matches {query:?}"));
+        return Ok(());
+    }
+    for (i, h) in hits.iter().enumerate() {
+        let path = if h.path.is_empty() { &h.title } else { &h.path };
+        let text: String = h.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let shown: String = text.chars().take(280).collect();
+        let more = if text.chars().count() > 280 {
+            " ..."
+        } else {
+            ""
+        };
+        Out::note(&format!(
+            "{n}. {path}   [{tokens} words, score {score:.2}]\n   {url}   chars {s}-{e}   {id}\n   {shown}{more}",
+            n = i + 1,
+            tokens = h.tokens,
+            score = h.score,
+            url = h.url,
+            s = h.start,
+            e = h.end,
+            id = h.id,
+        ));
+    }
+    Ok(())
+}
+
+/// `iohr atlas facts`: what the site model says, with the chunk each fact came from.
+fn kb_facts(
+    (site, predicate, grep): (Option<&str>, Option<&str>, Option<&str>),
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    let site = kb_site(site);
+    let rows = crate::kb::facts(&root, site.as_deref(), predicate, grep, limit.clamp(1, 500))
+        .map_err(Error::Failed)?;
+    if out.json {
+        let items: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.fact.id, "site": r.site, "subject": r.fact.subject,
+                    "predicate": r.fact.predicate, "value": r.fact.value, "url": r.fact.url,
+                    "chunk": r.fact.chunk, "source": r.fact.source,
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({ "facts": items }));
+        return Ok(());
+    }
+    if rows.is_empty() {
+        Out::note("no facts match");
+        return Ok(());
+    }
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            vec![
+                r.site.clone(),
+                r.fact.predicate.clone(),
+                r.fact.value.clone(),
+                r.fact.url.clone(),
+                r.fact.source.clone(),
+            ]
+        })
+        .collect();
+    Out::table(&["site", "predicate", "value", "page", "source"], &cells);
+    Ok(())
+}
+
+/// `iohr atlas index`: the crawled sites (or, with `--pages`, their pages).
+fn kb_index(
+    pages: bool,
+    site: Option<&str>,
+    limit: usize,
+    dir: Option<PathBuf>,
+    out: Out,
+) -> Result<(), Error> {
+    let root = root_of(dir)?;
+    let site = kb_site(site);
+    if pages {
+        let rows = crate::kb::pages(&root, site.as_deref(), limit.clamp(1, 1000))
+            .map_err(Error::Failed)?;
+        if out.json {
+            let items: Vec<_> = rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "site": r.site, "url": r.url, "title": r.title, "lang": r.lang,
+                        "chunks": r.chunks, "tokens": r.tokens,
+                    })
+                })
+                .collect();
+            Out::print_json(&serde_json::json!({ "pages": items }));
+            return Ok(());
+        }
+        let cells: Vec<Vec<String>> = rows
+            .iter()
+            .map(|r| {
+                vec![
+                    r.url.clone(),
+                    r.title.clone(),
+                    r.lang.clone(),
+                    r.chunks.to_string(),
+                    r.tokens.to_string(),
+                ]
+            })
+            .collect();
+        Out::table(&["page", "title", "lang", "chunks", "words"], &cells);
+        return Ok(());
+    }
+    let mut sites = crate::kb::status(&root).map_err(Error::Failed)?;
+    if let Some(s) = &site {
+        sites.retain(|x| &x.site == s);
+    }
+    if out.json {
+        let items: Vec<_> = sites
+            .iter()
+            .map(|s| {
+                let kinds = crate::kb::entity_kinds(&root, &s.site).unwrap_or_default();
+                serde_json::json!({
+                    "site": s.site, "subject": s.subject, "crawled": s.crawled,
+                    "built": s.built, "embeddings": s.embeddings, "pages": s.pages,
+                    "chunks": s.chunks, "tokens": s.tokens, "entities": s.entities,
+                    "entity_kinds": kinds.into_iter().collect::<std::collections::BTreeMap<_, _>>(),
+                    "facts": s.facts, "links": s.links,
+                    "sections": s.sections.iter().map(|x| serde_json::json!({
+                        "name": x.name, "pages": x.pages, "chunks": x.chunks,
+                        "tokens": x.tokens, "summary": x.summary,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        Out::print_json(&serde_json::json!({ "sites": items }));
+        return Ok(());
+    }
+    if sites.is_empty() {
+        Out::note("no site is indexed; run `iohr project init --crawl`");
+        return Ok(());
+    }
+    let cells: Vec<Vec<String>> = sites
+        .iter()
+        .map(|s| {
+            vec![
+                s.site.clone(),
+                s.pages.to_string(),
+                s.chunks.to_string(),
+                s.tokens.to_string(),
+                s.entities.to_string(),
+                s.facts.to_string(),
+                s.links.to_string(),
+                s.built.clone(),
+            ]
+        })
+        .collect();
+    Out::table(
+        &[
+            "site", "pages", "chunks", "words", "entities", "facts", "links", "built",
+        ],
+        &cells,
+    );
+    Ok(())
 }
 
 fn start(dir: Option<PathBuf>) -> Result<PathBuf, Error> {

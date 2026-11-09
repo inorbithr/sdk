@@ -138,8 +138,9 @@ pub(crate) fn declared(text: &str) -> usize {
         .count()
 }
 
-/// The backup's name: `checks.toml.bak-<UTC time>` beside the file.
-fn backup_path(file: &Path, now: OffsetDateTime) -> Result<PathBuf, String> {
+/// The backup's name: `<name>.bak-<UTC time>` beside the file (`checks.toml`, or the edge
+/// site file of [`super::edge_site`]).
+pub(crate) fn backup_path(file: &Path, now: OffsetDateTime) -> Result<PathBuf, String> {
     let stamp = now
         .format(format_description!(
             "[year][month][day]T[hour][minute][second]Z"
@@ -148,25 +149,23 @@ fn backup_path(file: &Path, now: OffsetDateTime) -> Result<PathBuf, String> {
     let name = file
         .file_name()
         .and_then(|n| n.to_str())
-        .ok_or("the checks file has no name")?;
+        .ok_or("the file has no name")?;
     Ok(file.with_file_name(format!("{name}.bak-{stamp}")))
 }
 
 /// `from` copied over `to` in one rename, with `from`'s permissions (the agent's file is
-/// private): a reader sees the old file or the new, never half.
-fn replace(from: &Path, to: &Path) -> Result<(), String> {
-    let tmp = to.with_file_name(format!(
-        ".{}.new-{}",
-        to.file_name().and_then(|n| n.to_str()).unwrap_or("checks"),
-        std::process::id()
-    ));
+/// private): a reader sees the old file or the new, never half. `from` must not be the
+/// `.<name>.new-<pid>` file this writes through.
+pub(crate) fn replace(from: &Path, to: &Path) -> Result<(), String> {
+    let name = to.file_name().and_then(|n| n.to_str()).unwrap_or("checks");
+    let tmp = to.with_file_name(format!(".{name}.new-{}", std::process::id()));
     let put = || -> std::io::Result<()> {
         std::fs::copy(from, &tmp)?;
         std::fs::rename(&tmp, to)
     };
     put().map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
-        format!("could not write the checks file: {}", e.kind())
+        format!("could not write {name}: {}", e.kind())
     })
 }
 

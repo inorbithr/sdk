@@ -74,36 +74,21 @@ pub(crate) fn user_dir(global: &crate::cli::Global) -> Option<PathBuf> {
 
 /// The context file of one folder: its path and, when `io.md` sat beside `IO.md`, the path
 /// that was skipped. Only the two names are looked at, and only a regular file counts: a
-/// symlink named `IO.md` is skipped, so a link can never pull in a file from elsewhere.
+/// symlink named `IO.md` is skipped, so a link can never pull in a file from elsewhere. The
+/// names come from the folder listing, so a disk that ignores case (macOS, Windows) gives the
+/// one file under the name it was saved with.
 fn in_folder(dir: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
-    let regular = |name: &str| {
-        let path = dir.join(name);
-        std::fs::symlink_metadata(&path)
-            .is_ok_and(|m| m.is_file())
-            .then_some(path)
-    };
-    let (upper, lower) = (regular(NAMES[0]), regular(NAMES[1]));
-    match (upper, lower) {
-        // A case-insensitive disk answers to both names with the one file.
-        (Some(u), Some(l)) if same_file(&u, &l) => (Some(u), None),
-        (Some(u), l) => (Some(u), l),
-        (None, l) => (l, None),
-    }
-}
-
-/// Whether two paths are the one file.
-fn same_file(a: &Path, b: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        match (std::fs::metadata(a), std::fs::metadata(b)) {
-            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
-            _ => false,
+    let mut found = [false; 2];
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        if let Some(i) = NAMES.iter().position(|n| name == *n) {
+            found[i] = entry.file_type().is_ok_and(|t| t.is_file());
         }
     }
-    #[cfg(not(unix))]
-    {
-        matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+    let path = |i: usize| found[i].then(|| dir.join(NAMES[i]));
+    match (path(0), path(1)) {
+        (Some(u), l) => (Some(u), l),
+        (None, l) => (l, None),
     }
 }
 
@@ -184,11 +169,15 @@ pub(crate) fn load_in(cwd: &Path, user: Option<&Path>, root: Option<&Path>) -> C
         let (file, skipped) = in_folder(d);
         chain.skipped.extend(skipped);
         if let Some(f) = file {
-            let rel = f
-                .strip_prefix(root.unwrap_or(cwd))
-                .unwrap_or(&f)
-                .display()
-                .to_string();
+            // A label is display text, so its parts are joined with `/` on every system.
+            let rel = match f.strip_prefix(root.unwrap_or(cwd)) {
+                Ok(r) => r
+                    .iter()
+                    .map(|p| p.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                Err(_) => f.display().to_string(),
+            };
             found.push((f, rel, Kind::Project));
         }
     }
@@ -509,18 +498,21 @@ mod tests {
         assert_eq!(labels(&c), ["IO.md", "docs/guide/io.md"]);
     }
 
+    // Symlinks need no extra rights only on unix, so the test runs there.
+    #[cfg(unix)]
     #[test]
     fn a_linked_file_is_not_read() {
         let t = tempfile::tempdir().unwrap();
         let root = project(t.path());
         let outside = t.path().join("elsewhere.txt");
         std::fs::write(&outside, "from elsewhere").unwrap();
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&outside, root.join("IO.md")).unwrap();
-            let c = load(&root, Some(&t.path().join("none")));
-            assert!(c.is_empty(), "a symlinked IO.md is skipped");
-            // A real io.md beside the link is read: the link is not a file of the folder.
+        std::os::unix::fs::symlink(&outside, root.join("IO.md")).unwrap();
+        let c = load(&root, Some(&t.path().join("none")));
+        assert!(c.is_empty(), "a symlinked IO.md is skipped");
+        // A real io.md beside the link is read: the link is not a file of the folder.
+        // A disk that ignores case (the macOS default) holds only one of the two names,
+        // so this half runs where the disk tells them apart.
+        if std::fs::symlink_metadata(root.join("io.md")).is_err() {
             put(&root, "io.md", "mine");
             let c = load(&root, Some(&t.path().join("none")));
             assert_eq!(c.docs.len(), 1);

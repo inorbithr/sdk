@@ -163,7 +163,7 @@ jobs:
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
           install_args: "rust go"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
       - run: cargo build --locked --manifest-path cli/Cargo.toml -p iohr
@@ -222,7 +222,7 @@ jobs:
       - run: mise run go:audit
       - run: mise run conformance:go
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
       # A generated two-profile surface builds and the wrong profile does not.
@@ -267,9 +267,10 @@ jobs:
         run: |
           chmod +x ci-tools/iohr ci-tools/replay
           mkdir -p conformance/server/bin && cp ci-tools/replay conformance/server/bin/replay
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: rust
+          key: ${{ matrix.rust }}
       # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
       - run: rustup component add rustfmt clippy
       - run: mise run rust:gen && git diff --exit-code -- rust
@@ -322,7 +323,7 @@ jobs:
       - run: mise run ts:audit
       - run: mise run conformance:ts
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
       # A generated two-profile surface type-checks and the wrong profile does not.
@@ -373,7 +374,7 @@ jobs:
       - run: mise run py:audit
       - run: mise run conformance:py
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
       # A generated two-profile surface passes pyright and mypy (strict) and the wrong
@@ -423,7 +424,7 @@ jobs:
       - run: mise run java:check
       - run: mise run conformance:java
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
       # A generated two-profile surface compiles and the wrong profile does not.
@@ -471,7 +472,7 @@ jobs:
       - run: mise run csharp:check
       - run: mise run conformance:csharp
       - if: env.COMPILE_CELL == 'true'
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
       # A generated two-profile surface builds and the wrong profile does not.
@@ -494,7 +495,7 @@ jobs:
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
           install_args: "rust go cargo-binstall cargo:cargo-nextest"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
       - run: mise run swift:gen && git diff --exit-code -- swift
@@ -557,9 +558,10 @@ jobs:
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
           install_args: "rust cargo-binstall cargo:cargo-nextest cargo-deny shellcheck"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/rust-cache # zizmor: ignore[self-repository]
         with:
           workspaces: cli
+          key: ${{ matrix.rust }}
       # MISE_RUST_VERSION overrides the version and drops the components mise.toml asks for.
       - run: rustup component add rustfmt clippy
       # The panel's pty tests (tests/panel_live.rs) run a real zsh: the panel is a zsh feature,

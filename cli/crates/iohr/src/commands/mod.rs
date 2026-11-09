@@ -32,10 +32,12 @@ mod project_plan;
 mod project_space;
 mod project_template;
 mod runner;
+mod runner_ops;
 mod sdk;
 mod sdk_add;
-mod session;
+pub(crate) mod session;
 pub(crate) mod shell;
+mod theme;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -53,8 +55,8 @@ use crate::error::Error;
 use crate::output::Out;
 
 /// Commands that never call the API, so a placeholder address is no bar: a tunnel reaches
-/// an environment over ssh, the UI serves files on loopback, and the permission commands
-/// stay on this machine.
+/// an environment over ssh, the UI serves files on loopback, the permission commands
+/// answer on this machine, and `sign-binary` signs a file on this Mac.
 fn calls_no_api(command: Option<&Command>) -> bool {
     matches!(
         command,
@@ -63,6 +65,7 @@ fn calls_no_api(command: Option<&Command>) -> bool {
                 | Command::Ui(_)
                 | Command::Permissions(_)
                 | Command::PermissionServer { .. }
+                | Command::SignBinary { .. }
         )
     )
 }
@@ -138,9 +141,11 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ext(cmd) => ext::run(g, &env, cmd, out).await,
         Command::Packages => ext::run(g, &env, ExtCommand::Packages, out).await,
         Command::Upgrade { check } => upgrade::run(g, &env, check, out).await,
+        Command::SignBinary { path } => upgrade::sign_binary(&env, &path),
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
+        Command::Theme(cmd) => theme::run(cmd, out),
         Command::Panel(args) => crate::panel::run(g, env, args).await,
         Command::Permissions(cmd) => permissions::run(g, cmd, out),
         Command::PermissionServer { .. } => Err(Error::Failed(
@@ -238,4 +243,25 @@ pub(crate) fn str_of<'a>(v: &'a serde_json::Value, k: &str) -> &'a str {
     v.get(k)
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+
+    use super::calls_no_api;
+    use crate::cli::Cli;
+
+    /// `sign-binary` signs a file and calls no API, so a placeholder environment does not stop
+    /// it; a command that does call the API is still held to a real address.
+    #[test]
+    fn sign_binary_is_exempt_from_the_environment_check_like_its_siblings() {
+        let parse = |args: &[&str]| {
+            let mut v = vec!["iohr"];
+            v.extend_from_slice(args);
+            Cli::try_parse_from(v).unwrap().command
+        };
+        assert!(calls_no_api(parse(&["sign-binary", "/tmp/iohr"]).as_ref()));
+        assert!(!calls_no_api(parse(&["whoami"]).as_ref()));
+    }
 }
