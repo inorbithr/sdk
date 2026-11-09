@@ -273,6 +273,8 @@ impl Mark {
 /// report (the stable lines scripts read) says how each step went.
 pub(crate) struct Step {
     bar: Option<cliclack::ProgressBar>,
+    /// The bar has a length (it is no longer a spinner): [`Step::progress`] sets it once.
+    bounded: bool,
 }
 
 /// What a person who said "no, stop" gets: the same error whether they pressed Esc or Ctrl-C
@@ -732,11 +734,17 @@ impl Ui {
     /// Starts a step. Plain: nothing until it ends.
     pub(crate) fn step(self, what: &str) -> Step {
         if !self.fancy {
-            return Step { bar: None };
+            return Step {
+                bar: None,
+                bounded: false,
+            };
         }
         let bar = cliclack::spinner();
         bar.start(what);
-        Step { bar: Some(bar) }
+        Step {
+            bar: Some(bar),
+            bounded: false,
+        }
     }
 
     /// A menu. Entries that are not available are dimmed and re-asked when picked; `initial`
@@ -1112,6 +1120,34 @@ impl Step {
     pub(crate) fn say(&self, what: &str) {
         if let Some(b) = &self.bar {
             b.set_message(what);
+        }
+    }
+
+    /// Says how far the running step is, as `done` of `total` with `what` beside it. Until a
+    /// `total` is known the step stays a spinner that shows `what`; the first `total` swaps it
+    /// for a bar that fills (a later one, or a longer one, moves its end). Plain it is silent,
+    /// like the rest of a step: the command's own report says how it went.
+    pub(crate) fn progress(&mut self, done: u64, total: Option<u64>, what: &str) {
+        let Some(old) = &self.bar else {
+            return;
+        };
+        let Some(total) = total else {
+            if !self.bounded {
+                old.set_message(what);
+            }
+            return;
+        };
+        if !self.bounded {
+            old.clear();
+            let bar = cliclack::progress_bar(total);
+            bar.start(what);
+            self.bar = Some(bar);
+            self.bounded = true;
+        }
+        if let Some(bar) = &self.bar {
+            bar.set_length(total);
+            bar.set_position(done.min(total));
+            bar.set_message(what);
         }
     }
 

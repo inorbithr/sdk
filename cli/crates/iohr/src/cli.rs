@@ -1712,6 +1712,62 @@ pub enum AtlasCommand {
     /// The built-in roles of this project.
     #[command(subcommand, alias = "personalities")]
     Roles(RolesCommand),
+    /// Search the text of the sites this project crawled (PRD 0192).
+    ///
+    /// The best matching chunks of page text, each with its page, heading path and offsets.
+    /// Local: it reads `.inorbit/crawl/kb.duckdb`, which `iohr project init --crawl` builds.
+    /// The search is lexical (BM25); there is no embedding model on this machine.
+    Search {
+        /// What to look for.
+        #[arg(value_name = "QUERY")]
+        query: String,
+        /// Only this site (a name as the crawl folders have it).
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most chunks to show.
+        #[arg(long, default_value_t = 8, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// The facts the site model holds, each with the chunk it came from.
+    ///
+    /// `contact_email`, `phone`, `lists_price`, `offers`, `located_in`, `has_profile`,
+    /// `names_person`, `hosts_event`, `published`, `built_with`, `mentions_organization`,
+    /// `description`, `language`.
+    Facts {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Only this predicate (for example `contact_email`).
+        #[arg(long, value_name = "NAME")]
+        predicate: Option<String>,
+        /// Only facts whose value or subject contains this text.
+        #[arg(long, value_name = "TEXT")]
+        grep: Option<String>,
+        /// The most facts to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
+    Index {
+        /// List the pages of the sites instead of the sites.
+        #[arg(long)]
+        pages: bool,
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most pages to show with `--pages`.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2267,6 +2323,17 @@ pub struct InitCrawlArgs {
     /// The most minutes the crawl runs (the crawler's own cap is 240).
     #[arg(long, value_name = "N", default_value_t = 5)]
     pub crawl_minutes: u32,
+    /// The most requests a second the crawl asks of one host, 1 to 50 (the default is 10).
+    /// A slower `Crawl-delay` in the site's robots.txt still wins. An older agent keeps its
+    /// own fixed pace of one a second until it is updated.
+    #[arg(
+        long,
+        value_name = "N",
+        env = "IOHR_CRAWL_RATE",
+        default_value_t = 10,
+        value_parser = clap::value_parser!(u32).range(1..=50)
+    )]
+    pub crawl_rate: u32,
     /// Follow every other name in the site's domain (a link to `blog.acme.example` from
     /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
     /// terminal init asks once per such name (yes, no, yes to all; the default is no), and

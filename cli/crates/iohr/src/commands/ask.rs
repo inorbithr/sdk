@@ -599,6 +599,7 @@ fn context_of(
             prior: h.prior_question.clone().zip(h.prior_answer.clone()),
             refresh: false,
             role: String::new(),
+            sources: String::new(),
             io_md,
         };
     Ok((ctx, root))
@@ -699,6 +700,11 @@ async fn headless(
         bin, agent, model, ..
     } = *chosen;
     let (mut ctx, root) = context_of(h, g)?;
+    // The project's local site knowledge base (PRD 0192): the best chunks for the question,
+    // with their sources. Nothing indexed, nothing added.
+    if let Some(r) = root.as_deref() {
+        ctx.sources = crate::kb::sources_block(&crate::kb::sources(r, question, 5));
+    }
     if let Some(r) = chosen.role {
         ctx.role = r.system_text();
     }
