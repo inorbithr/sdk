@@ -1,5 +1,6 @@
 //! Running one turn: the user's installed `claude`, started as published, with the
-//! scrubbed environment and the arguments of [`claude::build_args`].
+//! scrubbed environment, the arguments of [`claude::build_args`] and the sign-in
+//! environment of [`claude::auth_env`] (an API key, when one is stored, and nothing else).
 
 use std::ffi::OsString;
 use std::future::Future;
@@ -15,7 +16,7 @@ use tokio::sync::watch;
 use super::claude::{self, Outcome, Parsed, Session, TurnSpec};
 use super::env;
 use super::hygiene;
-use super::provider::{self, AuthState};
+use super::provider::{self, AuthState, LocalAuth};
 use super::sandbox::{self, Confine};
 use super::service::{Pack, ProviderState};
 use super::trust::{Ceiling, Narrowed};
@@ -90,6 +91,11 @@ pub(crate) struct ClaudeExec {
     /// The runner's configuration folder: unreadable inside the sandbox, except the
     /// working directory and the turn's own mirror and build directory.
     pub(crate) config_dir: Option<PathBuf>,
+    /// The sign-in `claude` gets from iohr: an API key from the credential store, or
+    /// none (its own sign-in). Redacted in `Debug`.
+    auth: claude::Auth,
+    /// What this machine allows, as config.toml says now (SIGHUP reloads it).
+    local: watch::Receiver<LocalAuth>,
 }
 
 impl ClaudeExec {
@@ -113,7 +119,23 @@ impl ClaudeExec {
             ceiling: watch::channel(Ceiling::default()).1,
             confine: Confine::Missing,
             config_dir: None,
+            auth: claude::Auth::OwnSignIn,
+            local: watch::channel(LocalAuth::default()).1,
         }
+    }
+
+    /// Runs `claude` on `auth` from now on.
+    #[must_use]
+    pub(crate) fn with_auth(mut self, auth: claude::Auth) -> Self {
+        self.auth = auth;
+        self
+    }
+
+    /// Reads what this machine allows from `local`, as it changes.
+    #[must_use]
+    pub(crate) fn with_local(mut self, local: watch::Receiver<LocalAuth>) -> Self {
+        self.local = local;
+        self
     }
 
     /// Where each session's last measured context is kept: beside the working directory,
@@ -136,8 +158,16 @@ impl ClaudeExec {
             .env_clear()
             .envs(self.env.iter().map(|(k, v)| (k, v)))
             // The host's GitHub sign-in stays out of the model's tools (RFC 0147).
-            .envs(env::contained())
-            .stdin(Stdio::piped())
+            .envs(env::contained());
+        // The stored key, here and nowhere else: `self.env` never holds it, so the scrub
+        // check and every other child stay without it. Under `claude_auth = "plan"` it
+        // stays out too, so claude runs on the plan it is signed in with.
+        if self.local.borrow().claude.uses_key() {
+            for (k, v) in claude::auth_env(&self.auth) {
+                c.env(k, v.expose());
+            }
+        }
+        c.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
@@ -180,6 +210,13 @@ impl ClaudeExec {
             .await
             .map(|s| s.trim().to_owned())
             .unwrap_or_default()
+    }
+
+    /// A voice lease's session (core RFC 0215): the scrubbed command, run in `dir`.
+    pub(crate) fn session_command(&self, args: &[String], dir: &Path) -> Command {
+        let mut cmd = self.command(args);
+        cmd.current_dir(dir);
+        cmd
     }
 
     /// The turn's command: its model's `cargo` builds into its repository's shared
@@ -250,7 +287,7 @@ impl ClaudeExec {
     }
 
     /// Why this turn may not start here, if it may not: another person's seat, another
-    /// provider's turn, or a `claude` that is not signed in on a subscription.
+    /// provider's turn, or a sign-in the turn may not run on ([`LocalAuth::refusal`]).
     async fn refusal(&self, pack: &Pack) -> Option<Finished> {
         if pack.user != self.user {
             return Some(Finished::refused(
@@ -268,14 +305,16 @@ impl ClaudeExec {
                 ),
             ));
         }
-        match self.auth_status().await {
-            AuthState::Subscription => None,
-            AuthState::SignedOut => Some(Finished::refused(
-                "login_expired",
-                "claude is signed out on this machine",
-            )),
-            AuthState::Refused(why) => Some(Finished::refused("refused_provider", why)),
-        }
+        let auth = self.auth_status().await;
+        let local = *self.local.borrow();
+        local
+            .refusal(
+                claude::PROVIDER,
+                &auth,
+                pack.auth_policy.get(claude::PROVIDER).map(String::as_str),
+                (&pack.created_by, &self.user),
+            )
+            .map(|(outcome, detail)| Finished::refused(outcome, detail))
     }
 
     /// The local ceiling cuts the turn's tools down (SR-35); a turn that asked for
@@ -572,7 +611,7 @@ impl Exec for ClaudeExec {
             let s = me.auth_status().await;
             vec![ProviderState {
                 provider: claude::PROVIDER.into(),
-                method: if s.signed_in() { "subscription" } else { "" }.into(),
+                method: s.method().into(),
                 signed_in: s.signed_in(),
             }]
         })
@@ -671,6 +710,16 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         }
     }
 
+    /// This machine with the person's own plan turned on and the notice accepted.
+    fn own_plan() -> watch::Receiver<LocalAuth> {
+        watch::channel(LocalAuth {
+            claude: provider::AuthPolicy::Any,
+            personal_use: Some(super::super::personal_use::Accepted::now()),
+            ..LocalAuth::default()
+        })
+        .1
+    }
+
     fn exec(dir: &std::path::Path, auth: &str) -> ClaudeExec {
         ClaudeExec {
             confine: Confine::Off,
@@ -682,6 +731,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
                 ME.into(),
                 "usr_me".into(),
             )
+            .with_local(own_plan())
         }
     }
 
@@ -697,7 +747,8 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
             Some(dir.path().join("claudedir")),
             ME.into(),
             "usr_me".into(),
-        );
+        )
+        .with_local(own_plan());
         let f = e.execute(pack("usr_me")).await;
         assert_eq!(f.outcome, "failed");
         assert!(f.detail.contains("no OS sandbox"), "{}", f.detail);
@@ -748,6 +799,9 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
         assert!(!args.lines().any(|a| a == "--restricted"), "{args}");
     }
+
+    const API_KEY: &str = r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty"}"#;
+    const STORED: &str = "sk-ant-api03-STORED-KEY-never-printed";
 
     /// RFC 0189: the model's `cargo` builds into its repository's shared directory, so
     /// jobs of one repository do not each keep a `target/` of their own.
@@ -938,7 +992,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         let dir = tempfile::tempdir().unwrap();
         let e = exec(
             dir.path(),
-            r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty"}"#,
+            r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"bedrock"}"#,
         );
         assert_eq!(e.execute(pack("usr_me")).await.outcome, "refused_provider");
         assert!(!dir.path().join("args.txt").exists());
@@ -947,6 +1001,95 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         let e = exec(dir.path(), r#"{"loggedIn":false}"#);
         assert_eq!(e.execute(pack("usr_me")).await.outcome, "login_expired");
         assert!(!e.providers().await[0].signed_in);
+    }
+
+    /// RFC 0214: with nothing configured a runner is `api`, so the person's own plan
+    /// never starts `claude`; an account's `api` narrows a runner that allows `any`; a
+    /// job someone else created is refused on the person's own plan.
+    #[tokio::test]
+    async fn api_refuses_the_own_plan_and_the_own_plan_takes_only_self_assigned_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut e = exec(dir.path(), SUB);
+        e.local = watch::channel(LocalAuth::default()).1;
+        let f = e.execute(pack("usr_me")).await;
+        assert_eq!(f.outcome, "refused_provider");
+        assert!(f.detail.contains("iohr runner api-key set"), "{}", f.detail);
+        assert!(!dir.path().join("args.txt").exists());
+
+        let e = exec(dir.path(), SUB);
+        let mut p = pack("usr_me");
+        p.auth_policy.insert("claude".into(), "api".into());
+        assert_eq!(e.execute(p).await.outcome, "refused_provider");
+        let mut p = pack("usr_me");
+        p.created_by = "usr_boss".into();
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "refused_user");
+        assert!(f.detail.contains("personal use only"), "{}", f.detail);
+        assert!(!dir.path().join("args.txt").exists());
+
+        let mut p = pack("usr_me");
+        p.created_by = "usr_me".into();
+        assert_eq!(e.execute(p).await.outcome, "replied");
+    }
+
+    /// RFC 0214: a stored API key reaches `claude` as `ANTHROPIC_API_KEY` with the
+    /// subprocess scrub, in place of the parent's, and never shows in `Debug`, in what
+    /// the turn reports, or in the scrubbed environment the check reads.
+    #[tokio::test]
+    async fn a_stored_key_reaches_claude_alone_and_never_prints() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = exec(dir.path(), API_KEY)
+            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
+                STORED.into(),
+            )))
+            .with_local(watch::channel(LocalAuth::default()).1);
+        assert!(matches!(e.auth, claude::Auth::ApiKey(_)));
+        assert!(e.env_is_clean());
+        assert!(!format!("{e:?}").contains(STORED));
+        let mut p = pack("usr_me");
+        p.created_by = "usr_boss".into();
+        p.auth_policy.insert("claude".into(), "api".into());
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "replied", "{}", f.detail);
+        assert!(!format!("{f:?}").contains(STORED));
+        let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
+        assert!(
+            env.lines()
+                .any(|l| l == format!("ANTHROPIC_API_KEY={STORED}"))
+        );
+        assert!(
+            env.lines()
+                .any(|l| l == "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1")
+        );
+        assert!(!env.contains("sk-secret"), "the parent's key never passes");
+        let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+        assert!(!args.contains(STORED), "never in argv");
+        let st = e.providers().await;
+        assert_eq!((st[0].method.as_str(), st[0].signed_in), ("api_key", true));
+
+        // Under `plan` the stored key stays out: claude runs on its own sign-in.
+        let dir = tempfile::tempdir().unwrap();
+        let e = exec(dir.path(), SUB)
+            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
+                STORED.into(),
+            )))
+            .with_local(
+                watch::channel(LocalAuth {
+                    claude: provider::AuthPolicy::Plan,
+                    personal_use: Some(super::super::personal_use::Accepted::now()),
+                    ..LocalAuth::default()
+                })
+                .1,
+            );
+        let mut p = pack("usr_me");
+        p.created_by = "usr_me".into();
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "replied", "{}", f.detail);
+        let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
+        assert!(
+            !env.contains(STORED),
+            "the stored key never passes under plan"
+        );
     }
 
     /// A `claude` whose turn is `body`; `auth status` and `--version` answer as usual.
@@ -970,6 +1113,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
                 ME.into(),
                 "usr_me".into(),
             )
+            .with_local(own_plan())
         }
     }
 

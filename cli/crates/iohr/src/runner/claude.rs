@@ -2,11 +2,14 @@
 //! "What the runner runs" and "Resuming a session").
 //!
 //! Invariant 8: no patched copy, no wrapper that alters requests, no custom endpoint,
-//! never `--bare`. [`build_args`] is the only place an argument vector is made, and it
-//! ends in [`assert_honest`], which fails on a flag that would break that.
+//! never `--bare`. [`build`] is the only place a `claude` argument vector and its sign-in
+//! environment are made (a runner turn through [`build_args`], `iohr ask` and the
+//! headless answer through their own [`Call`]s), and it ends in [`assert_honest`], which
+//! fails on a flag that would break that.
 
 use std::path::{Path, PathBuf};
 
+use iohr_auth::Redacted;
 use serde_json::Value;
 
 /// Flags that must never reach `claude`. `--bare` skips the user's own sign-in and
@@ -161,11 +164,178 @@ pub(crate) fn recorded_context(dir: &Path, id: &str) -> Option<u64> {
         .ok()
 }
 
+/// The sign-in a `claude` call runs on (RFC 0214).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Auth {
+    /// Whatever `claude` itself is signed in with (`claude`, then `/login`); the call
+    /// gets no credential from iohr.
+    OwnSignIn,
+    /// An Anthropic API key from the credential store. It reaches the `claude` child as
+    /// `ANTHROPIC_API_KEY` and nothing else: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` keeps it
+    /// out of the shells, hooks and MCP servers `claude` starts.
+    ApiKey(Redacted<String>),
+}
+
+/// The variable `claude` reads an Anthropic API key from.
+pub(crate) const API_KEY_VAR: &str = "ANTHROPIC_API_KEY";
+/// Set beside the key: `claude` strips its credentials from every subprocess it starts.
+pub(crate) const SUBPROCESS_SCRUB_VAR: &str = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB";
+
+/// The environment a call on `auth` adds after the scrubbed one: nothing on its own
+/// sign-in, the key and the subprocess scrub on a key. The value stays redacted until
+/// the spawn.
+pub(crate) fn auth_env(auth: &Auth) -> Vec<(&'static str, Redacted<String>)> {
+    match auth {
+        Auth::OwnSignIn => Vec::new(),
+        Auth::ApiKey(key) => vec![
+            (API_KEY_VAR, key.clone()),
+            (SUBPROCESS_SCRUB_VAR, Redacted::new("1".to_owned())),
+        ],
+    }
+}
+
+/// How `claude -p` prints.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Output {
+    /// One JSON result at the end.
+    #[default]
+    Json,
+    /// JSON lines as the answer streams (`stream-json` needs `--verbose`).
+    Stream,
+}
+
+/// What a call keeps of its session.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Keep<'a> {
+    /// `--no-session-persistence`: nothing on disk.
+    #[default]
+    Nothing,
+    /// `--session-id <id>`: a new session under that id.
+    Fresh(&'a str),
+    /// `--resume <id>`.
+    Resume(&'a str),
+}
+
+/// The system prompt a call gives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Prompt<'a> {
+    /// Claude Code's own.
+    #[default]
+    Own,
+    /// `--system-prompt`: in place of Claude Code's.
+    Replace(&'a str),
+    /// `--append-system-prompt`: after Claude Code's.
+    Append(&'a str),
+}
+
+/// One `claude -p` call, as each caller asks for it; [`build`] makes it an argument
+/// vector in one order.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Call<'a> {
+    pub(crate) output: Output,
+    pub(crate) model: Option<&'a str>,
+    pub(crate) max_turns: Option<u32>,
+    /// `--setting-sources <value>` (`""` is none of the person's settings).
+    pub(crate) setting_sources: Option<&'a str>,
+    /// `--strict-mcp-config`: no MCP server not named by `--mcp-config`.
+    pub(crate) strict_mcp: bool,
+    pub(crate) keep: Keep<'a>,
+    pub(crate) prompt: Prompt<'a>,
+    /// `--permission-mode <mode>`.
+    pub(crate) permission_mode: Option<&'a str>,
+    /// `--restricted`.
+    pub(crate) restricted: bool,
+    /// `--tools <list>` (`""` is no tools at all).
+    pub(crate) tools: Option<String>,
+    /// `--add-dir=<dir>` each (the `=` form: the list form would swallow what follows).
+    pub(crate) add_dirs: Vec<String>,
+    /// Flags a caller adds as they are (the broker's `--mcp-config` and its prompt tool).
+    pub(crate) extra: Vec<String>,
+    /// `--disallowedTools=<rule>` each, one flag a rule.
+    pub(crate) disallowed: Vec<String>,
+    /// `--allowedTools <rule>...`, last before the question, so the list takes nothing else.
+    pub(crate) allowed: Vec<String>,
+    /// `-- <question>`; `None` when the prompt goes on stdin.
+    pub(crate) question: Option<&'a str>,
+}
+
+/// A call's arguments (without the program name) and what it adds to the environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Built {
+    pub(crate) args: Vec<String>,
+    pub(crate) env: Vec<(&'static str, Redacted<String>)>,
+}
+
+/// The argument vector and sign-in environment of one call: `-p`, the output, the model
+/// and turn cap, the settings and MCP scope, the session, the system prompt, the
+/// permission mode, the tools, the extra flags, the denies and the allows, then `--` and
+/// the question. Everything before `--` is checked by [`assert_honest`].
+pub(crate) fn build(call: &Call<'_>, auth: &Auth) -> Result<Built, ArgError> {
+    let mut a: Vec<String> = vec!["-p".into(), "--output-format".into()];
+    match call.output {
+        Output::Json => a.push("json".into()),
+        Output::Stream => {
+            a.extend(["stream-json", "--verbose", "--include-partial-messages"].map(str::to_owned));
+        }
+    }
+    if let Some(m) = call.model {
+        a.extend(["--model".into(), m.to_owned()]);
+    }
+    if let Some(n) = call.max_turns {
+        a.extend(["--max-turns".into(), n.to_string()]);
+    }
+    if let Some(s) = call.setting_sources {
+        a.extend(["--setting-sources".into(), s.to_owned()]);
+    }
+    if call.strict_mcp {
+        a.push("--strict-mcp-config".into());
+    }
+    match call.keep {
+        Keep::Nothing => a.push("--no-session-persistence".into()),
+        Keep::Fresh(id) => a.extend(["--session-id".into(), id.to_owned()]),
+        Keep::Resume(id) => a.extend(["--resume".into(), id.to_owned()]),
+    }
+    match call.prompt {
+        Prompt::Own => {}
+        Prompt::Replace(p) => a.extend(["--system-prompt".into(), p.to_owned()]),
+        Prompt::Append(p) => a.extend(["--append-system-prompt".into(), p.to_owned()]),
+    }
+    if let Some(m) = call.permission_mode {
+        a.extend(["--permission-mode".into(), m.to_owned()]);
+    }
+    if call.restricted {
+        a.push("--restricted".into());
+    }
+    if let Some(t) = &call.tools {
+        a.extend(["--tools".into(), t.clone()]);
+    }
+    a.extend(call.add_dirs.iter().map(|d| format!("--add-dir={d}")));
+    a.extend(call.extra.iter().cloned());
+    a.extend(
+        call.disallowed
+            .iter()
+            .map(|r| format!("--disallowedTools={r}")),
+    );
+    if !call.allowed.is_empty() {
+        a.push("--allowedTools".into());
+        a.extend(call.allowed.iter().cloned());
+    }
+    assert_honest(&a)?;
+    if let Some(q) = call.question {
+        a.extend(["--".into(), q.to_owned()]);
+    }
+    Ok(Built {
+        args: a,
+        env: auth_env(auth),
+    })
+}
+
 /// The argument vector for `claude`, without the program name. The turn's prompt is
 /// written to stdin, so it is not in the process list.
 ///
 /// A resumed session keeps the system prompt it started with; only a fresh one is given
-/// the pack.
+/// the pack. The sign-in environment is the spawn's ([`auth_env`] of the runner's
+/// [`Auth`]), the same for every turn, so a turn's arguments never depend on it.
 pub(crate) fn build_args(spec: &TurnSpec<'_>) -> Result<Vec<String>, ArgError> {
     if spec.model.trim().is_empty() {
         return Err(ArgError::NoModel);
@@ -187,38 +357,34 @@ pub(crate) fn build_args(spec: &TurnSpec<'_>) -> Result<Vec<String>, ArgError> {
             return Err(ArgError::FlagLike(t.clone()));
         }
     }
-    let mut a: Vec<String> = vec![
-        "-p".into(),
-        "--output-format".into(),
-        "json".into(),
-        "--model".into(),
-        spec.model.to_owned(),
-        "--max-turns".into(),
-        spec.max_turns.to_string(),
-    ];
-    a.extend(LEAN_SESSION.iter().map(|f| (*f).to_owned()));
-    match spec.session {
-        Session::Resume(id) => a.extend(["--resume".into(), id.clone()]),
-        Session::Fresh(id) => {
-            a.extend(["--session-id".into(), id.clone()]);
-            a.extend(["--system-prompt".into(), spec.system_prompt.to_owned()]);
-        }
-    }
-    if let Some(tools) = spec.tools {
-        // One value, `""` for none: the list form would swallow the next argument.
-        a.extend(["--restricted".into(), "--tools".into(), tools.join(",")]);
-        // One flag per rule, `=`: the list form would swallow the next argument.
-        for rule in SECRET_RULES {
-            a.push(format!("--disallowedTools={rule}"));
-        }
-    }
-    if !spec.allowed_tools.is_empty() {
-        // Last, so the variadic flag cannot take anything after it.
-        a.push("--allowedTools".into());
-        a.extend(spec.allowed_tools.iter().cloned());
-    }
-    assert_honest(&a)?;
-    Ok(a)
+    let (keep, prompt) = match spec.session {
+        Session::Resume(id) => (Keep::Resume(id), Prompt::Own),
+        Session::Fresh(id) => (Keep::Fresh(id), Prompt::Replace(spec.system_prompt)),
+    };
+    build(
+        &Call {
+            output: Output::Json,
+            model: Some(spec.model),
+            max_turns: Some(spec.max_turns),
+            setting_sources: Some(LEAN_SESSION[1]),
+            strict_mcp: true,
+            keep,
+            prompt,
+            allowed: spec.allowed_tools.to_vec(),
+            // One value, `""` for none: the list form would swallow the next argument.
+            restricted: spec.tools.is_some(),
+            tools: spec.tools.map(|t| t.join(",")),
+            // One flag per rule: the secret files, under a ceiling.
+            disallowed: if spec.tools.is_some() {
+                SECRET_RULES.iter().map(|r| (*r).to_owned()).collect()
+            } else {
+                Vec::new()
+            },
+            ..Call::default()
+        },
+        &Auth::OwnSignIn,
+    )
+    .map(|b| b.args)
 }
 
 /// Fails when `args` holds a forbidden flag, alone or as `--flag=value`.
@@ -752,6 +918,51 @@ mod tests {
             );
         }
         assert!(assert_honest(&tools(&["--model", "sonnet"])).is_ok());
+    }
+
+    /// RFC 0214: one builder for every `claude` call. Both sign-ins give the same
+    /// arguments; only a key adds environment, the key and the subprocess scrub, and
+    /// never as an argument or in what `Debug` prints.
+    #[test]
+    fn one_builder_gives_both_sign_ins_the_same_args_and_only_a_key_its_env() {
+        const KEY: &str = "sk-ant-api03-UNIT-KEY-never-printed";
+        let call = Call {
+            output: Output::Stream,
+            model: Some("sonnet"),
+            max_turns: Some(3),
+            prompt: Prompt::Append("role"),
+            permission_mode: Some("plan"),
+            disallowed: vec!["Read(./.env)".to_owned()],
+            question: Some("what changed?"),
+            ..Call::default()
+        };
+        let own = build(&call, &Auth::OwnSignIn).unwrap();
+        let key = build(&call, &Auth::ApiKey(Redacted::new(KEY.to_owned()))).unwrap();
+        assert_eq!(own.args, key.args);
+        assert_eq!(own.env.len(), 0, "the own sign-in adds no environment");
+        let env: Vec<(&str, &str)> = key
+            .env
+            .iter()
+            .map(|(k, v)| (*k, v.expose().as_str()))
+            .collect();
+        assert_eq!(env, [(API_KEY_VAR, KEY), (SUBPROCESS_SCRUB_VAR, "1")]);
+        assert!(!key.args.iter().any(|a| a.contains(KEY)));
+        assert!(!format!("{key:?}").contains(KEY));
+        assert_eq!(
+            strs(&own.args)[..4],
+            ["-p", "--output-format", "stream-json", "--verbose"]
+        );
+        let tail = &own.args[own.args.len() - 2..];
+        assert_eq!(strs(tail), ["--", "what changed?"]);
+        // Every caller goes through the guard, whatever it adds.
+        let bad = Call {
+            extra: vec!["--bare".to_owned()],
+            ..call
+        };
+        assert_eq!(
+            build(&bad, &Auth::OwnSignIn),
+            Err(ArgError::Forbidden("--bare".to_owned()))
+        );
     }
 
     #[test]
