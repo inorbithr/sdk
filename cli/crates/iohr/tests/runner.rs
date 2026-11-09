@@ -147,7 +147,9 @@ fn allow_own_plan(dir: &Path, profile: &str) {
     let mut text = std::fs::read_to_string(&p).unwrap_or_default();
     let table = format!("[profiles.{profile}.runner]");
     if !text.contains(&table) {
-        text.push_str(&format!("\n{table}\nclaude_auth = \"any\"\n"));
+        text.push('\n');
+        text.push_str(&table);
+        text.push_str("\nclaude_auth = \"any\"\n");
         std::fs::write(&p, text).unwrap();
     }
     let runner = dir.join("config").join("runner");
