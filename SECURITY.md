@@ -82,7 +82,10 @@ receives fixes.
   ([docs/security/requirements.md](docs/security/requirements.md)).
 - How to check that a package you installed is the one we built:
   [docs/security/verifying-releases.md](docs/security/verifying-releases.md).
-<<<<<<< HEAD
+- `iohr runner` runs turns with the `claude` you installed, unmodified. `claude` sends
+  its requests to Anthropic directly; InOrbit does not proxy, read or store them. The
+  Anthropic API key the runner uses stays in your OS credential store and reaches only
+  the `claude` process it starts, never a log, an argument or InOrbit's servers.
 
 ## What leaves your machine
 
@@ -164,10 +167,3 @@ manager. To turn it off, set `auto_upgrade = false` under `[runner]` (or
 `[profiles.<name>.runner]`) in your configuration, or start with
 `iohr runner run --no-auto-upgrade`. A runner started by `iohr session` never upgrades
 itself. See the runner tables in [docs/config.md](docs/config.md).
-||||||| fe799e6c
-=======
-- `iohr runner` runs turns with the `claude` you installed, unmodified. `claude` sends
-  its requests to Anthropic directly; InOrbit does not proxy, read or store them. The
-  Anthropic API key the runner uses stays in your OS credential store and reaches only
-  the `claude` process it starts, never a log, an argument or InOrbit's servers.
->>>>>>> origin/main
