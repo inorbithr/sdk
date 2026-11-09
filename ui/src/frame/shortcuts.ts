@@ -2,14 +2,15 @@
 // Copyright 2026 InOrbit d.o.o.
 //
 // The key rules moved from iohr-mac src/lib/shortcuts.ts (origin/main d3ac8759) under ADR 0230: how an accelerator
-// ("CmdOrCtrl+\\") is spelt one way, shown as Mac glyphs and matched against a key event. iohr-mac keeps its own
-// table (shortcuts.json, which Rust reads too), its rebinding and its native-menu delivery, and imports these rules
-// from here in RFC 0217 C8.
+// ("CmdOrCtrl+\\") is spelt one way, shown as Mac glyphs and matched against a key event. iohr-mac imports these
+// rules from here (RFC 0217 C8) and keeps its own table, its rebinding and its native-menu delivery.
 //
-// The frame's own shortcuts are the rows of the Mac table that the frame answers: today the sidebar's toggle, with
-// the same id, label and accelerator as shortcuts.json. A browser has no native menu, so a keydown listener on the
+// The frame's own shortcuts live in one file, frame/shortcuts.json: id, label and accelerator. This module reads it,
+// and so does iohr-mac, both its page (src/lib/shortcuts.ts) and its Rust native menu (keys.rs, by include_str!),
+// which add only where the Mac menu bar places each row. A browser has no native menu, so a keydown listener on the
 // window delivers them (the Mac app's fallback outside Tauri does the same).
 import { useEffect, useRef } from "react";
+import frameTable from "./shortcuts.json" with { type: "json" };
 
 export type KeyLike = {
   key: string;
@@ -100,8 +101,8 @@ export function matches(accel: string, e: KeyLike): boolean {
 
 export type FrameShortcut = { id: string; label: string; accel: string };
 
-/** The rows of the Mac app's shortcuts.json that the frame answers, spelt as there. */
-export const FRAME_SHORTCUTS: FrameShortcut[] = [{ id: "sidebar", label: "Toggle sidebar", accel: "CmdOrCtrl+\\" }];
+/** The shortcuts the frame answers, from frame/shortcuts.json: the one table of them. */
+export const FRAME_SHORTCUTS: FrameShortcut[] = frameTable;
 
 /** The frame shortcut a key event is, if any. */
 export const shortcutOf = (e: KeyLike) => FRAME_SHORTCUTS.find((s) => matches(s.accel, e));
