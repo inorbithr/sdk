@@ -233,6 +233,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "context",
             "permissions",
             "shell",
+            "theme",
             "runner",
             "session",
             "stop",
@@ -500,6 +501,16 @@ pub enum Command {
     /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
     #[command(subcommand)]
     Shell(ShellCommand),
+    /// The app's terminal look for Terminal.app and zsh
+    ///
+    /// `iohr theme list` shows the themes (the app's own, generated from it); `iohr theme
+    /// install NAME` writes the Terminal.app profile under ~/.inorbit/term and remembers the
+    /// theme; `--terminal` opens the profile in Terminal.app and `--prompt` turns on the zsh
+    /// prompt (it needs the shell hook, and keeps a prompt you set yourself unless you pass
+    /// `--replace-prompt`). `iohr theme off` turns the prompt off. Local files only; ~/.zshrc
+    /// is never edited.
+    #[command(subcommand)]
+    Theme(ThemeCommand),
     /// Rules for what Io may run or open when you ask it something.
     ///
     /// `iohr ask` (and `?` at your prompt) asks you before Io runs a command. Your answers
@@ -674,7 +685,7 @@ pub enum RunnerCommand {
     ///
     /// Needs `claude` on your PATH and an Anthropic API key stored with `iohr runner
     /// api-key set`; or, for personal use only, `claude` signed in to your own plan
-    /// (`claude`, then `/login`) with `claude_auth = "any"` in `[runner]` and the notice
+    /// (`claude`, then `/login`) with `claude_auth = "any"` or `"plan"` in `[runner]` and the notice
     /// accepted. The key never leaves the machine; on your own plan nothing about the
     /// sign-in does except a hash of the seat `claude auth status` names (organisation
     /// and email). Run it again and it says the runner exists; with
@@ -811,7 +822,8 @@ pub enum RunnerCommand {
     /// personal use only. With no flag this shows the notice and whether you accepted
     /// it; `--accept` records that you accept it on this machine (the notice's version
     /// and the date, kept in `runner/personal-use.json`, never sent), for a year or
-    /// until the notice changes. It takes `claude_auth = "any"` in `[runner]` as well.
+    /// until the notice changes. It takes `claude_auth = "any"` or `"plan"` in `[runner]` as
+    /// well.
     /// Needs no sign-in.
     PersonalUse {
         /// Accept the notice shown.
@@ -2158,6 +2170,36 @@ pub enum ShellCommand {
         #[arg(value_enum)]
         shell: HookShell,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ThemeCommand {
+    /// List the themes and the one that is on.
+    List,
+    /// Show a theme's colours, font and cursor.
+    Show {
+        /// The theme (`iohr theme list`).
+        name: String,
+    },
+    /// Write a theme's Terminal.app profile and remember it; the prompt and Terminal.app are flags.
+    Install(ThemeInstallArgs),
+    /// Turn the prompt off and forget the chosen theme (Terminal.app profiles stay).
+    Off,
+}
+
+#[derive(Debug, Args)]
+pub struct ThemeInstallArgs {
+    /// The theme (`iohr theme list`).
+    pub name: String,
+    /// Open the profile in Terminal.app, which imports it (macOS; it is not made the default).
+    #[arg(long)]
+    pub terminal: bool,
+    /// Turn on the zsh prompt (it comes with `eval "$(iohr shell hook zsh)"`); a prompt you set yourself is kept.
+    #[arg(long)]
+    pub prompt: bool,
+    /// Turn on the zsh prompt and replace the prompt you set yourself.
+    #[arg(long)]
+    pub replace_prompt: bool,
 }
 
 /// A shell `iohr shell hook` names.

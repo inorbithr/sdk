@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use cliclack::Theme as _;
 use console::Key;
 
-use crate::card::Look;
+use crate::card::{Look, nearest_256};
 use crate::error::Error;
 use crate::prompt;
 
@@ -159,6 +159,33 @@ impl Paint {
     #[must_use]
     pub(crate) fn mark(self, text: &str) -> String {
         self.apply(text, |s| s.yellow().bold())
+    }
+
+    /// A block of a colour with its hex beside it (`show_hex`), for `iohr theme show`. Drawn
+    /// with 24-bit colour where the terminal has it and the nearest of the 256 otherwise; with
+    /// no colour, the hex alone, so a pipe and a screen reader get the value.
+    #[must_use]
+    pub(crate) fn swatch(
+        self,
+        rgb: (u8, u8, u8),
+        hex: &str,
+        show_hex: bool,
+        truecolor: bool,
+    ) -> String {
+        if !self.color {
+            return hex.to_owned();
+        }
+        let back = if truecolor {
+            format!("48;2;{};{};{}", rgb.0, rgb.1, rgb.2)
+        } else {
+            format!("48;5;{}", nearest_256(rgb))
+        };
+        let block = format!("\u{1b}[{back}m    \u{1b}[0m");
+        if show_hex {
+            format!("{block} {hex}")
+        } else {
+            block
+        }
     }
 
     /// A status: a green dot for live, a dim ring for coming, red for anything wrong. With no

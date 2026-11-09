@@ -433,8 +433,8 @@ profile's keys win), and its flags win over both. `iohr upgrade` reads
 | `upgrade_sign_identity` | `auto`, a code-signing identity, or `-` | not set (off) | `run` and `iohr upgrade`, macOS only: sign each new `iohr` with this identity before it is installed (below); `IOHR_SIGN_IDENTITY` wins over it |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 | `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
-| `claude_auth` | `api_only` or `any` | `api_only` | `register` and `run`: how `claude` may sign in for a turn: `api_only` takes only an Anthropic API key (`iohr runner api-key set`); `any` also allows your own Claude plan, for personal use only (below). A server policy can make it stricter, never looser |
-| `codex_auth` | `api_only` or `any` | `any` | `run`: the same for Codex turns |
+| `claude_auth` | `api`, `plan` or `any` | `api` | `register` and `run`: how `claude` may sign in for a turn: `api` takes only an Anthropic API key (`iohr runner api-key set`); `plan` takes only your own Claude plan, for personal use only (below), and leaves a stored key unused; `any` allows either. A server policy can narrow it, never widen it |
+| `codex_auth` | `api`, `plan` or `any` | `any` | `run`: the same for Codex turns |
 | `allow_host_git_credentials` | true or false | false | `run`: a job whose lease brings no GitHub token may use this machine's own `gh` sign-in to fetch and push; false, such a job fails before its checkout, saying why |
 | `workspace_keep_days` | 1 to 3650 | 14 | `run` and `prune`: a job checkout, repository mirror or build directory nothing has used for this many days is removed (below) |
 | `workspace_max_gb` | 1 or more (GB, 10^9 bytes) | not set (no cap) | `run` and `prune`: while the checkouts, mirrors and build directories take more than this, the oldest unused go first |
@@ -462,18 +462,19 @@ the coordinator, the config file or another child. `claude` sends its requests t
 Anthropic directly; InOrbit does not proxy them.
 
 Running on your own Claude plan instead is personal use only and off by default. It
-takes both `claude_auth = "any"` in the runner table (only the local file turns it on;
+takes both `claude_auth = "any"` or `"plan"` in the runner table (only the local file turns it on;
 the server never does) and the notice accepted on this machine:
 `iohr runner personal-use` shows it, `--accept` accepts it and `--withdraw` takes the
 acceptance back. The acceptance is stored in `runner/personal-use.json` under the
 config directory, with the notice's version and the date only, and holds for 365 days
 or until the notice changes. In this mode the runner takes one turn at a time, only work
-you assigned yourself, and says so when it starts. Under `api_only`, a turn on your own
-plan is refused with a message that names `iohr runner api-key set`.
+you assigned yourself, and says so when it starts. Under `api`, a turn on your own
+plan is refused with a message that names `iohr runner api-key set`; under `plan`, a turn
+on an API key is refused with one that names `claude`, then `/login`.
 
-The coordinator's lease can carry a policy per provider as well; the runner applies the
-stricter of that and its own setting, and treats a value it does not know as
-`api_only`. `claude_auth` and `codex_auth` are read again on SIGHUP; the stored key is
+The coordinator's lease can carry a policy per provider as well; a turn runs only on a
+sign-in both that and the runner's own setting allow, and a value the runner does not
+know counts as `api`. `claude_auth` and `codex_auth` are read again on SIGHUP; the stored key is
 not.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the

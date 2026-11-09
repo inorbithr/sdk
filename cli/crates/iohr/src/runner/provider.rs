@@ -41,42 +41,40 @@ impl AuthState {
 }
 
 /// Which sign-in a provider's turns may run on (RFC 0214): `any` takes an API key or
-/// the person's own plan, `api_only` takes an API key alone. The runner's local
-/// setting and the account's policy (sent with each turn) are both read, and the
-/// stricter wins: the server can tighten a runner, never loosen it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// the person's own plan, `api` an API key alone, `plan` the person's own plan alone.
+/// The runner's local setting and the account's policy (sent with each turn) must both
+/// allow a sign-in: the server can narrow a runner, never widen it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthPolicy {
     Any,
-    ApiOnly,
+    Plan,
+    Api,
 }
 
 impl AuthPolicy {
-    /// `any` or `api_only`; anything else is `None` (config) or, from the server,
-    /// read as `api_only` by [`AuthPolicy::from_server`].
+    /// `any`, `plan` or `api`; anything else is `None` (config) or, from the server,
+    /// read as `api` by [`AuthPolicy::from_server`].
     pub(crate) fn parse(s: &str) -> Option<Self> {
         match s.trim() {
             "any" => Some(Self::Any),
-            "api_only" => Some(Self::ApiOnly),
+            "plan" => Some(Self::Plan),
+            "api" => Some(Self::Api),
             _ => None,
         }
     }
 
     /// The account's policy for one provider, as the turn carries it: absent is no
-    /// tightening, a value the runner does not know is the strictest it does.
+    /// narrowing, a value the runner does not know never allows the person's own plan.
     pub(crate) fn from_server(v: Option<&str>) -> Option<Self> {
-        v.map(|s| Self::parse(s).unwrap_or(Self::ApiOnly))
+        v.map(|s| Self::parse(s).unwrap_or(Self::Api))
     }
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Any => "any",
-            Self::ApiOnly => "api_only",
+            Self::Plan => "plan",
+            Self::Api => "api",
         }
-    }
-
-    /// The stricter of the two.
-    pub(crate) fn stricter(self, other: Option<Self>) -> Self {
-        other.map_or(self, |o| self.max(o))
     }
 
     /// The default when the runner's config says nothing: Claude runs on an API key
@@ -85,17 +83,23 @@ impl AuthPolicy {
     pub(crate) fn default_for(provider: &str) -> Self {
         match provider {
             "codex" => Self::Any,
-            _ => Self::ApiOnly,
+            _ => Self::Api,
         }
     }
 
     /// May a turn run on this sign-in under this policy?
     pub(crate) fn allows(self, auth: &AuthState) -> bool {
         match auth {
-            AuthState::ApiKey => true,
-            AuthState::Subscription => self == Self::Any,
+            AuthState::ApiKey => self != Self::Plan,
+            AuthState::Subscription => self != Self::Api,
             AuthState::SignedOut | AuthState::Refused(_) => false,
         }
+    }
+
+    /// Whether a stored API key goes to the provider: not under `plan`, where the
+    /// turn runs on the person's own sign-in.
+    pub(crate) fn uses_key(self) -> bool {
+        self != Self::Plan
     }
 }
 
@@ -139,9 +143,9 @@ impl LocalAuth {
 
     /// Why a turn may not run on `auth` for `provider`, with the account's policy for it
     /// (`server`) and the person who created the job (`creator`, empty when the service
-    /// does not say): `(outcome, detail)`. An API key always runs; the person's own plan
-    /// runs only where both the local setting and the account allow it, after the
-    /// personal-use notice was accepted, and only on work this person assigned.
+    /// does not say): `(outcome, detail)`. A sign-in runs only where both the local setting
+    /// and the account allow it; the person's own plan also needs the personal-use
+    /// notice accepted, and takes only work this person assigned.
     pub(crate) fn refusal(
         &self,
         provider: &str,
@@ -150,19 +154,31 @@ impl LocalAuth {
         (creator, me): (&str, &str),
     ) -> Option<(&'static str, String)> {
         match auth {
-            AuthState::ApiKey => None,
-            AuthState::Subscription => {
-                let policy = self
-                    .policy(provider)
-                    .stricter(AuthPolicy::from_server(server));
-                if !policy.allows(auth) {
+            AuthState::ApiKey | AuthState::Subscription => {
+                let local = self.policy(provider);
+                let narrowed = AuthPolicy::from_server(server).filter(|a| !a.allows(auth));
+                let refused = if local.allows(auth) {
+                    narrowed.map(|a| (a, format!("the account's policy is {}", a.as_str())))
+                } else {
+                    Some((local, format!("{provider}_auth = {}", local.as_str())))
+                };
+                if let Some((policy, whose)) = refused {
                     Some((
                         "refused_provider",
-                        format!(
-                            "{provider} turns here run on an API key only ({provider}_auth = api_only); \
-store one with `iohr runner api-key set`"
-                        ),
+                        if policy == AuthPolicy::Plan {
+                            format!(
+                                "{provider} turns here run on your own plan only ({whose}); sign in \
+with `claude`, then `/login`"
+                            )
+                        } else {
+                            format!(
+                                "{provider} turns here run on an API key only ({whose}); store one \
+with `iohr runner api-key set`"
+                            )
+                        },
                     ))
+                } else if *auth == AuthState::ApiKey {
+                    None
                 } else if !self.personal_use_holds() {
                     Some((
                         "refused_provider",
@@ -313,30 +329,28 @@ mod tests {
     }
 
     #[test]
-    fn auth_policy_stricter_wins_and_unknown_is_api_only() {
-        use AuthPolicy::{Any, ApiOnly};
-        assert_eq!(AuthPolicy::default_for("claude"), ApiOnly);
+    fn auth_policy_is_any_plan_or_api_and_unknown_never_allows_the_plan() {
+        use AuthPolicy::{Any, Api, Plan};
+        assert_eq!(AuthPolicy::default_for("claude"), Api);
         assert_eq!(AuthPolicy::default_for("codex"), Any);
-        assert_eq!(AuthPolicy::default_for("gemini"), ApiOnly);
-        assert_eq!(Any.stricter(None), Any);
-        assert_eq!(Any.stricter(Some(ApiOnly)), ApiOnly);
-        assert_eq!(
-            ApiOnly.stricter(Some(Any)),
-            ApiOnly,
-            "the server never loosens"
-        );
+        assert_eq!(AuthPolicy::default_for("gemini"), Api);
+        for p in [Any, Plan, Api] {
+            assert_eq!(AuthPolicy::parse(p.as_str()), Some(p));
+        }
         assert_eq!(AuthPolicy::from_server(None), None);
-        assert_eq!(AuthPolicy::from_server(Some("any")), Some(Any));
-        assert_eq!(
-            AuthPolicy::from_server(Some("subscription_ok")),
-            Some(ApiOnly)
-        );
-        assert_eq!(AuthPolicy::parse("API_ONLY"), None);
-        assert!(ApiOnly.allows(&AuthState::ApiKey));
-        assert!(!ApiOnly.allows(&AuthState::Subscription));
-        assert!(Any.allows(&AuthState::Subscription));
-        assert!(!Any.allows(&AuthState::SignedOut));
-        assert!(!Any.allows(&AuthState::Refused(String::new())));
+        assert_eq!(AuthPolicy::from_server(Some("plan")), Some(Plan));
+        assert_eq!(AuthPolicy::from_server(Some("subscription_ok")), Some(Api));
+        assert_eq!(AuthPolicy::parse("API"), None);
+        assert_eq!(AuthPolicy::parse("api_only"), None);
+        let (key, sub) = (AuthState::ApiKey, AuthState::Subscription);
+        assert!(Any.allows(&key) && Any.allows(&sub));
+        assert!(Api.allows(&key) && !Api.allows(&sub));
+        assert!(!Plan.allows(&key) && Plan.allows(&sub));
+        for p in [Any, Plan, Api] {
+            assert!(!p.allows(&AuthState::SignedOut));
+            assert!(!p.allows(&AuthState::Refused(String::new())));
+        }
+        assert!(Any.uses_key() && Api.uses_key() && !Plan.uses_key());
         assert_eq!(AuthState::ApiKey.method(), "api_key");
         assert_eq!(AuthState::Subscription.method(), "subscription");
     }
@@ -349,7 +363,7 @@ mod tests {
         let out = |l: &LocalAuth, s: Option<&str>, who: (&str, &str)| {
             l.refusal("claude", &sub, s, who).map(|(o, _)| o)
         };
-        // Nothing configured: api_only, so the person's own plan never runs.
+        // Nothing configured: api, so the person's own plan never runs.
         let none = LocalAuth::default();
         assert_eq!(out(&none, None, me), Some("refused_provider"));
         assert!(
@@ -371,19 +385,30 @@ mod tests {
         assert_eq!(out(&ok, None, me), None);
         assert_eq!(out(&ok, Some("any"), ("", "usr_me")), None);
         assert_eq!(out(&ok, None, ("usr_boss", "usr_me")), Some("refused_user"));
-        // The account tightens it, and an unknown value is the strictest.
-        assert_eq!(out(&ok, Some("api_only"), me), Some("refused_provider"));
+        // The account narrows it, and a value the runner does not know never allows it.
+        assert_eq!(out(&ok, Some("plan"), me), None);
+        let (_, why) = ok.refusal("claude", &sub, Some("api"), me).unwrap();
+        assert!(why.contains("the account's policy is api"), "{why}");
         assert_eq!(out(&ok, Some("whatever"), me), Some("refused_provider"));
-        // An API key runs whatever the policy, the acceptance or the creator.
-        assert!(
-            none.refusal(
-                "claude",
-                &AuthState::ApiKey,
-                Some("api_only"),
-                ("usr_boss", "usr_me")
-            )
-            .is_none()
-        );
+        // An API key runs under api or any, whatever the acceptance or the creator.
+        let key = AuthState::ApiKey;
+        let boss = ("usr_boss", "usr_me");
+        assert!(none.refusal("claude", &key, Some("api"), boss).is_none());
+        assert!(ok.refusal("claude", &key, Some("any"), boss).is_none());
+        // Under plan, locally or from the account, an API key does not run.
+        let plan = LocalAuth {
+            claude: AuthPolicy::Plan,
+            ..ok
+        };
+        let (o, why) = plan.refusal("claude", &key, None, me).unwrap();
+        assert_eq!(o, "refused_provider");
+        assert!(why.contains("claude_auth = plan"), "{why}");
+        let (_, why) = ok.refusal("claude", &key, Some("plan"), me).unwrap();
+        assert!(why.contains("the account's policy is plan"), "{why}");
+        assert_eq!(out(&plan, None, me), None);
+        // Plan here and api on the account leave nothing to run on.
+        assert_eq!(out(&plan, Some("api"), me), Some("refused_provider"));
+        assert!(plan.refusal("claude", &key, Some("api"), me).is_some());
         assert_eq!(
             ok.refusal("claude", &AuthState::SignedOut, None, me)
                 .map(|(o, _)| o),
@@ -391,7 +416,7 @@ mod tests {
         );
         // Every provider has the switch: codex is any unless set.
         assert_eq!(none.policy("codex"), AuthPolicy::Any);
-        assert_eq!(none.policy("gemini"), AuthPolicy::ApiOnly);
+        assert_eq!(none.policy("gemini"), AuthPolicy::Api);
     }
 
     /// A salt drawn at runtime, as the real one comes from the account.

@@ -137,9 +137,12 @@ impl ClaudeExec {
             // The host's GitHub sign-in stays out of the model's tools (RFC 0147).
             .envs(env::contained());
         // The stored key, here and nowhere else: `self.env` never holds it, so the scrub
-        // check and every other child stay without it.
-        for (k, v) in claude::auth_env(&self.auth) {
-            c.env(k, v.expose());
+        // check and every other child stay without it. Under `claude_auth = "plan"` it
+        // stays out too, so claude runs on the plan it is signed in with.
+        if self.local.borrow().claude.uses_key() {
+            for (k, v) in claude::auth_env(&self.auth) {
+                c.env(k, v.expose());
+            }
         }
         c.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -822,11 +825,11 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         assert!(!e.providers().await[0].signed_in);
     }
 
-    /// RFC 0214: with nothing configured a runner is `api_only`, so the person's own plan
-    /// never starts `claude`; an account's `api_only` tightens a runner that allows it; a
+    /// RFC 0214: with nothing configured a runner is `api`, so the person's own plan
+    /// never starts `claude`; an account's `api` narrows a runner that allows `any`; a
     /// job someone else created is refused on the person's own plan.
     #[tokio::test]
-    async fn api_only_refuses_the_own_plan_and_the_own_plan_takes_only_self_assigned_work() {
+    async fn api_refuses_the_own_plan_and_the_own_plan_takes_only_self_assigned_work() {
         let dir = tempfile::tempdir().unwrap();
         let mut e = exec(dir.path(), SUB);
         e.local = watch::channel(LocalAuth::default()).1;
@@ -837,7 +840,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
 
         let e = exec(dir.path(), SUB);
         let mut p = pack("usr_me");
-        p.auth_policy.insert("claude".into(), "api_only".into());
+        p.auth_policy.insert("claude".into(), "api".into());
         assert_eq!(e.execute(p).await.outcome, "refused_provider");
         let mut p = pack("usr_me");
         p.created_by = "usr_boss".into();
@@ -867,7 +870,7 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         assert!(!format!("{e:?}").contains(STORED));
         let mut p = pack("usr_me");
         p.created_by = "usr_boss".into();
-        p.auth_policy.insert("claude".into(), "api_only".into());
+        p.auth_policy.insert("claude".into(), "api".into());
         let f = e.execute(p).await;
         assert_eq!(f.outcome, "replied", "{}", f.detail);
         assert!(!format!("{f:?}").contains(STORED));
@@ -885,6 +888,30 @@ echo '{{"type":"result","subtype":"success","is_error":false,"result":"{{\"say\"
         assert!(!args.contains(STORED), "never in argv");
         let st = e.providers().await;
         assert_eq!((st[0].method.as_str(), st[0].signed_in), ("api_key", true));
+
+        // Under `plan` the stored key stays out: claude runs on its own sign-in.
+        let dir = tempfile::tempdir().unwrap();
+        let e = exec(dir.path(), SUB)
+            .with_auth(claude::Auth::ApiKey(iohr_auth::Redacted::new(
+                STORED.into(),
+            )))
+            .with_local(
+                watch::channel(LocalAuth {
+                    claude: provider::AuthPolicy::Plan,
+                    personal_use: Some(super::super::personal_use::Accepted::now()),
+                    ..LocalAuth::default()
+                })
+                .1,
+            );
+        let mut p = pack("usr_me");
+        p.created_by = "usr_me".into();
+        let f = e.execute(p).await;
+        assert_eq!(f.outcome, "replied", "{}", f.detail);
+        let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
+        assert!(
+            !env.contains(STORED),
+            "the stored key never passes under plan"
+        );
     }
 
     /// A `claude` whose turn is `body`; `auth status` and `--version` answer as usual.

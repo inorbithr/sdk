@@ -332,9 +332,9 @@ pub(crate) struct Pack {
     /// read too); empty when the service sent none. On the person's own Claude plan the
     /// runner takes only turns of jobs its own person created.
     pub(crate) created_by: String,
-    /// The account's sign-in policy per provider (`auth_policy`: `{"claude": "api_only"}`;
-    /// `authPolicy` is read too). It can make the runner's own setting stricter, never
-    /// looser; a value the runner does not know is read as `api_only`.
+    /// The account's sign-in policy per provider (`auth_policy`: `{"claude": "api"}`;
+    /// `authPolicy` is read too). It can only narrow what the runner's own setting
+    /// allows, never widen it; a value the runner does not know is read as `api`.
     pub(crate) auth_policy: BTreeMap<String, String>,
 }
 
@@ -1401,10 +1401,10 @@ mod tests {
         assert_eq!(old.created_by, "");
         assert!(old.auth_policy.is_empty());
         let snake = Pack::from_json(
-            &json!({"created_by": "usr_a", "auth_policy": {"claude": "api_only", "codex": 3}}),
+            &json!({"created_by": "usr_a", "auth_policy": {"claude": "api", "codex": 3}}),
         );
         assert_eq!(snake.created_by, "usr_a");
-        assert_eq!(snake.auth_policy["claude"], "api_only");
+        assert_eq!(snake.auth_policy["claude"], "api");
         assert_eq!(
             snake.auth_policy["codex"], "",
             "not a string: read as unknown"

@@ -132,7 +132,7 @@ pub(crate) struct Effective {
     pub(crate) user_units: Option<Setting<Vec<String>>>,
     /// The core checkout `build.sweep-targets` runs in (absolute path); `None`, no sweep.
     pub(crate) core_checkout: Option<Setting<String>>,
-    /// Which sign-in Claude turns may run on (`claude_auth`; default `api_only`).
+    /// Which sign-in Claude turns may run on (`claude_auth`; default `api`).
     pub(crate) claude_auth: Setting<AuthPolicy>,
     /// Which sign-in Codex turns may run on (`codex_auth`; default `any`).
     pub(crate) codex_auth: Setting<AuthPolicy>,
@@ -313,7 +313,7 @@ fn auth_policy_of(
         Some(m) => Ok(Setting {
             value: AuthPolicy::parse(&m.value).ok_or_else(|| {
                 format!(
-                    "runner {provider}_auth {:?} ({}) is not any or api_only",
+                    "runner {provider}_auth {:?} ({}) is not any, plan or api",
                     m.value, m.source
                 )
             })?,
@@ -863,21 +863,21 @@ mod tests {
     }
 
     #[test]
-    fn claude_is_api_only_and_codex_any_by_default_and_a_bad_value_names_its_source() {
+    fn claude_is_api_and_codex_any_by_default_and_a_bad_value_names_its_source() {
         let none = resolve(&RunnerConfig::default(), None, &Flags::default()).unwrap();
-        assert_eq!(none.claude_auth.value, AuthPolicy::ApiOnly);
+        assert_eq!(none.claude_auth.value, AuthPolicy::Api);
         assert_eq!(none.claude_auth.source, Source::Default);
         assert_eq!(none.codex_auth.value, AuthPolicy::Any);
-        assert_eq!(none.auth_policy("gemini"), AuthPolicy::ApiOnly);
+        assert_eq!(none.auth_policy("gemini"), AuthPolicy::Api);
         let mut file = RunnerConfig::default();
         file.claude_auth = Some("any".into());
-        file.codex_auth = Some("api_only".into());
+        file.codex_auth = Some("plan".into());
         let e = resolve(&file, None, &Flags::default()).unwrap();
         assert_eq!(
             (e.claude_auth.value, e.claude_auth.source.clone()),
             (AuthPolicy::Any, Source::File)
         );
-        assert_eq!(e.auth_policy("codex"), AuthPolicy::ApiOnly);
+        assert_eq!(e.auth_policy("codex"), AuthPolicy::Plan);
         let mut work = RunnerConfig::default();
         work.claude_auth = Some("subscription".into());
         let err = resolve(&file, Some(("work", &work)), &Flags::default()).unwrap_err();
