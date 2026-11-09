@@ -151,6 +151,7 @@ pub const RESERVED: &[&str] = &[
     "sign-binary",
     "stop",
     "sync",
+    "theme",
     "token",
     "tunnel",
     "upgrade",

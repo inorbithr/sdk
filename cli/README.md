@@ -61,6 +61,7 @@ Operate), and every command ends its `--help` with real examples.
 | [Roles and memory](docs/roles-and-memory.md) | Built-in roles, `--role`, and `iohr memory` as local files |
 | [Asking your agent](docs/ask.md) | `iohr ask`, the `?` prompt in zsh, permission rules, the asks agents file for you |
 | [Sessions and the panel](docs/session-and-panel.md) | `iohr session`, `iohr stop`, bare `iohr` and the floating panel |
+| [The terminal theme](docs/terminal-theme.md) | `iohr theme`: the Mac app's terminal themes as a Terminal.app profile and a zsh prompt |
 | [Runner](docs/runner.md) | This machine as a coordinator runner on an Anthropic API key (your own plan for personal use only): capacity, upgrades, gate reports, approved run asks |
 | [Files, network and dependencies](docs/files-and-dependencies.md) | Where `iohr` keeps things, which hosts it talks to, and every runtime dependency with its reason |
 

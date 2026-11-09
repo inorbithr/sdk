@@ -37,6 +37,7 @@ mod sdk;
 mod sdk_add;
 pub(crate) mod session;
 pub(crate) mod shell;
+mod theme;
 mod token;
 mod tunnel;
 pub(crate) mod upgrade;
@@ -142,6 +143,7 @@ pub async fn run(cli: Cli, env: Env) -> Result<(), Error> {
         Command::Ask(args) => ask::run(g, &env, *args, out).await,
         Command::Asks(cmd) => asks::run(g, &env, cmd, out).await,
         Command::Shell(cmd) => shell::run(g, &cmd),
+        Command::Theme(cmd) => theme::run(cmd, out),
         Command::Panel(args) => crate::panel::run(g, env, args).await,
         Command::Permissions(cmd) => permissions::run(g, cmd, out),
         Command::PermissionServer { .. } => Err(Error::Failed(
