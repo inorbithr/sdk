@@ -357,6 +357,8 @@ max_retries = 4
 [runner]                            # iohr runner, every profile (section 4.3)
 capacity = 4
 kinds = ["coordinate", "build"]
+workspace_keep_days = 14
+workspace_max_gb = 200
 
 [profiles.ci.runner]                # this profile's runner, over [runner]
 capacity = 8
@@ -431,6 +433,9 @@ profile's keys win), and its flags win over both. `iohr upgrade` reads
 | `upgrade_sign_identity` | `auto`, a code-signing identity, or `-` | not set (off) | `run` and `iohr upgrade`, macOS only: sign each new `iohr` with this identity before it is installed (below); `IOHR_SIGN_IDENTITY` wins over it |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 | `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
+| `allow_host_git_credentials` | true or false | false | `run`: a job whose lease brings no GitHub token may use this machine's own `gh` sign-in to fetch and push; false, such a job fails before its checkout, saying why |
+| `workspace_keep_days` | 1 to 3650 | 14 | `run` and `prune`: a job checkout, repository mirror or build directory nothing has used for this many days is removed (below) |
+| `workspace_max_gb` | 1 or more (GB, 10^9 bytes) | not set (no cap) | `run` and `prune`: while the checkouts, mirrors and build directories take more than this, the oldest unused go first |
 
 With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh`, `mise`, `systemctl`, `git`, `df` or `helm` on its `PATH`, no `~/.inorbit/roll/remote-roll.sh` for `roll.task`, no `core_checkout` for `build.sweep-targets`, `agent.install-checks` or `disk.prune` with the target `host`, no cluster for `helm.runner-scale`, a system that is not Linux for `disk.prune`, no `~/.config/iohr-agent/checks.toml` or an agent unit outside `user_units` for `agent.install-checks`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
 
@@ -453,6 +458,49 @@ the kinds it declares until the volume has room again (`none` when nothing is le
 the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
 value in effect, where it came from and the build volume's free space, without signing
 in.
+
+A job's GitHub access comes from its lease: the token the coordinator sends for the
+account's GitHub App installation. When a lease brings none, the runner uses this
+machine's own `gh` sign-in only with `allow_host_git_credentials = true`; otherwise the
+job fails before anything is fetched, and the reason names the setting and the GitHub
+App. Turn it on only on a machine whose `gh` account may push to every repository the
+runner's account sends it.
+
+The runner keeps its job checkouts under `runner/coordinate/checkouts/` in the config
+directory, one bare mirror per repository under `runner/mirrors/` and one shared build
+directory per repository under `runner/target/`. While it holds no lease, at most once an
+hour and never in its first 5 minutes, `iohr runner run` removes what nothing has used
+for `workspace_keep_days`, and with `workspace_max_gb` set it removes the oldest unused
+first until the total is under the cap. A checkout a live lease holds is never removed:
+the runner holds an operating-system lock on it from before the checkout is made until
+the lease's work has ended, and the removal takes that lock first. A mirror goes only
+when no checkout is left on it, and nothing used in the last hour goes, even over the
+cap. `iohr runner prune` does the same at once, without signing in; `--dry-run` lists
+what it would remove (kind, path, days idle, size and why) and removes nothing, and
+`--json` prints the same as data.
+
+`iohr runner service install` starts the runner when you sign in to the machine and
+starts it again when it stops, with no `sudo`. On macOS it writes the user agent
+`~/Library/LaunchAgents/hr.inorbit.runner.plist` (label `hr.inorbit.runner`, or
+`hr.inorbit.runner-<profile>` with `--profile`; log in
+`~/Library/Logs/InOrbit/runner.log`) and loads it with `launchctl bootstrap gui/<uid>`.
+On Linux it writes `~/.config/systemd/user/iohr-runner.service` (or
+`iohr-runner-<profile>.service`; `$XDG_CONFIG_HOME` is used when set), then runs
+`systemctl --user daemon-reload`, `enable` and `restart`; `loginctl enable-linger` keeps
+it running after you sign out. The service runs this `iohr` by its full path, with
+`HOME`, the current `PATH` and `IOHR_CONFIG_DIR` when set, `KeepAlive` or
+`Restart=always`, and 10 seconds between restarts. An existing file that differs is
+replaced only with `--force`. Each step is printed as it runs; `--dry-run` prints the
+steps and the file and changes nothing. Other systems are refused with exit code 1.
+
+`iohr runner service uninstall` stops and removes that service. With `--purge` it also
+removes this machine's runner key and approvals run key for the account from the
+credential store, the account's approvals state, and, when no other runner service is
+installed for this user and no lease holds a checkout, the shared checkouts, mirrors,
+build directories and `runner/last-upgrade`; otherwise nothing shared is removed and it
+says why. `--purge` needs a sign-in to know the account (`--account` picks one). The
+runner stays registered with the coordinator under the same name, and this machine no
+longer holds its key.
 
 `iohr runner run` keeps itself on the latest released `iohr`. About a minute after it
 starts, and then every `upgrade_interval_minutes` plus up to 10 percent of jitter, it asks
