@@ -2411,6 +2411,64 @@ pub struct InitArgs {
     pub crawl: InitCrawlArgs,
 }
 
+/// The slowest, the fastest and the usual `--crawl-rate`, requests a second to one host
+/// (RFC 0163). The only copy: the flag's default and the check both read these. The ceiling
+/// of 50 is a judgement and the default of 10 the owner's choice (2026-11-08); the agent's
+/// own `atlas crawl --rate` has the same bounds.
+pub const CRAWL_RATE_MIN: u32 = 1;
+pub const CRAWL_RATE_MAX: u32 = 50;
+pub const CRAWL_RATE_DEFAULT: u32 = 10;
+
+/// What `--crawl-rate` or `IOHR_CRAWL_RATE` was given. Parsing never fails: a bad value in
+/// the environment must not stop `project init --no-crawl`, which never reads it. It is
+/// checked by [`CrawlRate::get`] when a crawl is about to run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrawlRate(String);
+
+impl CrawlRate {
+    /// A rate already known to be right (a test, a caller in code).
+    #[must_use]
+    pub fn of(per_second: u32) -> Self {
+        Self(per_second.to_string())
+    }
+
+    /// The rate, when it is a whole number from [`CRAWL_RATE_MIN`] to [`CRAWL_RATE_MAX`].
+    ///
+    /// # Errors
+    /// A sentence for the person: what was given and what is allowed.
+    pub fn get(&self) -> Result<u32, String> {
+        match self.0.parse::<u32>() {
+            Ok(n) if (CRAWL_RATE_MIN..=CRAWL_RATE_MAX).contains(&n) => Ok(n),
+            _ => Err(format!(
+                "`{}` is not a crawl rate: use a whole number of requests a second from \
+                 {CRAWL_RATE_MIN} to {CRAWL_RATE_MAX} (--crawl-rate, IOHR_CRAWL_RATE)",
+                self.0
+            )),
+        }
+    }
+}
+
+impl std::str::FromStr for CrawlRate {
+    type Err = std::convert::Infallible;
+
+    /// Never fails: the value is checked later, by [`CrawlRate::get`].
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Ok(Self(raw.trim().to_owned()))
+    }
+}
+
+impl Default for CrawlRate {
+    fn default() -> Self {
+        Self::of(CRAWL_RATE_DEFAULT)
+    }
+}
+
+impl std::fmt::Display for CrawlRate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// The flags of `project init` that read a public site on this machine and keep what it finds
 /// in the project (PRD 0190.1). Nothing is sent to InOrbit.
 #[derive(Debug, Args)]
@@ -2430,17 +2488,18 @@ pub struct InitCrawlArgs {
     /// The most minutes the crawl runs (the crawler's own cap is 240).
     #[arg(long, value_name = "N", default_value_t = 5)]
     pub crawl_minutes: u32,
-    /// The most requests a second the crawl asks of one host, 1 to 50 (the default is 10).
-    /// A slower `Crawl-delay` in the site's robots.txt still wins. An older agent keeps its
-    /// own fixed pace of one a second until it is updated.
+    /// The most requests a second the crawl asks of one host (1 to 50, the default is 10; a
+    /// value outside that is refused when a crawl would run, not before). A slower
+    /// `Crawl-delay` in the site's robots.txt still wins. An older agent keeps its own fixed
+    /// pace of one a second until it is updated.
     #[arg(
         long,
         value_name = "N",
         env = "IOHR_CRAWL_RATE",
-        default_value_t = 10,
-        value_parser = clap::value_parser!(u32).range(1..=50)
+        default_value_t = CrawlRate::default(),
+        value_parser = clap::value_parser!(CrawlRate)
     )]
-    pub crawl_rate: u32,
+    pub crawl_rate: CrawlRate,
     /// Follow every other name in the site's domain (a link to `blog.acme.example` from
     /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
     /// terminal init asks once per such name (yes, no, yes to all; the default is no), and

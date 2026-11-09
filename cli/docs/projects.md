@@ -271,7 +271,7 @@ project. Nothing is sent to InOrbit.
   minutes (default 5; the crawler's own caps are 20,000 pages and 240 minutes), 10 hosts,
   50 MB in all and 2 MB a page. `--dry-run` says the same and reads nothing.
 - **Pace.** `--crawl-rate N` requests a second to one host (default 10, 1 to 50; the
-  variable `IOHR_CRAWL_RATE` is the same, the flag wins), and a slower `Crawl-delay` in
+  variable `IOHR_CRAWL_RATE` is the same, the flag wins; a value outside 1 to 50 is refused only when a crawl would run, `--no-crawl` never reads it), and a slower `Crawl-delay` in
   robots.txt wins over it. The text init shows before it starts states the rate.
 - **Progress.** At a terminal the crawl shows a spinner with a live count (pages read, pages
   waiting) and, as soon as the crawler knows how much there is (a sitemap says so), a bar:

@@ -1456,7 +1456,7 @@ mod tests {
     use std::io;
     use std::time::{Duration, Instant};
 
-    use super::wrapped;
+    use super::{Ui, wrapped};
     use console::Key;
 
     use super::{Choice, Look, Marks, Paint, bar_lines, fancy_for, menu_rows, run_keyed};
@@ -1702,6 +1702,27 @@ mod tests {
         assert!(!fancy_for(true, false, None, Some("dumb")));
         assert!(!fancy_for(true, false, None, Some("")));
         assert!(!fancy_for(true, false, None, None));
+    }
+
+    #[test]
+    fn a_plain_step_never_draws_a_bar_whatever_the_agent_reports() {
+        // Plain is every case `fancy_for` refuses: no terminal, --json, NO_COLOR, a dumb TERM.
+        for (tty, json, no_color, term) in [
+            (false, false, None, Some("xterm")),
+            (true, true, None, Some("xterm")),
+            (true, false, Some("1"), Some("xterm")),
+            (true, false, None, Some("dumb")),
+        ] {
+            let ui = Ui {
+                fancy: fancy_for(tty, json, no_color, term),
+            };
+            let mut step = ui.step("Crawling");
+            step.progress(1, None, "1 page");
+            step.progress(3, Some(6), "3 of 6");
+            step.progress(6, Some(6), "6 of 6");
+            assert!(step.bar.is_none(), "{tty} {json} {no_color:?} {term:?}");
+            assert!(!step.bounded, "{tty} {json} {no_color:?} {term:?}");
+        }
     }
 
     #[test]

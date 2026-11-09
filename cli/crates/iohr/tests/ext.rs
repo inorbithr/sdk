@@ -1636,6 +1636,11 @@ mod init_crawl {
 
     impl Site {
         fn init(&self, extra: &[&str]) -> Output {
+            self.init_env(extra, &[])
+        }
+
+        /// The same, with `env` set on the command beside the rest.
+        fn init_env(&self, extra: &[&str], env: &[(&str, &str)]) -> Output {
             let t = token(&["extensions:read", "agents:write"]);
             let mut args = vec![
                 "project",
@@ -1650,15 +1655,16 @@ mod init_crawl {
                 self.dir.to_str().unwrap(),
             ];
             args.extend_from_slice(extra);
-            self.b
-                .cmd(&args)
-                .env("HOME", self.b.dir.path())
+            let mut c = self.b.cmd(&args);
+            c.env("HOME", self.b.dir.path())
                 .env("IOHR_BASE_URL", self.b.server.uri())
                 .env("IOHR_TOKEN", &t)
                 .env("IOHR_TOKEN_CI", &t)
-                .stdin(Stdio::null())
-                .output()
-                .unwrap()
+                .stdin(Stdio::null());
+            for (k, v) in env {
+                c.env(k, v);
+            }
+            c.output().unwrap()
         }
 
         /// The folder a crawl of this site keeps its files in.
@@ -1981,37 +1987,76 @@ mod init_crawl {
         let args = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
         assert!(args.contains("--rate 3 "), "{args}");
         // The flag is also a variable of the same name, and the flag wins over it.
-        let t = token(&["extensions:read", "agents:write"]);
-        let o =
-            s.b.cmd(&[
-                "project",
-                "init",
-                "made",
-                "--template",
-                "coordinated",
-                "--yes",
-                "--no-smoke",
-                "--no-sync",
-                "--dir",
-                s.dir.to_str().unwrap(),
-                "--crawl",
-                &s.url(),
-                "--crawl-rate",
-                "4",
-            ])
-            .env("HOME", s.b.dir.path())
-            .env("IOHR_BASE_URL", s.b.server.uri())
-            .env("IOHR_TOKEN", &t)
-            .env("IOHR_TOKEN_CI", &t)
-            .env("IOHR_CRAWL_RATE", "9")
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
+        let o = s.init_env(
+            &["--crawl", &s.url(), "--crawl-rate", "4"],
+            &[("IOHR_CRAWL_RATE", "9")],
+        );
         assert!(text(&o).contains("at most 4 requests"), "{}", text(&o));
         // Nothing outside 1 to 50 is accepted, and nothing is read.
         for bad in ["0", "51", "fast"] {
             let o = s.init(&["--crawl", &s.url(), "--crawl-rate", bad]);
             assert_eq!(code(&o), 2, "{bad}: {}", text(&o));
+        }
+        let o = s.init_env(&["--crawl", &s.url()], &[("IOHR_CRAWL_RATE", "fast")]);
+        assert_eq!(code(&o), 2, "a bad variable with a crawl: {}", text(&o));
+        assert!(text(&o).contains("1 to 50"), "{}", text(&o));
+    }
+
+    /// A bad `IOHR_CRAWL_RATE` is only a problem for a crawl: `--no-crawl` never reads it, and
+    /// nothing is crawled when no site was given.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_bad_rate_in_the_environment_does_not_stop_init_without_a_crawl() {
+        let s = site(Some(fake_agent(0, &[], true)), 0..=0).await;
+        for extra in [&["--no-crawl"][..], &[][..]] {
+            let o = s.init_env(extra, &[("IOHR_CRAWL_RATE", "fast")]);
+            assert_eq!(code(&o), 0, "{extra:?}: {}", text(&o));
+            assert!(!s.crawl_dir().exists(), "{extra:?}: nothing was crawled");
+            std::fs::remove_dir_all(&s.dir).unwrap();
+            std::fs::create_dir_all(&s.dir).unwrap();
+        }
+    }
+
+    /// No bar is drawn for a script: with no terminal (a test's pipe), with `--json`, with
+    /// `NO_COLOR`, the progress an agent reports is read and dropped, and what is written has
+    /// no progress text, escape, rail or bar character.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_bar_is_drawn_with_json_or_no_color() {
+        let lines = [progress_line(1, 4, None), progress_line(2, 3, Some(5))];
+        let glyphs = |c: char| c == '\u{1b}' || ('\u{2500}'..='\u{25ff}').contains(&c) || c == '\r';
+        for (name, extra, env) in [
+            ("no_terminal", &[][..], &[][..]),
+            ("json", &["--json"][..], &[][..]),
+            (
+                "no_color",
+                &[][..],
+                &[("NO_COLOR", "1"), ("TERM", "xterm-256color")][..],
+            ),
+            (
+                "no_color_and_json",
+                &["--json"][..],
+                &[("NO_COLOR", "1")][..],
+            ),
+        ] {
+            let s = site(Some(agent_that_reports(&lines)), 1..=1).await;
+            let mut args = vec!["--crawl".to_owned(), s.url()];
+            args.extend(extra.iter().map(|a| (*a).to_owned()));
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let o = s.init_env(&args, env);
+            let t = text(&o);
+            assert_eq!(code(&o), 0, "{name}: {t}");
+            assert!(
+                !t.contains("pages read, ")
+                    && !t.contains("of 5 pages")
+                    && !t.contains("\"event\""),
+                "{name}: progress text in the output: {t}"
+            );
+            assert!(
+                !t.chars().any(glyphs),
+                "{name}: a bar or an escape in the output: {t:?}"
+            );
+            // The crawl did run, with progress asked for.
+            let said = std::fs::read_to_string(s.crawl_dir().join("args.txt")).unwrap();
+            assert!(said.contains("--progress"), "{name}: {said}");
         }
     }
 
@@ -2104,19 +2149,6 @@ mod init_crawl {
         let end = term.screen.screen().contents();
         assert!(!end.contains("pages read, 4 waiting"), "{end}");
         assert!(end.contains("Nothing was sent to InOrbit"), "{end}");
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn without_a_terminal_or_with_json_the_progress_is_never_printed() {
-        let lines = [progress_line(1, 4, None), progress_line(2, 3, Some(5))];
-        let s = site(Some(agent_that_reports(&lines)), 1..=1).await;
-        let o = s.init(&["--crawl", &s.url()]);
-        let t = text(&o);
-        assert_eq!(code(&o), 0, "{t}");
-        assert!(
-            !t.contains("pages read, ") && !t.contains("of 5 pages") && !t.contains("\"event\""),
-            "{t}"
-        );
     }
 
     /// The site the real crawler reads: robots.txt, a sitemap that lists `n` pages besides the
