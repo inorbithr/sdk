@@ -813,6 +813,33 @@ mod tests {
         );
     }
 
+    /// Terminals that send Option-i as the dead key `ˆ` commit it with the next key the person
+    /// presses, so it can arrive in the same read as Down (observed through the reader and the
+    /// model: `ˆ` then `ESC [ B` closed the menu and the Down was lost). Beside other input it is
+    /// that key's companion, not a press of the menu key.
+    #[test]
+    fn down_moves_the_open_menu_when_a_dead_key_arrives_in_the_same_read() {
+        use super::super::input::{Input, Reader};
+        let mut m = model(1);
+        let mut r = Reader::default();
+        m.key(Key::Menu);
+        for read in ["\u{2c6}\x1b[B", "\x1b[B\u{2c6}"] {
+            for i in r.feed(read.as_bytes()) {
+                if let Input::Key(k) = i {
+                    m.key(k);
+                }
+            }
+            assert!(m.open(), "{read:?} closed the menu");
+        }
+        assert_eq!(m.menu_sel, 2, "both Downs moved the selection");
+        for i in r.feed("\u{2c6}".as_bytes()) {
+            if let Input::Key(k) = i {
+                m.key(k);
+            }
+        }
+        assert!(!m.open(), "the dead key alone is still the menu key");
+    }
+
     #[test]
     fn the_menu_key_opens_and_closes_and_rest_ignores_every_other_key() {
         let mut m = model(1);
