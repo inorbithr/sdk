@@ -773,7 +773,26 @@ mod tests {
                 age(&e.path(), ago);
             }
         }
-        File::open(path).unwrap().set_modified(t).unwrap();
+        for_times(path).set_modified(t).unwrap();
+    }
+
+    /// Opens `path`, a file or a folder, so its times can be set. Windows needs the
+    /// write-attributes right for that, and the backup flag to open a folder.
+    #[cfg(windows)]
+    fn for_times(path: &Path) -> File {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+            .unwrap()
+    }
+
+    #[cfg(not(windows))]
+    fn for_times(path: &Path) -> File {
+        File::open(path).unwrap()
     }
 
     /// A runner state with a checkout of `job` on `owner/repo` of `bytes` bytes.
