@@ -37,10 +37,6 @@ const DIR: &str = ".inorbit/crawl";
 /// The hard caps of the crawler (`iohr-agent atlas crawl --help`); init never asks for more.
 const MAX_PAGES: u32 = 20_000;
 const MAX_MINUTES: u32 = 240;
-/// The crawler's own bounds for `--rate`, requests a second per host (RFC 0163); init never
-/// asks for more. The default lives on `--crawl-rate`.
-const MIN_RATE: u32 = 1;
-const MAX_RATE: u32 = 50;
 /// Init's other budgets, smaller than the crawler's own defaults (PRD 0190.1 sets pages and
 /// minutes; these three are init's own choice).
 const HOSTS: u32 = 10;
@@ -207,12 +203,14 @@ pub(crate) fn decide(
         _ => return Ok(None),
     };
     let url = parse_site(raw)?;
+    // Only here, where a crawl would run: a bad IOHR_CRAWL_RATE never stops `--no-crawl`.
+    let rate = args.crawl_rate.get().map_err(Error::Usage)?;
     let plan = Plan {
         name: folder_name(&url),
         url,
         pages: args.crawl_pages.clamp(1, MAX_PAGES),
         minutes: args.crawl_minutes.clamp(1, MAX_MINUTES),
-        rate: args.crawl_rate.clamp(MIN_RATE, MAX_RATE),
+        rate,
         subdomains: args.crawl_subdomains,
     };
     if !out.json {
@@ -1168,6 +1166,7 @@ fn prepare_dir(root: &Path, dir: &Path, policy: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::{CRAWL_RATE_DEFAULT, CRAWL_RATE_MAX, CRAWL_RATE_MIN, CrawlRate};
 
     fn args(crawl: Option<&str>, no_crawl: bool) -> InitCrawlArgs {
         InitCrawlArgs {
@@ -1175,7 +1174,7 @@ mod tests {
             no_crawl,
             crawl_pages: 200,
             crawl_minutes: 5,
-            crawl_rate: 10,
+            crawl_rate: CrawlRate::default(),
             crawl_subdomains: false,
         }
     }
@@ -1407,15 +1406,38 @@ mod tests {
     }
 
     #[test]
-    fn the_rate_is_clamped_to_the_crawlers_bounds() {
+    fn the_rate_is_the_crawlers_bounds_or_a_usage_error_when_a_crawl_would_run() {
         let ui = Ui::detect(true);
         let out = Out { json: true };
-        for (asked, kept) in [(0, MIN_RATE), (10, 10), (1_000, MAX_RATE)] {
+        for (asked, kept) in [("1", 1), ("10", 10), ("50", 50), (" 7 ", 7)] {
             let mut a = args(Some("https://acme.example/"), false);
-            a.crawl_rate = asked;
+            a.crawl_rate = asked.parse::<CrawlRate>().unwrap();
             let p = decide(&a, None, false, ui, out).unwrap().unwrap();
             assert_eq!(p.rate, kept, "asked {asked}");
         }
+        for bad in ["0", "51", "-1", "1000", "fast", "", "2.5"] {
+            let mut a = args(Some("https://acme.example/"), false);
+            a.crawl_rate = bad.parse::<CrawlRate>().unwrap();
+            let e = decide(&a, None, false, ui, out).unwrap_err();
+            assert!(matches!(e, Error::Usage(_)), "{bad}: {e:?}");
+            assert!(e.to_string().contains("1 to 50"), "{bad}: {e}");
+        }
+        // Nothing is asked of the rate when no crawl runs.
+        let mut a = args(None, true);
+        a.crawl_rate = "fast".parse::<CrawlRate>().unwrap();
+        assert!(decide(&a, None, false, ui, out).unwrap().is_none());
+        let mut a = args(None, false);
+        a.crawl_rate = "fast".parse::<CrawlRate>().unwrap();
+        assert!(decide(&a, None, false, ui, out).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_default_rate_is_the_one_const_and_in_range() {
+        assert_eq!(
+            CrawlRate::default().get(),
+            Ok(crate::cli::CRAWL_RATE_DEFAULT)
+        );
+        assert!((CRAWL_RATE_MIN..=CRAWL_RATE_MAX).contains(&CRAWL_RATE_DEFAULT));
     }
 
     #[test]
