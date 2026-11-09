@@ -1,6 +1,6 @@
 /* The page's styles: Tailwind, the shell frame's tokens (frame/tokens.css, from the Mac app under ADR 0230),
-   a base layer adapted from the Mac app's index.css, and the few component classes the menu list, the panel
-   frame and the notices use, drawn on the same tokens. */
+   a base layer adapted from the Mac app's index.css, the context menu's surface from the same file, and the few
+   component classes the panel frame and the notices use, drawn on the same tokens. */
 @import "tailwindcss";
 @import "./frame/tokens.css";
 
@@ -30,66 +30,28 @@
 }
 
 @layer components {
-  .menu-anchor {
-    position: relative;
+  /* The context menu's surface, from the Mac app's index.css (.iohr-ctx): translucent, blurred, a soft shadow, a
+     quick scale-in, and none of the motion when the system asks for less. */
+  .iohr-ctx {
+    background: color-mix(in oklab, var(--popover) 84%, transparent);
+    -webkit-backdrop-filter: blur(22px) saturate(1.5);
+    backdrop-filter: blur(22px) saturate(1.5);
+    border-color: var(--border);
+    box-shadow:
+      0 0 0 0.5px rgb(0 0 0 / 0.05),
+      0 12px 32px -8px rgb(0 0 0 / 0.3),
+      0 2px 6px rgb(0 0 0 / 0.08);
+    animation: iohr-ctx-in 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-
-  .menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 50;
-    min-width: 260px;
-    max-width: calc(100vw - 32px);
-    padding: 4px;
-    background: var(--popover);
-    color: var(--popover-foreground);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-    outline: none;
+  .iohr-ctx[data-leaving] {
+    animation: iohr-ctx-out 85ms ease-in forwards;
+    pointer-events: none;
   }
-
-  .menu-heading {
-    padding: 4px 8px;
-    color: var(--muted-foreground);
-    font-size: 12px;
-    font-weight: 500;
-  }
-
-  .menu-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    width: 100%;
-    padding: 6px 8px;
-    font: inherit;
-    font-size: 14px;
-    color: inherit;
-    text-align: left;
-    background: none;
-    border: 0;
-    border-radius: var(--radius-sm);
-  }
-
-  .menu-row.active:not([aria-disabled="true"]) {
-    background: var(--accent);
-    color: var(--accent-foreground);
-  }
-
-  .menu-row[aria-disabled="true"] {
-    color: var(--muted-foreground);
-  }
-
-  .menu-hint {
-    color: var(--muted-foreground);
-    font-size: 12px;
-  }
-
-  .menu-sep {
-    border: 0;
-    border-top: 1px solid var(--border);
-    margin: 4px -4px;
+  @media (prefers-reduced-motion: reduce) {
+    .iohr-ctx,
+    .iohr-ctx[data-leaving] {
+      animation: none;
+    }
   }
 
   .frame-stub,
@@ -158,5 +120,22 @@
     min-height: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
+  }
+}
+
+@keyframes iohr-ctx-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes iohr-ctx-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
   }
 }

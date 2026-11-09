@@ -8,16 +8,18 @@ import {
   group,
   heading,
   isAction,
+  keyedCaps,
   last,
   type MenuEntry,
   place,
   placeSub,
+  rowKey,
   SEP,
   search,
   step,
   tidy,
   typeAhead,
-} from "../src/frame/menu-core.ts";
+} from "../src/frame/context-menu-core.ts";
 
 const a = (id: string, label = id, more: object = {}): MenuEntry => ({ id, label, ...more });
 
@@ -90,4 +92,23 @@ test("a submenu opens beside its row and flips to the left at the edge", () => {
   const n = placeSub({ left: 100, right: 320, top: 200, bottom: 228 }, { w: 200, h: 120 }, view);
   assert.equal(n.flipX, false);
   assert.ok(n.left >= 320 - 8);
+});
+
+test("keys for caps and rows are stable without the list index", () => {
+  assert.deepEqual(keyedCaps("⇧⌘C"), [
+    { cap: "⇧", key: "⇧" },
+    { cap: "⌘", key: "⌘" },
+    { cap: "C", key: "C" },
+  ]);
+  assert.deepEqual(
+    keyedCaps("⌘⌘").map((k) => k.key),
+    ["⌘", "⌘2"],
+  );
+  const rows: MenuEntry[] = [heading("Edit"), { id: "copy", label: "Copy" }, SEP, { id: "delete", label: "Delete" }];
+  assert.deepEqual(
+    rows.map((_, i) => rowKey(rows, i)),
+    ["h-Edit", "copy", "sep-before-delete", "delete"],
+  );
+  const keys = rows.map((_, i) => rowKey(rows, i));
+  assert.equal(new Set(keys).size, keys.length);
 });

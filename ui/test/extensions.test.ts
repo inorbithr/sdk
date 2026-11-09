@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isAction, isHeading, isOff, reasonOf } from "../src/frame/context-menu-core.ts";
 import { extensionsMenu } from "../src/frame/extensions-menu.ts";
-import { isAction, isHeading, isOff, reasonOf } from "../src/frame/menu-core.ts";
 import { loadExtensions, type Panel, parseExtensions } from "../src/lib/extensions.ts";
 
 const board: Panel = { name: "board", version: "1.2.0", title: "Board", entry: "index.html" };

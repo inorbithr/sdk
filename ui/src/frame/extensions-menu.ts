@@ -1,5 +1,5 @@
 import type { Panel } from "../lib/extensions.ts";
-import { heading, type MenuEntry, tidy } from "./menu-core.ts";
+import { heading, type MenuEntry, tidy } from "./context-menu-core.ts";
 
 /** The Extensions menu as the shared menu model: a heading, then one row per panel, sorted as the server sent them. */
 export function extensionsMenu(panels: Panel[], choose: (panel: Panel) => void): MenuEntry[] {

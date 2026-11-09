@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 InOrbit d.o.o.
 //
-// Moved from iohr-mac src/lib/context-menu-core.ts (origin/main 35acce79) under ADR 0230: the shell frame layer
+// Moved from iohr-mac src/lib/context-menu-core.ts (origin/main d3ac8759) under ADR 0230: the shell frame layer
 // lives here under Apache-2.0, and iohr-mac imports it (RFC 0217 C8 deletes its copy).
 //
 // The one context menu's model (PRD "Enterprise context menu"): what an item is, how a list of items is tidied
@@ -157,6 +157,26 @@ export function caps(keys: string): string[] {
   const rest = chars.slice(i).join("");
   if (rest) out.push(rest);
   return out;
+}
+
+/** The caps with a React key each, stable without the list index: the cap, then which time it repeats ("⌘", "⌘2"). */
+export function keyedCaps(keys: string): { cap: string; key: string }[] {
+  const seen = new Map<string, number>();
+  return caps(keys).map((cap) => {
+    const n = (seen.get(cap) ?? 0) + 1;
+    seen.set(cap, n);
+    return { cap, key: n === 1 ? cap : `${cap}${n}` };
+  });
+}
+
+/** A row's React key, stable without the list index: an action's id, a heading's text, and for a separator the id
+ *  of the next action (tidy never leaves one at the end). */
+export function rowKey(rows: MenuEntry[], i: number): string {
+  const r = rows[i];
+  if (isAction(r)) return r.id;
+  if (isHeading(r)) return `h-${r.heading}`;
+  const next = rows.slice(i + 1).find(isAction);
+  return `sep-before-${next ? next.id : "end"}`;
 }
 
 // ---------------------------------------------------------------- moving through rows
