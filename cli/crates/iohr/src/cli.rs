@@ -674,7 +674,7 @@ pub enum RunnerCommand {
     ///
     /// Needs `claude` on your PATH and an Anthropic API key stored with `iohr runner
     /// api-key set`; or, for personal use only, `claude` signed in to your own plan
-    /// (`claude`, then `/login`) with `claude_auth = "any"` in `[runner]` and the notice
+    /// (`claude`, then `/login`) with `claude_auth = "any"` or `"plan"` in `[runner]` and the notice
     /// accepted. The key never leaves the machine; on your own plan nothing about the
     /// sign-in does except a hash of the seat `claude auth status` names (organisation
     /// and email). Run it again and it says the runner exists; with
@@ -811,7 +811,8 @@ pub enum RunnerCommand {
     /// personal use only. With no flag this shows the notice and whether you accepted
     /// it; `--accept` records that you accept it on this machine (the notice's version
     /// and the date, kept in `runner/personal-use.json`, never sent), for a year or
-    /// until the notice changes. It takes `claude_auth = "any"` in `[runner]` as well.
+    /// until the notice changes. It takes `claude_auth = "any"` or `"plan"` in `[runner]` as
+    /// well.
     /// Needs no sign-in.
     PersonalUse {
         /// Accept the notice shown.

@@ -66,7 +66,7 @@ A turn is one `claude -p` run of the `claude` first on your `PATH`, as you insta
 ### On an API key
 
 It runs on an Anthropic API key, the path for organisations and teams. Your own Claude plan
-is for personal use only: it is off unless the runner table says `claude_auth = "any"` and
+is for personal use only: it is off unless the runner table says `claude_auth = "any"` (or `"plan"`) and
 you accepted the notice `iohr runner personal-use` shows, and then the runner takes one turn
 at a time, only work you assigned yourself (`docs/config.md` section 4.3). `claude` sends
 its requests to Anthropic directly; InOrbit does not proxy them.
