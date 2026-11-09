@@ -61,7 +61,9 @@ export function Marker({ isNew, isUpdated }: { isNew?: boolean; isUpdated?: bool
 /** One rail icon as the flyout sees it: its name (a link to its page) and the items under it. */
 export type FlyoutSection = { id: string; label: string; status?: string; items: FlyoutRow[] };
 
-const attr = (s: string) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(s) : s.replace(/"/g, '\\"'));
+// The value sits inside a double-quoted attribute selector. Without CSS.escape, a backslash and a quote are the two
+// characters that can end or bend that string, so both are escaped (the backslash too, or `\"` would close it).
+const attr = (s: string) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"));
 
 export function useRailFlyout(onGo: (id: string) => void, sections: Map<string, FlyoutSection>, active: boolean) {
   const [s, setS] = useState<FlyoutState>(initial);
