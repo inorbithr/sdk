@@ -119,7 +119,7 @@ osv-scanner scan source --recursive .
 
 [tasks.sbom]
 description = "CycloneDX SBOM for every package into dist/sbom/, then validate them"
-depends = ["go:sbom", "rust:sbom", "ts:sbom", "py:sbom", "cli:sbom"]
+depends = ["go:sbom", "rust:sbom", "ts:sbom", "ui:sbom", "py:sbom", "cli:sbom"]
 depends_post = ["sbom:validate"]
 
 [tasks."sbom:validate"]
@@ -343,6 +343,14 @@ run = "cargo run --quiet --locked -p iohr -- ui check"
 description = "Web UI: serve the built UI on loopback (`iohr ui serve`)"
 dir = "cli"
 run = "cargo run --quiet --locked -p iohr -- ui serve"
+
+[tasks."ui:sbom"]
+description = "Web UI: CycloneDX SBOM of the published @inorbithr/ui package into dist/sbom/"
+dir = "ui"
+shell = "bash -e -o pipefail -c"
+# The release job's ui SBOM step runs the same command (it checks out the tag, so it does
+# not call this task).
+run = "mkdir -p ../dist/sbom; pnpm sbom --sbom-format cyclonedx --prod > ../dist/sbom/ui.cdx.json"
 
 # ---------------------------------------------------------------- command line (ADR 0009)
 
