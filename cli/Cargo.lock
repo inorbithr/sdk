@@ -1820,6 +1820,7 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "html5ever",
+ "indicatif",
  "inorbithr",
  "iohr-auth",
  "iohr-codegen",

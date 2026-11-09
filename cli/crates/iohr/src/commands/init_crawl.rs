@@ -815,8 +815,12 @@ impl Ctx<'_> {
     ) -> Result<Crawl, String> {
         prepare_dir(self.root, dir, policy)?;
         let crawl_json = dir.join("crawl.json");
-        let mut sp =
-            (!self.out.json).then(|| self.ui.step(&format!("Reading {label} on this machine")));
+        let mut sp = (!self.out.json).then(|| {
+            self.ui.step_every(
+                &format!("Reading {label} on this machine"),
+                crate::ui::REDRAW,
+            )
+        });
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<progress::Line>();
         let ran = {
             let run = self.run_agent(start, &b, dir, &crawl_json, tx);
@@ -1070,8 +1074,12 @@ async fn read_text(
             .collect(),
         crawled: crawled.to_owned(),
     };
-    let mut sp = (!out.json && !input.is_empty())
-        .then(|| ui.step(&format!("Reading the text of {} pages", input.len())));
+    let mut sp = (!out.json && !input.is_empty()).then(|| {
+        ui.step_every(
+            &format!("Reading the text of {} pages", input.len()),
+            crate::ui::REDRAW,
+        )
+    });
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
     let tell = move |done: usize, total: usize| {
         let _ = tx.send((done, total));
