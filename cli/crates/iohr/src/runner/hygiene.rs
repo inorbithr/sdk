@@ -583,7 +583,7 @@ fn remove_whole(path: &Path) -> Result<(), String> {
     fs::remove_dir_all(&gone).map_err(|e| e.to_string())
 }
 
-/// What `uninstall --purge` removes of the runner's shared state, in this order.
+/// What `uninstall --purge` removes of the runner's shared state, listed in this order.
 const SHARED: [&str; 4] = ["coordinate", "mirrors", "target", "last-upgrade"];
 
 /// The paths [`remove_shared`] would remove, those that exist.
@@ -599,14 +599,15 @@ pub(crate) fn shared(state: &Path) -> Vec<PathBuf> {
 /// directory, and the upgrade ledger) whole, or nothing at all while a lease holds a
 /// checkout: every checkout is held first, so none is taken while the rest go.
 pub(crate) fn remove_shared(state: &Path) -> Result<Vec<PathBuf>, String> {
-    let checkouts = state.join("coordinate").join("checkouts");
+    let coordinate = state.join("coordinate");
+    let checkouts = coordinate.join("checkouts");
     let mut holds = Vec::new();
-    for (job, _) in dirs_in(&checkouts) {
+    for (job, path) in dirs_in(&checkouts) {
         if valid_job_id(&job).is_err() {
             continue;
         }
         match try_hold(&checkouts, &job) {
-            Ok(Some(h)) => holds.push(h),
+            Ok(Some(h)) => holds.push((h, path)),
             Ok(None) => {
                 return Err(format!(
                     "a lease holds the checkout of {job}: nothing removed; stop that runner first"
@@ -615,16 +616,26 @@ pub(crate) fn remove_shared(state: &Path) -> Result<Vec<PathBuf>, String> {
             Err(e) => return Err(format!("the checkout of {job} could not be held: {e}")),
         }
     }
-    let mut removed = Vec::new();
-    for path in shared(state) {
-        if path.is_dir() {
-            remove_whole(&path)?;
-        } else {
-            fs::remove_file(&path).map_err(|e| e.to_string())?;
-        }
-        removed.push(path);
+    let removed = shared(state);
+    // While held: each checkout, then everything shared but `coordinate`.
+    for (_, path) in &holds {
+        remove_whole(path)?;
     }
+    for path in removed.iter().filter(|p| **p != coordinate) {
+        if path.is_dir() {
+            remove_whole(path)?;
+        } else {
+            fs::remove_file(path).map_err(|e| e.to_string())?;
+        }
+    }
+    // The checkouts' lock files live under `coordinate`, and Windows renames no directory
+    // with a file open beneath it: they are closed first, with every checkout gone.
     drop(holds);
+    if coordinate.is_dir() {
+        remove_whole(&coordinate)?;
+    } else if coordinate.exists() {
+        fs::remove_file(&coordinate).map_err(|e| e.to_string())?;
+    }
     // The runner directory itself, once nothing else is in it.
     let _ = fs::remove_dir(state);
     Ok(removed)
