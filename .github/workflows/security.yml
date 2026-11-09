@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue waits for every required check, so zizmor must report there too;
+  # dependency review skips in the queue (it reviewed the pull request already).
+  merge_group:
   schedule:
     - cron: "17 4 * * 1"
 
