@@ -50,6 +50,7 @@ sigstore-verify = { version = "0.15", default-features = false, features = ["aws
 syn = { version = "3", features = ["full"] }
 typify = "0.8"
 cliclack = "0.5"
+indicatif = "0.18"
 console = "0.16"
 rpassword = "7"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "query", "form", "system-proxy"] }
