@@ -10,7 +10,7 @@ use super::accounts::Me;
 use super::decisions::decisions;
 use crate::Env;
 use crate::cli::{Global, ProjectSyncArgs};
-use crate::context::{Api, session};
+use crate::context::{Api, shared_session};
 use crate::error::Error;
 use crate::output::Out;
 use crate::project::space::{self, Ask, Decision, Readers, Seen};
@@ -120,7 +120,7 @@ fn pick_account(
 /// `--team` names an account the person is not in: refused before anything is made. Every
 /// other failure is an [`Outcome`], never an error, so `init` goes on.
 pub(crate) async fn sync(g: &Global, env: &Env, name: &str, ask: &Ask) -> Result<Outcome, Error> {
-    let Ok(s) = session(g, env).await else {
+    let Ok(s) = shared_session(g, env).await else {
         return Ok(Outcome::Queued("you are not signed in".to_owned()));
     };
     let me = match s.api.get::<Value>("/v1/accounts/me", &[]).await {
@@ -253,7 +253,7 @@ pub(crate) async fn ask(
     if !interactive || (team.is_some() && flagged.is_some()) {
         return Ok(out);
     }
-    let Ok(s) = session(g, env).await else {
+    let Ok(s) = shared_session(g, env).await else {
         return Ok(out);
     };
     let Some(me) = s
@@ -432,7 +432,7 @@ pub(crate) async fn sync_command(
 
 /// A folder that is linked already: the linked space must open for this sign-in.
 async fn check_linked(g: &Global, env: &Env, id: &str) -> Result<Outcome, Error> {
-    let Ok(s) = session(g, env).await else {
+    let Ok(s) = shared_session(g, env).await else {
         return Ok(Outcome::Queued("you are not signed in".to_owned()));
     };
     match decisions(&s.api).get_space(id).await {

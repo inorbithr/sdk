@@ -67,11 +67,24 @@ target's files:
 ```sh
 gh release download iohr/vX.Y.Z --repo inorbithr/sdk --pattern 'iohr-*-x86_64-unknown-linux-musl.tar.gz' --pattern SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify iohr-X.Y.Z-x86_64-unknown-linux-musl.tar.gz --repo inorbithr/sdk
+gh attestation verify iohr-X.Y.Z-x86_64-unknown-linux-musl.tar.gz --repo inorbithr/sdk \
+  --cert-identity https://github.com/inorbithr/sdk/.github/workflows/release.yml@refs/heads/main \
+  --source-ref refs/heads/main
 ```
 
-The installers run the checksum check themselves and the attestation check when `gh` is
-installed. Releases before 1.0 are marked pre-release.
+The release workflow runs on the push to `main` that merges the release PR, so the
+certificate names `main`, not the tag. `--cert-identity` requires exactly that workflow
+on `main` (the certificate's identity and build signer), and `--source-ref` requires the
+certificate's source ref to be `main` too. Without them, `gh` accepts the repository's
+release workflow from any branch.
+
+The installers run the checksum check themselves and this attestation check, with these
+two values, when `gh` is installed and signed in; otherwise they say plainly that only the
+checksum was checked. `iohr upgrade` and the runner require the same identity and source
+ref, and the same repository in the certificate's source repository claim, with the
+provenance agreeing with the certificate; one constant in
+`cli/crates/iohr/src/ext/trust.rs` holds the values, and a test holds the installers to
+it. Releases before 1.0 are marked pre-release.
 
 On macOS with `upgrade_sign_identity` set ([`config.md`](../config.md) section 4.3),
 `iohr upgrade` and the runner check the archive as above and then sign the binary with

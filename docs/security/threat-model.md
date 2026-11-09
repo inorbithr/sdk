@@ -110,10 +110,26 @@ Boundary: the runner to GitHub, and the runner to the model process it starts (S
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| E | A job pushes to repositories other than its own with the person's sign-in | SR-33: the lease's own installation token, one repository, `contents` and `pull_requests` only, about an hour; the host's sign-in only where the App is not installed, said in the log |
+| E | A job pushes to repositories other than its own with the person's sign-in | SR-33: the lease's own installation token, one repository, `contents` and `pull_requests` only, about an hour; the host's sign-in only where the App is not installed and the machine opted in with `allow_host_git_credentials` (off by default; refused with the reason otherwise), said in the log |
 | I | The token is left in a file, a git configuration or a log | SR-33: memory only; given per command with `-c` and a variable on that child; tests over the log, `Debug`, errors and every configuration |
 | E | A planted mirror configuration (proxy, URL rewrite, include, hook, helper) receives the token | SR-33: token-bearing git runs only in the runner's mirror, after a check that refuses any such key and an `origin` that is not the job's repository; hooks off |
 | I | The model reads the person's `gh` sign-in or a git credential helper | SR-33 (RFC 0147 containment): empty `GH_CONFIG_DIR`, no `GH_TOKEN` or `GITHUB_TOKEN`, git's helpers cleared and prompts off in its environment. Not a sandbox: a process of the same user can still read files that user can |
+| D | Old checkouts, mirrors and build directories fill the disk until jobs fail | `workspace_keep_days` (14 by default) and `workspace_max_gb`: the idle runner and `iohr runner prune` remove what nothing used; a checkout a live lease holds is locked and never removed |
+| T | A prune or purge removes a checkout while a job still works in it | The runner holds an operating-system lock per checkout for the lease's whole work; removal takes that lock first, renames, then deletes; `service uninstall --purge` removes nothing shared while any checkout is held |
+| E | Installing the runner as a service asks for administrator rights or runs it as another user | `iohr runner service install` writes only a per-user launchd agent or systemd user unit, never needs `sudo`, runs this `iohr` by its full path and prints every step; `--dry-run` changes nothing |
+| I | A removed runner leaves its key on the machine | `service uninstall --purge` deletes the runner key and the approvals run key from the credential store and the approvals state |
+
+### `iohr runner` and its model sign-in
+
+Boundary: the credential store to the runner, and the runner to the `claude` process it
+starts (SR-36). `claude` talks to Anthropic directly; the runner does not proxy it.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| I | The API key shows in a process list, a log, an error, a JSON answer or a request to the platform | SR-36: never an argument; `Redacted<String>` until it is set on the `claude` child; integration test over every output, request and the config file |
+| I | A tool the model runs inherits the key | SR-36: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` beside the key; no other child of the runner gets it |
+| E | The server, or a changed lease, turns on the person's own plan | SR-36: only the local file turns it on; the lease can only narrow the policy, and an unknown value counts as `api` |
+| S | Work someone else assigned runs on the person's own plan | SR-36: refused unless the pack's creator is the runner's own user; one turn at a time |
 
 ### `iohr runner` and approved run asks
 

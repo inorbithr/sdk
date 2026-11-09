@@ -78,10 +78,22 @@ checks Lab documents (`iohr lab check`), keeps RFCs, PRDs and ADRs in the Decisi
 runs coordinator turns on your own Claude subscription (`iohr runner`).
 It talks to `api.inorbit.hr` and
 `auth.inorbit.hr`, and to the extension registry only in `iohr ext install`, `upgrade` and
+<<<<<<< HEAD
 `sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry. A running
 `iohr runner` also sends a heartbeat and keeps itself on the latest release:
 [SECURITY.md](SECURITY.md#the-runner) says what it sends and how to turn upgrades off. Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
 check with `gh attestation verify`. [cli/README.md](cli/README.md) has every command.
+||||||| fe799e6c
+`sync` ([ADR 0012](docs/adr/0012-extensions.md)); there is no telemetry and no update
+check. Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
+check with `gh attestation verify`. [cli/README.md](cli/README.md) has every command.
+=======
+`sync` ([ADR 0012](docs/adr/0012-extensions.md)). What leaves your machine, including a
+running runner's upgrade checks, is in [SECURITY.md](SECURITY.md), section "What leaves
+your machine"; every host it reaches is in
+[cli/docs/files-and-dependencies.md](cli/docs/files-and-dependencies.md#the-hosts-it-talks-to). Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
+check with `gh attestation verify`. [cli/README.md](cli/README.md) is the guide, and [cli/docs/commands.md](cli/docs/commands.md) has every command.
+>>>>>>> origin/main
 
 ## Add a library to your project
 
@@ -90,7 +102,7 @@ iohr sdk add        # cargo add, npm install, pnpm/yarn/bun/deno add, uv/poetry/
 ```
 
 The command is printed, then run by your project's own package manager
-([cli/README.md](cli/README.md#add-the-sdk-to-a-project)).
+([cli/docs/sdk.md](cli/docs/sdk.md#add-the-sdk-to-a-project)).
 
 ## Generate a client for your account
 

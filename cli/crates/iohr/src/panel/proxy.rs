@@ -41,7 +41,9 @@ use crate::card::Look;
 use crate::cli::Global;
 use crate::commands::asks::{self, PanelAsk, PanelAuto};
 use crate::commands::coordinator;
+use crate::commands::session::{Joined, join_watched};
 use crate::error::Error;
+use crate::session::link;
 use crate::{Env, ui};
 
 /// How often the asks are read again while the panel runs.
@@ -61,6 +63,10 @@ const SYNC_OFF: &[u8] = b"\x1b[?2026l";
 /// and the proxy share no process, so a signal would need a pid the shell does not have).
 pub(super) const STOP_SEQ: &[u8] = b"\x1b]7771;iohr-panel-stop\x07";
 
+/// What bare `iohr` run inside a stopped panel writes to bring the panel back: the same kind of
+/// sequence, taken out of the shell's output the same way.
+pub(super) const RESUME_SEQ: &[u8] = b"\x1b]7771;iohr-panel-resume\x07";
+
 /// What to run and what to show.
 pub(super) struct Config {
     /// Stub data (the demo): labelled so in the title.
@@ -72,6 +78,11 @@ pub(super) struct Config {
     /// Answers when the session host this shell joined has stopped (`iohr stop`): the panel
     /// closes and the shell goes on. `None` when there is no host.
     pub(super) host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
+    /// The folder whose session host this panel was opened for: running `iohr` again after a
+    /// stop joins (starting it when none runs) that host again, from here, because this
+    /// process outlives the re-run and the host stops when its last session leaves. `None`
+    /// when the panel has no session (`iohr panel`).
+    pub(super) project: Option<std::path::PathBuf>,
 }
 
 fn command_or_shell(command: &[String]) -> Vec<String> {
@@ -88,7 +99,9 @@ fn io_err(what: &str, e: impl std::fmt::Display) -> Error {
 
 /// Set (to anything) in the helper's environment: this run is the shell side of the pty.
 pub(super) const LEADER: &str = "IOHR_PANEL_LEADER";
-/// Set in the shell's environment: it runs under the panel, so a nested `iohr panel` runs plainly.
+/// Set in the shell's environment to the pid of the panel proxy around it: the shell runs under
+/// the panel, so a nested `iohr panel` runs plainly. It is only believed while that pid lives
+/// (a shell that outlived its panel keeps the variable, and must be able to start a new one).
 const INSIDE: &str = "IOHR_PANEL";
 
 /// The shell side of the pty: become the session leader, take the pty (standard input) as the
@@ -101,7 +114,12 @@ pub(super) fn session_leader(command: &[String]) -> Result<(), Error> {
     let e = std::process::Command::new(&command[0])
         .args(&command[1..])
         .env_remove(LEADER)
-        .env(INSIDE, "1")
+        .env(
+            INSIDE,
+            rustix::process::getppid()
+                .map_or(1, |p| p.as_raw_nonzero().get())
+                .to_string(),
+        )
         .exec();
     Err(io_err(&format!("cannot run {}", command[0]), e))
 }
@@ -379,15 +397,17 @@ impl Proxy {
     /// One chunk of the shell's output, with the stop sequence (`iohr stop` run inside the panel)
     /// taken out: the panel is lifted and the shell goes on.
     fn shell_output(&mut self, chunk: &[u8]) -> Vec<u8> {
-        match find(chunk, STOP_SEQ) {
-            Some(at) => {
-                self.stopped = true;
-                let mut whole = chunk[..at].to_vec();
-                whole.extend_from_slice(&chunk[at + STOP_SEQ.len()..]);
-                self.child_output(&whole)
-            }
-            None => self.child_output(chunk),
+        let mut chunk = chunk.to_vec();
+        // Whichever sequence comes first is taken first, so the last one written wins.
+        while let Some((at, seq, stop)) = [(STOP_SEQ, true), (RESUME_SEQ, false)]
+            .into_iter()
+            .filter_map(|(seq, stop)| find(&chunk, seq).map(|at| (at, seq, stop)))
+            .min_by_key(|(at, ..)| *at)
+        {
+            self.stopped = stop;
+            chunk.drain(at..at + seq.len());
         }
+        self.child_output(&chunk)
     }
 
     /// A change of the panel with no output from the shell.
@@ -498,6 +518,13 @@ struct Session {
     host_gone: Option<Fetch<()>>,
     /// The host stopped while the panel was open.
     host_stopped: bool,
+    /// See [`Config::project`].
+    project: Option<std::path::PathBuf>,
+    /// The session this process rejoined with after a stop: the host counts it until it is
+    /// dropped, which is when the panel ends.
+    held: Option<link::Session>,
+    /// A rejoin in flight (starting a host takes seconds).
+    rejoin_fetch: Option<Fetch<Joined>>,
 }
 
 impl Session {
@@ -676,6 +703,11 @@ impl Session {
     /// its own key, else the shell's. A mouse report goes to the panel or to a program that
     /// asked for the mouse itself, never to a shell that did not.
     fn user_input(&mut self, bytes: &[u8]) {
+        // A stopped panel owns no key; Ctrl-G, the menu key on terminals without ⌥, is not the
+        // shell's either, and sent on it would echo as `^G` under a command in cooked mode.
+        if self.proxy.stopped && bytes == [0x07] && self.proxy.model.open_key().is(bytes) {
+            return;
+        }
         let panel_keys = !self.proxy.stopped && !self.proxy.screen.alt();
         let report = input::is_mouse_report(bytes);
         let routed = panel_keys
@@ -772,6 +804,47 @@ impl Session {
         write_terminal(&self.proxy.redraw());
     }
 
+    /// One chunk of the shell's output: written to the terminal, and when it brought a stopped
+    /// panel back, a host is joined again.
+    fn shell_wrote(&mut self, bytes: &[u8]) {
+        let was_stopped = self.proxy.stopped;
+        write_terminal(&self.proxy.shell_output(bytes));
+        if was_stopped && !self.proxy.stopped {
+            self.resumed();
+        }
+    }
+
+    /// The shell ran `iohr` again in a stopped panel and the panel is back. With no host
+    /// joined (`iohr stop` ended it) one is joined again here, starting it when none runs:
+    /// this process lives as long as the panel, the re-run does not, and the host stops when
+    /// its last session leaves.
+    fn resumed(&mut self) {
+        if self.host_gone.is_some() || self.rejoin_fetch.is_some() {
+            return;
+        }
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        let g = self.g.clone();
+        self.rejoin_fetch = Some(Box::pin(async move { join_watched(&g, &project).await }));
+    }
+
+    /// A rejoin ended: the new session and its watcher replace the stopped host's, or the same
+    /// note `iohr` gives when no host can start is written into the shell's output.
+    fn rejoined(&mut self, joined: Joined) {
+        if let Some(note) = joined.note {
+            write_terminal(
+                &self
+                    .proxy
+                    .child_output(format!("\r\n{note}\r\n").as_bytes()),
+            );
+            return;
+        }
+        self.held = joined.session;
+        self.host_gone = joined.gone.map(host_closed);
+        self.host_stopped = false;
+    }
+
     /// The session host stopped (`iohr stop`): the panel closes, the shell goes on.
     fn host_ended(&mut self) {
         self.host_stopped = true;
@@ -845,20 +918,40 @@ pub(super) fn fancy(g: &Global) -> bool {
 
 /// Whether this process already runs inside a panel.
 pub(super) fn inside() -> bool {
-    std::env::var_os(INSIDE).is_some()
+    std::env::var(INSIDE).is_ok_and(|v| proxy_lives(&v))
 }
 
-/// What bare `iohr` says inside a running panel, instead of an error: the session is already
-/// here, and which key opens the menu. `None` outside a panel.
-pub(super) fn bare_inside_message(g: &Global) -> Option<String> {
-    inside().then(|| already_in(Settings::read(g).open_key))
-}
-
-fn already_in(key: OpenKey) -> String {
-    format!(
-        "already in the iohr session; {} opens the menu",
-        key.label()
+/// Whether the panel proxy `var` names (a pid) still runs. A value that is not a pid counts as
+/// alive: it was set by a version that wrote `1`.
+fn proxy_lives(var: &str) -> bool {
+    let Some(pid) = var
+        .parse::<i32>()
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    else {
+        return true;
+    };
+    // Signal 0 only asks whether the process exists; no permission to signal it means it does.
+    !matches!(
+        rustix::process::test_kill_process(pid),
+        Err(rustix::io::Errno::SRCH)
     )
+}
+
+/// What bare `iohr` says inside a panel, instead of an error: the panel is on in this shell,
+/// and which key opens the menu. A panel that was stopped (`iohr stop`, "Stop panel" or
+/// its host ending) is brought back first, so running `iohr` again gives a live panel. `None`
+/// outside a panel.
+pub(super) fn bare_inside_message(g: &Global) -> Option<String> {
+    inside().then(|| {
+        send_to_panel(RESUME_SEQ);
+        panel_is_on(Settings::read(g).open_key)
+    })
+}
+
+/// True both when the panel was live and when this run just brought a stopped one back.
+fn panel_is_on(key: OpenKey) -> String {
+    format!("the panel is on; {} opens the menu", key.label())
 }
 
 /// Tells the panel proxy around this process to end, so `iohr stop` inside it closes the panel
@@ -866,6 +959,13 @@ fn already_in(key: OpenKey) -> String {
 /// panel (restoring its terminal modes). Returns whether it was sent: only inside a panel, and
 /// only when there is a terminal to send it to.
 pub(super) fn end_from_inside() -> bool {
+    send_to_panel(STOP_SEQ)
+}
+
+/// Writes `seq` to the controlling terminal for the panel proxy to read, only when a proxy
+/// runs around this process: with none, the sequence would reach the real terminal, which may
+/// print its bell as `^G`.
+fn send_to_panel(seq: &[u8]) -> bool {
     use std::io::Write as _;
     if !inside() {
         return false;
@@ -873,7 +973,7 @@ pub(super) fn end_from_inside() -> bool {
     std::fs::OpenOptions::new()
         .write(true)
         .open("/dev/tty")
-        .and_then(|mut tty| tty.write_all(STOP_SEQ).and_then(|()| tty.flush()))
+        .and_then(|mut tty| tty.write_all(seq).and_then(|()| tty.flush()))
         .is_ok()
 }
 
@@ -923,6 +1023,9 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         read_fetch: None,
         host_gone: config.host_gone.take().map(host_closed),
         host_stopped: false,
+        project: config.project.take(),
+        held: None,
+        rejoin_fetch: None,
     };
     write_terminal(&session.proxy.redraw());
     session.refresh();
@@ -935,7 +1038,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
     loop {
         tokio::select! {
             chunk = from_child.recv() => match chunk {
-                Some(bytes) => write_terminal(&session.proxy.shell_output(&bytes)),
+                Some(bytes) => session.shell_wrote(&bytes),
                 None => break,
             },
             bytes = from_user.recv(), if user_open => match bytes {
@@ -961,6 +1064,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
             result = poll(&mut session.act_fetch) => session.act_done(result),
             result = poll(&mut session.read_fetch) => session.read_done(result),
             () = poll(&mut session.host_gone) => session.host_ended(),
+            joined = poll(&mut session.rejoin_fetch) => session.rejoined(joined),
         }
     }
 
@@ -1139,6 +1243,32 @@ mod tests {
     }
 
     #[test]
+    fn the_resume_sequence_brings_a_stopped_panel_back_and_never_reaches_the_terminal() {
+        let mut p = proxy(MouseMode::Menu);
+        p.shell_output(STOP_SEQ);
+        assert!(p.stopped);
+        let out = p.shell_output(b"a\x1b]7771;iohr-panel-resume\x07b");
+        assert!(!p.stopped, "running `iohr` again lifts the stop");
+        assert!(!has(&out, RESUME_SEQ), "the sequence is the proxy's own");
+        // Both in one read: the last one written wins.
+        p.shell_output(&[STOP_SEQ, RESUME_SEQ].concat());
+        assert!(!p.stopped);
+        p.shell_output(&[RESUME_SEQ, STOP_SEQ].concat());
+        assert!(p.stopped);
+    }
+
+    #[test]
+    fn the_panel_is_believed_only_while_its_proxy_lives() {
+        let mut child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let pid = child.id().to_string();
+        assert!(proxy_lives(&std::process::id().to_string()));
+        assert!(proxy_lives("1"), "the old value, written before pids");
+        assert!(proxy_lives("not a pid"));
+        child.wait().unwrap();
+        assert!(!proxy_lives(&pid), "a proxy that ended is no panel");
+    }
+
+    #[test]
     fn a_program_s_own_mouse_mode_is_put_back_when_the_panel_gives_the_mouse_up() {
         let mut p = proxy(MouseMode::Menu);
         p.child_output(b"\x1b[?1000h\x1b[?1006h");
@@ -1206,10 +1336,10 @@ mod tests {
     }
 
     #[test]
-    fn bare_inside_says_it_is_already_in_the_session_and_names_the_key() {
-        let msg = already_in(OpenKey::detect(Some("Apple_Terminal"), false));
-        assert_eq!(msg, "already in the iohr session; ^G opens the menu");
-        let msg = already_in(OpenKey::detect(Some("xterm"), false));
+    fn bare_inside_says_the_panel_is_on_and_names_the_key() {
+        let msg = panel_is_on(OpenKey::detect(Some("Apple_Terminal"), false));
+        assert_eq!(msg, "the panel is on; ^G opens the menu");
+        let msg = panel_is_on(OpenKey::detect(Some("xterm"), false));
         assert!(msg.contains("⌥i"), "{msg}");
     }
 

@@ -230,8 +230,10 @@ pub const GROUPS: &[(&str, &[&str])] = &[
         &[
             "ask",
             "asks",
+            "context",
             "permissions",
             "shell",
+            "theme",
             "runner",
             "session",
             "stop",
@@ -421,6 +423,19 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Sign a built iohr the way releases are signed (the preview install, `cli:preview-install`).
+    ///
+    /// Signs the binary at PATH with this Mac's Apple Development or Developer ID
+    /// certificate and the identifier `hr.inorbit.iohr`, the same signing `iohr upgrade`
+    /// does (`IOHR_SIGN_IDENTITY` names an identity; unset is `auto`; `-`, which
+    /// means "do not sign", is refused), so the Keychain
+    /// trusts every build of it alike. Fails when it cannot sign: a preview that stays
+    /// ad hoc is the problem this exists to remove.
+    #[command(hide = true)]
+    SignBinary {
+        /// The binary to sign, in place.
+        path: PathBuf,
+    },
     /// Settings besides profiles: where extensions come from, which keys may sign them.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -472,12 +487,30 @@ pub enum Command {
     /// commands are never allowed. iohr never stores the question or the answer. Defaults
     /// come from `[ask]` in config.toml; the flags win for one call.
     Ask(Box<AskArgs>),
+    /// The IO.md files `?` and `??` read in this folder.
+    ///
+    /// Prints the chain of `IO.md` (or `io.md`) files that `? question` loads, the way a
+    /// `CLAUDE.md` works: your own file in the config folder, then the project root's down
+    /// to this folder, farthest first, the nearest winning. The root is the folder with
+    /// `inorbit.toml`, else the git root. Each file is cut at 4 KiB, all together at 8 KiB;
+    /// a cut is said. `--full` also prints the text that is sent; `--json` the same as data.
+    Context(ContextArgs),
     /// Shell integration: `? question` at your prompt asks your AI agent.
     ///
     /// `iohr shell hook zsh` prints what makes `? question` at your prompt ask your own AI
     /// agent. Add `eval "$(iohr shell hook zsh)"` to ~/.zshrc.
     #[command(subcommand)]
     Shell(ShellCommand),
+    /// The app's terminal look for Terminal.app and zsh
+    ///
+    /// `iohr theme list` shows the themes (the app's own, generated from it); `iohr theme
+    /// install NAME` writes the Terminal.app profile under ~/.inorbit/term and remembers the
+    /// theme; `--terminal` opens the profile in Terminal.app and `--prompt` turns on the zsh
+    /// prompt (it needs the shell hook, and keeps a prompt you set yourself unless you pass
+    /// `--replace-prompt`). `iohr theme off` turns the prompt off. Local files only; ~/.zshrc
+    /// is never edited.
+    #[command(subcommand)]
+    Theme(ThemeCommand),
     /// Rules for what Io may run or open when you ask it something.
     ///
     /// `iohr ask` (and `?` at your prompt) asks you before Io runs a command. Your answers
@@ -504,7 +537,10 @@ pub enum Command {
     /// Run coordinator turns on this machine.
     ///
     /// The coordinator's runner: this machine runs coordinator turns on your own
-    /// installed `claude`, on your own subscription.
+    /// installed `claude`, on an Anthropic API key you store with `iohr runner api-key
+    /// set` (the path for an organisation's work). Running on your own Claude plan
+    /// instead is for personal use only: it is off until you turn it on in config.toml
+    /// and accept the notice `iohr runner personal-use` shows.
     #[command(subcommand)]
     Runner(RunnerCommand),
     /// Open this project's session: one process hosts its Roles while iohr is open.
@@ -647,9 +683,12 @@ pub enum RunnerCommand {
     ///
     /// Register this machine as one of your runners: its name, system and what it can run.
     ///
-    /// Needs `claude` on your PATH, signed in with your subscription (`claude`, then
-    /// `/login`). Nothing about the sign-in leaves the machine except a hash of the seat
-    /// `claude auth status` names (organisation and email). Run it again and it says the runner exists; with
+    /// Needs `claude` on your PATH and an Anthropic API key stored with `iohr runner
+    /// api-key set`; or, for personal use only, `claude` signed in to your own plan
+    /// (`claude`, then `/login`) with `claude_auth = "any"` or `"plan"` in `[runner]` and the notice
+    /// accepted. The key never leaves the machine; on your own plan nothing about the
+    /// sign-in does except a hash of the seat `claude auth status` names (organisation
+    /// and email). Run it again and it says the runner exists; with
     /// `--refresh` it sends the registration again with the key this machine holds, so
     /// the runner keeps its id and the coordinator records its current sign-in.
     Register {
@@ -769,6 +808,31 @@ pub enum RunnerCommand {
         #[command(flatten)]
         account: AccountArg,
     },
+    /// Store or remove the Anthropic API key this machine's runner runs Claude on.
+    ///
+    /// The key is kept in your profile's credential store (the macOS Keychain on a Mac;
+    /// a file only for a profile made with `--insecure-storage`), never in config.toml,
+    /// and is given to `claude` alone when it starts, as `ANTHROPIC_API_KEY`. A running
+    /// runner reads it at start: restart it after a change.
+    #[command(subcommand)]
+    ApiKey(RunnerApiKeyCommand),
+    /// Read, accept or withdraw the personal-use notice for your own Claude plan.
+    ///
+    /// Running the runner on your own Claude plan, rather than an API key, is for
+    /// personal use only. With no flag this shows the notice and whether you accepted
+    /// it; `--accept` records that you accept it on this machine (the notice's version
+    /// and the date, kept in `runner/personal-use.json`, never sent), for a year or
+    /// until the notice changes. It takes `claude_auth = "any"` or `"plan"` in `[runner]` as
+    /// well.
+    /// Needs no sign-in.
+    PersonalUse {
+        /// Accept the notice shown.
+        #[arg(long)]
+        accept: bool,
+        /// Withdraw an acceptance: the runner no longer runs on your own plan.
+        #[arg(long, conflicts_with = "accept")]
+        withdraw: bool,
+    },
     /// Show or enrol this machine's run key.
     ///
     /// This machine's run key: the P-256 key that signs what it reports on approved
@@ -795,6 +859,84 @@ pub enum RunnerCommand {
         /// ask nothing.
         #[arg(long, conflicts_with_all = ["proof", "label"])]
         show: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Remove job checkouts, mirrors and build directories nothing uses.
+    ///
+    /// Remove what nothing has used for `workspace_keep_days` (14 by default): job
+    /// checkouts, repository mirrors with no checkout left on them, and their build
+    /// directories; with `workspace_max_gb` set, also the oldest unused while everything
+    /// takes more than that. A checkout a live lease holds is never touched, nor anything
+    /// used in the last hour. The runner does the same on its own while it holds no
+    /// lease. Needs no sign-in.
+    Prune {
+        /// List what would be removed; remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Install the runner as a service of your user, started at login.
+    ///
+    /// On macOS a `LaunchAgent` (`hr.inorbit.runner`, or `hr.inorbit.runner-<profile>`
+    /// with `--profile`), on Linux a systemd user unit (`iohr-runner.service`, or
+    /// `iohr-runner-<profile>.service`); never needs sudo.
+    #[command(subcommand)]
+    Service(RunnerServiceCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerServiceCommand {
+    /// Write the service file and start `iohr runner run` as a service of your user.
+    ///
+    /// Writes the `LaunchAgent` (macOS) or systemd user unit (Linux) that runs this `iohr`
+    /// as `iohr runner run` (with `--profile`, for that profile), and starts it: on macOS
+    /// with `launchctl bootstrap gui/<uid>`, on Linux with `systemctl --user enable` and
+    /// `restart`. Says each step first. Needs no sign-in and never sudo; the runner itself
+    /// needs `iohr runner register` first.
+    Install {
+        /// Print the steps and the file; write and start nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace a service file of that name that differs from this one.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop the service and remove its file.
+    ///
+    /// Stops the service (`launchctl bootout`, or `systemctl --user disable --now`) and
+    /// removes its file. `--purge` also removes the profile's runner key and run key from
+    /// the credential store and the runner's approvals state; the shared checkouts,
+    /// mirrors and build directories go too once no other runner service is installed.
+    /// `--purge` needs the profile's sign-in, to name the account.
+    Uninstall {
+        /// Print the steps; stop and remove nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Also remove the runner's keys and state.
+        #[arg(long)]
+        purge: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerApiKeyCommand {
+    /// Store the key: asked for without echo on a terminal, or read from a file or
+    /// standard input. Never give it as an argument.
+    Set {
+        /// Read the key from this file (at most 64 KiB; surrounding white space is
+        /// dropped).
+        #[arg(long, value_name = "PATH", conflicts_with = "stdin")]
+        file: Option<std::path::PathBuf>,
+        /// Read the key from standard input.
+        #[arg(long)]
+        stdin: bool,
+        #[command(flatten)]
+        account: AccountArg,
+    },
+    /// Remove the stored key.
+    Remove {
         #[command(flatten)]
         account: AccountArg,
     },
@@ -1647,6 +1789,62 @@ pub enum AtlasCommand {
     /// The built-in roles of this project.
     #[command(subcommand, alias = "personalities")]
     Roles(RolesCommand),
+    /// Search the text of the sites this project crawled (PRD 0192).
+    ///
+    /// The best matching chunks of page text, each with its page, heading path and offsets.
+    /// Local: it reads `.inorbit/crawl/kb.duckdb`, which `iohr project init --crawl` builds.
+    /// The search is lexical (BM25); there is no embedding model on this machine.
+    Search {
+        /// What to look for.
+        #[arg(value_name = "QUERY")]
+        query: String,
+        /// Only this site (a name as the crawl folders have it).
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most chunks to show.
+        #[arg(long, default_value_t = 8, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// The facts the site model holds, each with the chunk it came from.
+    ///
+    /// `contact_email`, `phone`, `lists_price`, `offers`, `located_in`, `has_profile`,
+    /// `names_person`, `hosts_event`, `published`, `built_with`, `mentions_organization`,
+    /// `description`, `language`.
+    Facts {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Only this predicate (for example `contact_email`).
+        #[arg(long, value_name = "NAME")]
+        predicate: Option<String>,
+        /// Only facts whose value or subject contains this text.
+        #[arg(long, value_name = "TEXT")]
+        grep: Option<String>,
+        /// The most facts to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
+    /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
+    Index {
+        /// List the pages of the sites instead of the sites.
+        #[arg(long)]
+        pages: bool,
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// The most pages to show with `--pages`.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1842,6 +2040,16 @@ pub enum MemoryCommand {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct ContextArgs {
+    /// The folder to read the chain for (default: here).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+    /// Also print the text that goes to the model.
+    #[arg(long)]
+    pub full: bool,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct SessionArgs {
     /// The project folder (default: here).
     #[arg(value_name = "DIR")]
@@ -1964,6 +2172,36 @@ pub enum ShellCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+pub enum ThemeCommand {
+    /// List the themes and the one that is on.
+    List,
+    /// Show a theme's colours, font and cursor.
+    Show {
+        /// The theme (`iohr theme list`).
+        name: String,
+    },
+    /// Write a theme's Terminal.app profile and remember it; the prompt and Terminal.app are flags.
+    Install(ThemeInstallArgs),
+    /// Turn the prompt off and forget the chosen theme (Terminal.app profiles stay).
+    Off,
+}
+
+#[derive(Debug, Args)]
+pub struct ThemeInstallArgs {
+    /// The theme (`iohr theme list`).
+    pub name: String,
+    /// Open the profile in Terminal.app, which imports it (macOS; it is not made the default).
+    #[arg(long)]
+    pub terminal: bool,
+    /// Turn on the zsh prompt (it comes with `eval "$(iohr shell hook zsh)"`); a prompt you set yourself is kept.
+    #[arg(long)]
+    pub prompt: bool,
+    /// Turn on the zsh prompt and replace the prompt you set yourself.
+    #[arg(long)]
+    pub replace_prompt: bool,
+}
+
 /// A shell `iohr shell hook` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum HookShell {
@@ -2080,6 +2318,7 @@ pub struct InitPlanArgs {
 /// variant is far larger than its siblings (clippy `large_enum_variant`, seen on Windows where
 /// `PathBuf` is wider).
 #[derive(Debug, Args)]
+#[allow(clippy::struct_excessive_bools)] // independent command-line switches, not a state
 pub struct InitArgs {
     /// The project's name: lowercase letters, digits and dashes, like demo or my-shop.
     /// At a terminal it is asked for when missing (the folder's name is the default);
@@ -2157,12 +2396,77 @@ pub struct InitArgs {
     /// Skip the smoke test (it runs the project once with the language's own runtime).
     #[arg(long)]
     pub no_smoke: bool,
+    /// Do not write the starter IO.md at the project root.
+    ///
+    /// `IO.md` is the file `?` and `??` read for context in this folder, like a CLAUDE.md:
+    /// what the project is, how to build and test it. An IO.md or io.md already there is
+    /// never touched, with or without this flag.
+    #[arg(long)]
+    pub no_io_md: bool,
     /// Where the project lives in InOrbit: team, who reads it, or none.
     #[command(flatten)]
     pub space: InitSpaceArgs,
     /// Reading a public site on this machine (the agent extension's crawler).
     #[command(flatten)]
     pub crawl: InitCrawlArgs,
+}
+
+/// The slowest, the fastest and the usual `--crawl-rate`, requests a second to one host
+/// (RFC 0163). The only copy: the flag's default and the check both read these. The ceiling
+/// of 50 is a judgement and the default of 10 the owner's choice (2026-11-08); the agent's
+/// own `atlas crawl --rate` has the same bounds.
+pub const CRAWL_RATE_MIN: u32 = 1;
+pub const CRAWL_RATE_MAX: u32 = 50;
+pub const CRAWL_RATE_DEFAULT: u32 = 10;
+
+/// What `--crawl-rate` or `IOHR_CRAWL_RATE` was given. Parsing never fails: a bad value in
+/// the environment must not stop `project init --no-crawl`, which never reads it. It is
+/// checked by [`CrawlRate::get`] when a crawl is about to run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrawlRate(String);
+
+impl CrawlRate {
+    /// A rate already known to be right (a test, a caller in code).
+    #[must_use]
+    pub fn of(per_second: u32) -> Self {
+        Self(per_second.to_string())
+    }
+
+    /// The rate, when it is a whole number from [`CRAWL_RATE_MIN`] to [`CRAWL_RATE_MAX`].
+    ///
+    /// # Errors
+    /// A sentence for the person: what was given and what is allowed.
+    pub fn get(&self) -> Result<u32, String> {
+        match self.0.parse::<u32>() {
+            Ok(n) if (CRAWL_RATE_MIN..=CRAWL_RATE_MAX).contains(&n) => Ok(n),
+            _ => Err(format!(
+                "`{}` is not a crawl rate: use a whole number of requests a second from \
+                 {CRAWL_RATE_MIN} to {CRAWL_RATE_MAX} (--crawl-rate, IOHR_CRAWL_RATE)",
+                self.0
+            )),
+        }
+    }
+}
+
+impl std::str::FromStr for CrawlRate {
+    type Err = std::convert::Infallible;
+
+    /// Never fails: the value is checked later, by [`CrawlRate::get`].
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Ok(Self(raw.trim().to_owned()))
+    }
+}
+
+impl Default for CrawlRate {
+    fn default() -> Self {
+        Self::of(CRAWL_RATE_DEFAULT)
+    }
+}
+
+impl std::fmt::Display for CrawlRate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 /// The flags of `project init` that read a public site on this machine and keep what it finds
@@ -2184,6 +2488,18 @@ pub struct InitCrawlArgs {
     /// The most minutes the crawl runs (the crawler's own cap is 240).
     #[arg(long, value_name = "N", default_value_t = 5)]
     pub crawl_minutes: u32,
+    /// The most requests a second the crawl asks of one host (1 to 50, the default is 10; a
+    /// value outside that is refused when a crawl would run, not before). A slower
+    /// `Crawl-delay` in the site's robots.txt still wins. An older agent keeps its own fixed
+    /// pace of one a second until it is updated.
+    #[arg(
+        long,
+        value_name = "N",
+        env = "IOHR_CRAWL_RATE",
+        default_value_t = CrawlRate::default(),
+        value_parser = clap::value_parser!(CrawlRate)
+    )]
+    pub crawl_rate: CrawlRate,
     /// Follow every other name in the site's domain (a link to `blog.acme.example` from
     /// `acme.example`) without asking. Without it the crawl stays on the host you gave: at a
     /// terminal init asks once per such name (yes, no, yes to all; the default is no), and

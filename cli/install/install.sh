@@ -8,7 +8,9 @@
 #   2. downloads it and the release's SHA256SUMS from the GitHub release over HTTPS;
 #   3. refuses unless the archive's SHA-256 matches SHA256SUMS, and, when the GitHub CLI
 #      is installed and signed in, unless `gh attestation verify` confirms this
-#      repository's release workflow built it;
+#      repository's release workflow built it from `main` (the exact certificate
+#      identity and source ref below; `iohr upgrade` requires the same, from
+#      cli/crates/iohr/src/ext/trust.rs, and a test holds the two together);
 #   4. copies `iohr` into ~/.local/bin (no sudo). It changes no shell profile: if that
 #      directory is not on your PATH, it says so.
 #
@@ -18,6 +20,8 @@
 set -eu
 
 repo="inorbithr/sdk"
+identity="https://github.com/inorbithr/sdk/.github/workflows/release.yml@refs/heads/main"
+source_ref="refs/heads/main"
 dir="${IOHR_INSTALL_DIR:-$HOME/.local/bin}"
 version="${IOHR_VERSION:-}"
 
@@ -85,11 +89,13 @@ got=$(sha256 "$tmp/$file")
 say "checksum ok ($got)"
 
 if have gh && gh auth status >/dev/null 2>&1; then
-  gh attestation verify "$tmp/$file" --repo "$repo" >/dev/null ||
+  gh attestation verify "$tmp/$file" --repo "$repo" \
+    --cert-identity "$identity" --source-ref "$source_ref" >/dev/null ||
     die "gh attestation verify failed for $file; nothing was installed"
-  say "attestation ok (built by $repo's release workflow)"
+  say "attestation ok (built by $repo's release workflow on main)"
 else
-  say "attestation not checked (needs the GitHub CLI, signed in); the checksum was"
+  say "attestation NOT checked: the GitHub CLI (gh) is not installed or not signed in."
+  say "only the SHA-256 checksum was checked. To check the attestation too, sign in to gh and run this again."
 fi
 
 tar -xzf "$tmp/$file" -C "$tmp"
