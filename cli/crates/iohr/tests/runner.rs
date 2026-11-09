@@ -2226,6 +2226,75 @@ async fn bare_iohr_on_a_terminal_enters_the_session_and_stop_closes_the_panel() 
     });
 }
 
+/// `iohr stop` inside the panel ends the host and lifts the panel; the shell and the panel
+/// proxy around it stay. Running `iohr` again then brings the panel back and must leave a live
+/// host joined for as long as the panel is up: the short-lived re-run cannot be the one that
+/// joins (the host stops when its last session leaves), so the proxy rejoins for it.
+#[tokio::test]
+async fn bare_iohr_after_stop_inside_the_panel_starts_the_host_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = host_registered(dir.path()).await;
+    let project = dir.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let bin = env!("CARGO_BIN_EXE_iohr");
+    let mut c = session_cmd(&server, dir.path(), &[]);
+    c.current_dir(&project)
+        .env_remove("TERM_PROGRAM")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .env("SHELL", "/bin/sh")
+        .env("PS1", "shell> ");
+    let mut s = pty::Session::spawn(c);
+    s.until("the panel over the shell", |screen| {
+        pty::any(screen, "⌥i menu") && pty::any(screen, "shell>")
+    });
+    let data = dir.path().join("data");
+    wait_until("the first host's socket", || {
+        session_socket(&data).is_some()
+    })
+    .await;
+
+    // `iohr stop` typed in the panel's shell: the host ends, the panel lifts.
+    s.send(format!("{bin} stop\r").as_bytes());
+    s.until("the panel closed by stop", |screen| {
+        pty::any(screen, "the panel is closed")
+    });
+    wait_until("the first host gone", || session_socket(&data).is_none()).await;
+    let beats_before = bodies(&server, BEAT).await.len();
+
+    // Bare `iohr` in the stopped panel: the panel is back, and so is a host.
+    s.send(format!("{bin}\r").as_bytes());
+    s.until("the re-run", |screen| pty::any(screen, "the panel is on"));
+    s.until("the panel back", |screen| pty::any(screen, "⌥i menu"));
+    wait_until("a host started by the re-run", || {
+        session_socket(&data).is_some()
+    })
+    .await;
+    assert!(
+        beats_at_least(&server, beats_before + 2).await >= beats_before + 2,
+        "the second host sent no heartbeat: {}",
+        session_diag(dir.path())
+    );
+    // It stays: the re-run process has long exited, and the proxy holds the session.
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert!(
+        session_socket(&data).is_some(),
+        "the host ended with the re-run: {}",
+        session_diag(dir.path())
+    );
+    assert!(
+        pty::any(s.screen.screen(), "⌥i menu"),
+        "the panel went again:\n{}",
+        s.screen.screen().contents()
+    );
+
+    // Leaving the panel leaves the session, and the host stops with its last session.
+    s.send(b"exit\r");
+    let status = s.exited().expect("the shell ends after exit");
+    assert!(status.success(), "{status}");
+    wait_until("the second host gone", || session_socket(&data).is_none()).await;
+}
+
 /// Under `NO_COLOR` a terminal is not the session either: the usage report, exit 2.
 #[tokio::test]
 async fn bare_iohr_on_a_terminal_under_no_color_prints_the_usage_report() {
