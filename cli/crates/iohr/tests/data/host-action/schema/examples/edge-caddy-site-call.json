@@ -1,0 +1,6 @@
+{
+  "action": "edge.caddy-site-call",
+  "runner_id": "rnr_00000000000000000000000001",
+  "params": {},
+  "effect": "Adds the call site to the edge Caddy config on the runner's host, validates it and reloads Caddy."
+}
