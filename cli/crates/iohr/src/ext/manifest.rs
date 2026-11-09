@@ -148,6 +148,7 @@ pub const RESERVED: &[&str] = &[
     "sdk",
     "session",
     "shell",
+    "sign-binary",
     "stop",
     "sync",
     "token",
