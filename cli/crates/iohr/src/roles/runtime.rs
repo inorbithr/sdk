@@ -17,7 +17,7 @@ use crate::ask::model_name;
 use crate::atlas;
 use crate::cli::Global;
 use crate::commands::coordinator::{clean_text, job_segment};
-use crate::context::session;
+use crate::context::shared_session;
 use crate::error::Error;
 use crate::output::Out;
 use crate::roles::{self, notes};
@@ -234,7 +234,7 @@ pub(crate) async fn resolve(g: &Global, env: &Env, l: Lookup<'_>) -> Result<Appl
         .and_then(|r| project_role(r, name))
         .map(|p| (Source::Project, p));
     let session = if online && (found.is_none() || job.is_some()) {
-        session(g, env).await.ok()
+        shared_session(g, env).await.ok()
     } else {
         None
     };

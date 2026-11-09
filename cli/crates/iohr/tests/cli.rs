@@ -641,6 +641,9 @@ async fn verbose_output_never_shows_the_token() {
     ];
     // `runner run-key` keeps its key in the profile's store, which a bare token has not:
     // `run_key_is_made_once_and_enrolled_with_a_proof_of_possession` (tests/runner.rs) runs it.
+    // `runner api-key` keeps the key in the same store:
+    // `a_stored_api_key_reaches_claude_alone_and_is_never_printed_or_sent` (tests/runner.rs)
+    // runs it with `--verbose`. `runner personal-use` calls nothing.
     // `iohr decisions` needs typed answers: `decisions_commands_never_show_the_token` runs it.
     // `iohr sync` needs a project with an atlas: `sync_never_shows_the_token_or_a_documents_words`
     // (tests/atlas.rs) runs it with `--verbose`.
@@ -706,13 +709,19 @@ async fn verbose_output_never_shows_the_token() {
         "--verbose",
     ];
     let o = r.with_token(&t, &args);
-    assert_eq!(code(&o), 0, "{args:?}: {}", text(&o));
     let all = text(&o);
+    // The session host is unix only: elsewhere `stop` refuses (exit 1) and says why.
+    let (want_code, want_text) = if cfg!(unix) {
+        (0, "no session host runs")
+    } else {
+        (1, "the session host needs a unix system")
+    };
+    assert_eq!(code(&o), want_code, "{args:?}: {all}");
     assert!(
         !all.contains("TOKENSIGNATUREMARKER"),
         "{args:?} leaked the token"
     );
-    assert!(all.contains("no session host runs"), "{args:?}: {all}");
+    assert!(all.contains(want_text), "{args:?}: {all}");
     assert!(!all.contains("request id"), "{args:?} made a call");
     // `ext verify ARTIFACT` (RFC 0143) is offline too: an artifact with a bundle that
     // does not match fails (exit 1) and prints no token and no request line.
@@ -779,6 +788,39 @@ async fn verbose_output_never_shows_the_token() {
         );
         assert!(!all.contains("request id"), "{args:?} made a call");
     }
+    // The runner's housekeeping is offline: `runner prune` with nothing to remove, and
+    // `runner service install --dry-run`, which writes and loads nothing (macOS and
+    // Linux only; elsewhere it says so and exits 1).
+    let service = i32::from(!cfg!(any(target_os = "macos", target_os = "linux")));
+    for (args, want) in [
+        (vec!["runner", "prune", "--dry-run", "--verbose"], 0),
+        (vec!["runner", "prune", "--json", "--verbose"], 0),
+        (
+            vec!["runner", "service", "install", "--dry-run", "--verbose"],
+            service,
+        ),
+    ] {
+        let o = r
+            .cmd(&args)
+            .env("IOHR_TOKEN", &t)
+            .env("HOME", &home)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(code(&o), want, "{args:?}: {}", text(&o));
+        let all = text(&o);
+        assert!(
+            !all.contains("TOKENSIGNATUREMARKER"),
+            "{args:?} leaked the token"
+        );
+        assert!(!all.contains("request id"), "{args:?} made a call");
+    }
+    let unit = if cfg!(target_os = "macos") {
+        home.join("Library/LaunchAgents/hr.inorbit.runner.plist")
+    } else {
+        home.join(".config/systemd/user/iohr-runner.service")
+    };
+    assert!(!unit.exists(), "a dry run wrote {}", unit.display());
 }
 
 const LAB_DOC: &str = "---\ntitle: A decision\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe site is www.example.com.\n\n## Status log\n\n- 2026-10-03: opened.\n";

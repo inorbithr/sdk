@@ -254,7 +254,8 @@ release workflow builds per platform, runs `iohr ext lint --json` for the config
 the OCI layout with `tools/ext_artifact.py`, pushes it to `ghcr.io/OWNER/iohr-ext/NAME`,
 and from a job that runs no repository code attaches a keyless cosign signature and SLSA
 provenance as OCI referrers. `iohr ext install` verifies both against
-`.github/workflows/release.yml` at a tag of your repository; installing another
+`.github/workflows/release.yml` at a tag of your repository, which must be named after
+the extension (`NAME` or `iohr-ext-NAME`); installing another
 publisher's extension needs `ext.registry` set to its registry.
 
 ## A panel, `$REPOS` and the `cluster` target (RFC 0143)

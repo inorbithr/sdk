@@ -174,6 +174,13 @@ pub async fn fetch(
             super::manifest::printable(&manifest.name)
         ))));
     }
+    if !verified.signer.publishes(name) {
+        return Err(ExtError::Trust(trust::TrustError(format!(
+            "not installed: {name} is signed by {}, which does not publish {name} \
+             (a release workflow publishes the extension its repository is named after)",
+            super::manifest::printable(&verified.signer.to_string())
+        ))));
+    }
     if let Want::Version(v) = want
         && &manifest.version != v
     {

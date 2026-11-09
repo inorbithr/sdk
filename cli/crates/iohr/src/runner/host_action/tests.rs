@@ -23,14 +23,14 @@ fn the_examples_validate_and_every_invalid_file_is_refused() {
         assert_eq!(validate(&read(p.clone())), Ok(()), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 19);
+    assert_eq!(n, 20);
     let mut n = 0;
     for e in std::fs::read_dir(dir.join("schema/invalid")).unwrap() {
         let p = e.unwrap().path();
         assert!(validate(&read(p.clone())).is_err(), "{}", p.display());
         n += 1;
     }
-    assert_eq!(n, 59);
+    assert_eq!(n, 60);
 }
 
 #[test]

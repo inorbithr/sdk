@@ -126,6 +126,9 @@ pub(crate) async fn run(
 /// How much of a quiet run's error output is kept, from its end.
 const TAIL: usize = 2048;
 
+/// The longest line of error output [`run_quiet`] hands over; a longer one is dropped.
+const LINE: usize = 64 * 1024;
+
 /// What a quiet run left: its exit code and the end of what it wrote to standard error.
 pub(crate) struct Quiet {
     pub code: u8,
@@ -134,13 +137,17 @@ pub(crate) struct Quiet {
 
 /// Runs extension `name` with `args` like [`run`], but with no terminal: standard input is
 /// closed, standard output is dropped and the last [`TAIL`] bytes of standard error are
-/// returned, so the caller (init) prints its own lines.
+/// returned, so the caller (init) prints its own lines. Every complete line of standard
+/// error also goes to `on_line` as it is written (without its newline), so a caller can draw
+/// progress while the extension runs (`|_| {}` when it does not). A line longer than [`LINE`]
+/// bytes is dropped for `on_line`, never buffered without end.
 pub(crate) async fn run_quiet(
     global: &Global,
     env: &Env,
     store: &Store,
     name: &str,
     args: &[OsString],
+    mut on_line: impl FnMut(&str) + Send + 'static,
 ) -> Result<Quiet, Error> {
     let p = prepare(global, env, store, name)?;
     let mut c = tokio::process::Command::new(&p.program);
@@ -163,6 +170,8 @@ pub(crate) async fn run_quiet(
             vec![tokio::spawn(async move {
                 use tokio::io::AsyncReadExt as _;
                 let mut buf = [0_u8; 1024];
+                let mut line = Vec::<u8>::new();
+                let mut too_long = false;
                 while let Ok(n) = err.read(&mut buf).await {
                     if n == 0 {
                         break;
@@ -172,6 +181,24 @@ pub(crate) async fn run_quiet(
                         let over = k.len().saturating_sub(TAIL);
                         k.drain(..over);
                     }
+                    for &byte in &buf[..n] {
+                        if byte == b'\n' {
+                            if !too_long {
+                                on_line(&String::from_utf8_lossy(&line));
+                            }
+                            line.clear();
+                            too_long = false;
+                        } else if !too_long {
+                            line.push(byte);
+                            if line.len() > LINE {
+                                line.clear();
+                                too_long = true;
+                            }
+                        }
+                    }
+                }
+                if !too_long && !line.is_empty() {
+                    on_line(&String::from_utf8_lossy(&line));
                 }
             })]
         },

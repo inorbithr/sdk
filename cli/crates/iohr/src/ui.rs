@@ -10,11 +10,13 @@
 
 use std::fmt::Display;
 use std::io::{self, Write as _};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use cliclack::Theme as _;
 use console::Key;
 
-use crate::card::Look;
+use crate::card::{Look, nearest_256};
 use crate::error::Error;
 use crate::prompt;
 
@@ -159,6 +161,33 @@ impl Paint {
         self.apply(text, |s| s.yellow().bold())
     }
 
+    /// A block of a colour with its hex beside it (`show_hex`), for `iohr theme show`. Drawn
+    /// with 24-bit colour where the terminal has it and the nearest of the 256 otherwise; with
+    /// no colour, the hex alone, so a pipe and a screen reader get the value.
+    #[must_use]
+    pub(crate) fn swatch(
+        self,
+        rgb: (u8, u8, u8),
+        hex: &str,
+        show_hex: bool,
+        truecolor: bool,
+    ) -> String {
+        if !self.color {
+            return hex.to_owned();
+        }
+        let back = if truecolor {
+            format!("48;2;{};{};{}", rgb.0, rgb.1, rgb.2)
+        } else {
+            format!("48;5;{}", nearest_256(rgb))
+        };
+        let block = format!("\u{1b}[{back}m    \u{1b}[0m");
+        if show_hex {
+            format!("{block} {hex}")
+        } else {
+            block
+        }
+    }
+
     /// A status: a green dot for live, a dim ring for coming, red for anything wrong. With no
     /// colour it is the word alone, so a pipe and a screen reader get plain text.
     #[must_use]
@@ -269,10 +298,238 @@ impl Mark {
     }
 }
 
+/// How often a step that reports often (a crawl) is drawn: the display updates at most once a
+/// second, the spinner included.
+pub(crate) const REDRAW: Duration = Duration::from_secs(1);
+
 /// A running step: a spinner on a terminal. Plain, it is silent: the command's own plain
 /// report (the stable lines scripts read) says how each step went.
 pub(crate) struct Step {
-    bar: Option<cliclack::ProgressBar>,
+    bar: Option<Row>,
+    /// The bar has a length (it is no longer a spinner): [`Step::progress`] sets it once.
+    bounded: bool,
+    /// How often the row may be drawn (zero: whenever it changes, and the spinner turns every
+    /// 100 ms); one gate for the spinner and the bar that replaces it.
+    gate: Arc<Mutex<Gate>>,
+}
+
+/// Decides, once per draw, whether the row is drawn now: at most once per `every` (zero: always),
+/// the first draw and a forced one (the row's end) always. Time is passed in, so a test can
+/// feed it a clock.
+#[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
+struct Gate {
+    every: Duration,
+    last: Option<Instant>,
+    /// The next draw is the row's end and always goes through.
+    force: bool,
+    /// The row's state is being changed: the draws that change causes are held back, and the
+    /// next one (the spinner's, or the end's) shows the whole new state, never half of it.
+    hold: bool,
+    /// A draw is under way: its writes are all let through or all held back.
+    open: bool,
+    pass: bool,
+}
+
+impl Gate {
+    fn new(every: Duration) -> Self {
+        Self {
+            every,
+            last: None,
+            force: false,
+            hold: false,
+            open: false,
+            pass: false,
+        }
+    }
+
+    /// Whether the draw that is under way (or starts now) goes to the terminal.
+    fn admit(&mut self, now: Instant) -> bool {
+        if !self.open {
+            if self.hold && !self.force {
+                return false;
+            }
+            self.open = true;
+            let due = self
+                .last
+                .is_none_or(|last| now.saturating_duration_since(last) >= self.every);
+            self.pass = std::mem::take(&mut self.force) || self.every.is_zero() || due;
+            if self.pass {
+                self.last = Some(now);
+            }
+        }
+        self.pass
+    }
+
+    /// The draw that was under way is over.
+    fn end(&mut self) {
+        self.open = false;
+    }
+}
+
+/// The terminal a [`Row`] draws on: every write of one redraw (indicatif ends each with a
+/// flush) goes through or is held back as a whole, by the step's [`Gate`]. A held-back redraw
+/// is not lost: the row keeps its latest state and the next redraw that passes shows it.
+struct Paced<T> {
+    inner: T,
+    gate: Arc<Mutex<Gate>>,
+    now: fn() -> Instant,
+}
+
+impl<T> std::fmt::Debug for Paced<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Paced")
+    }
+}
+
+impl<T: indicatif::TermLike> Paced<T> {
+    fn through(&self, write: impl FnOnce(&T) -> io::Result<()>) -> io::Result<()> {
+        let pass = self.gate.lock().map_or(true, |mut g| g.admit((self.now)()));
+        if pass { write(&self.inner) } else { Ok(()) }
+    }
+}
+
+impl<T: indicatif::TermLike> indicatif::TermLike for Paced<T> {
+    fn width(&self) -> u16 {
+        self.inner.width()
+    }
+    fn height(&self) -> u16 {
+        self.inner.height()
+    }
+    fn move_cursor_up(&self, n: usize) -> io::Result<()> {
+        self.through(|t| t.move_cursor_up(n))
+    }
+    fn move_cursor_down(&self, n: usize) -> io::Result<()> {
+        self.through(|t| t.move_cursor_down(n))
+    }
+    fn move_cursor_right(&self, n: usize) -> io::Result<()> {
+        self.through(|t| t.move_cursor_right(n))
+    }
+    fn move_cursor_left(&self, n: usize) -> io::Result<()> {
+        self.through(|t| t.move_cursor_left(n))
+    }
+    fn write_line(&self, s: &str) -> io::Result<()> {
+        self.through(|t| t.write_line(s))
+    }
+    fn write_str(&self, s: &str) -> io::Result<()> {
+        self.through(|t| t.write_str(s))
+    }
+    fn clear_line(&self) -> io::Result<()> {
+        self.through(indicatif::TermLike::clear_line)
+    }
+    fn flush(&self) -> io::Result<()> {
+        let r = self.through(indicatif::TermLike::flush);
+        if let Ok(mut g) = self.gate.lock() {
+            g.end();
+        }
+        r
+    }
+}
+
+/// The spinner or bar of a step, drawn as `cliclack` draws it (same theme strings) but on a
+/// [`Paced`] terminal, because `cliclack`'s own bar turns its spinner every 100 ms and redraws
+/// on every change, with no way to slow either.
+struct Row {
+    bar: indicatif::ProgressBar,
+    gate: Arc<Mutex<Gate>>,
+    /// Paced rows use the short bar template and cut the message to the terminal's width, so a
+    /// held-back redraw never leaves the row at another height than the one on screen.
+    paced: bool,
+}
+
+impl Row {
+    fn new(len: Option<u64>, what: &str, gate: &Arc<Mutex<Gate>>) -> Self {
+        use cliclack::Theme as _;
+        let paced = gate.lock().is_ok_and(|g| !g.every.is_zero());
+        let term = Paced {
+            inner: console::Term::stderr(),
+            gate: Arc::clone(gate),
+            now: Instant::now,
+        };
+        let bar = indicatif::ProgressBar::with_draw_target(
+            len,
+            indicatif::ProgressDrawTarget::term_like(Box::new(term)),
+        );
+        let template = match (len, paced) {
+            (None, _) => Marks.default_spinner_template(),
+            (Some(_), false) => Marks.default_progress_template(),
+            (Some(_), true) => "{msg} {bar:20.magenta}".to_owned(),
+        };
+        bar.set_style(Self::style(&template));
+        let row = Self {
+            bar,
+            gate: Arc::clone(gate),
+            paced,
+        };
+        row.set_message(what);
+        // A paced row wakes often so the latest state shows soon after the gate opens, but the
+        // gate lets it draw once per `every`.
+        row.bar.enable_steady_tick(if paced {
+            Duration::from_millis(250)
+        } else {
+            Duration::from_millis(100)
+        });
+        row
+    }
+
+    /// Changes the row's state (all of it, or part) without drawing in between, and draws the
+    /// result at once when `last` says this is the row's final state.
+    fn update(&self, last: bool, change: impl FnOnce(&Self)) {
+        let hold = |on: bool, force: bool| {
+            if let Ok(mut g) = self.gate.lock() {
+                g.hold = on && !g.every.is_zero();
+                g.force |= force;
+            }
+        };
+        hold(true, false);
+        change(self);
+        hold(false, last);
+        if last {
+            self.bar.force_draw();
+        }
+    }
+
+    /// The theme's style for a template: the same marks and spinner as every other step.
+    fn style(template: &str) -> indicatif::ProgressStyle {
+        indicatif::ProgressStyle::with_template(
+            &Marks.format_progress_start(template, false, false),
+        )
+        .unwrap_or_else(|_| indicatif::ProgressStyle::default_spinner())
+        .tick_chars(&Marks.spinner_chars())
+        .progress_chars(&Marks.progress_chars())
+    }
+
+    fn set_message(&self, what: &str) {
+        if !self.paced {
+            self.bar.set_message(Marks.format_progress_message(what));
+            return;
+        }
+        // One line, whatever the message: a held-back redraw must never leave the row at
+        // another height than the one on screen. The bar takes what the message leaves free
+        // (up to 20 columns) and is left out when that is too little.
+        let width = usize::from(console::Term::stderr().size().1);
+        let room = width.saturating_sub(4).max(20);
+        let what = console::truncate_str(what, room, "\u{2026}").into_owned();
+        if self.bar.length().is_some() {
+            let free = room
+                .saturating_sub(console::measure_text_width(&what) + 1)
+                .min(20);
+            self.bar.set_style(Self::style(&if free >= 8 {
+                format!("{{msg}} {{bar:{free}.magenta}}")
+            } else {
+                "{msg}".to_owned()
+            }));
+        }
+        self.bar.set_message(Marks.format_progress_message(&what));
+    }
+
+    /// Ends the row and leaves nothing on screen; the clearing redraw always goes through.
+    fn clear(&self) {
+        if let Ok(mut g) = self.gate.lock() {
+            g.force = true;
+        }
+        self.bar.finish_and_clear();
+    }
 }
 
 /// What a person who said "no, stop" gets: the same error whether they pressed Esc or Ctrl-C
@@ -731,12 +988,26 @@ impl Ui {
 
     /// Starts a step. Plain: nothing until it ends.
     pub(crate) fn step(self, what: &str) -> Step {
+        self.step_every(what, Duration::ZERO)
+    }
+
+    /// [`Ui::step`] for work that reports often (a crawl): its row is drawn at most once per
+    /// `every`, the spinner included, showing the latest state each time, and its end always
+    /// draws.
+    pub(crate) fn step_every(self, what: &str, every: Duration) -> Step {
+        let gate = Arc::new(Mutex::new(Gate::new(every)));
         if !self.fancy {
-            return Step { bar: None };
+            return Step {
+                bar: None,
+                bounded: false,
+                gate,
+            };
         }
-        let bar = cliclack::spinner();
-        bar.start(what);
-        Step { bar: Some(bar) }
+        Step {
+            bar: Some(Row::new(None, what, &gate)),
+            bounded: false,
+            gate,
+        }
     }
 
     /// A menu. Entries that are not available are dimmed and re-asked when picked; `initial`
@@ -1111,7 +1382,35 @@ impl Step {
     /// Says what the running step is doing now, on its spinner.
     pub(crate) fn say(&self, what: &str) {
         if let Some(b) = &self.bar {
-            b.set_message(what);
+            b.update(false, |r| r.set_message(what));
+        }
+    }
+
+    /// Says how far the running step is, as `done` of `total` with `what` beside it. Until a
+    /// `total` is known the step stays a spinner that shows `what`; the first `total` swaps it
+    /// for a bar that fills (a later one, or a longer one, moves its end). Plain it is silent,
+    /// like the rest of a step: the command's own report says how it went.
+    pub(crate) fn progress(&mut self, done: u64, total: Option<u64>, what: &str) {
+        let Some(old) = &self.bar else {
+            return;
+        };
+        let Some(total) = total else {
+            if !self.bounded {
+                old.update(false, |r| r.set_message(what));
+            }
+            return;
+        };
+        if !self.bounded {
+            old.clear();
+            self.bar = Some(Row::new(Some(total), what, &self.gate));
+            self.bounded = true;
+        }
+        if let Some(row) = &self.bar {
+            row.update(done >= total, |r| {
+                r.bar.set_length(total);
+                r.bar.set_position(done.min(total));
+                r.set_message(what);
+            });
         }
     }
 
@@ -1155,12 +1454,137 @@ impl Step {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::io;
+    use std::time::{Duration, Instant};
 
-    use super::wrapped;
+    use super::{Ui, wrapped};
     use console::Key;
 
     use super::{Choice, Look, Marks, Paint, bar_lines, fancy_for, menu_rows, run_keyed};
     use cliclack::Theme;
+
+    thread_local! {
+        static CLOCK: (Instant, Cell<Duration>) = (Instant::now(), Cell::new(Duration::ZERO));
+    }
+
+    fn at(ms: u64) -> Instant {
+        CLOCK.with(|(base, off)| {
+            off.set(Duration::from_millis(ms));
+            *base + off.get()
+        })
+    }
+
+    fn clock() -> Instant {
+        CLOCK.with(|(base, off)| *base + off.get())
+    }
+
+    /// A terminal that keeps what was flushed to it: one entry per redraw that got through.
+    #[derive(Debug, Default, Clone)]
+    struct Rec(
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        std::sync::Arc<std::sync::Mutex<String>>,
+    );
+
+    impl indicatif::TermLike for Rec {
+        fn width(&self) -> u16 {
+            200
+        }
+        fn move_cursor_up(&self, _: usize) -> io::Result<()> {
+            Ok(())
+        }
+        fn move_cursor_down(&self, _: usize) -> io::Result<()> {
+            Ok(())
+        }
+        fn move_cursor_right(&self, _: usize) -> io::Result<()> {
+            Ok(())
+        }
+        fn move_cursor_left(&self, _: usize) -> io::Result<()> {
+            Ok(())
+        }
+        fn write_line(&self, s: &str) -> io::Result<()> {
+            self.1.lock().unwrap().push_str(s);
+            Ok(())
+        }
+        fn write_str(&self, s: &str) -> io::Result<()> {
+            self.1.lock().unwrap().push_str(s);
+            Ok(())
+        }
+        fn clear_line(&self) -> io::Result<()> {
+            Ok(())
+        }
+        fn flush(&self) -> io::Result<()> {
+            let drawn = std::mem::take(&mut *self.1.lock().unwrap());
+            self.0.lock().unwrap().push(drawn.trim().to_owned());
+            Ok(())
+        }
+    }
+
+    fn row_on(
+        every: Duration,
+    ) -> (
+        indicatif::ProgressBar,
+        Rec,
+        std::sync::Arc<std::sync::Mutex<super::Gate>>,
+    ) {
+        let rec = Rec::default();
+        let gate = std::sync::Arc::new(std::sync::Mutex::new(super::Gate::new(every)));
+        let term = super::Paced {
+            inner: rec.clone(),
+            gate: std::sync::Arc::clone(&gate),
+            now: clock,
+        };
+        let bar = indicatif::ProgressBar::with_draw_target(
+            Some(100),
+            indicatif::ProgressDrawTarget::term_like(Box::new(term)),
+        );
+        bar.set_style(indicatif::ProgressStyle::with_template("{msg}").unwrap());
+        (bar, rec, gate)
+    }
+
+    #[test]
+    fn a_paced_row_is_drawn_once_a_second_with_the_latest_state_and_its_end_always() {
+        // Every progress line redrew the row before: five lines inside one second, five draws.
+        at(0);
+        let (bar, rec, _) = row_on(Duration::ZERO);
+        for (i, ms) in [0, 250, 500, 750, 900].into_iter().enumerate() {
+            at(ms);
+            bar.set_message(format!("line {i}"));
+        }
+        assert_eq!(rec.0.lock().unwrap().len(), 5);
+
+        // Paced, the same five lines draw once; a line after a second draws the latest.
+        at(0);
+        let (bar, rec, gate) = row_on(super::REDRAW);
+        for (i, ms) in [0, 250, 500, 750, 900].into_iter().enumerate() {
+            at(ms);
+            bar.set_message(format!("line {i}"));
+        }
+        assert_eq!(
+            *rec.0.lock().unwrap(),
+            ["line 0"],
+            "one draw inside the second"
+        );
+        at(1000);
+        bar.set_message("line 5");
+        bar.set_message("line 6");
+        assert_eq!(
+            *rec.0.lock().unwrap(),
+            ["line 0", "line 5"],
+            "one more after it"
+        );
+
+        // The spinner's own tick obeys the same gate: a tick inside the second draws nothing.
+        at(1400);
+        bar.tick();
+        bar.set_message("line 7");
+        assert_eq!(rec.0.lock().unwrap().len(), 2);
+
+        // The row's end always draws, inside the second too, and it shows the latest state.
+        at(1500);
+        gate.lock().unwrap().force = true;
+        bar.set_message("line 8");
+        assert_eq!(rec.0.lock().unwrap().last().unwrap(), "line 8");
+        assert_eq!(rec.0.lock().unwrap().len(), 3);
+    }
 
     #[test]
     fn a_numbered_plan_wraps_under_its_own_text() {
@@ -1278,6 +1702,27 @@ mod tests {
         assert!(!fancy_for(true, false, None, Some("dumb")));
         assert!(!fancy_for(true, false, None, Some("")));
         assert!(!fancy_for(true, false, None, None));
+    }
+
+    #[test]
+    fn a_plain_step_never_draws_a_bar_whatever_the_agent_reports() {
+        // Plain is every case `fancy_for` refuses: no terminal, --json, NO_COLOR, a dumb TERM.
+        for (tty, json, no_color, term) in [
+            (false, false, None, Some("xterm")),
+            (true, true, None, Some("xterm")),
+            (true, false, Some("1"), Some("xterm")),
+            (true, false, None, Some("dumb")),
+        ] {
+            let ui = Ui {
+                fancy: fancy_for(tty, json, no_color, term),
+            };
+            let mut step = ui.step("Crawling");
+            step.progress(1, None, "1 page");
+            step.progress(3, Some(6), "3 of 6");
+            step.progress(6, Some(6), "6 of 6");
+            assert!(step.bar.is_none(), "{tty} {json} {no_color:?} {term:?}");
+            assert!(!step.bounded, "{tty} {json} {no_color:?} {term:?}");
+        }
     }
 
     #[test]
