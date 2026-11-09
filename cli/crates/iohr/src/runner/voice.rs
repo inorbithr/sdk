@@ -16,7 +16,10 @@
 //! started the same way takes instead of starting its own. A lease that asks for another
 //! model or other instructions starts its own, as before, and the spare waits for the next.
 //! The spare counts toward [`MAX_LEASES`], dies with the listener, and is replaced when it
-//! ends or waits past [`SPARE_TTL`], so a stale sign-in never answers a call.
+//! ends or waits past [`SPARE_TTL`], so a stale sign-in never answers a call. Each spare runs
+//! a warm-up turn, so one is kept only within [`SPARE_WINDOW`] of the last lease taken or
+//! closed: a runner nobody called for that long lets its spare age out and starts the next
+//! only when a lease comes again (that lease starts cold).
 //!
 //! Nothing a person said or Claude wrote is logged or noted: only counts and labels.
 
@@ -51,8 +54,12 @@ const MAX_LEASES: usize = 4;
 /// How long a spare waits for a call before another replaces it, so the session that
 /// answers a call never started on a sign-in older than this.
 const SPARE_TTL: Duration = Duration::from_mins(10);
-/// After a spare that would not start, or ended before its warm-up was answered, the wait
-/// before the next: a runner that cannot start Claude does not start it again and again.
+/// A spare is started (or replaced) only this long after the last lease was taken or
+/// closed: without calls, a runner stops paying a warm-up turn every [`SPARE_TTL`].
+const SPARE_WINDOW: Duration = Duration::from_mins(30);
+/// After a spare that would not start or ended on its own, the wait before the next: a
+/// runner whose Claude cannot start, or exits once it has answered (signed out), does not
+/// start it again and again.
 const SPARE_RETRY: Duration = Duration::from_secs(30);
 /// How often the listener looks at its spare while no frame comes.
 const TEND: Duration = Duration::from_secs(30);
@@ -529,7 +536,12 @@ struct Leases<'e> {
     want: Option<Vec<String>>,
     /// No spare starts before this.
     spare_after: Option<Instant>,
+    /// When a lease was last taken or closed; None before the first.
+    last_lease: Option<Instant>,
     spare_ttl: Duration,
+    spare_window: Duration,
+    /// How often the listener tends the spare while no frame comes.
+    tend_every: Duration,
 }
 
 impl<'e> Leases<'e> {
@@ -541,7 +553,10 @@ impl<'e> Leases<'e> {
             spare: None,
             want: None,
             spare_after: None,
+            last_lease: None,
             spare_ttl: SPARE_TTL,
+            spare_window: SPARE_WINDOW,
+            tend_every: TEND,
         }
     }
 
@@ -559,6 +574,7 @@ impl<'e> Leases<'e> {
             } => self.turn(lease_id, seq, &text, note).await,
             Frame::Close { lease_id } => {
                 if self.sessions.remove(&lease_id).is_some() {
+                    self.last_lease = Some(Instant::now());
                     note(&format!("voice: lease {lease_id} closed"));
                 }
             }
@@ -596,6 +612,7 @@ impl<'e> Leases<'e> {
             Err(why) => note(&format!("voice: lease {lease_id} not opened ({why})")),
         }
         self.want = Some(args);
+        self.last_lease = Some(Instant::now());
     }
 
     /// A session on `args` for `lease_id`: the spare when it was started on the same
@@ -622,33 +639,42 @@ impl<'e> Leases<'e> {
         Ok((s, false))
     }
 
-    /// Stops a spare that ended or waited too long. One that ended before its warm-up
-    /// was answered never started well, so the next waits [`SPARE_RETRY`].
+    /// Whether a spare is kept now: a lease was taken or closed within the window.
+    fn calling(&self) -> bool {
+        self.last_lease
+            .is_some_and(|t| t.elapsed() < self.spare_window)
+    }
+
+    /// Stops a spare that ended or waited too long. A spare ends only on its own (it
+    /// would not start, or it exited after its warm-up, as a signed-out Claude does), so
+    /// the next waits [`SPARE_RETRY`].
     fn check_spare(&mut self, note: &impl Fn(&str)) {
         let Some(s) = self.spare.as_mut() else { return };
         if s.ended() {
-            let warmed = s.turns.answered();
-            note(&format!(
-                "voice: the spare session ended ({}), starting another",
-                if warmed {
-                    "after its warm-up"
-                } else {
-                    "before its warm-up"
-                }
-            ));
-            if !warmed {
-                self.spare_after = Some(Instant::now() + SPARE_RETRY);
-            }
+            let when = if s.turns.answered() {
+                "after its warm-up"
+            } else {
+                "before its warm-up"
+            };
+            let next = if self.calling() {
+                format!("another in {} s at the soonest", SPARE_RETRY.as_secs())
+            } else {
+                "none until the next lease".to_owned()
+            };
+            note(&format!("voice: the spare session ended ({when}), {next}"));
+            self.spare_after = Some(Instant::now() + SPARE_RETRY);
             self.spare = None;
         } else if s.born.elapsed() >= self.spare_ttl {
             self.spare = None;
         }
     }
 
-    /// Keeps one spare ready while there is room for it and a lease to model it on.
+    /// Keeps one spare ready while calls come, there is room for it and a lease to model
+    /// it on.
     async fn tend(&mut self, note: &impl Fn(&str)) {
         self.check_spare(note);
         if self.spare.is_some()
+            || !self.calling()
             || self.sessions.len() >= MAX_LEASES
             || self.spare_after.is_some_and(|t| Instant::now() < t)
         {
@@ -767,7 +793,7 @@ async fn listen(
         match svc.voice_events(runner_id).await {
             Ok(mut events) => {
                 // Listening: a spare is kept from here until the stream ends.
-                let mut tend = tokio::time::interval(TEND);
+                let mut tend = tokio::time::interval(leases.tend_every);
                 tend.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 loop {
                     let next = tokio::select! {
@@ -972,8 +998,12 @@ mod tests {
     }
 
     fn turn(seq: u64, text: &str) -> Frame {
+        turn_on("vl_1", seq, text)
+    }
+
+    fn turn_on(lease_id: &str, seq: u64, text: &str) -> Frame {
         Frame::Turn {
-            lease_id: "vl_1".into(),
+            lease_id: lease_id.into(),
             seq,
             text: text.into(),
         }
@@ -1034,14 +1064,7 @@ mod tests {
         assert!(env.contains("MAX_THINKING_TOKENS=0"));
         let pwd = std::fs::read_to_string(dir.path().join("pwd.txt")).unwrap();
         assert!(pwd.trim_end().ends_with("/voice"), "{pwd}");
-        leases
-            .on(
-                Frame::Close {
-                    lease_id: "vl_1".into(),
-                },
-                &note,
-            )
-            .await;
+        leases.on(close("vl_1"), &note).await;
         assert!(leases.sessions.is_empty());
         // Notes name the lease, never what was said or answered.
         let notes = notes.into_inner().unwrap().join("\n");
@@ -1114,12 +1137,7 @@ mod tests {
         // The next call is answered by that spare: nothing was started for it.
         leases.on(open_as("vl_2", "haiku"), &note).await;
         assert_eq!(pid(&leases.sessions["vl_2"]), spare);
-        let hi = Frame::Turn {
-            lease_id: "vl_2".into(),
-            seq: 1,
-            text: "hi".into(),
-        };
-        leases.on(hi, &note).await;
+        leases.on(turn_on("vl_2", 1, "hi"), &note).await;
         let got = until_done_on(&mut rx, "vl_2", 1).await;
         let text: String = got.iter().map(|p| p.text.as_str()).collect();
         assert_eq!(text, "Hello there.", "{got:?}");
@@ -1187,7 +1205,24 @@ mod tests {
             .status()
             .unwrap();
         assert!(killed.success());
-        // The listener's next look (a heartbeat here) replaces it at once.
+        // The listener's next look (a heartbeat here) sees it ended and waits before the
+        // next: a Claude that exits once it has answered is not started on every frame.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while leases.spare.is_some() {
+                leases.on(Frame::Other, &note).await;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for _ in 0..5 {
+            leases.on(Frame::Other, &note).await;
+        }
+        assert!(leases.spare.is_none());
+        assert!(leases.spare_after.is_some_and(|t| t > Instant::now()));
+        started(dir.path(), 2).await;
+        // Once the wait is over, the next look replaces it.
+        leases.spare_after = None;
         let fresh = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 leases.on(Frame::Other, &note).await;
@@ -1202,7 +1237,7 @@ mod tests {
         assert!(started(dir.path(), 3).await.contains(&fresh));
         assert!(
             notes.lock().unwrap().iter().any(
-                |n| n == "voice: the spare session ended (after its warm-up), starting another"
+                |n| n == "voice: the spare session ended (after its warm-up), another in 30 s at the soonest"
             ),
             "{:?}",
             notes.lock().unwrap()
@@ -1262,26 +1297,198 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_spare_stops_with_the_listener() {
+    async fn no_spare_is_started_once_no_lease_came_for_the_window() {
         let dir = tempfile::tempdir().unwrap();
         let exec = counted(dir.path());
         let (tx, _rx) = mpsc::channel(QUEUE);
         let mut leases = Leases::new(&exec, tx);
-        leases.on(open_frame(), &|_: &str| {}).await;
+        let notes = Mutex::new(Vec::<String>::new());
+        let note = |l: &str| notes.lock().unwrap().push(l.to_owned());
+        leases.on(open_frame(), &note).await;
         started(dir.path(), 2).await;
-        leases.clear();
-        assert!(leases.sessions.is_empty() && leases.spare.is_none());
-        // When the stream opens again, the spare comes back on the same arguments.
-        leases.tend(&|_: &str| {}).await;
+        leases.on(close("vl_1"), &note).await;
+        // No lease for longer than the window: the spare ages out and is not replaced, on a
+        // frame or on the listener's tick.
+        leases.spare_window = Duration::ZERO;
+        leases.spare_ttl = Duration::ZERO;
+        leases.on(Frame::Other, &note).await;
+        leases.tend(&note).await;
+        assert!(leases.spare.is_none());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        started(dir.path(), 2).await;
+        // The next lease starts cold, and the spare is kept again from there.
+        leases.spare_window = SPARE_WINDOW;
+        leases.spare_ttl = SPARE_TTL;
+        leases.on(open_as("vl_2", ""), &note).await;
+        let three = started(dir.path(), 4).await;
         assert!(leases.spare.is_some());
-        started(dir.path(), 3).await;
+        assert!(three.contains(&spare_pid(&leases)));
+        assert!(
+            notes
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|n| n == "voice: lease vl_2 open"),
+            "a cold start: {:?}",
+            notes.lock().unwrap()
+        );
     }
 
-    fn api(server: &MockServer) -> Api {
+    /// Counts its starts like [`COUNTED`] and leaves a child in its group (as `claude`
+    /// leaves its tools), recording `pid child`, so a test sees whether the group died.
+    fn grouped(dir: &std::path::Path) -> ClaudeExec {
+        fake_claude(
+            dir,
+            &format!(
+                "sleep 60 </dev/null >/dev/null 2>&1 &\necho \"$$ $!\" >> \"$d/kids.txt\"\n{COUNTED}{ANSWER}done"
+            ),
+        )
+    }
+
+    /// Every pid and child pid `grouped` recorded, once `n` sessions recorded theirs.
+    async fn kids(dir: &std::path::Path, n: usize) -> Vec<i32> {
+        let read = || std::fs::read_to_string(dir.join("kids.txt")).unwrap_or_default();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while read().lines().count() < n {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        read()
+            .split_whitespace()
+            .map(|p| p.parse().unwrap())
+            .collect()
+    }
+
+    /// A lease stream on loopback that sends `frames`, then stays open until `end` is sent
+    /// (or dropped), as the coordinator's does between frames.
+    async fn held_stream(frames: &[Value]) -> (String, tokio::sync::oneshot::Sender<()>) {
+        use std::fmt::Write as _;
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let uri = format!("http://{}", listener.local_addr().unwrap());
+        let (end, ended) = tokio::sync::oneshot::channel::<()>();
+        let mut body = String::new();
+        for f in frames {
+            writeln!(body, "data: {f}\n").unwrap();
+        }
+        tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+            let mut buf = [0_u8; 1024];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = conn.read(&mut buf).await.unwrap();
+                assert!(n > 0);
+                head.extend_from_slice(&buf[..n]);
+            }
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}"
+            );
+            conn.write_all(reply.as_bytes()).await.unwrap();
+            conn.flush().await.unwrap();
+            let _ = ended.await;
+        });
+        (uri, end)
+    }
+
+    fn api_at(uri: &str) -> Api {
         let person = Arc::new(AnyCredential::Token(StaticToken::new(Redacted::new(
             "person-token".to_owned(),
         ))));
-        Api::new(&server.uri(), person, false).unwrap()
+        Api::new(uri, person, false).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_spare_stops_when_the_stream_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = grouped(dir.path());
+        let (uri, end) =
+            held_stream(&[json!({"open": {"lease_id": "vl_1", "instructions": "be Io"}})]).await;
+        let api = api_at(&uri);
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let (stop, stopped) = watch::channel(false);
+        // A long wait before the stream is opened again: what is stopped below, the
+        // stream's end stopped, not the listener's return.
+        let pace = Pace {
+            backoff: Duration::from_secs(60),
+            rounds: None,
+        };
+        let check = async {
+            // The lease's session and its spare, each with a child in its group.
+            let pids = kids(dir.path(), 2).await;
+            assert_eq!(pids.len(), 4, "{pids:?}");
+            drop(end);
+            let mut alive = Vec::new();
+            for p in pids {
+                if !crate::runner::exec::process_gone(p).await {
+                    alive.push(p);
+                }
+            }
+            stop.send(true).unwrap();
+            alive
+        };
+        let (alive, ()) = tokio::time::timeout(Duration::from_secs(30), async {
+            tokio::join!(
+                check,
+                serve(&svc, &exec, "run_1", stopped, pace, &|_: &str| {})
+            )
+        })
+        .await
+        .unwrap();
+        assert!(
+            alive.is_empty(),
+            "still running after the stream ended: {alive:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_aged_spare_is_stopped_with_its_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = grouped(dir.path());
+        // A lease opens and closes, which leaves the spare; the stream stays open.
+        let (uri, _end) = held_stream(&[
+            json!({"open": {"lease_id": "vl_1", "instructions": "be Io"}}),
+            json!({"close": {"lease_id": "vl_1"}}),
+        ])
+        .await;
+        let api = api_at(&uri);
+        let svc = HttpService::new(&api, "acc_1".into(), None);
+        let (stop, stopped) = watch::channel(false);
+        let (tx, _rx) = mpsc::channel(QUEUE);
+        let mut leases = Leases::new(&exec, tx);
+        leases.spare_ttl = Duration::from_secs(2);
+        leases.tend_every = Duration::from_millis(100);
+        let check = async {
+            // The spare ages on the listener's tick and the next replaces it: three started.
+            started(dir.path(), 3).await;
+            stop.send(true).unwrap();
+        };
+        tokio::time::timeout(Duration::from_secs(30), async {
+            tokio::join!(
+                check,
+                listen(
+                    &svc,
+                    leases,
+                    "run_1",
+                    stopped,
+                    Pace::default(),
+                    &|_: &str| {}
+                )
+            )
+        })
+        .await
+        .unwrap();
+        // Everything the aged spare left in its group was stopped with it, as were the
+        // sessions the listener dropped on its way out.
+        for p in kids(dir.path(), 3).await {
+            assert!(crate::runner::exec::process_gone(p).await, "{p} still runs");
+        }
+    }
+
+    fn api(server: &MockServer) -> Api {
+        api_at(&server.uri())
     }
 
     #[tokio::test]
