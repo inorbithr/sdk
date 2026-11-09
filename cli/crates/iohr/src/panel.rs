@@ -566,19 +566,22 @@ async fn live(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
             initial,
             command: args.command,
             host_gone: None,
+            project: None,
         },
     )
     .await
     .map(|_| ())
 }
 
-/// Bare `iohr`: the person's shell under the panel, in the session the caller joined. Answers
-/// `true` when the session host stopped while the shell was open (`iohr stop`).
+/// Bare `iohr`: the person's shell under the panel, in the session the caller joined for
+/// `project`. Answers `true` when the session host stopped while the shell was open (`iohr
+/// stop`); running `iohr` again then joins a host again, from here, for as long as the panel is up.
 #[cfg(unix)]
 pub(crate) async fn session_shell(
     g: &Global,
     env: Env,
     host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
+    project: std::path::PathBuf,
 ) -> Result<bool, Error> {
     proxy::run(
         g,
@@ -588,6 +591,7 @@ pub(crate) async fn session_shell(
             initial: model::View::Rest,
             command: Vec::new(),
             host_gone,
+            project: Some(project),
         },
     )
     .await

@@ -311,7 +311,8 @@ The first rule that applies wins:
 1. `config_file` in code (`off` reads no file);
 2. `INORBIT_CONFIG_FILE` (`off` reads no file);
 3. `$IOHR_CONFIG_DIR/config.toml`, the command line's own override;
-4. the command line's default directory (its `etcetera` native strategy, `cli/README.md`):
+4. the command line's default directory (its `etcetera` native strategy,
+   `cli/docs/files-and-dependencies.md`):
 
 | OS | File |
 |---|---|
@@ -356,6 +357,8 @@ max_retries = 4
 [runner]                            # iohr runner, every profile (section 4.3)
 capacity = 4
 kinds = ["coordinate", "build"]
+workspace_keep_days = 14
+workspace_max_gb = 200
 
 [profiles.ci.runner]                # this profile's runner, over [runner]
 capacity = 8
@@ -431,6 +434,11 @@ profile's keys win), and its flags win over both. `iohr upgrade` reads
 | `upgrade_sign_identity` | `auto`, a code-signing identity, or `-` | not set (off) | `run` and `iohr upgrade`, macOS only: sign each new `iohr` with this identity before it is installed (below); `IOHR_SIGN_IDENTITY` wins over it |
 | `user_units` | user service unit names (`<name>.service`) | not set | `run`: the only units an approved `systemd.user-restart` may restart; unset or empty, every one is refused before it starts |
 | `core_checkout` | an absolute path to a core checkout (it holds `mise.toml`) | not set | `run`: where an approved `build.sweep-targets` runs `mise run target:sweep` or `target:guard`, and where an approved `agent.install-checks` reads core's check files with `git` and `disk.prune` with the target `host` runs `mise run host:prune`; unset, every sweep and install is refused before it starts |
+| `claude_auth` | `api`, `plan` or `any` | `api` | `register` and `run`: how `claude` may sign in for a turn: `api` takes only an Anthropic API key (`iohr runner api-key set`); `plan` takes only your own Claude plan, for personal use only (below), and leaves a stored key unused; `any` allows either. A server policy can narrow it, never widen it |
+| `codex_auth` | `api`, `plan` or `any` | `any` | `run`: the same for Codex turns |
+| `allow_host_git_credentials` | true or false | false | `run`: a job whose lease brings no GitHub token may use this machine's own `gh` sign-in to fetch and push; false, such a job fails before its checkout, saying why |
+| `workspace_keep_days` | 1 to 3650 | 14 | `run` and `prune`: a job checkout, repository mirror or build directory nothing has used for this many days is removed (below) |
+| `workspace_max_gb` | 1 or more (GB, 10^9 bytes) | not set (no cap) | `run` and `prune`: while the checkouts, mirrors and build directories take more than this, the oldest unused go first |
 
 With neither `kube_context` nor `kubeconfig` set, the runner refuses every approved Kubernetes action. An approved action whose tool this runner lacks (no cluster for a Kubernetes action, no `docker`, `gh`, `mise`, `systemctl`, `git`, `df` or `helm` on its `PATH`, no `~/.inorbit/roll/remote-roll.sh` for `roll.task`, no `core_checkout` for `build.sweep-targets`, `agent.install-checks` or `disk.prune` with the target `host`, no cluster for `helm.runner-scale`, a system that is not Linux for `disk.prune`, no `~/.config/iohr-agent/checks.toml` or an agent unit outside `user_units` for `agent.install-checks`) is refused before it is reported started, as `not_allowed_here`, so the ask shows why and nothing ran.
 
@@ -440,6 +448,35 @@ making a second one. When the key matches more than one runner (an older `iohr` 
 register twice), `run` and `gate-report` refuse to guess and list the ids: pin one with `id` in
 the profile's runner table (or `--runner <id>`, or `IOHR_RUNNER_ID`), then
 revoke the others. `register` prints the `id = "rnr_..."` line to add.
+
+#### How `claude` signs in
+
+A runner's `claude` turns run on an Anthropic API key, the path for organisations and
+teams. `iohr runner api-key set` stores the key in the profile's credential store (the
+OS keychain, or the owner-only file with `--insecure-storage`), keyed by account: it
+reads the key from a prompt with no echo, `--stdin` or `--file PATH`, never from an
+argument, and never prints it. `iohr runner api-key remove` deletes it. The runner reads
+the key when it starts (restart it after a change) and hands it only to the `claude`
+process it starts, as `ANTHROPIC_API_KEY` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
+beside it, so the tools `claude` runs do not inherit it. The key never reaches a log,
+the coordinator, the config file or another child. `claude` sends its requests to
+Anthropic directly; InOrbit does not proxy them.
+
+Running on your own Claude plan instead is personal use only and off by default. It
+takes both `claude_auth = "any"` or `"plan"` in the runner table (only the local file turns it on;
+the server never does) and the notice accepted on this machine:
+`iohr runner personal-use` shows it, `--accept` accepts it and `--withdraw` takes the
+acceptance back. The acceptance is stored in `runner/personal-use.json` under the
+config directory, with the notice's version and the date only, and holds for 365 days
+or until the notice changes. In this mode the runner takes one turn at a time, only work
+you assigned yourself, and says so when it starts. Under `api`, a turn on your own
+plan is refused with a message that names `iohr runner api-key set`; under `plan`, a turn
+on an API key is refused with one that names `claude`, then `/login`.
+
+The coordinator's lease can carry a policy per provider as well; a turn runs only on a
+sign-in both that and the runner's own setting allow, and a value the runner does not
+know counts as `api`. `claude_auth` and `codex_auth` are read again on SIGHUP; the stored key is
+not.
 
 `iohr runner run` sends `capacity`, its version and `kinds` on every heartbeat, so the
 coordinator offers that many slots within one beat, without registering again. On
@@ -453,6 +490,49 @@ the kinds it declares until the volume has room again (`none` when nothing is le
 the coordinator offers it nothing new). `iohr runner config show [--json]` prints each
 value in effect, where it came from and the build volume's free space, without signing
 in.
+
+A job's GitHub access comes from its lease: the token the coordinator sends for the
+account's GitHub App installation. When a lease brings none, the runner uses this
+machine's own `gh` sign-in only with `allow_host_git_credentials = true`; otherwise the
+job fails before anything is fetched, and the reason names the setting and the GitHub
+App. Turn it on only on a machine whose `gh` account may push to every repository the
+runner's account sends it.
+
+The runner keeps its job checkouts under `runner/coordinate/checkouts/` in the config
+directory, one bare mirror per repository under `runner/mirrors/` and one shared build
+directory per repository under `runner/target/`. While it holds no lease, at most once an
+hour and never in its first 5 minutes, `iohr runner run` removes what nothing has used
+for `workspace_keep_days`, and with `workspace_max_gb` set it removes the oldest unused
+first until the total is under the cap. A checkout a live lease holds is never removed:
+the runner holds an operating-system lock on it from before the checkout is made until
+the lease's work has ended, and the removal takes that lock first. A mirror goes only
+when no checkout is left on it, and nothing used in the last hour goes, even over the
+cap. `iohr runner prune` does the same at once, without signing in; `--dry-run` lists
+what it would remove (kind, path, days idle, size and why) and removes nothing, and
+`--json` prints the same as data.
+
+`iohr runner service install` starts the runner when you sign in to the machine and
+starts it again when it stops, with no `sudo`. On macOS it writes the user agent
+`~/Library/LaunchAgents/hr.inorbit.runner.plist` (label `hr.inorbit.runner`, or
+`hr.inorbit.runner-<profile>` with `--profile`; log in
+`~/Library/Logs/InOrbit/runner.log`) and loads it with `launchctl bootstrap gui/<uid>`.
+On Linux it writes `~/.config/systemd/user/iohr-runner.service` (or
+`iohr-runner-<profile>.service`; `$XDG_CONFIG_HOME` is used when set), then runs
+`systemctl --user daemon-reload`, `enable` and `restart`; `loginctl enable-linger` keeps
+it running after you sign out. The service runs this `iohr` by its full path, with
+`HOME`, the current `PATH` and `IOHR_CONFIG_DIR` when set, `KeepAlive` or
+`Restart=always`, and 10 seconds between restarts. An existing file that differs is
+replaced only with `--force`. Each step is printed as it runs; `--dry-run` prints the
+steps and the file and changes nothing. Other systems are refused with exit code 1.
+
+`iohr runner service uninstall` stops and removes that service. With `--purge` it also
+removes this machine's runner key and approvals run key for the account from the
+credential store, the account's approvals state, and, when no other runner service is
+installed for this user and no lease holds a checkout, the shared checkouts, mirrors,
+build directories and `runner/last-upgrade`; otherwise nothing shared is removed and it
+says why. `--purge` needs a sign-in to know the account (`--account` picks one). The
+runner stays registered with the coordinator under the same name, and this machine no
+longer holds its key.
 
 `iohr runner run` keeps itself on the latest released `iohr`. About a minute after it
 starts, and then every `upgrade_interval_minutes` plus up to 10 percent of jitter, it asks
@@ -510,7 +590,7 @@ upgraded by `brew` and keeps the signature it ships with. Other systems ignore t
 `iohr project init` (alias `create`) reads `[project]`; its `--template` flag wins over it.
 The coordinated template, the default, also makes the project's Planner plan; `--plan-id PLAN`
 uses one you have and `--no-plan` skips the step (signed out it is skipped on its own, with
-exit code 0; `cli/README.md`, "A project of your own").
+exit code 0; `cli/docs/projects.md`, "The Planner plan").
 The SDK does not read it, and `iohr` never writes it: a person edits it.
 
 | Key | Values | Default | Read by |

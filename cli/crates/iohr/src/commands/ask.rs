@@ -155,6 +155,10 @@ pub(crate) async fn run(g: &Global, env: &Env, mut args: AskArgs, out: Out) -> R
     result
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one ask from its flags to the agent's start, in order"
+)]
 async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Error> {
     if args.menu {
         return menu(g, &args);
@@ -192,7 +196,8 @@ async fn run_io(g: &Global, env: &Env, args: AskArgs, out: Out) -> Result<(), Er
         None,
         role_text.as_deref(),
         &question,
-    );
+    )
+    .map_err(Error::Usage)?;
     if args.dry_run {
         dry_run(via, agent, bin.as_deref(), &command_line, role_json, out);
         return Ok(());
@@ -599,6 +604,7 @@ fn context_of(
             prior: h.prior_question.clone().zip(h.prior_answer.clone()),
             refresh: false,
             role: String::new(),
+            sources: String::new(),
             io_md,
         };
     Ok((ctx, root))
@@ -699,6 +705,11 @@ async fn headless(
         bin, agent, model, ..
     } = *chosen;
     let (mut ctx, root) = context_of(h, g)?;
+    // The project's local site knowledge base (PRD 0192): the best chunks for the question,
+    // with their sources. Nothing indexed, nothing added.
+    if let Some(r) = root.as_deref() {
+        ctx.sources = crate::kb::sources_block(&crate::kb::sources(r, question, 5));
+    }
     if let Some(r) = chosen.role {
         ctx.role = r.system_text();
     }

@@ -44,7 +44,9 @@ use crate::card::Look;
 use crate::cli::Global;
 use crate::commands::asks::{self, PanelAsk, PanelAuto};
 use crate::commands::coordinator;
+use crate::commands::session::{Joined, join_watched};
 use crate::error::Error;
+use crate::session::link;
 use crate::{Env, ui};
 
 /// How often the asks are read again while the panel runs.
@@ -81,6 +83,11 @@ pub(super) struct Config {
     /// Answers when the session host this shell joined has stopped (`iohr stop`): the panel
     /// closes and the shell goes on. `None` when there is no host.
     pub(super) host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
+    /// The folder whose session host this panel was opened for: running `iohr` again after a
+    /// stop joins (starting it when none runs) that host again, from here, because this
+    /// process outlives the re-run and the host stops when its last session leaves. `None`
+    /// when the panel has no session (`iohr panel`).
+    pub(super) project: Option<std::path::PathBuf>,
 }
 
 fn command_or_shell(command: &[String]) -> Vec<String> {
@@ -608,6 +615,13 @@ struct Session {
     host_gone: Option<Fetch<()>>,
     /// The host stopped while the panel was open.
     host_stopped: bool,
+    /// See [`Config::project`].
+    project: Option<std::path::PathBuf>,
+    /// The session this process rejoined with after a stop: the host counts it until it is
+    /// dropped, which is when the panel ends.
+    held: Option<link::Session>,
+    /// A rejoin in flight (starting a host takes seconds).
+    rejoin_fetch: Option<Fetch<Joined>>,
 }
 
 impl Session {
@@ -892,6 +906,47 @@ impl Session {
         self.redraw();
     }
 
+    /// One chunk of the shell's output: written to the terminal, and when it brought a stopped
+    /// panel back, a host is joined again.
+    fn shell_wrote(&mut self, bytes: &[u8]) {
+        let was_stopped = self.proxy.stopped;
+        let out = self.proxy.shell_output(bytes);
+        self.emit(&out);
+        if was_stopped && !self.proxy.stopped {
+            self.resumed();
+        }
+    }
+
+    /// The shell ran `iohr` again in a stopped panel and the panel is back. With no host
+    /// joined (`iohr stop` ended it) one is joined again here, starting it when none runs:
+    /// this process lives as long as the panel, the re-run does not, and the host stops when
+    /// its last session leaves.
+    fn resumed(&mut self) {
+        if self.host_gone.is_some() || self.rejoin_fetch.is_some() {
+            return;
+        }
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        let g = self.g.clone();
+        self.rejoin_fetch = Some(Box::pin(async move { join_watched(&g, &project).await }));
+    }
+
+    /// A rejoin ended: the new session and its watcher replace the stopped host's, or the same
+    /// note `iohr` gives when no host can start is written into the shell's output.
+    fn rejoined(&mut self, joined: Joined) {
+        if let Some(note) = joined.note {
+            let out = self
+                .proxy
+                .child_output(format!("\r\n{note}\r\n").as_bytes());
+            self.emit(&out);
+            return;
+        }
+        self.held = joined.session;
+        self.host_gone = joined.gone.map(host_closed);
+        self.host_stopped = false;
+    }
+
     /// The session host stopped (`iohr stop`): the panel closes, the shell goes on.
     fn host_ended(&mut self) {
         self.host_stopped = true;
@@ -1096,6 +1151,9 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         read_fetch: None,
         host_gone: config.host_gone.take().map(host_closed),
         host_stopped: false,
+        project: config.project.take(),
+        held: None,
+        rejoin_fetch: None,
     };
     session.redraw();
     session.refresh();
@@ -1111,10 +1169,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
     loop {
         tokio::select! {
             chunk = from_child.recv() => match chunk {
-                Some(bytes) => {
-                    let out = session.proxy.shell_output(&bytes);
-                    session.emit(&out);
-                }
+                Some(bytes) => session.shell_wrote(&bytes),
                 None => break,
             },
             bytes = from_user.recv(), if user_open => match bytes {
@@ -1141,6 +1196,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
             result = poll(&mut session.act_fetch) => session.act_done(result),
             result = poll(&mut session.read_fetch) => session.read_done(result),
             () = poll(&mut session.host_gone) => session.host_ended(),
+            joined = poll(&mut session.rejoin_fetch) => session.rejoined(joined),
         }
     }
 
