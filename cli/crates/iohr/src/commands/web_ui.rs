@@ -12,14 +12,27 @@
 //! call one thing. A running `serve` records its address in the data folder
 //! (`ui/serving.json`, 0600) for `iohr ui open`, and removes it when it stops.
 //!
-//! The one API route, `GET /api/extensions`, lists the installed extensions that serve
-//! a panel (`ext::install::Store::panels`, the store `iohr ext install` writes). It
-//! reads the lock and records only: nothing is started from here.
+//! `GET /api/extensions` lists the installed extensions that serve a panel
+//! (`ext::install::Store::panels`, the store `iohr ext install` writes), with the port of
+//! each one this serve has started. `POST /api/extensions/<name>/start` and `.../stop`
+//! start and stop one (RFC 0217, question 3) through `ext::run::start_panel`, the one
+//! launch path `iohr ext run` uses, with its full trust check. Only the UI's own page can
+//! call them: `Sec-Fetch-Site: same-origin`, an `Origin` that is exactly this listener's,
+//! and the per-serve token the page carries in `<meta name="iohr-token">` (sent in the
+//! `x-iohr-token` header, compared in constant time), with no body and nothing else from
+//! the client: the name must equal an installed panel's and builds no path. One instance
+//! per extension; a panel that names the UI's port or another panel's is stopped. Every
+//! page answer allows framing exactly the ports this serve started (`frame-src`), and the
+//! UI itself is never framed. When the serve stops, every panel it started is stopped
+//! (SIGTERM to its process group, SIGKILL after 5 s).
 
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::io::{self, Read as _};
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use iohr_auth::loopback::{MAX_HEAD, READ_WINDOW, bind_loopback, read_head};
@@ -28,11 +41,13 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
+use crate::Env;
 use crate::cli::{Global, UiArgs, UiCommand, UiPackage, UiServe};
 use crate::commands::sdk_add::{resolve, run_program};
 use crate::commands::session::data_dir;
 use crate::error::Error;
 use crate::ext::install::Store;
+use crate::ext::run::{PANEL_LINE_WINDOW, PANEL_STOP_GRACE, StartedPanel, start_panel};
 use crate::output::Out;
 use crate::ui::Ui;
 
@@ -55,16 +70,16 @@ const MAX_SERVING: u64 = 16 * 1024;
 const ALIVE_WINDOW: Duration = Duration::from_secs(1);
 
 /// `iohr ui [verb]`.
-pub(crate) async fn run(g: &Global, args: UiArgs, out: Out) -> Result<(), Error> {
+pub(crate) async fn run(g: &Global, env: &Env, args: UiArgs, out: Out) -> Result<(), Error> {
     match args.command {
         None => {
             let serve = UiServe {
                 open: true,
                 ..UiServe::default()
             };
-            serve_until_stopped(g, &serve, out).await
+            serve_until_stopped(g, env, &serve, out).await
         }
-        Some(UiCommand::Serve(serve)) => serve_until_stopped(g, &serve, out).await,
+        Some(UiCommand::Serve(serve)) => serve_until_stopped(g, env, &serve, out).await,
         Some(UiCommand::Build(package)) => script(&package, "build", out),
         Some(UiCommand::Dev(package)) => script(&package, "dev", out),
         Some(UiCommand::Check(package)) => script(&package, "check", out),
@@ -209,10 +224,12 @@ fn forget(folder: &Path, url: &str) {
     }
 }
 
-async fn serve_until_stopped(g: &Global, args: &UiServe, out: Out) -> Result<(), Error> {
+async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) -> Result<(), Error> {
     let root = ui_root(args.dir.as_deref(), &working_folder()?)?;
     let port = args.port.unwrap_or(0);
-    let server = Server::bind(&root, port, super::ext::store(g)?)
+    let panels = Panels::new(g.clone(), env.clone())
+        .map_err(|e| Error::Failed(format!("the start token: {}", e.kind())))?;
+    let server = Server::bind(&root, port, super::ext::store(g)?, panels)
         .await
         .map_err(|e| listen_error(port, &e))?;
     let url = server.url();
@@ -278,25 +295,45 @@ fn ui_root(dir: Option<&Path>, from: &Path) -> Result<PathBuf, Error> {
     })
 }
 
-/// The UI listener: a canonical root, the extension store it lists, a loopback socket.
+/// The UI listener: a loopback socket and what every answer reads.
 pub(crate) struct Server {
     listener: TcpListener,
-    root: Arc<PathBuf>,
-    store: Arc<Store>,
+    site: Arc<Site>,
     addr: SocketAddr,
 }
 
+/// What every answer reads: the canonical UI folder, the extension store it lists, the
+/// panels this serve started, and the listener's own `Host`.
+struct Site {
+    root: PathBuf,
+    store: Arc<Store>,
+    panels: Arc<Panels>,
+    host: String,
+    port: u16,
+}
+
 impl Server {
-    /// Binds `port` (0: the system picks) on loopback, serving the canonical `root` and
-    /// listing the panels in `store`.
-    pub(crate) async fn bind(root: &Path, port: u16, store: Store) -> io::Result<Self> {
-        let root = Arc::new(std::fs::canonicalize(root)?);
+    /// Binds `port` (0: the system picks) on loopback, serving the canonical `root`,
+    /// listing the panels in `store` and starting them through `panels`.
+    pub(crate) async fn bind(
+        root: &Path,
+        port: u16,
+        store: Store,
+        panels: Panels,
+    ) -> io::Result<Self> {
+        let root = std::fs::canonicalize(root)?;
         let listener = bind_loopback(port).await?;
         let addr = listener.local_addr()?;
-        Ok(Self {
-            listener,
+        let site = Arc::new(Site {
             root,
             store: Arc::new(store),
+            panels: Arc::new(panels),
+            host: host_of(addr),
+            port: addr.port(),
+        });
+        Ok(Self {
+            listener,
+            site,
             addr,
         })
     }
@@ -306,28 +343,26 @@ impl Server {
         format!("http://{}/", host_of(self.addr))
     }
 
-    /// Answers connections until `stop` finishes.
+    /// Answers connections until `stop` finishes, then stops every panel it started.
     pub(crate) async fn serve(self, stop: impl Future<Output = ()>) {
         let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
-        let host = Arc::new(host_of(self.addr));
         tokio::pin!(stop);
         loop {
             tokio::select! {
-                () = &mut stop => return,
+                () = &mut stop => break,
                 accepted = self.listener.accept() => {
                     let Ok((stream, _)) = accepted else { continue };
                     // Over the cap: the connection closes unanswered.
                     let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else { continue };
-                    let root = Arc::clone(&self.root);
-                    let store = Arc::clone(&self.store);
-                    let host = Arc::clone(&host);
+                    let site = Arc::clone(&self.site);
                     tokio::spawn(async move {
-                        answer(stream, &root, store, &host).await;
+                        answer(stream, &site).await;
                         drop(permit);
                     });
                 }
             }
         }
+        self.site.panels.stop_all().await;
     }
 }
 
@@ -339,11 +374,11 @@ fn host_of(addr: SocketAddr) -> String {
     }
 }
 
-async fn answer(mut stream: TcpStream, root: &Path, store: Arc<Store>, host: &str) {
+async fn answer(mut stream: TcpStream, site: &Site) {
     let Ok(Ok(head)) = timeout(READ_WINDOW, read_head(&mut stream)).await else {
         return;
     };
-    let reply = reply_to(&head, root, store, host).await;
+    let reply = reply_to(&head, site).await;
     let _ = timeout(WRITE_WINDOW, reply.write(&mut stream)).await;
 }
 
@@ -358,6 +393,8 @@ struct Reply {
     /// `index.html` and errors are never cached; hashed assets may be.
     no_store: bool,
     allow: bool,
+    /// The loopback ports a page answer may frame: the panels this serve started.
+    frame_src: Vec<u16>,
 }
 
 impl Reply {
@@ -369,6 +406,20 @@ impl Reply {
             head_only: false,
             no_store: true,
             allow: false,
+            frame_src: Vec::new(),
+        }
+    }
+
+    /// `200 OK` with a JSON body, never cached.
+    fn json(value: &serde_json::Value) -> Self {
+        let Ok(body) = serde_json::to_vec(value) else {
+            return Self::error("500 Internal Server Error");
+        };
+        Self {
+            status: "200 OK",
+            content_type: "application/json",
+            body,
+            ..Self::error("200 OK")
         }
     }
 
@@ -383,9 +434,16 @@ impl Reply {
         } else {
             ""
         };
+        let mut csp = CSP.to_owned();
+        if !self.frame_src.is_empty() {
+            csp.push_str("; frame-src");
+            for port in &self.frame_src {
+                let _ = write!(csp, " http://127.0.0.1:{port}");
+            }
+        }
         let head = format!(
             "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{allow}\
-             Content-Security-Policy: {CSP}\r\n\
+             Content-Security-Policy: {csp}\r\n\
              Referrer-Policy: no-referrer\r\nCache-Control: {cache}\r\n\
              X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n\
              Cross-Origin-Opener-Policy: same-origin\r\n\
@@ -404,7 +462,8 @@ impl Reply {
 }
 
 /// The answer to one request head.
-async fn reply_to(head: &[u8], root: &Path, store: Arc<Store>, host: &str) -> Reply {
+async fn reply_to(head: &[u8], site: &Site) -> Reply {
+    let host = site.host.as_str();
     let request = match parse(head) {
         Ok(r) => r,
         Err(status) => return Reply::error(status),
@@ -415,6 +474,7 @@ async fn reply_to(head: &[u8], root: &Path, store: Arc<Store>, host: &str) -> Re
     let head_only = match request.method.as_str() {
         "GET" => false,
         "HEAD" => true,
+        "POST" if is_api(&request.target) => return post(&request, site).await,
         _ => {
             return Reply {
                 allow: true,
@@ -428,18 +488,337 @@ async fn reply_to(head: &[u8], root: &Path, store: Arc<Store>, host: &str) -> Re
         }
         // Any other `/api` path is 404, never the app page.
         let mut reply = match decoded_path(&request.target).as_deref() {
-            Some("/api/extensions") => extensions(store).await,
+            Some("/api/extensions") => extensions(Arc::clone(&site.store), &site.panels).await,
             _ => Reply::error("404 Not Found"),
         };
         reply.head_only = head_only;
         return reply;
     }
-    let mut reply = match file_for(root, &request.target) {
+    let mut reply = match file_for(&site.root, &request.target) {
         Ok(path) => serve_file(&path).await,
         Err(status) => Reply::error(status),
     };
+    if reply.status == "200 OK" && reply.content_type.starts_with("text/html") {
+        reply.body = with_token(&reply.body, &site.panels.token);
+        reply.frame_src = site.panels.ports().into_values().collect();
+    }
     reply.head_only = head_only;
     reply
+}
+
+/// A page with `<meta name="iohr-token" content="...">` right after its `<head>` (else
+/// after its doctype, else first), so the UI's own script can send the start token.
+fn with_token(page: &[u8], token: &str) -> Vec<u8> {
+    let meta = format!("<meta name=\"iohr-token\" content=\"{token}\">");
+    let find = |needle: &[u8]| {
+        page.windows(needle.len())
+            .position(|w| w.eq_ignore_ascii_case(needle))
+    };
+    let at = find(b"<head>").map(|i| i + b"<head>".len()).or_else(|| {
+        page.get(..9)
+            .is_some_and(|d| d.eq_ignore_ascii_case(b"<!doctype"))
+            .then(|| page.iter().position(|b| *b == b'>').map(|i| i + 1))
+            .flatten()
+    });
+    let at = at.unwrap_or(0);
+    let mut out = Vec::with_capacity(page.len() + meta.len());
+    out.extend_from_slice(&page[..at]);
+    out.extend_from_slice(meta.as_bytes());
+    out.extend_from_slice(&page[at..]);
+    out
+}
+
+/// What a POST asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Start,
+    Stop,
+}
+
+/// `POST /api/extensions/<name>/start` or `.../stop`, from the UI's own page only (see
+/// [`post_caller_allowed`]), with no body. The target is matched raw, with no decoding
+/// and no query, and `<name>` must equal an installed panel's name (or, to stop, a
+/// running one's). Every other `/api` POST is 404.
+async fn post(request: &Request, site: &Site) -> Reply {
+    if !post_caller_allowed(request, &site.host, &site.panels) {
+        return Reply::error("403 Forbidden");
+    }
+    let has_body = request.transfer_encoding.is_some()
+        || request.content_length.as_deref().is_some_and(|l| l != "0");
+    if has_body {
+        return Reply::error("400 Bad Request");
+    }
+    let Some(rest) = request.target.strip_prefix("/api/extensions/") else {
+        return Reply::error("404 Not Found");
+    };
+    let (asked, action) = if let Some(n) = rest.strip_suffix("/start") {
+        (n, Action::Start)
+    } else if let Some(n) = rest.strip_suffix("/stop") {
+        (n, Action::Stop)
+    } else {
+        return Reply::error("404 Not Found");
+    };
+    if action == Action::Stop && site.panels.ports().contains_key(asked) {
+        return site.panels.stop(asked).await;
+    }
+    let store = Arc::clone(&site.store);
+    let Ok(Ok(listed)) = tokio::task::spawn_blocking(move || store.panels()).await else {
+        return Reply::error("500 Internal Server Error");
+    };
+    // The installed entry's own name goes on, never the client's text.
+    let Some(name) = listed.into_iter().map(|p| p.name).find(|n| n == asked) else {
+        return Reply::error("404 Not Found");
+    };
+    match action {
+        Action::Start => {
+            Arc::clone(&site.panels)
+                .start(Arc::clone(&site.store), name, site.port)
+                .await
+        }
+        Action::Stop => site.panels.stop(&name).await,
+    }
+}
+
+/// A start or stop caller is the UI's own page: `Sec-Fetch-Site` is `same-origin`,
+/// `Origin` is exactly this listener's (`http://<host>`), and `x-iohr-token` is this
+/// serve's token. A missing header is a refusal.
+fn post_caller_allowed(request: &Request, own: &str, panels: &Panels) -> bool {
+    let site_ok = request
+        .fetch_site
+        .as_deref()
+        .is_some_and(|site| site.eq_ignore_ascii_case("same-origin"));
+    let origin_ok = request
+        .origin
+        .as_deref()
+        .and_then(|o| o.strip_prefix("http://"))
+        .is_some_and(|h| h == own);
+    let token_ok = panels.token_matches(request.token.as_deref());
+    site_ok && origin_ok && token_ok
+}
+
+/// What a started panel's slot holds.
+enum Slot {
+    /// `start_panel` is running; a second start or a stop is refused until it ends.
+    Starting,
+    /// Started and checked; `generation` tells this run from a later one of the same name.
+    Running {
+        generation: u64,
+        panel: StartedPanel,
+    },
+}
+
+/// The panels this serve started, one per extension, and what starting one needs: the
+/// person's flags and environment (for the token channel), and the per-serve token.
+pub(crate) struct Panels {
+    global: Global,
+    env: Env,
+    token: String,
+    closing: AtomicBool,
+    generation: AtomicU64,
+    slots: Mutex<BTreeMap<String, Slot>>,
+}
+
+/// What a finished start leaves.
+enum Settled {
+    Failed(Error),
+    /// It names a port the UI or another panel holds; stopped by the caller.
+    Taken(StartedPanel),
+    Running {
+        port: u16,
+        generation: u64,
+    },
+}
+
+impl Panels {
+    /// No panel yet, and a fresh 256-bit token from the system's random source.
+    pub(crate) fn new(global: Global, env: Env) -> io::Result<Self> {
+        let mut bytes = [0_u8; 32];
+        getrandom::fill(&mut bytes).map_err(|_| io::Error::other("no random source"))?;
+        let mut token = String::with_capacity(64);
+        for b in bytes {
+            let _ = write!(token, "{b:02x}");
+        }
+        Ok(Self {
+            global,
+            env,
+            token,
+            closing: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            slots: Mutex::new(BTreeMap::new()),
+        })
+    }
+
+    fn slots(&self) -> MutexGuard<'_, BTreeMap<String, Slot>> {
+        self.slots.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The port of every panel running now, by name.
+    fn ports(&self) -> BTreeMap<String, u16> {
+        self.slots()
+            .iter()
+            .filter_map(|(name, slot)| match slot {
+                Slot::Running { panel, .. } => Some((name.clone(), panel.port)),
+                Slot::Starting => None,
+            })
+            .collect()
+    }
+
+    /// Whether `given` is this serve's token, compared in constant time over its length.
+    fn token_matches(&self, given: Option<&str>) -> bool {
+        given.is_some_and(|g| same_bytes(g.as_bytes(), self.token.as_bytes()))
+    }
+
+    /// Starts `name` once: a running one answers its port, one still starting is 409.
+    /// A start that fails, or names the UI's port or another panel's, is 502 with no
+    /// detail on the wire; the reason goes to this terminal.
+    async fn start(self: Arc<Self>, store: Arc<Store>, name: String, ui_port: u16) -> Reply {
+        if self.closing.load(Ordering::SeqCst) {
+            return Reply::error("503 Service Unavailable");
+        }
+        {
+            let mut slots = self.slots();
+            match slots.get(&name) {
+                Some(Slot::Running { panel, .. }) => {
+                    return Reply::json(&serde_json::json!({ "port": panel.port }));
+                }
+                Some(Slot::Starting) => return Reply::error("409 Conflict"),
+                None => {
+                    slots.insert(name.clone(), Slot::Starting);
+                }
+            }
+        }
+        let started = start_panel(&self.global, &self.env, &store, &name).await;
+        let exited = started.as_ref().ok().map(StartedPanel::exited);
+        match self.settle(&name, started, ui_port) {
+            Settled::Failed(e) => {
+                Out::note(&format!("The {name} panel did not start: {e}"));
+                Reply::error("502 Bad Gateway")
+            }
+            Settled::Taken(panel) => {
+                Out::note(&format!(
+                    "The {name} panel was stopped: port {} is the UI's or another panel's",
+                    panel.port
+                ));
+                panel.stop().await;
+                Reply::error("502 Bad Gateway")
+            }
+            Settled::Running { port, generation } => {
+                if let Some(exited) = exited {
+                    let me = Arc::clone(&self);
+                    tokio::spawn(async move {
+                        exited.await;
+                        me.ended(&name, generation).await;
+                    });
+                }
+                Reply::json(&serde_json::json!({ "port": port }))
+            }
+        }
+    }
+
+    /// Records how a start ended. A panel finishing while the serve closes is still
+    /// recorded, so [`Panels::stop_all`] stops it.
+    fn settle(&self, name: &str, started: Result<StartedPanel, Error>, ui_port: u16) -> Settled {
+        let mut slots = self.slots();
+        slots.remove(name);
+        let panel = match started {
+            Err(e) => return Settled::Failed(e),
+            Ok(panel) => panel,
+        };
+        let taken = panel.port == ui_port
+            || slots.values().any(
+                |s| matches!(s, Slot::Running { panel: other, .. } if other.port == panel.port),
+            );
+        if taken {
+            return Settled::Taken(panel);
+        }
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst);
+        let port = panel.port;
+        slots.insert(name.to_owned(), Slot::Running { generation, panel });
+        Settled::Running { port, generation }
+    }
+
+    /// A panel that exited by itself: its slot is freed and what is left of its group
+    /// is stopped. A later run of the same name is left alone.
+    async fn ended(&self, name: &str, generation: u64) {
+        let panel = {
+            let mut slots = self.slots();
+            let ours = matches!(slots.get(name), Some(Slot::Running { generation: g, .. }) if *g == generation);
+            if !ours {
+                return;
+            }
+            match slots.remove(name) {
+                Some(Slot::Running { panel, .. }) => panel,
+                _ => return,
+            }
+        };
+        panel.stop().await;
+    }
+
+    /// `{"stopped": true}` once `name`'s group is stopped, `false` when none ran; one
+    /// still starting is 409.
+    async fn stop(&self, name: &str) -> Reply {
+        let panel = {
+            let mut slots = self.slots();
+            if matches!(slots.get(name), Some(Slot::Starting)) {
+                return Reply::error("409 Conflict");
+            }
+            match slots.remove(name) {
+                Some(Slot::Running { panel, .. }) => Some(panel),
+                _ => None,
+            }
+        };
+        let stopped = panel.is_some();
+        if let Some(panel) = panel {
+            panel.stop().await;
+        }
+        Reply::json(&serde_json::json!({ "stopped": stopped }))
+    }
+
+    /// Refuses new starts and stops every panel, all at once, waiting for starts in
+    /// flight to finish (at most their first-line window and the stop grace).
+    pub(crate) async fn stop_all(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+        let deadline = tokio::time::Instant::now() + PANEL_LINE_WINDOW + PANEL_STOP_GRACE;
+        loop {
+            let (running, starting) = {
+                let mut slots = self.slots();
+                let all = std::mem::take(&mut *slots);
+                let mut running = Vec::new();
+                for (name, slot) in all {
+                    match slot {
+                        Slot::Running { panel, .. } => running.push(panel),
+                        Slot::Starting => {
+                            slots.insert(name, Slot::Starting);
+                        }
+                    }
+                }
+                (running, !slots.is_empty())
+            };
+            let stops: Vec<_> = running
+                .into_iter()
+                .map(|p| tokio::spawn(p.stop()))
+                .collect();
+            for stop in stops {
+                let _ = stop.await;
+            }
+            if !starting || tokio::time::Instant::now() >= deadline {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+/// Equal bytes, every byte compared whatever the first difference (lengths are public).
+fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let diff = a
+        .iter()
+        .zip(b)
+        .fold(0_u8, |acc, (x, y)| acc | std::hint::black_box(x ^ y));
+    diff == 0
 }
 
 #[derive(Debug, Default)]
@@ -449,10 +828,14 @@ struct Request {
     host: Option<String>,
     origin: Option<String>,
     fetch_site: Option<String>,
+    token: Option<String>,
+    content_length: Option<String>,
+    transfer_encoding: Option<String>,
 }
 
-/// The request line and the `Host`, `Origin` and `Sec-Fetch-Site` headers of a head; an
-/// error is the status to answer. Any of the three sent twice is refused.
+/// The request line and the `Host`, `Origin`, `Sec-Fetch-Site`, `x-iohr-token`,
+/// `Content-Length` and `Transfer-Encoding` headers of a head; an error is the status to
+/// answer. Any of them sent twice is refused.
 fn parse(head: &[u8]) -> Result<Request, &'static str> {
     if head.len() >= MAX_HEAD && !head.windows(4).any(|w| w == b"\r\n\r\n") {
         return Err("431 Request Header Fields Too Large");
@@ -484,6 +867,12 @@ fn parse(head: &[u8]) -> Result<Request, &'static str> {
             &mut request.origin
         } else if name.eq_ignore_ascii_case("sec-fetch-site") {
             &mut request.fetch_site
+        } else if name.eq_ignore_ascii_case("x-iohr-token") {
+            &mut request.token
+        } else if name.eq_ignore_ascii_case("content-length") {
+            &mut request.content_length
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            &mut request.transfer_encoding
         } else {
             continue;
         };
@@ -507,25 +896,28 @@ fn is_api(target: &str) -> bool {
     decoded_path(target).is_some_and(|p| p == "/api" || p.starts_with("/api/"))
 }
 
-/// `GET /api/extensions`: `{"extensions": [{name, version, title, entry}]}`, the
-/// installed extensions with a panel, by name. The store is read off the async
-/// threads; a lock that cannot be read is 500 with no detail on the wire.
-async fn extensions(store: Arc<Store>) -> Reply {
+/// `GET /api/extensions`: `{"extensions": [{name, version, title, entry, port?}]}`, the
+/// installed extensions with a panel, by name, with `port` on the ones this serve
+/// started. The store is read off the async threads; a lock that cannot be read is 500
+/// with no detail on the wire.
+async fn extensions(store: Arc<Store>, panels: &Panels) -> Reply {
     let listed = tokio::task::spawn_blocking(move || store.panels()).await;
-    let Ok(Ok(panels)) = listed else {
+    let Ok(Ok(listed)) = listed else {
         return Reply::error("500 Internal Server Error");
     };
-    let Ok(body) = serde_json::to_vec(&serde_json::json!({ "extensions": panels })) else {
-        return Reply::error("500 Internal Server Error");
-    };
-    Reply {
-        status: "200 OK",
-        content_type: "application/json",
-        body,
-        head_only: false,
-        no_store: true,
-        allow: false,
+    let ports = panels.ports();
+    let mut entries = Vec::with_capacity(listed.len());
+    for panel in listed {
+        let port = ports.get(&panel.name).copied();
+        let Ok(mut entry) = serde_json::to_value(panel) else {
+            return Reply::error("500 Internal Server Error");
+        };
+        if let (Some(port), Some(fields)) = (port, entry.as_object_mut()) {
+            fields.insert("port".to_owned(), port.into());
+        }
+        entries.push(entry);
     }
+    Reply::json(&serde_json::json!({ "extensions": entries }))
 }
 
 /// An `/api/*` caller is this listener's own page: the browser says `Sec-Fetch-Site`
@@ -674,6 +1066,7 @@ async fn serve_file(path: &Path) -> Reply {
         head_only: false,
         no_store: content_type.starts_with("text/html"),
         allow: false,
+        frame_src: Vec::new(),
     }
 }
 
@@ -731,11 +1124,18 @@ mod tests {
         start_with(root, Store::new(root.join("no-extensions"))).await
     }
 
+    /// No panel started yet, with the default flags and an empty environment.
+    fn panels() -> super::Panels {
+        use clap::Parser as _;
+        let cli = crate::cli::Cli::try_parse_from(["iohr", "ui", "serve"]).expect("cli");
+        super::Panels::new(cli.global, crate::Env::default()).expect("panels")
+    }
+
     async fn start_with(
         root: &Path,
         store: Store,
     ) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
-        let server = Server::bind(root, 0, store).await.expect("bind");
+        let server = Server::bind(root, 0, store, panels()).await.expect("bind");
         let addr = server.addr;
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(server.serve(async {
@@ -772,6 +1172,10 @@ mod tests {
         assert!(index.contains("Referrer-Policy: no-referrer"));
         assert!(index.contains("Cross-Origin-Resource-Policy: same-origin"));
         assert!(index.ends_with("<p>ui</p>"));
+        // The start token sits right after the doctype; nothing is framed yet.
+        assert!(index.contains("<!doctype html><meta name=\"iohr-token\" content=\""));
+        assert_eq!(token_of(&index).len(), 64);
+        assert!(!index.contains("frame-src"));
 
         let js = send(addr, &get("/assets/app-1.js?v=1", &host)).await;
         assert!(js.starts_with("HTTP/1.1 200 OK"), "{js}");
@@ -1070,8 +1474,8 @@ mod tests {
             .await
             .expect("hold");
         let port = held.local_addr().expect("addr").port();
-        let Err(e) = Server::bind(dir.path(), port, Store::new(dir.path().join("none"))).await
-        else {
+        let store = Store::new(dir.path().join("none"));
+        let Err(e) = Server::bind(dir.path(), port, store, panels()).await else {
             panic!("bound a taken port");
         };
         assert_eq!(e.kind(), std::io::ErrorKind::AddrInUse);
@@ -1185,5 +1589,276 @@ mod tests {
         assert!(path.exists(), "another server's url leaves the record");
         forget(&folder, "http://127.0.0.1:4321/");
         assert!(!path.exists(), "its own url removes it");
+    }
+
+    /// The start token in a page answer.
+    fn token_of(page: &str) -> String {
+        let at = page
+            .find("name=\"iohr-token\" content=\"")
+            .expect("token meta")
+            + "name=\"iohr-token\" content=\"".len();
+        page[at..]
+            .chars()
+            .take_while(char::is_ascii_hexdigit)
+            .collect()
+    }
+
+    /// A start or stop as the UI's page sends it, with `extra` headers after.
+    fn post(path: &str, host: &str, token: &str, extra: &str) -> String {
+        format!(
+            "POST {path} HTTP/1.1\r\nHost: {host}\r\nSec-Fetch-Site: same-origin\r\n\
+             Origin: http://{host}\r\nx-iohr-token: {token}\r\nContent-Length: 0\r\n{extra}\r\n"
+        )
+    }
+
+    /// Gives installed `name` a real program: it writes its pid to `pid`, prints `line`
+    /// and sleeps, and the record's digest is the script's, so the trust check passes.
+    fn program(store: &Path, name: &str, line: &str, pid: &Path) {
+        use std::os::unix::fs::PermissionsExt as _;
+        let digest = Digest::of(name.as_bytes());
+        let dir = store.join(name).join(format!("0.1.0-{}", digest.short()));
+        let script = format!(
+            "#!/bin/sh\necho $$ > '{}'\necho '{line}'\nexec sleep 60\n",
+            pid.display()
+        );
+        let path = dir.join(name);
+        std::fs::write(&path, &script).expect("program");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let record_path = dir.join("record.json");
+        let mut record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&record_path).expect("record")).expect("json");
+        record["program_sha256"] = Digest::of(script.as_bytes()).to_string().into();
+        std::fs::write(&record_path, record.to_string()).expect("record");
+    }
+
+    /// Whether the process `pid` names (written by [`program`]) is still there.
+    fn alive(pid: &Path) -> bool {
+        let pid = std::fs::read_to_string(pid).expect("pid");
+        std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("kill")
+            .success()
+    }
+
+    fn panel(title: &str) -> serde_json::Value {
+        serde_json::json!({"title": title, "entry": "/"})
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_started_panel_runs_once_is_framed_and_stops() {
+        let dir = built_ui();
+        let data = tempfile::tempdir().expect("data");
+        let store = data.path().join("extensions");
+        installed(&store, "todo", Some(panel("Todo")), true);
+        let held = std::net::TcpListener::bind("127.0.0.1:0").expect("panel port");
+        let port = held.local_addr().expect("addr").port();
+        let pid = data.path().join("todo.pid");
+        program(&store, "todo", &format!("iohr-panel {port}"), &pid);
+        let (addr, stop) = start_with(dir.path(), Store::new(store)).await;
+        let host = super::host_of(addr);
+        let token = token_of(&send(addr, &get("/", &host)).await);
+
+        let started = send(addr, &post("/api/extensions/todo/start", &host, &token, "")).await;
+        assert!(started.starts_with("HTTP/1.1 200"), "{started}");
+        assert!(
+            started.ends_with(&format!("{{\"port\":{port}}}")),
+            "{started}"
+        );
+        assert!(alive(&pid));
+        // One instance: a second start answers the same port.
+        let again = send(addr, &post("/api/extensions/todo/start", &host, &token, "")).await;
+        assert!(again.ends_with(&format!("{{\"port\":{port}}}")), "{again}");
+
+        let own = format!("Sec-Fetch-Site: same-origin\r\nOrigin: http://{host}\r\n");
+        let listed = send(addr, &api("/api/extensions", &host, &own)).await;
+        assert!(listed.contains(&format!("\"port\":{port}")), "{listed}");
+        // Pages may frame exactly that port; the UI itself is never framed.
+        let page = send(addr, &get("/ext/todo", &host)).await;
+        assert!(
+            page.contains(&format!(
+                "frame-ancestors 'none'; frame-src http://127.0.0.1:{port}\r\n"
+            )),
+            "{page}"
+        );
+
+        let stopped = send(addr, &post("/api/extensions/todo/stop", &host, &token, "")).await;
+        assert!(stopped.ends_with("{\"stopped\":true}"), "{stopped}");
+        assert!(!alive(&pid), "the panel still runs after stop");
+        let page = send(addr, &get("/", &host)).await;
+        assert!(!page.contains("frame-src"), "{page}");
+
+        // Stopping the serve stops what it started.
+        let restarted = send(addr, &post("/api/extensions/todo/start", &host, &token, "")).await;
+        assert!(restarted.starts_with("HTTP/1.1 200"), "{restarted}");
+        assert!(alive(&pid));
+        let _ = stop.send(());
+        let mut gone = false;
+        for _ in 0..100 {
+            if !alive(&pid) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(gone, "the panel outlived the serve");
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn a_start_needs_the_pages_origin_token_and_an_installed_name() {
+        let dir = built_ui();
+        let data = tempfile::tempdir().expect("data");
+        let store = data.path().join("extensions");
+        installed(&store, "todo", Some(panel("Todo")), true);
+        let (addr, _stop) = start_with(dir.path(), Store::new(store)).await;
+        let host = super::host_of(addr);
+        let token = token_of(&send(addr, &get("/", &host)).await);
+        let wrong = "0".repeat(64);
+        let path = "/api/extensions/todo/start";
+        let bare = |headers: &str| format!("POST {path} HTTP/1.1\r\nHost: {host}\r\n{headers}\r\n");
+
+        for (why, raw, status) in [
+            ("no headers", bare(""), "403"),
+            (
+                "no token",
+                bare(&format!(
+                    "Sec-Fetch-Site: same-origin\r\nOrigin: http://{host}\r\n"
+                )),
+                "403",
+            ),
+            ("wrong token", post(path, &host, &wrong, ""), "403"),
+            ("short token", post(path, &host, &token[..63], ""), "403"),
+            (
+                "another origin",
+                bare(&format!(
+                    "Sec-Fetch-Site: same-origin\r\nOrigin: http://localhost:{}\r\nx-iohr-token: {token}\r\n",
+                    addr.port()
+                )),
+                "403",
+            ),
+            (
+                "cross-site",
+                bare(&format!(
+                    "Sec-Fetch-Site: cross-site\r\nOrigin: http://{host}\r\nx-iohr-token: {token}\r\n"
+                )),
+                "403",
+            ),
+            (
+                "two tokens",
+                post(path, &host, &token, &format!("x-iohr-token: {token}\r\n")),
+                "400",
+            ),
+            (
+                "a body",
+                bare(&format!(
+                    "Sec-Fetch-Site: same-origin\r\nOrigin: http://{host}\r\nx-iohr-token: {token}\r\nContent-Length: 2\r\n"
+                )),
+                "400",
+            ),
+            (
+                "chunked",
+                post(path, &host, &token, "Transfer-Encoding: chunked\r\n"),
+                "400",
+            ),
+            (
+                "a query",
+                post(&format!("{path}?x=1"), &host, &token, ""),
+                "404",
+            ),
+            (
+                "escaped",
+                post("/api/extensions/t%6fdo/start", &host, &token, ""),
+                "404",
+            ),
+            (
+                "a path",
+                post("/api/extensions/../start", &host, &token, ""),
+                "404",
+            ),
+            (
+                "unknown",
+                post("/api/extensions/nope/start", &host, &token, ""),
+                "404",
+            ),
+            (
+                "other verb",
+                post("/api/extensions/todo/run", &host, &token, ""),
+                "404",
+            ),
+            (
+                "the list",
+                post("/api/extensions", &host, &token, ""),
+                "404",
+            ),
+        ] {
+            let r = send(addr, &raw).await;
+            assert!(r.starts_with(&format!("HTTP/1.1 {status}")), "{why}: {r}");
+        }
+        // Installed, but its program is not there: the trust check refuses, no detail.
+        let r = send(addr, &post(path, &host, &token, "")).await;
+        assert!(r.starts_with("HTTP/1.1 502") && !r.contains("todo"), "{r}");
+        // Stopping what never ran is not an error.
+        let r = send(addr, &post("/api/extensions/todo/stop", &host, &token, "")).await;
+        assert!(r.ends_with("{\"stopped\":false}"), "{r}");
+        // A start is not a GET.
+        let r = send(addr, &get(path, &host)).await;
+        assert!(
+            r.starts_with("HTTP/1.1 403") || r.starts_with("HTTP/1.1 404"),
+            "{r}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_panel_naming_a_bad_or_taken_port_is_stopped() {
+        let dir = built_ui();
+        let data = tempfile::tempdir().expect("data");
+        let store = data.path().join("extensions");
+        for name in ["first", "second"] {
+            installed(&store, name, Some(panel(name)), true);
+        }
+        let held = std::net::TcpListener::bind("127.0.0.1:0").expect("panel port");
+        let port = held.local_addr().expect("addr").port();
+        let free = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").expect("free port");
+            l.local_addr().expect("addr").port()
+        };
+        let first_pid = data.path().join("first.pid");
+        program(&store, "first", &format!("iohr-panel {port}"), &first_pid);
+        let (addr, _stop) = start_with(dir.path(), Store::new(store.clone())).await;
+        let host = super::host_of(addr);
+        let token = token_of(&send(addr, &get("/", &host)).await);
+        let first = send(
+            addr,
+            &post("/api/extensions/first/start", &host, &token, ""),
+        )
+        .await;
+        assert!(first.starts_with("HTTP/1.1 200"), "{first}");
+
+        let pid = data.path().join("second.pid");
+        for line in [
+            format!("iohr-panel {port}"),
+            format!("iohr-panel {}", addr.port()),
+            format!("iohr-panel {free}"),
+            "iohr-panel 80".to_owned(),
+            "iohr-panel 70000".to_owned(),
+            format!("iohr-panel {port} extra"),
+            "listening".to_owned(),
+        ] {
+            program(&store, "second", &line, &pid);
+            let r = send(
+                addr,
+                &post("/api/extensions/second/start", &host, &token, ""),
+            )
+            .await;
+            assert!(r.starts_with("HTTP/1.1 502"), "{line}: {r}");
+            assert!(!alive(&pid), "{line}: the refused panel still runs");
+        }
+        // The first panel was never touched.
+        assert!(alive(&first_pid));
+        drop(held);
     }
 }

@@ -151,9 +151,32 @@ body {
 }
 
 .frame-stub,
-.panel-stub {
+.panel-idle {
   max-width: 640px;
   margin: 0 auto;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.panel-meta {
+  flex: 1;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .stub-badge {
@@ -177,7 +200,7 @@ body {
 
 .panel-frame {
   width: 100%;
-  height: calc(100vh - 88px);
+  height: calc(100vh - 120px);
   border: 1px solid var(--line);
   border-radius: 6px;
 }

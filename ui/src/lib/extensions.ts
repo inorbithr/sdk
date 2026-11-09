@@ -2,8 +2,13 @@
 // The server already decides which extensions have a panel (`ext::install::Store::panels`, which runs
 // `manifest::check_panel` again on read); this file only reads the answer's shape and never repeats that rule.
 
-/** One installed extension that declares a `[panel]`, as `/api/extensions` lists it. */
-export type Panel = { name: string; version: string; title: string; entry: string };
+import { isPanelPort } from "./panels.ts";
+
+/**
+ * One installed extension that declares a `[panel]`, as `/api/extensions` lists it. `port` is set when this serve
+ * started it (RFC 0217 C4b).
+ */
+export type Panel = { name: string; version: string; title: string; entry: string; port?: number };
 
 export type Listing = { state: "ok"; panels: Panel[] } | { state: "error"; reason: string };
 
@@ -23,7 +28,11 @@ export function parseExtensions(body: unknown): Panel[] | null {
   if (typeof body !== "object" || body === null) return null;
   const list = (body as Record<string, unknown>).extensions;
   if (!Array.isArray(list)) return null;
-  return list.filter(isPanel).map(({ name, version, title, entry }) => ({ name, version, title, entry }));
+  return list
+    .filter(isPanel)
+    .map(({ name, version, title, entry, port }) =>
+      isPanelPort(port) ? { name, version, title, entry, port } : { name, version, title, entry },
+    );
 }
 
 /** Reads the listing from this page's own listener. Never throws: a failure is a `Listing` with a reason. */

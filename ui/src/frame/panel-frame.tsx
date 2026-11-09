@@ -1,23 +1,56 @@
 import type { Panel } from "../lib/extensions.ts";
+import { panelSrc } from "../lib/panels.ts";
 import { PANEL_FRAME } from "./sandbox.ts";
 
 /**
- * One panel. `src` is set only by the panel start path, which waits on the security review of RFC 0217 question 3
- * (one launch path through `ext/run.rs` with the full trust check). Until then no caller passes it, and the frame
- * shows a labelled stub instead.
+ * One panel. A running panel (one this serve started, so it has a `port`) is framed at its own loopback origin with
+ * the sandbox in `PANEL_FRAME`; the page's `frame-src` allows exactly the ports the serve started. A panel that is
+ * not running shows what it is and a Start button.
  */
-export function PanelFrame({ panel, src }: { panel: Panel; src?: string }) {
-  if (src === undefined) {
-    return (
-      <section className="panel-stub" data-stub="true" aria-label={`${panel.title} (not started)`}>
-        <p className="stub-badge">Stub</p>
+export function PanelFrame({
+  panel,
+  busy,
+  reason,
+  onStart,
+  onClose,
+}: {
+  panel: Panel;
+  busy: boolean;
+  reason: string | null;
+  onStart: () => void;
+  onClose: () => void;
+}) {
+  const src = panel.port === undefined ? null : panelSrc(panel.port, panel.entry);
+  return (
+    <section className="panel" aria-label={panel.title}>
+      <header className="panel-head">
         <h2>{panel.title}</h2>
-        <p>
-          {panel.name} {panel.version} is installed and declares a panel. Starting panels from the web UI is not built
-          yet: it waits on the security review (RFC 0217).
-        </p>
-      </section>
-    );
-  }
-  return <iframe className="panel-frame" title={panel.title} src={src} {...PANEL_FRAME} />;
+        <span className="panel-meta">
+          {panel.name} {panel.version}
+          {src ? ` on 127.0.0.1:${panel.port}` : ""}
+        </span>
+        <button type="button" className="panel-close" onClick={onClose} disabled={busy}>
+          Close
+        </button>
+      </header>
+      {src ? (
+        <iframe className="panel-frame" title={panel.title} src={src} {...PANEL_FRAME} />
+      ) : (
+        <div className="panel-idle">
+          <p>
+            {panel.name} {panel.version} is installed and declares a panel. Starting it runs the extension's program on
+            this machine with the privileges you confirmed when you installed it.
+          </p>
+          {reason ? (
+            <p className="notice" role="alert">
+              {reason}
+            </p>
+          ) : null}
+          <button type="button" onClick={onStart} disabled={busy}>
+            {busy ? "Starting…" : "Start"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
 }
