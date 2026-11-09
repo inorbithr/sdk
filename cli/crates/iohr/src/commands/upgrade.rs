@@ -222,6 +222,19 @@ pub(crate) fn http_within(
     read: Option<Duration>,
     total: Duration,
 ) -> Result<reqwest::Client, Error> {
+    http_builder(base, connect, read, total)
+        .build()
+        .map_err(|e| Error::Failed(format!("cannot start the HTTP client: {e}")))
+}
+
+/// [`http_within`] before it is built, for a caller that sets more (the site reader turns
+/// redirects off, so it can check each address against the site's scope).
+pub(crate) fn http_builder(
+    base: &str,
+    connect: Duration,
+    read: Option<Duration>,
+    total: Duration,
+) -> reqwest::ClientBuilder {
     // https only, except a loopback address (a test double).
     let local = url::Url::parse(base)
         .ok()
@@ -238,20 +251,31 @@ pub(crate) fn http_within(
     if let Some(r) = read {
         b = b.read_timeout(r);
     }
-    b.build()
-        .map_err(|e| Error::Failed(format!("cannot start the HTTP client: {e}")))
+    b
 }
 
-/// A body of at most `max` bytes.
-pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
+/// What one request answered.
+pub(crate) struct Reply {
+    pub status: u16,
+    /// The `Content-Type`, lower case, empty when none came.
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// One `GET`: the status, the type and a body of at most `max` bytes, whatever the status.
+pub(crate) async fn fetch(c: &reqwest::Client, url: &str, max: usize) -> Result<Reply, Error> {
     let mut resp = c
         .get(url)
         .send()
         .await
         .map_err(|e| Error::Failed(format!("{url}: {}", e.without_url())))?;
-    if !resp.status().is_success() {
-        return Err(Error::Failed(format!("{url}: {}", resp.status())));
-    }
+    let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let mut body = Vec::new();
     while let Some(chunk) = resp
         .chunk()
@@ -263,7 +287,22 @@ pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Ve
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(body)
+    Ok(Reply {
+        status,
+        content_type,
+        body,
+    })
+}
+
+/// A body of at most `max` bytes, from a 2xx answer.
+pub(crate) async fn get(c: &reqwest::Client, url: &str, max: usize) -> Result<Vec<u8>, Error> {
+    let r = fetch(c, url, max).await?;
+    if !(200..300).contains(&r.status) {
+        let said = reqwest::StatusCode::from_u16(r.status)
+            .map_or_else(|_| r.status.to_string(), |s| s.to_string());
+        return Err(Error::Failed(format!("{url}: {said}")));
+    }
+    Ok(r.body)
 }
 
 struct Sources {
