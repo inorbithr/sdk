@@ -564,19 +564,22 @@ async fn live(g: &Global, env: Env, args: PanelArgs) -> Result<(), Error> {
             initial,
             command: args.command,
             host_gone: None,
+            project: None,
         },
     )
     .await
     .map(|_| ())
 }
 
-/// Bare `iohr`: the person's shell under the panel, in the session the caller joined. Answers
-/// `true` when the session host stopped while the shell was open (`iohr stop`).
+/// Bare `iohr`: the person's shell under the panel, in the session the caller joined for
+/// `project`. Answers `true` when the session host stopped while the shell was open (`iohr
+/// stop`); running `iohr` again then joins a host again, from here, for as long as the panel is up.
 #[cfg(unix)]
 pub(crate) async fn session_shell(
     g: &Global,
     env: Env,
     host_gone: Option<tokio::sync::oneshot::Receiver<()>>,
+    project: std::path::PathBuf,
 ) -> Result<bool, Error> {
     proxy::run(
         g,
@@ -586,6 +589,7 @@ pub(crate) async fn session_shell(
             initial: model::View::Rest,
             command: Vec::new(),
             host_gone,
+            project: Some(project),
         },
     )
     .await
@@ -607,6 +611,7 @@ pub(crate) fn bare_enters(_: &Global) -> bool {
 /// top right corner of the screen (ADR 0225), and a fresh terminal prints this note in those very
 /// rows, so the box would paint over the cause it is there to give. A terminal first scrolls the
 /// corner away: the note starts below the box and its shadow. Off a terminal it is the plain note.
+#[cfg(unix)]
 pub(crate) fn note_below_the_box(line: &str) {
     use std::io::{IsTerminal as _, Write as _};
     let mut err = std::io::stderr().lock();
@@ -618,6 +623,7 @@ pub(crate) fn note_below_the_box(line: &str) {
 
 /// The rows the idle box and its shadow cover from the top of the screen: three for the box,
 /// one for the shadow under it.
+#[cfg(unix)]
 const CORNER_ROWS: usize = 4;
 
 /// The key the static designs name: the live panel's own choice for this terminal.

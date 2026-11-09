@@ -63,7 +63,7 @@ impl Plan {
     /// What a dry run says it would do.
     pub(crate) fn would(&self) -> String {
         format!(
-            "read {} on this machine with iohr-agent (up to {} pages or {} minutes, at most {} a second; {}) into {DIR}/{}/, then write atlas facts and one memory entry; nothing is sent to InOrbit",
+            "read {} on this machine with iohr-agent (up to {} pages or {} minutes, at most {} a second; {}) into {DIR}/{}/, keep each page's text for a local search index (an older iohr-agent reads each page once more, at the same pace), then write atlas facts, a local knowledge base and one memory entry; nothing is sent to InOrbit",
             self.url.as_str(),
             self.pages,
             self.minutes,
@@ -92,7 +92,7 @@ pub(crate) fn consent(p: &Plan) -> String {
         " A link to another name in its domain is asked about, once per name, before it is followed; with no terminal none is followed (--crawl-subdomains follows them)."
     };
     format!(
-        "This reads the public pages of {scope} on this machine, with iohr-agent: at most {} a second to one host (a slower Crawl-delay in robots.txt wins), robots.txt followed, up to {} pages or {} minutes.{more} What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
+        "This reads the public pages of {scope} on this machine, with iohr-agent: at most {} a second to one host (a slower Crawl-delay in robots.txt wins), robots.txt followed, up to {} pages or {} minutes.{more} It keeps the text of each page for a local search index (an older iohr-agent makes one more request per page, at the same pace and under the same rules). What it finds stays in this project, under {DIR}/{}/ and atlas/. Nothing is sent to InOrbit.",
         requests(p.rate),
         p.pages,
         p.minutes,
@@ -265,6 +265,10 @@ pub(crate) struct Page {
     pub size: u64,
     pub depth: u32,
     pub error: Option<String>,
+    /// The address this one redirected to; the crawler records the target as a page of its own.
+    pub redirected_to: Option<String>,
+    /// The page was drawn by the crawler's browser (a page built by script), not just fetched.
+    pub rendered: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -335,8 +339,9 @@ fn fact_line(p: &Page, site: &str, crawled: &str) -> String {
     .to_string()
 }
 
-/// The study's text: what was read, then one line per page, up to [`LISTED`].
-fn study_text(c: &Crawl, n: &Counts, name: &str, crawled: &str) -> String {
+/// The study's text: what was read, the site model when the knowledge base was built, then one
+/// line per page, up to [`LISTED`].
+fn study_text(c: &Crawl, n: &Counts, name: &str, crawled: &str, model: Option<&str>) -> String {
     let mut t = String::new();
     let _ = writeln!(
         t,
@@ -356,6 +361,14 @@ fn study_text(c: &Crawl, n: &Counts, name: &str, crawled: &str) -> String {
             t,
             "Names in the same domain that were not read: {}.\n",
             n.not_followed.join(", ")
+        );
+    }
+    if let Some(m) = model {
+        // The site model's own headings sit one level down, under this one.
+        let _ = writeln!(
+            t,
+            "## Site model\n\n{}\n",
+            m.trim_end().replace("\n## ", "\n### ")
         );
     }
     let _ = writeln!(t, "## Pages\n");
@@ -450,13 +463,24 @@ pub(crate) struct Kept {
 /// # Errors
 ///
 /// A message saying which file could not be written.
-pub(crate) fn keep(root: &Path, name: &str, c: &Crawl, crawled: &str) -> Result<Kept, String> {
+pub(crate) fn keep(
+    root: &Path,
+    name: &str,
+    c: &Crawl,
+    crawled: &str,
+    model: Option<&crate::kb::Built>,
+) -> Result<Kept, String> {
     let n = c.counts();
     let dir = root.join(DIR).join(name);
     let mut facts = String::new();
     for p in &c.pages {
         facts.push_str(&fact_line(p, name, crawled));
         facts.push('\n');
+    }
+    // The site model's entities, sections and facts go in the same file, one record per line,
+    // told apart by `kind`.
+    if let Some(m) = model {
+        facts.push_str(&m.jsonl);
     }
     let path = dir.join("facts.jsonl");
     std::fs::write(&path, facts).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
@@ -471,7 +495,7 @@ pub(crate) fn keep(root: &Path, name: &str, c: &Crawl, crawled: &str) -> Result<
         &title,
         &summary,
         crawled,
-        &study_text(c, &n, name, crawled),
+        &study_text(c, &n, name, crawled, model.map(|m| m.study.as_str())),
     )?;
     let store = store::Store::project(root);
     let text = format!(
@@ -487,7 +511,7 @@ pub(crate) fn keep(root: &Path, name: &str, c: &Crawl, crawled: &str) -> Result<
     )
     .map_err(|e| format!("cannot write the memory entry: {e}"))?;
     Ok(Kept {
-        facts: c.pages.len(),
+        facts: c.pages.len() + model.map_or(0, crate::kb::Built::fact_lines),
         study,
         memories: 1,
     })
@@ -545,13 +569,16 @@ impl Budget {
 }
 
 /// The arguments of one pass, as the agent extension reads them. `paced` adds `--rate` and
-/// `--progress`, which an agent from before RFC 0163 refuses (see [`progress::is_old_agent`]).
+/// `--progress`, which an agent from before RFC 0163 refuses (see [`progress::is_old_agent`]);
+/// `keep` adds `--keep-pages`, so the page files are left for the knowledge base to read, which
+/// an agent from before it refuses (see [`progress::is_no_keep`]).
 fn crawler_args(
     start: &str,
     b: &Budget,
     policy: &Path,
     out: &Path,
     paced: bool,
+    keep: bool,
 ) -> Vec<std::ffi::OsString> {
     let mut a: Vec<std::ffi::OsString> =
         ["atlas", "crawl", start, "--policy"].map(Into::into).into();
@@ -572,6 +599,9 @@ fn crawler_args(
         a.push("--rate".into());
         a.push(b.rate.to_string().into());
         a.push("--progress".into());
+    }
+    if keep {
+        a.push("--keep-pages".into());
     }
     a
 }
@@ -766,6 +796,8 @@ struct Ctx<'a> {
     /// The agent refused `--rate` and `--progress`: it is from before RFC 0163, so the later
     /// passes of this run go without them, straight to the spinner and the agent's own pace.
     old_agent: std::sync::atomic::AtomicBool,
+    /// The agent refused `--keep-pages`: the page text is read from the site, once, by iohr.
+    no_keep: std::sync::atomic::AtomicBool,
 }
 
 impl Ctx<'_> {
@@ -781,8 +813,12 @@ impl Ctx<'_> {
     ) -> Result<Crawl, String> {
         prepare_dir(self.root, dir, policy)?;
         let crawl_json = dir.join("crawl.json");
-        let mut sp =
-            (!self.out.json).then(|| self.ui.step(&format!("Reading {label} on this machine")));
+        let mut sp = (!self.out.json).then(|| {
+            self.ui.step_every(
+                &format!("Reading {label} on this machine"),
+                crate::ui::REDRAW,
+            )
+        });
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<progress::Line>();
         let ran = {
             let run = self.run_agent(start, &b, dir, &crawl_json, tx);
@@ -845,15 +881,27 @@ impl Ctx<'_> {
     ) -> Result<Crawl, String> {
         use std::sync::atomic::Ordering::Relaxed;
         let policy = dir.join("policy.toml");
-        let paced = !self.old_agent.load(Relaxed);
-        let args = crawler_args(start, b, &policy, crawl_json, paced);
-        let mut quiet = self.launch(&args, b.minutes, tx.clone()).await?;
-        if paced && progress::is_old_agent(quiet.code, &quiet.stderr) {
-            // An agent from before RFC 0163 refuses the new flags before it does anything, so
-            // running it again without them repeats nothing.
-            self.old_agent.store(true, Relaxed);
-            let args = crawler_args(start, b, &policy, crawl_json, false);
-            quiet = self.launch(&args, b.minutes, tx).await?;
+        let mut paced = !self.old_agent.load(Relaxed);
+        let mut keep = !self.no_keep.load(Relaxed);
+        let mut quiet;
+        let mut tries = 0;
+        loop {
+            let args = crawler_args(start, b, &policy, crawl_json, paced, keep);
+            quiet = self.launch(&args, b.minutes, tx.clone()).await?;
+            // An agent refuses a flag it does not know before it does anything, so running it
+            // again without the flag repeats nothing. One from before RFC 0163 knows neither
+            // `--rate` nor `--keep-pages`; a later one lacks only `--keep-pages`.
+            tries += 1;
+            if tries < 3 && paced && progress::is_old_agent(quiet.code, &quiet.stderr) {
+                self.old_agent.store(true, Relaxed);
+                self.no_keep.store(true, Relaxed);
+                (paced, keep) = (false, false);
+            } else if tries < 3 && keep && progress::is_no_keep(quiet.code, &quiet.stderr) {
+                self.no_keep.store(true, Relaxed);
+                keep = false;
+            } else {
+                break;
+            }
         }
         // Exit 0 is a complete crawl and 1 one that a budget stopped: both leave the JSON.
         let parsed = std::fs::read(crawl_json)
@@ -914,6 +962,7 @@ pub(crate) async fn run(
         out,
         root,
         old_agent: std::sync::atomic::AtomicBool::new(false),
+        no_keep: std::sync::atomic::AtomicBool::new(false),
     };
     let dir: PathBuf = root.join(DIR).join(&p.name);
     let host = p.url.host_str().unwrap_or_default();
@@ -951,12 +1000,18 @@ pub(crate) async fn run(
         .await
     };
     let crawled = crate::front::today();
-    let kept = match keep(root, &p.name, &crawl, &crawled) {
+    // The page text is read first, from the files the crawler kept, so the model is in the
+    // facts and the study that `keep` writes.
+    let model = read_text(ui, out, root, p, &dir, &crawl, &crawled).await;
+    let kept = match keep(root, &p.name, &crawl, &crawled, model.as_ref()) {
         Ok(k) => k,
         Err(e) => return failed(e),
     };
     let n = crawl.counts();
-    let text = summary(&p.name, &n, kept.facts, kept.memories);
+    let mut text = summary(&p.name, &n, kept.facts, kept.memories);
+    if let Some(m) = &model {
+        text = m.report.within(&p.name, &text);
+    }
     if !out.json {
         ui.note("Crawl", &text);
     }
@@ -965,11 +1020,117 @@ pub(crate) async fn run(
         "Crawl",
         "done",
         format!(
-            "read {} pages of {} on this machine; {} facts in {}, 1 memory entry; nothing was sent to InOrbit",
-            n.read, p.name, kept.facts, kept.study
+            "read {} pages of {} on this machine; {} facts in {}, 1 memory entry{}; nothing was sent to InOrbit",
+            n.read,
+            p.name,
+            kept.facts,
+            kept.study,
+            model.as_ref().map_or_else(String::new, |m| format!(
+                "; knowledge base: {} chunks, {} words, {} entities",
+                m.report.chunks, m.report.tokens, m.report.entities
+            )),
         ),
         "",
     )
+}
+
+/// The local knowledge base of the crawl (PRD 0192): the text of each page, cut into chunks,
+/// indexed, with the site model. The pages come from the files the crawler kept under `dir`
+/// (and under a followed subdomain's folder); only a page with no file is requested, within
+/// the plan's scope, `robots.txt` and rate. It never fails the crawl: what went wrong is said,
+/// and the crawl's own record stands.
+async fn read_text(
+    ui: Ui,
+    out: Out,
+    root: &Path,
+    p: &Plan,
+    dir: &Path,
+    crawl: &Crawl,
+    crawled: &str,
+) -> Option<crate::kb::Built> {
+    let input: Vec<crate::kb::PageIn> = crawl
+        .pages
+        .iter()
+        .filter(|x| x.status == 200 && x.error.is_none())
+        .filter(|x| x.content_type.is_empty() || x.content_type.to_lowercase().contains("html"))
+        .map(|x| crate::kb::PageIn {
+            url: x.url.clone(),
+            title: x.title.clone(),
+            depth: x.depth,
+            rendered: x.rendered,
+        })
+        .collect();
+    let opts = crate::kb::Opts {
+        deadline: Duration::from_secs(u64::from(p.minutes) * 60),
+        rate: p.rate,
+        scope: p.url.host_str().unwrap_or_default().to_owned(),
+        also: subfolders(&dir.join("more")),
+        redirects: crawl
+            .pages
+            .iter()
+            .filter_map(|x| Some((x.url.clone(), x.redirected_to.clone()?)))
+            .collect(),
+        crawled: crawled.to_owned(),
+    };
+    let mut sp = (!out.json && !input.is_empty()).then(|| {
+        ui.step_every(
+            &format!("Reading the text of {} pages", input.len()),
+            crate::ui::REDRAW,
+        )
+    });
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+    let tell = move |done: usize, total: usize| {
+        let _ = tx.send((done, total));
+    };
+    let built = {
+        let run = crate::kb::build(root, &p.name, &input, &opts, &tell);
+        tokio::pin!(run);
+        loop {
+            tokio::select! {
+                r = &mut run => break r,
+                Some((done, total)) = rx.recv() => {
+                    if let Some(sp) = sp.as_mut() {
+                        sp.progress(
+                            done as u64,
+                            Some(total as u64),
+                            &format!("Reading the text of {total} pages: {done} done"),
+                        );
+                    }
+                }
+            }
+        }
+    };
+    match (built, sp) {
+        (Ok(r), sp) => {
+            if let Some(sp) = sp {
+                sp.clear();
+            }
+            Some(r)
+        }
+        (Err(e), sp) => {
+            let line = format!("The knowledge base was not built: {e}");
+            match sp {
+                Some(sp) => sp.fail(&line),
+                None if !out.json => ui.warn(&line),
+                None => {}
+            }
+            None
+        }
+    }
+}
+
+/// The folders directly under `dir` (one per followed subdomain), each of which may hold the
+/// crawler's `pages/`.
+fn subfolders(dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    v.sort();
+    v
 }
 
 /// A host as a folder name: safe characters only.
@@ -1092,6 +1253,8 @@ mod tests {
             size: 10,
             depth: 1,
             error: error.map(str::to_owned),
+            redirected_to: None,
+            rendered: false,
         }
     }
 
@@ -1184,6 +1347,7 @@ mod tests {
                 Path::new("/p/policy.toml"),
                 Path::new("/p/crawl.json"),
                 paced,
+                false,
             )
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
@@ -1196,6 +1360,31 @@ mod tests {
             line(true)
         );
         assert!(!line(false).contains("--rate") && !line(false).contains("--progress"));
+    }
+
+    #[test]
+    fn the_crawler_is_asked_to_keep_the_pages_unless_it_is_too_old() {
+        let p = plan("https://acme.example/");
+        let line = |keep| {
+            crawler_args(
+                p.url.as_str(),
+                &Budget::of(&p),
+                Path::new("/p/policy.toml"),
+                Path::new("/p/crawl.json"),
+                true,
+                keep,
+            )
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+        };
+        assert!(
+            line(true).ends_with("--progress --keep-pages"),
+            "{}",
+            line(true)
+        );
+        assert!(!line(false).contains("--keep-pages"));
     }
 
     #[test]
@@ -1348,14 +1537,14 @@ mod tests {
         };
         let name = "acme.example";
         std::fs::create_dir_all(t.path().join(DIR).join(name)).unwrap();
-        let k = keep(t.path(), name, &c, "2026-11-08").unwrap();
+        let k = keep(t.path(), name, &c, "2026-11-08", None).unwrap();
         assert_eq!(k.facts, 2);
         assert_eq!(k.study, "atlas/studies/0001-site-crawl-acme-example.md");
         let facts =
             std::fs::read_to_string(t.path().join(DIR).join(name).join("facts.jsonl")).unwrap();
         assert_eq!(facts.lines().count(), 2);
         assert!(facts.contains("\"crawled\":\"2026-11-08\""));
-        let again = keep(t.path(), name, &c, "2026-11-09").unwrap();
+        let again = keep(t.path(), name, &c, "2026-11-09", None).unwrap();
         assert_eq!(again.study, k.study, "a second crawl rewrites the study");
         let studies: Vec<_> = std::fs::read_dir(t.path().join("atlas/studies"))
             .unwrap()
@@ -1367,6 +1556,43 @@ mod tests {
     }
 
     #[test]
+    fn the_site_model_is_folded_into_the_facts_and_the_one_study() {
+        let t = tempfile::tempdir().unwrap();
+        let c = Crawl {
+            start: "https://acme.example/".into(),
+            pages: vec![page("https://acme.example/", 200, None)],
+            ..Crawl::default()
+        };
+        let name = "acme.example";
+        std::fs::create_dir_all(t.path().join(DIR).join(name)).unwrap();
+        let model = crate::kb::Built {
+            report: crate::kb::Report::default(),
+            jsonl: "{\"kind\":\"entity\",\"name\":\"Acme\"}\n{\"kind\":\"fact\",\"value\":\"x\"}\n"
+                .into(),
+            study: "The model of acme.example.\n\n## Sections\n\n- `/a`: A\n".into(),
+        };
+        let k = keep(t.path(), name, &c, "2026-11-08", Some(&model)).unwrap();
+        assert_eq!(k.facts, 3, "the page and the model's two lines");
+        let dir = t.path().join(DIR).join(name);
+        let facts = std::fs::read_to_string(dir.join("facts.jsonl")).unwrap();
+        assert_eq!(facts.lines().count(), 3);
+        assert!(facts.contains("\"kind\":\"entity\""));
+        assert!(!dir.join("model.jsonl").exists(), "one facts file, not two");
+        let studies: Vec<_> = std::fs::read_dir(t.path().join("atlas/studies"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(studies.len(), 1, "one study, not a second \"Site model\"");
+        let text = std::fs::read_to_string(studies[0].path()).unwrap();
+        let (model_at, pages_at) = (
+            text.find("## Site model").unwrap(),
+            text.find("## Pages").unwrap(),
+        );
+        assert!(model_at < pages_at, "{text}");
+        assert!(text.contains("### Sections"), "{text}");
+    }
+
+    #[test]
     fn the_crawler_gets_the_budgets_and_the_policy() {
         let p = plan("https://acme.example/");
         let a: Vec<String> = crawler_args(
@@ -1374,6 +1600,7 @@ mod tests {
             &Budget::of(&p),
             Path::new("/p/policy.toml"),
             Path::new("/p/crawl.json"),
+            false,
             false,
         )
         .iter()
@@ -1402,7 +1629,7 @@ mod tests {
                 .collect(),
             ..Crawl::default()
         };
-        let t = study_text(&c, &c.counts(), "a", "2026-11-08");
+        let t = study_text(&c, &c.counts(), "a", "2026-11-08", None);
         assert_eq!(t.matches("\n- https://a/").count(), LISTED);
         assert!(
             t.contains("3 more pages are in `.inorbit/crawl/a/facts.jsonl`"),
