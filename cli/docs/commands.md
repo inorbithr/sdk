@@ -38,6 +38,9 @@ ends its `--help` with real examples.
 |---|---|---|
 | `iohr init`, `iohr project init \| sync \| template ...` | Set up a project in this folder, from a template or built by your agent; `iohr init`, `iohr project init` and `iohr project create` are one command | [Projects](projects.md) |
 | `iohr atlas roles list \| import [--dry-run]` | The built-in roles and whether each is in your account | [Roles](roles-and-memory.md#built-in-roles) |
+| `iohr atlas search QUERY [--site S] [--limit N]` | The best chunks of the text of the sites you crawled, each with its page, heading path and offsets (local) | [Projects](projects.md#the-site-knowledge-base) |
+| `iohr atlas facts [--site S] [--predicate P] [--grep TEXT]` | The facts of the site model, each with the chunk it came from | [Projects](projects.md#the-site-knowledge-base) |
+| `iohr atlas index [--pages] [--site S]` | The crawled sites with pages, chunks, words, entities, facts and links; `--pages` lists the pages | [Projects](projects.md#the-site-knowledge-base) |
 | `iohr sync` | Send the project's atlas to your account | [Projects](projects.md#the-atlas-and-iohr-sync) |
 | `iohr ext ...` | Find, install, verify, pin and build extensions; `iohr <name> ...` runs one | [Extensions](extensions.md) |
 | `iohr sdk add \| config \| generate \| check \| examples` | The SDKs in your project | [SDKs and the API](sdk.md) |
