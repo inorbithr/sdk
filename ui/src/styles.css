@@ -1,0 +1,183 @@
+/* Plain tokens for the stub page. The Mac app's theme comes with the shell frame (RFC 0217 C5). */
+:root {
+  --bg: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #d2d2d7;
+  --bar: #f5f5f7;
+  --menu: #ffffff;
+  --active: #0a64d6;
+  --active-fg: #ffffff;
+  --stub: #8a5a00;
+  --stub-bg: #fff4d6;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --fg: #f5f5f7;
+    --muted: #a1a1a6;
+    --line: #3a3a3c;
+    --bar: #2c2c2e;
+    --menu: #2c2c2e;
+    --active: #0a84ff;
+    --active-fg: #ffffff;
+    --stub: #ffcf66;
+    --stub-bg: #3a2e12;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font:
+    14px / 1.45 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  font-weight: 600;
+}
+
+.menubar {
+  display: flex;
+  gap: 4px;
+}
+
+.menu-anchor {
+  position: relative;
+}
+
+.menubar-item {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: default;
+}
+
+.menubar-item[aria-expanded="true"],
+.menubar-item:hover:not(:disabled) {
+  background: var(--line);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  min-width: 260px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  background: var(--menu);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  outline: none;
+}
+
+.menu-heading {
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.menu-row {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: default;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 8px;
+  border-radius: 5px;
+}
+
+.menu-row.active:not([aria-disabled="true"]) {
+  background: var(--active);
+  color: var(--active-fg);
+}
+
+.menu-row[aria-disabled="true"] {
+  color: var(--muted);
+}
+
+.menu-hint {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.menu-sep {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
+}
+
+.body {
+  flex: 1;
+  padding: 24px 16px;
+}
+
+.frame-stub,
+.panel-stub {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.stub-badge {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--stub-bg);
+  color: var(--stub);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.notice {
+  max-width: 640px;
+  margin: 0 auto 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.panel-frame {
+  width: 100%;
+  height: calc(100vh - 88px);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}

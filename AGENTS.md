@@ -14,6 +14,7 @@ agent and for people. Language-specific rules live in each language directory's 
 | `typescript/`, `python/`, `go/`, `java/`, `csharp/`, `rust/`, `swift/` | One package each: a hand-written runtime and the public surface `iohr sdk generate` writes into it (ADR 0011). Swift's `Package.swift` sits at the root, where SwiftPM reads it (ADR 0016). |
 | `dart/` | The Dart runtime, started (platform RFC 0074.8): the bundled contract and the answer checker; the generated surface and the conformance driver follow. |
 | `cli/` | The `iohr` command line: a Cargo workspace of its own (ADR 0009), with `cli/AGENTS.md`. |
+| `ui/` | The web UI `iohr ui` serves (RFC 0217): a private Vite and React package, not published. The shell frame layer moves here from the Mac app under ADR 0230. |
 | `examples/<lang>/` | Small programs that compile in CI and are quoted by the READMEs. |
 | `docs/` | `design.md` (cross-language API rules), `adr/` (decisions), `releasing.md`, `style.md`. |
 | `tools/` | Repository scripts used by `mise` tasks and hooks. |
@@ -53,6 +54,8 @@ once, then:
   result differs from what is committed.
 - `mise run conformance` or `conformance:<lang>`: run the shared cases.
 - `mise run examples:check`: compile every example.
+- `mise run ui:check`: the web UI's biome, type check, tests and build, through `iohr ui check`;
+  `ui:dev`, `ui:build` and `ui:serve` are the other verbs.
 - `mise run spec:lint`: lint `spec/` and check it for breaking changes against `main`.
 
 A task for a language whose package does not exist yet prints a skip line and exits 0.

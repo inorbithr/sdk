@@ -56,15 +56,15 @@ CARGO_TERM_COLOR = "never"
 
 [tasks.ci]
 description = "Everything CI checks, in the same order"
-depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check", "conformance", "examples:check", "examples:run"]
+depends = ["repo:check", "spec:lint", "conformance:validate", "conformance:server:check", "audit", "gen:check", "go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check", "ui:check", "conformance", "examples:check", "examples:run"]
 
 [tasks."ci:changed"]
 description = "What CI would run for your changes since origin/main, with CI's path rules; run it before a push (`-- --dry-run` prints the plan)"
 run = "bash tools/ci-changed.sh"
 
 [tasks.check]
-description = "Format check, lint, types and unit tests for every language and the command line"
-depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check"]
+description = "Format check, lint, types and unit tests for every language, the command line and the web UI"
+depends = ["go:check", "rust:check", "ts:check", "py:check", "java:check", "csharp:check", "swift:check", "dart:check", "cli:check", "ui:check"]
 
 [tasks.fmt]
 description = "Format every language and the command line in place"
@@ -316,18 +316,26 @@ fi
 # One path for a developer, mise and CI: each task is the `iohr ui` verb, run from this
 # checkout's own build. `iohr ui` finds the nearest `ui/` package from `cli/`.
 
+[tasks."ui:install"]
+description = "Web UI: install the UI package's locked dependencies (pnpm, frozen lockfile)"
+dir = "ui"
+run = "pnpm install --frozen-lockfile"
+
 [tasks."ui:build"]
 description = "Web UI: build the UI package (`iohr ui build`, pnpm run build)"
+depends = ["ui:install"]
 dir = "cli"
 run = "cargo run --quiet --locked -p iohr -- ui build"
 
 [tasks."ui:dev"]
 description = "Web UI: the UI package's dev server (`iohr ui dev`)"
+depends = ["ui:install"]
 dir = "cli"
 run = "cargo run --quiet --locked -p iohr -- ui dev"
 
 [tasks."ui:check"]
 description = "Web UI: the UI package's checks (`iohr ui check`)"
+depends = ["ui:install"]
 dir = "cli"
 run = "cargo run --quiet --locked -p iohr -- ui check"
 
