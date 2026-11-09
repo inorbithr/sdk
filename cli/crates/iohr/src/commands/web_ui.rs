@@ -11,6 +11,10 @@
 //! `iohr sdk add` uses: no shell, the exit code passed on), so a developer, mise and CI
 //! call one thing. A running `serve` records its address in the data folder
 //! (`ui/serving.json`, 0600) for `iohr ui open`, and removes it when it stops.
+//!
+//! The one API route, `GET /api/extensions`, lists the installed extensions that serve
+//! a panel (`ext::install::Store::panels`, the store `iohr ext install` writes). It
+//! reads the lock and records only: nothing is started from here.
 
 use std::io::{self, Read as _};
 use std::net::SocketAddr;
@@ -28,6 +32,7 @@ use crate::cli::{Global, UiArgs, UiCommand, UiPackage, UiServe};
 use crate::commands::sdk_add::{resolve, run_program};
 use crate::commands::session::data_dir;
 use crate::error::Error;
+use crate::ext::install::Store;
 use crate::output::Out;
 use crate::ui::Ui;
 
@@ -207,7 +212,7 @@ fn forget(folder: &Path, url: &str) {
 async fn serve_until_stopped(g: &Global, args: &UiServe, out: Out) -> Result<(), Error> {
     let root = ui_root(args.dir.as_deref(), &working_folder()?)?;
     let port = args.port.unwrap_or(0);
-    let server = Server::bind(&root, port)
+    let server = Server::bind(&root, port, super::ext::store(g)?)
         .await
         .map_err(|e| listen_error(port, &e))?;
     let url = server.url();
@@ -273,22 +278,25 @@ fn ui_root(dir: Option<&Path>, from: &Path) -> Result<PathBuf, Error> {
     })
 }
 
-/// The UI listener: a canonical root and a loopback socket.
+/// The UI listener: a canonical root, the extension store it lists, a loopback socket.
 pub(crate) struct Server {
     listener: TcpListener,
     root: Arc<PathBuf>,
+    store: Arc<Store>,
     addr: SocketAddr,
 }
 
 impl Server {
-    /// Binds `port` (0: the system picks) on loopback, serving the canonical `root`.
-    pub(crate) async fn bind(root: &Path, port: u16) -> io::Result<Self> {
+    /// Binds `port` (0: the system picks) on loopback, serving the canonical `root` and
+    /// listing the panels in `store`.
+    pub(crate) async fn bind(root: &Path, port: u16, store: Store) -> io::Result<Self> {
         let root = Arc::new(std::fs::canonicalize(root)?);
         let listener = bind_loopback(port).await?;
         let addr = listener.local_addr()?;
         Ok(Self {
             listener,
             root,
+            store: Arc::new(store),
             addr,
         })
     }
@@ -311,9 +319,10 @@ impl Server {
                     // Over the cap: the connection closes unanswered.
                     let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else { continue };
                     let root = Arc::clone(&self.root);
+                    let store = Arc::clone(&self.store);
                     let host = Arc::clone(&host);
                     tokio::spawn(async move {
-                        answer(stream, &root, &host).await;
+                        answer(stream, &root, store, &host).await;
                         drop(permit);
                     });
                 }
@@ -330,11 +339,11 @@ fn host_of(addr: SocketAddr) -> String {
     }
 }
 
-async fn answer(mut stream: TcpStream, root: &Path, host: &str) {
+async fn answer(mut stream: TcpStream, root: &Path, store: Arc<Store>, host: &str) {
     let Ok(Ok(head)) = timeout(READ_WINDOW, read_head(&mut stream)).await else {
         return;
     };
-    let reply = reply_to(&head, root, host).await;
+    let reply = reply_to(&head, root, store, host).await;
     let _ = timeout(WRITE_WINDOW, reply.write(&mut stream)).await;
 }
 
@@ -395,7 +404,7 @@ impl Reply {
 }
 
 /// The answer to one request head.
-async fn reply_to(head: &[u8], root: &Path, host: &str) -> Reply {
+async fn reply_to(head: &[u8], root: &Path, store: Arc<Store>, host: &str) -> Reply {
     let request = match parse(head) {
         Ok(r) => r,
         Err(status) => return Reply::error(status),
@@ -417,11 +426,13 @@ async fn reply_to(head: &[u8], root: &Path, host: &str) -> Reply {
         if !api_caller_allowed(&request, host) {
             return Reply::error("403 Forbidden");
         }
-        // Round one has no API route yet (`/api/extensions` is C3); never the app page.
-        return Reply {
-            head_only,
-            ..Reply::error("404 Not Found")
+        // Any other `/api` path is 404, never the app page.
+        let mut reply = match decoded_path(&request.target).as_deref() {
+            Some("/api/extensions") => extensions(store).await,
+            _ => Reply::error("404 Not Found"),
         };
+        reply.head_only = head_only;
+        return reply;
     }
     let mut reply = match file_for(root, &request.target) {
         Ok(path) => serve_file(&path).await,
@@ -484,11 +495,37 @@ fn parse(head: &[u8]) -> Result<Request, &'static str> {
     Ok(request)
 }
 
+/// A target's path, without its query or fragment, percent-decoded; `None` for a bad
+/// escape.
+fn decoded_path(target: &str) -> Option<String> {
+    percent_decode(target.split(['?', '#']).next().unwrap_or_default())
+}
+
 /// Whether a target is under `/api`, judged on the decoded path so an escape cannot
 /// slip past the caller check.
 fn is_api(target: &str) -> bool {
-    let path = target.split(['?', '#']).next().unwrap_or_default();
-    percent_decode(path).is_some_and(|p| p == "/api" || p.starts_with("/api/"))
+    decoded_path(target).is_some_and(|p| p == "/api" || p.starts_with("/api/"))
+}
+
+/// `GET /api/extensions`: `{"extensions": [{name, version, title, entry}]}`, the
+/// installed extensions with a panel, by name. The store is read off the async
+/// threads; a lock that cannot be read is 500 with no detail on the wire.
+async fn extensions(store: Arc<Store>) -> Reply {
+    let listed = tokio::task::spawn_blocking(move || store.panels()).await;
+    let Ok(Ok(panels)) = listed else {
+        return Reply::error("500 Internal Server Error");
+    };
+    let Ok(body) = serde_json::to_vec(&serde_json::json!({ "extensions": panels })) else {
+        return Reply::error("500 Internal Server Error");
+    };
+    Reply {
+        status: "200 OK",
+        content_type: "application/json",
+        body,
+        head_only: false,
+        no_store: true,
+        allow: false,
+    }
 }
 
 /// An `/api/*` caller is this listener's own page: the browser says `Sec-Fetch-Site`
@@ -531,8 +568,9 @@ pub(crate) enum Outside {
 
 /// The file `relative` (`/`-separated, already decoded) names inside the canonical
 /// folder `root`. A folder means its `index.html`. No part of the path may be a link,
-/// and the canonical result must still be a file under `root`. The UI root resolves
-/// through this, and so does an installed extension's `[panel].entry` (C3).
+/// and the canonical result must still be a file under `root`. Every UI file resolves
+/// through this. (A panel's `entry` is a path on the panel's own server, RFC 0143, so
+/// it never comes here.)
 pub(crate) fn resolve_inside(root: &Path, relative: &str) -> Result<PathBuf, Outside> {
     if relative.starts_with('/') || relative.contains(['\0', '\\']) {
         return Err(Outside::Malformed);
@@ -581,8 +619,7 @@ fn not_a_link(path: &Path) -> Result<(), Outside> {
 /// extension) gets the root's own `index.html` and nothing else; an unknown asset is
 /// 404, so a broken build shows.
 fn file_for(root: &Path, target: &str) -> Result<PathBuf, &'static str> {
-    let path = target.split(['?', '#']).next().unwrap_or_default();
-    let decoded = percent_decode(path).ok_or("400 Bad Request")?;
+    let decoded = decoded_path(target).ok_or("400 Bad Request")?;
     match resolve_inside(root, decoded.trim_start_matches('/')) {
         Ok(found) => Ok(found),
         Err(Outside::Malformed) => Err("400 Bad Request"),
@@ -676,6 +713,9 @@ mod tests {
         Outside, Server, file_for, forget, host_allowed, listen_error, percent_decode,
         recorded_url, remember, resolve_inside, ui_package, ui_root,
     };
+    use crate::ext::install::Store;
+    use crate::ext::lock::{Entry, Lock};
+    use crate::ext::oci::Digest;
 
     fn built_ui() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -685,9 +725,17 @@ mod tests {
         dir
     }
 
-    /// Starts a server on a free port and returns its address and a stop switch.
+    /// Starts a server on a free port, with no extension installed, and returns its
+    /// address and a stop switch.
     async fn start(root: &Path) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
-        let server = Server::bind(root, 0).await.expect("bind");
+        start_with(root, Store::new(root.join("no-extensions"))).await
+    }
+
+    async fn start_with(
+        root: &Path,
+        store: Store,
+    ) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
+        let server = Server::bind(root, 0, store).await.expect("bind");
         let addr = server.addr;
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(server.serve(async {
@@ -840,7 +888,7 @@ mod tests {
         let host = super::host_of(addr);
         let own = format!("Origin: http://{host}\r\n");
 
-        // The UI's own fetch: allowed through, and never the app page (no route yet).
+        // The UI's own fetch: allowed through. Nothing installed is an empty list.
         let same = send(
             addr,
             &api(
@@ -850,11 +898,18 @@ mod tests {
             ),
         )
         .await;
-        assert!(same.starts_with("HTTP/1.1 404"), "{same}");
+        assert!(same.starts_with("HTTP/1.1 200"), "{same}");
+        assert!(same.ends_with("\r\n\r\n{\"extensions\":[]}"), "{same}");
         assert!(same.contains("Cache-Control: no-store") && !same.contains("<p>ui</p>"));
         assert!(same.contains("Cross-Origin-Resource-Policy: same-origin"));
-        let typed = send(addr, &api("/api", &host, "Sec-Fetch-Site: none\r\n")).await;
-        assert!(typed.starts_with("HTTP/1.1 404"), "{typed}");
+        // Any other `/api` path is 404, never the app page.
+        for other in ["/api", "/api/", "/api/extensions/x", "/api/other"] {
+            let r = send(addr, &api(other, &host, "Sec-Fetch-Site: none\r\n")).await;
+            assert!(
+                r.starts_with("HTTP/1.1 404") && !r.contains("<p>ui</p>"),
+                "{other}: {r}"
+            );
+        }
 
         for extra in [
             String::new(),
@@ -883,6 +938,131 @@ mod tests {
         assert!(twice.starts_with("HTTP/1.1 400"), "{twice}");
     }
 
+    /// Lays `name` out in the store as `iohr ext install` does: a lock entry and the
+    /// version's `record.json` (no program: listing never runs one). `record: false`
+    /// leaves the record out, as a broken install would.
+    fn installed(store: &Path, name: &str, panel: Option<serde_json::Value>, record: bool) {
+        let digest = Digest::of(name.as_bytes());
+        let lock_path = store.join("iohr-ext.lock");
+        let mut lock = Lock::load(&lock_path).expect("lock");
+        let entry = Entry::new(name, "0.1.0", &digest, "test signer".into(), Vec::new());
+        lock.entries.insert(name.to_owned(), entry);
+        std::fs::create_dir_all(store).expect("store");
+        lock.save(&lock_path).expect("save");
+        if !record {
+            return;
+        }
+        let mut manifest = serde_json::json!({
+            "name": name, "version": "0.1.0", "entrypoint": format!("bin/{name}"),
+        });
+        if let Some(p) = panel {
+            manifest["panel"] = p;
+        }
+        let dir = store.join(name).join(format!("0.1.0-{}", digest.short()));
+        std::fs::create_dir_all(&dir).expect("version dir");
+        let sha = Digest::of(b"program").to_string();
+        let record = serde_json::json!({
+            "manifest": manifest, "index": digest.to_string(),
+            "platform_manifest": digest.to_string(), "program": name,
+            "program_sha256": sha, "signer": "test signer",
+            "registry": "registry.example/ext", "installed_at": "2026-11-09T00:00:00Z",
+        });
+        std::fs::write(dir.join("record.json"), record.to_string()).expect("record");
+    }
+
+    #[tokio::test]
+    async fn api_extensions_lists_only_installed_panels_that_pass_the_rule() {
+        let dir = built_ui();
+        let data = tempfile::tempdir().expect("data");
+        let store = data.path().join("extensions");
+        installed(
+            &store,
+            "todo",
+            Some(serde_json::json!({"title": "Todo", "entry": "/"})),
+            true,
+        );
+        installed(
+            &store,
+            "board",
+            Some(serde_json::json!({"title": "Board", "entry": "/app/"})),
+            true,
+        );
+        installed(&store, "agent", None, true);
+        installed(
+            &store,
+            "evil",
+            Some(serde_json::json!({"title": "Evil", "entry": "//evil.example/"})),
+            true,
+        );
+        installed(
+            &store,
+            "broken",
+            Some(serde_json::json!({"title": "B", "entry": "/"})),
+            false,
+        );
+        let (addr, _stop) = start_with(dir.path(), Store::in_data_dir(data.path())).await;
+        let host = super::host_of(addr);
+
+        let r = send(
+            addr,
+            &api(
+                "/api/extensions?fresh=1",
+                &host,
+                "Sec-Fetch-Site: same-origin\r\n",
+            ),
+        )
+        .await;
+        assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+        assert!(r.contains("Content-Type: application/json\r\n"), "{r}");
+        assert!(r.contains("Cache-Control: no-store"), "{r}");
+        let body = r.split_once("\r\n\r\n").map(|(_, b)| b).expect("body");
+        let got: serde_json::Value = serde_json::from_str(body).expect("json");
+        assert_eq!(
+            got,
+            serde_json::json!({"extensions": [
+                {"name": "board", "version": "0.1.0", "title": "Board", "entry": "/app/"},
+                {"name": "todo", "version": "0.1.0", "title": "Todo", "entry": "/"},
+            ]})
+        );
+
+        let head = send(
+            addr,
+            &format!(
+                "HEAD /api/extensions HTTP/1.1\r\nHost: {host}\r\nSec-Fetch-Site: none\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert!(
+            head.contains(&format!("Content-Length: {}\r\n", body.len())),
+            "{head}"
+        );
+        assert!(head.ends_with("\r\n\r\n"), "{head}");
+
+        // The caller check still runs first: another site sees none of it.
+        let cross = send(
+            addr,
+            &api("/api/extensions", &host, "Sec-Fetch-Site: cross-site\r\n"),
+        )
+        .await;
+        assert!(
+            cross.starts_with("HTTP/1.1 403") && !cross.contains("todo"),
+            "{cross}"
+        );
+
+        // A lock that cannot be read is 500 with nothing of it on the wire.
+        std::fs::write(store.join("iohr-ext.lock"), "not a lock").expect("garble");
+        let bad = send(
+            addr,
+            &api("/api/extensions", &host, "Sec-Fetch-Site: none\r\n"),
+        )
+        .await;
+        assert!(
+            bad.starts_with("HTTP/1.1 500") && !bad.contains("iohr-ext.lock"),
+            "{bad}"
+        );
+    }
+
     #[tokio::test]
     async fn a_taken_port_is_an_error_not_another_address() {
         let dir = built_ui();
@@ -890,7 +1070,8 @@ mod tests {
             .await
             .expect("hold");
         let port = held.local_addr().expect("addr").port();
-        let Err(e) = Server::bind(dir.path(), port).await else {
+        let Err(e) = Server::bind(dir.path(), port, Store::new(dir.path().join("none"))).await
+        else {
             panic!("bound a taken port");
         };
         assert_eq!(e.kind(), std::io::ErrorKind::AddrInUse);
@@ -925,7 +1106,7 @@ mod tests {
     }
 
     #[test]
-    fn a_panel_entry_resolves_only_to_a_plain_file_in_its_folder() {
+    fn a_path_resolves_only_to_a_plain_file_in_the_folder() {
         let dir = built_ui();
         let root = std::fs::canonicalize(dir.path()).expect("canon");
         assert_eq!(
