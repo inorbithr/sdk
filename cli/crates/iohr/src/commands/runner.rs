@@ -19,7 +19,8 @@ use crate::cli::SignIn;
 use crate::cli::{Global, RunnerApiKeyCommand, RunnerCommand, RunnerConfigCommand};
 use crate::commands::session;
 use crate::context::{
-    Ctx, account as resolve_account, blocking, io_session, run_profile, session, session_for,
+    Ctx, Prompts, account as resolve_account, blocking, io_session, run_profile, session,
+    session_for,
 };
 use crate::error::Error;
 use crate::output::Out;
@@ -1300,7 +1301,7 @@ impl StoredKey {
             .map(|p| p.storage)
             .ok_or_else(|| Error::Failed(format!("there is no profile {profile}")))?;
         let key = EntryKey::new(profile, &format!("{account}_{name}"))?;
-        Ok((ctx.store(storage)?, key))
+        Ok((ctx.store(storage, Prompts::Allowed)?, key))
     }
 
     /// The stored bytes, if any.

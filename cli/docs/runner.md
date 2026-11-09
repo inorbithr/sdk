@@ -184,7 +184,8 @@ runner behaves around an upgrade.
 
 On macOS, `upgrade_sign_identity = "auto"` (or `IOHR_SIGN_IDENTITY`) signs each new binary
 with a code-signing identity from your keychain, so a keychain "Always Allow" grant holds
-across upgrades. It is off by default.
+across upgrades. It is off by default. A build from a checkout gets the same signature with
+`mise run cli:preview-install` (macOS, installs `iohr-preview`).
 
 The keys and their limits: [docs/config.md](../../docs/config.md), section 4.3.
 
