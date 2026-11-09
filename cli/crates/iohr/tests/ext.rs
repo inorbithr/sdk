@@ -1931,12 +1931,12 @@ mod init_crawl {
         )
     }
 
-    /// The fake agent, that first writes `lines` to standard error a second apart, as a crawl
-    /// that takes a while would.
-    fn agent_that_reports(lines: &[String]) -> Vec<u8> {
+    /// The fake agent, that first writes `lines` to standard error `gap` seconds apart, as a
+    /// crawl that takes a while would.
+    fn agent_that_reports(lines: &[String], gap: u32) -> Vec<u8> {
         let said: String = lines
             .iter()
-            .map(|l| format!("echo '{l}' >&2\nsleep 1\n"))
+            .map(|l| format!("echo '{l}' >&2\nsleep {gap}\n"))
             .collect::<Vec<_>>()
             .concat();
         String::from_utf8(fake_agent(0, &[], true))
@@ -2037,7 +2037,7 @@ mod init_crawl {
                 &[("NO_COLOR", "1")][..],
             ),
         ] {
-            let s = site(Some(agent_that_reports(&lines)), 1..=1).await;
+            let s = site(Some(agent_that_reports(&lines, 1)), 1..=1).await;
             let mut args = vec!["--crawl".to_owned(), s.url()];
             args.extend(extra.iter().map(|a| (*a).to_owned()));
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -2101,7 +2101,9 @@ mod init_crawl {
             progress_line(2, 3, Some(5)),
             progress_line(4, 1, Some(5)),
         ];
-        let s = site(Some(agent_that_reports(&lines)), 1..=1).await;
+        // The row is drawn at most once a second (`ui::REDRAW`) on a 250 ms tick, so each line
+        // must stay longer than that to be seen: a second apart, a state could be passed over.
+        let s = site(Some(agent_that_reports(&lines, 2)), 1..=1).await;
         let t = token(&["extensions:read", "agents:write"]);
         let mut cmd = s.b.cmd(&[
             "project",
