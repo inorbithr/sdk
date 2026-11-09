@@ -29,7 +29,10 @@ fn files(dir: &Path) -> Vec<String> {
             if p.is_dir() {
                 walk(&p, base, into);
             } else {
-                into.push(p.strip_prefix(base).unwrap().display().to_string());
+                // Join with '/' on every platform: Windows paths use '\\'.
+                let rel = p.strip_prefix(base).unwrap();
+                let parts: Vec<_> = rel.iter().map(|c| c.to_string_lossy()).collect();
+                into.push(parts.join("/"));
             }
         }
     }
