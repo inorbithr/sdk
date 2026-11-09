@@ -10,13 +10,21 @@
 //! replaced (barge-in) is answered to nobody: its pieces are dropped here, and the
 //! coordinator drops any that still reach it.
 //!
+//! A call's first answer would wait on that session's start (core PRD 0204 measured turn 1 at
+//! 2.37 s, turn 2 at 1.01 s once warm), so while it serves voice the runner keeps one spare:
+//! a session started and warmed up the way the newest lease's was, which the next lease
+//! started the same way takes instead of starting its own. A lease that asks for another
+//! model or other instructions starts its own, as before, and the spare waits for the next.
+//! The spare counts toward [`MAX_LEASES`], dies with the listener, and is replaced when it
+//! ends or waits past [`SPARE_TTL`], so a stale sign-in never answers a call.
+//!
 //! Nothing a person said or Claude wrote is logged or noted: only counts and labels.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use inorbithr::{EventStream, Method, Operation};
 use serde_json::{Value, json};
@@ -37,8 +45,17 @@ pub(crate) const DEFAULT_MODEL: &str = "haiku";
 /// The largest piece the coordinator takes.
 pub(crate) const MAX_PIECE: usize = 4096;
 /// Leases held at once; a call more than this is refused here and the coordinator falls
-/// back to the thread.
+/// back to the thread. The spare is one of them: sessions held and the spare together are
+/// never more than this, and a lease is never refused for the spare's sake.
 const MAX_LEASES: usize = 4;
+/// How long a spare waits for a call before another replaces it, so the session that
+/// answers a call never started on a sign-in older than this.
+const SPARE_TTL: Duration = Duration::from_mins(10);
+/// After a spare that would not start, or ended before its warm-up was answered, the wait
+/// before the next: a runner that cannot start Claude does not start it again and again.
+const SPARE_RETRY: Duration = Duration::from_secs(30);
+/// How often the listener looks at its spare while no frame comes.
+const TEND: Duration = Duration::from_secs(30);
 /// Pieces waiting to be posted before the session's reader waits.
 const QUEUE: usize = 256;
 /// Written to a session as it starts, before the person speaks, so the first request's
@@ -166,11 +183,13 @@ impl HttpService<'_> {
     }
 }
 
-/// The turns written to a session, oldest first, and the newest turn of the lease.
+/// The turns written to a session, oldest first, the newest turn of the lease, and the
+/// lease: set once, when a lease takes the session (a spare has none until then).
 #[derive(Debug, Default)]
 struct Turns {
     written: Mutex<VecDeque<u64>>,
     latest: AtomicU64,
+    lease: OnceLock<String>,
 }
 
 impl Turns {
@@ -189,22 +208,38 @@ impl Turns {
             .pop_front()
     }
 
-    /// Whether `seq` is the turn the person is waiting on. Turn 0 is the warm-up.
+    /// Whether `seq` is the turn the person is waiting on. Turn 0 is the warm-up, and a
+    /// session no lease took has nobody waiting.
     fn live(&self, seq: u64) -> bool {
-        seq != 0 && seq == self.latest.load(Ordering::Acquire)
+        seq != 0 && seq == self.latest.load(Ordering::Acquire) && self.lease.get().is_some()
+    }
+
+    fn lease(&self) -> String {
+        self.lease.get().cloned().unwrap_or_default()
+    }
+
+    /// Whether every turn written was answered: for a spare, that its warm-up was.
+    fn answered(&self) -> bool {
+        self.written
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
     }
 }
 
-/// One lease's warm Claude session. Dropping it kills the session's whole process group
-/// and stops its reader.
+/// One lease's warm Claude session, or the spare. Dropping it kills the session's whole
+/// process group and stops its reader.
 struct Session {
-    /// What it was started with, to start it again the same way.
+    /// What it was started with, to start it again the same way. A spare is taken only by
+    /// a lease whose arguments are these, so they are its key: the model and the
+    /// instructions, compared whole.
     args: Vec<String>,
     stdin: ChildStdin,
     turns: Arc<Turns>,
     reader: JoinHandle<()>,
-    _group: GroupGuard,
-    _child: Child,
+    born: Instant,
+    group: GroupGuard,
+    child: Child,
 }
 
 impl Drop for Session {
@@ -271,10 +306,10 @@ fn voice_dir(exec: &ClaudeExec) -> PathBuf {
     exec.workdir.parent().unwrap_or(&exec.workdir).join("voice")
 }
 
-/// Starts a lease's session on `args` (from [`session_args`]).
+/// Starts a session on `args` (from [`session_args`]) and writes its warm-up; a lease takes
+/// it with [`Session::take`].
 async fn open(
     exec: &ClaudeExec,
-    lease_id: &str,
     args: &[String],
     tx: mpsc::Sender<(String, Piece)>,
 ) -> Result<Session, &'static str> {
@@ -290,14 +325,15 @@ async fn open(
     let stdin = child.stdin.take().ok_or("spawn")?;
     let stdout = child.stdout.take().ok_or("spawn")?;
     let turns = Arc::new(Turns::default());
-    let reader = tokio::spawn(read(lease_id.to_owned(), stdout, turns.clone(), tx));
+    let reader = tokio::spawn(read(stdout, turns.clone(), tx));
     let mut s = Session {
         args: args.to_vec(),
         stdin,
         turns,
         reader,
-        _group: group,
-        _child: child,
+        born: Instant::now(),
+        group,
+        child,
     };
     s.send(0, WARM_UP).await.map_err(|_| "write")?;
     Ok(s)
@@ -305,12 +341,7 @@ async fn open(
 
 /// Reads a session's stdout, turns it into pieces of the turn it answers, and fails each
 /// turn still waiting when the session ends.
-async fn read(
-    lease_id: String,
-    stdout: ChildStdout,
-    turns: Arc<Turns>,
-    tx: mpsc::Sender<(String, Piece)>,
-) {
+async fn read(stdout: ChildStdout, turns: Arc<Turns>, tx: mpsc::Sender<(String, Piece)>) {
     let mut lines = BufReader::new(stdout).lines();
     let mut texted = false;
     let piece = |seq, text: String, done, failed| Piece {
@@ -328,7 +359,7 @@ async fn read(
                     {
                         texted = true;
                         if tx
-                            .send((lease_id.clone(), piece(seq, text, false, "")))
+                            .send((turns.lease(), piece(seq, text, false, "")))
                             .await
                             .is_err()
                         {
@@ -349,7 +380,7 @@ async fn read(
                         (None, _) => (String::new(), ""),
                     };
                     if tx
-                        .send((lease_id.clone(), piece(seq, text, true, failed)))
+                        .send((turns.lease(), piece(seq, text, true, failed)))
                         .await
                         .is_err()
                     {
@@ -364,7 +395,7 @@ async fn read(
     while let Some(seq) = turns.pop() {
         if turns.live(seq) {
             let _ = tx
-                .send((lease_id.clone(), piece(seq, String::new(), true, "model")))
+                .send((turns.lease(), piece(seq, String::new(), true, "model")))
                 .await;
         }
     }
@@ -486,11 +517,19 @@ pub(crate) async fn serve(
     );
 }
 
-/// The leases this runner holds, each with its warm session.
+/// The leases this runner holds, each with its warm session, and the spare.
 struct Leases<'e> {
     exec: &'e ClaudeExec,
     sessions: HashMap<String, Session>,
     tx: mpsc::Sender<(String, Piece)>,
+    /// A session started and warmed up for the next lease, which no lease holds yet.
+    spare: Option<Session>,
+    /// What the spare starts with: the newest lease's arguments. None before the first
+    /// lease, as the instructions come only with a lease.
+    want: Option<Vec<String>>,
+    /// No spare starts before this.
+    spare_after: Option<Instant>,
+    spare_ttl: Duration,
 }
 
 impl<'e> Leases<'e> {
@@ -499,6 +538,10 @@ impl<'e> Leases<'e> {
             exec,
             sessions: HashMap::new(),
             tx,
+            spare: None,
+            want: None,
+            spare_after: None,
+            spare_ttl: SPARE_TTL,
         }
     }
 
@@ -521,6 +564,7 @@ impl<'e> Leases<'e> {
             }
             Frame::Other => {}
         }
+        self.tend(note).await;
     }
 
     async fn open(
@@ -539,17 +583,96 @@ impl<'e> Leases<'e> {
             ));
             return;
         }
-        let opened = match session_args(instructions, model) {
-            Ok(args) => open(self.exec, &lease_id, &args, self.tx.clone()).await,
-            Err(_) => Err("refused"),
+        let Ok(args) = session_args(instructions, model) else {
+            note(&format!("voice: lease {lease_id} not opened (refused)"));
+            return;
         };
-        match opened {
-            Ok(s) => {
-                note(&format!("voice: lease {lease_id} open"));
+        match self.session(&lease_id, &args, 1, note).await {
+            Ok((s, warm)) => {
+                let on = if warm { ", on the spare" } else { "" };
+                note(&format!("voice: lease {lease_id} open{on}"));
                 self.sessions.insert(lease_id, s);
             }
             Err(why) => note(&format!("voice: lease {lease_id} not opened ({why})")),
         }
+        self.want = Some(args);
+    }
+
+    /// A session on `args` for `lease_id`: the spare when it was started on the same
+    /// arguments and is still fit to answer, else a new one (`true` when it was the
+    /// spare). `adds` is how many sessions the lease adds to those held: a spare that is
+    /// not taken is stopped only when keeping it would go past [`MAX_LEASES`].
+    async fn session(
+        &mut self,
+        lease_id: &str,
+        args: &[String],
+        adds: usize,
+        note: &impl Fn(&str),
+    ) -> Result<(Session, bool), &'static str> {
+        self.check_spare(note);
+        if let Some(s) = self.spare.take_if(|s| s.args == args) {
+            s.take(lease_id);
+            return Ok((s, true));
+        }
+        if self.spare.is_some() && self.sessions.len() + adds + 1 > MAX_LEASES {
+            self.spare = None;
+        }
+        let s = open(self.exec, args, self.tx.clone()).await?;
+        s.take(lease_id);
+        Ok((s, false))
+    }
+
+    /// Stops a spare that ended or waited too long. One that ended before its warm-up
+    /// was answered never started well, so the next waits [`SPARE_RETRY`].
+    fn check_spare(&mut self, note: &impl Fn(&str)) {
+        let Some(s) = self.spare.as_mut() else { return };
+        if s.ended() {
+            let warmed = s.turns.answered();
+            note(&format!(
+                "voice: the spare session ended ({}), starting another",
+                if warmed {
+                    "after its warm-up"
+                } else {
+                    "before its warm-up"
+                }
+            ));
+            if !warmed {
+                self.spare_after = Some(Instant::now() + SPARE_RETRY);
+            }
+            self.spare = None;
+        } else if s.born.elapsed() >= self.spare_ttl {
+            self.spare = None;
+        }
+    }
+
+    /// Keeps one spare ready while there is room for it and a lease to model it on.
+    async fn tend(&mut self, note: &impl Fn(&str)) {
+        self.check_spare(note);
+        if self.spare.is_some()
+            || self.sessions.len() >= MAX_LEASES
+            || self.spare_after.is_some_and(|t| Instant::now() < t)
+        {
+            return;
+        }
+        let Some(args) = self.want.as_deref() else {
+            return;
+        };
+        match open(self.exec, args, self.tx.clone()).await {
+            Ok(s) => {
+                self.spare = Some(s);
+                self.spare_after = None;
+            }
+            Err(why) => {
+                note(&format!("voice: no spare session ({why})"));
+                self.spare_after = Some(Instant::now() + SPARE_RETRY);
+            }
+        }
+    }
+
+    /// Stops every session and the spare: the listener is not listening.
+    fn clear(&mut self) {
+        self.sessions.clear();
+        self.spare = None;
     }
 
     async fn turn(&mut self, lease_id: String, seq: u64, text: &str, note: &impl Fn(&str)) {
@@ -563,19 +686,18 @@ impl<'e> Leases<'e> {
         if s.write(seq, text).await.is_ok() {
             return;
         }
-        // The session died since the last turn: start it again (it starts with no memory
-        // of the call) and write the turn there.
+        // The session died since the last turn: start it again, or take the spare (either
+        // starts with no memory of the call), and write the turn there.
         note(&format!(
             "voice: lease {lease_id} session ended, starting again"
         ));
         let args = std::mem::take(&mut s.args);
-        let again = if let Ok(mut fresh) = open(self.exec, &lease_id, &args, self.tx.clone()).await
-        {
+        self.sessions.remove(&lease_id);
+        let again = if let Ok((mut fresh, _)) = self.session(&lease_id, &args, 1, note).await {
             let wrote = fresh.write(seq, text).await;
             self.sessions.insert(lease_id.clone(), fresh);
             wrote.is_ok()
         } else {
-            self.sessions.remove(&lease_id);
             false
         };
         if !again {
@@ -596,6 +718,24 @@ impl<'e> Leases<'e> {
 }
 
 impl Session {
+    /// A lease takes the session: from here on its live turns' pieces go to that lease.
+    fn take(&self, lease_id: &str) {
+        let _ = self.turns.lease.set(lease_id.to_owned());
+    }
+
+    /// Whether the session's process has ended.
+    fn ended(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(None) => false,
+            Ok(Some(_)) => {
+                // Reaped: its pid may be reused, so its group is not killed on drop.
+                self.group.disarm();
+                true
+            }
+            Err(_) => true,
+        }
+    }
+
     /// Writes turn `seq`; it is the lease's newest from here on.
     async fn write(&mut self, seq: u64, text: &str) -> std::io::Result<()> {
         self.turns.latest.store(seq, Ordering::Release);
@@ -625,14 +765,23 @@ async fn listen(
     let mut round = 0_usize;
     while !*stop.borrow() {
         match svc.voice_events(runner_id).await {
-            Ok(mut events) => loop {
-                let next = tokio::select! {
-                    _ = stop.changed() => return,
-                    n = events.next() => n,
-                };
-                let Some(Ok(v)) = next else { break };
-                leases.on(frame(&v), note).await;
-            },
+            Ok(mut events) => {
+                // Listening: a spare is kept from here until the stream ends.
+                let mut tend = tokio::time::interval(TEND);
+                tend.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    let next = tokio::select! {
+                        _ = stop.changed() => return,
+                        _ = tend.tick() => {
+                            leases.tend(note).await;
+                            continue;
+                        }
+                        n = events.next() => n,
+                    };
+                    let Some(Ok(v)) = next else { break };
+                    leases.on(frame(&v), note).await;
+                }
+            }
             Err(e) if e.is_missing() || e.is_permanent() => {
                 note(&format!(
                     "voice: not served here ({}); turns go on",
@@ -642,8 +791,9 @@ async fn listen(
             }
             Err(_) => {}
         }
-        // The stream ended, and its leases with it on the coordinator (`runner_gone`).
-        leases.sessions.clear();
+        // The stream ended, and its leases with it on the coordinator (`runner_gone`); the
+        // spare too, as nothing is served until the stream opens again.
+        leases.clear();
         round += 1;
         if pace.rounds.is_some_and(|m| round >= m) {
             return;
@@ -746,11 +896,12 @@ mod tests {
 
     /// A `claude` that records its arguments, environment and directory, then runs
     /// `body` (which reads stream-json lines and answers them the way
-    /// `claude -p --include-partial-messages` does). It never echoes what it was told.
+    /// `claude -p --include-partial-messages` does). It never echoes what it was told. Each
+    /// record is written whole (a rename), as the spare runs the same script beside it.
     fn fake_claude(dir: &std::path::Path, body: &str) -> ClaudeExec {
         let p = dir.join("claude");
         let script = format!(
-            "#!/bin/sh\n[ \"$1\" = --version ] && {{ echo 1; exit 0; }}\nd=$(dirname \"$0\")\nprintf '%s\\n' \"$@\" > \"$d/args.txt\"\nenv > \"$d/env.txt\"\npwd > \"$d/pwd.txt\"\n{body}\n"
+            "#!/bin/sh\n[ \"$1\" = --version ] && {{ echo 1; exit 0; }}\nd=$(dirname \"$0\")\nprintf '%s\\n' \"$@\" > \"$d/args.$$\"\nenv > \"$d/env.$$\"\npwd > \"$d/pwd.$$\"\nfor f in args env pwd; do mv \"$d/$f.$$\" \"$d/$f.txt\"; done\n{body}\n"
         );
         std::fs::write(&p, script).unwrap();
         settle_script(&p);
@@ -765,11 +916,59 @@ mod tests {
     }
 
     fn open_frame() -> Frame {
+        open_as("vl_1", "")
+    }
+
+    fn open_as(lease_id: &str, model: &str) -> Frame {
         Frame::Open {
-            lease_id: "vl_1".into(),
+            lease_id: lease_id.into(),
             instructions: "be Io".into(),
-            model: String::new(),
+            model: model.into(),
         }
+    }
+
+    fn close(lease_id: &str) -> Frame {
+        Frame::Close {
+            lease_id: lease_id.into(),
+        }
+    }
+
+    /// Counts its starts by pid (`$$` is the session's pid: `claude` runs unwrapped), then
+    /// answers every line it reads.
+    const COUNTED: &str = "echo $$ >> \"$d/starts.txt\"\nwhile read -r line; do\n";
+
+    fn counted(dir: &std::path::Path) -> ClaudeExec {
+        fake_claude(dir, &format!("{COUNTED}{ANSWER}done"))
+    }
+
+    /// The pids `fake_claude` started, sorted, once there are `n` (and no more).
+    async fn started(dir: &std::path::Path, n: usize) -> Vec<u32> {
+        let read = || {
+            std::fs::read_to_string(dir.join("starts.txt"))
+                .unwrap_or_default()
+                .lines()
+                .map(|l| l.parse().unwrap())
+                .collect::<Vec<u32>>()
+        };
+        let waited = tokio::time::timeout(Duration::from_secs(5), async {
+            while read().len() < n {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        let mut got = read();
+        got.sort_unstable();
+        assert!(waited.is_ok(), "{n} starts expected, {} seen", got.len());
+        assert_eq!(got.len(), n, "{got:?}");
+        got
+    }
+
+    fn pid(s: &Session) -> u32 {
+        s.child.id().unwrap()
+    }
+
+    fn spare_pid(leases: &Leases<'_>) -> u32 {
+        pid(leases.spare.as_ref().unwrap())
     }
 
     fn turn(seq: u64, text: &str) -> Frame {
@@ -782,10 +981,19 @@ mod tests {
 
     /// Pieces until turn `seq` is done.
     async fn until_done(rx: &mut mpsc::Receiver<(String, Piece)>, seq: u64) -> Vec<Piece> {
+        until_done_on(rx, "vl_1", seq).await
+    }
+
+    /// Pieces until turn `seq` of `lease_id` is done; every piece is that lease's.
+    async fn until_done_on(
+        rx: &mut mpsc::Receiver<(String, Piece)>,
+        lease_id: &str,
+        seq: u64,
+    ) -> Vec<Piece> {
         let mut got = Vec::new();
         tokio::time::timeout(Duration::from_secs(10), async {
             while let Some((lease, p)) = rx.recv().await {
-                assert_eq!(lease, "vl_1");
+                assert_eq!(lease, lease_id);
                 let last = p.done && p.seq == seq;
                 got.push(p);
                 if last {
@@ -872,7 +1080,7 @@ mod tests {
         // Counts its starts, then exits after reading one turn without answering it.
         let exec = fake_claude(
             dir.path(),
-            "echo 1 >> \"$d/starts.txt\"\nread -r w\nread -r a\nexit 1",
+            "echo $$ >> \"$d/starts.txt\"\nread -r w\nread -r a\nexit 1",
         );
         let (tx, mut rx) = mpsc::channel(QUEUE);
         let mut leases = Leases::new(&exec, tx);
@@ -880,13 +1088,193 @@ mod tests {
         leases.on(turn(1, "a"), &|_: &str| {}).await;
         let got = until_done(&mut rx, 1).await;
         assert_eq!(got.last().unwrap().failed, "model");
-        // The next turn finds the session gone and starts it again.
+        // The next turn finds the session gone and takes the spare, started the same way,
+        // in its place; another spare is started for the next call.
         leases.on(turn(2, "b"), &|_: &str| {}).await;
         let got = until_done(&mut rx, 2).await;
         assert!(got.last().unwrap().done);
-        let starts = std::fs::read_to_string(dir.path().join("starts.txt")).unwrap();
-        assert_eq!(starts.lines().count(), 2, "{starts}");
+        started(dir.path(), 3).await;
         assert!(leases.sessions.contains_key("vl_1"));
+    }
+
+    #[tokio::test]
+    async fn a_lease_takes_the_ready_spare_instead_of_starting_claude() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = counted(dir.path());
+        let (tx, mut rx) = mpsc::channel(QUEUE);
+        let mut leases = Leases::new(&exec, tx);
+        let notes = Mutex::new(Vec::<String>::new());
+        let note = |l: &str| notes.lock().unwrap().push(l.to_owned());
+        // The first lease starts its own, and a spare is started the same way beside it.
+        leases.on(open_frame(), &note).await;
+        let two = started(dir.path(), 2).await;
+        let spare = spare_pid(&leases);
+        assert!(two.contains(&spare) && two.contains(&pid(&leases.sessions["vl_1"])));
+        leases.on(close("vl_1"), &note).await;
+        // The next call is answered by that spare: nothing was started for it.
+        leases.on(open_as("vl_2", "haiku"), &note).await;
+        assert_eq!(pid(&leases.sessions["vl_2"]), spare);
+        let hi = Frame::Turn {
+            lease_id: "vl_2".into(),
+            seq: 1,
+            text: "hi".into(),
+        };
+        leases.on(hi, &note).await;
+        let got = until_done_on(&mut rx, "vl_2", 1).await;
+        let text: String = got.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(text, "Hello there.", "{got:?}");
+        // The one start since is the next spare, not the lease's.
+        let three = started(dir.path(), 3).await;
+        let next = spare_pid(&leases);
+        assert!(three.contains(&next) && !two.contains(&next));
+        let notes = notes.into_inner().unwrap();
+        assert!(
+            notes
+                .iter()
+                .any(|n| n == "voice: lease vl_2 open, on the spare"),
+            "{notes:?}"
+        );
+        assert!(
+            notes
+                .iter()
+                .all(|n| !n.contains("be Io") && !n.contains("Hello") && !n.contains("hi")),
+            "{notes:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lease_for_another_model_starts_its_own_and_keeps_the_spare() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = counted(dir.path());
+        let (tx, _rx) = mpsc::channel(QUEUE);
+        let mut leases = Leases::new(&exec, tx);
+        leases.on(open_frame(), &|_: &str| {}).await;
+        let two = started(dir.path(), 2).await;
+        let spare = spare_pid(&leases);
+        leases.on(open_as("vl_2", "sonnet"), &|_: &str| {}).await;
+        let three = started(dir.path(), 3).await;
+        let s = &leases.sessions["vl_2"];
+        assert!(three.contains(&pid(s)) && !two.contains(&pid(s)), "its own");
+        assert!(s.args.windows(2).any(|w| w == ["--model", "sonnet"]));
+        // The spare was not spent on it, and the next haiku call takes it.
+        assert_eq!(spare_pid(&leases), spare);
+        leases.on(open_as("vl_3", ""), &|_: &str| {}).await;
+        assert_eq!(pid(&leases.sessions["vl_3"]), spare);
+    }
+
+    #[tokio::test]
+    async fn a_spare_that_ended_or_aged_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = counted(dir.path());
+        let (tx, _rx) = mpsc::channel(QUEUE);
+        let mut leases = Leases::new(&exec, tx);
+        let notes = Mutex::new(Vec::<String>::new());
+        let note = |l: &str| notes.lock().unwrap().push(l.to_owned());
+        leases.on(open_frame(), &note).await;
+        started(dir.path(), 2).await;
+        leases.on(close("vl_1"), &note).await;
+        let dead = spare_pid(&leases);
+        // Once its warm-up is answered, the spare ends.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !leases.spare.as_ref().unwrap().turns.answered() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let killed = std::process::Command::new("kill")
+            .args(["-KILL", &dead.to_string()])
+            .status()
+            .unwrap();
+        assert!(killed.success());
+        // The listener's next look (a heartbeat here) replaces it at once.
+        let fresh = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                leases.on(Frame::Other, &note).await;
+                if leases.spare.as_ref().is_some_and(|s| pid(s) != dead) {
+                    return spare_pid(&leases);
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(started(dir.path(), 3).await.contains(&fresh));
+        assert!(
+            notes.lock().unwrap().iter().any(
+                |n| n == "voice: the spare session ended (after its warm-up), starting another"
+            ),
+            "{:?}",
+            notes.lock().unwrap()
+        );
+        // A spare older than its bound is replaced too: a call never gets it.
+        leases.spare_ttl = Duration::ZERO;
+        leases.on(open_as("vl_2", ""), &note).await;
+        let five = started(dir.path(), 5).await;
+        let call = pid(&leases.sessions["vl_2"]);
+        assert!(five.contains(&call) && call != fresh && call != dead);
+        leases.spare_ttl = SPARE_TTL;
+        let next = spare_pid(&leases);
+        leases.on(Frame::Other, &note).await;
+        assert_eq!(spare_pid(&leases), next, "a young spare stays");
+        assert!(five.contains(&next) && next != call);
+    }
+
+    #[tokio::test]
+    async fn the_spare_counts_toward_the_lease_cap_and_never_refuses_a_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = counted(dir.path());
+        let (tx, _rx) = mpsc::channel(QUEUE);
+        let mut leases = Leases::new(&exec, tx);
+        let held = |l: &Leases<'_>| l.sessions.len() + usize::from(l.spare.is_some());
+        // The first lease and its spare, then each next lease takes the spare and another
+        // is started.
+        for i in 1..MAX_LEASES {
+            leases
+                .on(open_as(&format!("vl_{i}"), ""), &|_: &str| {})
+                .await;
+            started(dir.path(), i + 1).await;
+            assert!(held(&leases) <= MAX_LEASES);
+        }
+        // Three leases and the spare: the cap. A fourth for another model is opened, and
+        // the spare stops to make room for it.
+        assert_eq!(held(&leases), MAX_LEASES);
+        leases.on(open_as("vl_x", "sonnet"), &|_: &str| {}).await;
+        started(dir.path(), MAX_LEASES + 1).await;
+        assert!(leases.sessions.contains_key("vl_x"));
+        assert!(leases.spare.is_none());
+        assert_eq!(held(&leases), MAX_LEASES);
+        // A lease closes: there is room for a spare again, on the newest lease's model.
+        leases.on(close("vl_1"), &|_: &str| {}).await;
+        started(dir.path(), MAX_LEASES + 2).await;
+        assert_eq!(held(&leases), MAX_LEASES);
+        let spare = leases.spare.as_ref().unwrap();
+        assert!(spare.args.windows(2).any(|w| w == ["--model", "sonnet"]));
+        // A lease on that model takes it, and none is started past the cap.
+        leases.on(open_as("vl_y", "sonnet"), &|_: &str| {}).await;
+        assert!(leases.spare.is_none());
+        assert_eq!(held(&leases), MAX_LEASES);
+        // A fifth lease is refused, as before the spare.
+        leases.on(open_as("vl_z", ""), &|_: &str| {}).await;
+        assert!(!leases.sessions.contains_key("vl_z"));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        started(dir.path(), MAX_LEASES + 2).await;
+    }
+
+    #[tokio::test]
+    async fn the_spare_stops_with_the_listener() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = counted(dir.path());
+        let (tx, _rx) = mpsc::channel(QUEUE);
+        let mut leases = Leases::new(&exec, tx);
+        leases.on(open_frame(), &|_: &str| {}).await;
+        started(dir.path(), 2).await;
+        leases.clear();
+        assert!(leases.sessions.is_empty() && leases.spare.is_none());
+        // When the stream opens again, the spare comes back on the same arguments.
+        leases.tend(&|_: &str| {}).await;
+        assert!(leases.spare.is_some());
+        started(dir.path(), 3).await;
     }
 
     fn api(server: &MockServer) -> Api {
