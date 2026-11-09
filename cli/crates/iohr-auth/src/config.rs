@@ -392,6 +392,19 @@ pub struct RunnerConfig {
     /// The same for Codex turns: `any` (default) or `api_only`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_auth: Option<String>,
+    /// Whether git may use this machine's own `gh` sign-in for a job when the platform
+    /// says its GitHub App is not installed for the account (or mints no runner tokens).
+    /// Unset or false, such a job is refused instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_host_git_credentials: Option<bool>,
+    /// Days a job checkout, a mirror or a shared build directory may sit unused before
+    /// the runner removes it (`iohr runner prune`, and the runner while it is idle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_keep_days: Option<u32>,
+    /// The most the checkouts, mirrors and build directories together may take, in GB;
+    /// over it, the oldest unused go first. Unset, no cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_max_gb: Option<u64>,
 }
 
 impl RunnerConfig {
@@ -413,6 +426,9 @@ impl RunnerConfig {
             && self.core_checkout.is_none()
             && self.claude_auth.is_none()
             && self.codex_auth.is_none()
+            && self.allow_host_git_credentials.is_none()
+            && self.workspace_keep_days.is_none()
+            && self.workspace_max_gb.is_none()
     }
 }
 

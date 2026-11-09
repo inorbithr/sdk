@@ -788,6 +788,39 @@ async fn verbose_output_never_shows_the_token() {
         );
         assert!(!all.contains("request id"), "{args:?} made a call");
     }
+    // The runner's housekeeping is offline: `runner prune` with nothing to remove, and
+    // `runner service install --dry-run`, which writes and loads nothing (macOS and
+    // Linux only; elsewhere it says so and exits 1).
+    let service = i32::from(!cfg!(any(target_os = "macos", target_os = "linux")));
+    for (args, want) in [
+        (vec!["runner", "prune", "--dry-run", "--verbose"], 0),
+        (vec!["runner", "prune", "--json", "--verbose"], 0),
+        (
+            vec!["runner", "service", "install", "--dry-run", "--verbose"],
+            service,
+        ),
+    ] {
+        let o = r
+            .cmd(&args)
+            .env("IOHR_TOKEN", &t)
+            .env("HOME", &home)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(code(&o), want, "{args:?}: {}", text(&o));
+        let all = text(&o);
+        assert!(
+            !all.contains("TOKENSIGNATUREMARKER"),
+            "{args:?} leaked the token"
+        );
+        assert!(!all.contains("request id"), "{args:?} made a call");
+    }
+    let unit = if cfg!(target_os = "macos") {
+        home.join("Library/LaunchAgents/hr.inorbit.runner.plist")
+    } else {
+        home.join(".config/systemd/user/iohr-runner.service")
+    };
+    assert!(!unit.exists(), "a dry run wrote {}", unit.display());
 }
 
 const LAB_DOC: &str = "---\ntitle: A decision\nstatus: open\ndate: 2026-10-03\npublic: true\nlab: core\nsummary: One sentence.\n---\n\n## Problem\n\nThe site is www.example.com.\n\n## Status log\n\n- 2026-10-03: opened.\n";
