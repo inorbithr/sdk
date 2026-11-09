@@ -97,8 +97,10 @@ pub(crate) fn edge_dir(inspect: &str) -> Result<PathBuf, String> {
     if running.trim() != "true" {
         return Err(format!("refused: {CONTAINER} is not running"));
     }
+    // The mount is a path on the Linux host, so it is checked as one on every platform:
+    // `Path::is_absolute` wants a drive letter on Windows.
     let dir = Path::new(source);
-    if !dir.is_absolute() || dir.components().any(|c| c.as_os_str() == "..") {
+    if !source.starts_with('/') || dir.components().any(|c| c.as_os_str() == "..") {
         return Err(format!(
             "refused: {CONTAINER} mounts no host folder at /etc/caddy"
         ));
