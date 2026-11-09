@@ -1,4 +1,5 @@
-# Build scripts pnpm may run. esbuild ships its native binary as an optional platform package, so its
-# install script is not needed (the same rule as iohr-mac's pnpm-workspace.yaml).
+# Build scripts pnpm may run. esbuild and Tailwind's oxide ship their native binaries as optional platform
+# packages, so their install scripts are not needed (the same rule as iohr-mac's pnpm-workspace.yaml).
 allowBuilds:
+  '@tailwindcss/oxide': false
   esbuild: false

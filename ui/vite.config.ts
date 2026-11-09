@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -6,7 +7,7 @@ import { defineConfig } from "vite";
 const api = process.env.IOHR_UI_API;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   build: { assetsInlineLimit: 0, sourcemap: false },
   server: {
     host: "127.0.0.1",

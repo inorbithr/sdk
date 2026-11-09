@@ -1,206 +1,162 @@
-/* Plain tokens for the stub page. The Mac app's theme comes with the shell frame (RFC 0217 C5). */
-:root {
-  --bg: #ffffff;
-  --fg: #1d1d1f;
-  --muted: #6e6e73;
-  --line: #d2d2d7;
-  --bar: #f5f5f7;
-  --menu: #ffffff;
-  --active: #0a64d6;
-  --active-fg: #ffffff;
-  --stub: #8a5a00;
-  --stub-bg: #fff4d6;
-  color-scheme: light dark;
-}
+/* The page's styles: Tailwind, the shell frame's tokens (frame/tokens.css, from the Mac app under ADR 0230),
+   a base layer adapted from the Mac app's index.css, and the few component classes the menu list, the panel
+   frame and the notices use, drawn on the same tokens. */
+@import "tailwindcss";
+@import "./frame/tokens.css";
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1e;
-    --fg: #f5f5f7;
-    --muted: #a1a1a6;
-    --line: #3a3a3c;
-    --bar: #2c2c2e;
-    --menu: #2c2c2e;
-    --active: #0a84ff;
-    --active-fg: #ffffff;
-    --stub: #ffcf66;
-    --stub-bg: #3a2e12;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  /* The Mac app's base layer, less its native-window rules (no text selection, the arrow cursor): this page
+     runs in a browser, where text stays selectable. */
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-* {
-  box-sizing: border-box;
-}
+@layer components {
+  .menu-anchor {
+    position: relative;
+  }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font:
-    14px / 1.45 -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    system-ui,
-    sans-serif;
-}
+  .menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 50;
+    min-width: 260px;
+    max-width: calc(100vw - 32px);
+    padding: 4px;
+    background: var(--popover);
+    color: var(--popover-foreground);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+    outline: none;
+  }
 
-.app {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
+  .menu-heading {
+    padding: 4px 8px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-weight: 500;
+  }
 
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 40px;
-  padding: 0 16px;
-  background: var(--bar);
-  border-bottom: 1px solid var(--line);
-}
+  .menu-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 14px;
+    color: inherit;
+    text-align: left;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+  }
 
-.brand {
-  font-weight: 600;
-}
+  .menu-row.active:not([aria-disabled="true"]) {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
 
-.menubar {
-  display: flex;
-  gap: 4px;
-}
+  .menu-row[aria-disabled="true"] {
+    color: var(--muted-foreground);
+  }
 
-.menu-anchor {
-  position: relative;
-}
+  .menu-hint {
+    color: var(--muted-foreground);
+    font-size: 12px;
+  }
 
-.menubar-item {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  border-radius: 6px;
-  padding: 4px 10px;
-  cursor: default;
-}
+  .menu-sep {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 4px -4px;
+  }
 
-.menubar-item[aria-expanded="true"],
-.menubar-item:hover:not(:disabled) {
-  background: var(--line);
-}
+  .frame-stub,
+  .panel-idle {
+    max-width: 640px;
+    margin: 0 auto;
+  }
 
-.menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  min-width: 260px;
-  max-width: calc(100vw - 32px);
-  padding: 6px;
-  background: var(--menu);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-  outline: none;
-}
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+  }
 
-.menu-heading {
-  padding: 4px 8px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
+  .panel-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
 
-.menu-row {
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  background: none;
-  border: 0;
-  cursor: default;
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 5px 8px;
-  border-radius: 5px;
-}
+  .panel-head h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
 
-.menu-row.active:not([aria-disabled="true"]) {
-  background: var(--active);
-  color: var(--active-fg);
-}
+  .panel-meta {
+    flex: 1;
+    color: var(--muted-foreground);
+    font-size: 12px;
+  }
 
-.menu-row[aria-disabled="true"] {
-  color: var(--muted);
-}
+  .panel-close {
+    padding: 2px 10px;
+    font: inherit;
+    font-size: 13px;
+    color: inherit;
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
 
-.menu-hint {
-  color: inherit;
-  opacity: 0.7;
-}
+  .stub-badge {
+    display: inline-block;
+    margin: 0 0 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--warning) 18%, transparent);
+    color: var(--warning);
+    font-size: 12px;
+    font-weight: 600;
+  }
 
-.menu-sep {
-  border: 0;
-  border-top: 1px solid var(--line);
-  margin: 4px 0;
-}
+  .notice {
+    max-width: 640px;
+    margin: 0 auto 16px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
 
-.body {
-  flex: 1;
-  padding: 24px 16px;
-}
-
-.frame-stub,
-.panel-idle {
-  max-width: 640px;
-  margin: 0 auto;
-}
-
-.panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.panel-head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.panel-head h2 {
-  margin: 0;
-  font-size: 16px;
-}
-
-.panel-meta {
-  flex: 1;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.stub-badge {
-  display: inline-block;
-  margin: 0 0 8px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--stub-bg);
-  color: var(--stub);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.notice {
-  max-width: 640px;
-  margin: 0 auto 16px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-
-.panel-frame {
-  width: 100%;
-  height: calc(100vh - 120px);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  .panel-frame {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
 }
