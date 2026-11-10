@@ -15,6 +15,7 @@
 
 mod auto;
 mod entry;
+mod incidents;
 mod reader;
 mod work;
 
@@ -26,6 +27,7 @@ use super::input::OpenKey;
 use super::workloads::{Snapshot, Workload};
 use crate::card::Rgb;
 use crate::commands::asks::{PanelAsk, PanelAuto};
+use crate::commands::incident_settings::PanelIncidents;
 
 /// Where a piece of data stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +87,7 @@ pub(super) enum View {
     Run,
     Status,
     Auto,
+    Incidents,
     Help,
 }
 
@@ -122,6 +125,8 @@ pub(super) enum Effect {
     AutoOn,
     /// Turn auto mode off.
     AutoOff,
+    /// Turn the account's incident auto-resolution on or off.
+    IncidentsAutoResolve(bool),
     /// Say this to the session (a workload id).
     Message {
         id: String,
@@ -143,10 +148,11 @@ pub(super) enum Effect {
 }
 
 /// The menu: label, key, view it opens.
-const MENU: [(&str, char, View); 7] = [
+const MENU: [(&str, char, View); 8] = [
     ("Auto mode", 'a', View::Auto),
     ("Approvals", 'p', View::Approvals),
     ("Workloads", 'w', View::Workloads),
+    ("Incidents", 'i', View::Incidents),
     ("Run", 'r', View::Run),
     ("Status", 's', View::Status),
     ("Help", '?', View::Help),
@@ -166,6 +172,10 @@ pub(super) struct Model {
     pub(super) auto: Source<PanelAuto>,
     /// The phone was asked to turn it on and has not answered.
     auto_asked: bool,
+    /// The account's incident settings (auto-resolve).
+    pub(super) incidents: Source<PanelIncidents>,
+    /// A first press asked for the second that turns auto-resolve on.
+    incidents_confirm: bool,
     confirm: Option<String>,
     /// A session whose stop awaits the second key.
     stop_confirm: Option<String>,
@@ -196,6 +206,8 @@ impl Model {
             asks: Source::Loading,
             auto: Source::Loading,
             auto_asked: false,
+            incidents: Source::Loading,
+            incidents_confirm: false,
             confirm: None,
             stop_confirm: None,
             entry: None,
@@ -303,6 +315,7 @@ impl Model {
             View::Workloads => self.work_key(key),
             View::Workload => self.work_open_key(key),
             View::Auto => self.auto_key(key),
+            View::Incidents => self.incidents_key(key),
             View::Reader => {
                 self.reader_key(key);
                 Effect::None
@@ -400,7 +413,7 @@ impl Model {
         }
         self.view = view;
         self.note = None;
-        if matches!(view, View::Approvals | View::Workloads) {
+        if matches!(view, View::Approvals | View::Workloads | View::Incidents) {
             Effect::Refresh
         } else {
             Effect::None
@@ -477,7 +490,7 @@ impl Model {
             View::Approvals => 50,
             View::Workloads => 60,
             View::Workload | View::Reader => 72,
-            View::Auto => 56,
+            View::Auto | View::Incidents => 56,
             _ => 42,
         }
     }
@@ -495,6 +508,7 @@ impl Model {
             View::Workloads => self.workloads(width),
             View::Workload => self.workload(width),
             View::Auto => self.auto_view(),
+            View::Incidents => self.incidents_view(),
             View::Reader => self.reader(),
             View::Run => Self::coming("Run", "run a command with an agent from here"),
             View::Status => Self::coming("Status", "platform and agent status"),
@@ -545,6 +559,7 @@ impl Model {
             mode,
             waiting,
             self.work_menu_right(),
+            self.incidents_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
             (String::new(), MUTE),
@@ -749,7 +764,7 @@ mod tests {
         }
     }
 
-    fn model(n: usize) -> Model {
+    pub(super) fn model(n: usize) -> Model {
         let mut m = Model::new(false);
         m.set_asks(Source::Ready(
             (0..n)
@@ -769,7 +784,7 @@ mod tests {
         }
     }
 
-    fn rows(m: &Model) -> Vec<String> {
+    pub(super) fn rows(m: &Model) -> Vec<String> {
         let f = super::super::cells::lay_out(&m.spec(m.width()), 0, 0);
         f.cells
             .iter()
@@ -833,7 +848,7 @@ mod tests {
         let mut m = model(2);
         m.key(Key::Menu);
         m.key(Key::Up);
-        assert_eq!(m.menu_sel, 6, "wraps to Stop panel");
+        assert_eq!(m.menu_sel, 7, "wraps to Stop panel");
         m.key(Key::Down);
         assert_eq!(m.menu_sel, 0);
         let text = rows(&m);
@@ -1132,6 +1147,7 @@ mod tests {
             View::Run,
             View::Status,
             View::Auto,
+            View::Incidents,
             View::Help,
             View::Reader,
         ] {
