@@ -30,7 +30,7 @@ test("each kind of canvas lands in its nest", () => {
     "Studies",
   ]);
   assert.deepEqual(groupPath(e("cnv_dec-diag1", "A diagram")), ["Decisions"]);
-  assert.deepEqual(groupPath(e("cnv_d", "TestFlight upload of latest main (b8394a6ba), build 1447")), ["Jobs"]);
+  assert.deepEqual(groupPath(e("cnv_d", "TestFlight upload of latest main (b8394a6), build 1447")), ["Jobs"]);
   assert.deepEqual(groupPath(e("cnv_how-personalities-work", "How Personalities work")), ["Guides & demos"]);
   assert.deepEqual(groupPath(e("cnv_build-your-own-project-the-demo", "Build your own project: the demo")), [
     "Guides & demos",
