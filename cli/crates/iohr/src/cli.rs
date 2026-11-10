@@ -243,7 +243,14 @@ pub const GROUPS: &[(&str, &[&str])] = &[
     ),
     (
         "Operate",
-        &["tunnel", "browser", "upgrade", "completion", "help"],
+        &[
+            "tunnel",
+            "browser",
+            "doctor",
+            "upgrade",
+            "completion",
+            "help",
+        ],
     ),
 ];
 
@@ -411,6 +418,18 @@ pub enum Command {
     /// machine, and what is installed. The same as `iohr ext packages`.
     #[command(hide = true)]
     Packages,
+    /// Check this machine for the known problems with iohr and say how to fix each.
+    ///
+    /// Looks for a sign-in that is gone, the MCP bridge not answering, a nearly full disk
+    /// and a `config.toml` that does not parse. Exits 1 when something fails. `--fix` runs
+    /// the safe fixes (those that only restart something already down) now; with
+    /// `[doctor] auto_fix = true` in `config.toml` they also run on their own, and the `?`
+    /// card tells you what it found. Every other fix is shown, never run.
+    Doctor {
+        /// Run the safe fixes for this run.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Update iohr to the newest release.
     ///
     /// Update this `iohr` to the newest release, the way it was installed: Homebrew runs

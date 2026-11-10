@@ -54,6 +54,9 @@ pub struct Config {
     /// `iohr` panel settings (`[panel]`); read, never written: a person edits it.
     #[serde(default, skip_serializing_if = "PanelConfig::is_empty")]
     pub panel: PanelConfig,
+    /// `iohr doctor` settings (`[doctor]`); read, never written: a person edits it.
+    #[serde(default, skip_serializing_if = "DoctorConfig::is_empty")]
+    pub doctor: DoctorConfig,
     /// The file as it was read, so a save keeps what the command line does not own.
     #[serde(skip)]
     source: Source,
@@ -243,6 +246,31 @@ impl AskConfig {
             && self.mode.is_none()
             && self.permissions.is_none()
             && self.read.is_none()
+    }
+}
+
+/// The `[doctor]` table: whether `iohr doctor` and the `?` card may repair a local problem
+/// themselves. Off when unset: a fix is offered, never run, until the person says yes here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct DoctorConfig {
+    /// Run the safe fixes (the ones that only restart something already down) without asking.
+    /// Every other fix stays an offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_fix: Option<bool>,
+}
+
+impl DoctorConfig {
+    /// Whether nothing is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.auto_fix.is_none()
+    }
+
+    /// Whether the safe fixes run on their own (`auto_fix = true`).
+    #[must_use]
+    pub fn auto_fix_on(&self) -> bool {
+        self.auto_fix == Some(true)
     }
 }
 

@@ -53,7 +53,7 @@ Operate), and every command ends its `--help` with real examples.
 |---|---|
 | [Install and upgrade](docs/install.md) | Homebrew, the install scripts, APT, from source, `iohr upgrade`, checking a release |
 | [Sign in](docs/sign-in.md) | `iohr login`, accounts and teams, API tokens, `IOHR_TOKEN`, profiles, `iohr auth token` for other programs |
-| [Command reference](docs/commands.md) | Every command and its flags, the global flags, the help, usage errors and exit codes |
+| [Command reference](docs/commands.md) | Every command (`iohr doctor` included) and its flags, the global flags, the help, usage errors and exit codes |
 | [SDKs and the API](docs/sdk.md) | `iohr sdk add`, `config`, `generate`, `check` and `examples`; `iohr api` and `iohr openapi` |
 | [Domains and connections](docs/domains-and-connections.md) | Proving a domain with DNS, connecting apps with a key or a browser sign-in, grants |
 | [Extensions](docs/extensions.md) | Finding, installing, verifying and pinning extensions; building one with `iohr ext init`, `dev` and `lint` |

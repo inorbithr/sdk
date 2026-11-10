@@ -1320,6 +1320,10 @@ async fn think(
 /// The card: the model runs under a spinner while the asks waiting are counted, the answer is
 /// drawn, a question the model asked back is put to the person (kept, then the answer is
 /// refreshed once), and the one line about waiting asks closes it.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one card from the agent's answer to the hand-over, in order"
+)]
 async fn card_run(
     chosen: &Chosen<'_>,
     question: &str,
@@ -1418,6 +1422,7 @@ async fn card_run(
                 (h, menu_key, look, width),
                 (pending.as_ref(), note.as_deref()),
             );
+            crate::health::print_notes(g, dir);
             let undo = saved_rules(session.as_ref());
             hand_over(
                 h,

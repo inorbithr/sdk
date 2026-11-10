@@ -386,6 +386,9 @@ sync = false
 
 [panel]                             # the floating panel (section 4.8)
 mouse = "menu"
+
+[doctor]                            # `iohr doctor` and the `?` card (section 4.9)
+auto_fix = false
 ```
 
 Rules:
@@ -828,6 +831,20 @@ The key that opens the menu is not a setting: the pill shows the one that works 
 (`^G` in Terminal.app, iTerm2, VS Code, Ghostty, WezTerm and Hyper, whose default makes Option+i a
 dead key; `⌥i` elsewhere), and both always work, unless `[ask] menu_key = "ctrl-g"` takes Ctrl-G
 for the `?` menu.
+
+### 4.9 The doctor table
+
+`iohr doctor` checks this machine for the known problems and says how to fix each. It has one
+setting.
+
+| Key | Values | Default | Read by |
+|---|---|---|---|
+| `auto_fix` | `true`: the safe fixes run on their own whenever `iohr doctor` runs, and the `?` card tells you what it found and what it did; `false`: a fix is shown, never run | `false` | `iohr doctor`, `iohr ask` (`?`, `??`) |
+
+A safe fix only restarts something that is already down (today: the MCP bridge's launchd job).
+Every other fix (signing in again, freeing disk, repairing `config.toml`) is shown and never
+run. `iohr doctor --fix` runs the safe fixes once without the setting. The file is read, never
+written by `iohr`: you edit it.
 
 ## 5. Credentials
 

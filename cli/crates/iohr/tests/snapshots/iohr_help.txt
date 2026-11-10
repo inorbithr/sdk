@@ -48,6 +48,7 @@ Agents:
 Operate:
   tunnel       Open a loopback pipe to an environment's edge
   browser      Install the InOrbit Trails browser extension
+  doctor       Check this machine for the known problems with iohr and say how to fix each
   upgrade      Update iohr to the newest release
   completion   Print a shell completion script
   help         Print this message or the help of a command
