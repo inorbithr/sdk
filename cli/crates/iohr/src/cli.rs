@@ -3038,11 +3038,18 @@ pub struct UiArgs {
 pub enum UiCommand {
     /// Serve the built UI on a loopback address until Ctrl-C.
     ///
-    /// Serves a built `ui/dist` (the nearest one above this folder, or `--dir`) on
-    /// 127.0.0.1. GET and HEAD only; a request for another host, a path outside the folder
-    /// or a method other than those is refused. Unknown page paths get `index.html`, so
-    /// the app's own routes load.
+    /// Serves a built UI on 127.0.0.1: `--dir` (`IOHR_UI_DIR`), else the nearest `ui/dist`
+    /// above this folder, else the copy `iohr ui install` keeps in iohr's data folder, so
+    /// it works from any folder. GET and HEAD only; a request for another host, a path
+    /// outside the folder or a method other than those is refused. Unknown page paths get
+    /// `index.html`, so the app's own routes load.
     Serve(UiServe),
+    /// Install a built UI into iohr's data folder, where `iohr ui serve` finds it anywhere.
+    ///
+    /// Copies a built `ui/dist` (`--dir`, or the nearest one above this folder) to
+    /// `ui/dist` in iohr's data folder, replacing the copy there in one step. The preview
+    /// install (`mise run cli:preview-install`) runs this after building the UI.
+    Install(UiInstall),
     /// Build the UI package into `ui/dist` (its `build` script).
     ///
     /// Runs `pnpm run build` in the UI package: the nearest `ui/` with a `package.json`
@@ -3068,12 +3075,20 @@ pub struct UiPackage {
 }
 
 #[derive(Debug, Args, Default)]
+pub struct UiInstall {
+    /// The built UI folder to install, holding `index.html` (default: the nearest
+    /// `ui/dist` above this folder).
+    #[arg(long, env = "IOHR_UI_DIR")]
+    pub dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Default)]
 pub struct UiServe {
     /// The port to listen on (default: one the system picks).
     #[arg(long)]
     pub port: Option<u16>,
     /// The built UI folder, holding `index.html` (default: the nearest `ui/dist` above
-    /// this folder).
+    /// this folder, else the installed copy).
     #[arg(long, env = "IOHR_UI_DIR")]
     pub dir: Option<PathBuf>,
     /// Open the UI in the default browser once it listens.
