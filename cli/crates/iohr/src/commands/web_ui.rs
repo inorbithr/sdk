@@ -36,6 +36,9 @@
 mod forward;
 #[cfg(test)]
 mod forward_tests;
+mod live;
+#[cfg(test)]
+mod live_tests;
 mod session;
 #[cfg(test)]
 mod session_tests;
@@ -451,6 +454,9 @@ async fn answer(mut stream: TcpStream, site: &Site) {
         Next::Proxy(request) => {
             forward::forward(&mut stream, &request, rest, site.access.as_ref()).await;
         }
+        Next::Live(request) => {
+            live::serve(stream, &request, &rest, &site.panels, site.access.as_ref()).await;
+        }
     }
 }
 
@@ -482,6 +488,8 @@ async fn read_request_head(stream: &mut TcpStream) -> io::Result<(Vec<u8>, Vec<u
 enum Next {
     Reply(Reply),
     Proxy(Request),
+    /// `GET /api/live` through the gates: the WebSocket upgrade (`live`).
+    Live(Request),
 }
 
 /// One answer, written whole.
@@ -600,7 +608,27 @@ async fn reply_to(head: &[u8], site: &Site) -> Next {
     if let Some(next) = proxied(&request, site) {
         return next;
     }
+    if decoded_path(&request.target).is_some_and(|p| p == "/api/live") {
+        return Next::live_gate(&request, site);
+    }
     Next::Reply(reply_to_page(&request, site).await)
+}
+
+impl Next {
+    /// `/api/live`: a `GET` upgrade from the page's own origin (the token is the first
+    /// frame, `live`), else the refusal.
+    fn live_gate(request: &Request, site: &Site) -> Self {
+        if request.method != "GET" {
+            return Self::Reply(Reply {
+                allow: true,
+                ..Reply::error("405 Method Not Allowed")
+            });
+        }
+        if !live::upgrade_allowed(request, &site.host) {
+            return Self::Reply(Reply::error("403 Forbidden"));
+        }
+        Self::Live(request.clone())
+    }
 }
 
 /// A call of `/api/proxy/...`: through the gates, or the refusal.
@@ -636,6 +664,7 @@ fn proxied(request: &Request, site: &Site) -> Option<Next> {
             transfer_encoding: request.transfer_encoding.clone(),
             content_type: request.content_type.clone(),
             accept: request.accept.clone(),
+            ..Request::default()
         })
     } else {
         Next::Reply(Reply::error("403 Forbidden"))
@@ -1027,7 +1056,7 @@ fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Request {
     method: String,
     target: String,
@@ -1040,6 +1069,9 @@ struct Request {
     transfer_encoding: Option<String>,
     content_type: Option<String>,
     accept: Option<String>,
+    upgrade: Option<String>,
+    ws_key: Option<String>,
+    ws_version: Option<String>,
 }
 
 /// The request line and the `Host`, `Origin`, `Sec-Fetch-Site`, `x-iohr-token`,
@@ -1088,6 +1120,12 @@ fn parse(head: &[u8]) -> Result<Request, &'static str> {
             &mut request.content_type
         } else if name.eq_ignore_ascii_case("accept") {
             &mut request.accept
+        } else if name.eq_ignore_ascii_case("upgrade") {
+            &mut request.upgrade
+        } else if name.eq_ignore_ascii_case("sec-websocket-key") {
+            &mut request.ws_key
+        } else if name.eq_ignore_ascii_case("sec-websocket-version") {
+            &mut request.ws_version
         } else {
             continue;
         };

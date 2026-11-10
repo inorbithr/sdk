@@ -199,8 +199,21 @@ export type StreamOptions<T> = {
   fetcher?: typeof fetch;
   wait?: (ms: number) => Promise<void>;
   silenceMs?: number;
+  /** The live socket (`/api/live`); defaults to this page's own when the browser has a `WebSocket`. `false` is SSE only. */
+  socket?: SocketConfig | false;
   _t?: T;
 };
+
+/** A WebSocket as the hub uses it, so a test can stand in for the browser's. */
+export type SocketLike = {
+  send(data: string): void;
+  close(): void;
+  onopen: (() => void) | null;
+  onmessage: ((e: { data: unknown }) => void) | null;
+  onclose: (() => void) | null;
+  onerror: (() => void) | null;
+};
+export type SocketConfig = { url: string; ctor: new (url: string) => SocketLike };
 
 type Sub = { onEvent: (data: never, meta: StreamMeta) => void; onState?: (s: LiveState, why?: string) => void };
 type Shared = { subs: Set<Sub>; stop: () => void; state: LiveState; why?: string };
@@ -209,6 +222,148 @@ const streams = new Map<string, Shared>();
 const BACKOFF = [500, 1000, 2000, 4000, 8000, 15000, 30000];
 /** The server sends a keepalive every 15 s; this long with no bytes at all and the link is dead. */
 const SILENCE_MS = 45_000;
+
+/** How long the page reads server-sent events instead after the socket could not be opened. */
+const SOCKET_COOLDOWN_MS = 60_000;
+
+type WireCall = { data(d: unknown): void; end(): void; fail(status: number, message: string): void };
+type Wire = { ws: SocketLike; calls: Map<string, WireCall>; next: number; ready: Promise<void> };
+let wire: Wire | null = null;
+let socketDownUntil = 0;
+/** Paths the server has no socket call for: read as server-sent events from then on. */
+const unmapped = new Set<string>();
+
+/** Forgets the socket and what it learned (tests). */
+export function resetLive(): void {
+  wire?.ws.close();
+  wire = null;
+  socketDownUntil = 0;
+  unmapped.clear();
+}
+
+function pageSocket(): SocketConfig | null {
+  const loc = (globalThis as { location?: { protocol: string; host: string } }).location;
+  const ctor = (globalThis as { WebSocket?: SocketConfig["ctor"] }).WebSocket;
+  if (loc === undefined || ctor === undefined) return null;
+  return { url: `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/live`, ctor };
+}
+
+/**
+ * The one WebSocket the page's streams share. The browser cannot set a header on a handshake, so the per-serve token
+ * is the first frame (the server reads nothing before it). It resolves when the server says `ready`.
+ */
+function openWire(cfg: SocketConfig, token: string): Wire {
+  const ws = new cfg.ctor(cfg.url);
+  const calls = new Map<string, WireCall>();
+  const w: Wire = { ws, calls, next: 1, ready: Promise.resolve() };
+  let opened = false;
+  const broken = (message: string) => {
+    if (wire === w) wire = null;
+    if (!opened) socketDownUntil = Date.now() + SOCKET_COOLDOWN_MS;
+    const held = [...calls.values()];
+    calls.clear();
+    for (const c of held) c.fail(0, message);
+  };
+  w.ready = new Promise<void>((resolve, reject) => {
+    ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token }));
+    ws.onerror = () => {
+      reject(new Error("The live socket could not be opened."));
+      ws.close();
+    };
+    ws.onclose = () => {
+      reject(new Error("The live socket closed."));
+      broken("The live socket closed.");
+    };
+    ws.onmessage = (e) => {
+      let f: { type?: string; id?: string; data?: unknown; status?: string; message?: string };
+      try {
+        f = JSON.parse(String(e.data));
+      } catch {
+        return;
+      }
+      if (f.type === "ready") {
+        opened = true;
+        resolve();
+      } else if (f.id === undefined) {
+        if (f.type === "error") {
+          reject(new Error(f.message ?? "The live socket failed."));
+          broken(f.message ?? "The live socket failed.");
+          ws.close();
+        }
+      } else {
+        const c = calls.get(f.id);
+        if (c === undefined) return;
+        if (f.type === "data") c.data(f.data);
+        else if (f.type === "end") {
+          calls.delete(f.id);
+          c.end();
+        } else if (f.type === "error") {
+          calls.delete(f.id);
+          c.fail(Number.parseInt(f.status ?? "0", 10), f.message ?? "The stream failed.");
+        }
+      }
+    };
+  });
+  w.ready.catch(() => {});
+  return w;
+}
+
+type SocketOutcome = { kind: "fallback" } | { kind: "ended" } | { kind: "fatal"; why: string };
+
+/**
+ * One round of a stream over the shared socket: `fallback` when it cannot be used (no socket, the server has no socket
+ * call for this path, or it is cooling down after a failure to open), `ended` when the API ended it, `fatal` for a
+ * refusal that will not change; any other break throws, and the caller reconnects with backoff.
+ */
+async function overSocket(
+  cfg: SocketConfig | null,
+  token: string,
+  url: string,
+  apiPath: string,
+  signal: AbortSignal,
+  onLive: () => void,
+  onData: (d: unknown) => void,
+): Promise<SocketOutcome> {
+  if (cfg === null || unmapped.has(url) || Date.now() < socketDownUntil) return { kind: "fallback" };
+  let w = wire;
+  if (w === null) {
+    w = openWire(cfg, token);
+    wire = w;
+  }
+  try {
+    await w.ready;
+  } catch {
+    return { kind: "fallback" };
+  }
+  if (signal.aborted) return { kind: "ended" };
+  const live = w;
+  const id = String(live.next++);
+  return new Promise<SocketOutcome>((resolve, reject) => {
+    const stop = () => {
+      if (live.calls.delete(id)) live.ws.send(JSON.stringify({ type: "cancel", id }));
+      resolve({ kind: "ended" });
+    };
+    signal.addEventListener("abort", stop, { once: true });
+    const done = () => signal.removeEventListener("abort", stop);
+    live.calls.set(id, {
+      data: onData,
+      end: () => {
+        done();
+        resolve({ kind: "ended" });
+      },
+      fail: (status, message) => {
+        done();
+        if (message === "unmapped") {
+          unmapped.add(url);
+          resolve({ kind: "fallback" });
+        } else if (status >= 400 && status < 500 && status !== 429) resolve({ kind: "fatal", why: message });
+        else reject(new Error(message));
+      },
+    });
+    live.ws.send(JSON.stringify({ type: "call", id, path: apiPath }));
+    onLive();
+  });
+}
 
 /** The parsed events of an SSE byte stream: `id`, `event`, `data`; comments return `null`-data frames for liveness. */
 export function parseSse(buffer: string): { frames: { id: string | null; event: string; data: string }[]; rest: string } {
@@ -277,6 +432,7 @@ function openShared<T>(url: string, _path: string, opts: StreamOptions<T>, token
   const fetcher = opts.fetcher ?? fetch;
   const wait = opts.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const silence = opts.silenceMs ?? SILENCE_MS;
+  const socketCfg = opts.socket === false ? null : (opts.socket ?? pageSocket());
   const shared: Shared = { subs: new Set(), stop: () => {}, state: "connecting" };
   const ctl = new AbortController();
   const set = (state: LiveState, why?: string) => {
@@ -304,50 +460,67 @@ function openShared<T>(url: string, _path: string, opts: StreamOptions<T>, token
         timer = setTimeout(() => link.abort(), silence);
       };
       try {
-        beat();
-        const headers: Record<string, string> = { "x-iohr-token": token, accept: "text/event-stream" };
-        if (lastId !== null) headers["last-event-id"] = lastId;
-        const res = await fetcher(resumed(), { headers, cache: "no-store", signal: link.signal });
-        if (res.status === 401) fatal = "signed out";
-        else if (!res.ok || res.body === null) {
-          if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)
-            fatal = await failure(res);
-          else throw new Error(`HTTP ${res.status}`);
-        } else {
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buf = "";
-          set("live");
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            beat();
+        const sock = await overSocket(
+          socketCfg,
+          token,
+          url,
+          resumed().slice("/api/proxy".length),
+          ctl.signal,
+          () => set("live"),
+          (data) => {
             attempt = 0;
-            buf += decoder.decode(value, { stream: true });
-            const { frames, rest } = parseSse(buf);
-            buf = rest;
-            for (const f of frames) {
-              if (f.event === "error") {
-                let status = 0;
-                let reason = "The stream failed.";
-                try {
-                  const e = (JSON.parse(f.data) as { error?: { status?: string; message?: string } }).error;
-                  status = Number.parseInt(e?.status ?? "0", 10);
-                  reason = e?.message ?? reason;
-                } catch {
-                  // keep the default
+            const id = typeof (data as { sse_id?: unknown })?.sse_id === "string" ? (data as { sse_id: string }).sse_id : null;
+            if (id !== null && id !== "") lastId = id;
+            for (const s of [...shared.subs]) s.onEvent(data as never, { event: "message", id });
+          },
+        );
+        if (sock.kind === "fatal") fatal = sock.why;
+        if (sock.kind === "fallback") {
+          beat();
+          const headers: Record<string, string> = { "x-iohr-token": token, accept: "text/event-stream" };
+          if (lastId !== null) headers["last-event-id"] = lastId;
+          const res = await fetcher(resumed(), { headers, cache: "no-store", signal: link.signal });
+          if (res.status === 401) fatal = "signed out";
+          else if (!res.ok || res.body === null) {
+            if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)
+              fatal = await failure(res);
+            else throw new Error(`HTTP ${res.status}`);
+          } else {
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            set("live");
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              beat();
+              attempt = 0;
+              buf += decoder.decode(value, { stream: true });
+              const { frames, rest } = parseSse(buf);
+              buf = rest;
+              for (const f of frames) {
+                if (f.event === "error") {
+                  let status = 0;
+                  let reason = "The stream failed.";
+                  try {
+                    const e = (JSON.parse(f.data) as { error?: { status?: string; message?: string } }).error;
+                    status = Number.parseInt(e?.status ?? "0", 10);
+                    reason = e?.message ?? reason;
+                  } catch {
+                    // keep the default
+                  }
+                  if (status >= 400 && status < 500 && status !== 429) fatal = reason;
+                  throw new Error(reason);
                 }
-                if (status >= 400 && status < 500 && status !== 429) fatal = reason;
-                throw new Error(reason);
+                let data: unknown;
+                try {
+                  data = JSON.parse(f.data);
+                } catch {
+                  continue;
+                }
+                if (f.id !== null) lastId = f.id;
+                for (const s of [...shared.subs]) s.onEvent(data as never, { event: f.event, id: f.id });
               }
-              let data: unknown;
-              try {
-                data = JSON.parse(f.data);
-              } catch {
-                continue;
-              }
-              if (f.id !== null) lastId = f.id;
-              for (const s of [...shared.subs]) s.onEvent(data as never, { event: f.event, id: f.id });
             }
           }
         }

@@ -237,6 +237,18 @@ impl Access {
         Ok(fresh)
     }
 
+    /// A client for one page socket: the session's credential, every stream over one
+    /// upstream `/v1/ws` (`Streams::Socket`).
+    pub(super) fn socket_api(&self, s: &Session) -> Result<crate::context::Api, Error> {
+        crate::context::Api::with_streams(
+            self.global.base_url(),
+            Arc::clone(&s.credential),
+            false,
+            None,
+            inorbithr::Streams::Socket,
+        )
+    }
+
     /// `GET /api/session`: whether this machine is signed in, as whom, and how the
     /// sign-in the page started is going. No credential is ever in it.
     pub(super) async fn state(&self) -> Reply {

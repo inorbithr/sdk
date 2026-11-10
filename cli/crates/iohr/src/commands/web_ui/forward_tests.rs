@@ -16,7 +16,7 @@ use super::forward::Limits;
 use super::tests::{built_ui, get, panels_with, send, start_limited, token_of};
 use crate::Env;
 
-fn jwt() -> String {
+pub(super) fn jwt() -> String {
     let enc = |v: serde_json::Value| URL_SAFE_NO_PAD.encode(v.to_string());
     format!(
         "{}.{}.sig",
@@ -28,16 +28,16 @@ fn jwt() -> String {
     )
 }
 
-struct Rig {
+pub(super) struct Rig {
     _dir: tempfile::TempDir,
     _cfg: tempfile::TempDir,
-    addr: std::net::SocketAddr,
-    host: String,
-    token: String,
+    pub(super) addr: std::net::SocketAddr,
+    pub(super) host: String,
+    pub(super) token: String,
     _stop: tokio::sync::oneshot::Sender<()>,
 }
 
-async fn rig(api_url: &str, limits: Limits) -> Rig {
+pub(super) async fn rig(api_url: &str, limits: Limits) -> Rig {
     let dir = built_ui();
     let cfg = tempfile::tempdir().expect("cfg");
     let env = Env {
@@ -94,12 +94,12 @@ impl Rig {
     }
 }
 
-fn with_cookie(addr: std::net::SocketAddr, raw: &str) -> String {
+pub(super) fn with_cookie(addr: std::net::SocketAddr, raw: &str) -> String {
     let probe = super::tests::cookie_of(addr);
     raw.replacen("\r\n", &format!("\r\nCookie: {probe}\r\n"), 1)
 }
 
-fn status(answer: &str) -> &str {
+pub(super) fn status(answer: &str) -> &str {
     answer.lines().next().unwrap_or_default()
 }
 

@@ -275,6 +275,21 @@ browser (`IOHR_NO_BROWSER` prints the address instead).
   (the 5th gets `429`; a browser keeps six connections per origin); a stream ends when the
   page goes away or the serve stops. The page's client is `apiStream` in `ui/src/lib/api.ts`
   (reconnect with backoff, one shared connection per identical stream) and `useLive`.
+- `GET /api/live` is one WebSocket for all of the page's streams, so six open streams do
+  not use up the browser's six connections. It is for the routes the API has a socket
+  call for (coordinator picture, asks, thread and open items, approval events, atlas
+  signals, events); `apiStream` uses it for those and reads every other path, and any
+  stream when the socket cannot open, as server-sent events. The serve carries the calls
+  to the API on one `/v1/ws` through the SDK's `Streams::Socket`. The upgrade needs the
+  session cookie, the `Host`, `Sec-Fetch-Site: same-origin` and an exact `Origin`. A
+  browser cannot set a header on a WebSocket handshake, so the per-serve token is the first
+  frame (`{"type":"auth","token"}`, constant-time compare, nothing is read before it; a
+  wrong one closes the socket). Then `{"type":"call","id","path":"/v1/..."}` and
+  `{"type":"cancel","id"}` go in; `data`, `end` and `error` frames (with the call's `id`)
+  come out, `unmapped` for a path with no socket call. A socket takes one of the 4 stream
+  slots, carries at most 16 calls, accepts frames of at most 64 KiB, is pinged every 15 s,
+  and closes after 5 minutes with nothing either way or when the serve stops. Nothing it
+  carries is logged.
 - A taken `--port` is an error. A running `serve` records its address in the data folder
   (`ui/serving.json`, private) and removes it when it stops.
 
