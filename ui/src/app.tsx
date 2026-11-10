@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  FileText,
   House,
   LayoutGrid,
   Orbit,
@@ -9,6 +10,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { Decisions } from "./decisions/page.tsx";
 import {
   applyLayout,
   applySpan,
@@ -35,6 +37,7 @@ import { useFrameShortcuts } from "./frame/shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { Home } from "./home.tsx";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
+import { DECISIONS, decisionsRoute } from "./lib/decisions-route.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
 import { entryOf, isDown, whyClosed } from "./lib/features-core.ts";
@@ -79,7 +82,8 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
-  const pageKey = inSettings ? "settings" : routed === null ? HOME : `ext:${routed}`;
+  const inDecisions = decisionsRoute(window.location.pathname) !== null;
+  const pageKey = inSettings ? "settings" : inDecisions ? "decisions" : routed === null ? HOME : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -166,6 +170,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "decisions", title: "Decisions" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -173,6 +178,10 @@ export function App() {
     if (key === pageKey) return;
     if (key === HOME) {
       window.location.assign("/");
+      return;
+    }
+    if (key === "decisions") {
+      window.location.assign(DECISIONS);
       return;
     }
     if (key === "settings") {
@@ -235,11 +244,11 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings ? (
+      <span className={cn((chosen || inSettings || inDecisions) && "text-muted-foreground")}>InOrbit</span>
+      {chosen || inSettings || inDecisions ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{inSettings ? "Settings" : chosen?.title}</span>
+          <span className="truncate">{inDecisions ? "Decisions" : inSettings ? "Settings" : chosen?.title}</span>
         </>
       ) : null}
     </h1>
@@ -340,8 +349,15 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings}
+          active={routed === null && !inSettings && !inDecisions}
           onClick={() => window.location.assign("/")}
+        />
+        <NavItem
+          rail={rail}
+          label="Decisions"
+          icon={<FileText />}
+          active={inDecisions}
+          onClick={() => window.location.assign(DECISIONS)}
         />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
@@ -430,7 +446,9 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {inSettings ? (
+          {inDecisions ? (
+            <Decisions session={account.session} />
+          ) : inSettings ? (
             <Settings
               session={account.session}
               busy={account.busy}
