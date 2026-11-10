@@ -4,7 +4,10 @@
 import { Copy, Hand, MousePointer2, Plus, Redo2, Square, StickyNote, Trash2, Undo2, ArrowUpRight, Circle, Frame } from "lucide-react";
 import { type PointerEvent as RPointer, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../frame/cn.ts";
+import { showContextMenu } from "../frame/context-menu.tsx";
+import { FIRST_PANEL } from "../frame/dock-frame.ts";
 import {
+  duplicate,
   type Handle,
   HANDLES,
   addItems,
@@ -18,6 +21,9 @@ import {
   moveEnd,
   moveItems,
   normRect,
+  reorder,
+  setTitle,
+  setTone,
   resizeBox,
   resizeItem,
   setText,
@@ -35,7 +41,11 @@ import {
   renameCanvas,
   writeView,
 } from "./board-store-core.ts";
+import { boardMenu, itemMenu } from "./canvas-menus.ts";
 import { canvasPath, canvasRoute } from "./canvas-route.ts";
+import { Card, isCard } from "./cards.tsx";
+import { Inspector } from "./inspector.tsx";
+import { type CardKind, pick as pickCard } from "./picker-core.ts";
 import { useShortcuts } from "./keys-shim.ts";
 import { type Box, type Item, type Tone, paintOrder, removeItems, type ShapeItem } from "./schema.ts";
 import { useBoard } from "./use-board.ts";
@@ -193,6 +203,8 @@ function Editor({ id }: { id: string }) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [space, setSpace] = useState(false);
+  const [panel, setPanel] = useState<{ open: boolean; width: number }>({ open: false, width: FIRST_PANEL });
+  const [adding, setAdding] = useState(false);
   const canvas = st.canvas;
 
   useEffect(() => {
@@ -236,6 +248,49 @@ function Editor({ id }: { id: string }) {
     if (t === "note") place((p) => makeNote(p));
     if (t === "frame") place((p) => makeFrame(p));
     if (t === "note" || t === "frame") setTool("select");
+  };
+
+  const duplicateSel = () => {
+    if (!canvas || !sel.length) return;
+    const d = duplicate(canvas, sel);
+    edit(() => d.canvas);
+    setSel(d.ids);
+  };
+  const menuAt = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!canvas) return;
+    const p = at(e);
+    const hit = hitTest(canvas.items, p, 8 / view.zoom);
+    let ids = sel;
+    if (hit && !sel.includes(hit.item_id)) {
+      ids = [hit.item_id];
+      setSel(ids);
+    }
+    const rows =
+      hit || ids.length
+        ? itemMenu(
+            canvas.items.filter((i) => ids.includes(i.item_id)),
+            {
+              edit: () => setEditing(ids[0] ?? null),
+              inspect: () => setPanel((x) => ({ ...x, open: true })),
+              duplicate: duplicateSel,
+              front: () => edit((c) => reorder(c, ids, "front")),
+              back: () => edit((c) => reorder(c, ids, "back")),
+              tone: (t) => edit((c) => setTone(c, ids, t)),
+              fit: () => fitTo(boundsOf(canvas, ids)),
+              remove: remove,
+            },
+          )
+        : boardMenu({
+            note: () => edit((c) => addItems(c, [makeNote(at(e))])),
+            frame: () => edit((c) => addItems(c, [makeFrame(at(e))])),
+            add: () => setAdding(true),
+            fitAll: () => fitTo(boundsOf(canvas)),
+            fitHome: () => setView({ x: 40, y: 40, zoom: 1 }),
+            undo: st.past ? () => board?.undo() : null,
+            redo: st.future ? () => board?.redo() : null,
+          });
+    showContextMenu(e, rows, { label: hit ? "Item" : "Canvas" });
   };
 
   useShortcuts("canvas", {
@@ -410,6 +465,9 @@ function Editor({ id }: { id: string }) {
         </button>
         <span className="text-muted-foreground">/</span>
         <span className="mr-2 truncate text-sm font-medium">{canvas.title}</span>
+        <IconButton label="Add a card (document, pull request, decision)" onClick={() => setAdding(!adding)}>
+          <Plus />
+        </IconButton>
         <IconButton label="Select" active={tool === "select"} onClick={() => setTool("select")}>
           <MousePointer2 />
         </IconButton>
@@ -441,9 +499,6 @@ function Editor({ id }: { id: string }) {
         <IconButton label="Fit everything" onClick={() => fitTo(boundsOf(canvas))}>
           <Hand />
         </IconButton>
-        <IconButton label="New canvas" onClick={() => go(createCanvas(kv, "").canvas_id)}>
-          <Plus />
-        </IconButton>
         <span className="text-muted-foreground ml-auto text-[12px]" role="status">
           {Math.round(view.zoom * 100)}% · {st.error ?? (st.dirty ? "Saving…" : "Saved in this browser")}
         </span>
@@ -451,16 +506,27 @@ function Editor({ id }: { id: string }) {
       <p className="text-muted-foreground text-[12px]" role="note">
         {KEPT_HERE}
       </p>
+      {adding ? (
+        <AddCard
+          onClose={() => setAdding(false)}
+          onAdd={(make) => {
+            place(make);
+            setAdding(false);
+          }}
+        />
+      ) : null}
+      <div className="flex min-h-0 flex-1">
       <div
         ref={host}
         data-canvas-board
-        className="bg-muted/40 relative min-h-0 flex-1 touch-none overflow-hidden rounded-md border outline-none"
+        className="bg-muted/40 relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden rounded-md border outline-none"
         style={{ cursor }}
         tabIndex={0}
         onPointerDown={down}
         onPointerMove={move}
         onPointerUp={up}
         onWheel={wheel}
+        onContextMenu={menuAt}
       >
         <div className="absolute left-0 top-0" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`, transformOrigin: "0 0" }}>
           <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={1} height={1} aria-hidden="true">
@@ -513,7 +579,51 @@ function Editor({ id }: { id: string }) {
           </p>
         ) : null}
       </div>
+      {panel.open && single ? (
+        <Inspector
+          item={single}
+          width={panel.width}
+          onWidth={(w) => setPanel((x) => ({ ...x, width: w }))}
+          onClose={() => setPanel((x) => ({ ...x, open: false }))}
+          onTitle={(t) => edit((c) => setTitle(c, single.item_id, t))}
+          onText={(t) => edit((c) => setText(c, single.item_id, t))}
+          onTone={(t) => edit((c) => setTone(c, [single.item_id], t))}
+        />
+      ) : null}
+      </div>
     </section>
+  );
+}
+
+function AddCard({ onAdd, onClose }: { onAdd: (make: (at: { x: number; y: number }) => Item) => void; onClose: () => void }) {
+  const [kind, setKind] = useState<CardKind>("decision");
+  const [text, setText] = useState("");
+  const [why, setWhy] = useState("");
+  const hint = { decision: "RFC 0217", pr: "owner/repo#12", document: "space id, a space, document id" }[kind];
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2 text-sm"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const r = pickCard(kind, text);
+        if (r.ok) onAdd(r.make);
+        else setWhy(r.why);
+      }}
+    >
+      <select aria-label="Kind of card" className="bg-background border-input rounded-md border px-2 py-1" value={kind} onChange={(e) => setKind(e.target.value as CardKind)}>
+        <option value="decision">Decision</option>
+        <option value="pr">Pull request</option>
+        <option value="document">Document</option>
+      </select>
+      <input aria-label="Reference" className="bg-background border-input min-w-0 flex-1 rounded-md border px-2 py-1" placeholder={hint} value={text} onChange={(e) => setText(e.target.value)} />
+      <button type="submit" className="bg-primary text-primary-foreground rounded-md px-3 py-1">
+        Add
+      </button>
+      <button type="button" className="text-muted-foreground" onClick={onClose}>
+        Cancel
+      </button>
+      {why ? <span role="alert" className="text-destructive text-[12px]">{why}</span> : null}
+    </form>
   );
 }
 
@@ -610,11 +720,6 @@ function ItemView({
     );
   if (it.type === "image")
     return <img alt={it.alt ?? it.title} src={it.src} draggable={false} className={cn("absolute select-none object-contain", ring)} style={box} />;
-  // documents, diagrams, ask cards and the rest: their cards are slice 2; until then a labelled placeholder.
-  return (
-    <div className={cn("bg-card absolute rounded-md border p-2 text-[13px] shadow-sm", ring)} style={box}>
-      <div className="font-medium">{it.title || it.type}</div>
-      <div className="text-muted-foreground text-[12px]">{it.type}</div>
-    </div>
-  );
+  if (isCard(it)) return <Card it={it} detail={detail} ring={ring} />;
+  return null;
 }
