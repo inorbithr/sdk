@@ -21,6 +21,15 @@ const SWITCH_KEYS: [&[u8]; 2] = [b"\x00", b"\x1b[32;5u"];
 /// What the switch key is called on the box.
 pub(super) const SWITCH_LABEL: &str = "\u{2303}space";
 
+/// What the chat box calls its hide key, in every terminal: `⌥h` on macOS and `Alt+h` elsewhere.
+/// The forms above catch Option+h even where Option types characters, so the name never changes
+/// with the terminal.
+pub(super) const HIDE_LABEL: &str = if cfg!(target_os = "macos") {
+    "\u{2325}h"
+} else {
+    "Alt+h"
+};
+
 /// The byte Ctrl-G sends.
 const CTRL_G: &[u8] = b"\x07";
 
@@ -45,9 +54,6 @@ const DEAD_KEY_TERMINALS: [&str; 6] = [
 pub(super) struct OpenKey {
     ctrl_g: bool,
     label: &'static str,
-    /// What the chat box's hide key is called: `⌥h`, or `^]` where the menu key falls back to
-    /// `^G` (the terminals where Option does not reach the shell as itself).
-    hide_label: &'static str,
 }
 
 impl OpenKey {
@@ -62,7 +68,6 @@ impl OpenKey {
             } else {
                 "\u{2325}i"
             },
-            hide_label: if dead { "^]" } else { "\u{2325}h" },
         }
     }
 
@@ -74,11 +79,6 @@ impl OpenKey {
     /// The key as the pill and the help name it.
     pub(super) fn label(self) -> &'static str {
         self.label
-    }
-
-    /// The chat box's hide key as the box names it.
-    pub(super) fn hide_label(self) -> &'static str {
-        self.hide_label
     }
 
     /// Whether this input is exactly the chat box's hide and show key, in any of its forms.
@@ -375,15 +375,16 @@ mod tests {
     }
 
     #[test]
-    fn the_hide_key_is_named_option_h_where_the_menu_key_is_not_a_fallback() {
-        assert_eq!(OpenKey::detect(None, false).hide_label(), "\u{2325}h");
-        assert_eq!(
-            OpenKey::detect(Some("tmux"), false).hide_label(),
+    fn the_hide_key_has_one_name_in_every_terminal() {
+        let name = if cfg!(target_os = "macos") {
             "\u{2325}h"
-        );
-        for t in DEAD_KEY_TERMINALS {
-            assert_eq!(OpenKey::detect(Some(t), false).hide_label(), "^]", "{t}");
-        }
+        } else {
+            "Alt+h"
+        };
+        assert_eq!(HIDE_LABEL, name);
+        // Option+h's dead-key form is caught, so the terminals where Option types characters
+        // need no other name for it.
+        assert!(OpenKey::is_hide("\u{2d9}".as_bytes()));
     }
 
     #[test]

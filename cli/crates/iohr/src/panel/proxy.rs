@@ -1320,10 +1320,6 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         shell_pid,
         shares: 0,
     };
-    session
-        .proxy
-        .chat
-        .set_hide_label(settings.open_key.hide_label());
     session.redraw();
     session.refresh();
 
