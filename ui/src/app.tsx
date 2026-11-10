@@ -5,10 +5,11 @@ import {
   Orbit,
   PanelRight,
   Puzzle,
+  Radar,
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import {
   applyLayout,
   applySpan,
@@ -49,6 +50,9 @@ import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
+import { SENSORS, sensorsRoute } from "./lib/sensors-view.ts";
+
+const SensorsPage = lazy(() => import("./sensors/sensors-page.tsx"));
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -79,7 +83,8 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
-  const pageKey = inSettings ? "settings" : routed === null ? HOME : `ext:${routed}`;
+  const inSensors = sensorsRoute(window.location.pathname);
+  const pageKey = inSettings ? "settings" : inSensors ? "sensors" : routed === null ? HOME : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -166,6 +171,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "sensors", title: "Sensors" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -173,6 +179,10 @@ export function App() {
     if (key === pageKey) return;
     if (key === HOME) {
       window.location.assign("/");
+      return;
+    }
+    if (key === "sensors") {
+      window.location.assign(SENSORS);
       return;
     }
     if (key === "settings") {
@@ -340,9 +350,10 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings}
+          active={routed === null && !inSettings && !inSensors}
           onClick={() => window.location.assign("/")}
         />
+        <NavItem rail={rail} label="Sensors" icon={<Radar />} active={inSensors} onClick={() => goTo("sensors")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -439,6 +450,10 @@ export function App() {
               listing={listing}
               onEdit={setEditing}
             />
+          ) : inSensors ? (
+            <Suspense fallback={<p className="notice">Loading Sensors…</p>}>
+              <SensorsPage session={account.session} onSignIn={account.signIn} />
+            </Suspense>
           ) : (routed !== null && extensionsDown) || (routed === null && homeDown) ? (
             <section className="notice" role="status" data-maintenance-notice>
               <h2 className="mb-1 text-base font-semibold">
