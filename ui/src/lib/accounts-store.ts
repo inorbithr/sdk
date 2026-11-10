@@ -6,6 +6,8 @@ import { accountRows, type MeWire, pickActive, withAccount } from "./accounts-co
 import type { SessionState } from "./api.ts";
 import { ME_READ, type Part } from "./home-data.ts";
 import { useRead } from "./settings-data.ts";
+import { rememberAccount } from "./team-core.ts";
+import { apiSend } from "./team-send.ts";
 
 const KEY = "iohr.account";
 let picked: string | null = null;
@@ -42,7 +44,13 @@ export function useAccounts(raw: SessionState | null) {
   const open = me.state === "ok" ? (me.data.preferences?.open_account_id ?? null) : null;
   const token = raw?.state === "signed-in" ? raw.account : "";
   const active = rows.length === 0 ? (token === "" ? null : token) : pickActive(rows, tab, open, token);
-  const switchTo = useCallback((id: string) => pick(id), []);
+  // The tab switches at once; the API is told afterwards, as the console does, so the next sign-in opens this
+  // account. A refusal changes nothing the person sees: the pick is the tab's.
+  const switchTo = useCallback((id: string) => {
+    pick(id);
+    const c = rememberAccount(id);
+    void apiSend(c.method, c.path, c.body);
+  }, []);
   return { me, rows, active, session: withAccount(raw, active), switchTo };
 }
 

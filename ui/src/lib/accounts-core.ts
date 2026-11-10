@@ -8,6 +8,7 @@ import type { SessionState } from "./api.ts";
 type AccountWire = { id?: string; kind?: string; slug?: string; name?: string; plan?: string; role?: string };
 /** `GET /v1/accounts/me`, as far as the page reads it. */
 export type MeWire = {
+  user_id?: string;
   email?: string;
   name?: string;
   account?: AccountWire;
