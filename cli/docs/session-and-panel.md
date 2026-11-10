@@ -199,8 +199,16 @@ deeper; one Enter sends either (the question goes to your shell as if you had ty
 your history). While Io answers, the status row shows a spinner, what it is doing ("reading 3
 files"), a moving bar with the count and the time (the number of steps is not known, so it is not a
 percentage), and a `■ Stop esc` button; Esc or a click on it stops the answer, and Ctrl-C still
-does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, Esc
-clears the line, and a click on the mode chip changes the mode. `Ctrl-]` (or `^G` then `c`, or a
+does. Shift+Tab changes the answer mode (manual, plan, auto), Up recalls the last question, and a
+click on the mode chip changes the mode.
+
+Moving between the chat and the terminal is one key, `Ctrl-Space`, from either side. The title
+says `● typing here` while the box has the keys, and the shell has them when it does not. The
+draft stays when the keys leave: Esc hands them back to the terminal with the half-written
+question kept (it shows dimmed, tagged `draft`), `Ctrl-C` throws the draft away, and `Ctrl-Space`,
+`?` or a click on the input bring you back to it. A sent question starts the next line empty. The
+switch waits while an answer runs or a command is running (the box does not hold keys the shell
+would need). `Ctrl-]` (or `^G` then `c`, or a
 click on `hide`) folds the box to a corner chip and brings it back; the chip is a click away, and
 `[panel] chat = "hidden"` or `"off"` (or `IOHR_PANEL_CHAT`) sets the start. `Ctrl-]` is zsh's
 find-character key and is rebound only inside the panel. A full-screen program has the whole
