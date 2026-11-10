@@ -191,6 +191,40 @@ fn one_enter_sends_a_question_mark_question() {
     );
 }
 
+/// Ctrl-Space, the key that moves the keyboard between the box and the terminal.
+const SWITCH: &[u8] = &[0x00];
+
+#[test]
+fn one_key_moves_between_the_chat_and_the_terminal_and_the_draft_stays() {
+    let rig = Rig::new("switch", QUICK);
+    let mut s = rig.panel("");
+    s.until("the box at the prompt", |sc| boxed(sc) && ready(sc));
+    s.send(SWITCH);
+    s.until("the box taking the keys", |sc| {
+        any(sc, "ask anything about this shell") && any(sc, "typing here")
+    });
+    s.send(b"why is the roll slow");
+    s.until("the draft in the box", |sc| any(sc, "why is the roll slow"));
+    s.send(SWITCH);
+    s.until("the keys back in the terminal", |sc| {
+        any(sc, "draft") && !any(sc, "typing here") && any(sc, "why is the roll slow")
+    });
+    // The terminal types and runs a command; no keystroke goes to the box.
+    line(&mut s, "echo SHELL\"\"TYPED");
+    s.until("the command ran", |sc| any(sc, "SHELLTYPED"));
+    s.send(SWITCH);
+    s.until("the draft waiting", |sc| {
+        any(sc, "typing here") && any(sc, "why is the roll slow")
+    });
+    s.send(b"\r");
+    s.until("the answer", |sc| any(sc, "ANSWER-ONE"));
+    assert!(
+        rig.saw("claude.stdin").contains("why is the roll slow"),
+        "the draft did not reach the agent: {}",
+        rig.saw("claude.stdin")
+    );
+}
+
 #[test]
 fn one_enter_sends_a_double_question_mark_question_as_a_deeper_one() {
     let rig = Rig::new("deeper", QUICK);

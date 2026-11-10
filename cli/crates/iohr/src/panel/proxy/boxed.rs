@@ -380,6 +380,13 @@ impl Session {
             self.redraw();
             return true;
         }
+        // The switch key moves the keyboard between the box and the terminal; the draft stays.
+        if OpenKey::is_switch(bytes) && p.reserved && !p.model.open() && !self.reader.pending() {
+            if self.proxy.chat.switch() {
+                self.redraw();
+            }
+            return true;
+        }
         let now = StdInstant::now();
         if bytes == [0x1b] && p.chat.answering() && !p.chat.waiting_for_person() {
             let d = self.proxy.chat.press(&chat::ChatKey::Esc, now);
