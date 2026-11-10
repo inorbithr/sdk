@@ -13,7 +13,9 @@ import { toggleHidden } from "./frame/sidebar-frame.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
+import { useSession } from "./lib/session-store.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
+import { SessionControl } from "./session-control.tsx";
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -28,6 +30,7 @@ import { useSidebar } from "./lib/sidebar-store.ts";
 export function App() {
   const [sidebar, update] = useSidebar();
   const [dock, updateDock] = useDock();
+  const account = useSession();
   const [listing, setListing] = useState<Listing | null>(null);
   const [open, setOpen] = useState(false);
   const menu = useRef<number | null>(null);
@@ -119,6 +122,12 @@ export function App() {
 
   const actions = (
     <>
+      <SessionControl
+        session={account.session}
+        busy={account.busy}
+        onSignIn={account.signIn}
+        onSignOut={account.signOut}
+      />
       <button
         type="button"
         className="hover:bg-accent hover:text-foreground text-muted-foreground rounded-md px-2 py-1 text-[13px] disabled:opacity-50"

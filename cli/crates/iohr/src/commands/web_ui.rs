@@ -7,6 +7,13 @@
 //! link, `/api/*` only from this listener's own pages (`Sec-Fetch-Site` and `Origin`), a
 //! capped number of connections, and the same strict headers on every answer.
 //!
+//! Reaching the page takes the per-launch secret (`session`, RFC 0217 round 4): `iohr ui
+//! open` (or `serve --open`) puts it in the first address as `?launch=`, the server answers
+//! `303` to `/` and sets an `HttpOnly`, `SameSite=Strict` cookie, and every other answer
+//! needs that cookie. The page never holds a credential: `GET /api/session`,
+//! `POST /api/session/login` and `/logout` and `GET /api/proxy/v1/...` act as the profile
+//! `iohr login` signed in, from the same store.
+//!
 //! `build`, `dev` and `check` run the UI package's own scripts through pnpm (the runner
 //! `iohr sdk add` uses: no shell, the exit code passed on), so a developer, mise and CI
 //! call one thing. A running `serve` records its address in the data folder
@@ -25,6 +32,10 @@
 //! page answer allows framing exactly the ports this serve started (`frame-src`), and the
 //! UI itself is never framed. When the serve stops, every panel it started is stopped
 //! (SIGTERM to its process group, SIGKILL after 5 s).
+
+mod session;
+#[cfg(test)]
+mod session_tests;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -159,6 +170,7 @@ async fn open(g: &Global, out: Out) -> Result<(), Error> {
     file.take(MAX_SERVING)
         .read_to_string(&mut text)
         .map_err(|e| Error::Failed(format!("{}: {}", path.display(), e.kind())))?;
+    let launch = recorded_launch(&text);
     let Some((url, addr)) = recorded_url(&text) else {
         return Err(Error::Failed(format!(
             "{} does not hold a loopback address; refused",
@@ -174,14 +186,17 @@ async fn open(g: &Global, out: Out) -> Result<(), Error> {
             "the recorded `iohr ui serve` is no longer running: start it again".into(),
         ));
     }
+    // The first address carries the launch secret, so the browser is signed in; the
+    // secret is printed only when no browser can be opened and the person asked for it.
+    let first = launch.map_or_else(|| url.clone(), |l| format!("{url}?launch={l}"));
     if out.json {
         Out::print_json(&serde_json::json!({ "url": url }));
     }
-    if !crate::browser::open(&url) {
+    if !crate::browser::open(&first) {
         if !out.json {
-            Out::raw(format!("{url}\n").as_bytes());
+            Out::raw(format!("{first}\n").as_bytes());
         }
-        Out::note(&format!("Open {url} in a browser."));
+        Out::note("Open that address in a browser on this machine; it signs the browser in.");
     }
     Ok(())
 }
@@ -202,12 +217,21 @@ fn recorded_url(text: &str) -> Option<(String, SocketAddr)> {
     own.then(|| (url.to_owned(), addr))
 }
 
-/// Records `url` (served from `root`) for `iohr ui open`.
-fn remember(folder: &Path, url: &str, root: &Path) -> io::Result<()> {
+/// The launch secret in a recorded `serving.json`: 64 hex digits, else none.
+fn recorded_launch(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let launch = value.get("launch")?.as_str()?;
+    (launch.len() == 64 && launch.bytes().all(|b| b.is_ascii_hexdigit())).then(|| launch.to_owned())
+}
+
+/// Records `url` (served from `root`) and the launch secret for `iohr ui open`; the file
+/// is private to the person (0600).
+fn remember(folder: &Path, url: &str, root: &Path, launch: &str) -> io::Result<()> {
     let body = serde_json::json!({
         "url": url,
         "dir": root.display().to_string(),
         "pid": std::process::id(),
+        "launch": launch,
     });
     iohr_auth::write_private(folder, SERVING, body.to_string().as_bytes())
 }
@@ -243,7 +267,7 @@ async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) ->
     }
     let folder = data_dir(g).map(|d| d.join("ui"));
     let recorded = match &folder {
-        Ok(f) => remember(f, &url, &root).map_err(|e| e.kind().to_string()),
+        Ok(f) => remember(f, &url, &root, server.launch()).map_err(|e| e.kind().to_string()),
         Err(e) => Err(e.to_string()),
     };
     if let Err(why) = &recorded {
@@ -251,8 +275,8 @@ async fn serve_until_stopped(g: &Global, env: &Env, args: &UiServe, out: Out) ->
             "`iohr ui open` will not find this server ({why})."
         ));
     }
-    if args.open && !crate::browser::open(&url) {
-        Out::note(&format!("Open {url} in a browser."));
+    if args.open && !crate::browser::open(&format!("{url}?launch={}", server.launch())) {
+        Out::note("Run `iohr ui open` to open it in a browser, signed in.");
     }
     server
         .serve(async {
@@ -308,6 +332,7 @@ struct Site {
     root: PathBuf,
     store: Arc<Store>,
     panels: Arc<Panels>,
+    access: Arc<session::Access>,
     host: String,
     port: u16,
 }
@@ -324,10 +349,12 @@ impl Server {
         let root = std::fs::canonicalize(root)?;
         let listener = bind_loopback(port).await?;
         let addr = listener.local_addr()?;
+        let access = session::Access::new(panels.global.clone(), panels.env.clone(), addr.port())?;
         let site = Arc::new(Site {
             root,
             store: Arc::new(store),
             panels: Arc::new(panels),
+            access: Arc::new(access),
             host: host_of(addr),
             port: addr.port(),
         });
@@ -341,6 +368,12 @@ impl Server {
     /// The address a browser opens.
     pub(crate) fn url(&self) -> String {
         format!("http://{}/", host_of(self.addr))
+    }
+
+    /// The per-launch secret that signs a browser in (`?launch=`); recorded for `iohr ui
+    /// open`, never printed by `serve`.
+    pub(crate) fn launch(&self) -> &str {
+        self.site.access.launch()
     }
 
     /// Answers connections until `stop` finishes, then stops every panel it started.
@@ -395,6 +428,8 @@ struct Reply {
     allow: bool,
     /// The loopback ports a page answer may frame: the panels this serve started.
     frame_src: Vec<u16>,
+    /// Further header lines, whole and without their line ending (`Location`, `Set-Cookie`).
+    headers: Vec<String>,
 }
 
 impl Reply {
@@ -407,6 +442,17 @@ impl Reply {
             no_store: true,
             allow: false,
             frame_src: Vec::new(),
+            headers: Vec::new(),
+        }
+    }
+
+    /// An error with a JSON body naming it: `{"error": {"status": ..., "message": ...}}`.
+    fn problem(status: &'static str, message: &str) -> Self {
+        let body = serde_json::json!({ "error": { "status": status, "message": message } });
+        Self {
+            content_type: "application/json",
+            body: body.to_string().into_bytes(),
+            ..Self::error(status)
         }
     }
 
@@ -441,8 +487,12 @@ impl Reply {
                 let _ = write!(csp, " http://127.0.0.1:{port}");
             }
         }
+        let extra = self.headers.iter().fold(String::new(), |mut all, h| {
+            let _ = write!(all, "{h}\r\n");
+            all
+        });
         let head = format!(
-            "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{allow}\
+            "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{allow}{extra}\
              Content-Security-Policy: {csp}\r\n\
              Referrer-Policy: no-referrer\r\nCache-Control: {cache}\r\n\
              X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n\
@@ -471,6 +521,14 @@ async fn reply_to(head: &[u8], site: &Site) -> Reply {
     if !host_allowed(request.host.as_deref(), host) {
         return Reply::error("403 Forbidden");
     }
+    // The session cookie, or the launch secret that is exchanged for it (`session`).
+    match site.access.entry(&request) {
+        session::Entry::Open => {}
+        session::Entry::Exchange if matches!(request.method.as_str(), "GET" | "HEAD") => {
+            return site.access.exchange();
+        }
+        _ => return unsigned(&request),
+    }
     let head_only = match request.method.as_str() {
         "GET" => false,
         "HEAD" => true,
@@ -487,8 +545,17 @@ async fn reply_to(head: &[u8], site: &Site) -> Reply {
             return Reply::error("403 Forbidden");
         }
         // Any other `/api` path is 404, never the app page.
-        let mut reply = match decoded_path(&request.target).as_deref() {
+        let path = decoded_path(&request.target);
+        let path = path.as_deref();
+        let own_script = site.panels.token_matches(request.token.as_deref());
+        let mut reply = match path {
             Some("/api/extensions") => extensions(Arc::clone(&site.store), &site.panels).await,
+            Some("/api/session") if own_script => site.access.state().await,
+            Some(p) if own_script && p.starts_with("/api/proxy/") => {
+                site.access.proxy(&request).await
+            }
+            Some("/api/session") => Reply::error("403 Forbidden"),
+            Some(p) if p.starts_with("/api/proxy/") => Reply::error("403 Forbidden"),
             _ => Reply::error("404 Not Found"),
         };
         reply.head_only = head_only;
@@ -504,6 +571,22 @@ async fn reply_to(head: &[u8], site: &Site) -> Reply {
     }
     reply.head_only = head_only;
     reply
+}
+
+/// The answer to a request that carries neither the session cookie nor the launch secret.
+fn unsigned(request: &Request) -> Reply {
+    if is_api(&request.target) {
+        return Reply::problem(
+            "401 Unauthorized",
+            "this browser is not signed in to iohr ui: open it with `iohr ui open`",
+        );
+    }
+    Reply {
+        content_type: "text/plain; charset=utf-8",
+        body: b"401 Unauthorized\nOpen the UI with `iohr ui open` (it signs this browser in).\n"
+            .to_vec(),
+        ..Reply::error("401 Unauthorized")
+    }
 }
 
 /// A page with `<meta name="iohr-token" content="...">` right after its `<head>` (else
@@ -547,6 +630,11 @@ async fn post(request: &Request, site: &Site) -> Reply {
         || request.content_length.as_deref().is_some_and(|l| l != "0");
     if has_body {
         return Reply::error("400 Bad Request");
+    }
+    match request.target.as_str() {
+        "/api/session/login" => return site.access.login(),
+        "/api/session/logout" => return site.access.logout().await,
+        _ => {}
     }
     let Some(rest) = request.target.strip_prefix("/api/extensions/") else {
         return Reply::error("404 Not Found");
@@ -632,16 +720,10 @@ enum Settled {
 impl Panels {
     /// No panel yet, and a fresh 256-bit token from the system's random source.
     pub(crate) fn new(global: Global, env: Env) -> io::Result<Self> {
-        let mut bytes = [0_u8; 32];
-        getrandom::fill(&mut bytes).map_err(|_| io::Error::other("no random source"))?;
-        let mut token = String::with_capacity(64);
-        for b in bytes {
-            let _ = write!(token, "{b:02x}");
-        }
         Ok(Self {
             global,
             env,
-            token,
+            token: random_hex()?,
             closing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
             slots: Mutex::new(BTreeMap::new()),
@@ -809,6 +891,17 @@ impl Panels {
     }
 }
 
+/// 256 bits from the system's random source, as 64 hex digits.
+fn random_hex() -> io::Result<String> {
+    let mut bytes = [0_u8; 32];
+    getrandom::fill(&mut bytes).map_err(|_| io::Error::other("no random source"))?;
+    let mut text = String::with_capacity(64);
+    for b in bytes {
+        let _ = write!(text, "{b:02x}");
+    }
+    Ok(text)
+}
+
 /// Equal bytes, every byte compared whatever the first difference (lengths are public).
 fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -829,12 +922,13 @@ struct Request {
     origin: Option<String>,
     fetch_site: Option<String>,
     token: Option<String>,
+    cookie: Option<String>,
     content_length: Option<String>,
     transfer_encoding: Option<String>,
 }
 
 /// The request line and the `Host`, `Origin`, `Sec-Fetch-Site`, `x-iohr-token`,
-/// `Content-Length` and `Transfer-Encoding` headers of a head; an error is the status to
+/// `Cookie`, `Content-Length` and `Transfer-Encoding` headers of a head; an error is the status to
 /// answer. Any of them sent twice is refused.
 fn parse(head: &[u8]) -> Result<Request, &'static str> {
     if head.len() >= MAX_HEAD && !head.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -869,6 +963,8 @@ fn parse(head: &[u8]) -> Result<Request, &'static str> {
             &mut request.fetch_site
         } else if name.eq_ignore_ascii_case("x-iohr-token") {
             &mut request.token
+        } else if name.eq_ignore_ascii_case("cookie") {
+            &mut request.cookie
         } else if name.eq_ignore_ascii_case("content-length") {
             &mut request.content_length
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
@@ -1067,6 +1163,7 @@ async fn serve_file(path: &Path) -> Reply {
         no_store: content_type.starts_with("text/html"),
         allow: false,
         frame_src: Vec::new(),
+        headers: Vec::new(),
     }
 }
 
@@ -1097,7 +1194,9 @@ fn content_type(path: &Path) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::path::Path;
+    use std::sync::Mutex;
 
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::TcpStream;
@@ -1110,7 +1209,12 @@ mod tests {
     use crate::ext::lock::{Entry, Lock};
     use crate::ext::oci::Digest;
 
-    fn built_ui() -> tempfile::TempDir {
+    /// The session cookie line of each test server by address: `send` signs its request
+    /// in with it, `send_bare` does not, so a test about the gate is the only one that
+    /// says so.
+    static COOKIES: Mutex<Option<HashMap<std::net::SocketAddr, String>>> = Mutex::new(None);
+
+    pub(super) fn built_ui() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("index.html"), "<!doctype html><p>ui</p>").expect("index");
         std::fs::create_dir(dir.path().join("assets")).expect("assets");
@@ -1120,23 +1224,44 @@ mod tests {
 
     /// Starts a server on a free port, with no extension installed, and returns its
     /// address and a stop switch.
-    async fn start(root: &Path) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
+    pub(super) async fn start(
+        root: &Path,
+    ) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
         start_with(root, Store::new(root.join("no-extensions"))).await
     }
 
     /// No panel started yet, with the default flags and an empty environment.
     fn panels() -> super::Panels {
+        panels_with(&[], crate::Env::default())
+    }
+
+    /// Panels for a serve run with these global flags (before `ui serve`) and environment.
+    pub(super) fn panels_with(flags: &[&str], env: crate::Env) -> super::Panels {
         use clap::Parser as _;
-        let cli = crate::cli::Cli::try_parse_from(["iohr", "ui", "serve"]).expect("cli");
-        super::Panels::new(cli.global, crate::Env::default()).expect("panels")
+        let args = ["iohr"].into_iter().chain(flags.iter().copied());
+        let cli = crate::cli::Cli::try_parse_from(args.chain(["ui", "serve"])).expect("cli");
+        super::Panels::new(cli.global, env).expect("panels")
     }
 
     async fn start_with(
         root: &Path,
         store: Store,
     ) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
-        let server = Server::bind(root, 0, store, panels()).await.expect("bind");
+        start_panels(root, store, panels()).await
+    }
+
+    pub(super) async fn start_panels(
+        root: &Path,
+        store: Store,
+        panels: super::Panels,
+    ) -> (std::net::SocketAddr, tokio::sync::oneshot::Sender<()>) {
+        let server = Server::bind(root, 0, store, panels).await.expect("bind");
         let addr = server.addr;
+        COOKIES
+            .lock()
+            .expect("cookies")
+            .get_or_insert_with(HashMap::new)
+            .insert(addr, server.site.access.cookie_line());
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(server.serve(async {
             let _ = rx.await;
@@ -1144,7 +1269,32 @@ mod tests {
         (addr, tx)
     }
 
-    async fn send(addr: std::net::SocketAddr, raw: &str) -> String {
+    /// The launch secret of the test server at `addr`.
+    pub(super) fn launch_of(server: std::net::SocketAddr) -> String {
+        COOKIES
+            .lock()
+            .expect("cookies")
+            .as_ref()
+            .and_then(|m| m.get(&server))
+            .and_then(|c| c.split_once('|').map(|(_, l)| l.to_owned()))
+            .expect("a started server")
+    }
+
+    /// `raw` as a signed-in browser sends it: with the session cookie.
+    pub(super) async fn send(addr: std::net::SocketAddr, raw: &str) -> String {
+        let cookie = COOKIES
+            .lock()
+            .expect("cookies")
+            .as_ref()
+            .and_then(|m| m.get(&addr))
+            .and_then(|c| c.split_once('|').map(|(c, _)| c.to_owned()))
+            .expect("a started server");
+        let raw = raw.replacen("\r\n", &format!("\r\nCookie: {cookie}\r\n"), 1);
+        send_bare(addr, &raw).await
+    }
+
+    /// `raw` exactly as given.
+    pub(super) async fn send_bare(addr: std::net::SocketAddr, raw: &str) -> String {
         let mut s = TcpStream::connect(addr).await.expect("connect");
         s.write_all(raw.as_bytes()).await.expect("write");
         let mut buf = Vec::new();
@@ -1152,7 +1302,7 @@ mod tests {
         String::from_utf8_lossy(&buf).into_owned()
     }
 
-    fn get(path: &str, host: &str) -> String {
+    pub(super) fn get(path: &str, host: &str) -> String {
         format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n\r\n")
     }
 
@@ -1574,7 +1724,8 @@ mod tests {
     fn the_record_is_private_and_removed_only_by_its_own_server() {
         let data = tempfile::tempdir().expect("data");
         let folder = data.path().join("ui");
-        remember(&folder, "http://127.0.0.1:4321/", data.path()).expect("remember");
+        let launch = "ab".repeat(32);
+        remember(&folder, "http://127.0.0.1:4321/", data.path(), &launch).expect("remember");
         let path = folder.join("serving.json");
         #[cfg(unix)]
         {
@@ -1585,6 +1736,12 @@ mod tests {
         let text = std::fs::read_to_string(&path).expect("read");
         let (url, _) = recorded_url(&text).expect("valid");
         assert_eq!(url, "http://127.0.0.1:4321/");
+        assert_eq!(super::recorded_launch(&text), Some(launch));
+        assert_eq!(super::recorded_launch(r#"{"launch":"short"}"#), None);
+        assert_eq!(
+            super::recorded_launch(&format!(r#"{{"launch":"{}"}}"#, "z".repeat(64))),
+            None
+        );
         forget(&folder, "http://127.0.0.1:9999/");
         assert!(path.exists(), "another server's url leaves the record");
         forget(&folder, "http://127.0.0.1:4321/");
@@ -1592,7 +1749,7 @@ mod tests {
     }
 
     /// The start token in a page answer.
-    fn token_of(page: &str) -> String {
+    pub(super) fn token_of(page: &str) -> String {
         let at = page
             .find("name=\"iohr-token\" content=\"")
             .expect("token meta")
@@ -1604,7 +1761,7 @@ mod tests {
     }
 
     /// A start or stop as the UI's page sends it, with `extra` headers after.
-    fn post(path: &str, host: &str, token: &str, extra: &str) -> String {
+    pub(super) fn post(path: &str, host: &str, token: &str, extra: &str) -> String {
         format!(
             "POST {path} HTTP/1.1\r\nHost: {host}\r\nSec-Fetch-Site: same-origin\r\n\
              Origin: http://{host}\r\nx-iohr-token: {token}\r\nContent-Length: 0\r\n{extra}\r\n"
