@@ -500,10 +500,7 @@ pub fn parse_spec(s: &str) -> Spec {
 }
 
 fn expand_home(s: &str) -> PathBuf {
-    match s.strip_prefix("~/") {
-        Some(rest) => etcetera::home_dir().map_or_else(|_| PathBuf::from(s), |h| h.join(rest)),
-        None => PathBuf::from(s),
-    }
+    crate::access::expand_home(Path::new(s), etcetera::home_dir().ok().as_deref())
 }
 
 /// `~/.inorbit/templates`.

@@ -743,6 +743,7 @@ async fn init(g: &Global, env: &Env, a: InitArgs, out: Out) -> Result<(), Error>
         ask_thinking: cfg.ask.thinking.clone(),
         role,
         out,
+        asked: std::cell::RefCell::default(),
     };
     let mut wiz = Wizard {
         ui,
@@ -1230,6 +1231,35 @@ struct Exec<'a> {
     /// The Role the agent builds in (`--role`, RFC 0211), found before the plan starts.
     role: Option<runtime::Applied>,
     out: Out,
+    /// What the preview asked, so the real run does not ask it again.
+    asked: std::cell::RefCell<Asked>,
+}
+
+/// The questions `execute` puts to the person (where to keep the data, whether to read the
+/// site), settled once. The review page runs `execute` twice, as a preview and for real; the
+/// second run takes these answers, so nothing is asked or shown twice. They are dropped when
+/// the project's folder, name or description change, because the answers depend on them.
+#[derive(Default)]
+struct Asked {
+    key: String,
+    place: Option<super::project_place::Decision>,
+    crawl: Option<CrawlAnswer>,
+}
+
+/// What the crawl question settled: the plan, or no crawl (also an answer, not asked again).
+#[derive(Clone)]
+struct CrawlAnswer(Option<super::init_crawl::Plan>);
+
+impl Asked {
+    /// Forgets the answers unless they were given for the same project.
+    fn for_project(&mut self, key: String) {
+        if self.key != key {
+            *self = Self {
+                key,
+                ..Self::default()
+            };
+        }
+    }
 }
 
 /// What the person answered, settled: the input of the plan.
@@ -1515,7 +1545,19 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
 
     // Where the notes, the crawl and the machine state live (light PRD 0210): asked once,
     // recorded in inorbit.toml, then every writer follows it through one resolver.
-    let placed = super::project_place::decide(a, &dir, name, interactive, ui)?;
+    cx.asked.borrow_mut().for_project(format!(
+        "{}\n{name}\n{}",
+        dir.display(),
+        describe.as_deref().unwrap_or_default()
+    ));
+    let kept = cx.asked.borrow().place.clone();
+    let placed = if let Some(d) = kept {
+        d
+    } else {
+        let d = super::project_place::decide(a, &dir, name, interactive, ui)?;
+        cx.asked.borrow_mut().place = Some(d.clone());
+        d
+    };
     let layout = placed.layout.clone();
     let seed = super::project_place::split_seed(&placed, &mut files);
     let state = layout
@@ -1630,7 +1672,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
             }
             return Err(Error::Failed(e));
         }
-        None => {}
+        // A preview or a dry run: the place is listed as a step, as the others are.
+        None => {
+            flow.gate("place", &placed.would());
+        }
     }
     // The built-in roles (security and the language's engineer) go to the account only as part
     // of the account step above: a local-only init (`--no-sync`) or one without a sign-in
@@ -1674,10 +1719,10 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
     };
     // The Planner plan the project's builds go through (RFC 0211): made or found, and its id
     // written into coordination.toml. Signed out, init goes on and says how to set it later.
-    let plan = flow
+    let planned = flow
         .act_async(
             "plan",
-            "create or find the project's Planner plan and write its id into coordination.toml",
+            "create or find the project's Planner plan (its id goes into coordination.toml when the project has one)",
             || {
                 super::project_plan::run(
                     g,
@@ -1686,16 +1731,17 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
                     name,
                     a.plan.plan_id.as_deref(),
                     a.plan.no_plan,
+                    a.space.no_sync,
                 )
             },
         )
-        .await
-        .flatten();
-    if let Some(st) = plan {
-        if st.state == "skipped" && !out.json {
-            ui.note("Planner", &st.said);
+        .await;
+    let plan_id = planned.as_ref().and_then(|p| p.id.clone());
+    if let Some(p) = planned {
+        if p.step.state == "skipped" && !out.json {
+            ui.note("Planner", &p.step.said);
         }
-        report.steps.push(st);
+        report.steps.push(p.step);
     }
     // The project's shape (PRD 0210): asked once, recorded, and filed as an item in the plan.
     // A dry run asks nothing and only says what it would do.
@@ -1708,7 +1754,7 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         let what = super::project_shape::would(answer.as_deref());
         let st = flow
             .act_async("shape", &what, || {
-                super::project_shape::run(g, env, &dir, answer.as_deref())
+                super::project_shape::run(g, env, &dir, answer.as_deref(), plan_id.as_deref())
             })
             .await;
         if let Some(st) = st {
@@ -1719,14 +1765,22 @@ async fn execute(cx: &Exec<'_>, r: &Resolved, preview: bool) -> Result<(), Error
         }
     }
     // A public site, read on this machine when the person said so (PRD 0190.1).
-    if let Some(plan) = super::init_crawl::decide(
-        &a.crawl,
-        describe.as_deref(),
-        &layout.shown(&layout.crawl()),
-        interactive,
-        ui,
-        out,
-    )? {
+    let kept = cx.asked.borrow().crawl.clone();
+    let crawl = if let Some(CrawlAnswer(c)) = kept {
+        c
+    } else {
+        let c = super::init_crawl::decide(
+            &a.crawl,
+            describe.as_deref(),
+            &layout.shown(&layout.crawl()),
+            interactive,
+            ui,
+            out,
+        )?;
+        cx.asked.borrow_mut().crawl = Some(CrawlAnswer(c.clone()));
+        c
+    };
+    if let Some(plan) = crawl {
         let what = plan.would();
         let st = flow
             .act_async("crawl", &what, || {
