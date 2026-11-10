@@ -1,0 +1,39 @@
+# The offline eval suite on every pull request: it runs the cases against the solver, checks
+# the pass bar in thresholds.toml and fails the check when the bar is missed. No network, no
+# secret and no model call: the same run you do on your machine. Least privilege: the
+# workflow can read the repository and nothing else; every action is pinned to a commit.
+name: evals
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evals:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+@@CI_SETUP@@
+      - name: Grade the suite against the bar
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m @@MODULE@@ | tee report.txt
+          {
+            echo '### Evals'
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

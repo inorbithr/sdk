@@ -1,7 +1,47 @@
-# Coming, and left out of the picker (ADR 0221, PRD 0088.1): an offline eval suite (Python on
-# Inspect AI, TypeScript on promptfoo) that clears the bar in thresholds.toml and fails when one
-# expected answer is lowered. It goes live only when that self-test passes on the intended
-# runner with its dependencies locked; neither tool is verified here yet.
+# The evals template as data (PRD 0088.1, ADR 0221): an offline eval suite with a pass bar. A
+# labelled dataset (JSONL, twelve cases), a solver, deterministic scorers, `thresholds.toml` (the
+# bar), `docs/how-to-grade.md` and an `evals.yml` workflow that runs the suite on every pull
+# request. Python on its standard library alone. The solver is a stub, labelled as one
+# (`stub: true`, a `stub-` name), so the suite runs and tests offline with no key; swap in a
+# provider behind `Solver.solve`. The enterprise floor (CI, signed and attested release, SBOM,
+# dependency updates, secret scan) comes from `floor`.
+#
+# The test is the passes-on-init check: the fixture meets its bar with the network switched off;
+# lowering one expected answer makes the suite fail and name the case (the bar bites); a
+# chatty answer fails the format scorer; a solver that raises is an error, never a pass; a
+# broken dataset or a scorer with no bar stops the run. The variant is `live` only when that
+# test passes.
 id = "evals"
-description = "An offline eval suite with a pass bar (Python or TypeScript); coming once its self-test passes"
-status = "coming"
+description = "An offline eval suite with a pass bar: dataset, solver, scorers, thresholds and a CI workflow (Python)"
+status = "live"
+extends = "floor"
+kind = "evals"
+default_variant = "python"
+agent_prompt = "This folder is a fresh InOrbit project from the `@@TEMPLATE@@` template: an offline eval suite in @@LANGUAGE_LABEL@@ (@@SOURCE@@). Build what is described below by editing this folder. Add cases to the dataset from real work with customer data removed, keep every scorer deterministic and listed in thresholds.toml, never lower a bar to make a run pass without saying why, label any solver that is not a real model as a stub, never write an API key into the project, and keep the test passing (@@RUN_TEST@@)."
+
+[[variants]]
+id = "python"
+label = "Python 3.12 or newer (standard library only)"
+status = "live"
+needs = ["python3"]
+toolchain = ["python3", "--version"]
+agent_allow = ["python3 -m unittest", "python3 -m @@MODULE@@", "python3 -m py_compile", "uv lock", "uv build"]
+smoke = "test"
+test = ["python3", "-m", "unittest", "discover", "-s", "tests"]
+[variants.env]
+PYTHONPATH = "$DIR/src"
+PYTHONDONTWRITEBYTECODE = "1"
+[variants.vars]
+SOURCE = "src/@@MODULE@@/, tests in tests/"
+IGNORE = "__pycache__/\n*.pyc\n.venv/\n*.egg-info/\nreport.txt"
+RUN_TEST = "`python3 -m unittest discover -s tests` with PYTHONPATH=src"
+README_TEST = "PYTHONPATH=src python3 -m unittest discover -s tests"
+RUN = "PYTHONPATH=src python3 -m @@MODULE@@"
+TOOLCHAIN_MINOR = "3.12"
+LAYOUT = '''- `src/@@MODULE@@/runner.py`: runs the solver over the cases, scores them and checks the bar.
+- `src/@@MODULE@@/solver.py`: the thing under test; the stub model, and the one place to put yours.
+- `src/@@MODULE@@/scorers.py`: deterministic scorers, 0 or 1.
+- `src/@@MODULE@@/dataset.py`: the strict JSONL loader.
+- `src/@@MODULE@@/__main__.py`: `python -m @@MODULE@@`, exit 0 met, 1 missed, 2 broken suite.
+- `tests/test_suite.py`: the passes-on-init test, including that the bar bites.
+- `uv.lock`: the lockfile (`uv lock` refreshes it).'''

@@ -55,6 +55,21 @@ fn on_path(program: &str) -> bool {
     })
 }
 
+/// Whether the package registry a variant installs from answers (TCP connect, 5 s).
+fn registry_reachable(lang: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    let host = if lang == "python" {
+        "pypi.org:443"
+    } else {
+        "registry.npmjs.org:443"
+    };
+    host.to_socket_addrs().is_ok_and(|mut a| {
+        a.any(|addr| {
+            std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5)).is_ok()
+        })
+    })
+}
+
 /// `iohr project init NAME --template T [--lang L] ...extra`, answered and without a plan,
 /// into a fresh folder; the folder and the output come back.
 fn init(
@@ -112,7 +127,15 @@ fn the_picker_lists_the_approved_set_service_first_and_all_adds_the_hidden() {
     let names: Vec<&str> = rows.iter().map(|r| r["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        ["blank", "service", "agent", "cli", "extension"],
+        [
+            "blank",
+            "service",
+            "mcp-server",
+            "agent",
+            "evals",
+            "cli",
+            "extension"
+        ],
         "live templates, in the picker's order; coming and hidden ones are not offered"
     );
     let service = rows.iter().find(|r| r["name"] == "service").unwrap();
@@ -130,7 +153,7 @@ fn the_picker_lists_the_approved_set_service_first_and_all_adds_the_hidden() {
         .iter()
         .map(|r| r["name"].as_str().unwrap())
         .collect();
-    for hidden in ["demo", "coordinated", "mcp-server", "evals"] {
+    for hidden in ["demo", "coordinated", "macos-app", "ui-panel"] {
         assert!(all.contains(&hidden), "--all lists {hidden}: {all:?}");
     }
     for floor in ["floor", "base"] {
@@ -143,7 +166,7 @@ fn the_picker_lists_the_approved_set_service_first_and_all_adds_the_hidden() {
 
 #[test]
 fn a_template_that_is_coming_refuses_and_says_so() {
-    for coming in ["mcp-server", "evals"] {
+    for coming in ["macos-app", "ui-panel"] {
         let (_h, dir, out) = init(coming, None, false, &[]);
         assert!(!out.status.success(), "{coming}: {}", text(&out));
         assert!(text(&out).contains("coming"), "{coming}: {}", text(&out));
@@ -207,6 +230,9 @@ fn the_enterprise_floor_is_written_on_every_template_but_blank() {
         ("cli", "go"),
         ("cli", "rust"),
         ("agent", "python"),
+        ("mcp-server", "python"),
+        ("mcp-server", "typescript"),
+        ("evals", "python"),
         ("extension", "python"),
         ("extension", "typescript"),
     ] {
@@ -294,6 +320,58 @@ fn ci_none_drops_the_ci_files_and_keeps_the_rest_of_the_floor() {
     }
 }
 
+/// The two templates built last (ADR 0221): the evals suite carries its bar, dataset, guide and
+/// its own workflow (dropped by `--ci none`); the MCP server is on the official SDK pinned
+/// exactly, with a lockfile, and neither leaves a placeholder behind.
+#[test]
+fn evals_and_mcp_server_carry_what_their_readme_promises_and_leave_no_placeholder() {
+    let (_h, dir, out) = init("evals", None, false, &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    for f in [
+        "thresholds.toml",
+        "datasets/tickets.jsonl",
+        "docs/how-to-grade.md",
+        ".github/workflows/evals.yml",
+        "tests/test_suite.py",
+    ] {
+        assert!(dir.join(f).is_file(), "evals: {f}");
+    }
+    let wf = file(&dir, ".github/workflows/evals.yml");
+    assert!(wf.contains("permissions:\n  contents: read"), "{wf}");
+    for line in wf.lines().filter(|l| l.contains("uses:")) {
+        let pin = line.split('@').nth(1).unwrap_or_default();
+        let sha: String = pin.chars().take_while(char::is_ascii_hexdigit).collect();
+        assert_eq!(sha.len(), 40, "evals.yml pinned by SHA: {line}");
+    }
+    let cases = file(&dir, "datasets/tickets.jsonl");
+    assert_eq!(cases.lines().count(), 12, "a dozen labelled cases");
+    assert!(!holds(&dir, "@@"), "evals: a placeholder was left behind");
+    let (_h, dir, out) = init("evals", None, false, &["--ci", "none"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!dir.join(".github/workflows/evals.yml").exists());
+    assert!(dir.join("thresholds.toml").is_file(), "the bar stays");
+
+    for (lang, manifest, lock, pin) in [
+        ("python", "pyproject.toml", "uv.lock", "mcp==2.3.0"),
+        (
+            "typescript",
+            "package.json",
+            "package-lock.json",
+            "\"@modelcontextprotocol/server\": \"2.4.0\"",
+        ),
+    ] {
+        let (_h, dir, out) = init("mcp-server", Some(lang), false, &[]);
+        assert!(out.status.success(), "mcp-server/{lang}: {}", text(&out));
+        assert!(
+            file(&dir, manifest).contains(pin),
+            "mcp-server/{lang}: the official SDK is pinned exactly"
+        );
+        assert!(dir.join(lock).is_file(), "mcp-server/{lang}: {lock}");
+        assert!(file(&dir, "README.md").contains("2026-07-28"), "{lang}");
+        assert!(!holds(&dir, "@@"), "mcp-server/{lang}: placeholder left");
+    }
+}
+
 #[test]
 fn blank_keeps_a_small_floor_and_no_ci_unless_asked() {
     let (_h, dir, out) = init("blank", Some("python"), false, &[]);
@@ -327,6 +405,9 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
         ("cli", "rust", &["cargo"]),
         ("agent", "python", &["uv"]),
         ("agent", "typescript", &["node"]),
+        ("mcp-server", "python", &["uv"]),
+        ("mcp-server", "typescript", &["node", "npm"]),
+        ("evals", "python", &["python3"]),
         ("extension", "python", &["python3"]),
         ("extension", "typescript", &["node"]),
         ("extension", "go", &["go"]),
@@ -335,6 +416,12 @@ fn every_live_variant_inits_and_its_own_check_passes_when_the_toolchain_is_here(
     let mut ran = 0;
     for (template, lang, needs) in table {
         if !needs.iter().all(|p| on_path(p)) {
+            continue;
+        }
+        // An MCP server's smoke installs the official SDK from its registry (a cold cache in
+        // this test's private home), so it needs the network; without it the row is skipped.
+        if *template == "mcp-server" && !registry_reachable(lang) {
+            eprintln!("{template}/{lang}: skipped, its package registry is not reachable");
             continue;
         }
         let (_h, dir, out) = init(template, Some(lang), true, &[]);

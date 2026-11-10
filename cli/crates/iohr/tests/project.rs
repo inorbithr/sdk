@@ -108,7 +108,9 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     for (name, status) in [
         ("blank", "live"),
         ("service", "live"),
+        ("mcp-server", "live"),
         ("agent", "live"),
+        ("evals", "live"),
         ("cli", "live"),
         ("extension", "live"),
     ] {
@@ -126,7 +128,7 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     let out = iohr(h.path(), &["project", "templates", "--json"]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let rows = v.as_array().unwrap();
-    assert_eq!(rows.len(), 5);
+    assert_eq!(rows.len(), 7);
     // `blank` is listed first, after the menu's "Describe it".
     assert_eq!(rows[0]["name"], "blank");
     assert_eq!(
@@ -205,7 +207,7 @@ fn a_template_that_is_coming_still_refuses_and_says_what_is_live() {
             "create",
             "proj-c",
             "--template",
-            "mcp-server",
+            "macos-app",
             "--dir",
             d.to_str().unwrap(),
             "--no-smoke",
@@ -215,7 +217,7 @@ fn a_template_that_is_coming_still_refuses_and_says_what_is_live() {
     let t = text(&out);
     assert!(t.contains("coming") && t.contains("`service`"), "{t}");
     assert!(!d.exists());
-    config(h.path(), "[project]\ntemplate = \"evals\"\n");
+    config(h.path(), "[project]\ntemplate = \"ui-panel\"\n");
     let out = iohr(
         h.path(),
         &[
