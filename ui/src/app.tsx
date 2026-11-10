@@ -22,8 +22,9 @@ import { extensionsMenu } from "./frame/extensions-menu.ts";
 import { ARRANGE_MIN_WIDTH, Frame, useViewportWidth } from "./frame/frame.tsx";
 import { GridPicker } from "./frame/grid-picker.tsx";
 import { PanelFrame } from "./frame/panel-frame.tsx";
-import { keysOf, useFrameShortcuts } from "./frame/shortcuts.ts";
+import { useFrameShortcuts } from "./frame/shortcuts.ts";
 import { toggleHidden } from "./frame/sidebar-frame.ts";
+import { Home } from "./home.tsx";
 import { updateArrangement as updateArr, useArrangement } from "./lib/arrange-store.ts";
 import { useDock } from "./lib/dock-store.ts";
 import { type Listing, loadExtensions, type Panel } from "./lib/extensions.ts";
@@ -424,15 +425,7 @@ export function App() {
               No installed extension named {routed} declares a panel.
             </p>
           ) : (
-            <section className="frame-stub" data-stub="true" aria-label="Home (stub)">
-              <p className="stub-badge">Stub</p>
-              <h2 className="mb-2 text-base font-semibold">Home</h2>
-              <p className="text-muted-foreground text-sm">
-                This is the Mac app's window frame: the sidebar, the page header and its context menu. Right-click an
-                extension for its actions, press {keysOf("sidebar")} to hide or show the sidebar, and open the dock on
-                the right with Details. Choose an extension in the sidebar or the Extensions menu to start its panel.
-              </p>
-            </section>
+            <Home session={account.session} busy={account.busy} onSignIn={account.signIn} />
           )}
         </div>
       </Frame>
