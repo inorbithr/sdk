@@ -22,6 +22,12 @@ const RAIL: &str = "│  ";
 /// The braille spinner, one frame per tick.
 const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// The spinner's frame for a tick: the one frame set the card, the terminal panel and its chat
+/// box all draw.
+pub(crate) fn spinner(frame: usize) -> &'static str {
+    FRAMES[frame % FRAMES.len()]
+}
+
 /// A colour as red, green, blue.
 pub(crate) type Rgb = (u8, u8, u8);
 
@@ -931,9 +937,20 @@ fn table(rows: &[Vec<String>], width: usize, look: Look) -> Vec<String> {
 /// Set while a permission question is on the terminal, so the spinner leaves the line alone.
 static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Runs `ask`, a question put to the person in the terminal, with the panel's chat box
+/// stepping aside while it is open (RFC 0212).
+pub(crate) fn asking_person<T>(ask: impl FnOnce() -> T) -> T {
+    crate::panel::chat_report("back;1");
+    let answer = ask();
+    crate::panel::chat_report("back;0");
+    answer
+}
+
 /// Stops (or restarts) the spinner while a question is open.
 #[cfg(unix)]
 pub(crate) fn pause_spin(on: bool) {
+    // The panel's chat box (RFC 0212) steps aside for the question as well.
+    crate::panel::chat_report(if on { "back;1" } else { "back;0" });
     // Held while the stderr lock is taken in `spin`, so no frame lands after this returns.
     let _guard = std::io::stderr().lock();
     PAUSED.store(on, std::sync::atomic::Ordering::SeqCst);
@@ -949,7 +966,7 @@ pub(crate) fn say(line: &str) {
 
 /// One spinner frame on stderr, over the line before it.
 pub(crate) fn spin(frame: usize, elapsed: Duration, agent: &str, look: Look) {
-    let f = FRAMES[frame % FRAMES.len()];
+    let f = spinner(frame);
     let mut err = std::io::stderr().lock();
     if PAUSED.load(std::sync::atomic::Ordering::SeqCst) {
         return;

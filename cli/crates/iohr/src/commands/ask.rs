@@ -930,17 +930,18 @@ fn grant_access(
         }
         let may_ask = terminal && matches!(mode, Mode::Manual | Mode::Auto);
         let kept = trust::is_trusted(chosen.dir, &req.folder);
-        let asked = (!kept && may_ask).then(|| match trust::ask(&req.folder) {
-            trust::Answer::Always => {
-                if let Err(why) = trust::remember(chosen.dir, &req.folder) {
-                    let _ = console::Term::stderr()
-                        .write_line(&format!("Trusted for this time only: {why}"));
+        let asked =
+            (!kept && may_ask).then(|| match card::asking_person(|| trust::ask(&req.folder)) {
+                trust::Answer::Always => {
+                    if let Err(why) = trust::remember(chosen.dir, &req.folder) {
+                        let _ = console::Term::stderr()
+                            .write_line(&format!("Trusted for this time only: {why}"));
+                    }
+                    true
                 }
-                true
-            }
-            trust::Answer::Once => true,
-            trust::Answer::No => false,
-        });
+                trust::Answer::Once => true,
+                trust::Answer::No => false,
+            });
         if !(kept || asked == Some(true)) || ctx.also.len() >= MAX_FOLDERS {
             return Ok(Some(req));
         }
@@ -1491,7 +1492,9 @@ async fn ask_back(
     look: CardLook,
     how: (Option<&Session>, Mode),
 ) -> Result<Option<(String, Vec<Step>, u64)>, Error> {
-    let Some(answers) = askback::ask_person(questions) else {
+    // The box steps aside while the person is asked (the questions are drawn in the terminal).
+    let asked = card::asking_person(|| askback::ask_person(questions));
+    let Some(answers) = asked else {
         return Ok(None);
     };
     for line in askback::save(root, &answers) {
@@ -1602,24 +1605,29 @@ async fn spin_while<T>(
     tokio::pin!(work);
     let stop = tokio::signal::ctrl_c();
     tokio::pin!(stop);
+    // With the panel's chat box on the screen its progress row is the spinner (RFC 0212): this
+    // one stays out of its way, and the box is told when the run starts and when it ends.
+    let boxed = crate::panel::chat_shown() && crate::panel::chat_report("begin");
     let mut tick = tokio::time::interval(Duration::from_millis(90));
     let mut frame = 0usize;
-    loop {
+    let ended = loop {
         tokio::select! {
-            done = &mut work => {
-                card::spin_clear();
-                return Ok(done);
-            }
-            _ = &mut stop => {
-                card::spin_clear();
-                return Err(Error::Child(130));
-            }
+            done = &mut work => break Ok(done),
+            _ = &mut stop => break Err(Error::Child(130)),
             _ = tick.tick() => {
-                card::spin(frame, started.elapsed(), agent.display(), look);
+                if !boxed {
+                    card::spin(frame, started.elapsed(), agent.display(), look);
+                }
                 frame += 1;
             }
         }
+    };
+    if boxed {
+        crate::panel::chat_report("end");
+    } else {
+        card::spin_clear();
     }
+    ended
 }
 
 #[cfg(test)]
