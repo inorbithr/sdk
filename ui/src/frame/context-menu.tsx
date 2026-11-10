@@ -39,6 +39,7 @@ import {
   FileCode2,
   FlipHorizontal2,
   FlipVertical2,
+  Folder,
   Frame,
   Grid3x3,
   Group,
@@ -52,6 +53,8 @@ import {
   ListChecks,
   Lock,
   LockOpen,
+  LogIn,
+  LogOut,
   type LucideIcon,
   Magnet,
   Maximize2,
@@ -62,6 +65,7 @@ import {
   PanelRight,
   Pin,
   PinOff,
+  Plus,
   Puzzle,
   Redo2,
   RotateCcw,
@@ -179,6 +183,11 @@ export const ICONS: Record<string, LucideIcon> = {
   right: ChevronRight,
   "to-start": ArrowLeftToLine,
   "to-end": ArrowRightToLine,
+  // Added here for the account switcher (RFC 0217.1).
+  "log-in": LogIn,
+  "log-out": LogOut,
+  folder: Folder,
+  plus: Plus,
 };
 
 // ---------------------------------------------------------------- the store: one menu open at a time
