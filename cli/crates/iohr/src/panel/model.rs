@@ -150,7 +150,7 @@ pub(super) enum Effect {
 }
 
 /// The menu: label, key, view it opens.
-const MENU: [(&str, char, View); 8] = [
+const MENU: &[(&str, char, View)] = &[
     ("Auto mode", 'a', View::Auto),
     ("Approvals", 'p', View::Approvals),
     ("Workloads", 'w', View::Workloads),
@@ -858,7 +858,7 @@ mod tests {
         let mut m = model(2);
         m.key(Key::Menu);
         m.key(Key::Up);
-        assert_eq!(m.menu_sel, 7, "wraps to Stop panel");
+        assert_eq!(m.menu_sel, MENU.len() - 1, "wraps to Stop panel");
         m.key(Key::Down);
         assert_eq!(m.menu_sel, 0);
         let text = rows(&m);
