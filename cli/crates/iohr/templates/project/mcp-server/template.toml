@@ -1,0 +1,8 @@
+# Coming, and left out of the picker (ADR 0221, PRD 0088.1): an MCP server whose self-test is an
+# in-process client that lists the tools, calls one, is refused on a bad argument and on a
+# missing token, and sees the same order twice. It goes live only when the SDK speaks the MCP
+# 2026-07-28 spec and that self-test passes; the SDK designs MCP but does not ship it yet
+# (docs/design.md section 7), so nothing here pretends otherwise.
+id = "mcp-server"
+description = "An MCP server (TypeScript or Python); coming when the SDK speaks MCP"
+status = "coming"

@@ -72,17 +72,23 @@ fn create_is_init() {
             "project",
             "create",
             "made",
+            "--set",
+            "license=MIT",
             "--dir",
             dir.to_str().unwrap(),
             "--no-smoke",
         ],
     );
     assert!(out.status.success(), "{}", text(&out));
-    assert!(dir.join("extension.toml").is_file());
     assert!(
         dir.join("coordination.toml").is_file(),
-        "the built-in default is coordinated (RFC 0211)"
+        "every template names the project's plan"
     );
+    assert!(
+        dir.join(".github/workflows/ci.yml").is_file(),
+        "the built-in default is service, with the enterprise floor (PRD 0088.1)"
+    );
+    assert!(!dir.join("extension.toml").exists());
     assert!(
         h.path()
             .join(".inorbit/projects/made/project.toml")
@@ -101,17 +107,17 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     assert!(t.starts_with("NAME"), "{t}");
     for (name, status) in [
         ("blank", "live"),
-        ("demo", "live"),
-        ("coordinated", "live"),
-        ("macos-app", "coming"),
-        ("ui-panel", "coming"),
+        ("service", "live"),
+        ("agent", "live"),
+        ("cli", "live"),
+        ("extension", "live"),
     ] {
         let row = t.lines().find(|l| l.starts_with(name)).unwrap_or_default();
         assert!(row.contains(status), "{name}: {t}");
     }
     assert!(
         t.lines()
-            .find(|l| l.starts_with("coordinated"))
+            .find(|l| l.starts_with("service"))
             .unwrap()
             .contains('*')
     );
@@ -121,55 +127,35 @@ fn templates_lists_every_template_as_a_table_and_as_json() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let rows = v.as_array().unwrap();
     assert_eq!(rows.len(), 5);
-    // `blank` is listed first, after the menu's "Describe it"; demo keeps its own description.
+    // `blank` is listed first, after the menu's "Describe it".
     assert_eq!(rows[0]["name"], "blank");
     assert_eq!(
         rows[0]["description"],
         "A starter project in your language: one runnable file, Roles and memory"
     );
-    assert_eq!(rows[1]["name"], "demo");
-    assert_eq!(rows[2]["status"], "live");
-    assert_eq!(rows[3]["status"], "coming");
+    assert_eq!(rows[1]["name"], "service");
+    assert!(rows.iter().all(|r| r["status"] == "live"));
 }
 
 #[test]
-fn the_flag_beats_the_config_which_beats_coordinated() {
+fn the_flag_beats_the_config_which_beats_service() {
     let h = tempfile::tempdir().unwrap();
-    config(h.path(), "[project]\ntemplate = \"demo\"\n");
+    config(h.path(), "[project]\ntemplate = \"cli\"\n");
+    let (one, two, three) = (h.path().join("a"), h.path().join("b"), h.path().join("c"));
 
     // The config's template when there is no flag.
-    let first = h.path().join("a");
-    let out = iohr(
-        h.path(),
-        &[
-            "project",
-            "create",
-            "proj-a",
-            "--dir",
-            first.to_str().unwrap(),
-            "--no-smoke",
-        ],
-    );
+    let out = iohr(h.path(), &go_create("proj-a", one.to_str().unwrap(), &[]));
     assert!(out.status.success(), "{}", text(&out));
-    assert!(!first.join("coordination.toml").exists());
+    assert!(one.join("golden/greet.txt").is_file(), "the cli template");
 
     // The flag over the config.
-    let second = h.path().join("b");
     let out = iohr(
         h.path(),
-        &[
-            "project",
-            "create",
-            "proj-b",
-            "--template",
-            "coordinated",
-            "--dir",
-            second.to_str().unwrap(),
-            "--no-smoke",
-        ],
+        &go_create("proj-b", two.to_str().unwrap(), &["--template", "service"]),
     );
     assert!(out.status.success(), "{}", text(&out));
-    assert!(second.join("coordination.toml").is_file());
+    assert!(two.join("server.go").is_file(), "the service template");
+    assert!(!two.join("golden").exists());
 
     // The listing marks the configured default.
     let out = iohr(h.path(), &["project", "templates", "--json"]);
@@ -181,7 +167,31 @@ fn the_flag_beats_the_config_which_beats_coordinated() {
         .filter(|t| t["default"] == true)
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(default, ["demo"]);
+    assert_eq!(default, ["cli"]);
+
+    // With neither, service.
+    std::fs::remove_file(h.path().join("config/config.toml")).unwrap();
+    let out = iohr(h.path(), &go_create("proj-c", three.to_str().unwrap(), &[]));
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(three.join("server.go").is_file());
+}
+
+/// `project create NAME` in Go, answered, with the smoke test off, plus `extra`.
+fn go_create<'a>(name: &'a str, dir: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut a = vec![
+        "project",
+        "create",
+        name,
+        "--set",
+        "license=MIT",
+        "--lang",
+        "go",
+        "--dir",
+        dir,
+        "--no-smoke",
+    ];
+    a.extend_from_slice(extra);
+    a
 }
 
 #[test]
@@ -195,7 +205,7 @@ fn a_template_that_is_coming_still_refuses_and_says_what_is_live() {
             "create",
             "proj-c",
             "--template",
-            "ui-panel",
+            "mcp-server",
             "--dir",
             d.to_str().unwrap(),
             "--no-smoke",
@@ -203,9 +213,9 @@ fn a_template_that_is_coming_still_refuses_and_says_what_is_live() {
     );
     assert!(!out.status.success());
     let t = text(&out);
-    assert!(t.contains("coming") && t.contains("`coordinated`"), "{t}");
+    assert!(t.contains("coming") && t.contains("`service`"), "{t}");
     assert!(!d.exists());
-    config(h.path(), "[project]\ntemplate = \"macos-app\"\n");
+    config(h.path(), "[project]\ntemplate = \"evals\"\n");
     let out = iohr(
         h.path(),
         &[
@@ -292,6 +302,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "--template",
             "probe",
             "--set",
+            "license=MIT",
+            "--set",
             "kind=beta",
             "--set",
             "extra=hi",
@@ -320,6 +332,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "two",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--answers",
             f.to_str().unwrap(),
             "--dir",
@@ -344,6 +358,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "three",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--dir",
             d3.to_str().unwrap(),
             "--no-smoke",
@@ -362,6 +378,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "--template",
             "probe",
             "--set",
+            "license=MIT",
+            "--set",
             "kind=gamma",
             "--dir",
             d4.to_str().unwrap(),
@@ -377,6 +395,8 @@ fn a_user_template_answers_set_answers_yes_and_when() {
             "four",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--set",
             "nope=1",
             "--dir",
@@ -443,6 +463,8 @@ fn a_template_from_a_path_beats_the_user_folder() {
         &[
             "project",
             "init",
+            "--set",
+            "license=MIT",
             "pp",
             "--template",
             p.to_str().unwrap(),
@@ -565,16 +587,11 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
                 h.path(),
                 &h.path().join("bin"),
                 &[
-                    "project",
-                    "init",
-                    &format!("{id}-x"),
-                    "--template",
-                    id,
-                    "--dir",
-                    d.to_str().unwrap(),
-                    flag,
-                    "--yes",
-                ],
+                    &["project", "init", &format!("{id}-x"), "--template", id][..],
+                    licence(id),
+                    &["--dir", d.to_str().unwrap(), flag, "--yes"],
+                ]
+                .concat(),
             );
             let t = text(&o);
             assert!(o.status.success(), "{id}: {t}");
@@ -605,6 +622,8 @@ fn dry_run_changes_nothing_on_every_built_in_and_never_starts_the_agent() {
             "jj",
             "--template",
             "probe",
+            "--set",
+            "license=MIT",
             "--describe",
             "do a thing",
             "--dir",
@@ -654,6 +673,8 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--dry-run",
             "--yes",
         ],
@@ -661,7 +682,7 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
     assert!(out.status.success(), "{}", text(&out));
     let t = text(&out);
     assert!(
-        t.contains("would: write 86 files into ./my-shop (in the folder you are in)"),
+        t.contains("would: write 94 files into ./my-shop (in the folder you are in)"),
         "{t}"
     );
     assert!(
@@ -685,6 +706,8 @@ fn the_dry_run_names_the_folder_under_where_you_are_and_why() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--dry-run",
             "--yes",
             "--json",
@@ -716,6 +739,8 @@ fn a_folder_that_is_not_empty_is_refused_and_dotfiles_alone_are_fine() {
         "my-shop",
         "--template",
         "demo",
+        "--set",
+        "license=MIT",
         "--yes",
         "--no-smoke",
     ];
@@ -750,6 +775,8 @@ fn inside_a_git_repository_the_dry_run_warns_that_it_would_nest() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--dry-run",
             "--yes",
             "--json",
@@ -780,6 +807,8 @@ fn lang_picks_the_variant_and_a_wrong_one_is_refused() {
                 "my-shop",
                 "--template",
                 "demo",
+                "--set",
+                "license=MIT",
                 "--lang",
                 lang,
                 "--dry-run",
@@ -807,6 +836,8 @@ fn lang_picks_the_variant_and_a_wrong_one_is_refused() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--lang",
             "cobol",
             "--dry-run",
@@ -828,6 +859,8 @@ fn lang_picks_the_variant_and_a_wrong_one_is_refused() {
             "my-shop",
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--lang",
             "go",
             "--set",
@@ -869,6 +902,8 @@ fn every_live_language_scaffolds_and_its_smoke_test_passes_when_its_toolchain_is
             &name,
             "--template",
             "demo",
+            "--set",
+            "license=MIT",
             "--lang",
             lang,
             "--yes",
@@ -930,7 +965,7 @@ fn template_list_columns_and_a_piped_run_has_no_footer_or_colour() {
         ["NAME", "STATUS", "ORIGIN", "DEFAULT", "DESCRIPTION"],
         "{t}"
     );
-    let def = t.lines().find(|l| l.starts_with("coordinated")).unwrap();
+    let def = t.lines().find(|l| l.starts_with("service")).unwrap();
     assert!(def.contains(" * "), "the default is marked: {def}");
     assert!(!t.contains("(default)"), "{t}");
     assert!(t.contains("user: ~/.inorbit/templates/probe"), "{t}");
@@ -1034,7 +1069,10 @@ fn show_json_carries_everything() {
         got["agent"]["describe_prompt"],
         "Make @@NAME@@ do @@KIND@@."
     );
-    let q = got["questions"].as_array().unwrap();
+    // The questions it inherits come first (the base's, the floor's), its own after them.
+    let all = got["questions"].as_array().unwrap();
+    let at = all.iter().position(|q| q["key"] == "kind").unwrap();
+    let q = &all[at..];
     assert_eq!(q[0]["key"], "kind");
     assert_eq!(q[0]["type"], "choice");
     assert_eq!(q[0]["choices"], serde_json::json!(["alpha", "beta"]));
@@ -1055,7 +1093,7 @@ fn show_json_carries_everything() {
     let built_in: serde_json::Value = serde_json::from_slice(&built_in.stdout).unwrap();
     assert_eq!(built_in["origin"]["kind"], "built-in");
     assert!(built_in["path"].is_null());
-    assert_eq!(built_in["default"], true);
+    assert_eq!(built_in["default"], false);
 }
 
 #[test]
@@ -1565,16 +1603,11 @@ fn every_template_writes_the_space_link_and_git_commits_it() {
         let o = iohr(
             h.path(),
             &[
-                "project",
-                "init",
-                &format!("{id}-x"),
-                "--template",
-                id,
-                "--dir",
-                d.to_str().unwrap(),
-                "--no-smoke",
-                "--yes",
-            ],
+                &["project", "init", &format!("{id}-x"), "--template", id][..],
+                licence(id),
+                &["--dir", d.to_str().unwrap(), "--no-smoke", "--yes"],
+            ]
+            .concat(),
         );
         assert!(o.status.success(), "{id}: {}", text(&o));
         let link = std::fs::read_to_string(d.join(".inorbit/space")).unwrap();
@@ -1642,17 +1675,30 @@ fn every_blank_language_passes_the_smoke_test_through_init() {
 }
 
 /// `project create` with the default template, signed out (no token anywhere), as JSON.
+/// The licence answer every floor template asks; `blank` has no such question.
+fn licence(template: &str) -> &'static [&'static str] {
+    if template == "blank" {
+        &[]
+    } else {
+        &["--set", "license=MIT"]
+    }
+}
+
 fn made(h: &Path, name: &str, extra: &[&str]) -> (Output, std::path::PathBuf, serde_json::Value) {
     let dir = h.join(name);
-    let mut args = vec![
-        "project",
-        "create",
-        name,
-        "--dir",
-        dir.to_str().unwrap(),
-        "--no-smoke",
-        "--json",
-    ];
+    let mut args = vec!["project", "create", name];
+    // The extension template unless the test names one; every floor template asks the licence.
+    let template = extra
+        .iter()
+        .position(|a| *a == "--template")
+        .and_then(|i| extra.get(i + 1).copied());
+    if template.is_none() {
+        args.extend(["--template", "extension"]);
+    }
+    if !matches!(template, Some("blank")) {
+        args.extend(["--set", "license=MIT"]);
+    }
+    args.extend(["--dir", dir.to_str().unwrap(), "--no-smoke", "--json"]);
     args.extend_from_slice(extra);
     let out = iohr(h, &args);
     let v = serde_json::from_slice(&out.stdout).unwrap_or(serde_json::Value::Null);
@@ -1709,6 +1755,10 @@ fn init_with_a_token_for_another_audience_says_why_the_plan_was_skipped() {
         &[
             "project",
             "create",
+            "--template",
+            "extension",
+            "--set",
+            "license=MIT",
             "aud",
             "--dir",
             dir.to_str().unwrap(),
@@ -1781,6 +1831,10 @@ fn init_no_plan_and_plan_id_and_dry_run() {
         &[
             "project",
             "create",
+            "--template",
+            "extension",
+            "--set",
+            "license=MIT",
             "dry",
             "--dir",
             dir.to_str().unwrap(),
@@ -1797,10 +1851,10 @@ fn init_no_plan_and_plan_id_and_dry_run() {
 }
 
 #[test]
-fn the_demo_template_has_no_plan_step() {
+fn the_demo_template_has_the_plan_step_like_every_template() {
     let h = tempfile::tempdir().unwrap();
     let (out, dir, v) = made(h.path(), "plaindemo", &["--template", "demo"]);
     assert!(out.status.success(), "{}", text(&out));
-    assert!(!dir.join("coordination.toml").exists());
-    assert!(plan_step(&v).is_null(), "{v}");
+    assert!(dir.join("coordination.toml").is_file());
+    assert!(!plan_step(&v).is_null(), "{v}");
 }

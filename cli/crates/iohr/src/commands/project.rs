@@ -52,7 +52,7 @@ pub(crate) async fn run(g: &Global, env: &Env, cmd: ProjectCommand, out: Out) ->
         ProjectCommand::Init(a) => init(g, env, *a, out).await,
         ProjectCommand::Sync(a) => project_space::sync_command(g, env, a, out).await,
         // The old name of `template list`: the same handler, so the output is identical.
-        ProjectCommand::Templates => template_command(g, TemplateCommand::List, out),
+        ProjectCommand::Templates => template_command(g, TemplateCommand::List { all: false }, out),
         ProjectCommand::Template { cmd } => template_command(g, cmd, out),
     }
 }
@@ -66,7 +66,7 @@ fn default_template(g: &Global) -> Result<String, Error> {
 
 fn template_command(g: &Global, cmd: TemplateCommand, out: Out) -> Result<(), Error> {
     match cmd {
-        TemplateCommand::List => project_template::list(&default_template(g)?, out),
+        TemplateCommand::List { all } => project_template::list(&default_template(g)?, all, out),
         TemplateCommand::Show { id } => project_template::show(&id, &default_template(g)?, out),
         TemplateCommand::Path { id } => project_template::path(&id, out),
         TemplateCommand::New { id, extends } => {
@@ -178,8 +178,8 @@ fn live_names(rows: &[template::Row]) -> String {
 
 /// The language menu: every language of the template, the live ones first, each marked with
 /// whether its toolchain is on the PATH (`have`); the cursor starts on the first live one that
-/// has its toolchain (else on the template's default). The ones still coming are listed, dim,
-/// and refused when picked. `behind` says, for a toolchain that is found, where it stands
+/// has its toolchain (else on the template's default). A variant still coming is not shown
+/// (`--lang` names it and is refused). `behind` says, for a toolchain that is found, where it stands
 /// against the latest stable (`rustc 1.90.0, 1.93.0 is out`), or nothing.
 fn language_choices(
     tpl: &Template,
@@ -193,7 +193,7 @@ fn language_choices(
         .find(|v| found(v))
         .copied()
         .or_else(|| tpl.default_variant());
-    let mut out: Vec<Choice> = live
+    let out: Vec<Choice> = live
         .iter()
         .map(|v| {
             let what = if v.needs.is_empty() {
@@ -220,19 +220,6 @@ fn language_choices(
             }
         })
         .collect();
-    out.extend(
-        tpl.meta
-            .variants
-            .iter()
-            .filter(|v| v.status != template::Status::Live)
-            .map(|v| Choice {
-                value: v.id.clone(),
-                label: v.label.clone(),
-                hint: String::new(),
-                available: false,
-                key: None,
-            }),
-    );
     let initial = recommended.map(|v| v.id.clone()).unwrap_or_default();
     (out, initial)
 }
@@ -952,7 +939,7 @@ impl Wizard<'_> {
         let mut went = Went::Skip;
         if self.a.template.is_none() && self.interactive {
             let default = choose_template(None, self.configured.as_deref());
-            let rows = template::list(&self.root, &default);
+            let rows = template::list(&self.root, &default, self.a.experimental);
             let mut choices = vec![Choice {
                 value: DESCRIBE.into(),
                 label: "Describe it, your agent builds it".into(),
@@ -1013,7 +1000,7 @@ impl Wizard<'_> {
         }
         let tpl: Template = template::load(&spec, &self.root).map_err(Error::Usage)?;
         if tpl.meta.status == template::Status::Coming {
-            let rows = template::list(&self.root, "");
+            let rows = template::list(&self.root, "", false);
             return Err(Error::Usage(format!(
                 "the `{}` template is coming; live today: {}",
                 tpl.meta.id,
@@ -1067,6 +1054,15 @@ impl Wizard<'_> {
                 )));
             }
             given.insert(LANGUAGE.into(), Answer::Text(l.to_owned()));
+        }
+        if let Some(ci) = a.ci {
+            if !tpl.meta.questions.iter().any(|q| q.key == "ci") {
+                return Err(Error::Usage(format!(
+                    "the `{}` template writes no CI files, so --ci does not apply",
+                    tpl.meta.id
+                )));
+            }
+            given.insert("ci".into(), Answer::Text(ci.word().to_owned()));
         }
         Ok(given)
     }

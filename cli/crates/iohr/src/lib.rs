@@ -27,6 +27,7 @@ mod browser;
 mod card;
 mod commands;
 mod context;
+mod embedded;
 mod error;
 mod examples;
 mod handoff;

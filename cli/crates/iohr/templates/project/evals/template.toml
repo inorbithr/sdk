@@ -1,0 +1,7 @@
+# Coming, and left out of the picker (ADR 0221, PRD 0088.1): an offline eval suite (Python on
+# Inspect AI, TypeScript on promptfoo) that clears the bar in thresholds.toml and fails when one
+# expected answer is lowered. It goes live only when that self-test passes on the intended
+# runner with its dependencies locked; neither tool is verified here yet.
+id = "evals"
+description = "An offline eval suite with a pass bar (Python or TypeScript); coming once its self-test passes"
+status = "coming"
