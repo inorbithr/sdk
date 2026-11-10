@@ -1228,7 +1228,6 @@ fn send_to_panel(seq: &[u8]) -> bool {
 /// Runs the shell (or the command) under the panel. `Ok(true)` means the session host stopped
 /// while the panel was open.
 #[allow(clippy::too_many_lines, reason = "the setup and the one select loop")]
-#[allow(clippy::too_many_lines, reason = "the setup and the one select loop")]
 pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool, Error> {
     if !fancy(g) || inside() {
         return run_plain(&config.command).map(|()| false);
