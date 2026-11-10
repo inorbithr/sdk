@@ -84,6 +84,51 @@ your machine"; every host it reaches is in
 [cli/docs/files-and-dependencies.md](cli/docs/files-and-dependencies.md#the-hosts-it-talks-to). Releases before 1.0 are pre-releases. Every release carries checksums, an SBOM and build provenance you can
 check with `gh attestation verify`. [cli/README.md](cli/README.md) is the guide, and [cli/docs/commands.md](cli/docs/commands.md) has every command.
 
+### Start a project, ask your agent
+
+```sh
+iohr init my-shop                 # a project from a template, with a Planner plan and the enterprise floor
+iohr atlas search "refund policy" # search the text of the site init read (local, no model)
+iohr sync                         # send the project's atlas to your account
+
+eval "$(iohr shell hook zsh)"     # once, in ~/.zshrc: the ? prompt
+? why did that fail               # ask your own AI agent about this folder
+?? and the second one             # a follow-up with the last question and answer
+```
+
+- `iohr init` (also `iohr project init`) sets up a project from one of seven templates
+  (`blank`, `service`, `mcp-server`, `agent`, `evals`, `cli`, `extension`) or from a
+  description your agent builds, reads your public site into a local site knowledge base
+  (the atlas, searchable with `iohr atlas search`, `facts` and `index`), and keeps the
+  project's data outside the repository ([Projects](cli/docs/projects.md)).
+- `?` and `??` ask Claude Code or Codex on this machine, answered by the project's Roles
+  (`--role`, `iohr atlas roles import`). The agent reads folders you allow and asks before
+  it runs a command your rules do not cover. `IO.md` files up the folder chain add
+  instructions, and `iohr context` shows what a question would load
+  ([Asking your agent](cli/docs/ask.md), [Roles and memory](cli/docs/roles-and-memory.md)).
+- `iohr asks` lists the questions and approvals agents file for you; on a Mac you can
+  approve with Touch ID. `iohr session` and `iohr stop` run a project's Roles, and bare
+  `iohr` opens your shell in the session with a floating panel
+  ([Sessions and the panel](cli/docs/session-and-panel.md)).
+- `iohr theme` gives Terminal.app the InOrbit app's terminal themes
+  ([the terminal theme](cli/docs/terminal-theme.md)).
+
+The `?` prompt supports zsh only so far; bash and fish are not built.
+
+### The web UI
+
+```sh
+iohr ui          # serve the built page on loopback and open it in your browser
+```
+
+`iohr ui` serves a welcome page, Settings and the panels of your installed extensions from
+your own machine. The page never holds a credential: the local server signs in as
+`iohr login` does and reads the API for it, GET only. It is built from [`ui/`](ui/) (RFC 0217);
+[ui/README.md](ui/README.md) covers running, developing and checking it, and
+[ui/docs/](ui/docs/) has one guide each for the architecture, pages, API and proxy,
+shortcuts, theming and contributing. More pages (atlas, teams, planner, sensors, canvas,
+decisions, live) are in open pull requests and are not part of it yet.
+
 ## Add a library to your project
 
 ```sh
@@ -124,6 +169,7 @@ See [docs/design.md](docs/design.md) for the library design.
 | Path | Contents |
 |---|---|
 | [`cli/`](cli/) | The `iohr` command line, its release scripts and packaging |
+| [`ui/`](ui/) | The web UI `iohr ui` serves: a private Vite and React package, with [guides](ui/docs/) |
 | [`spec/`](spec/) | The API contract, synced from the platform |
 | [`conformance/`](conformance/) | Shared behaviour cases and the replay server every SDK runs them against |
 | [`rust/`](rust/), [`typescript/`](typescript/), [`go/`](go/), [`python/`](python/), [`csharp/`](csharp/), [`java/`](java/), [`swift/`](swift/) | One runtime per language, with its generated public surface; Swift's `Package.swift` is at the root |
