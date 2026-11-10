@@ -1,6 +1,7 @@
 import {
   ArrowLeftRight,
   House,
+  PenTool,
   LayoutGrid,
   Orbit,
   PanelRight,
@@ -8,7 +9,7 @@ import {
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import {
   applyLayout,
   applySpan,
@@ -44,7 +45,10 @@ import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
 import { useSession } from "./lib/session-store.ts";
+import { CANVAS, canvasRoute } from "./canvas/canvas-route.ts";
 import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
+
+const Canvas = lazy(() => import("./canvas/canvas-page.tsx"));
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
@@ -79,7 +83,8 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
-  const pageKey = inSettings ? "settings" : routed === null ? HOME : `ext:${routed}`;
+  const inCanvas = canvasRoute(window.location.pathname) !== null;
+  const pageKey = inSettings ? "settings" : inCanvas ? "canvas" : routed === null ? HOME : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -166,6 +171,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "canvas", title: "Canvas" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -177,6 +183,10 @@ export function App() {
     }
     if (key === "settings") {
       window.location.assign(SETTINGS);
+      return;
+    }
+    if (key === "canvas") {
+      window.location.assign(CANVAS);
       return;
     }
     const panel = panels.find((p) => `ext:${p.name}` === key);
@@ -235,11 +245,11 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings ? (
+      <span className={cn((chosen || inSettings || inCanvas) && "text-muted-foreground")}>InOrbit</span>
+      {chosen || inSettings || inCanvas ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{inSettings ? "Settings" : chosen?.title}</span>
+          <span className="truncate">{inSettings ? "Settings" : inCanvas ? "Canvas" : chosen?.title}</span>
         </>
       ) : null}
     </h1>
@@ -340,9 +350,10 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings}
+          active={routed === null && !inSettings && !inCanvas}
           onClick={() => window.location.assign("/")}
         />
+        <NavItem rail={rail} label="Canvas" icon={<PenTool />} active={inCanvas} onClick={() => goTo("canvas")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -439,6 +450,10 @@ export function App() {
               listing={listing}
               onEdit={setEditing}
             />
+          ) : inCanvas ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Opening the canvas…</p>}>
+              <Canvas />
+            </Suspense>
           ) : (routed !== null && extensionsDown) || (routed === null && homeDown) ? (
             <section className="notice" role="status" data-maintenance-notice>
               <h2 className="mb-1 text-base font-semibold">
