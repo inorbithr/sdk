@@ -138,17 +138,20 @@ pub(super) enum Effect {
     },
     /// Interrupt the session (the person confirmed).
     StopWork(String),
+    /// Fold the chat box or bring it back (Option+h, or Ctrl-]).
+    ChatToggle,
     /// Stop the panel: the shell goes on without it.
     Stop,
 }
 
 /// The menu: label, key, view it opens.
-const MENU: [(&str, char, View); 7] = [
+const MENU: [(&str, char, View); 8] = [
     ("Auto mode", 'a', View::Auto),
     ("Approvals", 'p', View::Approvals),
     ("Workloads", 'w', View::Workloads),
     ("Run", 'r', View::Run),
     ("Status", 's', View::Status),
+    ("Chat box", 'c', View::Rest),
     ("Help", '?', View::Help),
     ("Stop panel", 'x', View::Rest),
 ];
@@ -394,9 +397,14 @@ impl Model {
     }
 
     fn choose(&mut self, i: usize) -> Effect {
-        let (_, _, view) = MENU[i];
+        let (_, key, view) = MENU[i];
         if i == MENU.len() - 1 {
             return Effect::Stop;
+        }
+        if key == 'c' {
+            // The box folds or comes back and the menu closes, so the result is in view.
+            self.view = View::Rest;
+            return Effect::ChatToggle;
         }
         self.view = view;
         self.note = None;
@@ -547,6 +555,7 @@ impl Model {
             self.work_menu_right(),
             ("›".into(), MUTE),
             ("›".into(), MUTE),
+            (self.open_key.hide_label().into(), MUTE),
             (String::new(), MUTE),
             (String::new(), MUTE),
         ];
@@ -690,6 +699,7 @@ impl Model {
             row(open_key.label(), "open or close this panel"),
             row("↑↓ ⏎", "move and open"),
             row("esc", "back, then close"),
+            row(open_key.hide_label(), "fold or bring back the chat box"),
             row("a d q o", "phone-approve, deny, ask, read"),
             row("d y", "deny an ask, then confirm"),
             row("", "your command line is kept as is"),
@@ -833,7 +843,7 @@ mod tests {
         let mut m = model(2);
         m.key(Key::Menu);
         m.key(Key::Up);
-        assert_eq!(m.menu_sel, 6, "wraps to Stop panel");
+        assert_eq!(m.menu_sel, 7, "wraps to Stop panel");
         m.key(Key::Down);
         assert_eq!(m.menu_sel, 0);
         let text = rows(&m);
@@ -848,6 +858,16 @@ mod tests {
         assert!(rows(&m).join("\n").contains("coming next"));
         m.key(Key::Esc);
         assert_eq!(m.key(Key::Char('x')), Effect::Stop);
+    }
+
+    #[test]
+    fn the_menu_folds_and_brings_back_the_chat_box_and_closes() {
+        let mut m = model(0);
+        m.key(Key::Menu);
+        let text = rows(&m).join("\n");
+        assert!(text.contains("Chat box") && text.contains("\u{2325}h"));
+        assert_eq!(m.key(Key::Char('c')), Effect::ChatToggle);
+        assert_eq!(m.view, View::Rest, "the menu closes so the box is in view");
     }
 
     #[test]
