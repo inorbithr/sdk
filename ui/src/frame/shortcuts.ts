@@ -10,6 +10,7 @@
 // which add only where the Mac menu bar places each row. A browser has no native menu, so a keydown listener on the
 // window delivers them (the Mac app's fallback outside Tauri does the same).
 import { useEffect, useRef } from "react";
+import layoutTable from "./layout-shortcuts.json" with { type: "json" };
 import frameTable from "./shortcuts.json" with { type: "json" };
 
 export type KeyLike = {
@@ -104,12 +105,21 @@ export type FrameShortcut = { id: string; label: string; accel: string };
 /** The shortcuts the frame answers, from frame/shortcuts.json: the one table of them. */
 export const FRAME_SHORTCUTS: FrameShortcut[] = frameTable;
 
+/**
+ * The layout shortcuts (⌃⌥ and an arrow, Return, G or Z), as the Mac app's window layouts spell them. They are in
+ * their own table, not shortcuts.json, because iohr-mac reads that file for its native menu and already keeps these
+ * rows in its own table; the two fold into one when the owner extends ADR 0230 to the layouts (RFC 0217).
+ */
+export const LAYOUT_SHORTCUTS: FrameShortcut[] = layoutTable;
+
+const ALL_SHORTCUTS = [...FRAME_SHORTCUTS, ...LAYOUT_SHORTCUTS];
+
 /** The frame shortcut a key event is, if any. */
-export const shortcutOf = (e: KeyLike) => FRAME_SHORTCUTS.find((s) => matches(s.accel, e));
+export const shortcutOf = (e: KeyLike) => ALL_SHORTCUTS.find((s) => matches(s.accel, e));
 
 /** The keys to show for a frame shortcut id; "" for an unknown id. */
 export const keysOf = (id: string) => {
-  const s = FRAME_SHORTCUTS.find((x) => x.id === id);
+  const s = ALL_SHORTCUTS.find((x) => x.id === id);
   return s ? symbols(s.accel) : "";
 };
 
