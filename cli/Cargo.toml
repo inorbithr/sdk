@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab"]
+members = ["crates/iohr", "crates/iohr-auth", "crates/iohr-openapi", "crates/iohr-codegen", "crates/iohr-lab", "crates/iohr-atlas-core"]
 # Built with nightly by `mise run cli:fuzz`.
 exclude = ["fuzz"]
 
@@ -14,6 +14,7 @@ homepage = "https://docs.inorbit.hr"
 publish = false
 
 [workspace.dependencies]
+iohr-atlas-core = { path = "crates/iohr-atlas-core", version = "0.1.0-alpha.39" }
 iohr-auth = { path = "crates/iohr-auth" }
 iohr-codegen = { path = "crates/iohr-codegen" }
 iohr-lab = { path = "crates/iohr-lab" }
@@ -22,6 +23,8 @@ inorbithr = { path = "../rust" }
 
 aws-lc-rs = "1"
 base64 = "0.23"
+# The Atlas proof crate (PRD 0211): bitemporal records and the observed time of evidence.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4.6"
 # The session host's durable task queue (RFC 0213): bundled, so no system library is needed.
@@ -63,6 +66,8 @@ tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util"
 toml = "1"
 toml_edit = "0.25"
 url = "2"
+# Typed ids of the Atlas proof crate: UUIDv7 for claims and observations.
+uuid = { version = "1", features = ["v7", "serde"] }
 # The terminal panel keeps a model of the child's screen: what lies under the floating box (its
 # shadow) and whether the child is on the alternate screen (ADR 0225).
 vt100 = { version = "0.16", default-features = false }
@@ -76,6 +81,7 @@ windows-native-keyring-store = "1"
 zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 tempfile = "3"
+proptest = "1"
 wiremock = "0.6"
 
 [workspace.lints.rust]
