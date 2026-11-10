@@ -366,7 +366,7 @@ export function newId(prefix: string, now = Date.now()): string {
     t = Math.floor(t / 32);
   }
   let rand = "";
-  for (let i = 0; i < 6; i++) rand += ALPHA[Math.floor(Math.random() * 32)];
+  for (const b of crypto.getRandomValues(new Uint8Array(6))) rand += ALPHA[b % 32];
   return `${prefix}_${time}${seq.toString(32).padStart(2, "0")}${rand}`;
 }
 
