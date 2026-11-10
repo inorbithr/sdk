@@ -217,8 +217,87 @@ fn without_a_shape_a_headless_run_records_none_and_does_not_fail() {
 #[test]
 fn a_bad_place_or_shape_is_refused() {
     let h = tempfile::tempdir().unwrap();
-    let (o, _) = init(h.path(), "bad1", &[], &["--keep-in", "cloud"]);
+    // A word that is not project or home is a folder now; one that is a file is refused.
+    let file = h.path().join("afile");
+    std::fs::write(&file, "x").unwrap();
+    let (o, _) = init(
+        h.path(),
+        "bad1",
+        &[],
+        &["--keep-in", file.to_str().unwrap()],
+    );
     assert!(!o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("is a file, not a folder"), "{}", text(&o));
     let (o, _) = init(h.path(), "bad2", &[], &["--shape", "serverless"]);
     assert!(!o.status.success(), "{}", text(&o));
+}
+
+#[test]
+fn keep_in_a_path_relative_to_the_project_records_it_and_uses_it() {
+    let h = tempfile::tempdir().unwrap();
+    let (o, dir) = init(h.path(), "rel", &[], &["--keep-in", "kept/here"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert_eq!(recorded(&dir, "data").as_deref(), Some("kept/here"), "{t}");
+    let at = dir.join("kept/here");
+    assert!(at.join("memory").is_dir(), "{:?}\n{t}", files_under(&dir));
+    assert!(
+        !dir.join(".inorbit/memory").exists(),
+        "the project folder holds no notes: {:?}",
+        files_under(&dir)
+    );
+    assert!(
+        !h.path().join(".inorbit/projects/rel").exists(),
+        "the home folder holds nothing of this project"
+    );
+}
+
+#[test]
+fn keep_in_a_path_under_home_expands_the_tilde_and_records_it_as_typed() {
+    let h = tempfile::tempdir().unwrap();
+    let (o, dir) = init(h.path(), "tilde", &[], &["--keep-in", "~/vault/tilde"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert_eq!(
+        recorded(&dir, "data").as_deref(),
+        Some("~/vault/tilde"),
+        "{t}"
+    );
+    let at = h.path().join("vault/tilde");
+    assert!(
+        at.join("memory").is_dir(),
+        "{:?}\n{t}",
+        files_under(h.path())
+    );
+    assert!(!dir.join(".inorbit/memory").exists(), "{t}");
+}
+
+#[test]
+fn a_path_that_cannot_be_written_is_refused_before_anything_is_made() {
+    let h = tempfile::tempdir().unwrap();
+    let file = h.path().join("blocked");
+    std::fs::write(&file, "x").unwrap();
+    // Under a file nothing can be made; the reason names the file.
+    let under = format!("{}/inside", file.display());
+    let (o, dir) = init(h.path(), "blocked", &[], &["--keep-in", &under]);
+    let t = text(&o);
+    assert!(!o.status.success(), "{t}");
+    assert!(t.contains("is a file, not a folder"), "{t}");
+    assert!(!dir.exists(), "nothing is made on a refusal: {t}");
+}
+
+#[test]
+fn a_dry_run_names_the_custom_folder_and_makes_nothing() {
+    let h = tempfile::tempdir().unwrap();
+    let (o, dir) = init(
+        h.path(),
+        "drycustom",
+        &[],
+        &["--keep-in", "~/vault/dry", "--dry-run"],
+    );
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("[project] data = \"~/vault/dry\""), "{t}");
+    assert!(!dir.exists(), "{t}");
+    assert!(!h.path().join("vault").exists(), "{t}");
 }

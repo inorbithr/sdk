@@ -3,7 +3,9 @@
 //! Light PRD 0210: `iohr project init` asks once where project knowledge lives, in the
 //! project folder (`<project>/.inorbit/`, travels with the repository) or in the person's home
 //! (`~/.inorbit/projects/<name>/`, stays on this machine). The choice is `[project] data` in
-//! `inorbit.toml`; `--keep-in` and `IOHR_INIT_KEEP_IN` override it for one init.
+//! `inorbit.toml`; `--keep-in` and `IOHR_INIT_KEEP_IN` override it for one init. A third
+//! choice, any folder the person names, is recorded as the path itself (`~` is the home
+//! folder, a relative path is read from the project folder).
 //!
 //! The kinds that move with the choice: the project's notes (`memory/`), what a crawl keeps
 //! (`crawl/`, its local index) and the machine state (`state/`, `cache/`, `project.toml`, the
@@ -15,7 +17,7 @@
 //! `.inorbit/permissions.toml`. Moving data is offered, never done silently, and the old copy
 //! is never deleted ([`copy_over`]).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use toml_edit::{DocumentMut, value};
 
@@ -29,33 +31,100 @@ pub const PROJECT_DIR: &str = ".inorbit";
 pub const MANIFEST: &str = "inorbit.toml";
 
 /// Where the project's knowledge lives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Place {
     /// `<project>/.inorbit/`.
     Project,
     /// `~/.inorbit/projects/<name>/`.
     Home,
+    /// A folder the person named, as they wrote it (`~/notes/shop`, `../shared`, `/srv/x`):
+    /// `~` is the home folder and a relative path starts at the project folder
+    /// ([`custom_dir`]). Notes, crawl and state sit directly in it.
+    Elsewhere(String),
 }
 
 impl Place {
-    /// The word `[project] data` and `--keep-in` use.
+    /// What `[project] data` and `--keep-in` hold: `project`, `home` or the path.
     #[must_use]
-    pub fn word(self) -> &'static str {
+    pub fn word(&self) -> String {
         match self {
-            Place::Project => "project",
-            Place::Home => "home",
+            Place::Project => "project".to_owned(),
+            Place::Home => "home".to_owned(),
+            Place::Elsewhere(path) => path.clone(),
         }
     }
 
-    /// The place a word names.
+    /// The place a word or a path names: `project` and `home` are the two named places
+    /// (any case), anything else is a folder (write `./project` for a folder of that name).
     ///
     /// # Errors
-    /// A word that is neither `project` nor `home`.
+    /// Nothing at all.
     pub fn parse(s: &str) -> Result<Self, String> {
-        match s.trim().to_ascii_lowercase().as_str() {
+        let s = s.trim();
+        match s.to_ascii_lowercase().as_str() {
+            "" => Err("name a place: project, home or a folder".to_owned()),
             "project" => Ok(Place::Project),
             "home" => Ok(Place::Home),
-            other => Err(format!("{other:?} is not a place: use project or home")),
+            _ => Ok(Place::Elsewhere(s.to_owned())),
+        }
+    }
+}
+
+/// The folder a typed path names for the project at `root`: `~` and `~/..` from `home`, a
+/// relative path from `root`, an absolute one as it is; `.` and `..` folded away.
+#[must_use]
+pub fn custom_dir(root: &Path, raw: &str, home: Option<&Path>) -> PathBuf {
+    let typed = crate::access::expand_home(Path::new(raw.trim()), home);
+    let full = if typed.is_absolute() {
+        typed
+    } else {
+        root.join(typed)
+    };
+    let mut out = PathBuf::new();
+    for c in full.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// The folder `raw` names, when notes can live there: not a file, and either the folder is
+/// there and writable or the nearest folder above it is (the place is created when the run
+/// is confirmed).
+///
+/// # Errors
+/// A reason a person can act on.
+pub fn check_custom(root: &Path, raw: &str, home: Option<&Path>) -> Result<PathBuf, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("type a folder, for example ~/notes/shop".to_owned());
+    }
+    if raw.starts_with('~') && home.is_none() && (raw == "~" || raw.starts_with("~/")) {
+        return Err("there is no home folder on this machine to read ~ from".to_owned());
+    }
+    let dir = custom_dir(root, raw, home);
+    let mut at = dir.as_path();
+    loop {
+        if at.exists() {
+            if !at.is_dir() {
+                return Err(format!("{} is a file, not a folder", at.display()));
+            }
+            let readonly = std::fs::metadata(at).is_ok_and(|m| m.permissions().readonly());
+            if readonly {
+                return Err(format!("cannot write in {}", at.display()));
+            }
+            return Ok(dir);
+        }
+        match at.parent() {
+            Some(up) => at = up,
+            None => return Ok(dir),
         }
     }
 }
@@ -123,7 +192,37 @@ impl Layout {
     /// The recorded choice, when there is one.
     #[must_use]
     pub fn place(&self) -> Option<Place> {
-        self.place
+        self.place.clone()
+    }
+
+    /// The folder of an [`Place::Elsewhere`] choice, when that is the choice.
+    #[must_use]
+    pub fn custom_dir(&self) -> Option<PathBuf> {
+        match &self.place {
+            Some(Place::Elsewhere(raw)) => Some(custom_dir(&self.root, raw, self.home.as_deref())),
+            _ => None,
+        }
+    }
+
+    /// Makes the folder of an [`Place::Elsewhere`] choice (nothing for the other places, which
+    /// are made as they are written to).
+    ///
+    /// # Errors
+    /// The folder cannot be made or written to, with the path and the reason.
+    pub fn ensure_custom(&self) -> Result<(), String> {
+        let Some(dir) = self.custom_dir() else {
+            return Ok(());
+        };
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            format!(
+                "cannot use {} to keep the project's data: {e}",
+                dir.display()
+            )
+        })?;
+        if std::fs::metadata(&dir).is_ok_and(|m| m.permissions().readonly()) {
+            return Err(format!("cannot write in {}", dir.display()));
+        }
+        Ok(())
     }
 
     fn in_project(&self) -> PathBuf {
@@ -139,13 +238,14 @@ impl Layout {
     /// The folder `kind` lives in. With no recorded choice: notes and crawl in the project,
     /// state in home (what older versions did).
     fn base(&self, kind: Kind) -> Option<PathBuf> {
-        let at = self.place.unwrap_or(match kind {
-            Kind::Memory | Kind::Crawl => Place::Project,
-            Kind::State => Place::Home,
-        });
-        match at {
-            Place::Project => Some(self.in_project()),
-            Place::Home => self.in_home(),
+        match &self.place {
+            Some(Place::Project) => Some(self.in_project()),
+            Some(Place::Home) => self.in_home(),
+            Some(Place::Elsewhere(raw)) => Some(custom_dir(&self.root, raw, self.home.as_deref())),
+            None => match kind {
+                Kind::Memory | Kind::Crawl => Some(self.in_project()),
+                Kind::State => self.in_home(),
+            },
         }
     }
 
@@ -207,8 +307,8 @@ impl Layout {
 ///
 /// # Errors
 /// `text` is not valid TOML.
-pub fn with_place(text: &str, place: Place) -> Result<String, String> {
-    set_project_key(text, "data", place.word())
+pub fn with_place(text: &str, place: &Place) -> Result<String, String> {
+    set_project_key(text, "data", &place.word())
 }
 
 /// `text` with `[project] <key>` set to `val`, comments and the rest as they were.
@@ -264,8 +364,8 @@ pub fn write_project_key(root: &Path, key: &str, val: &str) -> Result<(), String
 ///
 /// # Errors
 /// As [`write_project_key`].
-pub fn record(root: &Path, place: Place) -> Result<(), String> {
-    write_project_key(root, "data", place.word())
+pub fn record(root: &Path, place: &Place) -> Result<(), String> {
+    write_project_key(root, "data", &place.word())
 }
 
 /// What the project folder's `.inorbit/.gitignore` has to hold when the machine state lives
@@ -397,15 +497,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(Layout::of(r.path()).place(), None);
-        record(r.path(), Place::Home).unwrap();
+        record(r.path(), &Place::Home).unwrap();
         assert_eq!(Layout::of(r.path()).place(), Some(Place::Home));
         let t = std::fs::read_to_string(r.path().join(MANIFEST)).unwrap();
         assert!(t.contains("# keep me") && t.contains("description = \"x\""));
-        assert!(with_place("x = [", Place::Home).is_err());
-        assert!(Place::parse("cloud").is_err());
+        assert!(with_place("x = [", &Place::Home).is_err());
+        assert!(Place::parse(" ").is_err());
         // A missing manifest is made.
         let n = tempfile::tempdir().unwrap();
-        record(n.path(), Place::Project).unwrap();
+        record(n.path(), &Place::Project).unwrap();
         assert_eq!(Layout::of(n.path()).place(), Some(Place::Project));
     }
 
@@ -454,5 +554,78 @@ mod tests {
         assert!(movable(&old, &to_home));
         // The same place is never a move.
         assert!(!movable(&old, &old));
+    }
+
+    #[test]
+    fn a_folder_the_person_names_holds_everything_and_round_trips() {
+        let (r, h) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let home = Some(h.path());
+        // `~` is the home folder, a relative path starts at the project, `..` is folded.
+        assert_eq!(
+            custom_dir(r.path(), "~/notes/shop", home),
+            h.path().join("notes/shop")
+        );
+        assert_eq!(
+            custom_dir(r.path(), "./data/../kept", home),
+            r.path().join("kept")
+        );
+        assert_eq!(
+            custom_dir(r.path(), "/srv/x", home),
+            PathBuf::from("/srv/x")
+        );
+        let elsewhere = Place::parse("~/notes/shop").unwrap();
+        assert_eq!(elsewhere, Place::Elsewhere("~/notes/shop".into()));
+        assert_eq!(Place::parse("HOME").unwrap(), Place::Home);
+        let l = layout(r.path(), h.path(), Some(elsewhere.clone()));
+        let base = h.path().join("notes/shop");
+        assert_eq!(l.memory(), base.join("memory"));
+        assert_eq!(l.crawl(), base.join("crawl"));
+        assert_eq!(l.state().unwrap(), base);
+        assert_eq!(l.memory_rel(), None);
+        // Recorded as typed in `[project] data`, read back by the same resolver.
+        record(r.path(), &elsewhere).unwrap();
+        assert_eq!(Layout::of(r.path()).place(), Some(elsewhere));
+        // A path inside the project is a relative memory path like the project place.
+        let inside = layout(r.path(), h.path(), Some(Place::parse("./kept").unwrap()));
+        assert_eq!(inside.memory_rel().as_deref(), Some("kept/memory"));
+    }
+
+    #[test]
+    fn a_folder_that_cannot_hold_notes_is_refused_with_the_reason() {
+        let (r, h) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let home = Some(h.path());
+        std::fs::write(r.path().join("afile"), "x").unwrap();
+        let e = check_custom(r.path(), "afile", home).unwrap_err();
+        assert!(e.contains("is a file, not a folder"), "{e}");
+        let e = check_custom(r.path(), "afile/inside", home).unwrap_err();
+        assert!(e.contains("is a file, not a folder"), "{e}");
+        assert!(check_custom(r.path(), "  ", home).is_err());
+        assert!(
+            check_custom(r.path(), "~/x", None)
+                .unwrap_err()
+                .contains("no home folder")
+        );
+        // A folder that is not there yet is fine: it is made on confirm.
+        let ok = check_custom(r.path(), "~/new/deep", home).unwrap();
+        assert_eq!(ok, h.path().join("new/deep"));
+        let l = layout(
+            r.path(),
+            h.path(),
+            Some(Place::Elsewhere("~/new/deep".into())),
+        );
+        l.ensure_custom().unwrap();
+        assert!(ok.is_dir());
+        // A place that cannot be made says which path and why.
+        let bad = layout(
+            r.path(),
+            h.path(),
+            Some(Place::Elsewhere("afile/inside".into())),
+        );
+        let e = bad.ensure_custom().unwrap_err();
+        assert!(e.contains("cannot use") && e.contains("afile"), "{e}");
+        // The two named places have nothing to make.
+        layout(r.path(), h.path(), Some(Place::Home))
+            .ensure_custom()
+            .unwrap();
     }
 }

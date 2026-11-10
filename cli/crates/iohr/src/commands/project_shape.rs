@@ -113,11 +113,20 @@ fn record(dir: &Path, shape: &str) -> Result<(), String> {
 }
 
 /// The step: record the answer (when there is one) and file the item. Signed out or offline,
-/// the answer is still kept locally and the step says the item was not filed.
-pub(super) async fn run(g: &Global, env: &Env, dir: &Path, answer: Option<&str>) -> Step {
-    let plan = std::fs::read_to_string(dir.join(project_plan::MANIFEST))
-        .ok()
-        .and_then(|t| project_plan::plan_id_in(&t));
+/// the answer is still kept locally and the step says the item was not filed. `plan` is the
+/// plan the plan step settled; without one, the id in `coordination.toml` is used.
+pub(super) async fn run(
+    g: &Global,
+    env: &Env,
+    dir: &Path,
+    answer: Option<&str>,
+    plan: Option<&str>,
+) -> Step {
+    let plan = plan.map(str::to_owned).or_else(|| {
+        std::fs::read_to_string(dir.join(project_plan::MANIFEST))
+            .ok()
+            .and_then(|t| project_plan::plan_id_in(&t))
+    });
     let already = place::project_key(dir, KEY);
     let mut kept = String::new();
     if let Some(shape) = answer {
@@ -284,6 +293,72 @@ mod tests {
         );
         // No claim and no status change: the mock server has no route for them and the
         // single PUT above is all it saw.
+    }
+
+    /// The blank template has no `coordination.toml`: the plan step makes the plan anyway and
+    /// hands its id on, so the shape item is filed in the plan that was just created.
+    #[tokio::test]
+    async fn a_project_without_a_manifest_gets_its_plan_and_the_item_is_filed_in_it() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/coordinator/plans"))
+            .and(body_partial_json(
+                json!({"title": "blank", "external_id": "project:blank"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"plan": {"id": "plan_01NEW", "title": "blank"}, "created": true}),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/coordinator/plans/plan_01NEW"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/v1/coordinator/plans/plan_01NEW/items/project-shape"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"item": {}})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let a = api(&server);
+        let planned = project_plan::settle_bare(
+            &project_plan::Access::In(&a),
+            "blank",
+            None,
+            "The project's Planner plan",
+        )
+        .await;
+        assert_eq!(planned.step.state, "done", "{}", planned.step.said);
+        assert!(
+            planned.step.said.starts_with("made: plan_01NEW")
+                && planned.step.said.contains("not written down"),
+            "{}",
+            planned.step.said
+        );
+        let id = planned.id.expect("the plan id is passed on");
+        let st = settle(&project_plan::Access::In(&a), &id, None, "").await;
+        assert_eq!(st.state, "done", "{}", st.said);
+        assert!(!st.said.contains("not filed"), "{}", st.said);
+    }
+
+    #[tokio::test]
+    async fn a_project_without_a_manifest_signed_out_says_why_nothing_is_filed() {
+        let planned = project_plan::settle_bare(
+            &project_plan::Access::Without("you are not signed in".to_owned()),
+            "blank",
+            None,
+            "t",
+        )
+        .await;
+        assert_eq!(planned.step.state, "skipped");
+        assert!(planned.id.is_none());
+        assert!(
+            planned.step.said.starts_with("you are not signed in;"),
+            "{}",
+            planned.step.said
+        );
     }
 
     #[tokio::test]
