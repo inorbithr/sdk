@@ -1,4 +1,13 @@
-import { ArrowLeftRight, House, LayoutGrid, Orbit, PanelRight, Puzzle, Wrench } from "lucide-react";
+import {
+  ArrowLeftRight,
+  House,
+  LayoutGrid,
+  Orbit,
+  PanelRight,
+  Puzzle,
+  Settings as SettingsIcon,
+  Wrench,
+} from "lucide-react";
 import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   applyLayout,
@@ -35,9 +44,11 @@ import { updateOrbits, useOrbits } from "./lib/orbits-store.ts";
 import { maintenanceMenu, orbitsMenu } from "./lib/page-menus.ts";
 import { panelRoute, routedPanel, startPanel, stopPanel } from "./lib/panels.ts";
 import { useSession } from "./lib/session-store.ts";
+import { SETTINGS, settingsRoute } from "./lib/settings-core.ts";
 import { useSidebar } from "./lib/sidebar-store.ts";
 import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
+import { Settings } from "./settings.tsx";
 
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
@@ -67,7 +78,8 @@ export function App() {
   const [gridAt, setGridAt] = useState<HTMLElement | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
-  const pageKey = routed === null ? HOME : `ext:${routed}`;
+  const inSettings = settingsRoute(window.location.pathname) !== null;
+  const pageKey = inSettings ? "settings" : routed === null ? HOME : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -152,11 +164,19 @@ export function App() {
     openContextMenu({ x: align === "right" ? r.right : r.left, y: r.bottom + 4 }, entries, { label, trigger: button });
   };
 
-  const pages = [{ key: HOME, title: "Home" }, ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title }))];
+  const pages = [
+    { key: HOME, title: "Home" },
+    { key: "settings", title: "Settings" },
+    ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
+  ];
   const goTo = (key: string) => {
     if (key === pageKey) return;
     if (key === HOME) {
       window.location.assign("/");
+      return;
+    }
+    if (key === "settings") {
+      window.location.assign(SETTINGS);
       return;
     }
     const panel = panels.find((p) => `ext:${p.name}` === key);
@@ -215,11 +235,11 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn(chosen && "text-muted-foreground")}>InOrbit</span>
-      {chosen ? (
+      <span className={cn((chosen || inSettings) && "text-muted-foreground")}>InOrbit</span>
+      {chosen || inSettings ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{chosen.title}</span>
+          <span className="truncate">{inSettings ? "Settings" : chosen?.title}</span>
         </>
       ) : null}
     </h1>
@@ -320,7 +340,7 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null}
+          active={routed === null && !inSettings}
           onClick={() => window.location.assign("/")}
         />
       </ul>
@@ -355,7 +375,20 @@ export function App() {
         title={title}
         actions={actions}
         sidebarBody={sidebarBody}
-        sidebarFooter={(rail) => <RailAccount session={account.session} rail={rail} />}
+        sidebarFooter={(rail) => (
+          <div className={cn("flex flex-col gap-2", rail && "items-center")}>
+            <ul>
+              <NavItem
+                rail={rail}
+                label="Settings"
+                icon={<SettingsIcon />}
+                active={inSettings}
+                onClick={() => goTo("settings")}
+              />
+            </ul>
+            <RailAccount session={account.session} rail={rail} />
+          </div>
+        )}
         arrangement={arr}
         onRestore={() => updateArr(restore)}
         dock={(slot) =>
@@ -397,7 +430,16 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {(routed !== null && extensionsDown) || (routed === null && homeDown) ? (
+          {inSettings ? (
+            <Settings
+              session={account.session}
+              busy={account.busy}
+              onSignIn={account.signIn}
+              onSignOut={account.signOut}
+              listing={listing}
+              onEdit={setEditing}
+            />
+          ) : (routed !== null && extensionsDown) || (routed === null && homeDown) ? (
             <section className="notice" role="status" data-maintenance-notice>
               <h2 className="mb-1 text-base font-semibold">
                 {routed === null ? "Home" : "Extension panels"} is under maintenance
