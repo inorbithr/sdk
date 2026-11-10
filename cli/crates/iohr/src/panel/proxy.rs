@@ -45,6 +45,7 @@ use crate::card::Look;
 use crate::cli::Global;
 use crate::commands::asks::{self, PanelAsk, PanelAuto};
 use crate::commands::coordinator;
+use crate::commands::incident_settings::{self, PanelIncidents};
 use crate::commands::session::{Joined, join_watched};
 use crate::error::Error;
 use crate::session::link;
@@ -621,6 +622,7 @@ struct Session {
     deny_fetch: Option<Fetch<(String, Result<(), Error>)>>,
     workloads_fetch: Option<Fetch<Result<Snapshot, Error>>>,
     auto_fetch: Option<Fetch<Result<PanelAuto, Error>>>,
+    incidents_fetch: Option<Fetch<Result<PanelIncidents, Error>>>,
     /// One action at a time: a question, a message, a stop, auto mode on or off.
     act_fetch: Option<Fetch<Result<String, String>>>,
     /// One page read at a time: an ask's details, a transcript.
@@ -656,6 +658,13 @@ impl Session {
         }
         if !self.stub && self.auto_fetch.is_none() {
             self.auto_fetch = Some(read_auto(self.g.clone(), self.env.clone()));
+        }
+        // Only while the menu or its view is open: the setting changes rarely.
+        if !self.stub
+            && self.incidents_fetch.is_none()
+            && matches!(self.proxy.model.view, View::Menu | View::Incidents)
+        {
+            self.incidents_fetch = Some(read_incidents(self.g.clone(), self.env.clone()));
         }
     }
 
@@ -759,6 +768,20 @@ impl Session {
                         asks::auto_revoke(&g, &env)
                             .await
                             .map(|()| "auto mode is off".to_owned())
+                    }));
+                }
+            }
+            Effect::IncidentsAutoResolve(on) => {
+                if self.stub {
+                    self.proxy
+                        .model
+                        .acted(Ok("stub: nothing was changed".into()));
+                } else {
+                    let (g, env) = (self.g.clone(), self.env.clone());
+                    self.act(limited(async move {
+                        incident_settings::set_auto_resolve(&g, &env, on)
+                            .await
+                            .map(|()| format!("auto-resolve is {}", if on { "on" } else { "off" }))
                     }));
                 }
             }
@@ -952,6 +975,11 @@ impl Session {
                 .deny_failed(e.to_string().lines().next().unwrap_or("")),
         }
         self.redraw();
+    }
+
+    fn incidents_done(&mut self, result: Result<PanelIncidents, Error>) {
+        self.proxy.model.set_incidents(source_of(result));
+        write_terminal(&self.proxy.redraw());
     }
 
     fn auto_done(&mut self, result: Result<PanelAuto, Error>) {
@@ -1279,6 +1307,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
         deny_fetch: None,
         workloads_fetch: None,
         auto_fetch: None,
+        incidents_fetch: None,
         act_fetch: None,
         read_fetch: None,
         host_gone: config.host_gone.take().map(host_closed),
@@ -1340,6 +1369,7 @@ pub(super) async fn run(g: &Global, env: Env, mut config: Config) -> Result<bool
             result = poll(&mut session.workloads_fetch) => session.workloads_done(result),
             (id, result) = poll(&mut session.deny_fetch) => session.deny_done(&id, result),
             result = poll(&mut session.auto_fetch) => session.auto_done(result),
+            result = poll(&mut session.incidents_fetch) => session.incidents_done(result),
             result = poll(&mut session.act_fetch) => session.act_done(result),
             result = poll(&mut session.read_fetch) => session.read_done(result),
             () = poll(&mut session.host_gone) => session.host_ended(),
@@ -1391,6 +1421,15 @@ fn read_limited(
         match tokio::time::timeout(FETCH_LIMIT, f).await {
             Ok(r) => r.map_err(|e| e.to_string().lines().next().unwrap_or("").to_owned()),
             Err(_) => Err("it took too long".to_owned()),
+        }
+    })
+}
+
+fn read_incidents(g: Global, env: Env) -> Fetch<Result<PanelIncidents, Error>> {
+    Box::pin(async move {
+        match tokio::time::timeout(FETCH_LIMIT, incident_settings::read(&g, &env)).await {
+            Ok(r) => r,
+            Err(_) => Err(Error::Failed("the incident settings took too long".into())),
         }
     })
 }
