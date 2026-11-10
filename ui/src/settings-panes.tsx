@@ -4,6 +4,8 @@ import { cn } from "./frame/cn.ts";
 import { closeDock, openDock } from "./frame/dock-frame.ts";
 import { FRAME_SHORTCUTS, LAYOUT_SHORTCUTS, symbols } from "./frame/shortcuts.ts";
 import { type SidebarMode, setMode } from "./frame/sidebar-frame.ts";
+import { type AccountRow, planLabel, roleLabel } from "./lib/accounts-core.ts";
+import type { AccountsState } from "./lib/accounts-store.ts";
 import type { SessionState } from "./lib/api.ts";
 import { updateArrangement, useArrangement } from "./lib/arrange-store.ts";
 import { updateDock, useDock } from "./lib/dock-store.ts";
@@ -29,6 +31,8 @@ const muted = "text-muted-foreground";
 
 export type PaneProps = {
   session: SessionState | null;
+  /** The accounts this person can act as and the one this tab does (RFC 0217.1). */
+  accounts: AccountsState;
   busy: boolean;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -172,7 +176,7 @@ export function Appearance() {
   );
 }
 
-export function Accounts({ session, busy, onSignIn, onSignOut }: PaneProps) {
+export function Accounts({ session, accounts, busy, onSignIn, onSignOut }: PaneProps) {
   if (session === null) return <p className={cn(muted, "text-[13px]")}>Checking sign-in…</p>;
   if (session.state === "unreachable")
     return (
@@ -180,6 +184,9 @@ export function Accounts({ session, busy, onSignIn, onSignOut }: PaneProps) {
         {session.reason}
       </p>
     );
+  const current: AccountRow | undefined = accounts.rows.find((r) => r.id === accounts.active);
+  const me = accounts.me.state === "ok" ? accounts.me.data : null;
+  const who = me?.email || me?.name || "";
   return (
     <Section
       title={session.state === "signed-in" ? "Signed in" : "Not signed in"}
@@ -189,10 +196,10 @@ export function Accounts({ session, busy, onSignIn, onSignOut }: PaneProps) {
         <>
           <Row label="Profile">{session.profile}</Row>
           <Row label="Kind">{session.kind}</Row>
-          <Row label="Account">{session.account === "" ? "none: this sign-in has no account" : session.account}</Row>
-          <Row label="Subject">
-            <span className="truncate">{session.subject}</span>
-          </Row>
+          <Row label="Account">{current?.name ?? "Your account"}</Row>
+          {current ? <Row label="Plan">{planLabel(current.plan)}</Row> : null}
+          {current ? <Row label="Your role">{roleLabel(current.role)}</Row> : null}
+          {who ? <Row label="Signed in as">{who}</Row> : null}
           <Row label="Scopes">
             <span className="text-right">{session.scopes.length === 0 ? "none" : session.scopes.join(", ")}</span>
           </Row>
