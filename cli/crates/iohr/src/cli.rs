@@ -1838,6 +1838,26 @@ pub enum AtlasCommand {
         #[arg(long, value_name = "DIR")]
         dir: Option<PathBuf>,
     },
+    /// The claims made from the facts, and with `--prove ID` why one is believed.
+    ///
+    /// A claim is a fact with its proof: the page it was read from, kept by its digest.
+    /// `verified` says a deterministic reader found the value in those bytes; it does not
+    /// say the value is true. A claim whose page changed or whose fact went is `stale`, and
+    /// stays listed.
+    Claims {
+        /// Only this site.
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+        /// Show the proof of this claim: its tree, the evidence and where it was read.
+        #[arg(long, value_name = "ID")]
+        prove: Option<String>,
+        /// The most claims to show.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// The project folder. Default: the nearest project folder up from here.
+        #[arg(long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+    },
     /// List the crawled sites: pages, chunks, tokens, entities, facts and sections.
     Index {
         /// List the pages of the sites instead of the sites.

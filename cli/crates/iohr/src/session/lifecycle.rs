@@ -8,7 +8,7 @@
 
 use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 
 use rustix::fs::{FlockOperation, flock};
@@ -52,7 +52,6 @@ impl Paths {
     /// checks the one that is there: a folder that is not the owner's, is open to others or is
     /// a link to somewhere else is refused, and so is a path the socket could not fit in.
     pub(crate) fn create(&self) -> std::io::Result<()> {
-        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
         let longest = SOCKET_PATH_MAX;
         let len = self.sock.as_os_str().len();
         if len > longest {
@@ -62,35 +61,8 @@ impl Paths {
                 self.sock.display()
             )));
         }
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&self.dir)?;
-        // Not `metadata`: a link is looked at, not followed.
-        let meta = std::fs::symlink_metadata(&self.dir)?;
-        if !meta.is_dir() {
-            return Err(std::io::Error::other(format!(
-                "{} is not a folder (a link or a file): the session host keeps its files in a \
-                 folder of its own",
-                self.dir.display()
-            )));
-        }
-        let owner = rustix::process::geteuid().as_raw();
-        if meta.uid() != owner {
-            return Err(std::io::Error::other(format!(
-                "{} belongs to another user ({}), not to you ({owner})",
-                self.dir.display(),
-                meta.uid()
-            )));
-        }
-        let mode = meta.permissions().mode() & 0o777;
-        if mode & 0o077 != 0 {
-            return Err(std::io::Error::other(format!(
-                "{} has mode {mode:o} and is open to others; it must be 700 (chmod 700 {})",
-                self.dir.display(),
-                self.dir.display()
-            )));
-        }
+        // The one folder check (`safe_open`): ours alone, not a link, closed to others.
+        crate::safe_open::private_dir(&self.dir).map_err(std::io::Error::other)?;
         Ok(())
     }
 }
