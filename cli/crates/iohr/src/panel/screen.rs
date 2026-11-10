@@ -20,6 +20,12 @@ impl Screen {
         self.parser.process(bytes);
     }
 
+    /// The screen as bytes that draw it again on an empty terminal of the same size (what the
+    /// phone starts from when a share begins).
+    pub(super) fn snapshot(&self) -> Vec<u8> {
+        self.parser.screen().state_formatted()
+    }
+
     pub(super) fn resize(&mut self, rows: usize, cols: usize) {
         self.parser.screen_mut().set_size(clamp(rows), clamp(cols));
     }
