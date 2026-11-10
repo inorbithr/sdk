@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Atom,
   House,
   LayoutGrid,
   Orbit,
@@ -8,7 +9,7 @@ import {
   Settings as SettingsIcon,
   Wrench,
 } from "lucide-react";
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { lazy, type MouseEvent, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import {
   applyLayout,
   applySpan,
@@ -55,6 +56,10 @@ import { MaintenanceForm } from "./maintenance-form.tsx";
 import { RailAccount, SessionControl } from "./session-control.tsx";
 import { Settings } from "./settings.tsx";
 
+// The Workload page (3D orbit, room, tree): its own chunk, so three loads only on /workload.
+const Workload = lazy(() => import("./workload.tsx"));
+const WORKLOAD = "/workload";
+
 // The page `iohr ui serve` serves, drawn in the shell frame from the Mac app (frame/frame.tsx, RFC 0217 C5): the
 // sidebar lists Home and the installed extensions that declare a panel, the page header holds the Extensions menu,
 // and the page body shows the chosen panel. The menus are the Mac app's one context menu (frame/context-menu.tsx,
@@ -91,7 +96,8 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   const layoutButton = useRef<HTMLButtonElement>(null);
   const inSettings = settingsRoute(window.location.pathname) !== null;
-  const pageKey = inSettings ? "settings" : routed === null ? HOME : `ext:${routed}`;
+  const inWorkload = window.location.pathname === WORKLOAD;
+  const pageKey = inSettings ? "settings" : inWorkload ? "workload" : routed === null ? HOME : `ext:${routed}`;
 
   useEffect(() => {
     let live = true;
@@ -196,6 +202,7 @@ export function App() {
 
   const pages = [
     { key: HOME, title: "Home" },
+    { key: "workload", title: "Workload" },
     { key: "settings", title: "Settings" },
     ...panels.map((p) => ({ key: `ext:${p.name}`, title: p.title })),
   ];
@@ -207,6 +214,10 @@ export function App() {
     }
     if (key === "settings") {
       window.location.assign(SETTINGS);
+      return;
+    }
+    if (key === "workload") {
+      window.location.assign(WORKLOAD);
       return;
     }
     const panel = panels.find((p) => `ext:${p.name}` === key);
@@ -265,11 +276,11 @@ export function App() {
 
   const title = (
     <h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
-      <span className={cn((chosen || inSettings) && "text-muted-foreground")}>InOrbit</span>
-      {chosen || inSettings ? (
+      <span className={cn((chosen || inSettings || inWorkload) && "text-muted-foreground")}>InOrbit</span>
+      {chosen || inSettings || inWorkload ? (
         <>
           <span className="text-muted-foreground">/</span>
-          <span className="truncate">{inSettings ? "Settings" : chosen?.title}</span>
+          <span className="truncate">{inSettings ? "Settings" : inWorkload ? "Workload" : chosen?.title}</span>
         </>
       ) : null}
     </h1>
@@ -371,9 +382,10 @@ export function App() {
           rail={rail}
           label="Home"
           icon={<House />}
-          active={routed === null && !inSettings}
+          active={routed === null && !inSettings && !inWorkload}
           onClick={() => window.location.assign("/")}
         />
+        <NavItem rail={rail} label="Workload" icon={<Atom />} active={inWorkload} onClick={() => goTo("workload")} />
       </ul>
       <section aria-label="Extensions" className={cn("flex flex-col gap-0.5", rail && "items-center")}>
         {!rail && <h2 className="text-muted-foreground px-2 pb-0.5 text-[11px] font-medium">Extensions</h2>}
@@ -461,7 +473,11 @@ export function App() {
               {reason}
             </p>
           ) : null}
-          {inSettings ? (
+          {inWorkload ? (
+            <Suspense fallback={<p className="text-muted-foreground text-sm">Loading the workload…</p>}>
+              <Workload />
+            </Suspense>
+          ) : inSettings ? (
             <Settings
               session={account.session}
               accounts={accounts}
