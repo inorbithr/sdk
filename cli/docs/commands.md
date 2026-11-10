@@ -243,6 +243,24 @@ browser (`IOHR_NO_BROWSER` prints the address instead).
   `GET /api/extensions` lists the installed extensions that declare a `[panel]` (name,
   version, title, entry) from the same store `iohr ext install` writes, and starts none of
   them.
+- Reaching the page takes a per-launch secret (RFC 0217, round 4). `iohr ui open` and
+  `serve --open` put it in the first address (`/?launch=...`); the server answers `303` to
+  `/` and sets a session cookie (`HttpOnly`, `SameSite=Strict`, named by the port), and
+  every other request without that cookie is `401`. The secret is one-shot: only a GET or
+  HEAD can use it, the first use spends it, and a second use is `401`. The server then makes
+  a fresh one and rewrites it in `ui/serving.json` (private), so the next `open` still gets
+  in. `serve` never prints the secret; `open` prints the address only when no browser could
+  be opened.
+- Error text the page can see (a failed sign-in, a failed proxy call) goes through the same
+  redaction as `iohr ask` output: values after a secret's name, bearer values, JWTs, tokens
+  and URLs are replaced.
+- The page never holds a credential. `iohr ui serve` signs in as `iohr login` does (the
+  same profile, the same credential store; `--profile`, `--env` and `IOHR_TOKEN` apply) and
+  calls the API for the page: `GET /api/session` says who (never a token),
+  `POST /api/session/login` starts `iohr login --web` (the system browser, PKCE) and
+  `POST /api/session/logout` is `iohr logout`, and `GET /api/proxy/v1/...` forwards one
+  read to the API with that credential. Each needs the page's own `x-iohr-token` header.
+  The proxy is GET only, under `/v1/`, with plain path segments.
 - A taken `--port` is an error. A running `serve` records its address in the data folder
   (`ui/serving.json`, private) and removes it when it stops.
 

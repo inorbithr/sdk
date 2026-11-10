@@ -8,6 +8,10 @@ import { useSyncExternalStore } from "react";
 export type Stored<T> = {
   /** The state now, live. */
   use: () => T;
+  /** The state now, once (outside React). */
+  get: () => T;
+  /** Calls `f` after every change; returns the way to stop. */
+  subscribe: (f: () => void) => () => void;
   /** Changes the state; one that returns the same object changes nothing. */
   update: (f: (s: T) => T) => void;
 };
@@ -32,6 +36,8 @@ export function stored<T>(key: string, parse: (o: unknown) => T): Stored<T> {
   const get = () => state;
   return {
     use: () => useSyncExternalStore(subscribe, get, get),
+    get,
+    subscribe,
     update: (f) => {
       const next = f(state);
       if (next === state) return;

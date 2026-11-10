@@ -10,8 +10,10 @@
 
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { type ReactNode, useState, useSyncExternalStore } from "react";
+import { type Arrangement, arranged, describe, initial, layoutOff, type Place } from "./arrange.ts";
 import { cn } from "./cn.ts";
 import { ResizeHandle } from "./resize-handle.tsx";
+import { keysOf } from "./shortcuts.ts";
 import {
   columnWidth,
   DEFAULT_WIDTH,
@@ -45,6 +47,14 @@ export function useFrameMode(sidebar: SidebarFrame): SidebarMode {
   return effectiveMode(sidebar.mode, useViewportWidth());
 }
 
+/** Below this window width the arrangement is not applied: the page fills the area, as on a phone. */
+export const ARRANGE_MIN_WIDTH = 900;
+
+/** What a dock is told about where it sits, so it can be drawn for it. */
+export type DockSlot = { side: "left" | "right"; fill: boolean };
+
+const cell = (p: Place) => ({ gridColumn: `${p.c0 + 1} / ${p.c1 + 1}`, gridRow: `${p.r0 + 1} / ${p.r1 + 1}` });
+
 export type FrameProps = {
   sidebar: SidebarFrame;
   update: UpdateSidebar;
@@ -60,8 +70,13 @@ export type FrameProps = {
   actions?: ReactNode;
   /** Room for a native window's traffic lights when the sidebar is hidden (the Mac app). */
   trafficLights?: boolean;
-  /** The right dock beside the page (frame/dock.tsx, RFC 0217 C7); the app decides what it holds. */
-  dock?: ReactNode;
+  /** The dock beside the page (frame/dock.tsx, RFC 0217 C7); the app decides what it holds. A function is told the side
+   *  and whether it fills cells of its own (frame/arrange.ts), so it can be drawn for them. */
+  dock?: ReactNode | ((slot: DockSlot) => ReactNode);
+  /** Where the page and the dock sit (frame/arrange.ts); left out, the page fills the area with the dock on its right. */
+  arrangement?: Arrangement;
+  /** With an arrangement: the way back to the page filling the area, shown while it does not. */
+  onRestore?: () => void;
   children: ReactNode;
 };
 
@@ -86,9 +101,16 @@ export function Frame({
   actions,
   trafficLights,
   dock,
+  arrangement,
+  onRestore,
   children,
 }: FrameProps) {
   const mode = useFrameMode(sidebar);
+  const wide = useViewportWidth() >= ARRANGE_MIN_WIDTH;
+  const arr = arrangement && wide ? arrangement : initial();
+  const dockFirst = arr.order[0] === "dock";
+  const dockNode =
+    typeof dock === "function" ? dock({ side: dockFirst ? "left" : "right", fill: arr.dock !== null }) : dock;
   const rail = mode === "rail";
   const hidden = mode === "hidden";
   const [resizing, setResizing] = useState(false);
@@ -147,38 +169,72 @@ export function Frame({
         )}
       </aside>
 
-      {/* The console's inset: the page sits on the sidebar's ground as a raised panel. */}
-      <div className="relative flex min-w-0 flex-1 flex-col py-2 pr-2">
-        <div data-tauri-drag-region className="absolute inset-x-0 top-0 h-2" />
-        <main
-          data-page-area
-          className="bg-background text-foreground flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-sm"
-        >
-          <header
-            data-tauri-drag-region="deep"
-            className={cn(
-              "flex h-11 shrink-0 items-center gap-2 border-b px-5 text-sm transition-[padding] duration-200",
-              hidden && trafficLights && "pl-[84px]",
-            )}
-          >
-            {hidden && (
-              <button
-                type="button"
-                title="Show sidebar"
-                aria-label="Show sidebar"
-                onClick={() => update((s) => setMode(s, "expanded"))}
-                className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md"
+      {/* The area beside the sidebar is a 6 by 4 grid (frame/arrange.ts). The page and its dock sit together in one place of
+          it, or, in a layout that gives each its share, in a place each. */}
+      <div
+        data-arrange-area
+        className="relative grid min-w-0 flex-1"
+        style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gridTemplateRows: "repeat(4, minmax(0, 1fr))" }}
+      >
+        <div style={cell(arr.page)} className="flex min-h-0 min-w-0" data-arrange-page>
+          <div className="relative flex min-w-0 flex-1 flex-col py-2 pr-2" style={{ order: dockFirst ? 1 : 0 }}>
+            <div data-tauri-drag-region className="absolute inset-x-0 top-0 h-2" />
+            <main
+              data-page-area
+              className="bg-background text-foreground flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-sm"
+            >
+              <header
+                data-tauri-drag-region="deep"
+                className={cn(
+                  "@container flex h-11 shrink-0 items-center gap-2 border-b px-5 text-sm transition-[padding] duration-200",
+                  hidden && trafficLights && "pl-[84px]",
+                )}
               >
-                <PanelLeftOpen className="size-4" />
-              </button>
-            )}
-            {title}
-            {actions && <div className="ml-auto flex items-center gap-1">{actions}</div>}
-          </header>
-          <div className="min-h-0 flex-1 overflow-auto">{children}</div>
-        </main>
+                {hidden && (
+                  <button
+                    type="button"
+                    title="Show sidebar"
+                    aria-label="Show sidebar"
+                    onClick={() => update((s) => setMode(s, "expanded"))}
+                    className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 items-center justify-center rounded-md"
+                  >
+                    <PanelLeftOpen className="size-4" />
+                  </button>
+                )}
+                {title}
+                {actions && <div className="ml-auto flex items-center gap-1">{actions}</div>}
+              </header>
+              <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+            </main>
+          </div>
+          {arr.dock === null && dockNode ? (
+            <div className="flex min-h-0" style={{ order: dockFirst ? 0 : 1 }}>
+              {dockNode}
+            </div>
+          ) : null}
+        </div>
+        {arr.dock !== null && dockNode ? (
+          <div style={cell(arr.dock)} className="flex min-h-0 min-w-0" data-arrange-dock>
+            {dockNode}
+          </div>
+        ) : null}
+        {onRestore && arranged(arr) ? (
+          <button
+            type="button"
+            data-arrange-restore
+            onClick={onRestore}
+            title={
+              layoutOff(arr)
+                ? `Put the page back to full (${keysOf("layout-full")})`
+                : "Put the boxes back in their first order"
+            }
+            className="bg-popover text-popover-foreground hover:bg-accent absolute right-4 bottom-4 z-10 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] shadow-md"
+          >
+            <span>{describe(arr) || "Boxes swapped"}</span>
+            <span className="text-muted-foreground">{layoutOff(arr) ? `Full ${keysOf("layout-full")}` : "Reset"}</span>
+          </button>
+        ) : null}
       </div>
-      {dock}
     </div>
   );
 }
