@@ -9,7 +9,15 @@
 import { applyLines, type Plan } from "./planner.ts";
 
 /** `Plan` of the plans API, the fields this page reads. */
-export type ApiPlan = { id: string; title?: string; external_id?: string; state?: string; version?: number; updated_at?: string; item_count?: number };
+export type ApiPlan = {
+  id: string;
+  title?: string;
+  external_id?: string;
+  state?: string;
+  version?: number;
+  updated_at?: string;
+  item_count?: number;
+};
 /** `PlanItem` of the plans API; `gate` is RFC 0171 slice 1's word and is read when the item carries it. */
 export type ApiItem = {
   item_id: string;
@@ -56,11 +64,22 @@ export function serverLines(r: ApiPlanResponse): string {
   const o = snake(r) as ApiPlanResponse;
   const lines: Record<string, unknown>[] = [];
   const plan = o.plan;
-  if (plan) lines.push({ t: "plan", ...(plan.title ? { title: plan.title } : {}), at: plan.updated_at ?? "", by: "coordinator" });
+  if (plan)
+    lines.push({
+      t: "plan",
+      ...(plan.title ? { title: plan.title } : {}),
+      at: plan.updated_at ?? "",
+      by: "coordinator",
+    });
   const items = [...(o.items ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   for (const i of items) {
     if (!i.item_id) continue;
-    const l: Record<string, unknown> = { t: "item", id: i.item_id, at: i.updated_at ?? "", by: i.updated_by || "coordinator" };
+    const l: Record<string, unknown> = {
+      t: "item",
+      id: i.item_id,
+      at: i.updated_at ?? "",
+      by: i.updated_by || "coordinator",
+    };
     if (i.kind) l.kind = i.kind;
     if (i.title) l.title = i.title;
     if (i.status) l.status = i.status;
@@ -75,7 +94,13 @@ export function serverLines(r: ApiPlanResponse): string {
   }
   for (const n of o.notes ?? []) {
     if (!n.body) continue;
-    lines.push({ t: "activity", item: n.item_id ?? "", agent: n.author || "coordinator", text: n.body, at: n.created_at ?? "" });
+    lines.push({
+      t: "activity",
+      item: n.item_id ?? "",
+      agent: n.author || "coordinator",
+      text: n.body,
+      at: n.created_at ?? "",
+    });
   }
   return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
 }
@@ -89,7 +114,11 @@ export function foldServer(cache: Plan, r: ApiPlanResponse): Plan {
 }
 
 /** The fold of the plan stream, keeping only what the store needs: the newest `seq` and `updated_at` per plan, so a change re-reads that plan. */
-export type StreamState = { seq: number; ready: boolean; plans: Map<string, { seq: number; updated_at: string; external_id?: string }> };
+export type StreamState = {
+  seq: number;
+  ready: boolean;
+  plans: Map<string, { seq: number; updated_at: string; external_id?: string }>;
+};
 export const emptyStream = (): StreamState => ({ seq: 0, ready: false, plans: new Map() });
 
 const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && /^-?\d+$/.test(v) ? Number(v) : 0);
@@ -100,7 +129,11 @@ export function foldStream(s: StreamState, raw: unknown): StreamState {
   if (!isObj(f)) return s;
   const put = (plans: StreamState["plans"], p: unknown, seq: number) => {
     if (!isObj(p) || !str(p.plan_id)) return;
-    plans.set(str(p.plan_id), { seq: num(p.seq) || seq, updated_at: str(p.updated_at), ...(str(p.external_id) ? { external_id: str(p.external_id) } : {}) });
+    plans.set(str(p.plan_id), {
+      seq: num(p.seq) || seq,
+      updated_at: str(p.updated_at),
+      ...(str(p.external_id) ? { external_id: str(p.external_id) } : {}),
+    });
   };
   if (isObj(f.snapshot)) {
     const plans: StreamState["plans"] = new Map();

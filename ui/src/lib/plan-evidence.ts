@@ -6,9 +6,9 @@
 // reads (the plan, the pull request poll) say what the gate would say, so a card never claims
 // "ready" with nothing behind it. Pure, tested in tests/plan-evidence.test.ts.
 
-import type { PrLive } from "./planner-shared.ts";
-import type { DocRef, Item, Plan } from "./planner.ts";
 import { NO_STAGES, prsOfStage, type StageMap } from "./plan-stage-core.ts";
+import type { DocRef, Item, Plan } from "./planner.ts";
+import type { PrLive } from "./planner-shared.ts";
 
 export const DOC_KINDS = ["prd", "rfc", "adr"] as const;
 export type DocKind = (typeof DOC_KINDS)[number];
@@ -104,19 +104,30 @@ const kindOf = (i: Item): DocKind | null => {
  * document (a `doc` into Decisions) beats a plan item of that kind that is not linked yet; the
  * latter is still named, as "not linked", so the card says which fact is missing.
  */
-export function documentsOf(plan: Plan, item: Item, status: DocStatus = new Map()): Record<DocKind, DocEvidence | null> {
+export function documentsOf(
+  plan: Plan,
+  item: Item,
+  status: DocStatus = new Map(),
+): Record<DocKind, DocEvidence | null> {
   const docs: Record<DocKind, DocEvidence | null> = { prd: null, rfc: null, adr: null };
   for (const it of chain(plan, item)) {
     const k = kindOf(it);
     if (!k || it.status === "dropped") continue;
     const linked = !!it.doc?.document_id;
     if (docs[k] && (docs[k]!.ref || !linked)) continue;
-    docs[k] = { kind: k, ref: linked ? it.doc! : null, item: it.id, title: it.title, status: linked ? (status.get(it.doc!.document_id) ?? "") : "" };
+    docs[k] = {
+      kind: k,
+      ref: linked ? it.doc! : null,
+      item: it.id,
+      title: it.title,
+      status: linked ? (status.get(it.doc!.document_id) ?? "") : "",
+    };
   }
   return docs;
 }
 
-const prState = (l?: PrLive): string => (!l ? "not read" : l.state === "OPEN" ? (l.draft ? "draft" : "open") : l.state.toLowerCase());
+const prState = (l?: PrLive): string =>
+  !l ? "not read" : l.state === "OPEN" ? (l.draft ? "draft" : "open") : l.state.toLowerCase();
 
 /** The newest head among the item's pull requests: a merge time when merged, else when it was opened. */
 export function newestHead(prs: PrEvidence[]): string | undefined {
@@ -132,11 +143,20 @@ export function diagramOf(item: Item, prs: PrEvidence[]): DiagramEvidence {
   const present = !!item.diagram || !!item.diagramRef;
   const updatedAt = item.diagramAt;
   const headAt = newestHead(prs);
-  return { present, ...(updatedAt ? { updatedAt } : {}), ...(headAt ? { headAt } : {}), stale: !!(present && updatedAt && headAt && updatedAt < headAt) };
+  return {
+    present,
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(headAt ? { headAt } : {}),
+    stale: !!(present && updatedAt && headAt && updatedAt < headAt),
+  };
 }
 
 /** The gate's words for what is missing, from the facts on the Mac. */
-export function missingOf(docs: Record<DocKind, DocEvidence | null>, prs: PrEvidence[], diagram: DiagramEvidence): string[] {
+export function missingOf(
+  docs: Record<DocKind, DocEvidence | null>,
+  prs: PrEvidence[],
+  diagram: DiagramEvidence,
+): string[] {
   const out: string[] = [];
   for (const k of DOC_KINDS) {
     if (!docs[k]) out.push(`no ${k.toUpperCase()}`);
@@ -149,9 +169,16 @@ export function missingOf(docs: Record<DocKind, DocEvidence | null>, prs: PrEvid
 }
 
 /** "blocked: no ADR", "blocked: no ADR +2": the first miss and how many more. */
-export const blockedLine = (missing: string[]): string | null => (missing.length ? `blocked: ${missing[0]}${missing.length > 1 ? ` +${missing.length - 1}` : ""}` : null);
+export const blockedLine = (missing: string[]): string | null =>
+  missing.length ? `blocked: ${missing[0]}${missing.length > 1 ? ` +${missing.length - 1}` : ""}` : null;
 
-export function evidenceOf(plan: Plan, item: Item, prNow: Map<string, PrLive> = new Map(), status: DocStatus = new Map(), stages: StageMap = NO_STAGES): Evidence {
+export function evidenceOf(
+  plan: Plan,
+  item: Item,
+  prNow: Map<string, PrLive> = new Map(),
+  status: DocStatus = new Map(),
+  stages: StageMap = NO_STAGES,
+): Evidence {
   const docs = documentsOf(plan, item, status);
   // The pull requests an item is about are the plan machine's one parse (plan-stage-core.ts), not a second reading here.
   const prs = prsOfStage(stages.get(item.id)).map((p) => {
@@ -167,7 +194,12 @@ export function evidenceOf(plan: Plan, item: Item, prNow: Map<string, PrLive> = 
 }
 
 /** Every item of a plan the gate refuses now, in plan order. */
-export function blockedItems(plan: Plan, prNow: Map<string, PrLive> = new Map(), status: DocStatus = new Map(), stages: StageMap = NO_STAGES): { item: Item; blocked: string }[] {
+export function blockedItems(
+  plan: Plan,
+  prNow: Map<string, PrLive> = new Map(),
+  status: DocStatus = new Map(),
+  stages: StageMap = NO_STAGES,
+): { item: Item; blocked: string }[] {
   const out: { item: Item; blocked: string }[] = [];
   for (const item of plan.items) {
     if (item.status === "dropped" || item.kind === "goal" || item.kind === "note") continue;

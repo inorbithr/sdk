@@ -10,9 +10,9 @@
 // no team, no release stage ("not_observed"), no job runner.
 
 import { snake } from "./plan-api.ts";
+import { type Item, line, liveItems, type Plan, type PlanState } from "./planner.ts";
+import { type Progress, STAGES, type Stage } from "./planner-progress.ts";
 import type { PrLive } from "./planner-shared.ts";
-import { line, liveItems, type Item, type Plan, type PlanState } from "./planner.ts";
-import { STAGES, type Progress, type Stage } from "./planner-progress.ts";
 
 export const PROGRESS = ["not_started", "running", "waiting_on_person", "waiting_on_pr", "done", "failed"] as const;
 export type OverviewStage = (typeof PROGRESS)[number];
@@ -27,9 +27,16 @@ export const TO_STAGE: Record<OverviewStage, Stage> = {
   done: "done",
   failed: "failed",
 };
-export const FROM_STAGE: Record<Stage, OverviewStage> = Object.fromEntries(Object.entries(TO_STAGE).map(([k, v]) => [v, k])) as Record<Stage, OverviewStage>;
+export const FROM_STAGE: Record<Stage, OverviewStage> = Object.fromEntries(
+  Object.entries(TO_STAGE).map(([k, v]) => [v, k]),
+) as Record<Stage, OverviewStage>;
 
-export type WaitingOn = { kind: "none" | "person" | "pr" | "check" | "approval"; ref: string; ask_id: string; since: string };
+export type WaitingOn = {
+  kind: "none" | "person" | "pr" | "check" | "approval";
+  ref: string;
+  ask_id: string;
+  since: string;
+};
 export type PlanPull = { ref: string; state: string; stub: boolean };
 export type ReleaseStage = "none" | "merged" | "rolled" | "verified" | "not_observed";
 
@@ -78,7 +85,20 @@ export type StoreOverview = { plans: unknown[]; totals: unknown; all: number; ar
  * item's title, id, writer, jobs and needs). One space-joined text; the store matches every word.
  */
 export function searchText(p: OverviewPlan, extra: string[] = []): string {
-  const parts = [p.title, p.plan_id, p.owner, p.team, p.state, p.progress.replace(/_/g, " "), p.waiting_on.ref, p.waiting_on.ask_id, p.release_stage, ...p.prs.map((x) => x.ref), ...p.stuck, ...extra];
+  const parts = [
+    p.title,
+    p.plan_id,
+    p.owner,
+    p.team,
+    p.state,
+    p.progress.replace(/_/g, " "),
+    p.waiting_on.ref,
+    p.waiting_on.ask_id,
+    p.release_stage,
+    ...p.prs.map((x) => x.ref),
+    ...p.stuck,
+    ...extra,
+  ];
   return parts
     .filter((s) => typeof s === "string" && s.trim())
     .join(" ")
@@ -88,15 +108,28 @@ export function searchText(p: OverviewPlan, extra: string[] = []): string {
 }
 
 /** The words of a plan's items a search should find: titles, ids, who wrote them, the jobs and what they need. */
-export const itemWords = (plan: Plan): string[] => plan.items.flatMap((i) => [i.title, i.id, i.by, ...(i.jobs ?? []), i.needs ?? ""]);
+export const itemWords = (plan: Plan): string[] =>
+  plan.items.flatMap((i) => [i.title, i.id, i.by, ...(i.jobs ?? []), i.needs ?? ""]);
 
 /** A store row from a summary; from files the items' words go into the search text too. */
 export const rowOf = (p: OverviewPlan, extra: string[] = []): PlanRow => ({ ...p, search: searchText(p, extra) });
 
 /** The words of `q` every row must contain (any order, lowercase); the store applies the same rule (plans.rs `matches`). */
-export const matchesSearch = (search: string, q: string): boolean => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => search.includes(w));
+export const matchesSearch = (search: string, q: string): boolean =>
+  q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((w) => search.includes(w));
 
-export const zeroCounts = (): StageCounts => ({ not_started: 0, running: 0, waiting_on_person: 0, waiting_on_pr: 0, done: 0, failed: 0 });
+export const zeroCounts = (): StageCounts => ({
+  not_started: 0,
+  running: 0,
+  waiting_on_person: 0,
+  waiting_on_pr: 0,
+  done: 0,
+  failed: 0,
+});
 
 // ---------------------------------------------------------------- from a plan file
 
@@ -121,7 +154,8 @@ export type FromFile = {
 };
 
 const prRef = (p: { repo: string; number: number }) => `${p.repo}#${p.number}`;
-const prState = (l?: PrLive) => (!l ? "not_read" : l.state === "OPEN" ? (l.draft ? "draft" : "open") : l.state.toLowerCase());
+const prState = (l?: PrLive) =>
+  !l ? "not_read" : l.state === "OPEN" ? (l.draft ? "draft" : "open") : l.state.toLowerCase();
 
 /** A sample plan is labelled as one in its own title ("Sample: ..."): the Overview marks it stub whatever else is true. */
 export const isSampleTitle = (t: string) => /^sample\b/i.test(t.trim());
@@ -137,7 +171,13 @@ export function summaryFromFile(planId: string, plan: Plan, p: Progress, o: From
 
   const waiting = p.waiting.find((s) => s.stage === "owner") ?? p.waiting.find((s) => s.stage === "pr");
   let waiting_on: WaitingOn = { kind: "none", ref: "", ask_id: "", since: "" };
-  if (waiting?.stage === "owner") waiting_on = { kind: "person", ref: waiting.item.title, ask_id: o.askFor?.(waiting.item) ?? "", since: waiting.since ?? "" };
+  if (waiting?.stage === "owner")
+    waiting_on = {
+      kind: "person",
+      ref: waiting.item.title,
+      ask_id: o.askFor?.(waiting.item) ?? "",
+      since: waiting.since ?? "",
+    };
   else if (waiting?.stage === "pr") {
     const open = waiting.prs.find((x) => x.live?.state === "OPEN") ?? waiting.prs[0];
     waiting_on = { kind: "pr", ref: open ? prRef(open) : waiting.item.title, ask_id: "", since: waiting.since ?? "" };
@@ -155,7 +195,11 @@ export function summaryFromFile(planId: string, plan: Plan, p: Progress, o: From
   }
 
   const live = [...liveItems(plan, now).entries()];
-  const heartbeat_at = live.map(([, v]) => v.at).sort().pop() ?? "";
+  const heartbeat_at =
+    live
+      .map(([, v]) => v.at)
+      .sort()
+      .pop() ?? "";
   const stub = isSampleTitle(plan.title) || [...seen.values()].some((x) => x.stub);
   return {
     plan_id: planId,
@@ -202,10 +246,25 @@ export function totalsOf(plans: OverviewPlan[]): OverviewTotals {
 
 /** Rows first that need a person, then stuck or failed, running, waiting on a PR, not started, done; the newest first inside each. */
 const rank = (p: OverviewPlan): number =>
-  p.progress === "waiting_on_person" ? 0 : p.stuck.length > 0 || p.progress === "failed" ? 1 : p.progress === "running" ? 2 : p.progress === "waiting_on_pr" ? 3 : p.progress === "not_started" ? 4 : 5;
+  p.progress === "waiting_on_person"
+    ? 0
+    : p.stuck.length > 0 || p.progress === "failed"
+      ? 1
+      : p.progress === "running"
+        ? 2
+        : p.progress === "waiting_on_pr"
+          ? 3
+          : p.progress === "not_started"
+            ? 4
+            : 5;
 
 export function sortPlans(plans: OverviewPlan[]): OverviewPlan[] {
-  return [...plans].sort((a, b) => rank(a) - rank(b) || Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "") || a.plan_id.localeCompare(b.plan_id));
+  return [...plans].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "") ||
+      a.plan_id.localeCompare(b.plan_id),
+  );
 }
 
 // ---------------------------------------------------------------- the platform's stream
@@ -223,7 +282,15 @@ export type Live = {
   lastAt: number;
 };
 
-export const emptyLive = (): Live => ({ plans: new Map(), totals: null, seq: 0, tier: "", ready: false, generated_at: "", lastAt: 0 });
+export const emptyLive = (): Live => ({
+  plans: new Map(),
+  totals: null,
+  seq: 0,
+  tier: "",
+  ready: false,
+  generated_at: "",
+  lastAt: 0,
+});
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && /^-?\d+$/.test(v) ? Number(v) : 0);
@@ -248,12 +315,20 @@ export function readPlan(raw: unknown): OverviewPlan | null {
     state: o.state === "paused" || o.state === "archived" ? o.state : "active",
     progress,
     counts: counts(o.counts),
-    waiting_on: { kind: (["person", "pr", "check", "approval"] as const).find((k) => k === w.kind) ?? "none", ref: str(w.ref), ask_id: str(w.ask_id), since: str(w.since) },
+    waiting_on: {
+      kind: (["person", "pr", "check", "approval"] as const).find((k) => k === w.kind) ?? "none",
+      ref: str(w.ref),
+      ask_id: str(w.ask_id),
+      since: str(w.since),
+    },
     running_jobs: num(o.running_jobs),
     running_tool: str(o.running_tool),
     heartbeat_at: str(o.heartbeat_at),
-    prs: Array.isArray(o.prs) ? o.prs.filter(isObj).map((x) => ({ ref: str(x.ref), state: str(x.state), stub: x.stub === true })) : [],
-    release_stage: (["none", "merged", "rolled", "verified"] as const).find((k) => k === o.release_stage) ?? "not_observed",
+    prs: Array.isArray(o.prs)
+      ? o.prs.filter(isObj).map((x) => ({ ref: str(x.ref), state: str(x.state), stub: x.stub === true }))
+      : [],
+    release_stage:
+      (["none", "merged", "rolled", "verified"] as const).find((k) => k === o.release_stage) ?? "not_observed",
     stuck: Array.isArray(o.stuck) ? o.stuck.filter((x): x is string => typeof x === "string") : [],
     stub: o.stub === true,
     updated_at: str(o.updated_at),
@@ -264,7 +339,14 @@ export function readPlan(raw: unknown): OverviewPlan | null {
 export function readTotals(raw: unknown): OverviewTotals | null {
   const o = snake(raw);
   if (!isObj(o)) return null;
-  return { plans: num(o.plans), by_progress: counts(o.by_progress), waiting_on_me: num(o.waiting_on_me), running_jobs: num(o.running_jobs), open_prs: num(o.open_prs), stuck: num(o.stuck) };
+  return {
+    plans: num(o.plans),
+    by_progress: counts(o.by_progress),
+    waiting_on_me: num(o.waiting_on_me),
+    running_jobs: num(o.running_jobs),
+    open_prs: num(o.open_prs),
+    stuck: num(o.stuck),
+  };
 }
 
 /** Which arm a frame is: `{snapshot}`, `{delta}`, `{ended}`, `{heartbeat}`, optionally inside `{result}` (the gateway's envelope for a stream). */
@@ -272,7 +354,8 @@ function arm(frame: unknown): [string, Record<string, unknown>] | null {
   let f = snake(frame);
   if (isObj(f) && isObj(f.result) && !("snapshot" in f)) f = f.result;
   if (!isObj(f)) return null;
-  for (const k of ["snapshot", "delta", "ended", "heartbeat"]) if (k in f) return [k, isObj(f[k]) ? (f[k] as Record<string, unknown>) : {}];
+  for (const k of ["snapshot", "delta", "ended", "heartbeat"])
+    if (k in f) return [k, isObj(f[k]) ? (f[k] as Record<string, unknown>) : {}];
   return null;
 }
 
@@ -293,7 +376,15 @@ export function foldFrame(s: Live, frame: unknown, now = Date.now()): Live {
       const p = readPlan(r);
       if (p) plans.set(p.plan_id, p);
     }
-    return { plans, totals: readTotals(body.totals) ?? totalsOf([...plans.values()]), seq: num(body.seq), tier: str(body.tier), ready: true, generated_at: str(body.generated_at), lastAt: now };
+    return {
+      plans,
+      totals: readTotals(body.totals) ?? totalsOf([...plans.values()]),
+      seq: num(body.seq),
+      tier: str(body.tier),
+      ready: true,
+      generated_at: str(body.generated_at),
+      lastAt: now,
+    };
   }
   if (kind === "ended") {
     return num(body.resume_seq) === 0 ? { ...emptyLive(), tier: s.tier, lastAt: now } : { ...s, lastAt: now };
@@ -346,10 +437,14 @@ export function keepRow(p: OverviewPlan, f: OverviewFilter, team = ""): boolean 
 
 /** How many rows each filter would keep, for the chips. */
 export const filterCounts = (plans: OverviewPlan[], team = ""): Record<OverviewFilter, number> =>
-  Object.fromEntries(FILTERS.map((f) => [f.id, plans.filter((p) => keepRow(p, f.id, team)).length])) as Record<OverviewFilter, number>;
+  Object.fromEntries(FILTERS.map((f) => [f.id, plans.filter((p) => keepRow(p, f.id, team)).length])) as Record<
+    OverviewFilter,
+    number
+  >;
 
 /** The teams the rows name, each once, sorted; nothing when no row has one (the files cannot know a team). */
-export const teamsOf = (plans: OverviewPlan[]): string[] => [...new Set(plans.map((p) => p.team).filter(Boolean))].sort();
+export const teamsOf = (plans: OverviewPlan[]): string[] =>
+  [...new Set(plans.map((p) => p.team).filter(Boolean))].sort();
 
 /** A pull request ref (`owner/repo#N`) as its GitHub page; "" when the ref is not one. */
 export function prUrl(ref: string): string {

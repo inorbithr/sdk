@@ -1,38 +1,72 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { snake } from "../src/lib/plan-api.ts";
+import type { StageInfo, StageMap } from "../src/lib/plan-stage-core.ts";
 import { parsePlan } from "../src/lib/planner.ts";
 import { progressOf } from "../src/lib/planner-progress.ts";
-import { emptyLive, filterCounts, foldFrame, isSampleTitle, keepRow, matchesSearch, prUrl, progressWord, readPlan, searchText, sortPlans, stateLine, summaryFromFile, teamsOf, totalsOf, zeroCounts, type OverviewPlan } from "../src/lib/plans-overview.ts";
-import { snake } from "../src/lib/plan-api.ts";
 import type { PrLive } from "../src/lib/planner-shared.ts";
-import type { StageInfo, StageMap } from "../src/lib/plan-stage-core.ts";
+import {
+  emptyLive,
+  filterCounts,
+  foldFrame,
+  isSampleTitle,
+  keepRow,
+  matchesSearch,
+  type OverviewPlan,
+  progressWord,
+  prUrl,
+  readPlan,
+  searchText,
+  sortPlans,
+  stateLine,
+  summaryFromFile,
+  teamsOf,
+  totalsOf,
+  zeroCounts,
+} from "../src/lib/plans-overview.ts";
 
 const L = (...o: Record<string, unknown>[]) => o.map((x) => JSON.stringify(x)).join("\n") + "\n";
 const T = (m: number) => new Date(Date.UTC(2026, 9, 18, 10, m)).toISOString();
 const NOW = Date.parse(T(60));
-const pr = (o: Partial<PrLive> = {}): PrLive => ({ repo: "o/r", number: 7, title: "t", url: "", state: "OPEN", draft: false, review: "", passed: 0, failed: 0, pending: 0, ...o });
+const pr = (o: Partial<PrLive> = {}): PrLive => ({
+  repo: "o/r",
+  number: 7,
+  title: "t",
+  url: "",
+  state: "OPEN",
+  draft: false,
+  review: "",
+  passed: 0,
+  failed: 0,
+  pending: 0,
+  ...o,
+});
 
 const plan = (title: string, ...items: Record<string, unknown>[]) =>
-  parsePlan(L({ t: "plan", title, at: T(0) }, ...items.map((i) => ({ t: "item", kind: "step", by: "c", at: T(1), ...i }))));
+  parsePlan(
+    L({ t: "plan", title, at: T(0) }, ...items.map((i) => ({ t: "item", kind: "step", by: "c", at: T(1), ...i }))),
+  );
 // The pull requests of an item come from the plan machine (Rust `item_prs`, read as StageInfo.prs); a test stands in for it by
 // reading "owner/repo#12" out of the item's title.
 const machine = (p: ReturnType<typeof plan>): StageMap =>
   new Map(
-    p.items.filter((i) => /#\d+/.test(i.title)).map((i) => [
-      i.id,
-      {
-        id: i.id,
-        stage: "building",
-        label: "Building",
-        file_status: i.status,
-        since: T(1),
-        wait: null,
-        wait_since: "",
-        evidence: [],
-        children: [],
-        prs: [...i.title.matchAll(/([\w.-]+\/[\w.-]+)#(\d+)/g)].map((m) => ({ repo: m[1], number: Number(m[2]) })),
-      } as StageInfo,
-    ]),
+    p.items
+      .filter((i) => /#\d+/.test(i.title))
+      .map((i) => [
+        i.id,
+        {
+          id: i.id,
+          stage: "building",
+          label: "Building",
+          file_status: i.status,
+          since: T(1),
+          wait: null,
+          wait_since: "",
+          evidence: [],
+          children: [],
+          prs: [...i.title.matchAll(/([\w.-]+\/[\w.-]+)#(\d+)/g)].map((m) => ({ repo: m[1], number: Number(m[2]) })),
+        } as StageInfo,
+      ]),
   );
 const sum = (title: string, items: Record<string, unknown>[], prs = new Map<string, PrLive>(), o = {}) => {
   const p = plan(title, ...items);
@@ -51,11 +85,16 @@ test("progress word follows the RFC order: failed, done, person, PR, running, no
 });
 
 test("a summary from a file counts steps, names the waiting item and links the ask", () => {
-  const s = sum("Plan A", [
-    { id: "a", title: "Done thing", status: "done" },
-    { id: "b", title: "Pick the deal stages", status: "building", needs: "Which stages?" },
-    { id: "c", title: "Later", status: "proposed" },
-  ], new Map(), { askFor: (i: { id: string }) => (i.id === "b" ? "apr_X" : undefined) });
+  const s = sum(
+    "Plan A",
+    [
+      { id: "a", title: "Done thing", status: "done" },
+      { id: "b", title: "Pick the deal stages", status: "building", needs: "Which stages?" },
+      { id: "c", title: "Later", status: "proposed" },
+    ],
+    new Map(),
+    { askFor: (i: { id: string }) => (i.id === "b" ? "apr_X" : undefined) },
+  );
   assert.equal(s.progress, "waiting_on_person");
   assert.deepEqual([s.counts.done, s.counts.waiting_on_person, s.counts.not_started], [1, 1, 1]);
   assert.equal(s.waiting_on.kind, "person");
@@ -66,13 +105,34 @@ test("a summary from a file counts steps, names the waiting item and links the a
 });
 
 test("a closed pull request is stuck, an open one is counted, a stub read is marked and never merged", () => {
-  const prs = new Map([["o/r#7", pr({ state: "CLOSED" })], ["o/r#8", pr({ number: 8 })]]);
-  const s = sum("Plan B", [{ id: "a", title: "Ship it o/r#7", status: "building" }, { id: "b", title: "Other o/r#8", status: "building" }], prs, { prsStub: true });
+  const prs = new Map([
+    ["o/r#7", pr({ state: "CLOSED" })],
+    ["o/r#8", pr({ number: 8 })],
+  ]);
+  const s = sum(
+    "Plan B",
+    [
+      { id: "a", title: "Ship it o/r#7", status: "building" },
+      { id: "b", title: "Other o/r#8", status: "building" },
+    ],
+    prs,
+    { prsStub: true },
+  );
   assert.deepEqual(s.stuck, ["a"]);
-  assert.deepEqual(s.prs.map((x) => [x.ref, x.state, x.stub]), [["o/r#7", "closed", true], ["o/r#8", "open", true]]);
+  assert.deepEqual(
+    s.prs.map((x) => [x.ref, x.state, x.stub]),
+    [
+      ["o/r#7", "closed", true],
+      ["o/r#8", "open", true],
+    ],
+  );
   assert.equal(s.stub, true);
   assert.equal(totalsOf([s]).open_prs, 0, "a stub read never counts as an open pull request");
-  const real = sum("Plan B", [{ id: "b", title: "Other o/r#8", status: "building" }], new Map([["o/r#8", pr({ number: 8 })]]));
+  const real = sum(
+    "Plan B",
+    [{ id: "b", title: "Other o/r#8", status: "building" }],
+    new Map([["o/r#8", pr({ number: 8 })]]),
+  );
   assert.equal(totalsOf([real]).open_prs, 1);
   assert.ok(s.prs.every((x) => x.state !== "merged"));
 });
@@ -89,18 +149,45 @@ test("a plan titled Sample is stub", () => {
 });
 
 test("sort puts waiting on you first, then stuck, running, PR, not started, done", () => {
-  const mk = (id: string, progress: OverviewPlan["progress"], at: string, stuck: string[] = []): OverviewPlan => ({ ...(readPlan({ plan_id: id }) as OverviewPlan), progress, updated_at: at, stuck });
-  const out = sortPlans([mk("done", "done", T(9)), mk("pr", "waiting_on_pr", T(9)), mk("new", "not_started", T(9)), mk("run", "running", T(9)), mk("stk", "waiting_on_pr", T(9), ["i"]), mk("you-old", "waiting_on_person", T(1)), mk("you-new", "waiting_on_person", T(5))]);
-  assert.deepEqual(out.map((p) => p.plan_id), ["you-new", "you-old", "stk", "run", "pr", "new", "done"]);
+  const mk = (id: string, progress: OverviewPlan["progress"], at: string, stuck: string[] = []): OverviewPlan => ({
+    ...(readPlan({ plan_id: id }) as OverviewPlan),
+    progress,
+    updated_at: at,
+    stuck,
+  });
+  const out = sortPlans([
+    mk("done", "done", T(9)),
+    mk("pr", "waiting_on_pr", T(9)),
+    mk("new", "not_started", T(9)),
+    mk("run", "running", T(9)),
+    mk("stk", "waiting_on_pr", T(9), ["i"]),
+    mk("you-old", "waiting_on_person", T(1)),
+    mk("you-new", "waiting_on_person", T(5)),
+  ]);
+  assert.deepEqual(
+    out.map((p) => p.plan_id),
+    ["you-new", "you-old", "stk", "run", "pr", "new", "done"],
+  );
 });
 
-const snap = (plans: Record<string, unknown>[], seq = 5) => ({ snapshot: { plans, seq, tier: "full", generated_at: T(0), totals: { plans: plans.length } } });
+const snap = (plans: Record<string, unknown>[], seq = 5) => ({
+  snapshot: { plans, seq, tier: "full", generated_at: T(0), totals: { plans: plans.length } },
+});
 
 test("a snapshot replaces, a newer delta upserts or removes, an old one is dropped", () => {
-  let s = foldFrame(emptyLive(), snap([{ plan_id: "a", title: "A" }, { plan_id: "b", title: "B" }]), 1);
+  let s = foldFrame(
+    emptyLive(),
+    snap([
+      { plan_id: "a", title: "A" },
+      { plan_id: "b", title: "B" },
+    ]),
+    1,
+  );
   assert.equal(s.ready, true);
   assert.deepEqual([...s.plans.keys()], ["a", "b"]);
-  s = foldFrame(s, { delta: { seq: 6, op: "upsert", plan: { plan_id: "a", title: "A2" }, totals: { plans: 2, waiting_on_me: 3 } } });
+  s = foldFrame(s, {
+    delta: { seq: 6, op: "upsert", plan: { plan_id: "a", title: "A2" }, totals: { plans: 2, waiting_on_me: 3 } },
+  });
   assert.equal(s.plans.get("a")?.title, "A2");
   assert.equal(s.totals?.waiting_on_me, 3);
   assert.equal(s.seq, 6);
@@ -132,7 +219,16 @@ test("ended with a resume point keeps the state; a heartbeat only stamps the tim
 });
 
 test("camelCase keys and the gateway's result envelope read the same", () => {
-  const s = foldFrame(emptyLive(), { result: { snapshot: { plans: [{ planId: "a", waitingOn: { kind: "person", askId: "qak_1" }, runningJobs: "2", releaseStage: "rolled" }], seq: "9" } } });
+  const s = foldFrame(emptyLive(), {
+    result: {
+      snapshot: {
+        plans: [
+          { planId: "a", waitingOn: { kind: "person", askId: "qak_1" }, runningJobs: "2", releaseStage: "rolled" },
+        ],
+        seq: "9",
+      },
+    },
+  });
   const p = s.plans.get("a");
   assert.equal(p?.waiting_on.ask_id, "qak_1");
   assert.equal(p?.running_jobs, 2);
@@ -154,12 +250,24 @@ test("an unknown release stage is not observed, an unknown progress is not start
 test("a plan line with a state sets it; the search text holds title, id, owner, ask, PR refs and the extra item words", () => {
   const p = plan("Plan S", { id: "a", title: "Ship o/r#12", status: "building" });
   assert.equal(p.state, undefined);
-  const archived = parsePlan(L({ t: "plan", title: "Old", at: T(0) }, { t: "plan", state: "archived", at: T(2), by: "you" }));
+  const archived = parsePlan(
+    L({ t: "plan", title: "Old", at: T(0) }, { t: "plan", state: "archived", at: T(2), by: "you" }),
+  );
   assert.equal(archived.state, "archived");
-  assert.equal(parsePlan(L({ t: "plan", title: "Odd", at: T(0) }, { t: "plan", state: "lost", at: T(2) })).state, undefined);
+  assert.equal(
+    parsePlan(L({ t: "plan", title: "Odd", at: T(0) }, { t: "plan", state: "lost", at: T(2) })).state,
+    undefined,
+  );
   const s = summaryFromFile("pid-1", archived, progressOf(archived, new Map(), NOW), { now: NOW });
   assert.equal(s.state, "archived");
-  const text = searchText({ ...sum("Plan S", [{ id: "a", title: "Ship o/r#12", status: "building" }]), owner: "Emma", waiting_on: { kind: "person", ref: "Pick", ask_id: "apr_X", since: "" } }, ["extra words"]);
+  const text = searchText(
+    {
+      ...sum("Plan S", [{ id: "a", title: "Ship o/r#12", status: "building" }]),
+      owner: "Emma",
+      waiting_on: { kind: "person", ref: "Pick", ask_id: "apr_X", since: "" },
+    },
+    ["extra words"],
+  );
   for (const w of ["plan s", "pid", "emma", "apr_x", "o/r#12", "extra words"]) assert.ok(text.includes(w), w);
   assert.ok(matchesSearch(text, "EMMA #12"));
   assert.ok(!matchesSearch(text, "emma nowhere"));
@@ -179,8 +287,14 @@ test("totals skip archived plans; the filters and the team pick keep the rows th
   assert.equal(t.plans, 4);
   assert.equal(t.running_jobs, 2);
   assert.deepEqual(filterCounts(rows), { all: 5, waiting: 1, running: 2, stuck: 1, prs: 1, paused: 1 });
-  assert.deepEqual(rows.filter((p) => keepRow(p, "all", "core")).map((p) => p.plan_id), ["run"]);
-  assert.deepEqual(rows.filter((p) => keepRow(p, "waiting")).map((p) => p.plan_id), ["wait"]);
+  assert.deepEqual(
+    rows.filter((p) => keepRow(p, "all", "core")).map((p) => p.plan_id),
+    ["run"],
+  );
+  assert.deepEqual(
+    rows.filter((p) => keepRow(p, "waiting")).map((p) => p.plan_id),
+    ["wait"],
+  );
   assert.deepEqual(teamsOf(rows), ["apps", "core"]);
 });
 

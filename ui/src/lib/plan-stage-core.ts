@@ -2,8 +2,8 @@
 // The Rust plan machine (src-tauri/src/plan_machine.rs, plan_state.rs) computes it; plan-stage.ts reads it.
 
 import type { PrRef } from "./planner.ts";
-import type { PrLive } from "./planner-shared.ts";
 import { duration } from "./planner-progress.ts";
+import type { PrLive } from "./planner-shared.ts";
 
 export type StageId = "proposed" | "ready" | "building" | "on_preview" | "merged" | "rolled" | "verified" | "dropped";
 export type StageInfo = {
@@ -40,7 +40,9 @@ export function stageLine(s: StageInfo | undefined, now = Date.now()): string {
   const parts = [Number.isFinite(t) ? `${s.label} for ${duration(now - t)}` : s.label];
   if (s.wait) {
     const w = Date.parse(s.wait_since);
-    parts.push(`waiting on ${s.wait.who}${s.wait.what ? `: ${s.wait.what}` : ""}${Number.isFinite(w) ? ` (${duration(now - w)})` : ""}`);
+    parts.push(
+      `waiting on ${s.wait.who}${s.wait.what ? `: ${s.wait.what}` : ""}${Number.isFinite(w) ? ` (${duration(now - w)})` : ""}`,
+    );
   }
   return parts.join(" · ");
 }
@@ -54,4 +56,3 @@ export function stageStamp(s: StageInfo): string {
 
 /** The stage label alone, for the tight spots. */
 export const stageLabel = (s: StageInfo | undefined, fallback: string): string => s?.label ?? fallback;
-

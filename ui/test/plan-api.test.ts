@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parsePlan } from "../src/lib/planner.ts";
 import type { ApiPlanResponse } from "../src/lib/plan-api.ts";
 import { emptyStream, foldServer, foldStream, serverLines, serverPlanFor, snake } from "../src/lib/plan-api.ts";
 import { evidenceOf } from "../src/lib/plan-evidence.ts";
+import { parsePlan } from "../src/lib/planner.ts";
 
 const L = (...o: Record<string, unknown>[]) => o.map((x) => JSON.stringify(x)).join("\n") + "\n";
 const T = (h: number) => new Date(Date.UTC(2026, 9, 21, h)).toISOString();
@@ -11,24 +11,71 @@ const T = (h: number) => new Date(Date.UTC(2026, 9, 21, h)).toISOString();
 const cache = parsePlan(
   L(
     { t: "plan", title: "Mac evidence", at: T(1) },
-    { t: "item", id: "rfc", kind: "rfc", title: "RFC 0171", status: "done", doc: { space_id: "lab_1", document_id: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ01", kind: "rfc", number: "0171" }, at: T(1) },
-    { t: "item", id: "s", kind: "step", title: "Old title", status: "building", diagram: { nodes: [{ id: "a", label: "A" }], edges: [] }, at: T(2) },
+    {
+      t: "item",
+      id: "rfc",
+      kind: "rfc",
+      title: "RFC 0171",
+      status: "done",
+      doc: { space_id: "lab_1", document_id: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ01", kind: "rfc", number: "0171" },
+      at: T(1),
+    },
+    {
+      t: "item",
+      id: "s",
+      kind: "step",
+      title: "Old title",
+      status: "building",
+      diagram: { nodes: [{ id: "a", label: "A" }], edges: [] },
+      at: T(2),
+    },
   ),
 );
 
 const server = {
   plan: { id: "plan_01X", title: "Mac evidence gate", externalId: "mac-evidence", version: 4, updatedAt: T(5) },
   items: [
-    { itemId: "s", kind: "step", title: "Mac Planner shows the gate", status: "ready", body: "", prs: ["inorbithr/inorbit-desktop#400"], position: 2, updatedAt: T(5), updatedBy: "coordinator", gate: { ok: false, reasons: ["no ADR", "diagram older than head"] } },
-    { itemId: "rfc", kind: "rfc", title: "RFC 0171", status: "done", doc: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ01", position: 1, updatedAt: T(4) },
-    { itemId: "adr", kind: "adr", title: "ADR 0132", status: "done", doc: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ02", diagram: "ldia_01ABCDEFGHJKMNPQRSTVWXYZ03", position: 3, updatedAt: T(4) },
+    {
+      itemId: "s",
+      kind: "step",
+      title: "Mac Planner shows the gate",
+      status: "ready",
+      body: "",
+      prs: ["inorbithr/inorbit-desktop#400"],
+      position: 2,
+      updatedAt: T(5),
+      updatedBy: "coordinator",
+      gate: { ok: false, reasons: ["no ADR", "diagram older than head"] },
+    },
+    {
+      itemId: "rfc",
+      kind: "rfc",
+      title: "RFC 0171",
+      status: "done",
+      doc: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ01",
+      position: 1,
+      updatedAt: T(4),
+    },
+    {
+      itemId: "adr",
+      kind: "adr",
+      title: "ADR 0132",
+      status: "done",
+      doc: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ02",
+      diagram: "ldia_01ABCDEFGHJKMNPQRSTVWXYZ03",
+      position: 3,
+      updatedAt: T(4),
+    },
   ],
   notes: [{ id: "n1", itemId: "s", author: "worker", body: "PR opened", createdAt: T(5) }],
   // The gateway may spell keys camelCase; the type says snake_case, so the test says it on purpose.
 } as unknown as ApiPlanResponse;
 
 test("the server's plan becomes the file's own event lines, in position order, camelCase read as snake_case", () => {
-  const lines = serverLines(server).trim().split("\n").map((l) => JSON.parse(l));
+  const lines = serverLines(server)
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
   assert.deepEqual(
     lines.map((l) => [l.t, l.id ?? l.title ?? l.text]),
     [
@@ -51,12 +98,20 @@ test("folded over the cache the server's facts win and the cache keeps what the 
   const s = plan.items.find((i) => i.id === "s")!;
   assert.equal(s.title, "Mac Planner shows the gate");
   assert.equal(s.status, "ready");
-  assert.deepEqual(s.diagram, { nodes: [{ id: "a", label: "A" }], edges: [] }, "the canvas diagram the file holds stays");
+  assert.deepEqual(
+    s.diagram,
+    { nodes: [{ id: "a", label: "A" }], edges: [] },
+    "the canvas diagram the file holds stays",
+  );
   assert.equal(s.diagramAt, T(2), "the diagram's time is the line that drew it");
   const rfc = plan.items.find((i) => i.id === "rfc")!;
   assert.equal(rfc.doc?.space_id, "lab_1", "the same document keeps the space the file knew");
   const adr = plan.items.find((i) => i.id === "adr")!;
-  assert.deepEqual(adr.doc, { space_id: "", document_id: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ02" }, "a document the file never saw has no space yet");
+  assert.deepEqual(
+    adr.doc,
+    { space_id: "", document_id: "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ02" },
+    "a document the file never saw has no space yet",
+  );
   assert.equal(adr.diagramRef, "ldia_01ABCDEFGHJKMNPQRSTVWXYZ03");
   assert.equal(adr.diagramAt, T(4));
   assert.equal(plan.activity.at(-1)?.text, "PR opened");
@@ -64,7 +119,11 @@ test("folded over the cache the server's facts win and the cache keeps what the 
   const e = evidenceOf(plan, s);
   assert.equal(e.fromServer, true);
   assert.equal(e.blocked, "blocked: no ADR +1");
-  assert.equal(e.docs.adr?.ref?.document_id, "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ02", "the Mac's own reading still fills the column");
+  assert.equal(
+    e.docs.adr?.ref?.document_id,
+    "ldoc_01ABCDEFGHJKMNPQRSTVWXYZ02",
+    "the Mac's own reading still fills the column",
+  );
 });
 
 test("folding the same server plan twice changes nothing, and a file line after it still lands", () => {
@@ -86,7 +145,9 @@ test("the server plan for a local id is the one whose external_id is that id, el
 });
 
 test("the plan stream fold keeps the newest seq per plan: snapshot, upsert, remove, ended", () => {
-  let s = foldStream(emptyStream(), { snapshot: { seq: 10, plans: [{ planId: "plan_01B", seq: 9, updatedAt: T(5) }] } });
+  let s = foldStream(emptyStream(), {
+    snapshot: { seq: 10, plans: [{ planId: "plan_01B", seq: 9, updatedAt: T(5) }] },
+  });
   assert.equal(s.ready, true);
   assert.equal(s.seq, 10);
   assert.equal(s.plans.get("plan_01B")?.seq, 9);

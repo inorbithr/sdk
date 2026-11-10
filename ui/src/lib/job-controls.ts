@@ -3,9 +3,9 @@
 // tests pin it; the coordinator's machine is still the one that decides and refuses the rest.
 // The moves go through the app's allowlisted proxy (src-tauri/src/api.rs), five POSTs only.
 
-import type { JobLike } from "./planner-shared.ts";
-import { JOB_ID, type Item, type PrRef } from "./planner.ts";
 import { NO_STAGES, prsOfStage, type StageMap } from "./plan-stage-core.ts";
+import { type Item, JOB_ID, type PrRef } from "./planner.ts";
+import type { JobLike } from "./planner-shared.ts";
 
 /** The five machine moves, and refile: a new ask that names a stopped job. */
 export type JobAction = "pause" | "resume" | "retry" | "release" | "cancel" | "refile";
@@ -22,12 +22,43 @@ export type JobControl = {
 const TERMINAL = new Set(["done", "stopped"]);
 
 const C: Record<JobAction, JobControl> = {
-  pause: { action: "pause", label: "Pause", hint: "Stop the job where it is until you continue it; nothing moves it meanwhile", reasonRequired: true },
-  resume: { action: "resume", label: "Continue", hint: "Return the job to the mode it was paused from, with that mode's state as it was", reasonRequired: true },
-  retry: { action: "retry", label: "Retry now", hint: "Fix: run the job's one retry now instead of waiting out the backoff", reasonRequired: true },
-  release: { action: "release", label: "Release", hint: "Fix: you have dealt with what held it; the job carries on", reasonRequired: true },
-  cancel: { action: "cancel", label: "Cancel", hint: "Stop the job for good; its compensations run", reasonRequired: true, tone: "danger" },
-  refile: { action: "refile", label: "Refile", hint: "Fix: queue a new ask that names this stopped job, so the planner files it again", reasonRequired: true },
+  pause: {
+    action: "pause",
+    label: "Pause",
+    hint: "Stop the job where it is until you continue it; nothing moves it meanwhile",
+    reasonRequired: true,
+  },
+  resume: {
+    action: "resume",
+    label: "Continue",
+    hint: "Return the job to the mode it was paused from, with that mode's state as it was",
+    reasonRequired: true,
+  },
+  retry: {
+    action: "retry",
+    label: "Retry now",
+    hint: "Fix: run the job's one retry now instead of waiting out the backoff",
+    reasonRequired: true,
+  },
+  release: {
+    action: "release",
+    label: "Release",
+    hint: "Fix: you have dealt with what held it; the job carries on",
+    reasonRequired: true,
+  },
+  cancel: {
+    action: "cancel",
+    label: "Cancel",
+    hint: "Stop the job for good; its compensations run",
+    reasonRequired: true,
+    tone: "danger",
+  },
+  refile: {
+    action: "refile",
+    label: "Refile",
+    hint: "Fix: queue a new ask that names this stopped job, so the planner files it again",
+    reasonRequired: true,
+  },
 };
 
 /** The moves this job's mode allows, the fix first. A mode or stage this build does not know offers nothing. */
@@ -58,7 +89,9 @@ export function holdCause(job: JobLike): string {
     case "held":
       return job.holdReason ? `Held: ${job.holdReason}` : "Held";
     case "retry":
-      return job.retryAt && Number.isFinite(Date.parse(job.retryAt)) ? `Retrying at ${stamp(new Date(job.retryAt).toISOString())}` : "Retrying";
+      return job.retryAt && Number.isFinite(Date.parse(job.retryAt))
+        ? `Retrying at ${stamp(new Date(job.retryAt).toISOString())}`
+        : "Retrying";
     case "awaiting":
       return job.awaitKind ? `Waiting for ${job.awaitKind}` : "Waiting";
     case "paused":
@@ -77,7 +110,8 @@ export function actionPath(action: JobAction, jobId: string): string | null {
 export function jobRefs(i: Pick<Item, "title" | "body" | "jobs">): string[] {
   const out: string[] = [...(i.jobs ?? [])];
   const re = new RegExp(JOB_ID.source, "g");
-  for (const text of [i.title, i.body]) for (const m of text.matchAll(re)) if (out.length < 40 && !out.includes(m[0])) out.push(m[0]);
+  for (const text of [i.title, i.body])
+    for (const m of text.matchAll(re)) if (out.length < 40 && !out.includes(m[0])) out.push(m[0]);
   return out;
 }
 
@@ -86,7 +120,10 @@ export const PLAN_STATUS_MAX = 100;
 
 /** The refs the plan asks the coordinator about in one ResolvePlanItems call: its items' jobs and PRs (the machine's one
  * parse of each item's pull requests, plan_state.rs `item_prs`, through its stages), dropped items left out. */
-export function planStatusRefs(items: Pick<Item, "id" | "title" | "body" | "jobs" | "status">[], stages: StageMap = NO_STAGES): string[] {
+export function planStatusRefs(
+  items: Pick<Item, "id" | "title" | "body" | "jobs" | "status">[],
+  stages: StageMap = NO_STAGES,
+): string[] {
   const out: string[] = [];
   const add = (r: string) => {
     if (out.length < PLAN_STATUS_MAX && !out.includes(r)) out.push(r);
@@ -101,7 +138,11 @@ export function planStatusRefs(items: Pick<Item, "id" | "title" | "body" | "jobs
 
 /** The jobs an item is: the ones it names, then the ones its pull requests (`prs`, the machine's parse) resolve to
  * (ResolvePlanItems), each once. A dropped item has none. */
-export function itemJobs(i: Pick<Item, "title" | "body" | "jobs" | "status">, statuses: { ref: string; jobId: string }[], prs: readonly PrRef[] = []): string[] {
+export function itemJobs(
+  i: Pick<Item, "title" | "body" | "jobs" | "status">,
+  statuses: { ref: string; jobId: string }[],
+  prs: readonly PrRef[] = [],
+): string[] {
   if (i.status === "dropped") return [];
   const by = new Map(statuses.map((s) => [s.ref, s.jobId]));
   const out: string[] = [];

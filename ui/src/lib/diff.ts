@@ -50,7 +50,9 @@ export function parseDiff(diff: string): DiffFile[] {
   let left = { old: Infinity, new: Infinity };
   const startHunk = (line: string) => {
     const m = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
-    left = m ? { old: m[1] === undefined ? 1 : Number(m[1]), new: m[2] === undefined ? 1 : Number(m[2]) } : { old: Infinity, new: Infinity };
+    left = m
+      ? { old: m[1] === undefined ? 1 : Number(m[1]), new: m[2] === undefined ? 1 : Number(m[2]) }
+      : { old: Infinity, new: Infinity };
     inHunk = left.old > 0 || left.new > 0;
     cur!.lines.push({ t: "hunk", text: line });
   };
